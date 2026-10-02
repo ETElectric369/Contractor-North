@@ -33,6 +33,25 @@ vi.mock("@/lib/notifications", () => ({
   },
 }));
 
+/**
+ * WHAT THE JOB HAS WORKED THAT NO BILL CLAIMS (M3). The billing step the gate now runs asks
+ * unbilledWorkForJob; every test above is on a job with no billing_type, so the step skips before it ever
+ * gets here and they are unaffected. The one test that sets `work.rows` is the T&M case.
+ */
+const work = vi.hoisted(() => ({ rows: null as Record<string, unknown> | null }));
+vi.mock("@/lib/unbilled-work", () => ({
+  unbilledWorkForJob: async () =>
+    work.rows ?? {
+      hours: 0, laborAmount: 0, laborByPerson: [], billsAmount: 0, excluded: 0, billsCount: 0, markupPct: 0.11,
+      billsBilled: 0, returnsAmount: 0, returnsCount: 0, returnsCredit: 0, stockCount: 0, stockAmount: 0,
+      stockBilled: 0, stockShorts: 0, stockShortsWords: null, stockNoCostWords: null, total: 0,
+      lastInvoiceNumber: null, lastInvoiceAt: null, lastInvoiceStatus: null, poCoveredBills: 0,
+      claimedCount: 0, claimedOn: [], schemaReady: true, rows: [],
+    },
+  fixedBillingsNotYetNetted: async () => 0,
+  claimedSourcesOnJob: async () => ({}),
+}));
+
 import { afterPaymentLanded } from "./after-payment-landed";
 
 const ORG = "org-et";
@@ -55,6 +74,52 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
     calls.reported.length = 0;
     calls.rang.length = 0;
     calls.staff = ["erik", "office-2", "office-3"];
+    work.rows = null;
+  });
+
+  /**
+   * THE CUSTOMER'S PAY BUTTON LEAVES WORK OFF A BILL, AND THE OFFICE HEARS IT (M3, the money seam).
+   *
+   * Erik bills part of a time-and-materials job, the customer taps Pay on the emailed link, and until
+   * now the job went complete with hours and receipts no bill claimed — drafted nowhere, named nowhere,
+   * and invisible to migration 0371's Done, Not Billed pile, which excludes any job that has a live
+   * bill. Now the gate's billing step refuses the finish, and THIS is where the refusal becomes a
+   * sentence: its own bell line, with its own door (the job, where the bill is made — not the invoice
+   * that is already paid), to the whole office including whoever recorded the payment, because typing a
+   * payment is not the same as being told your job still has 19.5 hours off every bill.
+   */
+  it("a T&M job's last bill is paid with 19.5 h on no bill: the job stays open and the office is TOLD, in its own line", async () => {
+    work.rows = { hours: 19.5, laborAmount: 2437.5, laborByPerson: [], billsAmount: 400, excluded: 0, billsCount: 2, markupPct: 0.11,
+      billsBilled: 473.62, returnsAmount: 0, returnsCount: 0, returnsCredit: 0, stockCount: 0, stockAmount: 0,
+      stockBilled: 0, stockShorts: 0, stockShortsWords: null, stockNoCostWords: null, total: 2911.12,
+      lastInvoiceNumber: "INV-080", lastInvoiceAt: null, lastInvoiceStatus: "paid", poCoveredBills: 0,
+      claimedCount: 0, claimedOn: [], schemaReady: true, rows: [] };
+    const db = fakeDb({
+      ...books(1000),
+      jobs: [{ id: JOB, status: "in_progress", billing_type: "tm", job_number: "J-002", name: "41 Larkspur", customers: { name: "Marla Finch" } }],
+    });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, bell: { amount: 1000, said: "paid online" } });
+
+    // The money landed. The job did NOT end, and nothing left Google.
+    expect(r.settled).toBe(true);
+    expect(db.tables.invoices[0].status).toBe("paid");
+    expect(r.job.completed).toBe(false);
+    expect(db.tables.jobs[0].status).toBe("in_progress");
+    expect(calls.pushedToGoogle).toEqual([]);
+
+    // TWO lines, two facts: the payment, then the job. Never one line carrying both.
+    expect(calls.rang).toHaveLength(2);
+    expect(calls.rang[0].line).toMatchObject({ title: "Payment received", body: "$1,000.00 paid online on INV-080 — Rita Moss", url: `/billing/${INV}` });
+    expect(calls.rang[1]).toMatchObject({ org: ORG, kind: "invoice_paid" });
+    expect(calls.rang[1].line.title).toBe("Still to bill");
+    expect(calls.rang[1].line.body).toContain("19.5 h and 2 bills ($2,911.12)");
+    expect(calls.rang[1].line.body).toContain("41 Larkspur · J-002 — Marla Finch");
+    expect(calls.rang[1].line.body).toContain("This Is The Last Bill");
+    // The door is the JOB: the invoice is paid, so sending a person there is a dead end.
+    expect(calls.rang[1].line.url).toBe(`/jobs/${JOB}`);
+    // Nobody is left out of this one, not even the person who typed the payment.
+    expect(calls.rang[1].people).toEqual(["erik", "office-2", "office-3"]);
+    expect(calls.reported).toEqual([]);
   });
 
   it("a deposit off the bank file pays the last bill: the figures land, the JOB IS FINISHED, the office hears it once, every money screen refreshes", async () => {

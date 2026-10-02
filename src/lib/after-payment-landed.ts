@@ -36,6 +36,11 @@ import { reportError } from "@/lib/observe";
  *      REPEAT (the Stripe row was already there, or the same event came back): the money is being
  *      settled again, which is free, and ringing twice for one payment is a lie, so it doesn't.
  *      Overpaid is said in its own words, because only a person can choose credit or refund.
+ *      AND WHEN STEP 2 HAD SOMETHING TO SAY, IT IS SAID TOO (M3): on a time-and-materials job the
+ *      billing step can find hours and receipts no bill claims, and then the job is NOT finished —
+ *      a fact about the JOB, not about the payment, so it gets its own line with its own door
+ *      (/jobs/<id>, where the bill is made) rather than being tucked under a money title pointing at
+ *      an invoice that is already paid. Two lines, two facts; never one line carrying both.
  *   4. REFRESH EVERY SCREEN THAT SHOWS MONEY (lib/revalidate-money), so the invoice page, the
  *      billing board, By Customer and My Day's money line can't disagree with the row.
  *
@@ -95,6 +100,21 @@ export async function afterPaymentLanded(
     } catch (e) {
       // A notification must never unsave what caused it: the money is in, the figures are right.
       reportError("afterPaymentLanded:bell", e, { invoiceId, orgId });
+    }
+  }
+  // WHAT THE BILLING STEP FOUND, SAID OUT LOUD (M3). Its own line, because it is its own fact and its
+  // own door — and gated on the same `bell` as the payment line, so a Stripe event delivered four times
+  // says this once. (Both lines share that gate, so both are lost in the one case it doesn't cover: a
+  // writer that died between its payment insert and this helper. That gap is the payment bell's too and
+  // predates this; it is not widened here.)
+  // Every read of `job` happens INSIDE the try, so this file's own law — it never throws, because the
+  // money is already recorded when it runs — stays literally true even if step 2 ever answered with
+  // something that isn't a verdict.
+  if (input.bell) {
+    try {
+      await ringJobStillToBill(orgId, job);
+    } catch (e) {
+      reportError("afterPaymentLanded:job-bell", e, { invoiceId, orgId });
     }
   }
 
@@ -160,4 +180,30 @@ async function ringPaymentBell(supabase: any, invoiceId: string, orgId: string |
   // Who was TOLD, which is the bell line's audience, not the push's: muting a buzz is not asking to
   // lose the record (lib/notifications).
   return people;
+}
+
+/**
+ * THE JOB'S OWN LINE: WHAT A PAID BILL LEFT STILL TO BILL (M3, lib/finish-bills-first).
+ *
+ * The sentence is the billing step's, verbatim — it already names the job the way Erik reads it and the
+ * hours, receipts and takes from the Unbilled card's own arithmetic, so nothing is re-derived or
+ * shortened here (a figure trimmed on its way to a person is the silence this lane exists to close).
+ * The door is the JOB, because that is where the bill is made; the payment's line keeps the invoice.
+ * Unlike the payment line this one DOES go to the person who recorded it: they typed a payment, which is
+ * not the same as being told their job still has work off every bill.
+ *
+ * Rides the `invoice_paid` kind on purpose: it is a consequence of that same money landing, so whoever
+ * asked to hear about a bill being paid hears this, and nobody has to find a new switch to turn on.
+ */
+async function ringJobStillToBill(orgId: string | null | undefined, job: CompleteWhenPaid): Promise<void> {
+  if (!job?.say) return;
+  if (!orgId) {
+    reportError("afterPaymentLanded:job-bell", new Error("a job's billing step had something to say with no company on it, so nobody could be told"), {});
+    return;
+  }
+  await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
+    title: job.completed ? "Job finished" : "Still to bill",
+    body: job.say,
+    ...(job.jobId ? { url: `/jobs/${job.jobId}` } : {}),
+  });
 }

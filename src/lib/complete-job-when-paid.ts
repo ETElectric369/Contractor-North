@@ -1,6 +1,8 @@
 import { revalidatePath } from "next/cache";
 import { pushCalendarItem } from "@/lib/calendar-sync";
 import { STARTED_JOB_STATUSES, finishedJobFields, jobStatusLabel } from "@/lib/job-status";
+import { finishBillingStep, paidDoorVerdict } from "@/lib/finish-bills-first";
+import { jobSaidLabel } from "@/lib/job-pick-label";
 import { reportError } from "@/lib/observe";
 
 /**
@@ -28,6 +30,20 @@ import { reportError } from "@/lib/observe";
  *      job because a straggler bill was paid.
  *   3. the job has no OTHER live, unpaid bill. A second open invoice — a draft still being
  *      built, a sent bill still owed — means the job is still open. Void doesn't count.
+ *   4. THE BILLING STEP (M3, lib/finish-bills-first) — the same one Finish Job runs, which is the
+ *      whole point of it being one function. Rule 3 asked "is there an open BILL?"; on a
+ *      time-and-materials job it has to ask "is there open WORK?", because hours and receipts with
+ *      no document yet are the same thing one step earlier. This gate used to skip the question
+ *      entirely: Erik billed part of a T&M job, the customer tapped Pay on the emailed link, the job
+ *      went complete, and hours and receipts no bill claimed were never drafted, never named and
+ *      nowhere — the Tao J-002 failure (19.5 h off every bill) reached from the customer's own Pay
+ *      button, with 0371's Done, Not Billed pile unable to catch it because it excludes any job that
+ *      has a live bill. A fixed-price job skips this: the price is the price, so its hours are not
+ *      billed separately and nothing about it changes.
+ *      This door cannot BUILD the draft — the invoice builders are "use server" actions behind
+ *      requireStaff and this runs in the Stripe webhook on a service client — and it must not, since
+ *      a draft it built would itself be the "other open bill" rule 3 refuses. So it does not finish
+ *      the job, and `say` carries the sentence a person reads (lib/after-payment-landed rings it).
  *
  * THIS IS THE SECOND DOOR THAT ENDS A JOB, so it writes what the first one writes: every field in
  * lib/job-status's finishedJobFields, which is the whole of a finish — the word, and the hold reason
@@ -45,7 +61,13 @@ import { reportError } from "@/lib/observe";
  * the money is already recorded when this runs, and a job status is not worth failing a payment
  * over — a miss is reported and the job stays as it was.
  */
-export type CompleteWhenPaid = { completed: true; jobId: string } | { completed: false; why: string };
+export type CompleteWhenPaid =
+  /** `say`: a SENTENCE FOR A PERSON, set whenever the billing step had something to tell them —
+   *  a deposit that covered the work on a job that just ended, or (not completed) the hours and
+   *  receipts still waiting for a bill. lib/after-payment-landed rings it; `why` stays the log's
+   *  short reason. Absent means there was nothing to say. */
+  | { completed: true; jobId: string; say?: string }
+  | { completed: false; why: string; say?: string; jobId?: string };
 
 export async function completeJobWhenPaid(
   supabase: any,
@@ -71,7 +93,13 @@ export async function completeJobWhenPaid(
     const jobId = row.job_id ?? null;
     if (!jobId) return { completed: false, why: "the invoice isn't on a job" };
 
-    const { data: job, error: jobErr } = await supabase.from("jobs").select("id, status").eq("id", jobId).maybeSingle();
+    // The NAME comes back with the status: a refusal is read on a lock screen with no job page around
+    // it, and "J-054" alone is the thing Erik says he cannot read ("i cant tell by job numbers alone").
+    const { data: job, error: jobErr } = await supabase
+      .from("jobs")
+      .select("id, status, job_number, name, customers(name)")
+      .eq("id", jobId)
+      .maybeSingle();
     if (jobErr) {
       reportError("completeJobWhenPaid:read-job", jobErr, { invoiceId, jobId });
       return { completed: false, why: "the job couldn't be read" };
@@ -91,6 +119,13 @@ export async function completeJobWhenPaid(
     const stillOwed = ((others ?? []) as { id: string; status?: string | null }[]).filter((o) => o.status !== "void" && o.status !== "paid");
     if (stillOwed.length) return { completed: false, why: `the job has ${stillOwed.length} other open bill${stillOwed.length === 1 ? "" : "s"}` };
 
+    // 4. THE BILLING STEP — the same function Finish Job runs (lib/finish-bills-first). A finishing
+    //    status may not be written without it, at either door.
+    const named = job as { job_number?: string | null; name?: string | null; customers?: { name?: string | null } | null };
+    const jobSaid = jobSaidLabel({ job_number: named.job_number, name: named.name, customer: named.customers?.name ?? null });
+    const verdict = paidDoorVerdict(await finishBillingStep(supabase, jobId), jobSaid);
+    if (!verdict.finish) return { completed: false, why: verdict.why, jobId, ...(verdict.say ? { say: verdict.say } : {}) };
+
     const { data: done, error: updErr } = await supabase
       .from("jobs")
       .update(finishedJobFields())
@@ -103,7 +138,7 @@ export async function completeJobWhenPaid(
     }
     if (!done?.length) return { completed: false, why: "the job moved before it could be completed" };
     await touch(jobId);
-    return { completed: true, jobId };
+    return { completed: true, jobId, ...(verdict.say ? { say: verdict.say } : {}) };
   } catch (e) {
     reportError("completeJobWhenPaid", e, { invoiceId });
     return { completed: false, why: "something went wrong" };
