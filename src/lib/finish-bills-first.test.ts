@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname, normalize, sep } from "node:path";
 import { paidDoorVerdict, type FinishBillingStep } from "./finish-bills-first";
 import { jobBillsItsActuals } from "./invoice-import-rule";
-import { liveFunctionBody } from "@/lib/migration-body.test-util";
+import { codeOnly, liveFunctionBody } from "@/lib/migration-body.test-util";
 import type { NotBilled } from "./finish-job-words";
 
 /**
@@ -246,7 +246,16 @@ describe("the billing step is callable from the Stripe webhook, not just from a 
  * lib/paid-door-prices-the-work.test.ts runs the real step on both clients over the same books.)
  */
 describe("every door that ends a job on money says which client it is holding", () => {
-  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  /**
+   * Source with comments removed, through THE one stripper every bypass tripwire reads
+   * (lib/migration-body.test-util: codeOnly), so prose can neither satisfy nor trip an assertion
+   * about code. THIS ONE SCANS THE WHOLE APP: a doc comment anywhere in 200+ files that happened
+   * to write `completeJobWhenPaid(db, id)` as prose would be reported as a door that forgot its
+   * client, and a comment in the step's own header that wrote `access?:` while explaining why an
+   * optional scope was the defect would fail "`access` may not be optional". The repo's house
+   * style names its functions in prose constantly; it is one hyphen from happening.
+   */
+  const read = (f: string) => codeOnly(readFileSync(join(process.cwd(), f), "utf8"));
   const SRC = (() => {
     const out: string[] = [];
     const walk = (dir: string) => {

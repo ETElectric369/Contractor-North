@@ -133,9 +133,15 @@ describe("the one comment stripper every bypass tripwire reads through", () => {
     expect(writes.test(codeOnly(writer)), "codeOnly does").toBe(true);
     // The three that used to carry it now point here, so nobody's reach depends on where a camera
     // input happens to sit in the file.
-    for (const t of ["supplier-owed-one-place.test.ts", "after-payment-landed.test.ts", "no-supplier-name.test.ts"]) {
+    // finish-bills-first.test.ts is the fourth, and it is the one that proves naming them is not
+    // enough: it landed in a parallel lane on the same day as this consolidation, scanning all 200+
+    // app files raw, and nothing here could see it (integration of 2026-10-01). A fifth will do the
+    // same. The list is the floor, not the rule.
+    for (const t of ["supplier-owed-one-place.test.ts", "after-payment-landed.test.ts", "no-supplier-name.test.ts", "finish-bills-first.test.ts"]) {
       const src = readFileSync(join(process.cwd(), "src/lib", t), "utf8");
-      expect(src, `${t} must read through codeOnly`).toContain('import { codeOnly } from "@/lib/migration-body.test-util"');
+      expect(src, `${t} must read through codeOnly`).toMatch(
+        /import \{[^}]*\bcodeOnly\b[^}]*\} from "@\/lib\/migration-body\.test-util"/,
+      );
       expect(src, `${t} must not keep its own stripper`).not.toMatch(/replace\(\/\\\/\\\*\[\\s\\S\]\*\?\\\*\\\/\/g, ""\)[\s\S]{0,80}split\("\\n"\)/);
     }
   });
