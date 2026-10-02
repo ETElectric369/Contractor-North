@@ -211,7 +211,11 @@ export function unreadBankTable(table: readonly (readonly string[])[], headerRow
  * question, and two spellings of the answer is how one of them stops naming what to do next.
  */
 export function notABankDownloadSaid(name: string): string {
-  return `${name} doesn't read as a bank download: it needs a date, a description and an amount on every line. Download it again as CSV (with column headings, if the bank offers them) and drop that. Nothing was added.`;
+  // ONE ACTION, NOT A MENU (Erik, 2026-10-02: "i dont want people to have to jump on a merry go
+  // round to do shit"). This used to end "Download it again as CSV (with column headings, if the
+  // bank offers them)", which is three decisions handed to someone who just wanted their month in.
+  // Now that a PDF reads too, the one thing left to do is take the month straight off the bank.
+  return `${name} doesn't read as a bank download: it needs a day, a description and an amount on every line. Nothing was added — take the month straight off your bank and drop that.`;
 }
 
 export function redactWordCells(table: readonly (readonly string[])[]): string[][] {

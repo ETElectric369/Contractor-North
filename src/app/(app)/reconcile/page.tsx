@@ -380,10 +380,14 @@ export default async function ReconcilePage() {
           it at precisely the moment a person opens this page: the book is quiet and he has the next
           download in his hand. An all-clear page with no way to put anything on it is a dead end.
 
-          WHAT IT TAKES IS NAMED, NOT IMPLIED. LIST_ACCEPT (lib/open-list-file.ts) reads CSV, TSV, a
-          text table, Excel old or new and a bank's OFX/QFX/QBO — and NOT a PDF. "Drop your
-          statement" would send him to the bank's Statements page for the PDF and hand him a refusal
-          he had no reason to expect. */}
+          IT NAMES NO FORMATS. Erik, 2026-10-02: "i dont want people to have to jump on a merry go
+          round to do shit." This line used to list CSV, TSV, a text table, Excel old or new and a
+          bank's OFX/QFX/QBO, which is a lecture on file types nobody should have to learn: a person
+          is emailed a PDF and hands it over. Since the PDF reads (pdf-table.ts), the sentence is
+          "drop what you were given" and the app works out what it is. Where one format really is
+          better — OFX carries the bank's own transaction id, so an overlapping download can never
+          count a line twice (0363's fitid: key) — that is the APP's preference to act on, never a
+          choice to hand the person. */}
       {/* THE ANCHOR IS DRAWN FOR EVERY STAFF VIEWER, both halves of the gate, because the Net Profit
           card on /analytics links to it: an anchor that is not drawn is the dead end this page's own
           "File It" door already taught us (see the not-on-an-account section above). */}
@@ -392,13 +396,12 @@ export default async function ReconcilePage() {
         {sortsBank ? (
           <>
             <p className="mb-2 mt-1 text-sm text-slate-600">
-              Drop the month off your bank&apos;s website or a supplier&apos;s portal here: CSV, Excel, your bank&apos;s OFX,
-              QFX or QBO file, or the PDF statement your supplier emails you. A PDF is read off the page, so the line
-              under it says how many pages and how many rows came off it and what they add to — check that against the
-              total your statement prints. If two of its columns could both be the amount, the line says the pages and
-              asks you which column is which, and adds them up once you have. A PDF that was SCANNED has no text on its
-              pages at all; that one has to go in
-              with the + button at the top, which looks at it as a picture.
+              Drop your statement here — whatever your bank or supplier gave you, in whatever form they gave it.
+              North works out what it is. When it comes off a PDF, the line underneath says how many pages and rows it
+              read and what they add up to: hold that against the total printed on your own statement, because two
+              numbers agreeing is the proof it read them right. If two columns could both be the amount, it asks you
+              which is which and adds them up once you have said. One kind still has to go in with the + button at the
+              top: a statement that was SCANNED, with no text on its pages at all, which that door reads as a picture.
             </p>
             <BankDropLine />
           </>

@@ -310,10 +310,27 @@ describe("the page reads; it does not re-rule", () => {
    * which calls `readListFile`, and that reader cannot read a PDF. The statement door has its own
    * constant (STATEMENT_ACCEPT) and its own route through the table reader.
    */
-  it("the file types on the card are the file types the reader takes, the scan named as the one that is not", () => {
+  /**
+   * NO MERRY-GO-ROUND (Erik, 2026-10-02: "i dont want people to have to jump on a merry go round to
+   * do shit"). This test used to REQUIRE the card to name CSV, Excel, OFX, QFX and QBO, on the
+   * reasoning that what a door takes should be named rather than implied. That reasoning was wrong:
+   * a person is emailed a statement and hands it over, and a list of file extensions is a lecture on
+   * something they should never have to learn. So the law is inverted here, and the test with it —
+   * the card may name NO format, because the reader works out what the file is.
+   *
+   * THE ONE EXCEPTION IS A DOOR THAT GENUINELY CANNOT DO IT. A scanned statement has no text on its
+   * pages, so this door really cannot read it, and saying so names ONE other door. That is the only
+   * sentence of its kind allowed on the card, and it goes the day the scan reads here too.
+   *
+   * The accept lists are still pinned, because they are what the browser filters on: .pdf must be in
+   * STATEMENT_ACCEPT and must NOT be in LIST_ACCEPT, where isListFile would send every PDF to
+   * readListFile, a reader that cannot open one.
+   */
+  it("the card names no file formats, and names the one kind this door cannot read", () => {
     const card = text(html.slice(html.indexOf("Bring In A Statement")));
-    for (const said of ["CSV", "Excel", "OFX", "QFX", "QBO", "PDF"]) expect(card, said).toContain(said);
-    expect(card).toContain("A PDF that was SCANNED has no text on its pages at all");
+    for (const lecture of ["CSV", "TSV", "Excel", "OFX", "QFX", "QBO", ".xlsx"]) expect(card, lecture).not.toContain(lecture);
+    expect(card).toContain("whatever your bank or supplier gave you");
+    expect(card).toContain("SCANNED");
     for (const ext of [".csv", ".tsv", ".txt", ".xlsx", ".xls", ".ofx", ".qfx", ".qbo"]) expect(LIST_ACCEPT, ext).toContain(ext);
     expect(LIST_ACCEPT).not.toContain(".pdf");
     for (const ext of [".pdf", ".csv", ".xlsx", ".ofx", ".qbo"]) expect(STATEMENT_ACCEPT, ext).toContain(ext);
