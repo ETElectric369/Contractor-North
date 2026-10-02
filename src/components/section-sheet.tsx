@@ -48,7 +48,7 @@ export function SectionSheet({
 
   // THIS COVERS THE SCREEN, so the page underneath comes upright while it is open. The scrim and the
   // sheet are both `position: fixed`, and this renders INSIDE the app shell's turned region (the
-  // layout mounts SectionSubnav there) — so on /schedule or /price-list held sideways they would be
+  // layout mounts SectionSubnav there) — so on /schedule held sideways they would be
   // laid out against a rotated box and land in a corner of the glass. NOT useModalLock: `modal-open`
   // is what the Escape handler below stands down for, and it hides this sheet's own edge handle.
   useCoversTheScreen(open);
