@@ -296,6 +296,26 @@ describe("the door's figure and the section's figure are the same figure", () =>
     expect(html).not.toContain('id="not-on-an-account"');
   });
 
+  /**
+   * AND WHERE ONLY SOME OF THE PILE IS UPSTAIRS, THE HEADING'S COUNT SAYS SO. The heading is the
+   * whole pile; these rows are what no suggestion speaks for. Two numbers on one card with nothing
+   * joining them is the same fault as the door's, one card smaller.
+   */
+  it("says how many of the pile are in a question above, so the count and the rows agree", async () => {
+    CURRENT = {
+      ...BASE,
+      bills: [
+        bill("p-1", { supplier: "Fernhill Pipe & Fitting", amount: 120, category: "Receipt" }),
+        bill("p-2", { supplier: "Fernhill Pipe and Fitting", amount: 95, category: "Receipt" }),
+        bill("b-loose", { supplier: "Larkspur Trade Counter", amount: 61.4, category: "Receipt" }),
+      ],
+    };
+    const words = pile(await render());
+    // Three papers in the pile, one row: the other two are the merge proposal above.
+    expect(words).toContain("Papers Not On A Supplier Account Yet (3)");
+    expect(words).toContain("2 of them are in a question above");
+  });
+
   it("a pile whose only paper is spoken for upstairs still draws the anchor, pointing at the row", async () => {
     CURRENT = {
       ...BASE,

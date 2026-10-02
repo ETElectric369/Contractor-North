@@ -760,6 +760,12 @@ export function SupplierUnfiledSpellings({
   // THE ONLY QUESTION THIS CARD ASKS NOW: a paper with no category word on it at all. Erik's rule,
   // verbatim — "if it's unclear ask" — so a row whose papers are all categorised asks nothing.
   const toAsk = spellings.filter((g) => (g.uncategorised ?? 0) > 0).length;
+  // ── AND HOW MANY OF THE PILE ARE NOT IN THIS LIST, BECAUSE A SUGGESTION ABOVE HOLDS THEM ──────
+  // The three name sections are slices of ONE pile, and this list is what no suggestion speaks for
+  // (a spelling with two doors doing one thing is its own trap). So the heading's count can be
+  // larger than these rows add up to, and nothing may leave a figure in silence.
+  const rowPapers = spellings.reduce((n, g) => n + (Number(g.bills) || 0), 0) + namelessPapers;
+  const askedAbove = papers == null ? 0 : Math.max(0, papers - rowPapers);
 
   function file(spelling: SupplierSpelling) {
     setError(null);
@@ -797,6 +803,14 @@ export function SupplierUnfiledSpellings({
             {settledAtTheRegister} more {settledAtTheRegister === 1 ? "purchase" : "purchases"} on no supplier account{" "}
             {settledAtTheRegister === 1 ? "was" : "were"} paid at the register, so {settledAtTheRegister === 1 ? "it has" : "each has"}{" "}
             one record and nothing to square up. {settledAtTheRegister === 1 ? "It is" : "They are"} in All Bills on the Bills page.
+          </p>
+        )}
+        {/* THE COUNT ABOVE IS THE WHOLE PILE'S; THESE ROWS ARE WHAT NOTHING ELSE SPEAKS FOR. Said out
+            loud, so the figure in the heading and the rows under it never read as a contradiction. */}
+        {askedAbove > 0 && (
+          <p className="mt-1 text-sm text-slate-500">
+            {askedAbove} of {askedAbove === 1 ? "them is" : "them are"} in a question above, under the name on the paper, and{" "}
+            {askedAbove === 1 ? "is" : "are"} answered there rather than twice.
           </p>
         )}
         <WhyFold>
