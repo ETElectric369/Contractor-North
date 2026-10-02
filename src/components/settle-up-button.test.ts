@@ -333,7 +333,7 @@ describe("the one Get Paid sheet", () => {
 });
 
 /**
- * TAP TO PAY TELLS THE TRUTH (0e2cb937 — Rich Seiler, INV-083, $420, 2026-09-30), the sheet's half.
+ * TAP TO PAY TELLS THE TRUTH (0e2cb937 — Rich Siskin, INV-083, $420, 2026-09-30), the sheet's half.
  *
  * The bridge's ok is a claim; tapPaymentOutcome is the check; lib/tap-verdict is what the sheet
  * says for each answer and the watch that ends. tapToPay() wires them: a "paid" verdict is the

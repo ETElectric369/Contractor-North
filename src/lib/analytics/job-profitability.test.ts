@@ -146,7 +146,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
   });
 
   // 0286: the owner is paid by owner's draw. His hours are billed to the customer and counted, and
-  // they are never a cost. Erik's J-046 (Jason Waldow) read $479.14 with his hours costed at $125.
+  // they are never a cost. Erik's J-046 (Jason Wexley) read $479.14 with his hours costed at $125.
   it("the owner's hours cost $0 and come back as ownerHours with profit per owner hour", () => {
     const owner = { job_id: "A", status: "closed", ...span(10), profiles: { hourly_rate: 0, paid_by_draw: true } };
     const rows = computeJobProfitRows({
@@ -347,7 +347,7 @@ describe("computeJobProfitRows — petty cash finally counts", () => {
 
 /**
  * THE SHELF (Shop Stock, 0303): job material cost = bills - off_shelf + from_shelf, read from the
- * job_shelf_net view. The numbers are Herringbone's: the 8/19 12/2 coil ($180.17 with its tax
+ * job_shelf_net view. The numbers are Honeysuckle's: the 8/19 12/2 coil ($180.17 with its tax
  * share) goes on the shelf from J-011, and 60 ft of it ($43.24) goes onto another job.
  */
 describe("computeJobProfitRows — cost follows the piece", () => {

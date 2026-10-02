@@ -26,12 +26,12 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 export const ACTIVE_JOB_STATUSES: JobStatus[] = ["to_be_scheduled", "scheduled", "in_progress", "on_hold"];
 
 /**
- * WHICH DOOR A STATUS IS WRITTEN THROUGH (M2, Tao J-002).
+ * WHICH DOOR A STATUS IS WRITTEN THROUGH (M2, Tess J-002).
  *
  *   "set"    the plain status write: the word, and nothing else follows from it (setJobStatus).
  *   "finish" FINISHING, which BILLS THE UNBILLED WORK FIRST (jobs/actions finishJob) — the T&M
  *            Final built as a draft, the nothing-new check, and the hours-and-receipts-off-a-bill
- *            warning. Writing the word alone is the Tao J-002 failure: his job went complete, 19.5
+ *            warning. Writing the word alone is the Tess J-002 failure: his job went complete, 19.5
  *            hours were billed nowhere, and they dropped off every screen with nobody told.
  *
  * ONE RULE, ONE PLACE: every door that moves a job's status reads this table instead of carrying its

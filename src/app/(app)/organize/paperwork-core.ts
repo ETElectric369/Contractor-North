@@ -506,7 +506,7 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
   const bucketRead = parsed?.destination === "overhead" ? bucketOf(parsed?.overhead_category) : null;
   const feeShaped = bucketRead === "Fees" || looksLikeSupplierFee(title, vendor, summary);
   // THE COMPANY'S OWN USE IS READ THE SAME WAY (Erik, 2026-09-24): "TOOLS" in the PO box picks
-  // Tools & Supplies in code, exactly, the way "13897 HERRINGBONE" picks the job. A job mark
+  // Tools & Supplies in code, exactly, the way "13897 HONEYSUCKLE" picks the job. A job mark
   // beats it; a paper naming both says so and picks nothing (placeFromMarks).
   const { job: byMarks, companyUse } = placeFromMarks(marks, opts.markJobs ?? [], opts.pos ?? [], opts.selfNames ?? [], { feeShaped });
   const hint = parsed?.job_hint ? String(parsed.job_hint).slice(0, 200) : null;

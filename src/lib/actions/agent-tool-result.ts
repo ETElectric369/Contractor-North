@@ -7,7 +7,7 @@ import type { ActionResult } from "./types";
  * right shape (a handler's internals must not leak into a prompt) and also the exact place the law
  * keeps being broken: audit v800 found `warning` and `recorded` stripped here, so Nort announced
  * "3 hours logged" for a three-second entry with the correction sitting unread in a dropped field.
- * It happened again on Erik's TTP 56 morning (2026-10-01): the clock-in handler attached the "the app
+ * It happened again on Erik's ARR 56 morning (2026-10-01): the clock-in handler attached the "the app
  * picked this job" sentence as a field of its own, this list did not carry it, and Nort read
  * `{"ok":true}` — so it answered "You're clocked in" while 2h19m billed the wrong customer, in
  * exactly the silence that fix exists to end.

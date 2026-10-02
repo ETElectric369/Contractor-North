@@ -88,7 +88,9 @@ export function Topbar({
     // for its position:fixed descendants, which trapped Nort's floating panel inside the bar
     // (it rendered behind the section pills — cn-v344 regression). The bar never overlaps the
     // scrolling content, so a blur had nothing to frost anyway; the translucency reads glassy.
-    <header className="flex h-[calc(4rem+var(--sat,0px))] items-center justify-between gap-2 border-b border-white/50 bg-[rgba(255,255,255,0.8)] px-4 pt-[var(--sat,0px)] shell:px-6">
+    // `app-topbar`: turned sideways on a phone the notch is on the SIDE, so globals.css pads this
+    // bar past it — same bar, same controls, same places, just not under the camera.
+    <header className="app-topbar flex h-[calc(4rem+var(--sat,0px))] items-center justify-between gap-2 border-b border-white/50 bg-[rgba(255,255,255,0.8)] px-4 pt-[var(--sat,0px)] shell:px-6">
       <button
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
         onClick={() => {
@@ -117,7 +119,11 @@ export function Topbar({
 
       <div className="flex-1" />
 
-      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+      {/* THE CHROME DOES NOT MOVE WHEN THE PHONE TURNS (Erik, 2026-10-01). A phone held sideways is
+          ~700–930px wide, which trips sm: and md: — so this group would have widened its gaps and
+          the Search button below would have grown a text label, in the one place he said nothing may
+          change. `turned:` puts the phone's own measurements back. */}
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3 turned:gap-2">
         {/* Nort's panel and deep-link openers — no DOM of its own in the bar (the panel floats). */}
         {nortOn && <GlobalAssistant />}
         <button
@@ -125,10 +131,10 @@ export function Topbar({
           data-tour="ask"
           aria-label={nortOn ? "Search Or Ask" : "Search"}
           title={`${nortOn ? "Search or ask Nort" : "Search"} (${modKey})${nortOn && waiting ? " — setup is waiting inside" : ""}`}
-          className="relative flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 md:w-auto md:px-3"
+          className="relative flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 md:w-auto md:px-3 turned:w-11 turned:px-0"
         >
           <Search className="h-5 w-5 shrink-0" />
-          <span className="hidden text-sm md:inline">{nortOn ? "Search Or Ask" : "Search"}</span>
+          <span className="hidden text-sm md:inline turned:hidden">{nortOn ? "Search Or Ask" : "Search"}</span>
           {/* The shortcut only where there is a keyboard to press it on. */}
           <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:pointer-fine:inline">{modKey}</span>
           {nortOn && waiting && (

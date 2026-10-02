@@ -171,7 +171,7 @@ function sayList(items: string[]): string {
 
 /**
  * CREATE A SUPPLIER ACCOUNT - the thing he owes money to, keyed by the number on the statement
- * (TR-34426) rather than by whatever the scanner typed that day.
+ * (AC-10427) rather than by whatever the scanner typed that day.
  *
  * `on_account` is what decides whether a running balance exists at all: a counter he pays at the
  * register the moment he walks out has no balance to carry, and showing one would be inventing a
@@ -720,7 +720,7 @@ async function fileSpelling(
 /**
  * THE SUPPLIER'S OWN INVOICE NUMBER, and whether this document is a STATEMENT.
  *
- * CED's portal names its PDFs `TR-34426_20260616_32136931_15165103264.pdf` - account, date,
+ * CED's portal names its PDFs `AC-10427_20260616_32136931_15165103264.pdf` - account, date,
  * invoice number, internal id - and the scanner files that whole string in `notes` as a leftover
  * filename while `bill_number` sits empty on every single bill. The documents he imported from
  * email are worse: they are statements carrying several CED invoices at once, their numbers
@@ -1030,7 +1030,7 @@ function billIdsInGroupId(groupId: string): string[] {
  * HE PICKS WHICH JOB KEEPS THE TICKET.
  *
  * An identical CED ticket - $95.27, eight lines, line for line to the penny - is filed to BOTH
- * "13631 Northwoods" and "85 Whitney Place", so one of those jobs is carrying a cost that is not
+ * "13631 Nightshade" and "41 Larkspur Place", so one of those jobs is carrying a cost that is not
  * its own and its profit is wrong by exactly that much. Which copy is real is ERIK'S KNOWLEDGE: he
  * was on those jobs. The app only ever asked.
  *
@@ -1114,8 +1114,8 @@ export async function resolveDuplicateBill(input: {
   /**
    * AND A COPY HE SETS ASIDE MAY ALREADY BE ON A CUSTOMER'S BILL (review, 2026-09-20).
    *
-   * Both of his $95.27 CED copies are: 8ce93d0a rides on INV-050 (paid, 13631 Northwoods) and
-   * 31b489e4 on INV-061 (paid, 85 Whitney Place), eight lines each. Setting one aside is still the
+   * Both of his $95.27 CED copies are: 8ce93d0a rides on INV-050 (paid, 13631 Nightshade) and
+   * 31b489e4 on INV-061 (paid, 41 Larkspur Place), eight lines each. Setting one aside is still the
    * right move and the COST should stop counting - but what he CHARGED for it does not stop, so
    * the job keeps $119.09 of revenue for a $95.27 purchase the app now calls a duplicate, and its
    * margin moves by both numbers with nothing on any screen accounting for it.
@@ -1463,11 +1463,11 @@ export async function tieSupplierInvoiceToBill(input: { invoiceId: string; billI
 /**
  * WHICH JOB A SUPPLIER INVOICE BELONGS TO, ANSWERED BY THE PERSON WHO WAS THERE.
  *
- * CED prints a JOB NAME on every invoice and it is very nearly his own: 13631 NORTHWOODS, 85
- * WHITNEY PLACE, 13683 HILLSIDE. Very nearly is not the same as exactly, and the gap is where a
- * machine would put money on the wrong job. The same road comes back as "5659 RHODESIA", "561
- * RHODESIA", "5661 RHODESIA" and "5659 RODESSIA", and he has FIVE separate jobs on it. "235 TIMBER
- * CREEK" matches two. "STOCK" matches none and never should - he has been telling his supplier
+ * CED prints a JOB NAME on every invoice and it is very nearly his own: 13631 NIGHTSHADE, 41
+ * LARKSPUR PLACE, 13683 HAZELNUT. Very nearly is not the same as exactly, and the gap is where a
+ * machine would put money on the wrong job. The same road comes back as "5659 FERNHILL", "561
+ * FERNHILL", "5661 FERNHILL" and "5659 FERNHILE", and he has FIVE separate jobs on it. "235 THISTLE
+ * WOOD" matches two. "STOCK" matches none and never should - he has been telling his supplier
  * what is shop stock for months, and it is not a job at all.
  *
  * So the app ranks and the man decides, and this is the write that records his answer.
@@ -1595,7 +1595,7 @@ export async function setSupplierInvoiceJob(input: {
  * He had to ask because `recordAsBill` was typed on the card, rendered if it was passed, and
  * nothing anywhere implemented it or passed it - the same failure as `setInvoiceJob` one wave
  * earlier, on the same card. Eleven more CED invoices are sitting in that list, including the
- * $523.47 on TTP56 he is about to bill, and every one of them was a message to me.
+ * $523.47 on ARR56 he is about to bill, and every one of them was a message to me.
  *
  * A BILL FROM A SUPPLIER INVOICE IS NOT A SCAN. Everything else in `bills` arrived as a photograph
  * read by a language model. This arrives from the supplier's own file: their number, their date,
@@ -1603,7 +1603,7 @@ export async function setSupplierInvoiceJob(input: {
  * prices his account pays, and they are the antidote to the Sunnyvale counter preview that 0271
  * had to fence off.
  *
- * THE EXTENSION IS THE PRICE (0274, found doing his TTP 106 bill by hand two hours ago). CED
+ * THE EXTENSION IS THE PRICE (0274, found doing his ARR 106 bill by hand two hours ago). CED
  * prints a one-gang decora plate as "50.00" with a C beside it - fifty dollars per HUNDRED - and
  * 93 of the 227 lines on his invoices are priced per hundred or per thousand. `bill_line_items`
  * has nowhere to put that letter and every money path in the app reads the EXTENSION, so the
@@ -2157,7 +2157,7 @@ async function shelveRecordedBill(
 /**
  * ONE TAP: PUT THE PAPER ON A JOB AND RECORD IT, or record it as a business cost.
  *
- * Before this, CED's 8802-1107820 ("85 WHITNEY", $187.64) took about eight taps across two lists
+ * Before this, CED's 8802-1107820 ("41 LARKSPUR", $187.64) took about eight taps across two lists
  * on /bills: pick J-028 in Invoices With No Job, press File It, scroll to Purchases Not In Your
  * Books, find the row again, Record It As A Bill. The card on My Day asks the one question and the
  * answer does both halves, by calling the two actions that already do each half and already say
@@ -2278,7 +2278,7 @@ export async function fileSupplierPaper(input: {
   }
   if (!rec.ok) return putBack(rec.error ?? `${number} didn't record.`);
   // ALREADY BILLED ON INV-x? (0357). Filing stays exactly as it was; the done line then asks, when a
-  // sent bill on the job could have charged for this paper already (Purple Sage: typed by hand on
+  // sent bill on the job could have charged for this paper already (Pinyon Sage: typed by hand on
   // INV-00023). A read that fails only means the card doesn't ask; the Costs tab still can.
   const offer = rec.billId ? await alreadyBilledOffer(ctx.supabase, org.orgId, jobId!, rec.billId) : null;
   return {

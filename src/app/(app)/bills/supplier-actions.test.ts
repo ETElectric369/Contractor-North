@@ -66,9 +66,9 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
 const STAFF = { data: { role: "owner", org_id: "org-1", active: true }, error: null };
 
 // His real rows: one CED ticket, $95.27, eight lines, filed on two jobs.
-const NORTHWOODS_COPY = "8ce93d0a-d2ce-46a9-a857-2c7070224246";
-const WHITNEY_COPY = "31b489e4-743b-4208-9742-7fb4005c642c";
-const GROUP = `dup:${JSON.stringify([NORTHWOODS_COPY, WHITNEY_COPY])}`;
+const NIGHTSHADE_COPY = "8ce93d0a-d2ce-46a9-a857-2c7070224246";
+const LARKSPUR_COPY = "31b489e4-743b-4208-9742-7fb4005c642c";
+const GROUP = `dup:${JSON.stringify([NIGHTSHADE_COPY, LARKSPUR_COPY])}`;
 
 let calls: Call[];
 beforeEach(() => { calls = []; });
@@ -77,27 +77,27 @@ describe("resolveDuplicateBill - setting a copy aside says what it costs", () =>
   /** The keeper, the supersede, and the link move. The claim read is scripted per test. */
   const script = (claimRows: any[] | null, over: Record<string, any[]> = {}) => ({
     "profiles.select": [STAFF],
-    "bills.select": [{ data: { id: WHITNEY_COPY, amount: "95.27", job_id: "job-whitney", jobs: { name: "85 Whitney Place" } }, error: null }],
-    "bills.update": [{ data: [{ id: NORTHWOODS_COPY, job_id: "job-northwoods", jobs: { name: "13631 Northwoods" } }], error: null }],
+    "bills.select": [{ data: { id: LARKSPUR_COPY, amount: "95.27", job_id: "job-larkspur", jobs: { name: "41 Larkspur Place" } }, error: null }],
+    "bills.update": [{ data: [{ id: NIGHTSHADE_COPY, job_id: "job-nightshade", jobs: { name: "13631 Nightshade" } }], error: null }],
     "bill_supplier_invoices.update": [{ data: [], error: null }],
     "invoice_items.select": [{ data: claimRows, error: null }],
     ...over,
   });
 
   it("names the paid invoice the set-aside copy is on, and the door back", async () => {
-    // INV-050 (paid) claims the Northwoods copy through source_ids - his real row, five bill ids
+    // INV-050 (paid) claims the Nightshade copy through source_ids - his real row, five bill ids
     // on one line. The cost stops counting; the $119.09 the customer was charged does not.
     state.client = fakeSupabase(
       script([
-        { import_key: null, source_ids: [NORTHWOODS_COPY, "7cf0c30a-48b4-4748-9b2c-8e53151ab7ba"], invoices: { invoice_number: "INV-050", status: "paid", job_id: "job-northwoods" } },
+        { import_key: null, source_ids: [NIGHTSHADE_COPY, "7cf0c30a-48b4-4748-9b2c-8e53151ab7ba"], invoices: { invoice_number: "INV-050", status: "paid", job_id: "job-nightshade" } },
       ]),
       calls,
     );
 
-    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: WHITNEY_COPY, duplicateBillIds: [NORTHWOODS_COPY] });
+    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: LARKSPUR_COPY, duplicateBillIds: [NIGHTSHADE_COPY] });
 
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("Kept the $95.27 ticket on 85 Whitney Place.");
+    expect(res.message).toContain("Kept the $95.27 ticket on 41 Larkspur Place.");
     expect(res.message).toContain("already billed to the customer on INV-050");
     expect(res.message).toContain("the cost stops counting, but what you charged for it does not");
     // NO DEAD ENDS: Credit / Refund is the literal label in the Actions menu on the invoice.
@@ -109,18 +109,18 @@ describe("resolveDuplicateBill - setting a copy aside says what it costs", () =>
     // 0277 is unique on the INVOICE, so a link left on the set-aside copy could never be replaced -
     // and it would name a bill every cost reader ignores.
     state.client = fakeSupabase(script([]), calls);
-    await resolveDuplicateBill({ groupId: GROUP, keepBillId: WHITNEY_COPY, duplicateBillIds: [NORTHWOODS_COPY] });
+    await resolveDuplicateBill({ groupId: GROUP, keepBillId: LARKSPUR_COPY, duplicateBillIds: [NIGHTSHADE_COPY] });
 
     const relink = calls.find((c) => c.table === "bill_supplier_invoices" && c.verb === "update");
-    expect(relink?.payload).toEqual({ bill_id: WHITNEY_COPY });
+    expect(relink?.payload).toEqual({ bill_id: LARKSPUR_COPY });
   });
 
   it("says nothing extra when no invoice claims the copy", async () => {
     state.client = fakeSupabase(script([]), calls);
-    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: WHITNEY_COPY, duplicateBillIds: [NORTHWOODS_COPY] });
+    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: LARKSPUR_COPY, duplicateBillIds: [NIGHTSHADE_COPY] });
     expect(res.ok).toBe(true);
     expect(res.message).toBe(
-      "Kept the $95.27 ticket on 85 Whitney Place. The copy on 13631 Northwoods stops counting against that job and stays on your bills list.",
+      "Kept the $95.27 ticket on 41 Larkspur Place. The copy on 13631 Nightshade stops counting against that job and stays on your bills list.",
     );
   });
 
@@ -128,10 +128,10 @@ describe("resolveDuplicateBill - setting a copy aside says what it costs", () =>
     // A draft is not a bill he sent: its lines are still editable, so a credit would be the wrong
     // advice. Same split the receipt card and the invoice page both make.
     state.client = fakeSupabase(
-      script([{ import_key: `bill:${NORTHWOODS_COPY}`, source_ids: null, invoices: { invoice_number: "INV-071", status: "draft", job_id: "job-northwoods" } }]),
+      script([{ import_key: `bill:${NIGHTSHADE_COPY}`, source_ids: null, invoices: { invoice_number: "INV-071", status: "draft", job_id: "job-nightshade" } }]),
       calls,
     );
-    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: WHITNEY_COPY, duplicateBillIds: [NORTHWOODS_COPY] });
+    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: LARKSPUR_COPY, duplicateBillIds: [NIGHTSHADE_COPY] });
     expect(res.message).toContain("INV-071, still a draft");
     expect(res.message).not.toContain("Credit / Refund");
   });
@@ -139,14 +139,14 @@ describe("resolveDuplicateBill - setting a copy aside says what it costs", () =>
   it("still supersedes when the claim read fails, and never refuses over it", async () => {
     // The money is already right by then. A failed read costs him a sentence, not the decision.
     state.client = fakeSupabase(script(null, { "invoice_items.select": [{ data: null, error: { code: "42501", message: "permission denied" } }] }), calls);
-    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: WHITNEY_COPY, duplicateBillIds: [NORTHWOODS_COPY] });
+    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: LARKSPUR_COPY, duplicateBillIds: [NIGHTSHADE_COPY] });
     expect(res.ok).toBe(true);
     expect(res.message).toContain("stops counting against that job");
   });
 
   it("says so when the link could not follow the cost", async () => {
     state.client = fakeSupabase(script([], { "bill_supplier_invoices.update": [{ data: null, error: { code: "42501", message: "permission denied" } }] }), calls);
-    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: WHITNEY_COPY, duplicateBillIds: [NORTHWOODS_COPY] });
+    const res = await resolveDuplicateBill({ groupId: GROUP, keepBillId: LARKSPUR_COPY, duplicateBillIds: [NIGHTSHADE_COPY] });
     expect(res.ok).toBe(true);
     expect(res.message).toContain("still tied to the copy you set aside");
   });
@@ -161,7 +161,7 @@ const INV_ROW = {
     invoice_number: "8802-1104644",
     kind: "invoice",
     invoice_date: "2026-07-29",
-    job_id: "job-whitney",
+    job_id: "job-larkspur",
     supplier_account_id: "acct-ced",
     tax: 0,
     shipping: 0,
@@ -169,7 +169,7 @@ const INV_ROW = {
     open_balance: "95.27",
     closed: false,
     supplier_accounts: { name: "CED Truckee" },
-    jobs: { name: "85 Whitney Place", job_number: "J-028" },
+    jobs: { name: "41 Larkspur Place", job_number: "J-028" },
   },
   error: null,
 };
@@ -181,7 +181,7 @@ const recordScript = (over: Record<string, any[]> = {}) => ({
     INV_ROW,
     { data: [{ id: INVOICE_ID, kind: "invoice", total: "95.27", open_balance: "95.27", closed: false }], error: null },
     // "Already in your books?" (samePurchaseFor): the account's documents.
-    { data: [{ id: INVOICE_ID, invoice_number: "8802-1104644", supplier_account_id: "acct-ced", job_id: "job-whitney", total: "95.27", invoice_date: "2026-07-29" }], error: null },
+    { data: [{ id: INVOICE_ID, invoice_number: "8802-1104644", supplier_account_id: "acct-ced", job_id: "job-larkspur", total: "95.27", invoice_date: "2026-07-29" }], error: null },
   ],
   // The link check, then samePurchaseFor's read of every link.
   "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }],
@@ -230,7 +230,7 @@ describe("recordSupplierInvoiceAsBill - the rollback after a lost race", () => {
     const res = await recordSupplierInvoiceAsBill({ invoiceId: INVOICE_ID });
     expect(calls.some((c) => c.table === "bills" && c.verb === "delete")).toBe(false);
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("8802-1104644 is a bill on 85 Whitney Place now: $95.27");
+    expect(res.message).toContain("8802-1104644 is a bill on 41 Larkspur Place now: $95.27");
     // And it does not claim the tie failed: the tie exists, another tap wrote it.
     expect(res.message).not.toContain("didn't get tied");
   });
@@ -320,7 +320,7 @@ describe("a refusal over a saved spelling names no button that does not exist", 
 describe("setSupplierInvoiceJob - a set-aside copy is not 'in your books'", () => {
   const script = (links: any[]) => ({
     "profiles.select": [STAFF],
-    "jobs.select": [{ data: { id: "job-whitney", name: "85 Whitney Place", job_number: "J-028" }, error: null }],
+    "jobs.select": [{ data: { id: "job-larkspur", name: "41 Larkspur Place", job_number: "J-028" }, error: null }],
     "supplier_invoices.update": [{ data: [{ id: INVOICE_ID, invoice_number: "8802-1104644" }], error: null }],
     "bill_supplier_invoices.select": [{ data: links, error: null }],
   });
@@ -328,16 +328,16 @@ describe("setSupplierInvoiceJob - a set-aside copy is not 'in your books'", () =
   it("still names the next step when the only bill carrying it was set aside", async () => {
     // Every cost reader in the app ignores a superseded bill, so "its bill is already in your
     // books" would be telling him a cost had landed on a job carrying none of it.
-    state.client = fakeSupabase(script([{ bill_id: NORTHWOODS_COPY, bills: { superseded_by_bill_id: WHITNEY_COPY } }]), calls);
-    const res = await setSupplierInvoiceJob({ invoiceId: INVOICE_ID, jobId: "job-whitney" });
+    state.client = fakeSupabase(script([{ bill_id: NIGHTSHADE_COPY, bills: { superseded_by_bill_id: LARKSPUR_COPY } }]), calls);
+    const res = await setSupplierInvoiceJob({ invoiceId: INVOICE_ID, jobId: "job-larkspur" });
     expect(res.ok).toBe(true);
     expect(res.message).toContain("Record It As A Bill");
   });
 
   it("says the cost is already in his books when a live bill carries it", async () => {
-    state.client = fakeSupabase(script([{ bill_id: WHITNEY_COPY, bills: { superseded_by_bill_id: null } }]), calls);
-    const res = await setSupplierInvoiceJob({ invoiceId: INVOICE_ID, jobId: "job-whitney" });
-    expect(res.message).toBe("8802-1104644 is on 85 Whitney Place now, and its bill is already in your books.");
+    state.client = fakeSupabase(script([{ bill_id: LARKSPUR_COPY, bills: { superseded_by_bill_id: null } }]), calls);
+    const res = await setSupplierInvoiceJob({ invoiceId: INVOICE_ID, jobId: "job-larkspur" });
+    expect(res.message).toBe("8802-1104644 is on 41 Larkspur Place now, and its bill is already in your books.");
   });
 });
 
@@ -359,11 +359,11 @@ const SO_BILL = {
   job_id: "job-j011",
   is_statement: false,
   notes: "Bill filed by a person from the tray: Consolidated Electrical Dist. — $323.71",
-  jobs: { job_number: "J-011", name: "13897 Herringbone" },
+  jobs: { job_number: "J-011", name: "13897 Honeysuckle" },
   bill_line_items: [{ description: "SIEM Q2020" }],
 };
 const CED_INVOICE = {
-  id: "si-herringbone",
+  id: "si-honeysuckle",
   invoice_number: "8802-1109999",
   kind: "invoice",
   invoice_date: "2026-09-26",
@@ -375,7 +375,7 @@ const CED_INVOICE = {
   open_balance: "323.71",
   closed: false,
   supplier_accounts: { name: "CED Truckee" },
-  jobs: { name: "13897 Herringbone", job_number: "J-011" },
+  jobs: { name: "13897 Honeysuckle", job_number: "J-011" },
 };
 const ledger = (bills: any[] = [SO_BILL]) => ({
   "bills.select": [{ data: bills, error: null }],
@@ -399,7 +399,7 @@ describe("Record It As A Bill never writes a second bill for a purchase already 
     state.client = fakeSupabase(script(), calls);
     const res = await recordSupplierInvoiceAsBill({ invoiceId: CED_INVOICE.id });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Maybe already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone");
+    expect(res.error).toContain("Maybe already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle");
     expect(res.error).toContain("Same Purchase: Tie Them");
     expect(res.error).toContain("Different Purchase: Record It Anyway");
     expect(res.error).toContain("Nothing was written.");
@@ -429,7 +429,7 @@ describe("Record It As A Bill never writes a second bill for a purchase already 
     );
     const res = await recordSupplierInvoiceAsBill({ invoiceId: CED_INVOICE.id, differentPurchase: true });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("8802-1109999 is a bill on 13897 Herringbone now: $323.71");
+    expect(res.message).toContain("8802-1109999 is a bill on 13897 Honeysuckle now: $323.71");
   });
 
   it("a read that fails is never 'no bill': nothing is written", async () => {
@@ -488,7 +488,7 @@ describe("setSupplierInvoiceJob says when the purchase may already be on the job
     state.client = fakeSupabase(
       {
         "profiles.select": [STAFF],
-        "jobs.select": [{ data: { id: "job-j011", name: "13897 Herringbone", job_number: "J-011" }, error: null }],
+        "jobs.select": [{ data: { id: "job-j011", name: "13897 Honeysuckle", job_number: "J-011" }, error: null }],
         "supplier_invoices.update": [
           { data: [{ id: CED_INVOICE.id, invoice_number: "8802-1109999", supplier_account_id: "acct-ced", total: "323.71", invoice_date: "2026-09-26" }], error: null },
         ],
@@ -511,7 +511,7 @@ describe("setSupplierInvoiceJob says when the purchase may already be on the job
     state.client = fakeSupabase(
       {
         "profiles.select": [STAFF],
-        "jobs.select": [{ data: { id: "job-j011", name: "13897 Herringbone", job_number: "J-011" }, error: null }],
+        "jobs.select": [{ data: { id: "job-j011", name: "13897 Honeysuckle", job_number: "J-011" }, error: null }],
         "supplier_invoices.update": [
           { data: [{ id: CED_INVOICE.id, invoice_number: "8802-1109999", supplier_account_id: "acct-ced", total: "323.71", invoice_date: "2026-09-26" }], error: null },
         ],
@@ -524,7 +524,7 @@ describe("setSupplierInvoiceJob says when the purchase may already be on the job
     const res = await setSupplierInvoiceJob({ invoiceId: CED_INVOICE.id, jobId: "job-j011" });
     expect(res.ok).toBe(true);
     expect(res.message).toBe(
-      "8802-1109999 is on 13897 Herringbone now, and a bill already carries its number: Consolidated Electrical Dist. #8802-1109999, $400.00, 2026-08-01, on J-011 13897 Herringbone.",
+      "8802-1109999 is on 13897 Honeysuckle now, and a bill already carries its number: Consolidated Electrical Dist. #8802-1109999, $400.00, 2026-08-01, on J-011 13897 Honeysuckle.",
     );
     expect(res.message).not.toMatch(/Tie Them|Record It Anyway|Record It As A Bill/);
   });

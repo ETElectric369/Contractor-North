@@ -130,7 +130,7 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
       if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
       if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return []; // no open draft
       if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return []; // no standard invoices
-      if (table === "quotes") return [{ id: "q-tao", status: "accepted" }];
+      if (table === "quotes") return [{ id: "q-tess", status: "accepted" }];
       if (table === "invoices" && cols === "id") return [{ id: "inv-00006" }]; // the deposit carries the quote_id
       if (table === "invoices" && cols === "id, invoice_number") return [{ id: "inv-00028", invoice_number: "INV-00028" }, { id: "inv-00006", invoice_number: "INV-00006" }];
       if (table === "invoice_items" && cols === "id") return [{ id: "li-labor" }]; // INV-00028 carries labor lines
@@ -166,7 +166,7 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     expect(res.door).toBe("part-of-estimate");
   });
 
-  it("Tao J-002 (T&M): the estimate is a guide - with only the estimate's deposit out, the next bill is still the progress report of the actuals", async () => {
+  it("Tess J-002 (T&M): the estimate is a guide - with only the estimate's deposit out, the next bill is still the progress report of the actuals", async () => {
     const createInvoiceFromQuote = (await import("../billing/actions")).createInvoiceFromQuote as unknown as ReturnType<typeof vi.fn>;
     createInvoiceFromQuote.mockReset();
     state.client = fake((table, cols, single) => {
@@ -174,7 +174,7 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
       if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
       if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
       if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
-      if (table === "quotes") return [{ id: "q-tao", status: "accepted" }];
+      if (table === "quotes") return [{ id: "q-tess", status: "accepted" }];
       // Only the deposit, made from the estimate, and no labor/costs line on any draw yet.
       if (table === "invoices" && cols === "id, invoice_number") return [{ id: "inv-00006", invoice_number: "INV-00006" }];
       throw new Error(`unrouted ${table} [${cols}]`);
@@ -199,7 +199,7 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     state.client = fake((table, cols, single) => {
       if (table === "payment_milestones") return single ? null : [];
       if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
-      if (table === "jobs") return { customer_id: "c-1", name: "Schaffer", description: null };
+      if (table === "jobs") return { customer_id: "c-1", name: "Snowbell", description: null };
       if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
       if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
       if (table === "invoices" && cols === "id, invoice_number") return [];
@@ -268,7 +268,7 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
  */
 describe("the job's New Invoice routes like the server, case by case (W1-24)", () => {
   const money = formatCurrency;
-  const TAO_WORK = { hours: 19.5, billsCount: 0, stockCount: 0, returnsCount: 0, total: 2437.5, laborAmount: 2437.5, billsBilled: 0, stockBilled: 0 };
+  const TESS_WORK = { hours: 19.5, billsCount: 0, stockCount: 0, returnsCount: 0, total: 2437.5, laborAmount: 2437.5, billsBilled: 0, stockBilled: 0 };
   const facts = (f: { billingType: string; estimate?: number; quotes?: any[]; invoices?: any[]; milestones?: number }) =>
     newInvoicePageFacts({ billingType: f.billingType, estimate: f.estimate ?? 0, quotes: f.quotes ?? [], invoices: f.invoices ?? [], milestoneCount: f.milestones ?? 0 });
 
@@ -287,11 +287,11 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(newInvoiceRoute({ ...f, openDraft: { id: "inv-080", number: "INV-080", refreshable: false } }, "part").kind).toBe("draft");
   });
 
-  it("draws that bill actuals (Tao J-002, T&M): the sheet, and Bill The Work So Far is the card's own progress-payment door, the default", async () => {
+  it("draws that bill actuals (Tess J-002, T&M): the sheet, and Bill The Work So Far is the card's own progress-payment door, the default", async () => {
     const f = facts({ billingType: "tm", estimate: 17325, quotes: [{ status: "accepted", total: 17325 }], invoices: [{ status: "paid", invoice_kind: "deposit" }, { status: "paid", invoice_kind: "progress" }] });
     expect(f).toMatchObject({ drawBilled: true, billsActuals: true, wholeEstimate: null, scheduleActive: false });
     expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "sheet" });
-    const workDoor = workSoFarDoor(TAO_WORK, 0, f.drawBilled, money);
+    const workDoor = workSoFarDoor(TESS_WORK, 0, f.drawBilled, money);
     expect(workDoor).toEqual({ kind: "draw", label: "Create Progress Payment for $2,437.50", amount: 2437.5 });
     expect(newInvoiceChoices({ ...f, billingType: "tm", estimate: 17325, workDoor })).toEqual({ choices: ["deposit", "part", "work"], initial: "work" });
     // The server takes the same job to the same door.
@@ -300,7 +300,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
       if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
       if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
       if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
-      if (table === "quotes") return [{ id: "q-tao", status: "accepted" }];
+      if (table === "quotes") return [{ id: "q-tess", status: "accepted" }];
       if (table === "invoices" && cols === "id, invoice_number") return [{ id: "inv-00028", invoice_number: "INV-00028" }];
       throw new Error(`unrouted ${table} [${cols}]`);
     });
@@ -346,7 +346,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(f).toMatchObject({ hasEstimate: false, drawBilled: false, billsActuals: true });
     expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "direct" });
     expect(newInvoiceRoute({ ...f, openDraft: null }, "deposit")).toEqual({ kind: "sheet" });
-    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 0, workDoor: workSoFarDoor(TAO_WORK, 0, false, money) }, "deposit")).toEqual({
+    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 0, workDoor: workSoFarDoor(TESS_WORK, 0, false, money) }, "deposit")).toEqual({
       choices: ["deposit", "work"],
       initial: "deposit",
     });
@@ -446,7 +446,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     state.client = fake((table, cols, single) => {
       if (table === "payment_milestones") return single ? null : [];
       if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
-      if (table === "jobs") return { customer_id: "c-1", name: "Timbercreek", description: null };
+      if (table === "jobs") return { customer_id: "c-1", name: "Thistlewood", description: null };
       if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
       if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [{ id: "inv-061", invoice_number: "INV-061", status: "sent", quote_id: "q-acc" }];
       if (table === "invoices" && cols === "id, invoice_number") return []; // no draws
@@ -473,7 +473,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     // Read, and nothing new: said as that - a different sentence.
     expect(workSoFarNote({ billsActuals: true, unbilledRead: true, workDoor: null })).toBe("Every hour and bill so far is on a bill - nothing new to bill.");
     // The choice is there: nothing to add. A job that doesn't bill its actuals: nothing to say.
-    expect(workSoFarNote({ billsActuals: true, unbilledRead: true, workDoor: workSoFarDoor(TAO_WORK, 0, false, formatCurrency) })).toBeNull();
+    expect(workSoFarNote({ billsActuals: true, unbilledRead: true, workDoor: workSoFarDoor(TESS_WORK, 0, false, formatCurrency) })).toBeNull();
     expect(workSoFarNote({ billsActuals: false, unbilledRead: false, workDoor: null })).toBeNull();
   });
 

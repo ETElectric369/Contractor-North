@@ -12,13 +12,13 @@
  * ADDRESS. There is no job-site line on a quote, an invoice, or a change order. It was never
  * built. So a full site address prints only when the person you bill happens to live at the work.
  *
- * For Tahoe Tavern Properties that fails four times over: J-009 "TTP #11", J-013 "TTP #56",
- * J-017 "TTP #224" and J-035 are four different dwellings at 300 W Lake Blvd, and the unit number
+ * For Alder Ridge Rentals that fails four times over: J-009 "ARR #11", J-013 "ARR #56",
+ * J-017 "ARR #224" and J-035 are four different dwellings at 300 W Garnet Blvd, and the unit number
  * exists ONLY in the job name. Two of them are already paid.
  *
  * ── WHY THERE IS NO ADDRESS PARSER IN THIS FILE ─────────────────────────────────────────────
  *
- * The obvious fix — split "1871 Apache Ct Olympic Valley CA 96146 United States" into parts and
+ * The obvious fix — split "1871 Acacia Ct Olympic Valley CA 96146 United States" into parts and
  * backfill — was killed on two independent grounds, and it is worth writing down so nobody
  * rebuilds it:
  *
@@ -39,7 +39,7 @@ import { formatCityStateZip, unitLine } from "@/lib/utils";
 
 export interface SiteParts {
   address?: string | null;
-  /** The dwelling. Four TTP jobs share 300 W Lake Blvd and only this tells them apart. */
+  /** The dwelling. Four ARR jobs share 300 W Garnet Blvd and only this tells them apart. */
   unit?: string | null;
   city?: string | null;
   state?: string | null;
@@ -79,8 +79,8 @@ export function addressHasCityStateZipTail(s: string | null | undefined): boolea
 /**
  * PICK THE SITE, MOST-SPECIFIC FIRST, ALL-OR-NOTHING PER RECORD.
  *
- * Never a per-field COALESCE. Merging J-018's street with Jason Waldow's city would produce
- * "1871 Apache Ct, Olympic Valley" against the job's own "Tahoe City" — an address that exists on
+ * Never a per-field COALESCE. Merging J-018's street with Jason Wexley's city would produce
+ * "1871 Acacia Ct, Olympic Valley" against the job's own "Tahoe City" — an address that exists on
  * no record and in no town. A candidate wins whole or it doesn't win.
  */
 export function pickSite(candidates: { source: string; parts?: SiteParts | null }[]): ResolvedSite | null {
@@ -101,7 +101,7 @@ export function pickSite(candidates: { source: string; parts?: SiteParts | null 
       state: state || null,
       zip: zip || null,
       source: c.source,
-      // A blob that carries its own tail IS complete — Jason Waldow's row prints fine today and
+      // A blob that carries its own tail IS complete — Jason Wexley's row prints fine today and
       // must not be flagged as a gap just because its parts columns are empty.
       complete: (!!city && !!state && !!zip) || addressHasCityStateZipTail(address),
     };

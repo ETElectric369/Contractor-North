@@ -392,7 +392,7 @@ export type LinkTarget = {
  *
  * ONE control, not three. Three pickers labelled Lead / Customer / Job would make the person
  * classify the thing before they can find it — and at a job the honest answer is usually "it's the
- * Cain place", not "it is an inquiry record". So: type a name or an address, get everything that
+ * Dale place", not "it is an inquiry record". So: type a name or an address, get everything that
  * matches, pick it, done. The KIND is an outcome of the pick, not a question asked first.
  *
  * This is also the fix for the real cause of orphaned inspections: only 2 of 7 doors that create
@@ -1309,7 +1309,7 @@ export async function createJobFromAppointment(
       address: appt.location,
       unit: apptUnit, // the visit's unit is the job's (0187), and its name's " #56"
       // THE PARTS TRAVEL WITH THE LINE. This selected `location` alone and pushed that one string
-      // into jobs.address with city/state/zip null — the exact Waldow/Cohen blob shape, minted
+      // into jobs.address with city/state/zip null — the exact Wexley/Crake blob shape, minted
       // fresh on every job born from an appointment. `location` is already a formatted full line,
       // so carrying the parts alongside it would print the town twice; siteLines suppresses the
       // second line when the first carries its own tail, which is why this is now safe to do.

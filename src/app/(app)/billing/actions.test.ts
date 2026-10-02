@@ -7,7 +7,7 @@ import { join } from "node:path";
  *
  * 1. A receipt flagged `pricing_provisional` (0271 — CED's Sunnyvale counter prints its own retail
  *    price where Erik's contract price belongs) was itemised onto a customer's invoice with no
- *    gate and no word said. It already happened: $467.87 on J-046, Jason Waldow. The fixture below
+ *    gate and no word said. It already happened: $467.87 on J-046, Jason Wexley. The fixture below
  *    is that receipt, line for line out of his database.
  * 2. createProgressReportInvoice swallowed a real import failure and shipped a draw missing the
  *    work, or deleted the draft and blamed "no labor or materials logged" — the one failure 0260
@@ -127,10 +127,10 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
 }
 
 const INV = "9fc9aaaa-0000-4000-8000-000000000001";
-const JOB = "3d1bb8cc-ac74-4a57-9eef-6739d0a1a0c3"; // J-046, Jason Waldow
+const JOB = "3d1bb8cc-ac74-4a57-9eef-6739d0a1a0c3"; // J-046, Jason Wexley
 
 /** bills.id c0535cdb… — the real Sunnyvale ticket, pricing_provisional = true. */
-const WALDOW_BILL = {
+const WEXLEY_BILL = {
   id: "c0535cdb-e485-4679-8e56-fd0918fd728b",
   supplier: "Contractors Electrical Distributors",
   bill_number: null,
@@ -140,15 +140,15 @@ const WALDOW_BILL = {
 };
 
 /** Its bill_line_items, copied out of his database. */
-const WALDOW_LINES = [
-  { id: "90cf614c", bill_id: WALDOW_BILL.id, description: "ITE PN1632L1125C 125A Plug On Neutral Load Center", quantity: "1.00", unit_price: "107.33", amount: "107.33", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
-  { id: "374b0d23", bill_id: WALDOW_BILL.id, description: "3M 33+SUPER3/4X76FT 3/4 x 76 33+ Super Vinyl Tape", quantity: "2.00", unit_price: "8.24", amount: "16.48", category: "Electrical", sort_order: 1, billable: true, billed_amount: null },
-  { id: "24bfd5db", bill_id: WALDOW_BILL.id, description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: "500.00", unit_price: "108.36", amount: "108.36", category: "Electrical", sort_order: 2, billable: true, billed_amount: null },
-  { id: "595b34f6", bill_id: WALDOW_BILL.id, description: "IDEAL 30030 8-Oz Anti Oxidant Comp", quantity: "1.00", unit_price: "20.65", amount: "20.65", category: "Electrical", sort_order: 3, billable: true, billed_amount: null },
-  { id: "eb753e54", bill_id: WALDOW_BILL.id, description: "SQD HOM120 Miniature Circuit", quantity: "3.00", unit_price: "6.17", amount: "18.51", category: "Electrical", sort_order: 4, billable: true, billed_amount: null },
-  { id: "266c063c", bill_id: WALDOW_BILL.id, description: "SQD HOMT1515 Miniature Circuit", quantity: "4.00", unit_price: "15.12", amount: "60.48", category: "Electrical", sort_order: 5, billable: true, billed_amount: null },
-  { id: "1c3216e4", bill_id: WALDOW_BILL.id, description: "SQD HOMT2020 Miniature Circuit", quantity: "4.00", unit_price: "15.12", amount: "60.48", category: "Electrical", sort_order: 6, billable: true, billed_amount: null },
-  { id: "99fb20d5", bill_id: WALDOW_BILL.id, description: "SQD HOMT230250 Miniature Ckt Brkr", quantity: "2.00", unit_price: "37.79", amount: "75.58", category: "Electrical", sort_order: 7, billable: true, billed_amount: null },
+const WEXLEY_LINES = [
+  { id: "90cf614c", bill_id: WEXLEY_BILL.id, description: "ITE PN1632L1125C 125A Plug On Neutral Load Center", quantity: "1.00", unit_price: "107.33", amount: "107.33", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
+  { id: "374b0d23", bill_id: WEXLEY_BILL.id, description: "3M 33+SUPER3/4X76FT 3/4 x 76 33+ Super Vinyl Tape", quantity: "2.00", unit_price: "8.24", amount: "16.48", category: "Electrical", sort_order: 1, billable: true, billed_amount: null },
+  { id: "24bfd5db", bill_id: WEXLEY_BILL.id, description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: "500.00", unit_price: "108.36", amount: "108.36", category: "Electrical", sort_order: 2, billable: true, billed_amount: null },
+  { id: "595b34f6", bill_id: WEXLEY_BILL.id, description: "IDEAL 30030 8-Oz Anti Oxidant Comp", quantity: "1.00", unit_price: "20.65", amount: "20.65", category: "Electrical", sort_order: 3, billable: true, billed_amount: null },
+  { id: "eb753e54", bill_id: WEXLEY_BILL.id, description: "SQD HOM120 Miniature Circuit", quantity: "3.00", unit_price: "6.17", amount: "18.51", category: "Electrical", sort_order: 4, billable: true, billed_amount: null },
+  { id: "266c063c", bill_id: WEXLEY_BILL.id, description: "SQD HOMT1515 Miniature Circuit", quantity: "4.00", unit_price: "15.12", amount: "60.48", category: "Electrical", sort_order: 5, billable: true, billed_amount: null },
+  { id: "1c3216e4", bill_id: WEXLEY_BILL.id, description: "SQD HOMT2020 Miniature Circuit", quantity: "4.00", unit_price: "15.12", amount: "60.48", category: "Electrical", sort_order: 6, billable: true, billed_amount: null },
+  { id: "99fb20d5", bill_id: WEXLEY_BILL.id, description: "SQD HOMT230250 Miniature Ckt Brkr", quantity: "2.00", unit_price: "37.79", amount: "75.58", category: "Electrical", sort_order: 7, billable: true, billed_amount: null },
 ];
 
 /** The reads importCostsIntoInvoice makes that aren't about the bills themselves. */
@@ -210,7 +210,7 @@ beforeEach(() => { calls = []; landedCalls = 0; });
 describe("importCostsIntoInvoice — a counter preview is not his price (0271)", () => {
   it("says the prices are a preview when the receipt it just billed is flagged", async () => {
     state.client = fakeSupabase(
-      costsImportRoute({ bills: [WALDOW_BILL], lines: WALDOW_LINES, landedAfter: [WALDOW_BILL.id] }),
+      costsImportRoute({ bills: [WEXLEY_BILL], lines: WEXLEY_LINES, landedAfter: [WEXLEY_BILL.id] }),
       calls,
     );
 
@@ -227,7 +227,7 @@ describe("importCostsIntoInvoice — a counter preview is not his price (0271)",
 
   it("asks for the column, so a flag the receipt reader set can be read at all", async () => {
     state.client = fakeSupabase(
-      costsImportRoute({ bills: [WALDOW_BILL], lines: WALDOW_LINES, landedAfter: [WALDOW_BILL.id] }),
+      costsImportRoute({ bills: [WEXLEY_BILL], lines: WEXLEY_LINES, landedAfter: [WEXLEY_BILL.id] }),
       calls,
     );
     await importCostsIntoInvoice(INV, 20);
@@ -236,9 +236,9 @@ describe("importCostsIntoInvoice — a counter preview is not his price (0271)",
   });
 
   it("stays quiet on an ordinary receipt — no warning nobody needs", async () => {
-    const settled = { ...WALDOW_BILL, pricing_provisional: false };
+    const settled = { ...WEXLEY_BILL, pricing_provisional: false };
     state.client = fakeSupabase(
-      costsImportRoute({ bills: [settled], lines: WALDOW_LINES, landedAfter: [settled.id] }),
+      costsImportRoute({ bills: [settled], lines: WEXLEY_LINES, landedAfter: [settled.id] }),
       calls,
     );
     const res: any = await importCostsIntoInvoice(INV, 20);
@@ -247,16 +247,16 @@ describe("importCostsIntoInvoice — a counter preview is not his price (0271)",
   });
 
   it("names two receipts in the plural, and only the ones whose lines landed", async () => {
-    const second = { ...WALDOW_BILL, id: "11111111-2222-4333-8444-555555555555", amount: "100.00", pricing_provisional: true };
-    const heldBack = { ...WALDOW_BILL, id: "99999999-8888-4777-8666-555555555555", amount: "50.00", pricing_provisional: true };
+    const second = { ...WEXLEY_BILL, id: "11111111-2222-4333-8444-555555555555", amount: "100.00", pricing_provisional: true };
+    const heldBack = { ...WEXLEY_BILL, id: "99999999-8888-4777-8666-555555555555", amount: "50.00", pricing_provisional: true };
     const lines = [
-      ...WALDOW_LINES,
+      ...WEXLEY_LINES,
       { id: "l2", bill_id: second.id, description: "Wire", quantity: "1.00", unit_price: "100.00", amount: "100.00", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
       { id: "l3", bill_id: heldBack.id, description: "Strut", quantity: "1.00", unit_price: "50.00", amount: "50.00", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
     ];
     state.client = fakeSupabase(
       // heldBack's rows never land (the office edited that line by hand, so the RPC left it alone).
-      costsImportRoute({ bills: [WALDOW_BILL, second, heldBack], lines, landedAfter: [WALDOW_BILL.id, second.id] }),
+      costsImportRoute({ bills: [WEXLEY_BILL, second, heldBack], lines, landedAfter: [WEXLEY_BILL.id, second.id] }),
       calls,
     );
     const res: any = await importCostsIntoInvoice(INV, 0);
@@ -266,8 +266,8 @@ describe("importCostsIntoInvoice — a counter preview is not his price (0271)",
 });
 
 describe("importCostsIntoInvoice — an edited tax row left behind is said out loud (INV-074)", () => {
-  /** Swigard's, $17.15: a Duct Flex at $15.99 and $1.16 of tax. */
-  const SWIG = { id: "5a1f0000-0000-4000-8000-000000000074", supplier: "Swigard's", bill_number: null, amount: "17.15", po_id: null, pricing_provisional: false };
+  /** Brandow's, $17.15: a Duct Flex at $15.99 and $1.16 of tax. */
+  const SWIG = { id: "5a1f0000-0000-4000-8000-000000000074", supplier: "Brandow's", bill_number: null, amount: "17.15", po_id: null, pricing_provisional: false };
   const SWIG_LINES = [
     { id: "flex", bill_id: SWIG.id, description: "Duct Flex", quantity: "1.00", unit_price: "15.99", amount: "15.99", category: "Materials", sort_order: 0, billable: true, billed_amount: null },
     { id: "tax", bill_id: SWIG.id, description: "Sales Tax", quantity: "1.00", unit_price: "1.16", amount: "1.16", category: "Sales Tax", sort_order: 1, billable: true, billed_amount: null },
@@ -289,7 +289,7 @@ describe("importCostsIntoInvoice — an edited tax row left behind is said out l
     );
     const res: any = await importCostsIntoInvoice(INV, 30);
     expect(res.ok).toBe(true);
-    expect(res.stats.warnings).toEqual(["Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51"]);
+    expect(res.stats.warnings).toEqual(["Brandow's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51"]);
     // Nothing about what is charged moved: the offer is billItemisation's, edited row or not.
     const rpc = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items");
     expect((rpc?.payload?.p_rows ?? []).map((r: any) => [r.import_key, r.unit_price])).toEqual([
@@ -562,7 +562,7 @@ const NEW_DRAW = "0dda0000-0000-4000-8000-00000000000d";
  *  labor import the way 0260's guard_invoice_item_claim does — a genuine concurrent claim. */
 function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any[]; lump?: number }) {
   return (q: Q): Reply => {
-    if (q.table === "jobs" && q.cols.includes("customer_id")) return { data: { customer_id: "cust-1", name: "Jason Waldow" } };
+    if (q.table === "jobs" && q.cols.includes("customer_id")) return { data: { customer_id: "cust-1", name: "Jason Wexley" } };
     if (q.table === "jobs") return { data: null }; // customerLaborRate / customerMaterialMarkup
     if (q.table === "organizations") return { data: { settings: { default_labor_rate: 95, material_markup_percent: 20, invoice_due_days: 30 } } };
     if (q.table === "payment_milestones") return { data: null };
@@ -724,7 +724,7 @@ describe("the scope block, the title and the due date are revisions (0269)", () 
 
   it("stamps revised_at when the title changes on a delivered invoice", async () => {
     state.client = fakeSupabase(headerRoute({ sentAt: "2026-09-01T18:00:00Z", rowsWritten: 1 }), calls);
-    const res = await setInvoiceTitle(INV, "Service change, 13631 Northwoods");
+    const res = await setInvoiceTitle(INV, "Service change, 13631 Nightshade");
     expect(res.ok).toBe(true);
     expect(stampedOn(calls)).toBe(1);
   });
@@ -788,7 +788,7 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
         ]
       : [{ import_key: null, source_ids: null }];
   return (q: Q): Reply => {
-    if (q.table === "jobs" && q.cols.includes("customer_id")) return { data: { customer_id: "cust-1", name: "13897 Herringbone" } };
+    if (q.table === "jobs" && q.cols.includes("customer_id")) return { data: { customer_id: "cust-1", name: "13897 Honeysuckle" } };
     if (q.table === "jobs") return { data: { customers: { pricing_levels: { markup_pct: 15, labor_rate: null } } } };
     if (q.table === "organizations") return { data: { settings: { default_labor_rate: 95, material_markup_percent: 25, invoice_due_days: 30 } } };
     if (q.table === "payment_milestones") return { data: opts.schedule ? (q.single ? { id: "m-1" } : [{ id: "m-1" }]) : q.single ? null : [] };
@@ -1126,9 +1126,9 @@ describe("importCostsIntoInvoice — pieces taken from stock are billed once, on
     { id: "item-122", name: "12/2 NM-B", unit: "ft" },
     { id: "item-nut", name: "Twister wire nut", unit: "ea" },
   ];
-  /** The Waldow receipt plus three takes and a short; `heldElsewhere` = move ids another live invoice claims. */
+  /** The Wexley receipt plus three takes and a short; `heldElsewhere` = move ids another live invoice claims. */
   const route = (landedAfter: string[], heldElsewhere: string[] = []) => {
-    const base = costsImportRoute({ bills: [{ ...WALDOW_BILL, pricing_provisional: false }], lines: WALDOW_LINES, landedAfter });
+    const base = costsImportRoute({ bills: [{ ...WEXLEY_BILL, pricing_provisional: false }], lines: WEXLEY_LINES, landedAfter });
     return (q: Q): Reply => {
       if (q.table === "stock_moves" && q.verb === "select") return { data: moves };
       if (q.table === "inventory_items" && q.verb === "select") return { data: items };
@@ -1144,7 +1144,7 @@ describe("importCostsIntoInvoice — pieces taken from stock are billed once, on
   };
 
   it("adds one line per take after the bill rows, at the same markup, claimed by the moves, never the short", async () => {
-    state.client = fakeSupabase(route([WALDOW_BILL.id, M1, M2, M3]), calls);
+    state.client = fakeSupabase(route([WEXLEY_BILL.id, M1, M2, M3]), calls);
     const res: any = await importCostsIntoInvoice(INV, 15);
     expect(res.ok).toBe(true);
     const rows = (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
@@ -1173,7 +1173,7 @@ describe("importCostsIntoInvoice — pieces taken from stock are billed once, on
   });
 
   it("a take another invoice already bills stays there, whole, and is named", async () => {
-    state.client = fakeSupabase(route([WALDOW_BILL.id, M1, M3], [M2]), calls);
+    state.client = fakeSupabase(route([WEXLEY_BILL.id, M1, M3], [M2]), calls);
     const res: any = await importCostsIntoInvoice(INV, 15);
     expect(res.ok).toBe(true);
     const rows = (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
@@ -1183,14 +1183,14 @@ describe("importCostsIntoInvoice — pieces taken from stock are billed once, on
   });
 
   it("a take the office deleted from the invoice stays off, and is said with the door out", async () => {
-    state.client = fakeSupabase(route([WALDOW_BILL.id, M1, M2]), calls);
+    state.client = fakeSupabase(route([WEXLEY_BILL.id, M1, M2]), calls);
     const res: any = await importCostsIntoInvoice(INV, 15);
     expect(res.stats.summary).toContain("2 takes from stock pulled in");
     expect(res.stats.summary).toContain("1 take from stock not added — on a line you edited or deleted (Start It Over rebuilds it)");
   });
 
   it("a failed read-back speaks in the RPC's lines once: the take lines are in that count, never added again", async () => {
-    const inner = route([WALDOW_BILL.id, M1, M2, M3]);
+    const inner = route([WEXLEY_BILL.id, M1, M2, M3]);
     state.client = fakeSupabase((q) => {
       if (q.table === "invoice_items" && q.verb === "select" && q.cols.includes("import_key, edited")) return { error: { message: "read-back lost" } };
       if (q.table === "rpc:upsert_imported_invoice_items") return { data: { inserted: 4, updated: 0, kept_edited: 0, removed: 0 } };
@@ -1455,7 +1455,7 @@ describe("recordPayment — the payment push is paired with its bell line (W1-10
   const PAID_INV = "5b3c0000-0000-4000-8000-000000000074";
   const route = (q: Q): Reply => {
     if (q.table === "invoices" && q.verb === "select" && q.cols === "id, org_id, invoice_number, total, amount_paid, customers(name)") {
-      return { data: { id: PAID_INV, org_id: "org-1", invoice_number: "INV-074", total: 624.49, amount_paid: 0, customers: { name: "Jason Waldow" } } };
+      return { data: { id: PAID_INV, org_id: "org-1", invoice_number: "INV-074", total: 624.49, amount_paid: 0, customers: { name: "Jason Wexley" } } };
     }
     if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
     if (q.table === "payments" && q.verb === "insert") return { data: null };
@@ -1466,7 +1466,7 @@ describe("recordPayment — the payment push is paired with its bell line (W1-10
       return { data: { id: PAID_INV, job_id: null, invoice_kind: "standard", status: "paid" } };
     }
     if (q.table === "invoices" && q.verb === "select" && q.cols === "invoice_number, total, amount_paid, customers(name)") {
-      return { data: { invoice_number: "INV-074", total: 624.49, amount_paid: 624.49, customers: { name: "Jason Waldow" } } };
+      return { data: { invoice_number: "INV-074", total: 624.49, amount_paid: 624.49, customers: { name: "Jason Wexley" } } };
     }
     // recalcInvoice's reads and its one write.
     if (q.table === "invoice_items" && q.verb === "select" && q.cols === "line_total") return { data: [{ line_total: 624.49 }] };
@@ -1484,7 +1484,7 @@ describe("recordPayment — the payment push is paired with its bell line (W1-10
     expect(res).toEqual({ ok: true });
     // A person typed it, so it reads "Payment recorded" and that person is not told about it.
     expect(spies.notified).toEqual([
-      ["org-1", ["office-2", "office-3"], "invoice_paid", { title: "Payment recorded", body: "$624.49 on INV-074 — Jason Waldow", url: `/billing/${PAID_INV}` }],
+      ["org-1", ["office-2", "office-3"], "invoice_paid", { title: "Payment recorded", body: "$624.49 on INV-074 — Jason Wexley", url: `/billing/${PAID_INV}` }],
     ]);
   });
 

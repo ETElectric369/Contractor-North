@@ -83,8 +83,8 @@ describe("importJobs: the sheet's name as typed, else the street, else the card 
   });
 
   it("the sheet's own name stays exactly as typed, a tag and real words included", async () => {
-    await importJobs([row("Acme Property Management", "Service call — Panel swap"), row("Rita Moss", "RV Inspection"), row("Rita Moss", "TTP #56")]);
-    expect(db.jobs.map((j) => j.name)).toEqual(["Service call — Panel swap", "RV Inspection", "TTP #56"]);
+    await importJobs([row("Acme Property Management", "Service call — Panel swap"), row("Rita Moss", "RV Inspection"), row("Rita Moss", "ARR #56")]);
+    expect(db.jobs.map((j) => j.name)).toEqual(["Service call — Panel swap", "RV Inspection", "ARR #56"]);
   });
 });
 
@@ -109,7 +109,7 @@ describe("parseCsv: the job's name column is never the customer's", () => {
   });
 
   it("the documented 'Customer, Job Name' and a sheet with only 'Name' read as before", () => {
-    expect(parseCsv("Customer,Job Name,Address\nRita Moss,TTP #56,12 Elm St\n")).toMatchObject([{ customer: "Rita Moss", job_name: "TTP #56" }]);
+    expect(parseCsv("Customer,Job Name,Address\nRita Moss,ARR #56,12 Elm St\n")).toMatchObject([{ customer: "Rita Moss", job_name: "ARR #56" }]);
     expect(parseCsv("Name,Address\nBack porch,12 Elm St\n")).toMatchObject([{ customer: "", job_name: "Back porch" }]);
   });
 });

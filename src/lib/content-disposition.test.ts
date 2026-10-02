@@ -2,12 +2,12 @@ import { describe, it, expect } from "vitest";
 import { asciiFilename, contentDisposition } from "./content-disposition";
 
 describe("content-disposition — a header can only carry bytes", () => {
-  it("THE BADGER LANE FAILURE: an em-dash filename no longer throws, and still reads right", () => {
-    const name = "Invoice INV-060 — 10410 Badger Lane.pdf";
+  it("THE BAYBERRY LANE FAILURE: an em-dash filename no longer throws, and still reads right", () => {
+    const name = "Invoice INV-060 — 10410 Bayberry Lane.pdf";
     const value = contentDisposition(name);
     // The whole point: every code point must fit in a byte or the response dies on send.
     for (const ch of value) expect(ch.codePointAt(0)!).toBeLessThan(256);
-    expect(value).toContain('filename="Invoice INV-060 - 10410 Badger Lane.pdf"');
+    expect(value).toContain('filename="Invoice INV-060 - 10410 Bayberry Lane.pdf"');
     // …and a modern browser still gets the real name back.
     expect(decodeURIComponent(value.split("filename*=UTF-8''")[1])).toBe(name);
   });

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeDb } from "@/lib/bank-transfer-fake.test-util";
 
 /**
- * TAP TO PAY TELLS THE TRUTH (0e2cb937 — Rich Seiler, INV-083, $420, 2026-09-30), the server half.
+ * TAP TO PAY TELLS THE TRUTH (0e2cb937 — Rich Siskin, INV-083, $420, 2026-09-30), the server half.
  *
  * tapPaymentOutcome reads the PaymentIntent off the tenant's connected account and answers with
  * Stripe's word, not the phone's. The metadata is a claim (another company's intent, another
@@ -48,7 +48,7 @@ const ACCT = "acct_et";
 const INV = "inv-83";
 const tables = () => ({
   organizations: [{ id: ORG, stripe_account_id: ACCT }],
-  invoices: [{ id: INV, org_id: ORG, status: "sent", invoice_number: "INV-083", total: 420, amount_paid: 0, customers: { name: "Rich Seiler" } }],
+  invoices: [{ id: INV, org_id: ORG, status: "sent", invoice_number: "INV-083", total: 420, amount_paid: 0, customers: { name: "Rich Siskin" } }],
   payments: [] as any[],
 });
 const intent = (over: Record<string, unknown> = {}) => ({

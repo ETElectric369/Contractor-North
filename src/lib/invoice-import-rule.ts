@@ -21,8 +21,8 @@ export function shouldImportActuals(
 }
 
 /**
- * ON A TIME & MATERIAL JOB THE ESTIMATE IS A GUIDE, NEVER THE CONTRACT (Erik, 2026-09-26, Tao
- * Zhu J-002: "i dont see a running total anywhere on tao's job page"). Tao's job is T&M with an
+ * ON A TIME & MATERIAL JOB THE ESTIMATE IS A GUIDE, NEVER THE CONTRACT (Erik, 2026-09-26, Tess
+ * Zane J-002: "i dont see a running total anywhere on tess's job page"). Tess's job is T&M with an
  * accepted $17,325 estimate, a deposit and progress draws; his bills are the hours and receipts,
  * and the estimate is only what he was told to expect. A fixed-price job's live estimate IS the
  * contract (a declined or expired one is not). Every door that asks "is the quote the bill?" asks
@@ -60,7 +60,7 @@ export function isLiveQuote(status: string | null | undefined): boolean {
 /**
  * DOES THE NEXT NEW INVOICE PULL THE JOB'S HOURS AND RECEIPTS? createInvoiceForJob's own rule: no
  * payment schedule, and no estimate that is the contract. Wider than jobBillsItsActuals: a
- * fixed-price job with no live estimate (J-010 Purple Sage, INV-00023) is billed from its actuals
+ * fixed-price job with no live estimate (J-010 Pinyon Sage, INV-00023) is billed from its actuals
  * too, so a charge made there by hand has to be recordable, or New Invoice bills it again.
  */
 export function nextInvoiceImportsActuals(

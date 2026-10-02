@@ -10,7 +10,7 @@ import type { SupplierActionResult } from "./supplier-balance";
 /**
  * WAITING ON A CREDIT (Erik, 2026-09-26; 0346).
  *
- * CED billed 8802-1107139 ($59.17, 13683 HILLSIDE) for the replacement of a faulty switch, and a
+ * CED billed 8802-1107139 ($59.17, 13683 HAZELNUT) for the replacement of a faulty switch, and a
  * CED credit memo for the same amount will take it back off. Until the credit arrives there is no
  * right answer on the card (not a job, not the shelf, not a business cost), so a person says "it's
  * waiting on a credit" and the card steps off My Day and Needs You. It is listed, folded, under its

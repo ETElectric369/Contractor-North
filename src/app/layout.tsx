@@ -4,6 +4,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
 import { BackLinkTracker } from "@/components/back-link";
+import { TurnsSideways } from "@/components/turns-sideways";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
@@ -68,6 +69,11 @@ export default function RootLayout({
         {/* Watches client-side route changes so <BackLink> knows real in-app
             history exists (root layout = never unmounts, covers /print too). */}
         <BackLinkTracker />
+        {/* WHICH WAY THE PHONE MAY BE HELD, on every route. Here for the same two reasons as the
+            tracker above — it never unmounts, and /print/* (where the documents are) is outside the
+            app shell. Portrait unless the route is declared in lib/screens-that-turn.ts. Draws
+            nothing; a no-op anywhere there is nobody to ask. */}
+        <TurnsSideways />
         {/* Core Web Vitals (LCP/CLS/INP) — Pro Speed Insights. Ranks the public marketing
             sites for local SEO and surfaces slow routes. */}
         <SpeedInsights />

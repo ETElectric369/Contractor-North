@@ -486,14 +486,14 @@ export function QuoteBuilder({
     //
     // captureId IS FIRST, AND ITS ABSENCE WAS THE BUG THE COMMENT ABOVE PREDICTED.
     //
-    // Erik: "im creating an estimate for [Moraine Rd] now and its pulling info from a sarah cain
+    // Erik: "im creating an estimate for [Mayfern Rd] now and its pulling info from a sarah dale
     // inspection but i cant see anything i wrote for this job."
     //
     // An estimate started from a WALK-THROUGH is exactly the case that has none of the other three.
-    // Both of his live inspections — 13125 Moraine Rd and Sarah Cain — carry customer_id, job_id
+    // Both of his live inspections — 13125 Mayfern Rd and Sarah Dale — carry customer_id, job_id
     // and inquiry_id all null, because an inspection can happen before any of those records exist.
-    // So both collapsed to "quote-builder:new", the shared slot, and Sarah Cain's saved draft
-    // restored straight over the Moraine Rd prefill: her scope, her description, her line items.
+    // So both collapsed to "quote-builder:new", the shared slot, and Sarah Dale's saved draft
+    // restored straight over the Mayfern Rd prefill: her scope, her description, her line items.
     // Not lost — overwritten on screen by somebody else's job.
     //
     // The appointment is the MOST specific identity here (a job can hold several walk-throughs), so

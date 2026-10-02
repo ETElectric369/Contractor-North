@@ -110,7 +110,7 @@ d("the shell's new reads: Bug Watch's open count and the link offer's candidates
         (
           await one(
             `insert into public.appointments (org_id, title, type, starts_at, location, status, customer_id, created_by, created_at)
-             values ($1, $2, 'inspection', now() + interval '1 day', '3245 W. Lake Blvd', $3, $4, $5, now() - make_interval(hours => $6))
+             values ($1, $2, 'inspection', now() + interval '1 day', '3245 W. Garnet Blvd', $3, $4, $5, now() - make_interval(hours => $6))
              returning id`,
             [over.org ?? a.orgId, title, over.status ?? "scheduled", over.customer ?? null, over.by ?? owner, over.ageHours ?? 0],
           )

@@ -102,7 +102,7 @@ describe('"still open" counts only what applies', () => {
     // `undefined`, so every checkbox silently counted as answered the instant the sheet was
     // touched — and left the still-open list having never been asked.
     //
-    // On 13125 Moraine Rd — a storage room being converted to living space — that recorded
+    // On 13125 Mayfern Rd — a storage room being converted to living space — that recorded
     // `permit` as unchecked, i.e. NO PERMIT, on a job pulling one for occupancy.
     const afterOneTap = clearHiddenAnswers(SHEET, { work_type: "Troubleshoot" });
     expect(afterOneTap.permit).toBeNull(); // this is what the app actually holds

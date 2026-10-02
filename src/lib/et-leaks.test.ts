@@ -15,7 +15,7 @@ const src = (p: string) =>
   readFileSync(join(process.cwd(), p), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
-const ET_WORDS = /Whitney|Arnoso|Truckee|Tahoe|\bErik\b|\bBrian\b|Consolidated|Integrity|TECL|1156091/;
+const ET_WORDS = /Larkspur|Avocet|Truckee|Tahoe|\bErik\b|\bBrian\b|Consolidated|Integrity|TECL|1156091/;
 
 describe("Document Studio's sample paper names nobody real", () => {
   it("has no real crew, customer, supplier or town", () => {
@@ -50,7 +50,7 @@ describe("no placeholder shows a real account, license, branch or town", () => {
       });
     const hits = [...walk(join(process.cwd(), "src/app")), ...walk(join(process.cwd(), "src/components"))].flatMap((f) =>
       (readFileSync(f, "utf8").match(/placeholder=(\{[^}]*\}|"[^"]*")/g) ?? [])
-        .filter((p) => /TR-34426|8802|Truckee|Sunnyvale|Tahoe|Washoe|NV Energy|1156091|\bCED\b/.test(p))
+        .filter((p) => /AC-10427|8802|Truckee|Sunnyvale|Tahoe|Washoe|NV Energy|1156091|\bCED\b/.test(p))
         .map((p) => `${f.split("/src/")[1]}: ${p}`),
     );
     expect(hits).toEqual([]);
@@ -102,7 +102,7 @@ describe("sign-up, sign-in and Settings carry North's mark and plain labels", ()
 
   it("the Playbook starters say what they are, not whose they are", async () => {
     const { PLAYBOOK_STARTERS } = await import("@/lib/playbook/starters");
-    for (const st of PLAYBOOK_STARTERS) expect(st.blurb, st.key).not.toMatch(/Whitney|Truckee|Tahoe|\bErik|\bChris|\bhis\b/);
+    for (const st of PLAYBOOK_STARTERS) expect(st.blurb, st.key).not.toMatch(/Larkspur|Truckee|Tahoe|\bErik|\bChris|\bhis\b/);
   });
 });
 

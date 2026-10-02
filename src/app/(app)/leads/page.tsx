@@ -71,7 +71,7 @@ export default async function InquiriesPage({
   /**
    * WHAT EACH LEAD'S VISITS SAY, for its one next-step chip (W2-07, lib/leads/next-step).
    *
-   * Erik: "the sarah cain lead was already converted to an inspection but still shows up as a
+   * Erik: "the sarah dale lead was already converted to an inspection but still shows up as a
    * new lead." Staying OPEN is correct and deliberate — leads/actions.ts documents inspection as
    * exempt from converting, so an inspected lead can still go on to become an estimate. What was
    * wrong is that her row looked IDENTICAL to a lead nobody had touched. So: how many visits are

@@ -37,7 +37,7 @@ import { NO_JOB_MATCH, SplitShiftSheet, jobSearchNote } from "./split-shift-shee
 const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const TZ = "America/Los_Angeles";
 
-/** One of Brian's shifts as the week list gets it: 7:00 AM to 3:30 PM Pacific, on 85 Whitney. */
+/** One of Brian's shifts as the week list gets it: 7:00 AM to 3:30 PM Pacific, on 41 Larkspur. */
 const row = (over: Partial<StackEntry> = {}): StackEntry => ({
   id: "e1",
   personId: "brian-1",
@@ -50,12 +50,12 @@ const row = (over: Partial<StackEntry> = {}): StackEntry => ({
   hours: 8.5,
   open: false,
   miles: 0,
-  label: "Brian · 85 Whitney",
+  label: "Brian · 41 Larkspur",
   sub: "7:00 AM–3:30 PM",
   color: "",
   dot: "bg-sky-500",
   href: "/timecards?week=0&entry=e1",
-  job: { href: "/jobs/j28", label: "85 Whitney" },
+  job: { href: "/jobs/j28", label: "41 Larkspur" },
   jobCode: null,
   source: null,
   lunchMin: 0,
@@ -77,7 +77,7 @@ const entry = (over: Record<string, unknown> = {}) => ({
   miles: 0,
   status: "closed",
   profiles: { full_name: "Brian Taylor" },
-  job: { job_number: "J-028", name: "85 Whitney" },
+  job: { job_number: "J-028", name: "41 Larkspur" },
   ...over,
 });
 const members = [
@@ -294,7 +294,7 @@ describe("no sentence sends anyone to a door that left", () => {
 
 describe("Split This Shift offers every job in flight, not the 50 newest (cc484d6e)", () => {
   /** 60 jobs, newest first as the old read ordered them; the 60th is an older job still running. */
-  const sixty = Array.from({ length: 60 }, (_, i) => ({ id: `j${i + 1}`, job_number: `J-${String(i + 1).padStart(3, "0")}`, name: i === 59 ? "700 North Lake Boulevard" : `Job ${i + 1}` }));
+  const sixty = Array.from({ length: 60 }, (_, i) => ({ id: `j${i + 1}`, job_number: `J-${String(i + 1).padStart(3, "0")}`, name: i === 59 ? "700 North Juniper Boulevard" : `Job ${i + 1}` }));
   const sheet = (jobs: typeof sixty) =>
     renderToStaticMarkup(
       createElement(SplitShiftSheet, { entry: entry() as any, jobs, jobCodes: [], tz: TZ, open: true, onClose: () => undefined, onSplit: () => undefined, knownClaim: null }),
@@ -302,7 +302,7 @@ describe("Split This Shift offers every job in flight, not the 50 newest (cc484d
 
   it("the Second Part's picker lists an active job older than the 50 newest, under 'Jobs', never 'Recent Jobs'", () => {
     const html = sheet(sixty);
-    expect(html).toContain('<option value="job:j60">700 North Lake Boulevard</option>');
+    expect(html).toContain('<option value="job:j60">700 North Juniper Boulevard</option>');
     expect(html).toContain('<optgroup label="Jobs">');
     expect(html).not.toContain("Recent Jobs");
     expect((html.match(/<option value="job:/g) ?? []).length).toBe(60);

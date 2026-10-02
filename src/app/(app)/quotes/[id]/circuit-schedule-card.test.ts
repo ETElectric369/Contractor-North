@@ -47,11 +47,11 @@ describe("the estimate's Circuit Schedule card", () => {
     const none = renderToStaticMarkup(createElement(CircuitScheduleCard, { quoteId: "q1", initial }));
     expect(none).not.toContain("This Is The Proposal");
     const html = renderToStaticMarkup(
-      createElement(CircuitScheduleCard, { quoteId: "q1", initial, panelJob: { id: "j11", label: "J-011 13897 Herringbone" } }),
+      createElement(CircuitScheduleCard, { quoteId: "q1", initial, panelJob: { id: "j11", label: "J-011 13897 Honeysuckle" } }),
     );
     expect(html).toContain("This Is The Proposal. The Job Keeps Its Own List On The Panel Tab.");
     const link = /<a[^>]*href="\/jobs\/j11\?tab=panel"[^>]*>([\s\S]*?)<\/a>/.exec(html);
     expect(link?.[0]).toContain("min-h-[44px]");
-    expect(link?.[1].replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'")).toBe("Open J-011 13897 Herringbone's Panel ");
+    expect(link?.[1].replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'")).toBe("Open J-011 13897 Honeysuckle's Panel ");
   });
 });

@@ -104,7 +104,7 @@ export type BillForItemisation = {
  * $0.00 IS AN ANSWER, NOT A BLANK (review, 2026-09-19). This used to read an explicit zero the
  * same as a missing one and fall through to unit × qty, and a supply house prints exactly that
  * shape: a BACK-ORDERED line carries the price of the part beside an extension of $0.00, because
- * nothing shipped. On his 85 Whitney receipt that is a $38.98 luminaire; on the next CED invoice
+ * nothing shipped. On his 41 Larkspur receipt that is a $38.98 luminaire; on the next CED invoice
  * with a back-ordered plate it is "50.00" per HUNDRED × 5, and this function returned $250.00 of
  * cost for merchandise that never left the counter. Itemised, that put a $312.50 row on a
  * customer's invoice and drove the supplies-and-tax row NEGATIVE to keep the total honest; switched
@@ -245,7 +245,7 @@ export function excludedReceiptCost(allLines: BillLine[]): number {
  * (the rule this file has got wrong once per layer). On every bill, the job's part plus its rolls
  * equals the whole receipt to the cent.
  *
- * Herringbone's 8/19 CED ticket: the 12/2 coil is $165.29 and the ticket's tax is $16.47. With the
+ * Honeysuckle's 8/19 CED ticket: the 12/2 coil is $165.29 and the ticket's tax is $16.47. With the
  * coil switched to "0 used", this line's share is $165.29 plus its proportional share of the tax.
  *
  * THE CENT THAT ROUNDING WOULD LOSE. excludedReceiptCost rounds the shared tax ONCE per bill. Rounding
@@ -330,7 +330,7 @@ function excludedShareCents(allLines: BillLine[]): number[] {
  * 0268 and 0272 made a receipt's TOTAL stop being the answer to "what will this bill". The
  * importer has known that since cn-v964; the Unbilled card and the work-to-date panel did not, and
  * they both say in their own headers that their figure is the figure a draft built from them will
- * carry. On Erik's OSH run for Jason Waldow that promise was off by his own ice cream bar with 25%
+ * carry. On Erik's OSH run for Jason Wexley that promise was off by his own ice cream bar with 25%
  * on top: the card said $20.35 of unbilled material, the button that bills it wrote $8.13, and the
  * $12.22 in between was presented to him as money a customer owed.
  *
@@ -469,7 +469,7 @@ export function billItemisation(
    * total was right and the page was unreadable, and the first question it invites is one Erik
    * cannot answer from the screen.
    *
-   * It happens when a scan reads two documents as one. His Tao Zhu receipt carries twenty-one
+   * It happens when a scan reads two documents as one. His Tess Zane receipt carries twenty-one
    * lines, $1,676.16 of them, against the $1,513.71 of a single CED invoice - the other $162.45 is
    * invoice 8802-1101363, in the same PDF, read into the same bill. The lines are not wrong about
    * what was bought; they are wrong about which paper they belong to, and no arithmetic here can
@@ -549,7 +549,7 @@ export function editedRemainderDrift(
   return out;
 }
 
-/** "Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51" - or, on a
+/** "Brandow's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51" - or, on a
  *  supplier return, "CED: your edited Returned: tax row stayed at -$4.88; ...". */
 export function editedRemainderSentence(d: EditedRemainderDrift, markupPct: unknown): string {
   const pct = +(Number(markupPct) || 0).toFixed(2);

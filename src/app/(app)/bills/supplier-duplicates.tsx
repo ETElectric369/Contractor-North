@@ -29,7 +29,7 @@ export interface SupplierDuplicateActions {
  * THE SAME TICKET, FILED TO TWO JOBS (Erik, 2026-09-18).
  *
  * An identical CED ticket - $95.27, eight lines, line for line to the penny - is filed to BOTH
- * "13631 Northwoods" (07-29, from the CED portal PDF) and "85 Whitney Place" (08-28, from a file
+ * "13631 Nightshade" (07-29, from the CED portal PDF) and "41 Larkspur Place" (08-28, from a file
  * he saved as "85 Whit.pdf"). It is not a near match and not a guess: it is the same ticket twice,
  * which means one of those two jobs is carrying $95.27 of cost that is not its own, and its profit
  * is wrong by exactly that much. That is the quiet kind of wrong - both jobs look fine on their own.

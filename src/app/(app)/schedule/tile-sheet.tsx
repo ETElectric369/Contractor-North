@@ -30,7 +30,7 @@ import { GhostSheetBody, ghostTitle, type GhostTarget } from "./ghost-sheet";
 /**
  * TAP A BLOCK ON THE SCHEDULE: ONE SMALL SHEET with its day, its start and its length, and who's on it.
  *
- * Erik, 2026-09-28, after Seiler · 3-way switches landed 10 AM to 5 PM: "i had no way to adjust the
+ * Erik, 2026-09-28, after Siskin · 3-way switches landed 10 AM to 5 PM: "i had no way to adjust the
  * time so i clicked on it and i could have cleared the day and reset it ... on the schedule itself
  * there should be a time adjustment inside the job itself with the crew picker". This replaces the
  * clear-and-reset: the day (a deliberate Move), the time (the same controls as the job page:

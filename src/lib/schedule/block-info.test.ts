@@ -9,25 +9,25 @@ import { blockRows, crewChips, hmShort, initialsOf, nameSays, placeLine, spanSho
  */
 describe("the place line", () => {
   it("a job named for the work: its street number and name, never the city or the zip", () => {
-    expect(placeLine({ name: "Seiler · 3-way switches", street: "123 Main St", customer: "Rich Seiler" })).toEqual({ text: "123 Main St", kind: "street" });
-    expect(placeLine({ name: "Seiler · 3-way switches", street: "123 Main St, Truckee, CA 96161", customer: "Rich Seiler" })).toEqual({ text: "123 Main St", kind: "street" });
+    expect(placeLine({ name: "Siskin · 3-way switches", street: "123 Main St", customer: "Rich Siskin" })).toEqual({ text: "123 Main St", kind: "street" });
+    expect(placeLine({ name: "Siskin · 3-way switches", street: "123 Main St, Truckee, CA 96161", customer: "Rich Siskin" })).toEqual({ text: "123 Main St", kind: "street" });
   });
 
   it("a job named for its street (the new rule): who instead of the street twice", () => {
-    expect(placeLine({ name: "498 Mil Drae Lane", street: "498 Mil Drae Lane", customer: "Jackie Burks" })).toEqual({ text: "Jackie Burks", kind: "customer" });
+    expect(placeLine({ name: "498 May Dell Lane", street: "498 May Dell Lane", customer: "Marla Finch" })).toEqual({ text: "Marla Finch", kind: "customer" });
     // "Ln." and "Lane" are one street; a unit on the name is still the street.
-    expect(placeLine({ name: "498 Mil Drae Ln.", street: "498 Mil Drae Lane", customer: "Jackie Burks" })?.kind).toBe("customer");
-    expect(placeLine({ name: "300 West Lake Boulevard #56", street: "300 W Lake Blvd", customer: "TTP" })).toEqual({ text: "TTP", kind: "customer" });
+    expect(placeLine({ name: "498 May Dell Ln.", street: "498 May Dell Lane", customer: "Marla Finch" })?.kind).toBe("customer");
+    expect(placeLine({ name: "300 West Garnet Boulevard #56", street: "300 W Garnet Blvd", customer: "ARR" })).toEqual({ text: "ARR", kind: "customer" });
   });
 
   it("no street: who, unless the name already says who; nothing to add is nothing", () => {
-    expect(placeLine({ name: "Seiler · 3-way switches", street: null, customer: "Rich Seiler" })).toEqual({ text: "Rich Seiler", kind: "customer" });
-    expect(placeLine({ name: "Jackie Burks · Panel Upgrade", street: "", customer: "Jackie Burks" })).toBeNull();
+    expect(placeLine({ name: "Siskin · 3-way switches", street: null, customer: "Rich Siskin" })).toEqual({ text: "Rich Siskin", kind: "customer" });
+    expect(placeLine({ name: "Marla Finch · Panel Upgrade", street: "", customer: "Marla Finch" })).toBeNull();
     expect(placeLine({ name: "New Job · Sep 28", street: null, customer: null })).toBeNull();
   });
 
   it("a visit with no place of its own is at its job's address, on every surface", () => {
-    const inspection = { title: "Inspection", location: null, jobs: { address: "12 Elm St, Kings Beach, CA 96143" }, customers: { name: "Andrew Cohen" } };
+    const inspection = { title: "Inspection", location: null, jobs: { address: "12 Elm St, Kings Beach, CA 96143" }, customers: { name: "Andrew Crake" } };
     expect(visitPlace(inspection)).toBe("12 Elm St, Kings Beach, CA 96143");
     expect(placeLine({ name: inspection.title, street: streetOf(visitPlace(inspection)), customer: inspection.customers.name })).toEqual({ text: "12 Elm St", kind: "street" });
     expect(townOf(visitPlace(inspection))).toBe("Kings Beach");
@@ -54,7 +54,7 @@ describe("the place line", () => {
 
   it("says: case, punctuation and street words aside", () => {
     expect(nameSays("12 ELM STREET remodel", "12 Elm St.")).toBe(true);
-    expect(nameSays("Seiler", "")).toBe(false);
+    expect(nameSays("Siskin", "")).toBe(false);
   });
 });
 

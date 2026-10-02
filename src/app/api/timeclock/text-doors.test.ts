@@ -195,7 +195,7 @@ describe("the 12-hour question, as a text too", () => {
     clock_in: "2001-01-02T07:00:00.000Z",
     long_shift_warned_at: "2001-01-02T17:00:00.000Z",
     long_shift_nudged_at: null,
-    job: { job_number: "J-011", name: "Herringbone" },
+    job: { job_number: "J-011", name: "Honeysuckle" },
     profiles: { full_name: "Brian Taylor", role: "tech", active: true, phone },
   });
   const routes = (phone: string | null, org: typeof ORG = ORG) => (q: Q): Reply => {
@@ -225,7 +225,7 @@ describe("the 12-hour question, as a text too", () => {
     expect(sentTexts()).toEqual([
       {
         to: "+15305550100",
-        body: "ET Electric: You've been clocked in at Herringbone since Mon 11:00 PM, more than 12 hours. Open Timeclock to set when you stopped.",
+        body: "ET Electric: You've been clocked in at Honeysuckle since Mon 11:00 PM, more than 12 hours. Open Timeclock to set when you stopped.",
       },
     ]);
     expect(spies.push).toHaveLength(2);

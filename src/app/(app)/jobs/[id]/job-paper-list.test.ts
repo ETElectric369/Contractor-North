@@ -24,7 +24,7 @@ const paper = (over: Partial<JobPaperView>): JobPaperView => ({
   id: "p",
   invoiceNumber: "8802-1107139",
   invoiceDate: "2026-09-01",
-  jobNameRaw: "13683 HILLSIDE",
+  jobNameRaw: "13683 HAZELNUT",
   total: 59.17,
   filed: false,
   accountId: CED,
@@ -39,7 +39,7 @@ describe("Named On A Paper, Not Recorded Yet: a paper waiting on a credit", () =
       jobId: "j45",
       papers: [
         paper({ id: "wait", waitingOnCredit: true, waitingSince: "2026-09-26", supplier: "CED" }),
-        paper({ id: "open", invoiceNumber: "8802-1107820", jobNameRaw: "85 WHITNEY", total: 187.64, onNeedsYou: true }),
+        paper({ id: "open", invoiceNumber: "8802-1107820", jobNameRaw: "41 LARKSPUR", total: 187.64, onNeedsYou: true }),
       ],
     }),
   );

@@ -108,8 +108,8 @@ const titleCase = titleCaseWords;
 /**
  * WHAT A CHIP SAYS BEYOND ITS NUMBER (review of Wave A). "J-033 · Complete" and "J-006 · Complete"
  * read the same on a phone, where a `title` never shows. So a chip carries the job's name when it
- * is not the name the others share ("J-034 · Panel Upgrade", "J-047 · Jackie Burks"), and the day
- * the job was made, which is what tells two "5659 Rhodesia, complete" jobs apart.
+ * is not the name the others share ("J-034 · Panel Upgrade", "J-047 · Marla Finch"), and the day
+ * the job was made, which is what tells two "5659 Fernhill, complete" jobs apart.
  */
 const squash = (s: string | null | undefined) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 export function chipNames(said: string | null, jobs: PaperJob[]): Map<string, string | null> {
@@ -127,7 +127,7 @@ export function chipNames(said: string | null, jobs: PaperJob[]): Map<string, st
       out.set(j.id, null);
       continue;
     }
-    // "5659 Rhodesia - Panel Upgrade" beside "5659 Rhodesia" says only "Panel Upgrade".
+    // "5659 Fernhill - Panel Upgrade" beside "5659 Fernhill" says only "Panel Upgrade".
     let rest = name;
     if (base && n.startsWith(`${base} `)) {
       // Walk his own words until the shared ones are used up; what is left is the news.
@@ -265,11 +265,11 @@ export function PaperContentsView({ cardTotal, view, onRetry }: { cardTotal: num
  * One card per supplier paper nobody has put in the books, the same cards on My Day and on /bills
  * (both are fed by supplierPaperFeed). The card asks the one question and every answer is one tap:
  *
- *   CED Sent A Bill · $301.81 · It Says 13897 HERRINGBONE
+ *   CED Sent A Bill · $301.81 · It Says 13897 HONEYSUCKLE
  *   [Put It On J-011] [Another Job] [Shop Stock] [Business Cost]
  *
  * THE APP SUGGESTS, A PERSON DECIDES. The matcher's clear guess is the first button and nothing is
- * ever preselected; when several jobs match just as well (the Rhodesias) they are chips and none is
+ * ever preselected; when several jobs match just as well (the Fernhills) they are chips and none is
  * first; when there is nothing to go on it says Pick A Job. Every tap says what it did, with Undo
  * while no customer invoice has claimed the bill. Staff only: these carry prices.
  */
@@ -556,7 +556,7 @@ export function SupplierPaperCards({
           </Button>
         )}
         {/* FILING STAYS AS IT WAS; THEN THE ONE QUESTION (0357): a sent bill on the job may have
-            charged for this paper by hand already (Purple Sage on INV-00023). */}
+            charged for this paper by hand already (Pinyon Sage on INV-00023). */}
         {d.alreadyBilled && !d.marked && (
           <Button type="button" variant="outline" disabled={busy === d.card.invoiceId} onClick={() => setMarking(d)}>
             {d.alreadyBilled.invoiceNumber ? `Already Billed On ${d.alreadyBilled.invoiceNumber}?` : "Already Billed?"}

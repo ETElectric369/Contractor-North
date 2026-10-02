@@ -124,7 +124,7 @@ describe("what the estimator is told", () => {
   });
 
   /**
-   * THE PUNCH LIST STAYS A PUNCH LIST. Erik answered Sara Cain's scope as eight lines, each with
+   * THE PUNCH LIST STAYS A PUNCH LIST. Erik answered Sara Dale's scope as eight lines, each with
    * its own materials and its own minutes. The bullet used to prefix only the first line, so the
    * other seven reached the estimator unbulleted and unattached to any question — and we then asked
    * a model to rebuild structure he had already typed.
@@ -176,7 +176,7 @@ describe("factsForEstimator clears to a FIXED POINT before handing facts to the 
 /**
  * EDITING YOUR QUESTIONS MUST NOT DELETE FINISHED SITE VISITS.
  *
- * Erik, on 13125 Moraine Rd: "a bunch of info is missing and i found it in the playbook in those
+ * Erik, on 13125 Mayfern Rd: "a bunch of info is missing and i found it in the playbook in those
  * questions i deleted." coerceByPlaybook rebuilds from pb.needs, so a retired question took its
  * answer with it on the next autosave. 725 Granlibakken was holding a real wire list under the
  * retired key `materials_known` when this was found.
@@ -246,7 +246,7 @@ describe("a select with `other` — the door in the wall", () => {
   it("trims and caps, so it is still a bounded string — at the OPEN length, not a chip length", () => {
     expect(coerceNeed(open, "   spaced   ")).toBe("spaced");
     // Was 500 until cn-v698. The point of `other` is that the unlisted answer is the PARAGRAPH —
-    // Erik's Sara Cain scope is ~700 characters — so a 500 cap meant a question that gained
+    // Erik's Sara Dale scope is ~700 characters — so a 500 cap meant a question that gained
     // choices silently shortened the answer already stored against it on the next autosave. The
     // bound still exists; it is the same bound an open need gets, because the shape of the
     // control must not decide how much of what he said survives.

@@ -1,7 +1,7 @@
 /**
  * TAP TO PAY TELLS THE TRUTH (0e2cb937, 2026-09-30).
  *
- * Rich Seiler, INV-083, $420: the Pay Now sheet said "Card approved — recording it on the
+ * Rich Siskin, INV-083, $420: the Pay Now sheet said "Card approved — recording it on the
  * invoice… Stripe confirmed the charge" at 12:41, and Stripe had charged nothing. The bridge's
  * "ok" meant only that the plugin's confirm call resolved (the Swift side never read the
  * intent's status); the sheet turned that into "confirmed" and polled the invoice for a webhook

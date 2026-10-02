@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { TIMBER_CREEK } from "@/test/ced-timber-creek";
+import { THISTLE_WOOD } from "@/test/ced-thistle-wood";
 
 /**
  * SNAP OR NOTE'S SERVER HALF (W1-30), and the one note writer's read. What these pin: pasted supplier
@@ -92,8 +92,8 @@ describe("routePastedText: pasted supplier text is imported, not kept as a note"
       unchanged: [],
       refused: [],
     });
-    const res = await routePastedText(TIMBER_CREEK);
-    expect(imports.importCedInvoices).toHaveBeenCalledWith({ text: TIMBER_CREEK.trim() });
+    const res = await routePastedText(THISTLE_WOOD);
+    expect(imports.importCedInvoices).toHaveBeenCalledWith({ text: THISTLE_WOOD.trim() });
     expect(res).toEqual({
       kind: "imported",
       ok: true,
@@ -103,7 +103,7 @@ describe("routePastedText: pasted supplier text is imported, not kept as a note"
 
   it("an import that refuses says so, and nothing is saved as a note", async () => {
     imports.importCedInvoices.mockResolvedValue({ ok: false, error: "Nothing could be read. 8802-1101363: the lines don't add up", landed: [], updated: [], unchanged: [], refused: [] });
-    const res = await routePastedText(TIMBER_CREEK);
+    const res = await routePastedText(THISTLE_WOOD);
     expect(res).toEqual({ kind: "imported", ok: false, line: "Not imported: Nothing could be read. 8802-1101363: the lines don't add up" });
   });
 
@@ -133,7 +133,7 @@ describe("routePastedText: pasted supplier text is imported, not kept as a note"
 
   it("a pasted invoice that doesn't read (its totals don't add up) is kept as a note, and says why, never bounced back", async () => {
     // Break the invoice's arithmetic: the parser refuses it, so the importer would read nothing.
-    const broken = TIMBER_CREEK.replace(/TOTAL DUE[^\n]*/, "TOTAL DUE 999,999.99");
+    const broken = THISTLE_WOOD.replace(/TOTAL DUE[^\n]*/, "TOTAL DUE 999,999.99");
     const res = await routePastedText(broken);
     expect(imports.importCedInvoices).not.toHaveBeenCalled();
     expect(res.kind).toBe("note");
@@ -142,7 +142,7 @@ describe("routePastedText: pasted supplier text is imported, not kept as a note"
 
   it("a crew member's text is never routed (the importer is the office's): it is a note", async () => {
     state.staff = { error: "This action is staff-only." };
-    expect(await routePastedText(TIMBER_CREEK)).toEqual({ kind: "note" });
+    expect(await routePastedText(THISTLE_WOOD)).toEqual({ kind: "note" });
     expect(imports.importCedInvoices).not.toHaveBeenCalled();
   });
 });
@@ -150,7 +150,7 @@ describe("routePastedText: pasted supplier text is imported, not kept as a note"
 describe("snapContext: who is asking, and a tech's jobs as labels only", () => {
   const JOB_ROWS = [
     { id: "j-2", job_number: "J-002", name: "Smith Panel", address: "1 Main St", status: "scheduled", created_at: "2026-09-20", customers: { name: "Ann Smith" } },
-    { id: "j-7", job_number: "J-007", name: "13897 Herringbone", address: "13897 Herringbone Way", status: "in_progress", created_at: "2026-09-10", customers: { name: "Bo Lee" } },
+    { id: "j-7", job_number: "J-007", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", status: "in_progress", created_at: "2026-09-10", customers: { name: "Bo Lee" } },
     { id: "j-9", job_number: "J-009", name: "Lake House", address: "9 Shore Rd", status: "scheduled", created_at: "2026-09-01", customers: null },
   ];
 
@@ -170,7 +170,7 @@ describe("snapContext: who is asking, and a tech's jobs as labels only", () => {
       punchJobId: "j-9",
       jobs: [
         { id: "j-9", label: "Lake House" },
-        { id: "j-7", label: "13897 Herringbone" },
+        { id: "j-7", label: "13897 Honeysuckle" },
         { id: "j-2", label: "Smith Panel" },
       ],
       shopStock: true,

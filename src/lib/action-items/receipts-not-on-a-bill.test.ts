@@ -26,7 +26,7 @@ const doc = (o: Partial<ReceiptDoc> = {}): ReceiptDoc => ({
   job_id: "job-1",
   uploaded_by: "tech-1",
   created_at: "2026-09-27T17:00:00Z",
-  jobs: { job_number: "J-011", name: "Herringbone" },
+  jobs: { job_number: "J-011", name: "Honeysuckle" },
   ...o,
 });
 const tie = (o: Partial<PaperTie>): PaperTie => ({ document_id: null, bill_id: null, file_url: null, ...o });
@@ -85,7 +85,7 @@ describe("the row's words", () => {
   });
 
   it("the job leads with its name, the number second", () => {
-    expect(receiptRowJob(doc())).toBe("Herringbone · J-011");
+    expect(receiptRowJob(doc())).toBe("Honeysuckle · J-011");
     expect(receiptRowJob(doc({ jobs: { job_number: "J-011", name: null } }))).toBe("J-011");
   });
 });

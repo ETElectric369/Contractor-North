@@ -94,7 +94,7 @@ export const jobActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: async (i) => {
-      // Forgive a customer NAME passed as customer_id (the "c1a-first-rob" / "John Chmura"
+      // Forgive a customer NAME passed as customer_id (the "c1a-first-rob" / "John Clover"
       // class). Resolve it to a real id; a bad name ASKS rather than silently opening a job on
       // the wrong (or no) customer. The new_customer_name path is untouched — that's the
       // explicit "create one" branch and is handled by createJob itself.
@@ -131,7 +131,7 @@ export const jobActions: Record<string, ActionDef> = {
        * ONE FINISH TOOL, NOT TWO (M2). Nort could end a job two ways: job.finish, which bills the
        * unbilled work into a draft and asks the user to confirm first (confirm: "financial"), and
        * this tool with status "complete", which wrote the word alone and asked nobody. Same words
-       * from Erik, two different consequences — and the cheap one was the one that lost Tao's 19.5
+       * from Erik, two different consequences — and the cheap one was the one that lost Tess's 19.5
        * hours. So finishing has exactly one door now, and this one points at it in words rather
        * than quietly doing something else (the typed table in lib/job-status says which statuses
        * end a job, so a new one is covered here the day it is added).

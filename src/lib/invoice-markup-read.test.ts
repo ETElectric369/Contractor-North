@@ -111,7 +111,7 @@ describe("readInvoiceMarkup — the importer's read, shared with the % box", () 
     expect(read).toEqual({ ok: true, reading: { kind: "one", pct: 11 } });
     const seed = markupBoxSeed(read.ok ? read.reading : "unread", "15.00");
     expect(markupBoxStart(seed)).toEqual({ value: 11, applied: 11, appliedHere: false });
-    expect(markupBoxWords(seed, "Andrew Cohen")).toEqual({ main: "Priced at 11%", usual: "Andrew Cohen's usual is 15%" });
+    expect(markupBoxWords(seed, "Andrew Crake")).toEqual({ main: "Priced at 11%", usual: "Andrew Crake's usual is 15%" });
     expect(reads.sort()).toEqual(["bill_line_items", "bills", "invoice_items", "invoices", "purchase_orders"]);
   });
 
@@ -133,7 +133,7 @@ describe("readInvoiceMarkup — the importer's read, shared with the % box", () 
     expect(read).toEqual({ ok: true, reading: { kind: "mixed" } });
     const seed = markupBoxSeed(read.ok ? read.reading : "unread", 15);
     expect(seed).toEqual({ pct: 15, source: "mixed", usualPct: 15 });
-    expect(markupBoxWords(seed, "Andrew Cohen").main).toBe("Lines are at different markups");
+    expect(markupBoxWords(seed, "Andrew Crake").main).toBe("Lines are at different markups");
   });
 
   it("a receipt changed after the import has no vote: the rest of INV-078 still reads 11, never the changed bill's ratio", async () => {

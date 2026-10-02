@@ -101,7 +101,7 @@ describe("bookWorkedDay", () => {
   it("adds that one day at the hours worked; the listed day, the status and a hold never move", () => {
     const start = at(planned, "09:00");
     const end = at(planned, "11:00");
-    db.jobs = [{ id: "j11", name: "22 Herringbone Way", job_number: "J-011", status: "on_hold", scheduled_start: start, scheduled_end: end, planned_minutes: 120 }];
+    db.jobs = [{ id: "j11", name: "22 Honeysuckle Way", job_number: "J-011", status: "on_hold", scheduled_start: start, scheduled_end: end, planned_minutes: 120 }];
     db.segments = [{ id: "s1", job_id: "j11", start_date: planned, end_date: planned, start_time: null, end_time: null }];
     db.entries = [
       { id: "e1", profile_id: "p-brian", job_id: "j11", clock_in: at(worked, "11:04"), clock_out: at(worked, "13:46") },
@@ -109,7 +109,7 @@ describe("bookWorkedDay", () => {
     ];
     return bookWorkedDay("j11", worked).then((res) => {
       expect(res).toMatchObject({ ok: true, added: true });
-      expect(res.note).toMatch(/^Added .+ to 22 Herringbone Way · J-011's schedule\.$/);
+      expect(res.note).toMatch(/^Added .+ to 22 Honeysuckle Way · J-011's schedule\.$/);
       expect(days()).toEqual([`${planned}..${planned} usual`, `${worked}..${worked} 11:04-17:30`].sort());
       expect(db.jobs[0]).toMatchObject({ status: "on_hold", scheduled_start: start, scheduled_end: end, planned_minutes: 120 });
       // No status write rode along (promote: false).

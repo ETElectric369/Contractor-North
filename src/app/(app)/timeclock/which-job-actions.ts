@@ -153,7 +153,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
  * surprise either.
  *
  * AND IT MOVES A PUNCH OFF THE JOB THE APP CHOSE (`fromJobId`; Erik, 2026-10-01: "we didn't do the
- * job at TTP 56 this morning"). The clock now says which job it picked when nobody picked it, and
+ * job at ARR 56 this morning"). The clock now says which job it picked when nobody picked it, and
  * that sentence's Change door opens this same sheet and lands on this same write — a punch whose job
  * nobody chose is not an after-the-fact edit, it is the person finally being asked. The whole punch
  * moves, every hour since the tap, which is why Switch Job is not the door: switch_job (0288) only

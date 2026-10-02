@@ -14,8 +14,8 @@ const csz = (x: any) => formatCityStateZip(x?.city, x?.state, x?.zip);
  * THE ADDRESS ON THE LIEN NOTICE, through the one resolver (cn-v711).
  *
  * Built by hand here, so it predated `unit` — and a preliminary notice that names the building but
- * not the dwelling is the one document where that ambiguity has consequences. Four TTP jobs share
- * 300 W Lake Blvd. It also had no fallback: a job with no address of its own served a notice
+ * not the dwelling is the one document where that ambiguity has consequences. Four ARR jobs share
+ * 300 W Garnet Blvd. It also had no fallback: a job with no address of its own served a notice
  * reading "(address — fill in before serving)" while the customer's address sat one query away.
  *
  * COMMA-joined, unlike the contract's block. Every line of this notice is `LABEL: value` and the

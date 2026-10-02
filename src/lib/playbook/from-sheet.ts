@@ -33,7 +33,7 @@ function slotFor(f: InspectionField): NeedSlot {
     case "checkbox":
       // A checkbox is a two-option select wearing a smaller coat, and saying so out loud is what
       // stops "Permit needed" from being answerable only as yes-or-silence. It is also the field
-      // that vanished at 13125 Moraine Rd and got recorded as "no" — a shape that could not hold
+      // that vanished at 13125 Mayfern Rd and got recorded as "no" — a shape that could not hold
       // "the homeowner is pulling one, for occupancy".
       return { type: "select", options: ["Yes", "No"] };
     case "textarea":

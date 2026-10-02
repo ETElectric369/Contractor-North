@@ -201,7 +201,7 @@ export default async function NewQuotePage({
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
-        // WHAT'S ATTACHED, BY NAME. Erik, estimating Sara Cain: "the estimator said it didnt have
+        // WHAT'S ATTACHED, BY NAME. Erik, estimating Sara Dale: "the estimator said it didnt have
         // the file even though its there." It was there — a home-inspection PDF sitting in the
         // walk-through's capture — and this hand-off simply never mentioned it, so the estimator
         // answered honestly about a world it couldn't see. It still can't READ a PDF; naming the

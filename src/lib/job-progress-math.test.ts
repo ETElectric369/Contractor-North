@@ -17,7 +17,7 @@ const base = {
 };
 
 describe("computeJobProgress", () => {
-  it("reconciles to the billed lines (Tao: labor + materials, markup 0)", () => {
+  it("reconciles to the billed lines (Tess: labor + materials, markup 0)", () => {
     const r = computeJobProgress(base);
     expect(r.estimate).toBe(17325);
     expect(r.workToDate).toBeCloseTo(11327.87, 2); // 6037.50 labor + 5290.37 materials
@@ -170,7 +170,7 @@ describe("computeJobProgress", () => {
 });
 
 describe("computeJobProgress — work to date is what the customer will be billed (0268/0272)", () => {
-  /** His OSH run for Jason Waldow, from the live row (bills 905c9f3d on J-046). */
+  /** His OSH run for Jason Wexley, from the live row (bills 905c9f3d on J-046). */
   const osh = {
     amount: 16.28,
     po_id: null,
@@ -257,10 +257,10 @@ describe("livePurchaseOrders", () => {
   });
 });
 
-describe("billedWorkOnInvoices — T&M work to date is what was billed, at the price billed (Tao Zhu, J-002)", () => {
+describe("billedWorkOnInvoices — T&M work to date is what was billed, at the price billed (Tess Zane, J-002)", () => {
   // J-002 as it stands: the $10,000 deposit, INV-00028 itemizing June at $150 / $75 and netting the
   // deposit, INV-080 billing September at today's rates.
-  const deposit = { status: "paid", invoice_kind: "deposit", invoice_items: [{ import_source: null, unit: "lot", description: "Deposit — Tao Zhu hot tub feed", line_total: "10000.00" }] };
+  const deposit = { status: "paid", invoice_kind: "deposit", invoice_items: [{ import_source: null, unit: "lot", description: "Deposit — Tess Zane hot tub feed", line_total: "10000.00" }] };
   const inv28 = {
     status: "paid",
     invoice_kind: "progress",
@@ -392,7 +392,7 @@ describe("billedWorkOnInvoices — T&M work to date is what was billed, at the p
 
     it("J-002 is untouched: every line on it is labor, materials, a deposit or the credit netting it", () => {
       expect(billedWorkOnInvoices([deposit, inv28, inv80])).toBe(19716.64);
-      expect(countsAsWorkCompleted({ import_source: null, unit: "lot", description: "Deposit — Tao Zhu hot tub feed" }, "deposit")).toBe(false);
+      expect(countsAsWorkCompleted({ import_source: null, unit: "lot", description: "Deposit — Tess Zane hot tub feed" }, "deposit")).toBe(false);
     });
   });
 

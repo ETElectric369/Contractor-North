@@ -24,7 +24,7 @@
  *     Exactly one person named is the line's person. Two people ("Labor - Erik & Brian Taylor": Brian
  *     in full, Erik by his first name), or nobody ("Labor - ET Electric hourly with 2 guys"), is a
  *     crew line: it bills everyone's hours and is never judged. Open: a first name that is only a
- *     customer's ("Labor - Erik Nyborg's panel") still reads as the worker Erik;
+ *     customer's ("Labor - Erik Norrel's panel") still reads as the worker Erik;
  *   - a claimed id is judged only when `ownerOf` knows its person (the caller's map: a time entry by
  *     its own profile_id; a retired split id by the shift it became, when the caller can read that).
  */

@@ -53,7 +53,7 @@ describe("the fill path is told the door exists", () => {
 });
 
 describe("coercion keeps the paragraph, not a chip-sized slice of it", () => {
-  // Erik's Sara Cain scope is ~700 characters and the open branch allows 8000. A question that
+  // Erik's Sara Dale scope is ~700 characters and the open branch allows 8000. A question that
   // gains choices must not quietly shorten the answer already stored against it.
   const long = "12/2 romex ".repeat(80).trim(); // ~880 chars
 

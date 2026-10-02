@@ -149,7 +149,7 @@ describe("every kind the app offers survives the round trip", () => {
     expect(WORK_KINDS).toContain("call");
     expect(appointmentTypeFor("call")).toBe("call");
     expect(KIND_LABEL.call).toBe("Phone Call");
-    expect(bookingTitle("call", "Mike Scrivano")).toBe("Call Mike Scrivano");
+    expect(bookingTitle("call", "Mike Sparrow")).toBe("Call Mike Sparrow");
   });
 });
 
@@ -197,8 +197,8 @@ describe("the five kinds a person picks survive the round trip, Other included",
   });
 
   it("the New Appointment title follows its type", () => {
-    const ctx = { jobName: "3245 West Lake Boulevard", customerName: "Rita Moss", place: "12 Elm St, Testville, CA 96161" };
-    expect(suggestedVisitTitle("job", ctx)).toBe("3245 West Lake Boulevard"); // the job's own name
+    const ctx = { jobName: "3245 West Garnet Boulevard", customerName: "Rita Moss", place: "12 Elm St, Testville, CA 96161" };
+    expect(suggestedVisitTitle("job", ctx)).toBe("3245 West Garnet Boulevard"); // the job's own name
     expect(suggestedVisitTitle("inspection", ctx)).toBe("Walk-Through: Rita Moss");
     expect(suggestedVisitTitle("inspection", { place: "12 Elm St, Testville, CA 96161" })).toBe("Walk-Through: 12 Elm St");
     expect(suggestedVisitTitle("other", ctx)).toBe("Rita Moss");

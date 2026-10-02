@@ -79,7 +79,7 @@ describe("a bill's status says how it was bought, in words", () => {
     }
     // A bill on no account (the page stamps null) still never prints the long spelling.
     expect(label({ status: "unpaid", supplier: "Consolidated Electrical Distributors, Inc.", settledBySupplier: true, settledBySupplierName: null })).toBe("Settled · CED Says");
-    expect(label({ status: "unpaid", supplier: "Swigard's Hardware", settledBySupplier: true, settledBySupplierName: null })).toBe("Settled · Swigard's Hardware Says");
+    expect(label({ status: "unpaid", supplier: "Brandow's Hardware", settledBySupplier: true, settledBySupplierName: null })).toBe("Settled · Brandow's Hardware Says");
   });
 
   /**

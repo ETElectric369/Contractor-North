@@ -200,7 +200,7 @@ export async function hearSetup(answers: Answers, transcript: string): Promise<H
  * what the public page says. So hearSetup fills, and this saves, and the two are never the same
  * button. [[fill-vs-execute]].
  *
- * THE TRADE SEEDS THE SHEET. Andrew Cohen signed up with a blank trade and got a generic
+ * THE TRADE SEEDS THE SHEET. Andrew Crake signed up with a blank trade and got a generic
  * six-question walk-through, then pressed "generate questions" and couldn't find what it made.
  * Naming the trade is what was missing, so naming it is what fixes it — here, in the same press,
  * rather than as a second thing to go and discover.

@@ -77,7 +77,7 @@ export function bucketInspections<T extends InspectionBucketRow>(
      * FOUR WAYS A VISIT ENDS, not one (0205).
      *
      * This asked only "does an estimate exist?", so a walk-through that turned into billed,
-     * paid work still nagged (Mineral Springs: job complete, invoice paid, no estimate ever
+     * paid work still nagged (Mallow Springs: job complete, invoice paid, no estimate ever
      * written) and a lost bid could never leave at all (Donner Pass, which has no customer,
      * inquiry, job or estimate to hang anything on). Money is an outcome; so is a decision.
      */

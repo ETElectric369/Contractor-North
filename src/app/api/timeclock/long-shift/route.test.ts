@@ -93,7 +93,7 @@ const brian = (hoursIn: number, now: number, extra: any = {}) => ({
   clock_in: new Date(now - hoursIn * H).toISOString(),
   long_shift_warned_at: null,
   long_shift_nudged_at: null,
-  job: { job_number: "J-104", name: "Herringbone" },
+  job: { job_number: "J-104", name: "Honeysuckle" },
   profiles: { full_name: "Brian Cole", role: "tech", active: true },
   ...extra,
 });

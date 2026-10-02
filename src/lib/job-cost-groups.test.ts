@@ -3,7 +3,7 @@ import { billedOnLabel, groupJobCosts, nothingToBillWhy, openOwnNote, openRowsDr
 import type { CostRowVerdict } from "@/lib/unbilled-work";
 
 /**
- * THE COSTS TAB, OPEN FIRST (Erik, 2026-09-25, 85 Whitney / INV-081). The piles are the Unbilled
+ * THE COSTS TAB, OPEN FIRST (Erik, 2026-09-25, 41 Larkspur / INV-081). The piles are the Unbilled
  * card's own per-row verdicts; these pin how they are sorted and said.
  */
 
@@ -13,7 +13,7 @@ const INV58 = { id: "i58", invoice_number: "INV-058", status: "sent", created_at
 
 const billed = (id: string, invoice: typeof INV61 | typeof INV58): CostRowVerdict => ({ id, kind: "bill", state: "billed", invoice });
 
-describe("groupJobCosts — 85 Whitney while INV-081 is a draft", () => {
+describe("groupJobCosts — 41 Larkspur while INV-081 is a draft", () => {
   const rows = [
     { id: "a", kind: "bill" as const, amount: 3034.54 },
     { id: "b", kind: "bill" as const, amount: 95.27 },

@@ -18,8 +18,8 @@ import type { ActionDef, ActionResult } from "../types";
 type Db = Awaited<ReturnType<typeof createClient>>;
 type StoredCustomer = { name?: string | null; phone?: string | null; email?: string | null; address?: string | null };
 
-/** ANNOUNCE THE DEED: the contact as STORED. Nort told Erik "Saved his phone: (916) 992-4711" over a
- *  row that read "1 (916) 992-4711" (2026-09-24) — it repeated what it meant, not what landed. */
+/** ANNOUNCE THE DEED: the contact as STORED. Nort told Erik "Saved his phone: (916) 555-0147" over a
+ *  row that read "1 (916) 555-0147" (2026-09-24) — it repeated what it meant, not what landed. */
 async function customerRecorded(supabase: Db, id: string, verb: string): Promise<{ said: string; row: StoredCustomer } | null> {
   const { data } = await supabase.from("customers").select("name, phone, email, address").eq("id", id).maybeSingle();
   if (!data) return null;

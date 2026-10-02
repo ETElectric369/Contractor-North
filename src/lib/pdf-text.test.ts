@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isPdfBytes, isPdfText, joinPdfTextItems } from "./pdf-text";
 import { sha256Hex, isSha256 } from "./content-hash";
 import { parseCedInvoice } from "./ced-invoice-parse";
-import { TIMBER_CREEK } from "@/test/ced-timber-creek";
+import { THISTLE_WOOD } from "@/test/ced-thistle-wood";
 
 const bytes = (s: string) => new TextEncoder().encode(s);
 
@@ -31,7 +31,7 @@ describe("joinPdfTextItems: pdfjs runs back into lines the CED parser reads", ()
     const items = [
       { str: "INVOICE NO.", hasEOL: true },
       { str: "8802-1101363", hasEOL: true },
-      { str: "TR-34426", hasEOL: false },
+      { str: "AC-10427", hasEOL: false },
       { str: "ERIK", hasEOL: false },
       { str: "TAYLOR", hasEOL: true },
       { str: "", hasEOL: true },
@@ -39,13 +39,13 @@ describe("joinPdfTextItems: pdfjs runs back into lines the CED parser reads", ()
       { str: "", hasEOL: true },
       { str: "TOTAL   162.45", hasEOL: false },
     ];
-    expect(joinPdfTextItems(items)).toBe("INVOICE NO.\n8802-1101363\nTR-34426 ERIK TAYLOR\n\nTOTAL 162.45");
+    expect(joinPdfTextItems(items)).toBe("INVOICE NO.\n8802-1101363\nAC-10427 ERIK TAYLOR\n\nTOTAL 162.45");
   });
   it("marked-content items with no string are skipped, not printed as 'undefined'", () => {
     expect(joinPdfTextItems([{ hasEOL: false }, { str: "A", hasEOL: true }, { str: undefined, hasEOL: true }])).toBe("A");
   });
   it("text laid out one run per line survives the join and still reconciles", () => {
-    const items = TIMBER_CREEK.split("\n").map((str) => ({ str, hasEOL: true }));
+    const items = THISTLE_WOOD.split("\n").map((str) => ({ str, hasEOL: true }));
     const result = parseCedInvoice(joinPdfTextItems(items));
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.invoice.total).toBe(162.45);

@@ -3,8 +3,8 @@
  *
  * "site inspections are labeled with the tag they shouldnt carry site inspection in the job title
  * same goes for any conversion", then, final: "street number and name as always". His company's
- * jobs have always been named "3245 West Lake Boulevard", "498 Mil Drae Lane"; with no address, the
- * person ("Jackie Burks"); a unit complex "TTP #56".
+ * jobs have always been named "3245 West Garnet Boulevard", "498 May Dell Lane"; with no address, the
+ * person ("Marla Finch"); a unit complex "ARR #56".
  *
  * ONE namer for every door that makes a job (a visit, a lead, an accepted estimate, New Job, Nort,
  * an import, a recurring template). The SQL twin is public.job_name_from (0369), used by the public
@@ -14,11 +14,11 @@
  *      recurring template's title) stays exactly as typed, unless it is ONLY a source tag, or a tag
  *      and the customer or the street (the stock "Site inspection: Rita Moss"): that is no name.
  *   2. With a street: the street number and name, and " #<unit>" when the job has a unit ("300
- *      West Lake Boulevard #56"). No person, no city/state/zip. Words a SOURCE carried
+ *      West Garnet Boulevard #56"). No person, no city/state/zip. Words a SOURCE carried
  *      (`sourceWords`: a visit's title, an estimate's title, a lead's short scope) never replace it.
- *   3. No street: the customer as written (the company, else the whole name: "Jackie Burks"), then
- *      " · " and the source's own work words when any are left once the tag comes off ("Jackie
- *      Burks · Panel Upgrade"), cut to about 40 characters, never a paragraph. A part of the words
+ *   3. No street: the customer as written (the company, else the whole name: "Marla Finch"), then
+ *      " · " and the source's own work words when any are left once the tag comes off ("Marla
+ *      Finch · Panel Upgrade"), cut to about 40 characters, never a paragraph. A part of the words
  *      that is only who or where comes off too (the lead door's "New deck — Rita Moss" is "New deck").
  *   4. Neither: "New Job · Sep 28" on the company's today. (Work words with no one and nowhere are
  *      still the work: "Kitchen rewire", never a date.)

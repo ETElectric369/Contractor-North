@@ -16,7 +16,7 @@ import { loadShelf, takeFromStockAction, undoTakeAction } from "./stock-actions"
  * job's materials list page, the same for the crew and the office, built for one hand at 60 mph:
  *
  *   Took From Stock → pick the item (names and how much is on the shelf, never a price) → a number
- *   pad with the unit already there ("ft") → Take It → "Took 60 ft of 12/2 NM-B for Herringbone"
+ *   pad with the unit already there ("ft") → Take It → "Took 60 ft of 12/2 NM-B for Honeysuckle"
  *   with Undo.
  *
  * A take bigger than the shelf shows still saves, so nobody hits a dead end in the field: the pad

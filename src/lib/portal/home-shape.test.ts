@@ -16,9 +16,9 @@ describe("the portal home (customer_portal, 0323)", () => {
     expect(Object.keys(portalHomeOrg(withExtra)).sort()).toEqual(["email", "license", "logoUrl", "name", "phone", "tint"]);
   });
 
-  it("Andrew's running bill: 13897 Herringbone, $9,590.89 less $6,760 paid is $2,830.89 left", () => {
-    expect(portalHomeRunning([{ job_id: JOB, job_name: "13897 Herringbone", job_number: "J-011", total: 9590.89, amount_paid: 6760 }])).toEqual([
-      { jobId: JOB, name: "13897 Herringbone", number: "J-011", total: 9590.89, paid: 6760, balance: 2830.89 },
+  it("Andrew's running bill: 13897 Honeysuckle, $9,590.89 less $6,760 paid is $2,830.89 left", () => {
+    expect(portalHomeRunning([{ job_id: JOB, job_name: "13897 Honeysuckle", job_number: "J-011", total: 9590.89, amount_paid: 6760 }])).toEqual([
+      { jobId: JOB, name: "13897 Honeysuckle", number: "J-011", total: 9590.89, paid: 6760, balance: 2830.89 },
     ]);
   });
 

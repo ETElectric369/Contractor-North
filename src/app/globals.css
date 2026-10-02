@@ -23,6 +23,43 @@
   }
 }
 
+/* ── The phone, turned sideways ───────────────────────────────────────────
+   `turned:` = "a PHONE held sideways": wide, and with almost no HEIGHT to
+   spend — an iPhone 16 Pro is 402pt tall that way, an SE 320.
+
+   Erik, 2026-10-01, from /schedule: "I'd like to be able to turn the phone
+   sideways to see the calendar in full, but it would be nice to also keep the
+   buttons for the top bar and the dock exactly where they are while spinning
+   everything in between only."
+
+   WHY IT IS NOT JUST `landscape:`. A landscape phone is ~700–930px WIDE, which
+   trips sm: and md: — so the chrome would quietly put on its wider clothes
+   (the Search button grows a label, gaps widen) exactly where he said nothing
+   may move. This variant is what UNDOES that, so it must match only the case
+   it is undoing: the max-height keeps iPads out (an iPad mini is 744pt tall
+   sideways) and `pointer: coarse` keeps short desktop windows out, which get
+   the desktop shell anyway. `shell:` never fires here — 930px with a finger is
+   below its 1024 floor — so the dock stays the bottom bar and the top bar
+   stays the phone's top bar, which is the whole reason this works at all.
+
+   AND THE MIN-WIDTH, WHICH IS THE ONLY CLAUSE THAT SAYS "SIDEWAYS". The other
+   three only say "wider than it is tall, short, and touched" — and a phone
+   standing straight up with its keyboard open is all three. layout.tsx sets
+   interactiveWidget: "resizes-content", so on Android Chrome the keyboard
+   shrinks the LAYOUT viewport: a 360x640 phone with a ~300px keyboard is
+   360x340, which reports `orientation: landscape` and clears max-height. The
+   whole sideways layout then landed mid-typing on a phone that never moved —
+   on /schedule the rail, which holds the autofocused "Why?" box, dropped below
+   the calendar as he tapped into it. An upright phone is ~440px wide at the
+   most and the narrowest sideways phone is 568, so 480 separates them cleanly.
+   iOS does not resize for the keyboard, so Erik's own phone never saw this —
+   it is a build-for-millions clause, not one he reported. */
+@custom-variant turned {
+  @media (orientation: landscape) and (min-width: 480px) and (max-height: 540px) and (pointer: coarse) {
+    @slot;
+  }
+}
+
 /* ── Contractor North theme ───────────────────────────────────────────────
    Brand color echoes the CED blue from the letterhead.                      */
 /* Plain @theme so brand utilities reference var(--color-brand) and can be
@@ -92,6 +129,122 @@ body {
 main {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
+}
+
+/* ── TURNED SIDEWAYS: the height budget, and the notch ───────────────────────
+   The same media query as the `turned:` variant above (a variant can't carry
+   plain rules, and these belong in one place next to each other).
+
+   A phone held sideways has ~402pt of height on Erik's 16 Pro. The top bar is
+   64 of it and the dock 64 — they stay EXACTLY where they are and keep every
+   control at 44px, which is the spec — so a third of the screen is chrome
+   before anything is drawn. These rules spend the rest of it on the thing he
+   turned the phone to see, by taking back padding that was sized for a tall
+   screen. Nothing shrinks a control; nothing is dropped.
+
+   AND THE CAMERA. Sideways, the notch / Dynamic Island is on the SIDE: iOS
+   reports ~59px of safe-area inset on both left and right, and the WebView
+   paints edge to edge (viewportFit: cover). Without these insets the Back
+   button and the first and last dock tiles sit under the cutout — a door you
+   can see the edge of and not read. The bar and the dock stay exactly where
+   they are; what is under the camera moves out from under it. */
+@media (orientation: landscape) and (min-width: 480px) and (max-height: 540px) and (pointer: coarse) {
+  /* The top bar: still the top bar, same controls, same order, same 44px —
+     just clear of the cutout on both ends. */
+  .app-topbar {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  /* The dock: still pinned to the bottom, same tiles in the same order. They
+     are flex-1, so clearing the cutout narrows them evenly instead of moving
+     the bar.
+
+     `.app-dock`, NOT `.app-bottom-nav`. That second class has two users: the
+     dock, and the section-sheet edge handle, which borrows it only so
+     body.modal-open hides it with the dock. The handle is a 36px slab pinned
+     to the left edge — rounded on the RIGHT only, no left border, because it is
+     meant to look like part of that edge. This rule is unlayered, so it beat the
+     handle's own Tailwind `left-0`, and sideways it pushed the handle
+     env(safe-area-inset-left) — ~59pt on a 16 Pro — into mid-page, where it read
+     as a floating slab with a raw square side. It hit every section with more
+     than four pages, /price-list included, where that handle is the ONLY sibling
+     nav, and in any rotated mobile browser tab as well. */
+  .app-dock {
+    left: max(0.5rem, env(safe-area-inset-left, 0px));
+    right: max(0.5rem, env(safe-area-inset-right, 0px));
+  }
+  /* The scrolling middle. The 7.5rem of bottom padding clears a dock that is
+     4rem tall; on a tall screen that slack costs nothing and here it is a
+     fifth of the screen. */
+  .app-backdrop main {
+    padding-top: 0.5rem;
+    padding-bottom: 4.5rem;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  /* The section strip keeps all of its doors and loses the gap under it. */
+  .app-subnav {
+    margin-bottom: 0.5rem;
+    padding-bottom: 0;
+  }
+  /* THE CALENDAR FIRST. Below lg the rail is stacked ABOVE it, so rotating to
+     see the calendar landed on "Waiting For A Day". Order, not display: the
+     rail is all still there, one scroll further down. */
+  .schedule-split {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  /* `space-y-4` in Tailwind v4 is margin-block-END on every child but the last, so with the order
+     swapped the gap would hang off the wrong element. `gap` above replaces it; this takes it off. */
+  .schedule-split > * {
+    margin-block: 0;
+  }
+  .schedule-split > aside {
+    order: 1;
+  }
+  /* The week/month stack is the scroller (its own onScroll is what extends the
+     endless stack, so it must keep scrolling itself rather than handing the job
+     to main). Sideways, 70dvh is taller than the room between the chrome, which
+     made main scroll too — two scrollers for one list. This is the room that is
+     actually there: the screen, less the top bar, the strip, the calendar's own
+     header row and the dock. */
+  .cal-stack {
+    max-height: calc(100dvh - 11.5rem);
+  }
+
+  /* ── DOCUMENTS, which have no app shell around them ──────────────────────
+     Erik, 2026-10-01: "The rotate should be available for any screen that
+     warrants it like documents especially". Two of them paint EDGE TO EDGE with
+     no top bar and no dock to borrow insets from — /print/pdf-preview (outside
+     the app shell entirely) and the full-screen photo/PDF viewer (fixed
+     inset-0). Sideways, the camera cutout is on the SIDE, so without these the
+     only way off the preview (Back) and the only way to close the viewer (✕)
+     sit under the Dynamic Island: doors you can see the edge of and not press.
+     The rows do not move and nothing is dropped — they clear the camera. Each
+     keeps the padding it already had as its floor, so a browser (where every
+     inset is 0) is pixel-for-pixel what it is today. */
+  .pdf-preview-bar,
+  .media-lightbox-bar {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  .pdf-pages-scroll,
+  .media-lightbox-body {
+    padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+  }
+  /* The sheet gets the height back that a tall screen could afford to frame it
+     with. 1.5rem top and bottom is a tenth of the screen sideways. */
+  .pdf-pages-scroll {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+  /* The viewer's hint line STAYS (nothing is dropped to make room) — it just
+     sits tight against the bottom instead of floating above it. */
+  .media-lightbox-hint {
+    padding-bottom: 0.25rem;
+  }
 }
 
 /* ── The iOS shell (Capacitor WKWebView, full-bleed) ─────────────────────────

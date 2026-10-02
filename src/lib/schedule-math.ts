@@ -8,7 +8,7 @@
  *  EACH DAY KEEPS ITS OWN HOURS (0370). A range may carry `hours`: the wall-clock start and end its
  *  days run on the company's clock (job_schedule_segments.start_time / end_time). Three states, like
  *  the writers' start time always had:
- *    hours: { start, end }  the days' OWN hours (Herringbone added today, noon to 5, beside its
+ *    hours: { start, end }  the days' OWN hours (Honeysuckle added today, noon to 5, beside its
  *                           other days);
  *    hours: null            the job's USUAL hours (its scheduled_start/end block), today's behavior;
  *    hours absent           not said: a writer carries over whatever those days already had
@@ -208,7 +208,7 @@ export function applyRangeEdit(current: DaySegment, patch: Partial<DaySegment>):
 }
 
 /** KEEP THE DAYS THAT HAPPENED. A reschedule writes the job's whole segment set, so a move
- *  computed only from the new window erases every past day the job sat on. Herringbone,
+ *  computed only from the new window erases every past day the job sat on. Honeysuckle,
  *  2026-09-24: Nort moved it to the 24th and the 22nd vanished from the calendar though time had
  *  been logged there that day. The calendar is also the job's history, so a day that was
  *  scheduled AND worked (time logged, a visit closed out as done) stays; only the rest moves.

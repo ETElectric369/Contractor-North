@@ -26,7 +26,7 @@ import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "./shelf-plan";
  * shelf. Only the PO box and the job-name box are read, the WHOLE box, so "IN STOCK" and
  * "STOCKTON" never trigger it. A ticket with no lines can't go to the shelf yet, and says why.
  */
-const J011: MarkJob = { id: "j11", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customerNames: ["Andrew Cohen"] };
+const J011: MarkJob = { id: "j11", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", customerNames: ["Andrew Crake"] };
 const JOBS = [J011];
 const SELF = ["ET Electric", "Erik Taylor"];
 const LINES = [
@@ -60,7 +60,7 @@ describe("which words name the shelf: the WHOLE PO or job-name box, never the hi
   it.each(["STOCK", "Stock", "shop stock", "SHOP  STOCK.", "INVENTORY"])("%s names the shelf", (word) => {
     expect(companyUseWord(word)?.shelf).toBe(true);
   });
-  it.each(["IN STOCK", "STOCKTON", "STOCK 13897 HERRINGBONE", "RESTOCK", "STOCK ROOM"])("%s does not", (word) => {
+  it.each(["IN STOCK", "STOCKTON", "STOCK 13897 HONEYSUCKLE", "RESTOCK", "STOCK ROOM"])("%s does not", (word) => {
     expect(companyUseWord(word)?.shelf ?? false).toBe(false);
   });
   it("STOCK in the hint alone picks nothing", () => {
@@ -78,9 +78,9 @@ describe("PO STOCK is suggested to the shelf, with the because-line", () => {
   });
 
   it("STOCK plus a job named on the same paper is two answers: nothing is picked, and the row says so", () => {
-    const place = placeFromMarks({ po: "STOCK", address: "13897 HERRINGBONE" }, JOBS, [], SELF);
+    const place = placeFromMarks({ po: "STOCK", address: "13897 HONEYSUCKLE" }, JOBS, [], SELF);
     expect(place.job.kind).toBe("conflict");
-    const row = rematchPaper(stockPaper({ po: "STOCK", marks: { po: "STOCK", address: "13897 HERRINGBONE" }, jobId: null, jobFrom: null }), JOBS, [], SELF);
+    const row = rematchPaper(stockPaper({ po: "STOCK", marks: { po: "STOCK", address: "13897 HONEYSUCKLE" }, jobId: null, jobFrom: null }), JOBS, [], SELF);
     expect(suggestedDestination(row, ["j11"])).toBe("");
     expect((row.proposal as { jobConflict?: string }).jobConflict).toContain('the PO "STOCK"');
   });

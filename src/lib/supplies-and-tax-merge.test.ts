@@ -58,12 +58,12 @@ describe("mergeSuppliesAndTax — several receipts become one line", () => {
   it("names no supplier — the importer's own labels merge too", () => {
     const rows = [
       row("a", "Wire", 40),
-      row("sa", "Supplies & tax — Swigard's True Value", 3.1),
+      row("sa", "Supplies & tax — Brandow's True Value", 3.1),
       row("b", "Box", 10),
       row("sb", "Supplies & tax — Consolidated Electrical Distributors, Inc. (CED)", 0.87),
     ];
     const shown = mergeSuppliesAndTax(rows);
-    expect(shown.filter((r) => r.description.includes("Swigard") || r.description.includes("CED"))).toEqual([]);
+    expect(shown.filter((r) => r.description.includes("Brandow") || r.description.includes("CED"))).toEqual([]);
     expect(shown.filter(isSuppliesAndTaxLine)).toHaveLength(1);
     expect(cents(shown)).toBe(cents(rows));
   });

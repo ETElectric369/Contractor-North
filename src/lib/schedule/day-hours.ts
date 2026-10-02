@@ -3,8 +3,8 @@
  * writeScheduleRanges) and the controls that predict them (the schedule tile's This Day time, the Add
  * To Schedule sheet) ask these, so a screen never promises hours the save won't store.
  *
- * Erik, 2026-09-28, on the Schedule page at night: "i want to put heringbone on the page for the rest
- * of the day after Seiler". Herringbone runs 9/18, 9/22 and 9/24; a job had ONE time of day for every
+ * Erik, 2026-09-28, on the Schedule page at night: "i want to put honysuckle on the page for the rest
+ * of the day after Siskin". Honeysuckle runs 9/18, 9/22 and 9/24; a job had ONE time of day for every
  * day, so its new day could only land at the job's usual hours. A day of job_schedule_segments now
  * carries start_time / end_time (company wall clock): null is the job's usual hours (today's
  * behavior), set is that day's own.
@@ -83,7 +83,7 @@ type Mirror = { scheduledStart: string | null; scheduledEnd: string | null; plan
 /**
  * ADDING A DAY NEVER MOVES ANOTHER. The job's span (jobs.scheduled_start/end) grows to cover a day
  * added to it. A job's usual hours are its hours on each of its days (job-block jobDayBlock), so
- * Seiler's one day 10 to 12 stays 10 to 12 when a second day joins it and nothing here fires; this
+ * Siskin's one day 10 to 12 stays 10 to 12 when a second day joins it and nothing here fires; this
  * remains the safety net: every day of `segments` that keeps no hours of its own, and whose drawn
  * block changes from `before` to `after`, gets the block it had as its own hours. `skip` (the day
  * being added) is left as it is.

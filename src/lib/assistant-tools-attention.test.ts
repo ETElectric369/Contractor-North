@@ -80,7 +80,7 @@ describe("needs_attention honours the day a person picked", () => {
       organizations: { data: [ORG] },
       quotes: {
         data: [
-          { quote_number: "Q-101", total: "4200", updated_at: OLD, valid_until: null, follow_up_at: "2026-11-01", customers: { name: "Tanager" } },
+          { quote_number: "Q-101", total: "4200", updated_at: OLD, valid_until: null, follow_up_at: "2026-11-01", customers: { name: "Tupelo" } },
           { quote_number: "Q-102", total: "900", updated_at: OLD, valid_until: null, follow_up_at: null, customers: { name: "Birch" } },
           { quote_number: "Q-103", total: "1500", updated_at: OLD, valid_until: null, follow_up_at: "2026-09-20", customers: { name: "Alder" } },
         ],
@@ -88,7 +88,7 @@ describe("needs_attention honours the day a person picked", () => {
     });
     const r = await sweep(db);
     expect(r.stale_estimates.filter((e: any) => e.kind === "quote").map((e: any) => e.ref)).toEqual(["Q-102", "Q-103"]);
-    expect(r.waiting.estimates).toEqual([{ ref: "Q-101", customer: "Tanager", total: 4200, back_on: "2026-11-01" }]);
+    expect(r.waiting.estimates).toEqual([{ ref: "Q-101", customer: "Tupelo", total: 4200, back_on: "2026-11-01" }]);
     expect(sweepReads(db)[0]).toContain("follow_up_at");
   });
 

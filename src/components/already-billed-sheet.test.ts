@@ -25,7 +25,7 @@ import type { AlreadyBilledSheetData } from "@/lib/already-billed-read";
 /**
  * THE ALREADY BILLED SHEET, AS ERIK READS IT (0357). What these pin is the law, not the styling:
  * the question in his words beside what the cost was, only lines that can hold it, the button that
- * names the bill, Purple Sage's question only when it is likely, the hours ticked up to the day the
+ * names the bill, Pinyon Sage's question only when it is likely, the hours ticked up to the day the
  * bill was written, a database without 0357 said plainly, and every clickable 44px and Title Case.
  */
 
@@ -72,7 +72,7 @@ const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, 
 /** Title Case: every word that starts with a letter starts with a capital ("INV-00023", "h" and "$" aside). */
 const titleCase = (s: string) => s.split(/\s+/).filter((w) => /^[a-z]/i.test(w) && w !== "h").every((w) => /^[A-Z]/.test(w));
 
-describe("the sheet, Purple Sage", () => {
+describe("the sheet, Pinyon Sage", () => {
   it("asks which line, beside what the bill cost, and names the bill on its button", () => {
     const html = render({ state: "ok", data: data() }, { lineId: "materials" });
     const t = text(html);

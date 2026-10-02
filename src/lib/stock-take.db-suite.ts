@@ -147,7 +147,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
     }
     return { id: b.id as string, lineIds: ids, lines: lines.map((l, i) => ({ id: ids[i], ...l })) as BillLine[] };
   };
-  /** Herringbone's 8/19 CED ticket shape, the coil at 0 used: its roll costs $180.17. */
+  /** Honeysuckle's 8/19 CED ticket shape, the coil at 0 used: its roll costs $180.17. */
   const coilTicket = (job: string | null, date: string) =>
     bill(job, date, [
       { description: "TEST Flexbox BH bar hanger ground", amount: 8.82 },

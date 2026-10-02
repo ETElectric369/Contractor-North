@@ -183,7 +183,7 @@ describe("isStandardBillingBlocker (H4 reverse, narrowed 0255 — only an OPEN D
   it("does NOT block on a blank draft (no lines, $0) — nothing billed yet", () => {
     expect(isStandardBillingBlocker("standard", "draft", 0, 0)).toBe(false);
   });
-  // THE 85 WHITNEY CASE (Erik 2026-09-11): INV-061 is PAID. Its rows are claimed, a draw imports only
+  // THE 41 LARKSPUR CASE (Erik 2026-09-11): INV-061 is PAID. Its rows are claimed, a draw imports only
   // what's unclaimed, so a finished invoice must never again refuse the next progress payment.
   it("a SENT / PARTIAL / PAID / OVERDUE standard invoice is finished business, never a blocker", () => {
     for (const status of ["sent", "partial", "paid", "overdue"]) {
@@ -241,7 +241,7 @@ describe("resolveDrawCredit (H1 — a draw can never go negative)", () => {
   it("bails 'no-work' when nothing is logged", () => {
     expect(resolveDrawCredit(0, 5000)).toEqual({ ok: false, reason: "no-work" });
   });
-  it("bails 'covered' when prior billings already cover the work (Tao: $16k prior vs $11.3k work)", () => {
+  it("bails 'covered' when prior billings already cover the work (Tess: $16k prior vs $11.3k work)", () => {
     expect(resolveDrawCredit(11327.87, 16000)).toEqual({ ok: false, reason: "covered" });
     expect(resolveDrawCredit(10000, 10000)).toEqual({ ok: false, reason: "covered" });
   });
@@ -273,7 +273,7 @@ describe("drawAmount", () => {
 });
 
 describe("progressSummary", () => {
-  it("computes percent complete + balance (Tao $6k draw)", () => {
+  it("computes percent complete + balance (Tess $6k draw)", () => {
     expect(progressSummary(17325, 11327.87, 10000, 6000)).toEqual({ pctComplete: 65, balance: 1325 });
   });
   it("never divides by zero when there's no estimate", () => {
@@ -347,7 +347,7 @@ describe("recalcTotals credits — audit 8: a credit reduces a balance, never in
   });
 });
 
-describe("groupInvoiceLines — a hand-typed labor line is labor (the Badger Lane 'Other $760')", () => {
+describe("groupInvoiceLines — a hand-typed labor line is labor (the Bayberry Lane 'Other $760')", () => {
   const line = (description: string, line_total: number, extra: Record<string, unknown> = {}) =>
     ({ description, line_total, ...extra });
 

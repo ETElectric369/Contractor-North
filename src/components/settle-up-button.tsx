@@ -823,7 +823,7 @@ function useCardDoor(
       }
       if (c.ok) {
         /**
-         * THE PHONE'S WORD IS A CLAIM (0e2cb937 — Rich Seiler, INV-083, $420, 2026-09-30).
+         * THE PHONE'S WORD IS A CLAIM (0e2cb937 — Rich Siskin, INV-083, $420, 2026-09-30).
          *
          * "ok" from the bridge means the plugin's confirm call resolved — and the stock plugin
          * resolved without ever reading the intent's status. This screen used to turn that into

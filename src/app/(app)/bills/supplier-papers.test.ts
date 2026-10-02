@@ -15,7 +15,7 @@ import { fold, searchBills, wordsOf, moneyWords, type BillsSearchRow } from "./b
  * job names and totals are his, the jobs are his (ids shortened), the statement bill's lines are
  * the lines the receipt reader wrote ("Sales Tax 9.00 percent (Invoice 8802-1105868)"). The read-
  * only replay against ET that night listed 9 cards (8802-1107820 and 8802-1106969 had both just
- * been recorded by hand), none of them from before June 8 and none on Saddle Rd.
+ * been recorded by hand), none of them from before June 8 and none on Sorrel Rd.
  */
 
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
@@ -24,19 +24,19 @@ const ET_SETTINGS = { books_begin: "2026-06-08" };
 const CED = "acct-ced";
 
 const JOB_ROWS = [
-  { id: "j-002", job_number: "J-002", name: "Tao Zhu", status: "complete", address: "235 Timbercreek Court" },
-  { id: "j-006", job_number: "J-006", name: "5659 Rhodesia", status: "complete", address: "5659 Rhodesia Road" },
-  { id: "j-010", job_number: "J-010", name: "11301 Purple Sage", status: "complete", address: "11301 Purple Sage Rd, Truckee, CA 96161, USA" },
-  { id: "j-011", job_number: "J-011", name: "13897 Herringbone", status: "in_progress", address: "13897 Herringbone Way" },
-  { id: "j-013", job_number: "J-013", name: "TTP #56", status: "on_hold", address: "300 W Lake Blvd, Tahoe City, CA 96145, USA" },
-  { id: "j-014", job_number: "J-014", name: "5659 Rhodesia", status: "to_be_scheduled", address: "5659 Rhodesia Rd, Carnelian Bay, CA 96140, USA" },
-  { id: "j-028", job_number: "J-028", name: "85 Whitney Place", status: "in_progress", address: "85 Whitney Court" },
-  { id: "j-030", job_number: "J-030", name: "13631 Northwoods", status: "complete", address: "13631 Northwoods Boulevard" },
-  { id: "j-033", job_number: "J-033", name: "5659 Rhodesia", status: "complete", address: "5659 Rhodesia Rd, Carnelian Bay, CA 96140, USA" },
-  { id: "j-034", job_number: "J-034", name: "5659 Rhodesia - Panel Upgrade", status: "on_hold", address: "5659 Rhodesia Road" },
-  { id: "j-042", job_number: "J-042", name: "TTP #106", status: "complete", address: "300 West Lake Boulevard" },
-  { id: "j-045", job_number: "J-045", name: "13683 Hillside", status: "complete", address: "13683 Hillside Drive" },
-  { id: "j-050", job_number: "J-050", name: "3639 Saddle Road", status: "complete", address: "3639 Saddle Rd" },
+  { id: "j-002", job_number: "J-002", name: "Tess Zane", status: "complete", address: "235 Thistlewood Court" },
+  { id: "j-006", job_number: "J-006", name: "5659 Fernhill", status: "complete", address: "5659 Fernhill Road" },
+  { id: "j-010", job_number: "J-010", name: "11301 Pinyon Sage", status: "complete", address: "11301 Pinyon Sage Rd, Truckee, CA 96161, USA" },
+  { id: "j-011", job_number: "J-011", name: "13897 Honeysuckle", status: "in_progress", address: "13897 Honeysuckle Way" },
+  { id: "j-013", job_number: "J-013", name: "ARR #56", status: "on_hold", address: "300 W Garnet Blvd, Tahoe City, CA 96145, USA" },
+  { id: "j-014", job_number: "J-014", name: "5659 Fernhill", status: "to_be_scheduled", address: "5659 Fernhill Rd, Carnelian Bay, CA 96140, USA" },
+  { id: "j-028", job_number: "J-028", name: "41 Larkspur Place", status: "in_progress", address: "41 Larkspur Court" },
+  { id: "j-030", job_number: "J-030", name: "13631 Nightshade", status: "complete", address: "13631 Nightshade Boulevard" },
+  { id: "j-033", job_number: "J-033", name: "5659 Fernhill", status: "complete", address: "5659 Fernhill Rd, Carnelian Bay, CA 96140, USA" },
+  { id: "j-034", job_number: "J-034", name: "5659 Fernhill - Panel Upgrade", status: "on_hold", address: "5659 Fernhill Road" },
+  { id: "j-042", job_number: "J-042", name: "ARR #106", status: "complete", address: "300 West Garnet Boulevard" },
+  { id: "j-045", job_number: "J-045", name: "13683 Hazelnut", status: "complete", address: "13683 Hazelnut Drive" },
+  { id: "j-050", job_number: "J-050", name: "3639 Sorrel Road", status: "complete", address: "3639 Sorrel Rd" },
   { id: "j-099", job_number: "J-099", name: "Old Cancelled Job", status: "cancelled", address: null },
 ];
 const JOBS = reconcileJobsOf(JOB_ROWS);
@@ -65,29 +65,29 @@ function hisDocuments() {
   seq = 0;
   return [
     // ── the ones a person still has to answer ───────────────────────────────────────────────
-    doc({ id: "herringbone", invoice_number: "8802-1106969", invoice_date: "2026-09-04", job_name_raw: "13897 HERRINGBONE", total: "301.81" }),
-    doc({ id: "whitney", invoice_number: "8802-1107820", invoice_date: "2026-09-16", job_name_raw: "85 WHITNEY", total: "187.64" }),
-    doc({ id: "rhodesia", invoice_number: "8802-1105878", invoice_date: "2026-08-19", job_name_raw: "5659 RHODESIA", total: "216.44", closed: true }),
+    doc({ id: "honeysuckle", invoice_number: "8802-1106969", invoice_date: "2026-09-04", job_name_raw: "13897 HONEYSUCKLE", total: "301.81" }),
+    doc({ id: "larkspur", invoice_number: "8802-1107820", invoice_date: "2026-09-16", job_name_raw: "41 LARKSPUR", total: "187.64" }),
+    doc({ id: "fernhill", invoice_number: "8802-1105878", invoice_date: "2026-08-19", job_name_raw: "5659 FERNHILL", total: "216.44", closed: true }),
     doc({ id: "blank", invoice_number: "8802-1102291", invoice_date: "2026-06-29", job_name_raw: "CUSTOMER ORDER NO.", total: "451.75", closed: true }),
-    doc({ id: "ttp56", invoice_number: "8802-1102103", invoice_date: "2026-06-25", job_name_raw: "TTP56", total: "523.47", closed: true }),
-    doc({ id: "june8", invoice_number: "8802-1100911", invoice_date: "2026-06-08", job_name_raw: "5661 RHODESIA", total: "3.15", closed: true }),
+    doc({ id: "ttp56", invoice_number: "8802-1102103", invoice_date: "2026-06-25", job_name_raw: "ARR56", total: "523.47", closed: true }),
+    doc({ id: "june8", invoice_number: "8802-1100911", invoice_date: "2026-06-08", job_name_raw: "5661 FERNHILL", total: "3.15", closed: true }),
     // ── covered by a bill already: never a card ─────────────────────────────────────────────
-    doc({ id: "stmt-a", invoice_number: "8802-1105868", invoice_date: "2026-08-19", job_name_raw: "85 WHITNEY PLACE", total: "2950.17", closed: true }),
-    doc({ id: "stmt-b", invoice_number: "8802-1105963", invoice_date: "2026-08-19", job_name_raw: "85 WHITNEY PL", total: "84.37" }),
-    doc({ id: "taozhu", invoice_number: "8802-1101820", invoice_date: "2026-06-24", job_name_raw: "235 TIMBER CREEK", total: "1810.55", closed: true }),
+    doc({ id: "stmt-a", invoice_number: "8802-1105868", invoice_date: "2026-08-19", job_name_raw: "41 LARKSPUR PLACE", total: "2950.17", closed: true }),
+    doc({ id: "stmt-b", invoice_number: "8802-1105963", invoice_date: "2026-08-19", job_name_raw: "41 LARKSPUR PL", total: "84.37" }),
+    doc({ id: "tesszane", invoice_number: "8802-1101820", invoice_date: "2026-06-24", job_name_raw: "235 THISTLE WOOD", total: "1810.55", closed: true }),
     // ── never a card, each for its own reason ───────────────────────────────────────────────
-    doc({ id: "returned", invoice_number: "8802-1107230", invoice_date: "2026-09-03", job_name_raw: "TTP 106", job_id: "j-042", total: "225.47" }),
-    doc({ id: "return-memo", invoice_number: "8802-1107337", kind: "credit_memo", invoice_date: "2026-09-03", job_name_raw: "TTP 106", job_id: "j-042", total: "-225.47" }),
-    doc({ id: "credit", invoice_number: "8802-1104645", kind: "credit_memo", invoice_date: "2026-08-06", job_name_raw: "13631 NORTHWOODS", total: "-31.86" }),
+    doc({ id: "returned", invoice_number: "8802-1107230", invoice_date: "2026-09-03", job_name_raw: "ARR 106", job_id: "j-042", total: "225.47" }),
+    doc({ id: "return-memo", invoice_number: "8802-1107337", kind: "credit_memo", invoice_date: "2026-09-03", job_name_raw: "ARR 106", job_id: "j-042", total: "-225.47" }),
+    doc({ id: "credit", invoice_number: "8802-1104645", kind: "credit_memo", invoice_date: "2026-08-06", job_name_raw: "13631 NIGHTSHADE", total: "-31.86" }),
     doc({ id: "interest", invoice_number: "9019682437", kind: "service_charge", invoice_date: "2026-07-25", total: "31.26" }),
     doc({ id: "statement", invoice_number: "STATEMENT-082526", kind: "statement", invoice_date: "2026-08-25", total: "2587.66", closed: true }),
     doc({ id: "stock", invoice_number: "8802-1103061-X", invoice_date: "2026-07-13", job_name_raw: "STOCK", total: "114.40", closed: true }),
-    doc({ id: "nothing", invoice_number: "8802-1109000", invoice_date: "2026-09-10", job_name_raw: "13897 HERRINGBONE", total: "0.00" }),
-    // ── before June 8: the Saddle Rd pair already on J-050, and the two 5/28 Rhodesias ───────
-    doc({ id: "saddle-1", invoice_number: "8802-1099048", invoice_date: "2026-05-28", job_name_raw: "3639 SADDLE RD", job_id: "j-050", total: "355.17", closed: true }),
-    doc({ id: "saddle-2", invoice_number: "8802-1099868", invoice_date: "2026-05-28", job_name_raw: "3639 SADDLE", job_id: "j-050", total: "66.00", closed: true }),
-    doc({ id: "rhod-528a", invoice_number: "8802-1100090", invoice_date: "2026-05-28", job_name_raw: "5659 RHODESIA", total: "744.96", closed: true }),
-    doc({ id: "rhod-528b", invoice_number: "8802-1100166", invoice_date: "2026-05-28", job_name_raw: "5659 RHODESIA", total: "375.31", closed: true }),
+    doc({ id: "nothing", invoice_number: "8802-1109000", invoice_date: "2026-09-10", job_name_raw: "13897 HONEYSUCKLE", total: "0.00" }),
+    // ── before June 8: the Sorrel Rd pair already on J-050, and the two 5/28 Fernhills ───────
+    doc({ id: "sorrel-1", invoice_number: "8802-1099048", invoice_date: "2026-05-28", job_name_raw: "3639 SORREL RD", job_id: "j-050", total: "355.17", closed: true }),
+    doc({ id: "sorrel-2", invoice_number: "8802-1099868", invoice_date: "2026-05-28", job_name_raw: "3639 SORREL", job_id: "j-050", total: "66.00", closed: true }),
+    doc({ id: "rhod-528a", invoice_number: "8802-1100090", invoice_date: "2026-05-28", job_name_raw: "5659 FERNHILL", total: "744.96", closed: true }),
+    doc({ id: "rhod-528b", invoice_number: "8802-1100166", invoice_date: "2026-05-28", job_name_raw: "5659 FERNHILL", total: "375.31", closed: true }),
   ];
 }
 
@@ -106,8 +106,8 @@ function hisBills() {
       job_id: "j-028",
       is_statement: false,
       superseded_by_bill_id: null,
-      notes: "Receipt recorded as cost: 85 Whitney Pl - CED.pdf",
-      jobs: { job_number: "J-028", name: "85 Whitney Place" },
+      notes: "Receipt recorded as cost: 41 Larkspur Pl - CED.pdf",
+      jobs: { job_number: "J-028", name: "41 Larkspur Place" },
       line_items: [
         { description: "5/6 in RL, 900/1200LM 5CCT D2W" },
         { description: "Sales Tax 9.00 percent (Invoice 8802-1105868)" },
@@ -127,13 +127,13 @@ function hisBills() {
       is_statement: false,
       superseded_by_bill_id: null,
       notes: "Receipt recorded as cost: image.jpg",
-      jobs: { job_number: "J-002", name: "Tao Zhu" },
+      jobs: { job_number: "J-002", name: "Tess Zane" },
       line_items: [{ description: "SIEM Q2100 2P 100A 120/240V CB" }],
     },
   ];
 }
 
-const LINKS = [{ bill_id: "64451b80", supplier_invoice_id: "taozhu" }];
+const LINKS = [{ bill_id: "64451b80", supplier_invoice_id: "tesszane" }];
 
 function feedTonight(over: { documents?: any[]; bills?: any[]; links?: any[] } = {}) {
   const bills = over.bills ?? hisBills();
@@ -225,10 +225,10 @@ describe("the June 8 line (Erik: \"june 8 is good\")", () => {
     expect(page).toContain("<BooksBeginLine since={recordsSince} named={!!booksNamed} canChange={canChangeSettings} />");
   });
 
-  it("no Saddle Rd card and nothing from before June 8, but June 8 itself counts", () => {
+  it("no Sorrel Rd card and nothing from before June 8, but June 8 itself counts", () => {
     const f = feedTonight();
     for (const n of ["8802-1099048", "8802-1099868", "8802-1100090", "8802-1100166"]) expect(card(f, n)).toBeUndefined();
-    expect(f.cards.some((c) => /SADDLE/.test(c.said ?? ""))).toBe(false);
+    expect(f.cards.some((c) => /SORREL/.test(c.said ?? ""))).toBe(false);
     expect(f.cards.every((c) => !c.date || c.date >= "2026-06-08")).toBe(true);
     expect(card(f, "8802-1100911")).toBeTruthy();
   });
@@ -239,18 +239,18 @@ describe("which papers make a card", () => {
     const c = card(feedTonight(), "8802-1106969")!;
     expect(c.supplier).toBe("CED");
     expect(c.total).toBe(301.81);
-    expect(c.said).toBe("13897 HERRINGBONE");
+    expect(c.said).toBe("13897 HONEYSUCKLE");
     expect(c.state).toBe("needs_job");
     expect(c.verdict).toBe("one");
-    expect(c.suggestion).toEqual({ id: "j-011", label: "J-011", name: "13897 Herringbone", status: "in progress" });
+    expect(c.suggestion).toEqual({ id: "j-011", label: "J-011", name: "13897 Honeysuckle", status: "in progress" });
     expect(c.candidates).toEqual([]);
   });
 
-  it("8802-1107820 (85 WHITNEY) suggests J-028", () => {
+  it("8802-1107820 (41 LARKSPUR) suggests J-028", () => {
     expect(card(feedTonight(), "8802-1107820")!.suggestion?.label).toBe("J-028");
   });
 
-  it("a Rhodesia paper asks: the close jobs are chips and none of them goes first", () => {
+  it("a Fernhill paper asks: the close jobs are chips and none of them goes first", () => {
     const c = card(feedTonight(), "8802-1105878")!;
     expect(c.verdict).toBe("ask");
     expect(c.suggestion).toBeNull();
@@ -267,9 +267,9 @@ describe("which papers make a card", () => {
     expect(c.candidates).toEqual([]);
   });
 
-  it("quotes CED's own words verbatim: TTP56 stays TTP56", () => {
+  it("quotes CED's own words verbatim: ARR56 stays ARR56", () => {
     const c = card(feedTonight(), "8802-1102103")!;
-    expect(c.said).toBe("TTP56");
+    expect(c.said).toBe("ARR56");
     expect(c.suggestion?.label).toBe("J-013");
   });
 
@@ -308,14 +308,14 @@ describe("which papers make a card", () => {
       is_statement: false,
       superseded_by_bill_id: null,
       notes: "Recorded from Consolidated Electrical Distributors invoice 8802-1106969, the supplier's own document.",
-      jobs: { job_number: "J-011", name: "13897 Herringbone" },
+      jobs: { job_number: "J-011", name: "13897 Honeysuckle" },
       line_items: [],
     };
     expect(card(feedTonight({ bills: [...hisBills(), recorded] }), "8802-1106969")).toBeUndefined();
   });
 
   it("a paper a person already put on a job, after the line, asks only for the bill", () => {
-    const documents = [doc({ id: "saddle-late", invoice_number: "8802-1111111", invoice_date: "2026-06-20", job_name_raw: "3639 SADDLE", job_id: "j-050", total: "66.00" })];
+    const documents = [doc({ id: "sorrel-late", invoice_number: "8802-1111111", invoice_date: "2026-06-20", job_name_raw: "3639 SORREL", job_id: "j-050", total: "66.00" })];
     const c = feedTonight({ documents, bills: [], links: [] }).cards[0];
     expect(c.state).toBe("record");
     expect(c.onJob?.label).toBe("J-050");
@@ -336,7 +336,7 @@ describe("which papers make a card", () => {
       is_statement: false,
       superseded_by_bill_id: null,
       notes: null,
-      jobs: { job_number: "J-011", name: "13897 Herringbone" },
+      jobs: { job_number: "J-011", name: "13897 Honeysuckle" },
       line_items: [],
     };
     const c = card(feedTonight({ bills: [...hisBills(), ticket] }), "8802-1106969")!;
@@ -350,7 +350,7 @@ describe("which papers make a card", () => {
 });
 
 describe("review of Wave A", () => {
-  it("a weak card still brings the nearest jobs, for the top of its picker (5661 RHODESIA)", () => {
+  it("a weak card still brings the nearest jobs, for the top of its picker (5661 FERNHILL)", () => {
     const c = card(feedTonight(), "8802-1100911")!;
     expect(c.verdict).toBe("weak");
     const closest = (c.closest ?? []).map((j) => j.label);
@@ -363,7 +363,7 @@ describe("review of Wave A", () => {
   it("a credit memo from one supplier never reverses another supplier's purchase (the Record button reads per account)", () => {
     const rows = supplierDocumentRows({
       documents: [
-        doc({ id: "a-buy", supplier_account_id: "acct-a", invoice_number: "A-1", total: "120.00", job_name_raw: "13897 HERRINGBONE", invoice_date: "2026-09-10" }),
+        doc({ id: "a-buy", supplier_account_id: "acct-a", invoice_number: "A-1", total: "120.00", job_name_raw: "13897 HONEYSUCKLE", invoice_date: "2026-09-10" }),
         doc({ id: "b-memo", supplier_account_id: "acct-b", invoice_number: "B-9", kind: "credit_memo", total: "-120.00", invoice_date: "2026-09-11" }),
       ],
       bills: [],
@@ -433,7 +433,7 @@ describe("the supplier bills badge as ONE line (the BADGE INVARIANT)", () => {
 describe("shortSupplierName", () => {
   it("says CED, keeps a short name, and prefers the short form an account carries", () => {
     expect(shortSupplierName("Consolidated Electrical Distributors")).toBe("CED");
-    expect(shortSupplierName("Swigard's Hardware")).toBe("Swigard's Hardware");
+    expect(shortSupplierName("Brandow's Hardware")).toBe("Brandow's Hardware");
     expect(shortSupplierName("Ace Mountain Hardware")).toBe("Ace Mountain Hardware");
     expect(shortSupplierName("Outdoor Supply Hardware (OSH - Cupertino)")).toBe("OSH - Cupertino");
     expect(shortSupplierName(null)).toBe("The Supplier");
@@ -452,7 +452,7 @@ describe("finding a paper on /bills by what he remembers", () => {
       kind: "paper",
       title: "CED Invoice 8802-1107820",
       sub: "",
-      words: wordsOf("8802-1107820", "85 WHITNEY", "CED", moneyWords(187.64), "J-028", "85 Whitney Place", "85 Whitney Court"),
+      words: wordsOf("8802-1107820", "41 LARKSPUR", "CED", moneyWords(187.64), "J-028", "41 Larkspur Place", "41 Larkspur Court"),
       href: "/jobs/j-028",
     },
     {
@@ -460,7 +460,7 @@ describe("finding a paper on /bills by what he remembers", () => {
       kind: "bill",
       title: "CED #8802-1106969",
       sub: "",
-      words: wordsOf("8802-1106969", "Consolidated Electrical Distributors", moneyWords("301.81"), "J-011", "13897 Herringbone"),
+      words: wordsOf("8802-1106969", "Consolidated Electrical Distributors", moneyWords("301.81"), "J-011", "13897 Honeysuckle"),
       href: "/jobs/j-011",
     },
   ];
@@ -469,22 +469,22 @@ describe("finding a paper on /bills by what he remembers", () => {
   it("by number, street, job, CED's words, or money", () => {
     expect(keys("1107820")).toEqual(["paper:1"]);
     expect(keys("8802-1106969")).toEqual(["bill:2"]);
-    expect(keys("whitney")).toEqual(["paper:1"]);
-    expect(keys("herringbone")).toEqual(["bill:2"]);
+    expect(keys("larkspur")).toEqual(["paper:1"]);
+    expect(keys("honeysuckle")).toEqual(["bill:2"]);
     expect(keys("J-028")).toEqual(["paper:1"]);
     expect(keys("$187.64")).toEqual(["paper:1"]);
     expect(keys("301.81")).toEqual(["bill:2"]);
   });
 
   it("every word he types has to match, and one character finds nothing", () => {
-    expect(keys("whitney 301")).toEqual([]);
+    expect(keys("larkspur 301")).toEqual([]);
     expect(keys("8")).toEqual([]);
     expect(keys("8802")).toEqual(["paper:1", "bill:2"]);
   });
 
   it("says how many more matched than it shows", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ ...rows[0], key: `p${i}` }));
-    const { hits, more } = searchBills(many, "whitney", 25);
+    const { hits, more } = searchBills(many, "larkspur", 25);
     expect(hits).toHaveLength(25);
     expect(more).toBe(5);
   });
@@ -498,12 +498,12 @@ describe("finding a paper on /bills by what he remembers", () => {
 
 // ── WAITING ON A CREDIT (Erik, 2026-09-26; 0346) ─────────────────────────────────────────────────
 //
-// His real paper: 8802-1107139, $59.17, 13683 HILLSIDE, the replacement of a faulty switch that a
+// His real paper: 8802-1107139, $59.17, 13683 HAZELNUT, the replacement of a faulty switch that a
 // CED credit memo for the same amount will take back off. The credit hadn't come in.
 
-describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
-  const hillside = (over: Record<string, unknown> = {}) =>
-    doc({ id: "hillside", invoice_number: "8802-1107139", invoice_date: "2026-09-01", job_name_raw: "13683 HILLSIDE", total: "59.17", ...over });
+describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HAZELNUT", () => {
+  const hazelnut = (over: Record<string, unknown> = {}) =>
+    doc({ id: "hazelnut", invoice_number: "8802-1107139", invoice_date: "2026-09-01", job_name_raw: "13683 HAZELNUT", total: "59.17", ...over });
   const feedWith = (extra: any[], today: string) => {
     const bills = hisBills();
     const { rows } = supplierDocumentRows({ documents: [...hisDocuments(), ...extra], bills, links: LINKS, aliasRows: [] });
@@ -513,7 +513,7 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
   const TAPPED = "2026-09-27T00:10:00+00:00";
 
   it("today it is a card, suggesting J-045, with nothing waiting", () => {
-    const f = feedWith([hillside()], "2026-09-26");
+    const f = feedWith([hazelnut()], "2026-09-26");
     const c = card(f, "8802-1107139")!;
     expect(c.suggestion?.label).toBe("J-045");
     expect(c.waitingCredit).toBeUndefined();
@@ -521,7 +521,7 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
   });
 
   it("waiting, it leaves the cards (My Day and Needs You) and is listed as waiting, back in 30 days", () => {
-    const f = feedWith([hillside({ waiting_credit_since: TAPPED })], "2026-10-25");
+    const f = feedWith([hazelnut({ waiting_credit_since: TAPPED })], "2026-10-25");
     expect(card(f, "8802-1107139")).toBeUndefined();
     expect(f.waiting?.map((c) => c.invoiceNumber)).toEqual(["8802-1107139"]);
     expect(f.waiting?.[0].waitingCredit).toEqual({ since: "2026-09-26", back: "2026-10-26", overdue: false });
@@ -532,7 +532,7 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
   });
 
   it("with no credit after 30 days it comes back by itself and says so", () => {
-    const f = feedWith([hillside({ waiting_credit_since: TAPPED })], "2026-10-26");
+    const f = feedWith([hazelnut({ waiting_credit_since: TAPPED })], "2026-10-26");
     const c = card(f, "8802-1107139")!;
     expect(c.stillNoCredit).toBe("Still no credit from CED after 30 days");
     expect(c.waitingCredit?.overdue).toBe(true);
@@ -540,9 +540,9 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
   });
 
   it("once CED's credit memo for $59.17 on the same account lands, the pair is gone from both lists", () => {
-    const memo = doc({ id: "hillside-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-02", job_name_raw: "13683 HILLSIDE", total: "-59.17" });
+    const memo = doc({ id: "hazelnut-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-02", job_name_raw: "13683 HAZELNUT", total: "-59.17" });
     for (const today of ["2026-10-05", "2026-11-30"]) {
-      const f = feedWith([hillside({ waiting_credit_since: TAPPED }), memo], today);
+      const f = feedWith([hazelnut({ waiting_credit_since: TAPPED }), memo], today);
       expect(card(f, "8802-1107139")).toBeUndefined();
       expect(f.waiting).toEqual([]);
     }
@@ -556,32 +556,32 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
    */
   it("the credit pairs with the waiting bill whichever of the two CED has closed (invoice closed, memo open)", () => {
     const memo = (over: Record<string, unknown> = {}) =>
-      doc({ id: "hillside-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-12", job_name_raw: "13683 HILLSIDE", total: "-59.17", ...over });
+      doc({ id: "hazelnut-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-12", job_name_raw: "13683 HAZELNUT", total: "-59.17", ...over });
     for (const [bill, credit] of [
       [{ closed: true, open_balance: "0" }, {}],
       [{}, { closed: true, open_balance: "0" }],
     ] as const) {
-      const f = feedWith([hillside({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], "2026-10-27");
+      const f = feedWith([hazelnut({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], "2026-10-27");
       expect(card(f, "8802-1107139")).toBeUndefined();
       expect(f.waiting).toEqual([]);
       // And /bills's Not In Your Books (and the job's Costs tab) count it taken back, not missing.
-      const { rows } = supplierDocumentRows({ documents: [hillside({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], bills: [], links: [], aliasRows: [] });
+      const { rows } = supplierDocumentRows({ documents: [hazelnut({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], bills: [], links: [], aliasRows: [] });
       const need = invoicesNeedingBill(rows, { since: null });
-      expect(need.rows.map((r) => r.id)).not.toContain("hillside");
+      expect(need.rows.map((r) => r.id)).not.toContain("hazelnut");
       expect(need.reversedRows).toBe(1);
     }
   });
 
   it("the stamp breaks the twins tie: two $59.17 bills, one memo, the waiting one is the one credited", () => {
-    const twin = doc({ id: "twin", invoice_number: "8802-1107140", invoice_date: "2026-09-02", job_name_raw: "85 WHITNEY", total: "59.17" });
-    const memo = doc({ id: "hillside-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-12", total: "-59.17" });
-    const f = feedWith([hillside({ waiting_credit_since: TAPPED }), twin, memo], "2026-10-27");
+    const twin = doc({ id: "twin", invoice_number: "8802-1107140", invoice_date: "2026-09-02", job_name_raw: "41 LARKSPUR", total: "59.17" });
+    const memo = doc({ id: "hazelnut-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-12", total: "-59.17" });
+    const f = feedWith([hazelnut({ waiting_credit_since: TAPPED }), twin, memo], "2026-10-27");
     expect(card(f, "8802-1107139")).toBeUndefined();
     expect(f.waiting).toEqual([]);
     // The one nobody said anything about is still a card: nothing says it came back.
     expect(card(f, "8802-1107140")).toBeDefined();
     // Two stamped twins and one memo: nothing says which, so neither is answered.
-    const f2 = feedWith([hillside({ waiting_credit_since: TAPPED }), { ...twin, waiting_credit_since: TAPPED }, memo], "2026-10-27");
+    const f2 = feedWith([hazelnut({ waiting_credit_since: TAPPED }), { ...twin, waiting_credit_since: TAPPED }, memo], "2026-10-27");
     expect(f2.cards.filter((c) => c.stillNoCredit).map((c) => c.invoiceNumber).sort()).toEqual(["8802-1107139", "8802-1107140"]);
   });
 
@@ -600,26 +600,26 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
 
   it("a credit memo on ANOTHER supplier's account never pairs with it", () => {
     const other = doc({ id: "other-credit", supplier_account_id: "acct-other", invoice_number: "X-1", kind: "credit_memo", total: "-59.17" });
-    const f = feedWith([hillside({ waiting_credit_since: TAPPED }), other], "2026-10-26");
+    const f = feedWith([hazelnut({ waiting_credit_since: TAPPED }), other], "2026-10-26");
     expect(card(f, "8802-1107139")?.stillNoCredit).toBe("Still no credit from CED after 30 days");
   });
 
   it("the /bills read and My Day's carry the stamp through (supplierDocumentRows)", () => {
-    const { rows } = supplierDocumentRows({ documents: [hillside({ waiting_credit_since: TAPPED })], bills: [], links: [], aliasRows: [] });
+    const { rows } = supplierDocumentRows({ documents: [hazelnut({ waiting_credit_since: TAPPED })], bills: [], links: [], aliasRows: [] });
     expect(rows[0].waitingCreditSince).toBe(TAPPED);
     expect(supplierPaperNeeds(rows, JOBS, { today: "2026-10-01" })).toEqual([]);
-    expect(supplierPapersWaitingOnCredit(rows, JOBS, { today: "2026-10-01" }).map((c) => c.invoiceId)).toEqual(["hillside"]);
+    expect(supplierPapersWaitingOnCredit(rows, JOBS, { today: "2026-10-01" }).map((c) => c.invoiceId)).toEqual(["hazelnut"]);
   });
 
   it("a stamp on a paper with no supplier account never hides it: it stays a card (nowhere to fold, nothing to pair)", () => {
     const { rows } = supplierDocumentRows({
-      documents: [hillside({ waiting_credit_since: TAPPED, supplier_account_id: null })],
+      documents: [hazelnut({ waiting_credit_since: TAPPED, supplier_account_id: null })],
       bills: [],
       links: [],
       aliasRows: [],
     });
     const cards = supplierPaperNeeds(rows, JOBS, { today: "2026-10-01" });
-    expect(cards.map((c) => c.invoiceId)).toEqual(["hillside"]);
+    expect(cards.map((c) => c.invoiceId)).toEqual(["hazelnut"]);
     expect(cards[0].accountId).toBeNull();
     expect(cards[0].waitingCredit).toBeUndefined();
     expect(supplierPapersWaitingOnCredit(rows, JOBS, { today: "2026-10-01" })).toEqual([]);

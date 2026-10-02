@@ -13,7 +13,7 @@ import { assembleInvoiceDocumentProps } from "@/lib/invoice-document-props";
  * customer door reads them through customerLineWords. The live cases are real ET rows.
  */
 const CED = "Consolidated Electrical Distributors, Inc. (CED)";
-const SUPPLIERS = supplierNameSet([CED, "The Home Depot", "Swigard's Hardware", "Consolidated Electrical Dist.", null, "  "]);
+const SUPPLIERS = supplierNameSet([CED, "The Home Depot", "Brandow's Hardware", "Consolidated Electrical Dist.", null, "  "]);
 const costs = (description: string, extra: { import_key?: string | null; edited?: boolean } = {}) => ({
   description,
   import_source: "costs",

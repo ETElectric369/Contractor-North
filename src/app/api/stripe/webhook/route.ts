@@ -89,7 +89,7 @@ export async function POST(req: Request) {
 
   /**
    * THE ONE WRITER FOR STRIPE MONEY, shared with the Pay Now sheet's own check (lib/record-invoice-
-   * payment.ts, 2026-09-30: Rich Seiler's $420 said "approved" on the phone and was never charged;
+   * payment.ts, 2026-09-30: Rich Siskin's $420 said "approved" on the phone and was never charged;
    * the sheet now asks Stripe and books a succeeded tap itself when this webhook hasn't landed
    * yet). Everything that used to live here — the org<->account and invoice<->org claim, the draft
    * note, the event-id idempotency, the shared recalc, the office push, the fee — lives there now,

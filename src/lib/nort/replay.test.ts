@@ -184,7 +184,7 @@ describe("Nort replays an assistant turn that thought", () => {
       ),
       ROUND_TWO,
     ]);
-    const convo: Anthropic.MessageParam[] = [{ role: "user", content: "Find Herringbone" }];
+    const convo: Anthropic.MessageParam[] = [{ role: "user", content: "Find Honeysuckle" }];
     await runRound(client, convo);
     convo.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_3", content: "J-011" }] });
     await runRound(client, convo);

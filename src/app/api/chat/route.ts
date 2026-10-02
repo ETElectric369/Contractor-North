@@ -151,7 +151,7 @@ const REQUEST_CONTACT_TOOL = {
   input_schema: {
     type: "object",
     properties: {
-      search: { type: "string", description: "Optional initial search term to pre-fill, e.g. 'Jackie'." },
+      search: { type: "string", description: "Optional initial search term to pre-fill, e.g. 'Marla'." },
       type: { type: "string", enum: ["residential", "commercial", "industrial", "subcontractor"], description: "Optional — filter the picker to one contact type." },
     },
   },
@@ -463,7 +463,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     systemPrompt +=
       "\n\nWRITE IT DOWN: when the user gives you an idea, a feature request, an app suggestion, a note, or any thought to keep ('capture this', 'write this down', 'remember this idea') — call capture.quick with the FULL text; it saves instantly to Needs You, on their My Day, for later filing. Use it too whenever they describe something you have no other tool for but that clearly shouldn't be lost." +
       "\n\nTHE HONESTY RULE (absolute): NEVER say 'captured', 'saved', 'added', 'done', or read back a record as if it exists unless a tool call actually SUCCEEDED in this conversation. If you have no tool for what they asked, say so plainly in one sentence and offer capture.quick so the thought still lands somewhere real. A confident claim with no write behind it is the worst thing you can do — it silently loses their work. Corollary: never claim a LINK you didn't write — 'attached to John' / 'pinned to the job' is true only if that exact id was an argument of a call that succeeded, or a write that succeeded says it made that link in its `recorded` line (customer.create links the one visit you just booked for that person and says so); a missing link gets ADDED (quote.setCustomer, quote.attachJob, appointment.linkCustomer), the document never re-created. Corollary 2 (edits): after you change line items, the NEW TOTAL is real ONLY if you RE-READ the record (get_quote) after the write tools returned ok — do NOT do the arithmetic in your head and report that figure as saved. Write → get the ok → re-read → THEN read back the real total (and show_card it). If you run low on tool rounds, prioritize the write over the readback: it's better to say 'saved — pull it up to see the new total' than to recite a total you never confirmed." +
-      // The Chmura night (2026-07-01): one estimate saved three times (E-009/010/011) + three
+      // The Clover night (2026-07-01): one estimate saved three times (E-009/010/011) + three
       // calls failed on names/placeholders passed as ids. These two rules close both holes.
       "\n\nSAVE ONCE: a document already saved this conversation is NEVER created again — a later 'save it' about the same doc means confirm its number and EDIT it (quote.addItem/updateItem/deleteItem, quote.setType, quote.setCustomer, quote.attachJob). Duplicate drafts cost the user cleanup and trust." +
       "\n\nIDS ARE UUIDS: every id argument (customer_id, job_id, profile_id, entry id…) must be a uuid RETURNED BY a list_* tool in this conversation. Never pass a name ('<customer name>'), a slug, or a placeholder ('{{JOB_ID}}') where an id belongs — if you don't have the uuid yet, look it up first, then write.";
@@ -767,7 +767,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       const MAX_WRITES = 3;
       let writeCount = 0;
       // The model's text before a tool call and its text after it are two blocks the stream
-      // simply concatenated — "I'll pull that job's numbers.J-011, 13897 Herringbone" is what
+      // simply concatenated — "I'll pull that job's numbers.J-011, 13897 Honeysuckle" is what
       // the 2026-09-11 transcript holds, and what the screen showed. One paragraph break between
       // rounds, added only when text actually follows, keeps both the screen and the persisted
       // transcript readable (and lets the sentence splitter in voice mode find the boundary).
@@ -796,7 +796,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               ],
               // Native web search (server-side, autonomous) so the assistant can research
               // LIVE prices, specs, and code while estimating — the core "do it like Claude
-              // did the Tao Zhu quote" capability. Results are untrusted web text (the
+              // did the Tess Zane quote" capability. Results are untrusted web text (the
               // input-is-data rule in the system prompt covers them).
               // The live quote preview is an Estimates door (its Save makes an estimate): off with it.
               // With Sales Tax off it carries no tax field (quoteDraftToolFor).

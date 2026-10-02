@@ -50,7 +50,7 @@ export function NewCustomerInline({
   className?: string;
   /** What was typed where nothing matched (/billing's New Invoice): the name box starts with it. */
   initialName?: string;
-  /** The closed button's words ("New Customer 'Tao Zhu'"). */
+  /** The closed button's words ("New Customer 'Tess Zane'"). */
   label?: string;
 }) {
   const [open, setOpen] = useState(false);

@@ -70,7 +70,9 @@ export function SectionSubnav({ isStaff, features }: { isStaff?: boolean; featur
   // UP TO lg, NOT up to shell:. The dock's inside-left column only appears at 1024 now, so
   // between 640 and 1024 on a mouse THIS is the section nav — and it costs no content width.
   return (
-    <div className="mb-4 flex w-full gap-1.5 pb-1 lg:hidden">
+    // `app-subnav`: on a phone held sideways globals.css takes the gap under the strip back for the
+    // page — every door stays, at the same size.
+    <div className="app-subnav mb-4 flex w-full gap-1.5 pb-1 lg:hidden">
       {tabs.map((c) => {
         const active = c.href === activeHref;
         const Icon = c.icon;

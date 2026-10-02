@@ -14,8 +14,8 @@ vi.mock("@/lib/supabase/server", () => {
         if (table === "time_entries" && q.verb === "update") return { data: { id: "p1" } };
         if (table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles", timeclock_job_codes: true } } };
         if (table === "jobs" && q.verb === "select" && q.cols.startsWith("org_id"))
-          return { data: { org_id: "org-1", status: db.jobStatus, job_number: "J-048", name: "Tanager Ln", hold_reason: "waiting on the permit" } };
-        if (table === "jobs" && q.verb === "select") return { data: { id: "j48", status: db.jobStatus, job_number: "J-048", name: "Tanager Ln", address: null, customers: null } };
+          return { data: { org_id: "org-1", status: db.jobStatus, job_number: "J-048", name: "Tupelo Ln", hold_reason: "waiting on the permit" } };
+        if (table === "jobs" && q.verb === "select") return { data: { id: "j48", status: db.jobStatus, job_number: "J-048", name: "Tupelo Ln", address: null, customers: null } };
         if (table === "jobs" && q.verb === "update") {
           const onlyHeld = q.filters.some((f) => f[0] === "eq" && f[1] === "status" && f[2] === "on_hold");
           return { data: onlyHeld ? (db.woke ? [{ id: "j48" }] : []) : null };
@@ -102,14 +102,14 @@ describe("the answer to a pick that took a job off hold", () => {
   const WARNING = "J-048 was on hold (waiting on the permit). It's off hold now.";
 
   it("says both sentences, the placed one first", async () => {
-    const put = vi.fn(async () => ({ ok: true, label: "J-048 Tanager", warning: WARNING }));
-    expect(await pickOutcome(put, "p1", held)).toEqual({ kind: "placed", sentence: `Your punch is on J-048 Tanager. ${WARNING}` });
+    const put = vi.fn(async () => ({ ok: true, label: "J-048 Tupelo", warning: WARNING }));
+    expect(await pickOutcome(put, "p1", held)).toEqual({ kind: "placed", sentence: `Your punch is on J-048 Tupelo. ${WARNING}` });
   });
 
   it("at a door with a toast, the toast carries both; at the offline queue's door, the sheet does", async () => {
-    const put = vi.fn(async () => ({ ok: true, label: "J-048 Tanager", warning: WARNING }));
+    const put = vi.fn(async () => ({ ok: true, label: "J-048 Tupelo", warning: WARNING }));
     const out = await pickOutcome(put, "p1", held);
-    const both = `Your punch is on J-048 Tanager. ${WARNING}`;
+    const both = `Your punch is on J-048 Tupelo. ${WARNING}`;
     expect(routePick(out, { confirmInline: false, gone: false })).toEqual({
       refresh: true,
       toast: { sentence: both, kind: "success" },
@@ -144,7 +144,7 @@ describe("the answer to a pick that took a job off hold", () => {
     db.calls = [];
     db.jobStatus = "on_hold";
     db.woke = true;
-    expect(await putPunchOnJob("p1", "j48")).toEqual({ ok: true, label: "Tanager Ln", warning: WARNING });
+    expect(await putPunchOnJob("p1", "j48")).toEqual({ ok: true, label: "Tupelo Ln", warning: WARNING });
     // The wake is its own checked write: only while the job is still on hold, and asked back.
     const wake = db.calls.find((c) => c.table === "jobs" && c.verb === "update")!;
     expect(wake.payload).toEqual({ status: "in_progress" });
@@ -152,11 +152,11 @@ describe("the answer to a pick that took a job off hold", () => {
     // Someone took it off hold first: no warning (the job was never taken off hold by this pick).
     db.calls = [];
     db.woke = false;
-    expect(await putPunchOnJob("p1", "j48")).toEqual({ ok: true, label: "Tanager Ln" });
+    expect(await putPunchOnJob("p1", "j48")).toEqual({ ok: true, label: "Tupelo Ln" });
     // A job that wasn't held: the pick is what it always was.
     db.calls = [];
     db.jobStatus = "scheduled";
-    expect(await putPunchOnJob("p1", "j48")).toEqual({ ok: true, label: "Tanager Ln" });
+    expect(await putPunchOnJob("p1", "j48")).toEqual({ ok: true, label: "Tupelo Ln" });
   });
 
   it("a refusal never carries a warning: it is the refusal, in its own words", async () => {

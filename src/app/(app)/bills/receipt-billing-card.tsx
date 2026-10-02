@@ -465,8 +465,8 @@ export function ReceiptLines({
  * PUT THE REST ON THE SHELF (Shop Stock, Phase 2): "used on this job N, the rest to the shelf".
  *
  * Opens on the ticket's own count ("250 ft") and how much of it this job was already billed (none,
- * when the line was split to $0), so on Herringbone's 8/19 coil it is one tap: 0 used, 250 ft to
- * the shelf, $180.17 off Herringbone. Before the save it says exactly what will happen to the
+ * when the line was split to $0), so on Honeysuckle's 8/19 coil it is one tap: 0 used, 250 ft to
+ * the shelf, $180.17 off Honeysuckle. Before the save it says exactly what will happen to the
  * customer's bill and to the job's cost, from the same arithmetic the server writes with.
  */
 function PutTheRestOnTheShelf({

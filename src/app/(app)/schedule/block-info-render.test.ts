@@ -44,7 +44,7 @@ const block = (minutes: number, crew: TimeGridEvent["info"] extends infer I ? (I
     dayStr: "2026-09-28",
     startMin: 600,
     endMin: 600 + minutes,
-    label: "Seiler · 3-way switches",
+    label: "Siskin · 3-way switches",
     info: { place: "123 Main St", town: "Truckee", time: "10a–12p", crew },
     color: "border-slate-300 bg-slate-200/80 text-slate-800",
     href: "/jobs/j058",
@@ -64,7 +64,7 @@ const grid = (e: TimeGridEvent, extra: Record<string, unknown> = {}) =>
 describe("a grid block, by its height", () => {
   it("two hours: the name, the street, the crew, the time and the town", () => {
     const t = text(grid(block(120)));
-    for (const w of ["Seiler · 3-way switches", "123 Main St", "ET", "10a–12p", "Truckee"]) expect(t).toContain(w);
+    for (const w of ["Siskin · 3-way switches", "123 Main St", "ET", "10a–12p", "Truckee"]) expect(t).toContain(w);
   });
 
   it("an hour: the name, the street and the crew; a half hour: the name alone (but its title says it all)", () => {
@@ -74,7 +74,7 @@ describe("a grid block, by its height", () => {
     expect(text(hour)).not.toContain("10a–12p");
     const half = grid(block(30));
     expect(text(half)).not.toContain("123 Main St");
-    expect(half).toContain('title="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor"');
+    expect(half).toContain('title="Siskin · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor"');
   });
 
   it("nobody on it is a dashed Nobody; the block never grows past its time (overflow is clipped, lines are whole)", () => {
@@ -87,7 +87,7 @@ describe("a grid block, by its height", () => {
 
   it("with the office's tap, the block opens its sheet and says what it holds", () => {
     const html = grid({ ...block(120), tapId: "job:j058" }, { onEventTap: () => {} });
-    expect(html).toMatch(/<button[^>]*aria-label="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor: day, time and crew"/);
+    expect(html).toMatch(/<button[^>]*aria-label="Siskin · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor: day, time and crew"/);
   });
 });
 
@@ -97,14 +97,14 @@ describe("the day drill's card", () => {
       createElement(JobScheduleCard, {
         job: {
           id: "j058",
-          name: "Seiler · 3-way switches",
+          name: "Siskin · 3-way switches",
           job_number: "J-058",
           status: "scheduled",
           scheduled_start: at("2026-09-28", "10:00"),
           scheduled_end: at("2026-09-28", "12:00"),
           planned_minutes: null,
           assigned_to: ["p-erik"],
-          customers: { name: "Rich Seiler" },
+          customers: { name: "Rich Siskin" },
           address: "123 Main St",
           city: "Truckee",
           ...over,
@@ -126,18 +126,18 @@ describe("the day drill's card", () => {
   });
 
   it("a job named for its street reads who instead of the street twice", () => {
-    const t = text(card({ name: "123 Main St", customers: { name: "Rich Seiler" } }));
-    expect(t).toContain("Rich Seiler");
+    const t = text(card({ name: "123 Main St", customers: { name: "Rich Siskin" } }));
+    expect(t).toContain("Rich Siskin");
     expect(t.match(/123 Main St/g)?.length).toBe(1);
   });
 
   it("a job whose name already says who (and has no street) reads no J-number in its place: only its town", () => {
-    const named = { name: "Jackie Burks · Panel Upgrade", customers: { name: "Jackie Burks" }, address: null };
+    const named = { name: "Marla Finch · Panel Upgrade", customers: { name: "Marla Finch" }, address: null };
     const t = text(card(named));
     expect(t).not.toContain("J-058");
     expect(t).toContain("Truckee");
     expect(t).not.toContain("· Truckee");
-    expect(t.match(/Jackie Burks/g)?.length).toBe(1);
+    expect(t.match(/Marla Finch/g)?.length).toBe(1);
     const bare = text(card({ ...named, city: null }));
     expect(bare).not.toContain("J-058");
   });
@@ -147,7 +147,7 @@ describe("the day drill's card", () => {
       createElement(JobScheduleCard, {
         job: {
           id: "j011",
-          name: "Herringbone",
+          name: "Honeysuckle",
           job_number: "J-011",
           status: "in_progress",
           scheduled_start: at("2026-09-24", "09:00"),
@@ -177,10 +177,10 @@ describe("the rail's card", () => {
           {
             id: "j1",
             kind: "job",
-            name: "498 Mil Drae Lane",
-            address: "498 Mil Drae Lane",
+            name: "498 May Dell Lane",
+            address: "498 May Dell Lane",
             city: "Truckee",
-            customer: "Jackie Burks",
+            customer: "Marla Finch",
             crew: [{ id: "p-erik", initials: "ET", name: "Erik Taylor" }],
             status: "to_be_scheduled",
           },
@@ -198,9 +198,9 @@ describe("the rail's card", () => {
       }),
     );
     const t = text(html);
-    expect(t).toContain("498 Mil Drae Lane");
-    expect(t).toContain("Jackie Burks");
-    expect(t.match(/498 Mil Drae Lane/g)?.length).toBe(1);
+    expect(t).toContain("498 May Dell Lane");
+    expect(t).toContain("Marla Finch");
+    expect(t.match(/498 May Dell Lane/g)?.length).toBe(1);
     expect(html).toMatch(/title="Erik Taylor"[^>]*>ET</);
     expect(t).toContain("12 Elm St");
     expect(t).not.toContain("CA 96161");

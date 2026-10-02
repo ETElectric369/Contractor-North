@@ -858,7 +858,7 @@ export function accentHex(glassTintHex?: string | null): string {
 export type DocPrefix = "i" | "q" | "c" | "portal" | "pick" | "inquire" | "estimate";
 
 export function orgDocUrl(settings: OrgSettings, prefix: DocPrefix, token: string, place?: string | null): string {
-  // `place` (docPlace in lib/doc-place) rides on the end as a slug the page ignores: /i/<token>/235-timbercreek.
+  // `place` (docPlace in lib/doc-place) rides on the end as a slug the page ignores: /i/<token>/235-thistlewood.
   return withPlace(`${orgPublicBaseUrl(settings)}/${prefix}/${token}`, place);
 }
 

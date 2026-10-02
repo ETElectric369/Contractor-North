@@ -20,7 +20,7 @@ import {
   spaceMap,
   NO_ROOM,
 } from "./model";
-import { E017, E017_ID, FINAL_MAP, J011, PANEL, PHOTO_EXISTING, TICKET, circuit } from "./__fixtures__/herringbone";
+import { E017, E017_ID, FINAL_MAP, J011, PANEL, PHOTO_EXISTING, TICKET, circuit } from "./__fixtures__/honeysuckle";
 
 /**
  * THE POLE MATH, PROVEN ON THE NIGHT'S NUMBERS (Panel plan, phase 1). J-011's final map against the
@@ -29,7 +29,7 @@ import { E017, E017_ID, FINAL_MAP, J011, PANEL, PHOTO_EXISTING, TICKET, circuit 
  * and the need line must be "Need 2 x 1P 15A, 15 x 1P 20A, 1 x 2P 20A, 1 x 2P 30A."
  */
 
-describe("the Herringbone breaker count", () => {
+describe("the Honeysuckle breaker count", () => {
   const all = [...FINAL_MAP, ...PHOTO_EXISTING];
 
   it("needs 2 x 1P 15A, 15 x 1P 20A, 1 x 2P 20A, 1 x 2P 30A; the range and the two reused circuits are already in", () => {

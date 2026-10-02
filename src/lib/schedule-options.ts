@@ -13,9 +13,9 @@ export type PickerOption = { id: string; label: string; address?: string | null 
 /**
  * THE job label — used on 52 surfaces, so this one function decides how a job reads everywhere.
  *
- * It used to lead with the number: "J-030 · 13631 Northwoods — Garage Subpanel". Both owners
+ * It used to lead with the number: "J-030 · 13631 Nightshade — Garage Subpanel". Both owners
  * navigate by ADDRESS, and in a picker or a pill the number ate the width the address needed —
- * "J-030 · 13631 Northwoods — Garag". Erik: "he needs all these labels to be the job name (address
+ * "J-030 · 13631 Nightshade — Garag". Erik: "he needs all these labels to be the job name (address
  * number and street) not J-xxx on all the windows, thats what we see the most guiding us, and it
  * doesnt work for me either."
  *
@@ -152,9 +152,9 @@ export function statusFromDate(day: string | null | undefined, todayStr: string)
   return d <= todayStr ? "in_progress" : "scheduled";
 }
 
-/** Who, in a job's name, as written: the company's own name, else the customer's whole name ("Jackie
- *  Burks", never cut to a last name). Erik 2026-09-28: with no address his jobs have always been
- *  named for the person, "Jackie Burks", "Jason Waldow". */
+/** Who, in a job's name, as written: the company's own name, else the customer's whole name ("Marla
+ *  Finch", never cut to a last name). Erik 2026-09-28: with no address his jobs have always been
+ *  named for the person, "Marla Finch", "Jason Wexley". */
 export function customerNamePart(c: { name?: string | null; company_name?: string | null; type?: string | null } | null | undefined): string {
   const company = String(c?.company_name ?? "").trim().replace(/\s+/g, " ");
   if (company) return company;
@@ -209,11 +209,11 @@ const PO_BOX = /^(?:p\.?\s*o\.?\s*box|post\s+office\s+box)(?![a-z])/i;
 /**
  * THE NAME A NEW JOB GETS WHEN NONE IS TYPED (Erik 2026-09-28, final: "street number and name as
  * always"). The way his company has always named jobs:
- *   - with a street, the street number and name, and " #<unit>" when the job has one: "3245 West
- *     Lake Boulevard", "300 West Lake Boulevard #56" (never twice: "12 Elm St Apt 5" stays). Never
+ *   - with a street, the street number and name, and " #<unit>" when the job has one: "3245 West Garnet
+ *     Boulevard", "300 West Garnet Boulevard #56" (never twice: "12 Elm St Apt 5" stays). Never
  *     the person, never the town (a one-line address is cut to its street), never a PO box;
- *   - no street: who, as written ("Jackie Burks", a company by its name), then " · " and the work
- *     words a source carried when there are any ("Jackie Burks · Panel Upgrade");
+ *   - no street: who, as written ("Marla Finch", a company by its name), then " · " and the work
+ *     words a source carried when there are any ("Marla Finch · Panel Upgrade");
  *   - neither: "New Job · Sep 28" on the company's today (the work words alone when that is all).
  * The New Job form shows the same line live ("It'll Be Called: …") and the server builds it from the
  * same function (lib/job-name jobNameFrom), so they can't differ.

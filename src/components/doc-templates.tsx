@@ -226,7 +226,7 @@ export function DocParty({ label, customer, brand }: { label: string; customer: 
  *
  * DocParty above is the customer's MAILING address ("Prepared for" / "Bill to"), and until now it
  * was the only address block on a quote or an invoice. So the place the work happens printed only
- * when the person being billed happened to live there. For Tahoe Tavern Properties that is four
+ * when the person being billed happened to live there. For Alder Ridge Rentals that is four
  * dwellings at one street, and two of them are on paid invoices.
  *
  * It PRINTS WHENEVER A SITE RESOLVES, including when it renders the same string as the bill-to. A

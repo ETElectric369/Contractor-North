@@ -4,7 +4,7 @@
  *   job material cost = the job's live bills  -  off_shelf  +  from_shelf
  *
  *   · off_shelf  = what the rolls put on the shelf from the job's OWN tickets cost (the 12/2 coil
- *                  Herringbone bought and did not use: $180.17 comes off Herringbone);
+ *                  Honeysuckle bought and did not use: $180.17 comes off Honeysuckle);
  *   · from_shelf = what the pieces the job TOOK from the shelf cost, as the database stamped them,
  *                  less any carried back (60 ft of that coil onto another job: $43.24 lands there).
  *

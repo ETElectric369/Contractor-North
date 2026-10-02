@@ -54,7 +54,7 @@ export interface Proposal {
   key?: string;
   from: Provenance;
   /**
-   * THE SAME THING, SAID TWICE BY THE SOURCE. Sara Cain's report lists "LIGHT DID NOT TURN ON /
+   * THE SAME THING, SAID TWICE BY THE SOURCE. Sara Dale's report lists "LIGHT DID NOT TURN ON /
    * MULTIPLE LOCATIONS" as item 5.1.1 on page 18 AND as 8.1.1 on page 32, in two different
    * sections. Estimating straight off the report bills that twice. Set to the id it duplicates so
    * the surface can show it beside its twin. It is a PROMPT TO CHECK, never a suppression — see
@@ -70,7 +70,7 @@ const norm = (v: string): string => v.toLowerCase().replace(/[^a-z0-9 ]/g, " ").
 /**
  * FINGERPRINT THE SOURCE'S WORDS, NOT OURS.
  *
- * First cut hashed the model's one-line `text`, and against the real Sara Cain report it caught
+ * First cut hashed the model's one-line `text`, and against the real Sara Dale report it caught
  * NOTHING — the same defect filed as 5.1.1 and 8.1.1 came back worded two different ways, because
  * a paraphrase is free to vary and did. The QUOTE cannot: it is the document repeating itself,
  * which is the actual signal. Fall back to the text only when a quote is too short to mean

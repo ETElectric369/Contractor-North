@@ -3,8 +3,8 @@
  *
  * The page had no search at all, cut every list at six rows, and kept collapsed rows out of the
  * DOM, so Cmd-F missed them on a laptop and a phone has no find. He remembers a paper by one of
- * five things: its number ("1107820"), the street ("whitney"), the job ("J-028"), what CED wrote
- * on it ("85 WHITNEY"), or the money ("187.64"). Every one of those is in `words` below, over the
+ * five things: its number ("1107820"), the street ("larkspur"), the job ("J-028"), what CED wrote
+ * on it ("41 LARKSPUR"), or the money ("187.64"). Every one of those is in `words` below, over the
  * papers the page has ALREADY loaded: no new read, nothing sent anywhere, typed and answered on
  * the phone.
  *
@@ -21,7 +21,7 @@ export interface BillsSearchRow {
   kind: "paper" | "bill" | "po" | "file";
   /** The line he reads first: "CED Invoice 8802-1107820". */
   title: string;
-  /** Where it is and what it is: "Sep 16 · $187.64 · on J-028 85 Whitney Place · in your books". */
+  /** Where it is and what it is: "Sep 16 · $187.64 · on J-028 41 Larkspur Place · in your books". */
   sub: string;
   /** Everything it can be found by, folded (fold()). */
   words: string;
@@ -54,7 +54,7 @@ export function wordsOf(...parts: unknown[]): string {
 }
 
 /**
- * THE ROWS A QUERY FINDS. Every word he typed has to appear somewhere on the row, so "whitney 187"
+ * THE ROWS A QUERY FINDS. Every word he typed has to appear somewhere on the row, so "larkspur 187"
  * narrows to the one paper. Fewer than two characters finds nothing (a single "8" would match the
  * whole book). `more` is how many matched beyond the ones shown, so the list never hides a count.
  */

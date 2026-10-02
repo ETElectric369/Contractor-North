@@ -1,8 +1,8 @@
 /**
  * WHAT THE CLOCK TELLS YOU ABOUT THE JOB IT PUT YOUR PUNCH ON.
  *
- * Erik, 2026-10-01: "we didn't do the job at TTP 56 this morning. Brian clocked in on his way to the
- * Supply house to get materials for Whitney before I could switch the schedule." Two punches landed
+ * Erik, 2026-10-01: "we didn't do the job at ARR 56 this morning. Brian clocked in on his way to the
+ * Supply house to get materials for Larkspur before I could switch the schedule." Two punches landed
  * on the job the schedule happened to be showing — 2h19m of billable time on the wrong customer —
  * and the clock said nothing, because it only speaks up when it CANNOT tell the job (askAfterPunch,
  * which-job-choices). A punch the app placed looked exactly like a punch the person placed.

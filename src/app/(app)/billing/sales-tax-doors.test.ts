@@ -56,7 +56,7 @@ describe("the one rule (lib/sales-tax-switch)", () => {
 });
 
 describe("New Invoice on /billing (W1-28: one question, Which Job Or Customer?)", () => {
-  const props = { customers: [{ id: "c-tao", name: "Tao Zhu" }], jobs: [{ id: "j-011", job_number: "J-011", name: "Timbercreek", customer_id: "c-tao", customer_name: "Tao Zhu" }] };
+  const props = { customers: [{ id: "c-tess", name: "Tess Zane" }], jobs: [{ id: "j-011", job_number: "J-011", name: "Thistlewood", customer_id: "c-tess", customer_name: "Tess Zane" }] };
   const body = (pick: { kind: "job" | "customer"; id: string; label: string } | null, salesTax: boolean) =>
     html(NewInvoicePickBody, {
       query: "",
@@ -71,8 +71,8 @@ describe("New Invoice on /billing (W1-28: one question, Which Job Or Customer?)"
       refusal: null,
       onStartBlank: () => {},
     });
-  const JOB = { kind: "job" as const, id: "j-011", label: "J-011 · Timbercreek · Tao Zhu" };
-  const CUSTOMER = { kind: "customer" as const, id: "c-tao", label: "Tao Zhu" };
+  const JOB = { kind: "job" as const, id: "j-011", label: "J-011 · Thistlewood · Tess Zane" };
+  const CUSTOMER = { kind: "customer" as const, id: "c-tess", label: "Tess Zane" };
 
   it("no switches stored / on: the same form, and nothing to tax until something is picked", () => {
     const today = html(NewInvoiceButton, props);
@@ -99,7 +99,7 @@ describe("New Invoice on /billing (W1-28: one question, Which Job Or Customer?)"
       expect(off).not.toContain("Tax Rate");
     }
     expect(routePick(JOB, { salesTax: false, taxRate: 0.0825 })).toEqual({ action: "job", jobId: "j-011" });
-    expect(routePick(CUSTOMER, { salesTax: false, taxRate: 0.0825 })).toEqual({ action: "customer", customerId: "c-tao", taxRate: 0 });
+    expect(routePick(CUSTOMER, { salesTax: false, taxRate: 0.0825 })).toEqual({ action: "customer", customerId: "c-tess", taxRate: 0 });
   });
 });
 

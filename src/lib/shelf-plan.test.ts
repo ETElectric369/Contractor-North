@@ -15,12 +15,12 @@ import {
 
 /**
  * SHOP STOCK, PHASE 2: PUTTING THINGS ON THE SHELF - the pure half. Every fixture is Erik's own
- * paper: Herringbone's 8/19 CED ticket (bill 11e96fc3), the 7/31 ticket with both coils, the CED
- * STOCK document 8802-1103061, the "1000' REEL, qty 55" counter cut and the Waldow Twister box.
+ * paper: Honeysuckle's 8/19 CED ticket (bill 11e96fc3), the 7/31 ticket with both coils, the CED
+ * STOCK document 8802-1103061, the "1000' REEL, qty 55" counter cut and the Wexley Twister box.
  */
 
 type L = BillLine & { id: string };
-const HERRINGBONE_819: L[] = [
+const HONEYSUCKLE_819: L[] = [
   { id: "l0", description: "Flexbox BH bar hanger ground", quantity: 1, unit_price: 8.82, amount: 8.82, category: "Electrical", billable: true, billed_amount: null },
   { id: "l1", description: "NMB 12/2 w/gnd wire 250 ft coil", quantity: 250, unit_price: 0.66, amount: 165.29, category: "Electrical", billable: true, billed_amount: null },
   { id: "l2", description: "Flexbox single gang 16 cu in", quantity: 2, unit_price: 4.45, amount: 8.9, category: "Electrical", billable: true, billed_amount: null },
@@ -28,7 +28,7 @@ const HERRINGBONE_819: L[] = [
 ];
 
 describe("the count a ticket line suggests (filled in, never saved on its own)", () => {
-  it("Herringbone's coil: 250 at $0.66 is 250 ft, because the ticket's own columns close", () => {
+  it("Honeysuckle's coil: 250 at $0.66 is 250 ft, because the ticket's own columns close", () => {
     expect(shelfCountGuess({ description: "NMB 12/2 w/gnd wire 250 ft coil", quantity: 250, unit_price: 0.66, amount: 165.29 })).toMatchObject({
       pieces: 250,
       unit: "ft",
@@ -63,7 +63,7 @@ describe("the count a ticket line suggests (filled in, never saved on its own)",
     expect(shelfCountGuess({ description: "WAGO 221-412 100/BX", quantity: 1, unit_price: 0, amount: 38.5 })).toMatchObject({ pieces: 100, unit: "ea", bought: 1 });
   });
 
-  it("the Waldow Twister box: the quantity came out of the product name and the columns don't close, so the person types it", () => {
+  it("the Wexley Twister box: the quantity came out of the product name and the columns don't close, so the person types it", () => {
     expect(shelfCountGuess({ description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: 500, unit_price: 0.15, amount: 77.39 })).toMatchObject({
       pieces: null,
       bought: 1,
@@ -72,8 +72,8 @@ describe("the count a ticket line suggests (filled in, never saved on its own)",
 });
 
 describe("planShelving: what the job is billed and what the roll costs, before anything is written", () => {
-  it("Herringbone 8/19, 0 used: billed $0, 250 ft on the shelf at $180.17 (the coil plus its $14.88 share of the tax)", () => {
-    const plan = planShelving(HERRINGBONE_819, [{ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2 NM-B" }]);
+  it("Honeysuckle 8/19, 0 used: billed $0, 250 ft on the shelf at $180.17 (the coil plus its $14.88 share of the tax)", () => {
+    const plan = planShelving(HONEYSUCKLE_819, [{ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2 NM-B" }]);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     expect(plan.lots).toEqual([
@@ -86,7 +86,7 @@ describe("planShelving: what the job is billed and what the roll costs, before a
   });
 
   it("used on this job 60: the job is billed $39.67 of the coil, 190 ft go on the shelf, and job part + roll is the ticket", () => {
-    const plan = planShelving(HERRINGBONE_819, [{ lineId: "l1", pieces: 250, used: 60, unit: "ft", bought: 250, newItemName: "12/2 NM-B" }]);
+    const plan = planShelving(HONEYSUCKLE_819, [{ lineId: "l1", pieces: 250, used: 60, unit: "ft", bought: 250, newItemName: "12/2 NM-B" }]);
     if (!plan.ok) throw new Error(plan.error);
     expect(plan.lots[0]).toMatchObject({ billedAmount: 39.67, pieces: 190 });
     expect(plan.lots[0].cost).toBe(excludedReceiptCost(plan.patched));
@@ -110,17 +110,17 @@ describe("planShelving: what the job is billed and what the roll costs, before a
     [{ pieces: 250, used: 0, unit: "" }, "counted in"],
     [{ pieces: 250, used: 0, newItemName: "" }, "pick the item"],
   ])("refuses %j in words (%s)", (over, words) => {
-    const plan = planShelving(HERRINGBONE_819, [{ lineId: "l1", unit: "ft", bought: 250, newItemName: "12/2", ...over } as any]);
+    const plan = planShelving(HONEYSUCKLE_819, [{ lineId: "l1", unit: "ft", bought: 250, newItemName: "12/2", ...over } as any]);
     expect(plan.ok).toBe(false);
     if (!plan.ok) expect(plan.error).toContain(words);
   });
 
   it("tax, a $0.00 extension and a line switched off the bill with some used are refused", () => {
-    expect(planShelving(HERRINGBONE_819, [{ lineId: "l3", pieces: 1, used: 0, unit: "ea", newItemName: "tax" }]).ok).toBe(false);
+    expect(planShelving(HONEYSUCKLE_819, [{ lineId: "l3", pieces: 1, used: 0, unit: "ea", newItemName: "tax" }]).ok).toBe(false);
     const zero: L[] = [{ id: "z", description: "back-ordered plate", quantity: 1, unit_price: 3, amount: 0, category: "Electrical", billable: true, billed_amount: null }];
     const z = planShelving(zero, [{ lineId: "z", pieces: 1, used: 0, unit: "ea", newItemName: "plate" }]);
     expect(!z.ok && z.error).toContain("$0.00");
-    const off = HERRINGBONE_819.map((l) => (l.id === "l1" ? { ...l, billable: false } : l));
+    const off = HONEYSUCKLE_819.map((l) => (l.id === "l1" ? { ...l, billable: false } : l));
     const o = planShelving(off, [{ lineId: "l1", pieces: 250, used: 10, unit: "ft", bought: 250, newItemName: "12/2" }]);
     expect(!o.ok && o.error).toContain("off the customer's bill");
     // 0 used on a switched-off line is the whole line to the shelf.
@@ -200,12 +200,12 @@ describe("suggestShelfItem: pre-selected only on an exact part number or name, i
 });
 
 describe("Waiting For The Shelf: suggested, never moved", () => {
-  const base = { billId: "b", jobId: "j011", jobLabel: "Herringbone", category: "Electrical", billable: true, hasLot: false, billDate: "2026-07-31" };
-  it("the Herringbone 14/2 (billed $0, no roll), the Waldow Twister box, the STOCK document and a lineless STOCK paper", () => {
+  const base = { billId: "b", jobId: "j011", jobLabel: "Honeysuckle", category: "Electrical", billable: true, hasLot: false, billDate: "2026-07-31" };
+  it("the Honeysuckle 14/2 (billed $0, no roll), the Wexley Twister box, the STOCK document and a lineless STOCK paper", () => {
     const w = waitingForShelf({
       lines: [
         { ...base, lineId: "142", description: "NMB 14/2 w/gnd 250 ft coil", quantity: 250, amount: 111.6, billedAmount: 0 },
-        { ...base, lineId: "tw", jobLabel: "Jason Waldow", description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: 500, amount: 77.39, billedAmount: null },
+        { ...base, lineId: "tw", jobLabel: "Jason Wexley", description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: 500, amount: 77.39, billedAmount: null },
         { ...base, lineId: "brk", description: "SQD HOM120 Miniature Circuit", quantity: 3, amount: 23.13, billedAmount: null },
         { ...base, lineId: "tax", description: "Tax", quantity: 1, amount: 39.42, category: "Tax", billedAmount: null },
         { ...base, lineId: "done", description: "NMB 12/2 250 ft coil", quantity: 250, amount: 165.29, billedAmount: 0, hasLot: true },
@@ -260,8 +260,8 @@ describe("Waiting For The Shelf: suggested, never moved", () => {
   it("a receipt the customer already holds is named with NO door: the receipt card has no button there", () => {
     const w = waitingForShelf({
       lines: [
-        { ...base, lineId: "tz", jobLabel: "Tao Zhu", description: "NMB 12/2 250 ft coil", quantity: 250, amount: 165.29, billedAmount: 0, heldBy: "INV-00028 (paid)" },
-        { ...base, lineId: "tw", jobLabel: "Jason Waldow", description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: 500, amount: 77.39, billedAmount: null, heldBy: "INV-069 (paid)" },
+        { ...base, lineId: "tz", jobLabel: "Tess Zane", description: "NMB 12/2 250 ft coil", quantity: 250, amount: 165.29, billedAmount: 0, heldBy: "INV-00028 (paid)" },
+        { ...base, lineId: "tw", jobLabel: "Jason Wexley", description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: 500, amount: 77.39, billedAmount: null, heldBy: "INV-069 (paid)" },
       ],
     });
     expect(w.map((x) => [x.key, x.href, x.door])).toEqual([

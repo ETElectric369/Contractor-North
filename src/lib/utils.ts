@@ -168,10 +168,10 @@ export function escapeLike(input: string | undefined | null): string {
   return (input ?? "").replace(/[\\%_]/g, "\\$&");
 }
 
-/** Format a US phone number progressively: "(530) 933-6686".
+/** Format a US phone number progressively: "(530) 555-0133".
  *
- *  A leading US country code ("+1 (916) 992-4711", "1-916-992-4711", "19169924711") is DROPPED,
- *  not kept: Nort saved Tom Goodman as "1 (916) 992-4711" (2026-09-24) because this formatter
+ *  A leading US country code ("+1 (916) 555-0147", "1-916-555-0147", "19165550147") is DROPPED,
+ *  not kept: Nort saved Tom Goodman as "1 (916) 555-0147" (2026-09-24) because this formatter
  *  used to print the 1 back out, so the same number read two ways across the book. No US area
  *  code starts with 1, so eleven digits led by a 1 is always the country code. */
 export function formatPhone(input: string | null | undefined): string {

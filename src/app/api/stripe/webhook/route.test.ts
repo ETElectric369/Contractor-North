@@ -50,7 +50,7 @@ const deliver = async (type: string, obj: any, id = `evt_${type}`, account = ACC
 };
 const tables = () => ({
   organizations: [{ id: ORG, stripe_account_id: ACCT }],
-  invoices: [{ id: "inv-78", org_id: ORG, status: "sent", invoice_number: "INV-078", total: 9590.89, amount_paid: 6760, customers: { name: "Andrew Cohen" } }],
+  invoices: [{ id: "inv-78", org_id: ORG, status: "sent", invoice_number: "INV-078", total: 9590.89, amount_paid: 6760, customers: { name: "Andrew Crake" } }],
   payments: [] as any[],
   pending_bank_transfers: [] as any[],
 });

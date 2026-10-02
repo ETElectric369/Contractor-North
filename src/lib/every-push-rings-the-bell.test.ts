@@ -183,7 +183,7 @@ describe("notifyPeople", () => {
   it("a failed line never stops the push, and never throws: it says so (bell: false)", async () => {
     const { notifyPeople } = await import("./notifications");
     bell.fail = true;
-    const r = await notifyPeople("org-1", ["office-1"], "assigned", { title: "New appointment assigned", body: "Walk-through at 85 Whitney" });
+    const r = await notifyPeople("org-1", ["office-1"], "assigned", { title: "New appointment assigned", body: "Walk-through at 41 Larkspur" });
     expect(r).toEqual({ bell: false, pushed: ["office-1"] });
     expect(push.calls).toHaveLength(1);
   });

@@ -22,12 +22,12 @@ import { VisitStartCard, visitStartState, visitTimeOffered } from "./visit-start
 const TZ = "America/Los_Angeles";
 const preview = {
   // The name Start The Job gives (lib/job-name): the street, never the visit's "Walk-Through:" tag.
-  name: "3245 W. Lake Blvd",
+  name: "3245 W. Garnet Blvd",
   customer: "Tom Goodman",
-  address: "3245 W. Lake Blvd, Homewood, CA 96141",
+  address: "3245 W. Garnet Blvd, Homewood, CA 96141",
   scheduledStart: "2026-09-25T17:00:00.000Z",
 };
-const j55 = { id: "job-55", job_number: "J-055", name: "3245 West Lake Boulevard" };
+const j55 = { id: "job-55", job_number: "J-055", name: "3245 West Garnet Boulevard" };
 const onJ50 = { id: "entry-50", job_id: "job-50", label: "J-050", clock_in: "2026-09-25T15:00:00.000Z" };
 const onJ55 = { id: "entry-55", job_id: "job-55", label: "J-055", clock_in: "2026-09-25T19:00:00.000Z" };
 
@@ -42,7 +42,7 @@ const render = (p: Partial<Props>) =>
       openEntry: null,
       linkInstead: null,
       preview,
-      officePhone: "(530) 933-6686",
+      officePhone: "(530) 555-0133",
       ...p,
     }),
   );
@@ -101,7 +101,7 @@ describe("office, no job yet", () => {
     const h = render({ linkInstead: { ...j55, customer: "Tom Goodman" } });
     expect(h).toContain("Link To J-055 Instead");
     expect(h).toContain("Tom Goodman already has");
-    expect(h).toContain("3245 West Lake Boulevard");
+    expect(h).toContain("3245 West Garnet Boulevard");
     phoneSafe(h);
   });
 
@@ -227,8 +227,8 @@ describe("crew, no job yet: no dead end", () => {
     expect(html).toContain('data-visit-start="ask"');
     expect(html).toContain("Ask the office to start the job");
     expect(html).toContain("Ask The Office");
-    expect(html).toContain('href="tel:5309336686"');
-    expect(html).toContain('href="sms:5309336686"');
+    expect(html).toContain('href="tel:5305550133"');
+    expect(html).toContain('href="sms:5305550133"');
     expect(html).not.toContain("Start The Job");
   });
   it("is phone-safe at 375px", () => phoneSafe(html));

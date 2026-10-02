@@ -166,7 +166,7 @@ export function JobEditButton({
           </div>
 
           <div>
-            {/* THE DWELLING. Four Tahoe Tavern jobs share 300 W Lake Blvd and the number lived
+            {/* THE DWELLING. Four Alder Ridge jobs share 300 W Garnet Blvd and the number lived
                 only inside the job NAME, so every document named the building. The address picker
                 never fills it: Google returns a street, not somebody's apartment. */}
             <Label htmlFor="ej-unit">

@@ -72,7 +72,7 @@ const hold = (id: string, num: string, name: string, touched: string, until: str
 
 describe("a hold with no day ages from when it was last touched", () => {
   it("old no-day holds draw amber pips; the words still say No Day Set", async () => {
-    state.held = [hold("j13", "J-013", "Birch Remodel", daysAgo(40), null), hold("j34", "J-034", "Alder Service", daysAgo(10), null), hold("j48", "J-048", "Tanager Panel", daysAgo(2), null)];
+    state.held = [hold("j13", "J-013", "Birch Remodel", daysAgo(40), null), hold("j34", "J-034", "Alder Service", daysAgo(10), null), hold("j48", "J-048", "Tupelo Panel", daysAgo(2), null)];
     const r = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" });
     const pile = r.now.find((i) => i.id === "pile:holds_back");
     expect(pile, "the three holds roll into the Holds Back pile").toBeTruthy();
@@ -86,7 +86,7 @@ describe("a hold with no day ages from when it was last touched", () => {
   });
 
   it("a hold whose day has come ages from that day, as before", async () => {
-    state.held = [hold("j13", "J-013", "Birch Remodel", daysAgo(1), daysAgo(9).slice(0, 10)), hold("j48", "J-048", "Tanager Panel", daysAgo(40), TODAY)];
+    state.held = [hold("j13", "J-013", "Birch Remodel", daysAgo(1), daysAgo(9).slice(0, 10)), hold("j48", "J-048", "Tupelo Panel", daysAgo(40), TODAY)];
     const r = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" });
     const kids = r.now.find((i) => i.id === "pile:holds_back")!.children!;
     const byId = Object.fromEntries(kids.map((k) => [k.id, k]));

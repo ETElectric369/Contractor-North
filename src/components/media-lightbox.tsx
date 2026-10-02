@@ -6,6 +6,7 @@ import { useModalLock } from "@/components/ui/modal-lock";
 import { isNativeShell } from "@/lib/native-shell";
 import { saveRoute } from "@/lib/shell-save";
 import { reportClientError } from "@/app/report-client-error";
+import { useTurnsSidewaysLayer } from "@/components/turns-sideways";
 
 /** Full-screen in-app viewer for an image or PDF — always dismissible
  *  (fixes "can't go back from the photo" on the phone). */
@@ -22,6 +23,11 @@ export function MediaLightbox({
   // lightbox doesn't yank the lock out from under a camera overlay opened on top of it — the bottom nav
   // stays hidden until BOTH are closed (this is the recurring "Save hidden behind the nav" class).
   useModalLock(true);
+  // TURN THE PHONE TO READ IT (Erik, 2026-10-01: "documents especially"). This viewer is a layer over
+  // whatever screen you were on, not a route, so it declares itself — "document-full-screen" in
+  // lib/screens-that-turn.ts carries the reason, and components/turns-sideways.tsx is still the only
+  // thing that tells the phone. Closing it hands the screen underneath its own answer back.
+  useTurnsSidewaysLayer("document-full-screen");
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -110,8 +116,11 @@ export function MediaLightbox({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-black/90">
-      <div className="flex items-center justify-between gap-2 px-4 pb-3 pt-[max(0.75rem,var(--sat,0px))] text-white">
+    // `media-lightbox-*`: turned sideways on a phone the camera cutout is on the SIDE, and this
+    // layer paints edge to edge — without the insets globals.css adds, Close and Download sit under
+    // the Dynamic Island. Same row, same buttons, same 44px; they just clear the camera.
+    <div className="media-lightbox fixed inset-0 z-[60] flex flex-col bg-black/90">
+      <div className="media-lightbox-bar flex items-center justify-between gap-2 px-4 pb-3 pt-[max(0.75rem,var(--sat,0px))] text-white">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
         <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10" title="Open in new tab" aria-label="Open in new tab">
           <ExternalLink className="h-5 w-5" />
@@ -130,7 +139,7 @@ export function MediaLightbox({
           <X className="h-6 w-6" />
         </button>
       </div>
-      <div className="flex flex-1 items-center justify-center overflow-auto p-2" onClick={onClose}>
+      <div className="media-lightbox-body flex flex-1 items-center justify-center overflow-auto p-2" onClick={onClose}>
         {isPdf ? (
           <iframe
             src={url}
@@ -155,7 +164,8 @@ export function MediaLightbox({
           {note}
         </p>
       )}
-      <p className="pb-3 text-center text-xs text-white/50">Tap outside the image or the ✕ to close</p>
+      {/* Kept sideways too — nothing is dropped to make room; it just sits tighter (globals.css). */}
+      <p className="media-lightbox-hint pb-3 text-center text-xs text-white/50">Tap outside the image or the ✕ to close</p>
     </div>
   );
 }

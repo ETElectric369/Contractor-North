@@ -225,7 +225,7 @@ export type SamePurchaseCandidate = {
   dollarsOff: number;
   daysApart: number | null;
   jobId: string | null;
-  /** "Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone". */
+  /** "Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle". */
   label: string;
 };
 

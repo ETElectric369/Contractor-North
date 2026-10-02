@@ -1,24 +1,24 @@
 import { describe, it, expect } from "vitest";
 import { formatPhone } from "./utils";
 
-// Nort saved Tom Goodman's "+1 (916) 992-4711" as "1 (916) 992-4711" (2026-09-24): the one
+// Nort saved Tom Goodman's "+1 (916) 555-0147" as "1 (916) 555-0147" (2026-09-24): the one
 // formatter printed the US country code back out, so one number read two ways across the book.
 describe("formatPhone — the one phone formatter", () => {
   it("drops a leading US country code however it arrives", () => {
-    expect(formatPhone("+1 (916) 992-4711")).toBe("(916) 992-4711");
-    expect(formatPhone("1 (916) 992-4711")).toBe("(916) 992-4711");
-    expect(formatPhone("1-916-992-4711")).toBe("(916) 992-4711");
-    expect(formatPhone("+19169924711")).toBe("(916) 992-4711");
-    expect(formatPhone("19169924711")).toBe("(916) 992-4711");
+    expect(formatPhone("+1 (916) 555-0147")).toBe("(916) 555-0147");
+    expect(formatPhone("1 (916) 555-0147")).toBe("(916) 555-0147");
+    expect(formatPhone("1-916-555-0147")).toBe("(916) 555-0147");
+    expect(formatPhone("+19165550147")).toBe("(916) 555-0147");
+    expect(formatPhone("19165550147")).toBe("(916) 555-0147");
   });
 
   it("formats a plain ten-digit number the same way", () => {
-    expect(formatPhone("9169924711")).toBe("(916) 992-4711");
-    expect(formatPhone("916.992.4711")).toBe("(916) 992-4711");
+    expect(formatPhone("9165550147")).toBe("(916) 555-0147");
+    expect(formatPhone("916.555.0147")).toBe("(916) 555-0147");
   });
 
   it("is idempotent on its own output (a re-save never drifts)", () => {
-    expect(formatPhone(formatPhone("+1 (916) 992-4711"))).toBe("(916) 992-4711");
+    expect(formatPhone(formatPhone("+1 (916) 555-0147"))).toBe("(916) 555-0147");
   });
 
   it("still formats progressively while typing", () => {

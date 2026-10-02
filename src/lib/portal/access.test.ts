@@ -34,7 +34,7 @@ const { readPortalAccess } = await import("./access");
 const TOKEN = "d".repeat(32);
 const OFFICE = "e".repeat(64);
 const CUSTOMER = "f".repeat(64);
-const GATE = { data: { org: { name: "ET Electric" }, email: "mcpowder@comcast.net", live_code_sent_at: null }, error: null };
+const GATE = { data: { org: { name: "ET Electric" }, email: "redfinch@comcast.net", live_code_sent_at: null }, error: null };
 /** portal_session_check answers by which session hash it is asked about. */
 const sessions = (live: Record<string, "customer" | "office">) =>
   rpc.mockImplementation(async (fn: string, args: { p_session_hash?: string }) => {
@@ -88,8 +88,8 @@ describe("readPortalAccess", () => {
         : { data: null, error: null },
     );
     const a = await readPortalAccess(TOKEN);
-    expect(a).toMatchObject({ kind: "gate", maskedEmail: "m*******@comcast.net", codeSentMinutesAgo: 4 });
-    expect(JSON.stringify(a)).not.toContain("mcpowder");
+    expect(a).toMatchObject({ kind: "gate", maskedEmail: "r*******@comcast.net", codeSentMinutesAgo: 4 });
+    expect(JSON.stringify(a)).not.toContain("redfinch");
   });
 
   it("no code out: codeSentMinutesAgo is null", async () => {

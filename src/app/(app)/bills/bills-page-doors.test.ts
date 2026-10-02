@@ -40,12 +40,12 @@ const job = (id: string, job_number: string, name: string, status: string, addre
   customers: null,
 });
 const JOBS = [
-  job(J028, "J-028", "85 Whitney Place", "in_progress", "85 Whitney Court", "2026-08-20T00:00:00Z"),
-  job(J033, "J-033", "5659 Rhodesia", "complete", "5659 Rhodesia Rd", "2026-07-11T00:00:00Z"),
-  job(J006, "J-006", "5659 Rhodesia", "complete", "5659 Rhodesia Rd", "2026-06-11T00:00:00Z"),
-  job(J050, "J-050", "3639 Saddle Road", "complete", "3639 Saddle Rd", "2026-06-01T00:00:00Z"),
-  job(J011, "J-011", "13897 Herringbone", "in_progress", "13897 Herringbone Way", "2026-06-20T00:00:00Z"),
-  job(J030, "J-030", "13631 Northwoods", "complete", "13631 Northwoods Blvd", "2026-07-20T00:00:00Z"),
+  job(J028, "J-028", "41 Larkspur Place", "in_progress", "41 Larkspur Court", "2026-08-20T00:00:00Z"),
+  job(J033, "J-033", "5659 Fernhill", "complete", "5659 Fernhill Rd", "2026-07-11T00:00:00Z"),
+  job(J006, "J-006", "5659 Fernhill", "complete", "5659 Fernhill Rd", "2026-06-11T00:00:00Z"),
+  job(J050, "J-050", "3639 Sorrel Road", "complete", "3639 Sorrel Rd", "2026-06-01T00:00:00Z"),
+  job(J011, "J-011", "13897 Honeysuckle", "in_progress", "13897 Honeysuckle Way", "2026-06-20T00:00:00Z"),
+  job(J030, "J-030", "13631 Nightshade", "complete", "13631 Nightshade Blvd", "2026-07-20T00:00:00Z"),
 ];
 const jobRef = (id: string) => {
   const j = JOBS.find((x) => x.id === id)!;
@@ -100,11 +100,11 @@ const BILLS = [
     job_id: J028,
     jobs: jobRef(J028),
     supplier_account_id: CED,
-    notes: "TR-34426_20260817_32136931_statement.pdf",
+    notes: "AC-10427_20260817_32136931_statement.pdf",
     bill_line_items: [line("Statement (Invoice 8802-1105868)", 2950.17), line("Statement (Invoice 8802-1105963)", 84.37)],
   }),
-  // Herringbone's CED bill, recorded with its number.
-  bill("b-herringbone", {
+  // Honeysuckle's CED bill, recorded with its number.
+  bill("b-honeysuckle", {
     amount: 301.81,
     bill_date: "2026-09-04",
     job_id: J011,
@@ -140,12 +140,12 @@ const BILLS = [
   // Spellings on no account: a saved alias (Accept And File Them There), a pair (Not The Same), the
   // Sunnyvale counter (the same-supplier question), and a till store (Give It Its Own Account).
   bill("b-dist", { supplier: "Consolidated Electrical Dist.", amount: 147.92, bill_date: "2026-09-23", job_id: J028, jobs: jobRef(J028) }),
-  bill("b-swig1", { supplier: "Swigard's Hardware", amount: 19.18, status: "paid", bill_date: "2026-06-17", job_id: J011, jobs: jobRef(J011) }),
-  bill("b-swig2", { supplier: "Swigards Hardware", amount: 25.4, status: "paid", bill_date: "2026-07-02", job_id: J011, jobs: jobRef(J011) }),
+  bill("b-swig1", { supplier: "Brandow's Hardware", amount: 19.18, status: "paid", bill_date: "2026-06-17", job_id: J011, jobs: jobRef(J011) }),
+  bill("b-swig2", { supplier: "Brandows Hardware", amount: 25.4, status: "paid", bill_date: "2026-07-02", job_id: J011, jobs: jobRef(J011) }),
   bill("b-sunnyvale", { supplier: "Contractors Electrical Distributors", amount: 467.87, bill_date: "2026-07-14", job_id: J011, jobs: jobRef(J011) }),
   bill("b-depot", { supplier: "The Home Depot", amount: 47.44, status: "paid", bill_date: "2026-06-08", job_id: J030, jobs: jobRef(J030) }),
   // The same $95.27 ticket filed to two jobs.
-  bill("b-dup-a", { amount: 95.27, bill_date: "2026-07-29", job_id: J030, jobs: jobRef(J030), supplier_account_id: CED, notes: "TR-34426_20260729_1.pdf", bill_line_items: ticketLines() }),
+  bill("b-dup-a", { amount: 95.27, bill_date: "2026-07-29", job_id: J030, jobs: jobRef(J030), supplier_account_id: CED, notes: "AC-10427_20260729_1.pdf", bill_line_items: ticketLines() }),
   bill("b-dup-b", { amount: 95.27, bill_date: "2026-08-28", job_id: J028, jobs: jobRef(J028), supplier_account_id: CED, notes: "85 Whit.pdf", bill_line_items: ticketLines() }),
   // A business cost with no job.
   bill("b-gas", { supplier: "Fuel", amount: 64.1, status: "paid", bill_date: "2026-09-10", category: "Fuel" }),
@@ -171,37 +171,37 @@ const doc = (id: string, over: Record<string, unknown>) => ({
 });
 const SUPPLIER_INVOICES = [
   // The one he was hunting: a card, the matcher suggests J-028, a ticket may be the same purchase.
-  doc("si-1107820", { invoice_number: "8802-1107820", invoice_date: "2026-09-16", job_name_raw: "85 WHITNEY", total: 187.64, open_balance: 187.64, discount_amount: 1.77, discount_by: "2026-10-10" }),
-  // Only Erik knows which Rhodesia: chips.
-  doc("si-1100090", { invoice_number: "8802-1100090", invoice_date: "2026-06-20", job_name_raw: "5659 RHODESIA", total: 744.96, open_balance: 0, closed: true }),
+  doc("si-1107820", { invoice_number: "8802-1107820", invoice_date: "2026-09-16", job_name_raw: "41 LARKSPUR", total: 187.64, open_balance: 187.64, discount_amount: 1.77, discount_by: "2026-10-10" }),
+  // Only Erik knows which Fernhill: chips.
+  doc("si-1100090", { invoice_number: "8802-1100090", invoice_date: "2026-06-20", job_name_raw: "5659 FERNHILL", total: 744.96, open_balance: 0, closed: true }),
   // Already on J-050, no bill: Record It On J-050.
-  doc("si-1099048", { invoice_number: "8802-1099048", invoice_date: "2026-06-12", job_name_raw: "3639 SADDLE RD", job_id: J050, jobs: { name: "3639 Saddle Road" }, total: 355.17, open_balance: 0, closed: true }),
+  doc("si-1099048", { invoice_number: "8802-1099048", invoice_date: "2026-06-12", job_name_raw: "3639 SORREL RD", job_id: J050, jobs: { name: "3639 Sorrel Road" }, total: 355.17, open_balance: 0, closed: true }),
   // Nothing to go on: Pick A Job.
   doc("si-1102291", { invoice_number: "8802-1102291", invoice_date: "2026-06-29", job_name_raw: "CUSTOMER ORDER NO.", total: 451.75, open_balance: 0, closed: true }),
   // CED booked it to STOCK: never a card; Record To Shelf in the supplier's own lists.
   doc("si-1103061", { invoice_number: "8802-1103061", invoice_date: "2026-07-21", job_name_raw: "STOCK", total: 114.4, open_balance: 0, closed: true }),
   // A credit memo on no job: never a card; File It On This Job in the supplier's own lists.
-  doc("si-1108541", { invoice_number: "8802-1108541", kind: "credit_memo", invoice_date: "2026-09-18", job_name_raw: "13897 HERRINGBONE", total: -115.33, open_balance: -115.33 }),
+  doc("si-1108541", { invoice_number: "8802-1108541", kind: "credit_memo", invoice_date: "2026-09-18", job_name_raw: "13897 HONEYSUCKLE", total: -115.33, open_balance: -115.33 }),
   // Covered by the statement bill's lines, and by numbers on bills.
-  doc("si-1105868", { invoice_number: "8802-1105868", invoice_date: "2026-08-12", job_name_raw: "85 WHITNEY", total: 2950.17, open_balance: 2950.17 }),
-  doc("si-1105963", { invoice_number: "8802-1105963", invoice_date: "2026-08-13", job_name_raw: "85 WHITNEY", total: 84.37, open_balance: 84.37 }),
-  doc("si-1106969", { invoice_number: "8802-1106969", invoice_date: "2026-09-04", job_name_raw: "13897 HERRINGBONE", total: 301.81, open_balance: 301.81, discount_amount: 5.54, discount_by: "2026-10-10" }),
-  doc("si-1107088", { invoice_number: "8802-1107088", invoice_date: "2026-09-01", job_name_raw: "13897 HERRINGBONE", total: 456.02, open_balance: 456.02, discount_amount: 4.7, discount_by: "2026-10-10" }),
+  doc("si-1105868", { invoice_number: "8802-1105868", invoice_date: "2026-08-12", job_name_raw: "41 LARKSPUR", total: 2950.17, open_balance: 2950.17 }),
+  doc("si-1105963", { invoice_number: "8802-1105963", invoice_date: "2026-08-13", job_name_raw: "41 LARKSPUR", total: 84.37, open_balance: 84.37 }),
+  doc("si-1106969", { invoice_number: "8802-1106969", invoice_date: "2026-09-04", job_name_raw: "13897 HONEYSUCKLE", total: 301.81, open_balance: 301.81, discount_amount: 5.54, discount_by: "2026-10-10" }),
+  doc("si-1107088", { invoice_number: "8802-1107088", invoice_date: "2026-09-01", job_name_raw: "13897 HONEYSUCKLE", total: 456.02, open_balance: 456.02, discount_amount: 4.7, discount_by: "2026-10-10" }),
   doc("si-sc0901", { invoice_number: "8802-SC0901", kind: "service_charge", invoice_date: "2026-09-01", total: 23.21, open_balance: 23.21 }),
 ];
 
 const TABLES: Record<string, unknown[]> = {
   profiles: [{ org_id: ORG, full_name: "Erik Taylor", organizations: { name: "ET Electric" } }],
   organizations: [{ settings: { timezone: "America/Los_Angeles" }, name: "ET Electric" }],
-  purchase_orders: [{ id: "po-1", po_number: "PO-001", vendor: "CED", status: "draft", total: 412.5, job_id: J011, jobs: { name: "13897 Herringbone" } }],
+  purchase_orders: [{ id: "po-1", po_number: "PO-001", vendor: "CED", status: "draft", total: 412.5, job_id: J011, jobs: { name: "13897 Honeysuckle" } }],
   bills: BILLS,
   documents: [
-    { id: "doc-1", name: "IMG_0412.jpg", category: "Receipt", file_url: `${ORG}/${J011}/1-IMG_0412.jpg`, size_bytes: 1000, created_at: "2026-09-17T18:00:00Z", job_id: J011, jobs: { name: "13897 Herringbone" } },
+    { id: "doc-1", name: "IMG_0412.jpg", category: "Receipt", file_url: `${ORG}/${J011}/1-IMG_0412.jpg`, size_bytes: 1000, created_at: "2026-09-17T18:00:00Z", job_id: J011, jobs: { name: "13897 Honeysuckle" } },
   ],
   jobs: JOBS,
-  material_lists: [{ id: "ml-1", name: "Herringbone rough-in" }],
+  material_lists: [{ id: "ml-1", name: "Honeysuckle rough-in" }],
   supplier_accounts: [
-    { id: CED, name: "Consolidated Electrical Distributors", account_number: "TR-34426", branch_code: "8802", on_account: true, note: null },
+    { id: CED, name: "Consolidated Electrical Distributors", account_number: "AC-10427", branch_code: "8802", on_account: true, note: null },
     { id: OSH, name: "Outdoor Supply Hardware (OSH - Cupertino)", account_number: null, branch_code: null, on_account: false, note: null },
   ],
   supplier_aliases: [
@@ -213,7 +213,7 @@ const TABLES: Record<string, unknown[]> = {
     { id: "pay-1", supplier_account_id: CED, amount: 2000, paid_on: "2026-09-05", method: "check", reference: "1042", note: null, voided_at: null },
   ],
   supplier_invoices: SUPPLIER_INVOICES,
-  bill_supplier_invoices: [{ bill_id: "b-herringbone", supplier_invoice_id: "si-1106969" }],
+  bill_supplier_invoices: [{ bill_id: "b-honeysuckle", supplier_invoice_id: "si-1106969" }],
   organized_items: [
     {
       id: "tray-1",
@@ -344,7 +344,7 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "Business Cost", was: "Needs You (and Sort These' bucket picker)", home: "needs-you", times: 5 },
   { door: "Same Purchase: Tie Them", was: "Needs You (and CED 3b)", home: "needs-you" },
   // 2. What You Owe Your Suppliers -> one line per supplier, its detail
-  { door: /^Consolidated Electrical Distributors Account TR-34426/, was: "account row tap", home: "suppliers" },
+  { door: /^Consolidated Electrical Distributors Account AC-10427/, was: "account row tap", home: "suppliers" },
   { door: "Record A Payment", was: "account row AND the CED discount section", home: "suppliers", times: 1 },
   { door: "Turn On A Running Balance", was: "account row (now inside Check These)", home: "suppliers" },
   { door: "Undo", was: "account row (per payment)", home: "suppliers" },
@@ -434,7 +434,7 @@ describe("every door keeps exactly one home", () => {
     expect(summaries.length).toBe(1);
     for (const s of summaries) expect(s).toMatch(/^Discount Still On The Table \(\d+\)$/);
     // On the line itself, before he opens anything: money with a deadline is never behind a fold.
-    const line = doors(ced).find((d) => d.startsWith("Consolidated Electrical Distributors Account TR-34426"));
+    const line = doors(ced).find((d) => d.startsWith("Consolidated Electrical Distributors Account AC-10427"));
     expect(line).toMatch(/comes off if they are paid by Oct 10, 2026/);
     // And nowhere else on the page.
     expect(text(html).match(/comes off if/g) ?? []).toHaveLength(1);
@@ -488,8 +488,8 @@ describe("every door keeps exactly one home", () => {
 
   it("a paper on a Needs You card is never listed a second time in the supplier's own lists", () => {
     const ced = section(`supplier-invoices-${CED}`);
-    // 85 WHITNEY is a card; the only no-job rows left in CED's lists are the credit memo and STOCK.
-    expect(text(section("needs-you"))).toContain("It Says 85 WHITNEY");
+    // 41 LARKSPUR is a card; the only no-job rows left in CED's lists are the credit memo and STOCK.
+    expect(text(section("needs-you"))).toContain("It Says 41 LARKSPUR");
     const noJob = ced.slice(ced.indexOf("Invoices With No Job"), ced.indexOf("Not Recorded Yet"));
     expect(noJob).not.toContain("8802-1107820");
     expect(noJob).toContain("8802-1108541");
@@ -545,7 +545,7 @@ describe("Needs You holds Sort These (W1-32)", () => {
     expect((html.match(/id="sort-these"/g) ?? []).length).toBe(1);
     // In order: the dropped paper's card, then the supplier's cards.
     expect(ny.indexOf("Home Depot")).toBeGreaterThan(-1);
-    expect(ny.indexOf("Home Depot")).toBeLessThan(ny.indexOf("It Says 85 WHITNEY"));
+    expect(ny.indexOf("Home Depot")).toBeLessThan(ny.indexOf("It Says 41 LARKSPUR"));
     // Sort These is gone as a card and as a word; Add More's job is the header's and the page's drop.
     expect(text(html)).not.toContain("Sort These");
     expect(count(doors(html), "Add More")).toBe(0);
@@ -655,7 +655,7 @@ describe("All Bills is one list", () => {
   it("Already Billed stays on a bill's own row in the one list (0357), with its Billed By Hand · Not Billed After All", async () => {
     const { BillsReceipts } = await import("./bills-receipts");
     const { createElement } = await import("react");
-    const row = (id: string) => ({ id, supplier: "Supply House", bill_number: null, amount: 40, status: "unpaid", bill_date: "2026-09-10", job_id: J011, category: null, jobs: { job_number: "J-011", name: "13897 Herringbone" } });
+    const row = (id: string) => ({ id, supplier: "Supply House", bill_number: null, amount: 40, status: "unpaid", bill_date: "2026-09-10", job_id: J011, category: null, jobs: { job_number: "J-011", name: "13897 Honeysuckle" } });
     const list = renderToStaticMarkup(
       createElement(BillsReceipts, {
         orgId: ORG,

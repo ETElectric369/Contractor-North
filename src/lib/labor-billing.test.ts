@@ -90,7 +90,7 @@ describe("computeJobLaborBilling", () => {
     expect(lines[0].sourceIds).toEqual(["piece-here"]);
   });
 
-  it("reconciles the Tao scenario (Brian 26.5h@75 + Erik 27h@150 = 6037.50)", () => {
+  it("reconciles the Tess scenario (Brian 26.5h@75 + Erik 27h@150 = 6037.50)", () => {
     const { total } = computeJobLaborBilling([entry(brian, 26.5), entry(erik, 27)], 0);
     expect(total).toBe(6037.5);
   });
@@ -297,7 +297,7 @@ describe("labor lines claim their hours (0255)", () => {
     expect(lines).toEqual([]);
   });
 
-  it("withoutClaimedLabor: the 85 Whitney case — INV-061 holds nine entries, Brian's 09-10 entry stays free", () => {
+  it("withoutClaimedLabor: the 41 Larkspur case — INV-061 holds nine entries, Brian's 09-10 entry stays free", () => {
     const held = ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9"];
     const entries = [...held.map((id, i) => punch(id, i % 2 ? brianP : erikP, 8)), punch("e10", brianP, 5.22)];
     const free = withoutClaimedLabor(entries, new Set(held));

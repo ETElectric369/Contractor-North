@@ -21,12 +21,12 @@ import { indexSupplierAliases } from "./supplier-identity";
  * "TOOLS" IN THE PO BOX (Erik, 2026-09-24). ET's live row 5b670ec2, Paper A: a CED sales-order
  * ticket, $44.44, 8802-SO-257558, PO "TOOLS", hint "JOB NAME AND ADDRESS ERIK TAYLOR TOOLS". It
  * came in asking "Where does this go?", with the reader's bucket labelled "Not read off the paper".
- * The PO picks the Tools & Supplies business cost exactly the way "13897 HERRINGBONE" picks J-011.
+ * The PO picks the Tools & Supplies business cost exactly the way "13897 HONEYSUCKLE" picks J-011.
  */
-const J011: MarkJob = { id: "j11", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customerNames: ["Andrew Cohen"] };
-const J046: MarkJob = { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd", customerNames: ["Jason Waldow"] };
+const J011: MarkJob = { id: "j11", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", customerNames: ["Andrew Crake"] };
+const J046: MarkJob = { id: "j46", job_number: "J-046", name: "Jason Wexley", address: "518 Cinder Lake Rd", customerNames: ["Jason Wexley"] };
 const JOBS = [J011, J046];
-const SELF = ["ET Electric", "Erik Taylor", "Brian Taylor", "Jimmy Santoliva"];
+const SELF = ["ET Electric", "Erik Taylor", "Brian Taylor", "Jimmy Starling"];
 
 const paperA = (proposal: Record<string, unknown>, over: Partial<PaperItem> = {}): PaperItem => ({
   id: "5b670ec2",
@@ -70,7 +70,7 @@ describe("companyUseWord: the whole box, exactly", () => {
     expect(companyUseWord(word)).toEqual({ bucket: null, words: word, shelf: true });
   });
 
-  it.each(["TOOLS FOR HERRINGBONE", "SHOP", "ERIK TAYLOR", "ET ELECTRIC", "WILL CALL", "13897 HERRINGBONE", "", null])("%s is not a company word", (word) => {
+  it.each(["TOOLS FOR HONEYSUCKLE", "SHOP", "ERIK TAYLOR", "ET ELECTRIC", "WILL CALL", "13897 HONEYSUCKLE", "", null])("%s is not a company word", (word) => {
     expect(companyUseWord(word as string | null)).toBeNull();
   });
 });
@@ -91,10 +91,10 @@ describe("placeFromMarks: a job mark beats a company word; a paper naming both p
   });
 
   it("PO TOOLS and a street in the hint names both, says so, and picks nothing", () => {
-    const r = placeFromMarks({ po: "TOOLS", hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" }, JOBS, [], SELF);
+    const r = placeFromMarks({ po: "TOOLS", hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE" }, JOBS, [], SELF);
     expect(r.job.kind).toBe("conflict");
     expect(r.job.kind === "conflict" && r.job.sentence).toBe(
-      'The paper names a job (the address "13897 HERRINGBONE") and the company\'s own use (the PO "TOOLS"), so nothing was picked.',
+      'The paper names a job (the address "13897 HONEYSUCKLE") and the company\'s own use (the PO "TOOLS"), so nothing was picked.',
     );
   });
 
@@ -187,7 +187,7 @@ describe("a stored company word is placed again on every load, like any other ro
 
   it("PO STOCK read before its job existed shows the conflict a read today would find", () => {
     // Read when J-011 did not exist yet: the hint's street matched nothing, so only STOCK was kept.
-    const row = paperA({ ...LIVE_A, po: "STOCK", bucket: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE", companyUse: STOCK_USE });
+    const row = paperA({ ...LIVE_A, po: "STOCK", bucket: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE", companyUse: STOCK_USE });
     expect(rematchPaper(row, [], [], SELF)).toBe(row);
     const now = rematchPaper(row, JOBS, [], SELF);
     expect(now.proposal).toMatchObject({ companyUse: STOCK_USE, jobId: null });
@@ -196,7 +196,7 @@ describe("a stored company word is placed again on every load, like any other ro
   });
 
   it("PO TOOLS stops picking the bucket once the address names a job too: a person decides", () => {
-    const row = paperA({ ...LIVE_A, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE", companyUse: TOOLS_USE });
+    const row = paperA({ ...LIVE_A, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE", companyUse: TOOLS_USE });
     const now = rematchPaper(row, JOBS, [], SELF);
     expect(suggestedDestination(now, ["j11"])).toBe("");
     expect(paperPickOf(now)).toBe("");
@@ -237,7 +237,7 @@ describe("pickProvenance: who decided where the paper went (Paper B, audit v994 
       vendor: "Consolidated Electrical Dist.",
       amount: "323.71",
       doc_number: "8802-SO-257555",
-      proposal: { po: "13897 HERRINGBONE", jobId: null, jobFrom: null, bucket: null, guessJobId: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" },
+      proposal: { po: "13897 HONEYSUCKLE", jobId: null, jobFrom: null, bucket: null, guessJobId: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE" },
     },
     JOBS,
     [],
@@ -249,18 +249,18 @@ describe("pickProvenance: who decided where the paper went (Paper B, audit v994 
       filed: {
         picked: "paper",
         paperPick: "job:j11",
-        because: "Job picked from the PO on the bill: 13897 HERRINGBONE",
+        because: "Job picked from the PO on the bill: 13897 HONEYSUCKLE",
         jobFrom: "po",
-        jobHint: "13897 HERRINGBONE",
+        jobHint: "13897 HONEYSUCKLE",
       },
-      note: "Job picked from the PO on the bill: 13897 HERRINGBONE.",
+      note: "Job picked from the PO on the bill: 13897 HONEYSUCKLE.",
     });
   });
 
   it("filed somewhere else: a PERSON overrode the paper, and the note says so in so many words", () => {
     const r = pickProvenance(paperB, "job:j46");
     expect(r.filed.picked).toBe("person");
-    expect(r.note).toBe("A person picked this over what the paper names (Job picked from the PO on the bill: 13897 HERRINGBONE).");
+    expect(r.note).toBe("A person picked this over what the paper names (Job picked from the PO on the bill: 13897 HONEYSUCKLE).");
   });
 
   it("a model's guess tapped is a guess, never the paper", () => {
@@ -291,7 +291,7 @@ describe("findSameNumber reads the bill the supplier's door wrote", () => {
       amount: 400,
       bill_date: "2026-09-12",
       job_id: "job-046",
-      jobs: { job_number: "J-046", name: "Jason Waldow" },
+      jobs: { job_number: "J-046", name: "Jason Wexley" },
     };
     const paper: PaperItem = { id: "p", kind: "receipt", status: "needs_review", doc_type: "bill", vendor: "CED", amount: 400, doc_number: "8802-1109000" };
     expect(findSameNumber(paper, { bills: [recorded] }, aliases)).toEqual([expect.objectContaining({ kind: "bill", billId: "rec-1" })]);

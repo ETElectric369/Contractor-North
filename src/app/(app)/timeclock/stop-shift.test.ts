@@ -75,7 +75,7 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
 }
 
 const ENTRY = "0c7fae89-0000-4000-8000-000000000001";
-const HERRINGBONE = "a0000000-0000-4000-8000-00000000011b";
+const HONEYSUCKLE = "a0000000-0000-4000-8000-00000000011b";
 const H = 3_600_000;
 // A day nobody worked: 2001-01-01, 1:37 PM Pacific.
 const CLOCK_IN = "2001-01-01T21:37:00.000Z";
@@ -88,11 +88,11 @@ const openRow = (r: Row = {}) => ({
   clock_in: CLOCK_IN,
   clock_out: r.clock_out ?? null,
   status: r.status ?? "open",
-  job_id: HERRINGBONE,
+  job_id: HONEYSUCKLE,
   notes: r.notes ?? null,
   paid_at: null,
   profiles: { full_name: "Brian Taylor" },
-  job: { job_number: "J-011", name: "Herringbone" },
+  job: { job_number: "J-011", name: "Honeysuckle" },
 });
 
 /** The routes stopShift needs; `updated` is what the guarded UPDATE matched. */
@@ -100,7 +100,7 @@ function stopRoutes(row: any, updated: any[] = [{ id: ENTRY }]) {
   return (q: Q): Reply => {
     if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
     if (q.table === "profiles") return { data: { full_name: "Erik Taylor" } };
-    if (q.table === "jobs") return { data: { id: HERRINGBONE, job_number: "J-011", name: "Herringbone" } };
+    if (q.table === "jobs") return { data: { id: HONEYSUCKLE, job_number: "J-011", name: "Honeysuckle" } };
     if (q.table === "time_entries" && q.verb === "select" && /status/.test(q.cols)) return { data: row };
     if (q.table === "time_entries" && q.verb === "select") return { data: [] }; // the overlap read: a clear day
     if (q.table === "time_entries" && q.verb === "update") return { data: updated };
@@ -160,7 +160,7 @@ describe("stopShift", () => {
     expect(r.ok).toBe(true);
     expect(r.hours).toBe(5);
     // Erik, 2026-09-24: "Brian is Clocked Out". The deed in his words, then the facts.
-    expect(r.sentence).toBe("Brian is Clocked Out: 5.00 h on Herringbone, Mon Jan 1, 12:00 PM to 5:00 PM. Brian has been told.");
+    expect(r.sentence).toBe("Brian is Clocked Out: 5.00 h on Honeysuckle, Mon Jan 1, 12:00 PM to 5:00 PM. Brian has been told.");
 
     const upd = calls.find((c) => c.table === "time_entries" && c.verb === "update")!;
     expect(upd.filters).toContainEqual(["eq", "status", "open"]);
@@ -183,7 +183,7 @@ describe("stopShift", () => {
     expect(to).toEqual(["brian-1"]);
     expect(n).toMatchObject({ type: "clock_stopped", title: "You're Clocked Out", url: "/timeclock" });
     expect(n.body).toBe(
-      "Erik clocked you out at 5:00 PM: 5.00 h on Herringbone, Mon Jan 1, 12:00 PM to 5:00 PM, no lunch. If that is wrong, tell Erik.",
+      "Erik clocked you out at 5:00 PM: 5.00 h on Honeysuckle, Mon Jan 1, 12:00 PM to 5:00 PM, no lunch. If that is wrong, tell Erik.",
     );
     expect(spies.push).toHaveLength(1);
     expect(spies.push[0][0]).toEqual(["brian-1"]);
@@ -193,7 +193,7 @@ describe("stopShift", () => {
   it("stopping your own clock tells nobody, and the sentence leaves the telling out", async () => {
     state.client = fakeSupabase(stopRoutes(openRow({ profile_id: "user-1" })), calls);
     const r = await stop("2001-01-02T01:00:00.000Z", { lunch_minutes: 30 });
-    expect(r.sentence).toBe("You're Clocked Out: 2.88 h on Herringbone, Mon Jan 1, 1:37 PM to 5:00 PM.");
+    expect(r.sentence).toBe("You're Clocked Out: 2.88 h on Honeysuckle, Mon Jan 1, 1:37 PM to 5:00 PM.");
     expect(spies.notify).toEqual([]);
     expect(spies.push).toEqual([]);
   });
@@ -205,9 +205,9 @@ describe("stopShift", () => {
       return stopRoutes(nameless)(q);
     }, calls);
     const r = await stop("2001-01-02T01:00:00.000Z");
-    expect(r.sentence).toBe("They're Clocked Out: 3.38 h on Herringbone, Mon Jan 1, 1:37 PM to 5:00 PM. They have been told.");
+    expect(r.sentence).toBe("They're Clocked Out: 3.38 h on Honeysuckle, Mon Jan 1, 1:37 PM to 5:00 PM. They have been told.");
     expect(spies.notify[0][2].body).toBe(
-      "The office clocked you out at 5:00 PM: 3.38 h on Herringbone, Mon Jan 1, 1:37 PM to 5:00 PM, no lunch. If that is wrong, tell the office.",
+      "The office clocked you out at 5:00 PM: 3.38 h on Honeysuckle, Mon Jan 1, 1:37 PM to 5:00 PM, no lunch. If that is wrong, tell the office.",
     );
   });
 
@@ -348,7 +348,7 @@ describe("switchJob on a clock past twelve hours", () => {
     id: ENTRY,
     org_id: "org-1",
     profile_id: "user-1",
-    job_id: HERRINGBONE,
+    job_id: HONEYSUCKLE,
     job_code: null,
     notes: null,
     rate_override: null,
@@ -384,13 +384,13 @@ describe("switchJob on a clock past twelve hours", () => {
 describe("updateOpenEntry", () => {
   it("fixes a running shift's job and notes without ever writing its clock or status", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "jobs") return { data: { id: HERRINGBONE } };
+      if (q.table === "jobs") return { data: { id: HONEYSUCKLE } };
       if (q.table === "time_entries" && q.verb === "select") return { data: { job_id: null, status: "open" } };
       if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: ENTRY }] };
     }, calls);
-    expect(await updateOpenEntry({ id: ENTRY, job_id: HERRINGBONE, notes: "panel swap" })).toEqual({ ok: true });
+    expect(await updateOpenEntry({ id: ENTRY, job_id: HONEYSUCKLE, notes: "panel swap" })).toEqual({ ok: true });
     const upd = calls.find((c) => c.verb === "update")!;
-    expect(upd.payload).toEqual({ job_id: HERRINGBONE, notes: "panel swap" });
+    expect(upd.payload).toEqual({ job_id: HONEYSUCKLE, notes: "panel swap" });
     expect(upd.filters).toContainEqual(["eq", "status", "open"]);
   });
 

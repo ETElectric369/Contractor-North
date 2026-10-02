@@ -129,7 +129,7 @@ export interface SupplierInvoiceRow {
   kind: string;
   invoiceDate: string | null;
   dueDate: string | null;
-  /** CED's own JOB NAME, verbatim: "5659 RHODESIA", "5661 RHODESIA", "5659 RODESSIA". Kept raw
+  /** CED's own JOB NAME, verbatim: "5659 FERNHILL", "5661 FERNHILL", "5659 FERNHILE". Kept raw
    *  and never matched to a job by machine - he has five jobs on that one road. */
   jobNameRaw: string | null;
   /** Where a PERSON said it belongs. Null until one does. */
@@ -154,7 +154,7 @@ export interface SupplierAccountRow {
   id: string;
   /** What he calls them: "CED Truckee". */
   name: string;
-  /** The number on the statement: TR-34426. Null for a counter with no account. */
+  /** The number on the statement: AC-10427. Null for a counter with no account. */
   accountNumber: string | null;
   branchCode: string | null;
   /** False for a vendor he pays at the register. Those have no running balance, ever. */
@@ -406,7 +406,7 @@ const discountOf = documentDiscount;
  * A DISCOUNT ON AN INVOICE A CREDIT MEMO HAS ALREADY REVERSED IS NOT A DISCOUNT (review, 2026-09-19).
  *
  * This is worth exactly $4.14 and it is the whole gap between what this app said a cheque would be
- * and what CED's own portal said. On his TTP 106 order they billed $225.47 (invoice 8802-1107230,
+ * and what CED's own portal said. On his ARR 106 order they billed $225.47 (invoice 8802-1107230,
  * prompt-pay discount $4.14), reversed it to the cent with credit memo 8802-1107337 (-$225.47),
  * and rebilled $223.29 on 8802-1107338. Both halves of the reversal are still OPEN documents, so
  * they cancel in the gross - correctly - but the discount was still being counted against a line
@@ -1020,7 +1020,7 @@ export function supplierCandidateQuestions(
 
 // ── THE SAME TICKET, FILED TWICE ────────────────────────────────────────────────────────────────
 // An identical CED ticket ($95.27, 8 lines, line for line to the penny) sits on BOTH "13631
-// Northwoods" (07-29) and "85 Whitney Place" (08-28). One of those jobs is carrying a cost that is
+// Nightshade" (07-29) and "41 Larkspur Place" (08-28). One of those jobs is carrying a cost that is
 // not its own. WHICH ONE IS ERIK'S KNOWLEDGE, NOT OURS: nothing here deletes either copy, and the
 // group is built from whatever matched, never hard-coded to that one bill.
 
@@ -1044,7 +1044,7 @@ export interface DuplicateBillGroup {
   resolution?: { keptBillId: string; at?: string | null } | null;
 }
 
-/** "13631 Northwoods", "Overhead (no job)" - a copy named the way it reads on the card. */
+/** "13631 Nightshade", "Overhead (no job)" - a copy named the way it reads on the card. */
 export function copyPlace(copy: DuplicateBillCopy): string {
   return copy.jobName?.trim() || "Overhead (no job)";
 }

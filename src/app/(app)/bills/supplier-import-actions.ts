@@ -40,8 +40,8 @@ import { createOpenListPaper, orgToday } from "./open-list-core";
  * WHAT A RE-IMPORT MAY NEVER DO, in order of how much it would cost him:
  *
  *   1. NEVER OVERWRITE A JOB A PERSON SET. `job_id` is not in any patch in this file. CED prints
- *      a job name and it is a gift, but his same road reads "5659 RHODESIA", "561 RHODESIA",
- *      "5661 RHODESIA" and "5659 RODESSIA" and he has FIVE jobs on it. The raw name is stored;
+ *      a job name and it is a gift, but his same road reads "5659 FERNHILL", "561 FERNHILL",
+ *      "5661 FERNHILL" and "5659 FERNHILE" and he has FIVE jobs on it. The raw name is stored;
  *      only a person resolves it, and re-reading the paper must never undo that.
  *   2. NEVER RE-OPEN A SETTLED DOCUMENT. The supplier's "***PAID IN FULL***" stamp can CLOSE a
  *      document here. The absence of that stamp closes nothing and opens nothing, because a PDF
@@ -336,7 +336,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   const numbers = [...parsed.keys()];
 
   // ── WHICH SUPPLIER ACCOUNT THESE BELONG TO ────────────────────────────────────────────────
-  // Matched on the ACCOUNT NUMBER printed on the invoice (TR-34426), falling back to the branch
+  // Matched on the ACCOUNT NUMBER printed on the invoice (AC-10427), falling back to the branch
   // code in the invoice number (8802-1103832). Both are identifiers the supplier printed, not
   // guesses about a spelling - the fuzzy matching in supplier-identity.ts is for receipt text,
   // and a fuzzy match here would file somebody else's money onto his account.

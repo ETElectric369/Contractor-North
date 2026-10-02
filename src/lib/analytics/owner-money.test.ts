@@ -46,7 +46,7 @@ const JIMMY = "jimmy";
 const people = new Map<string, OwnerMoneyPerson>([
   [ERIK, { name: "Erik Taylor", paidByDraw: true, hourlyRate: 0 }],
   [BRIAN, { name: "Brian Taylor", paidByDraw: false, hourlyRate: 40 }],
-  [JIMMY, { name: "Jimmy Santoliva", paidByDraw: false, hourlyRate: 50 }],
+  [JIMMY, { name: "Jimmy Starling", paidByDraw: false, hourlyRate: 50 }],
 ]);
 const profilesOf = (id: string) => {
   const p = people.get(id)!;
@@ -848,7 +848,7 @@ describe("caveats: each only when it applies", () => {
   });
 
   it("a credit memo a bill covers is counted in materials once, never also named as not counted", () => {
-    // The 518 Crater Lake shape: each CED memo is a negative bill on J-046, tied to its memo.
+    // The 518 Cinder Lake shape: each CED memo is a negative bill on J-046, tied to its memo.
     const docs = supplierDocsNoBillCovers([
       { id: "m1", kind: "credit_memo", total: -115.33, invoice_date: "2026-09-22", bill_supplier_invoices: [{ id: "t1" }] },
       { id: "m2", kind: "credit_memo", total: -82.1, invoice_date: "2026-09-22", bill_supplier_invoices: [{ id: "t2" }] },

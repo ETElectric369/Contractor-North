@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
  * ADD TO SCHEDULE FOR ANY JOB, AND EACH DAY'S OWN HOURS, on the server without a database (Erik,
- * 2026-09-28: "i want to put heringbone on the page for the rest of the day after Seiler but theres no
+ * 2026-09-28: "i want to put honysuckle on the page for the rest of the day after Siskin but theres no
  * way to add to the schedule from the schedule page unless its already scripted"). An in-memory
  * stand-in for the Supabase client applies each write to rows the next read sees; `noHours` plays a
  * database without 0370 (a select or an insert naming start_time/end_time fails with 42703, the way
@@ -167,11 +167,11 @@ beforeEach(() => {
   vi.mocked(notifyJobCrewAdded).mockClear();
 });
 
-/** Herringbone as Erik had it: In Progress on 9/18, 9/22 and 9/24 (the plan 9/24, 9 to closing), worked. */
-function herringbone() {
+/** Honeysuckle as Erik had it: In Progress on 9/18, 9/22 and 9/24 (the plan 9/24, 9 to closing), worked. */
+function honeysuckle() {
   state.db.jobs.push({
     id: "j011",
-    name: "Herringbone",
+    name: "Honeysuckle",
     status: "in_progress",
     scheduled_start: at("2026-09-24", "09:00"),
     scheduled_end: at("2026-09-24", "17:00"),
@@ -187,8 +187,8 @@ function herringbone() {
 }
 
 describe("Add To Schedule: the day joins the job, at its own hours", () => {
-  it("Herringbone gets today, noon to 5, beside its other days, which all stay", async () => {
-    herringbone();
+  it("Honeysuckle gets today, noon to 5, beside its other days, which all stay", async () => {
+    honeysuckle();
     const r = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 300 });
     expect(r).toMatchObject({ ok: true });
     expect(r.note).toContain("Added Mon, Sep 28, 12:00 PM – 5:00 PM.");
@@ -202,8 +202,8 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
     expect(job("j011")).toMatchObject({ scheduled_start: at("2026-09-24", "09:00"), scheduled_end: at("2026-09-28", "17:00"), status: "in_progress" });
   });
 
-  it("adding a day never moves another: Seiler's 10 to 12 keeps 10 to 12 when a second day joins (by the rule itself: a job's hours are each day's, so nothing is frozen)", async () => {
-    state.db.jobs.push({ id: "j058", name: "Seiler · 3-way switches", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null, assigned_to: [] });
+  it("adding a day never moves another: Siskin's 10 to 12 keeps 10 to 12 when a second day joins (by the rule itself: a job's hours are each day's, so nothing is frozen)", async () => {
+    state.db.jobs.push({ id: "j058", name: "Siskin · 3-way switches", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "j058", start_date: "2026-09-28", end_date: "2026-09-28", start_time: null, end_time: null });
     expect((await actions.addJobDay("j058", { day: "2026-09-30", start: "13:00" })).ok).toBe(true);
     expect(days("j058")).toEqual(["2026-09-28..2026-09-28 usual", "2026-09-30..2026-09-30 13:00-15:00"]);
@@ -214,7 +214,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("no length: the job's size when it has one, else two hours, said", async () => {
-    herringbone();
+    honeysuckle();
     const r = await actions.addJobDay("j011", { day: "2026-09-29", start: "13:00" });
     expect(r).toMatchObject({ ok: true, defaulted: true });
     expect(r.note).toContain("(2 hours; change it on its block)");
@@ -234,7 +234,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("an on-hold job comes off hold (its reason with it), its worked day kept, its stale day gone", async () => {
-    state.db.jobs.push({ id: "h1", name: "Tanager", status: "on_hold", hold_reason: "Waiting on the permit", scheduled_start: at("2026-09-25", "09:00"), scheduled_end: at("2026-09-25", "17:00"), planned_minutes: null, assigned_to: [] });
+    state.db.jobs.push({ id: "h1", name: "Tupelo", status: "on_hold", hold_reason: "Waiting on the permit", scheduled_start: at("2026-09-25", "09:00"), scheduled_end: at("2026-09-25", "17:00"), planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push(
       { job_id: "h1", start_date: "2026-09-21", end_date: "2026-09-21", start_time: "10:00:00", end_time: "14:00:00" },
       { job_id: "h1", start_date: "2026-09-25", end_date: "2026-09-25", start_time: null, end_time: null },
@@ -248,7 +248,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("the crew as the sheet left it, applied to the crew as saved now: someone added rings the bell", async () => {
-    herringbone();
+    honeysuckle();
     // Someone put Mike on from the time clock after the sheet opened; the sheet only added Brian.
     job("j011").assigned_to = ["p-erik", "p-mike"];
     expect((await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 300, crew: { add: ["p-brian"], remove: ["p-erik"] } })).ok).toBe(true);
@@ -257,15 +257,15 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("refused in words: a day it's already on, a finished job, a job that isn't there", async () => {
-    herringbone();
+    honeysuckle();
     expect(await actions.addJobDay("j011", { day: "2026-09-24", start: "12:00" })).toEqual({
       ok: false,
-      error: "Herringbone is already on Thu, Sep 24. Tap its block there to change its time or crew.",
+      error: "Honeysuckle is already on Thu, Sep 24. Tap its block there to change its time or crew.",
     });
     job("j011").status = "complete";
     const done = await actions.addJobDay("j011", { day: "2026-09-29" });
     expect(done.ok).toBe(false);
-    expect(done.error).toMatch(/^Herringbone is .+, so it can't take another day\. Change its status on the job page first\.$/);
+    expect(done.error).toMatch(/^Honeysuckle is .+, so it can't take another day\. Change its status on the job page first\.$/);
     expect((await actions.addJobDay("nope", { day: "2026-09-29" })).error).toBe("That job isn't available. It may have been deleted.");
     expect((await actions.addJobDay("j011", { day: "Monday" })).error).toBe("Pick a day.");
     expect((await actions.addJobDay("j011", { day: "2026-09-29", start: "25:00" })).error).toBe("Pick a start time.");
@@ -273,7 +273,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("a worked day kept as history (outside the plan) takes the add: it is planned again at these hours", async () => {
-    herringbone();
+    honeysuckle();
     // 9/22 was worked and sits outside the plan (9/24): its block's sheet says its time belongs to the
     // plan, so "tap its block" would be a dead end. The add plans it.
     const r = await actions.addJobDay("j011", { day: "2026-09-22", start: "12:00", length: 300 });
@@ -284,7 +284,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
 
   it("a job with no live plan, on the day it sits on as history: that day becomes its plan", async () => {
     // Its date was cleared (Clear The Date) and the worked day stayed; the office puts it back on that day.
-    state.db.jobs.push({ id: "c1", name: "Tanager", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null, assigned_to: [] });
+    state.db.jobs.push({ id: "c1", name: "Tupelo", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "c1", start_date: "2026-09-21", end_date: "2026-09-21", start_time: "10:00:00", end_time: "14:00:00" });
     state.db.time_entries.push({ job_id: "c1", clock_in: at("2026-09-21", "10:05") });
     const r = await actions.addJobDay("c1", { day: "2026-09-21", start: "13:00", length: 120 });
@@ -294,7 +294,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("an on-hold job put back on its old day comes off hold there, instead of being told it's already on it", async () => {
-    state.db.jobs.push({ id: "h2", name: "Tanager", status: "on_hold", hold_reason: "Waiting on the permit", scheduled_start: at("2026-09-25", "09:00"), scheduled_end: at("2026-09-25", "17:00"), planned_minutes: null, assigned_to: [] });
+    state.db.jobs.push({ id: "h2", name: "Tupelo", status: "on_hold", hold_reason: "Waiting on the permit", scheduled_start: at("2026-09-25", "09:00"), scheduled_end: at("2026-09-25", "17:00"), planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "h2", start_date: "2026-09-25", end_date: "2026-09-25", start_time: null, end_time: null });
     const r = await actions.addJobDay("h2", { day: "2026-09-25", start: "08:00", length: 120 });
     expect(r.ok).toBe(true);
@@ -304,7 +304,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("a pick-a-date link out is asked about first, and withdrawn only when the office says so", async () => {
-    herringbone();
+    honeysuckle();
     state.db.schedule_proposals.push({ id: "sp1", job_id: "j011", status: "pending" });
     const ask = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00" });
     expect(ask).toMatchObject({ ok: false, needsProposalConfirm: true });
@@ -316,15 +316,15 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("a refused add never withdraws the customer's link", async () => {
-    herringbone();
+    honeysuckle();
     state.db.schedule_proposals.push({ id: "sp2", job_id: "j011", status: "pending" });
     const r = await actions.addJobDay("j011", { day: "2026-09-24", start: "12:00" }, { cancelProposals: true });
-    expect(r.error).toBe("Herringbone is already on Thu, Sep 24. Tap its block there to change its time or crew.");
+    expect(r.error).toBe("Honeysuckle is already on Thu, Sep 24. Tap its block there to change its time or crew.");
     expect(state.db.schedule_proposals[0].status).toBe("pending");
   });
 
   it("before 0370 (no hours columns): the day is added at the job's usual hours, and the note says so", async () => {
-    herringbone();
+    honeysuckle();
     state.noHours = true;
     const r = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 300 });
     expect(r.ok).toBe(true);
@@ -358,7 +358,7 @@ describe("This Day: one day's time, that day only (setJobDayTimes)", () => {
   });
 
   it("the job's one day IS the job's time: the job's hours move (and a day's leftover own hours give way)", async () => {
-    state.db.jobs.push({ id: "o1", name: "Seiler", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null, assigned_to: [] });
+    state.db.jobs.push({ id: "o1", name: "Siskin", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "o1", start_date: "2026-09-28", end_date: "2026-09-28", start_time: "07:00:00", end_time: "08:00:00" });
     expect(await actions.setJobDayTimes("o1", "2026-09-28", { start: "13:00" })).toEqual({ ok: true });
     // The block drawn was the day's own 7 to 8: a new start keeps that hour on the clock.
@@ -378,7 +378,7 @@ describe("This Day: one day's time, that day only (setJobDayTimes)", () => {
 
 describe("every rewrite carries each day's hours through (writeScheduleRanges)", () => {
   function withOwnDay() {
-    state.db.jobs.push({ id: "w1", name: "Herringbone", status: "in_progress", scheduled_start: at("2026-09-28", "09:00"), scheduled_end: at("2026-10-01", "17:00"), planned_minutes: null, assigned_to: [] });
+    state.db.jobs.push({ id: "w1", name: "Honeysuckle", status: "in_progress", scheduled_start: at("2026-09-28", "09:00"), scheduled_end: at("2026-10-01", "17:00"), planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push(
       { job_id: "w1", start_date: "2026-09-28", end_date: "2026-09-28", start_time: "12:00:00", end_time: "17:00:00" },
       { job_id: "w1", start_date: "2026-09-29", end_date: "2026-10-01", start_time: null, end_time: null },
@@ -432,8 +432,8 @@ describe("a plan that shrinks back to one day: the job's time is the block that 
     const b = jobDayBlock({ day, scheduledStart: j.scheduled_start, scheduledEnd: j.scheduled_end, plannedMinutes: j.planned_minutes, tz: LA, wd: WD, dayHours: own });
     return `${b.startMin / 60}-${b.endMin / 60}`;
   }
-  async function seilerPlusWed() {
-    state.db.jobs.push({ id: "s1", name: "Seiler", status: "scheduled", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: null, assigned_to: [] });
+  async function siskinPlusWed() {
+    state.db.jobs.push({ id: "s1", name: "Siskin", status: "scheduled", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "s1", start_date: "2026-10-05", end_date: "2026-10-05", start_time: null, end_time: null });
     expect((await actions.addJobDay("s1", { day: "2026-10-07", start: "13:00", length: 120 })).ok).toBe(true);
     // Mon keeps no hours of its own: the job's 10 to 12 is its hours on every day, so Mon draws it as is.
@@ -442,7 +442,7 @@ describe("a plan that shrinks back to one day: the job's time is the block that 
   }
 
   it("the range editor takes Wed off: Mon's 10 to 12 is the job's time again, not 10 to closing", async () => {
-    await seilerPlusWed();
+    await siskinPlusWed();
     expect((await actions.setJobScheduleRanges("s1", [{ start: "2026-10-05", end: "2026-10-05" }])).ok).toBe(true);
     expect(job("s1")).toMatchObject({ scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: null });
     expect(days("s1")).toEqual(["2026-10-05..2026-10-05 usual"]);
@@ -450,7 +450,7 @@ describe("a plan that shrinks back to one day: the job's time is the block that 
   });
 
   it("Wed's block moved onto Mon: the job's time is the 1 to 3 drawn there, and a 1h tap keeps its 1 PM start", async () => {
-    await seilerPlusWed();
+    await siskinPlusWed();
     expect((await actions.moveJobDay("s1", "2026-10-07", "2026-10-05")).ok).toBe(true);
     expect(job("s1")).toMatchObject({ scheduled_start: at("2026-10-05", "13:00"), scheduled_end: at("2026-10-05", "15:00") });
     expect(days("s1")).toEqual(["2026-10-05..2026-10-05 usual"]);
@@ -461,9 +461,9 @@ describe("a plan that shrinks back to one day: the job's time is the block that 
 });
 
 describe("before 0370, Add To Schedule never redraws the job's other days", () => {
-  it("Seiler's one day 10 to 12 stays 10 to 12 when Wed joins it (a job's hours are each day's), so the add goes on and Wed lands at the usual 10 to 12", async () => {
+  it("Siskin's one day 10 to 12 stays 10 to 12 when Wed joins it (a job's hours are each day's), so the add goes on and Wed lands at the usual 10 to 12", async () => {
     state.noHours = true;
-    state.db.jobs.push({ id: "s2", name: "Seiler", status: "scheduled", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: 120, assigned_to: [] });
+    state.db.jobs.push({ id: "s2", name: "Siskin", status: "scheduled", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: 120, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "s2", start_date: "2026-10-05", end_date: "2026-10-05" });
     state.db.schedule_proposals.push({ id: "sp9", job_id: "s2", status: "pending" });
     const r = await actions.addJobDay("s2", { day: "2026-10-07", start: "13:00", length: 120 }, { cancelProposals: true });
@@ -480,7 +480,7 @@ describe("before 0370, Add To Schedule never redraws the job's other days", () =
   });
 
   it("a day that redraws no other day goes on, and the note says the hours it draws, not the ones asked", async () => {
-    herringbone();
+    honeysuckle();
     state.noHours = true;
     const r = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 120 });
     expect(r.ok).toBe(true);

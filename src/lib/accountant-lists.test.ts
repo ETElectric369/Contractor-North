@@ -4,7 +4,7 @@ import { HEADERS, onHandList, toCsv, toolsBilledList, toolsList, type Accountant
 const TZ = "America/Los_Angeles";
 
 /**
- * Herringbone's 8/19 coil on the shelf ($180.17 for 250 ft), and a September of upkeep on it:
+ * Honeysuckle's 8/19 coil on the shelf ($180.17 for 250 ft), and a September of upkeep on it:
  * 60 ft onto another job, 10 ft ruined, 50 ft back to CED against a $30.00 credit filed to the
  * shelf, 10 ft of the take brought back. A Twister box counted in at $0. Two tool tickets.
  */
@@ -15,7 +15,7 @@ const inputs = (): AccountantInputs => ({
   ],
   lots: [
     { lot_id: "L1", item_id: "i-122", kind: "line", bill_id: "h1", pieces: "250", unit: "ft", cost: "180.17", bought_on: "2026-08-19", live: true, note: null },
-    { lot_id: "L2", item_id: "i-tw", kind: "opening", bill_id: null, pieces: "440", unit: "ea", cost: "0", bought_on: "2026-09-25", live: true, note: "The rest of Waldow's box (INV-069 paid)" },
+    { lot_id: "L2", item_id: "i-tw", kind: "opening", bill_id: null, pieces: "440", unit: "ea", cost: "0", bought_on: "2026-09-25", live: true, note: "The rest of Wexley's box (INV-069 paid)" },
     // Taken back off the shelf: never stock bought, never on hand.
     { lot_id: "L0", item_id: "i-122", kind: "line", bill_id: "h0", pieces: "250", unit: "ft", cost: "180.17", bought_on: "2026-07-31", live: false, note: null },
   ],
@@ -41,7 +41,7 @@ const inputs = (): AccountantInputs => ({
     { id: "hd3", bill_id: "hd", description: "Tax", quantity: 1, unit_price: 45, amount: 45, category: "Tax", billable: true, billed_amount: null },
   ],
   jobs: [
-    { id: "J11", job_number: "J-011", name: "13897 Herringbone" },
+    { id: "J11", job_number: "J-011", name: "13897 Honeysuckle" },
     { id: "J13", job_number: "J-013", name: "Another Job" },
     { id: "J02", job_number: "J-002", name: "The SuperHawg Job" },
   ],

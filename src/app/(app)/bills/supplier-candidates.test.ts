@@ -12,7 +12,7 @@ import {
  * THE ONE QUESTION ON HIS REAL BOOK, AND THE RULES THAT KEEP IT HONEST.
  *
  * cn-v963 shipped and Erik used it: four supplier accounts, four real payments against CED, and the
- * duplicate ticket resolved onto 85 Whitney Place. His CED balance reads $6,476.93 and reconciles
+ * duplicate ticket resolved onto 41 Larkspur Place. His CED balance reads $6,476.93 and reconciles
  * to the penny. One question was left over and the page was throwing it away - "Contractors
  * Electrical Distributors" ($467.87, unpaid) against his four "Consolidated Electrical ..."
  * spellings, which reduce to the same initials and differ in their first word.

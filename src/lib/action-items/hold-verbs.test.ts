@@ -102,9 +102,9 @@ describe("job.setStatus puts a job on hold through the hold", () => {
 /**
  * NORT HAS ONE FINISH TOOL, NOT TWO (M2).
  *
- * "Mark the Tao job complete" could reach either job.finish — which bills the unbilled work into a
+ * "Mark the Tess job complete" could reach either job.finish — which bills the unbilled work into a
  * draft and asks Erik to confirm first — or job.setStatus {status: complete}, which wrote the word
- * alone and asked nobody. Same words, two consequences, and the cheap one is how Tao's 19.5 hours
+ * alone and asked nobody. Same words, two consequences, and the cheap one is how Tess's 19.5 hours
  * went unbilled. job.setStatus now points at the one door instead, in words Nort can act on.
  */
 describe("job.setStatus is not a second way to finish a job", () => {
@@ -167,16 +167,16 @@ describe("invoice.setAside", () => {
   });
 
   it("a draft whose job is finished or cancelled is refused in words: it waits on nothing, so no day is written and no 'comes back' is said", async () => {
-    m.invoiceJob = { job_number: "J-011", name: "Herringbone", status: "complete" };
+    m.invoiceJob = { job_number: "J-011", name: "Honeysuckle", status: "complete" };
     const r = await invoiceActions["invoice.setAside"].handler({ id: "inv-78", date: later(20) }, ctx);
     expect(r.ok).toBe(false);
-    expect(r.error).toBe("Herringbone · J-011 is finished, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.");
+    expect(r.error).toBe("Honeysuckle · J-011 is finished, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.");
     expect(r.speak).toBeUndefined();
-    m.invoiceJob = { job_number: "J-011", name: "Herringbone", status: "cancelled" };
-    expect((await invoiceActions["invoice.setAside"].handler({ id: "inv-78", date: later(20) }, ctx)).error).toMatch(/^Herringbone · J-011 is cancelled,/);
+    m.invoiceJob = { job_number: "J-011", name: "Honeysuckle", status: "cancelled" };
+    expect((await invoiceActions["invoice.setAside"].handler({ id: "inv-78", date: later(20) }, ctx)).error).toMatch(/^Honeysuckle · J-011 is cancelled,/);
     expect(m.parkInvoice).not.toHaveBeenCalled();
     // A job still going: parked as before.
-    m.invoiceJob = { job_number: "J-011", name: "Herringbone", status: "in_progress" };
+    m.invoiceJob = { job_number: "J-011", name: "Honeysuckle", status: "in_progress" };
     expect((await invoiceActions["invoice.setAside"].handler({ id: "inv-78", date: later(20) }, ctx)).ok).toBe(true);
     expect(m.parkInvoice).toHaveBeenCalledTimes(1);
   });

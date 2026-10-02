@@ -17,9 +17,9 @@ import { addJobDay } from "./actions";
 
 /**
  * ADD TO SCHEDULE, FROM THE SCHEDULE, FOR ANY JOB (Erik, 2026-09-28, at night: "im on the schedule page
- * and i want to put heringbone on the page for the rest of the day after Seiler but theres no way to add
+ * and i want to put honysuckle on the page for the rest of the day after Siskin but theres no way to add
  * to the schedule from the schedule page unless its already scripted"). The rail lists only work with no
- * day; a job already under way over several days (Herringbone: 9/18, 9/22, 9/24) had no door to another.
+ * day; a job already under way over several days (Honeysuckle: 9/18, 9/22, 9/24) had no door to another.
  *
  * An open spot tapped on a day (or the day's "+") opens this: pick the job (search; the company's jobs
  * still in flight, the most recently worked first, each by its name with its street and who), the start

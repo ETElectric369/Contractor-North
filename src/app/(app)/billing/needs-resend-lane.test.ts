@@ -13,7 +13,7 @@ import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
  * the day) left no mark on any list, count or badge in the app. The banner that says "send it
  * again" was only ever visible to someone already looking at the invoice that needed it.
  *
- * Live proof, queried 2026-09-20: INV-071, Karen Wucher, $1,875.98, status 'sent', sent_at
+ * Live proof, queried 2026-09-20: INV-071, Karen Willet, $1,875.98, status 'sent', sent_at
  * 2026-09-19T20:54:55.199Z, revised_at 2026-09-20T05:21:57.343Z. She is holding the older bill
  * right now, and on /billing that row rendered identically to a bill that is perfectly up to date.
  *

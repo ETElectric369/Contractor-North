@@ -48,8 +48,8 @@ const members = [
   { id: "brian-1", full_name: "Brian Taylor" },
 ];
 const jobs: AddJob[] = [
-  { id: "j28", job_number: "J-028", name: "85 Whitney", address: "85 Whitney Ave", status: "in_progress", customers: { name: "Nora Arnoso" } },
-  { id: "j11", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Dr", status: "complete", customers: [{ name: "Andrew Cohen" }] },
+  { id: "j28", job_number: "J-028", name: "41 Larkspur", address: "41 Larkspur Ave", status: "in_progress", customers: { name: "Nora Avocet" } },
+  { id: "j11", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Dr", status: "complete", customers: [{ name: "Andrew Crake" }] },
 ];
 const codes = [
   { id: "c1", code: "ROUGH", description: "Rough-in", billable: true, active: true, created_at: "" },
@@ -140,16 +140,16 @@ describe("the Job on Timecards: always somebody's choice", () => {
   it("starts on Pick The Job, lists the open jobs by name (codes on) and ends on Company Time", () => {
     expect(optionsOf(form({ jobCodesEnabled: true }), "ate-job")).toEqual([
       ["", "Pick The Job"],
-      ["j28", "85 Whitney"],
-      ["j11", "13897 Herringbone"],
+      ["j28", "41 Larkspur"],
+      ["j11", "13897 Honeysuckle"],
       [COMPANY_TIME, "Company Time (Not Billed)"],
     ]);
   });
 
   it("codes off: the customer and the street lead, the number never does", () => {
     const opts = optionsOf(form({ jobCodesEnabled: false }), "ate-job");
-    expect(opts[1]).toEqual(["j28", "Nora Arnoso · 85 Whitney Ave"]);
-    expect(opts[2]).toEqual(["j11", "Andrew Cohen · 13897 Herringbone Dr"]);
+    expect(opts[1]).toEqual(["j28", "Nora Avocet · 41 Larkspur Ave"]);
+    expect(opts[2]).toEqual(["j11", "Andrew Crake · 13897 Honeysuckle Dr"]);
     for (const [, label] of opts) expect(label).not.toMatch(/^J-\d/);
   });
 
@@ -167,14 +167,14 @@ describe("the Job on Timecards: always somebody's choice", () => {
   });
 
   it("Save refuses a Job nobody picked, in words that name the ways out", () => {
-    const base = { fixedJob: null, jobCode: "", jobCodesEnabled: false, labelOf: (id: string) => (id === "j28" ? "85 Whitney" : "That job") };
+    const base = { fixedJob: null, jobCode: "", jobCodesEnabled: false, labelOf: (id: string) => (id === "j28" ? "41 Larkspur" : "That job") };
     expect(resolveJobChoice({ ...base, value: "", companyTimeCode: "SHOP" })).toEqual({ ok: false, error: "Pick the job, or Company Time." });
     expect(resolveJobChoice({ ...base, value: "", companyTimeCode: null })).toEqual({ ok: false, error: "Pick the job, or No Job." });
     // Company Time files the company's own code on no job; No Job is only a choice without one.
     expect(resolveJobChoice({ ...base, value: COMPANY_TIME, companyTimeCode: "SHOP" })).toEqual({ ok: true, job_id: null, job_code: "SHOP", where: "Company Time" });
     expect(resolveJobChoice({ ...base, value: NO_JOB, companyTimeCode: null })).toEqual({ ok: true, job_id: null, job_code: null, where: "No Job" });
     expect(resolveJobChoice({ ...base, value: NO_JOB, companyTimeCode: "SHOP" }).ok).toBe(false);
-    expect(resolveJobChoice({ ...base, value: "j28", companyTimeCode: "SHOP" })).toEqual({ ok: true, job_id: "j28", job_code: null, where: "85 Whitney" });
+    expect(resolveJobChoice({ ...base, value: "j28", companyTimeCode: "SHOP" })).toEqual({ ok: true, job_id: "j28", job_code: null, where: "41 Larkspur" });
     // The Job Code rides only while the switch is on.
     expect(resolveJobChoice({ ...base, value: "j28", companyTimeCode: "SHOP", jobCode: "ROUGH", jobCodesEnabled: true })).toMatchObject({ job_code: "ROUGH" });
     expect(resolveJobChoice({ ...base, value: "j28", companyTimeCode: "SHOP", jobCode: "ROUGH", jobCodesEnabled: false })).toMatchObject({ job_code: null });
@@ -183,7 +183,7 @@ describe("the Job on Timecards: always somebody's choice", () => {
 
 describe("the schedule starts the Job field, and never overrules a pick", () => {
   const answer = (over: Record<string, unknown> = {}) =>
-    ({ ok: true, name: "Brian Taylor", tz: TZ, shifts: [], forJob: null, scheduledJob: { id: "j28", label: "85 Whitney" }, offThatDay: false, ...over }) as any;
+    ({ ok: true, name: "Brian Taylor", tz: TZ, shifts: [], forJob: null, scheduledJob: { id: "j28", label: "41 Larkspur" }, offThatDay: false, ...over }) as any;
 
   it("untouched: the scheduled job; nothing scheduled, marked off, or unreadable: Pick The Job", () => {
     expect(preselectFrom(answer(), false)).toBe("j28");
@@ -230,8 +230,8 @@ describe("the schedule starts the Job field, and never overrules a pick", () => 
 
 describe("the job's own page: the job is said, not picked", () => {
   it("Job · <the job>, no job list, no older-job line", () => {
-    const html = form({ fixedJob: { id: "j28", label: "85 Whitney" }, jobs: [] });
-    expect(html).toContain("Job · 85 Whitney");
+    const html = form({ fixedJob: { id: "j28", label: "41 Larkspur" }, jobs: [] });
+    expect(html).toContain("Job · 41 Larkspur");
     expect(html).not.toContain('id="ate-job"');
     expect(html).not.toContain("Older job?");
     expect(html).not.toContain("Pick The Job");
@@ -239,14 +239,14 @@ describe("the job's own page: the job is said, not picked", () => {
 
   it("Save names the job it was on", () => {
     expect(
-      resolveJobChoice({ value: "", fixedJob: { id: "j28", label: "85 Whitney" }, companyTimeCode: null, jobCode: "", jobCodesEnabled: false, labelOf: () => "x" }),
-    ).toEqual({ ok: true, job_id: "j28", job_code: null, where: "85 Whitney" });
+      resolveJobChoice({ value: "", fixedJob: { id: "j28", label: "41 Larkspur" }, companyTimeCode: null, jobCode: "", jobCodesEnabled: false, labelOf: () => "x" }),
+    ).toEqual({ ok: true, job_id: "j28", job_code: null, where: "41 Larkspur" });
   });
 });
 
 describe("Day, Start, End", () => {
   it("the Day starts on the COMPANY's today on both pages, not the browser's; 8 to 4 by default", () => {
-    for (const html of [form(), form({ fixedJob: { id: "j28", label: "85 Whitney" } })]) {
+    for (const html of [form(), form({ fixedJob: { id: "j28", label: "41 Larkspur" } })]) {
       expect(html).toMatch(new RegExp(`id="ate-day" type="date" value="${todayStrInTz(TZ)}"`));
       expect(html).toMatch(/id="ate-start" type="time" value="08:00"/);
       expect(html).toMatch(/id="ate-end" type="time" value="16:00"/);
@@ -271,7 +271,7 @@ describe("Day, Start, End", () => {
 
 describe("after Save, nothing silent", () => {
   it("the toast names the hours, the person, the day and where they went", () => {
-    expect(addedWords({ hours: 7.5, who: "Brian", day: "2026-09-23", where: "85 Whitney" })).toBe("Added 7.5 h for Brian · Wed, Sep 23 · 85 Whitney");
+    expect(addedWords({ hours: 7.5, who: "Brian", day: "2026-09-23", where: "41 Larkspur" })).toBe("Added 7.5 h for Brian · Wed, Sep 23 · 41 Larkspur");
     expect(addedWords({ hours: 8, who: "Brian", day: "2026-09-22", where: "Company Time" })).toBe("Added 8 h for Brian · Tue, Sep 22 · Company Time");
     expect(hoursWords(8.333333)).toBe("8.33 h");
     expect(dayWords("2026-09-23")).toBe("Wed, Sep 23");
@@ -285,14 +285,14 @@ describe("after Save, nothing silent", () => {
   });
 });
 
-describe("a refusal over a RUNNING punch hands back the clock-out door (Erik, 2026-09-29, Brian on 700 North Lake Boulevard)", () => {
+describe("a refusal over a RUNNING punch hands back the clock-out door (Erik, 2026-09-29, Brian on 700 North Juniper Boulevard)", () => {
   const running: OverlapClash = {
     id: "punch-1",
     clockIn: "2026-09-29T16:10:00Z",
     clockOut: null,
     jobId: "j11",
     jobCode: null,
-    jobLabel: "13897 Herringbone",
+    jobLabel: "13897 Honeysuckle",
     noJob: false,
     exact: false,
     lunchMinutes: 30,

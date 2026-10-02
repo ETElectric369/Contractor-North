@@ -75,7 +75,7 @@ function office(script: Record<string, any[]>) {
   state.client = fakeSupabase(script, calls, store);
   state.guard = { supabase: state.client, userId: "user-1", orgId: ORG };
 }
-const JOB_ROW = { data: { id: JOB, name: "13897 Herringbone", customers: { name: "Andrew Cohen" } } };
+const JOB_ROW = { data: { id: JOB, name: "13897 Honeysuckle", customers: { name: "Andrew Crake" } } };
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -216,7 +216,7 @@ describe("Save As Circuit Map", () => {
     const r = await saveCircuitMap(JOB);
     expect(r).toMatchObject({ ok: true, documentId: NEW_DOC, title: "Circuit Map", replaced: "Final Circuit Map" });
     if (!r.ok) return;
-    expect(r.message).toBe(`Saved as the circuit map on Andrew Cohen's page. It replaces "Final Circuit Map", so Andrew Cohen sees only the new one.`);
+    expect(r.message).toBe(`Saved as the circuit map on Andrew Crake's page. It replaces "Final Circuit Map", so Andrew Crake sees only the new one.`);
 
     // The same print page as Print Panel Directory, through the PDF engine, as the office.
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -238,7 +238,7 @@ describe("Save As Circuit Map", () => {
     share.filePlan.mockResolvedValueOnce({ ok: true, paper: { id: NEW_DOC } });
     share.showPaper.mockResolvedValueOnce({ ok: true, row: { document_id: NEW_DOC, title: "Circuit Map" } });
     const r = await saveCircuitMap(JOB);
-    expect(r).toMatchObject({ ok: true, replaced: null, message: "Saved as the circuit map on Andrew Cohen's page, under Plans And Drawings." });
+    expect(r).toMatchObject({ ok: true, replaced: null, message: "Saved as the circuit map on Andrew Crake's page, under Plans And Drawings." });
     expect(share.showPaper).toHaveBeenCalledWith(NEW_DOC, { kind: "circuit_map", title: "Circuit Map" });
   });
 
@@ -273,7 +273,7 @@ describe("Save As Circuit Map", () => {
     expect(await saveCircuitMap(JOB)).toEqual({
       ok: false,
       documentId: NEW_DOC,
-      error: "Saved in the job's Plans, but it didn't go on Andrew Cohen's page: Only the office decides what the customer sees.",
+      error: "Saved in the job's Plans, but it didn't go on Andrew Crake's page: Only the office decides what the customer sees.",
     });
   });
 

@@ -93,9 +93,9 @@ const OWING = {
     inv("inv-5", { total: 250, due_date: "2026-07-01", customer_id: "c-pat", customers: { name: "Pat Lee" } }),
   ],
   jobs: [
-    { id: "job-1", name: "85 Whitney Place", job_number: "J-028", status: "complete", customer_id: "c-pat", customers: { name: "Pat Lee" } },
+    { id: "job-1", name: "41 Larkspur Place", job_number: "J-028", status: "complete", customer_id: "c-pat", customers: { name: "Pat Lee" } },
     // Finished, never invoiced: its accepted estimate is what it would bill.
-    { id: "job-2", name: "13897 Herringbone", job_number: "J-011", status: "complete", customer_id: "c-sam", customers: { name: "Sam Roe" } },
+    { id: "job-2", name: "13897 Honeysuckle", job_number: "J-011", status: "complete", customer_id: "c-sam", customers: { name: "Sam Roe" } },
   ],
   quotes: [{ job_id: "job-2", total: 1200, status: "accepted", created_at: "2026-09-01T00:00:00Z" }],
   payment_milestones: [],

@@ -20,7 +20,7 @@ import { daysNeeded } from "./work-shape";
 /**
  * A JOB LANDS EXACTLY WHERE AND AS LONG AS CHOSEN, in the company's timezone on any date.
  *
- * Erik, 2026-09-28, J-058 Seiler · 3-way switches: "i set it for 2 hours and it jumped to a later time
+ * Erik, 2026-09-28, J-058 Siskin · 3-way switches: "i set it for 2 hours and it jumped to a later time
  * block for many hours". Stored: 2026-09-28T17:00Z to 2026-09-29T00:00Z, planned_minutes NULL, i.e.
  * 10:00 AM to 5:00 PM Pacific. The 5 PM was the writer's closing-time stamp; the 10:00 was a wall-clock
  * time it was handed, not a daylight-saving slip (see "not a DST slip" below).
@@ -199,7 +199,7 @@ describe("a move keeps the block: the same start, the same length, on the new da
   });
 });
 
-describe("several days: the job's hours on each of them (Erik, 2026-09-29, 700 North Lake Boulevard)", () => {
+describe("several days: the job's hours on each of them (Erik, 2026-09-29, 700 North Juniper Boulevard)", () => {
   it("Erik's case: a 10–12 job given a second range keeps 10 to 12 on both days, and its End stays its own", () => {
     const prior = { scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-28", "12:00"), plannedMinutes: null };
     const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-10-01", tz: LA, workDay: ET_DAY, prior });

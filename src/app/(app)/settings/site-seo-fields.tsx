@@ -205,7 +205,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
         <div className="space-y-3 rounded-lg border border-slate-200 p-3">
           <div>
             <Label htmlFor="seo-pub-addr">Public address (optional)</Label>
-            <Input id="seo-pub-addr" value={pubAddr} onChange={(e) => setPubAddr(e.target.value)} placeholder="e.g. 1200 Donner Pass Rd — leave blank if you work out of your home" />
+            <Input id="seo-pub-addr" value={pubAddr} onChange={(e) => setPubAddr(e.target.value)} placeholder="e.g. 1200 Main St — leave blank if you work out of your home" />
             <p className="mt-1 text-xs text-slate-500">
               Fill this in <strong>only</strong> if you have a shop, yard or office you want customers
               to find. Publishing a full address helps local search when the address is real and matches

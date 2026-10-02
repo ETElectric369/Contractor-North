@@ -10,7 +10,7 @@ import { tradeKeyFromWords } from "@/lib/org-trade";
  * clearHiddenAnswers, all of it shipped and tested — has had NOTHING TO RENDER on any org that
  * did not hand-author a template. Two consequences, both observed:
  *
- *   · Andrew Cohen signed up as the first outside tenant and his inspection page had no questions
+ *   · Andrew Crake signed up as the first outside tenant and his inspection page had no questions
  *     on it at all. He did not report a bug, because an empty form looks like a thin product, not
  *     a broken one.
  *   · Erik's own inspections show empty answer sets on 27 of 28 — read for months as "he doesn't

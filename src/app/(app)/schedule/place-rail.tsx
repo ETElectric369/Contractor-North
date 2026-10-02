@@ -55,11 +55,11 @@ import {
  *
  * Grouped by town, biggest cluster first, because geography picks the day — his five Truckee
  * leads are a Tuesday. What a lead is MISSING shows as its next action rather than demoting it:
- * Mike Scrivano has no address but a phone and a real note, so his next move is a call, not the
+ * Mike Sparrow has no address but a phone and a real note, so his next move is a call, not the
  * bottom of the list. See lib/schedule/place-by-town.
  */
 /** A job's or a visit's place line and crew, for its card: the words its block on the calendar says
- *  (lib/schedule/block-info). "14161 Tanager Ln." the job and "14161 Tanager Lane" the address are the
+ *  (lib/schedule/block-info). "14161 Tupelo Ln." the job and "14161 Tupelo Lane" the address are the
  *  same fact, so a job named for its street reads who instead of the street twice. */
 function PlaceAndCrew({ i }: { i: Placeable }) {
   const place = placeLine({ name: i.name, street: i.address, customer: i.customer });
@@ -326,7 +326,7 @@ export function PlaceRail({
                     keep them alive. That held right up until the custom sizer added an <input> and
                     a <button>: a <button> inside a <button> is invalid HTML, and the parser closes
                     the outer one where the inner begins, so the DOM the browser built stopped
-                    matching the tree React thought it had. Karen Wucher's "3 hrs" went nowhere —
+                    matching the tree React thought it had. Karen Willet's "3 hrs" went nowhere —
                     typed, apparently accepted, never saved.
                     A control nested inside a control is a bug waiting for its second control. */}
                   <div
@@ -483,7 +483,7 @@ export function PlaceRail({
                         {(i.kind === "lead" || i.kind === "job") && (!i.phone || !i.email) && (
                           <div className="flex flex-wrap items-center gap-1.5">
                             {!i.phone && (
-                              /* The app's ONE phone control — formats "(530) 933-6686" as you
+                              /* The app's ONE phone control — formats "(530) 555-0133" as you
                                  type. A bare input here stored 4153703682 beside formatted
                                  numbers: the hand-copied-control bug, caught by Erik in a day. */
                               <PhoneInput

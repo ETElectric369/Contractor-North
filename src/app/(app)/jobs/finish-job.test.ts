@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /**
  * FINISH JOB SAYS THE TRUTH, AND ON A T&M JOB IT BUILDS THE FINAL.
  *
- * Tao Zhu's J-002 is Time & Material, billed with progress payments (a paid deposit and a paid T&M
+ * Tess Zane's J-002 is Time & Material, billed with progress payments (a paid deposit and a paid T&M
  * report); Sept 8-9 was on no bill: 19.5 h. Finish marked it complete, billed nothing and said "It
  * bills with progress payments" - and the hours dropped off every screen. Connected North Phase 1
  * made it NAME the work (still pinned below, for a fixed-price job billed with draws). Erik, 2026-
@@ -62,7 +62,7 @@ vi.mock("../billing/actions", () => ({
 
 import { finishJob, finishJobPreview, setJobStatus } from "./actions";
 
-const JOB = "tao-j-002";
+const JOB = "tess-j-002";
 
 /** A PostgREST fake: every read answered by table + columns, every write recorded. */
 function fake() {
@@ -78,7 +78,7 @@ function fake() {
           return [];
         }
         if (table === "jobs" && cols === "billing_type") return { billing_type: state.billingType };
-        if (table === "jobs" && cols === "customer_id, name, description") return { customer_id: "cust-1", name: "Tao Zhu", description: null };
+        if (table === "jobs" && cols === "customer_id, name, description") return { customer_id: "cust-1", name: "Tess Zane", description: null };
         if (table === "jobs") return null; // pricing levels: none
         if (table === "invoices" && cols === "invoice_number, total, invoice_kind") return state.made;
         if (table === "invoices" && (cols === "id" || cols === "id, invoice_number")) return state.draws; // the live draws
@@ -102,7 +102,7 @@ function fake() {
   };
 }
 
-const TAO_SEPT = { schemaReady: true, hours: 19.5, laborAmount: 2437.5, billsCount: 0, billsBilled: 0, stockCount: 0, stockBilled: 0, total: 2437.5, returnsCount: 0 };
+const TESS_SEPT = { schemaReady: true, hours: 19.5, laborAmount: 2437.5, billsCount: 0, billsBilled: 0, stockCount: 0, stockBilled: 0, total: 2437.5, returnsCount: 0 };
 const NOTHING = { schemaReady: true, hours: 0, laborAmount: 0, billsCount: 0, billsBilled: 0, stockCount: 0, stockBilled: 0, total: 0, returnsCount: 0 };
 
 beforeEach(() => {
@@ -111,7 +111,7 @@ beforeEach(() => {
   state.billingType = null;
   state.draws = [{ id: "inv-00028", invoice_number: "INV-00028" }];
   state.openDraft = null;
-  state.unbilled = { ...TAO_SEPT };
+  state.unbilled = { ...TESS_SEPT };
   state.unbilledFails = false;
   state.lump = 0;
   state.made = null;
@@ -158,7 +158,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     state.billingType = "tm";
   });
 
-  it("Tao J-002: builds the Final through the draw door, completes the job, and says what was built", async () => {
+  it("Tess J-002: builds the Final through the draw door, completes the job, and says what was built", async () => {
     state.drawDoor.mockResolvedValue({ ok: true, id: "inv-080", note: "Started INV-080 for the work not yet billed - its total is that work." });
     state.made = { invoice_number: "INV-080", total: 2437.5 };
     const res = await finishJob(JOB, { sendInvoice: true });
@@ -203,7 +203,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     expect(state.drawDoor).not.toHaveBeenCalled();
   });
 
-  it("Herringbone: an open actuals report takes the work and becomes the Final", async () => {
+  it("Honeysuckle: an open actuals report takes the work and becomes the Final", async () => {
     state.openDraft = { id: "inv-078", number: "INV-078", kind: "progress", refreshable: true };
     state.draws = [{ id: "inv-078", invoice_number: "INV-078" }];
     state.drawDoor.mockResolvedValue({ ok: true, id: "inv-078", note: "Pulled 2.71 hours and 2 bills into INV-078. INV-078 is now the final payment." });
@@ -342,7 +342,7 @@ describe("finishJobPreview — the truth at the button", () => {
 });
 
 /**
- * EVERY DOOR THAT FINISHES A JOB BILLS FIRST (M2, Tao J-002 again).
+ * EVERY DOOR THAT FINISHES A JOB BILLS FIRST (M2, Tess J-002 again).
  *
  * setJobStatus took the word "complete" from anybody and wrote it alone: Nort's "mark it complete",
  * and whatever door is written next. The job page's own Complete had already been pointed at

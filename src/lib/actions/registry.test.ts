@@ -235,7 +235,7 @@ describe("action registry — invoice money loop (draft fill by voice)", () => {
 });
 
 // The job's ONE materials list, by voice (Erik to Nort, 2026-09-16: "add a single gang bell box
-// to the materials list for Jason Waldo job" → "I don't have a tool for that" → "I want you to
+// to the materials list for Jason Wexle job" → "I don't have a tool for that" → "I want you to
 // be able to do everything that I can do on this app"). Techs work the same list (auth "any"),
 // adding + ticking are reversible tier-1, removing a line is confirm-gated.
 describe("action registry — material entity (the job's one materials list)", () => {
@@ -270,20 +270,20 @@ describe("action registry — material entity (the job's one materials list)", (
 
   it("addLine takes a job name where an id belongs, defaults quantity 1 / unit ea, and needs a description", () => {
     const schema = REGISTRY["material.addLine"].input;
-    const ok = schema.safeParse({ job_id: "Waldow", description: "single-gang bell box" });
+    const ok = schema.safeParse({ job_id: "Wexley", description: "single-gang bell box" });
     expect(ok.success).toBe(true);
     if (ok.success) {
       expect(ok.data.quantity).toBe(1);
       expect(ok.data.unit).toBe("ea");
     }
-    expect(schema.safeParse({ job_id: "Waldow" }).success).toBe(false);
-    expect(schema.safeParse({ job_id: "Waldow", description: "   " }).success).toBe(false);
-    expect(schema.safeParse({ job_id: "Waldow", description: "bit", quantity: 0 }).success).toBe(false);
+    expect(schema.safeParse({ job_id: "Wexley" }).success).toBe(false);
+    expect(schema.safeParse({ job_id: "Wexley", description: "   " }).success).toBe(false);
+    expect(schema.safeParse({ job_id: "Wexley", description: "bit", quantity: 0 }).success).toBe(false);
   });
 
   it("the addLine read-back names the line and the job in the user's words, never a uuid", () => {
-    const parsed = REGISTRY["material.addLine"].input.parse({ job_id: "Waldow", description: "single-gang bell box" });
-    expect(REGISTRY["material.addLine"].describe?.(parsed)).toBe("Add 1 ea single-gang bell box to the Waldow materials list.");
+    const parsed = REGISTRY["material.addLine"].input.parse({ job_id: "Wexley", description: "single-gang bell box" });
+    expect(REGISTRY["material.addLine"].describe?.(parsed)).toBe("Add 1 ea single-gang bell box to the Wexley materials list.");
     const byId = REGISTRY["material.addLine"].input.parse({
       job_id: "8f1c3b2a-4d5e-4f60-9a7b-1c2d3e4f5a6b",
       description: "short extension bit",
@@ -295,12 +295,12 @@ describe("action registry — material entity (the job's one materials list)", (
   it("markPurchased / removeLine need the job plus a description fragment or an item_id", () => {
     for (const v of ["material.markPurchased", "material.removeLine"]) {
       const schema = REGISTRY[v].input;
-      expect(schema.safeParse({ job_id: "Waldow", description: "bell box" }).success).toBe(true);
-      expect(schema.safeParse({ job_id: "Waldow", item_id: "8f1c3b2a-4d5e-4f60-9a7b-1c2d3e4f5a6b" }).success).toBe(true);
-      expect(schema.safeParse({ job_id: "Waldow" }).success).toBe(false); // which line?
+      expect(schema.safeParse({ job_id: "Wexley", description: "bell box" }).success).toBe(true);
+      expect(schema.safeParse({ job_id: "Wexley", item_id: "8f1c3b2a-4d5e-4f60-9a7b-1c2d3e4f5a6b" }).success).toBe(true);
+      expect(schema.safeParse({ job_id: "Wexley" }).success).toBe(false); // which line?
       expect(schema.safeParse({ description: "bell box" }).success).toBe(false); // which job?
     }
-    const m = REGISTRY["material.markPurchased"].input.parse({ job_id: "Waldow", description: "bell box" });
+    const m = REGISTRY["material.markPurchased"].input.parse({ job_id: "Wexley", description: "bell box" });
     expect(m.purchased).toBe(true); // ticking is the default; purchased:false un-ticks
     expect(REGISTRY["material.removeLine"].describe?.(m)).toContain("say yes to confirm");
   });
@@ -331,10 +331,10 @@ describe("action registry — stock.take is a fill, never a take", () => {
   it("takes a job, an item, a count and a unit: no money field, and the item and job are required", () => {
     const schema = REGISTRY["stock.take"].input as any;
     expect(Object.keys(schema.shape).sort()).toEqual(["item", "job_id", "qty", "unit"]);
-    expect(schema.safeParse({ job_id: "Herringbone", item: "12/2", qty: 60 }).success).toBe(true);
-    expect(schema.safeParse({ job_id: "Herringbone", item: "12/2" }).success).toBe(true); // the pad asks how many
+    expect(schema.safeParse({ job_id: "Honeysuckle", item: "12/2", qty: 60 }).success).toBe(true);
+    expect(schema.safeParse({ job_id: "Honeysuckle", item: "12/2" }).success).toBe(true); // the pad asks how many
     expect(schema.safeParse({ item: "12/2", qty: 60 }).success).toBe(false); // which job?
-    expect(schema.safeParse({ job_id: "Herringbone", qty: 60 }).success).toBe(false); // which item?
+    expect(schema.safeParse({ job_id: "Honeysuckle", qty: 60 }).success).toBe(false); // which item?
     expect(REGISTRY["stock.take"].description).toMatch(/does NOT take anything/);
   });
 

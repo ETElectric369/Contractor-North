@@ -14,14 +14,14 @@ import { supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
  */
 
 const CED = "acct-ced";
-const hillside = {
-  id: "hillside",
+const hazelnut = {
+  id: "hazelnut",
   supplier_account_id: CED,
   invoice_number: "8802-1107139",
   kind: "invoice",
   invoice_date: "2026-09-01",
   due_date: null,
-  job_name_raw: "13683 HILLSIDE",
+  job_name_raw: "13683 HAZELNUT",
   job_id: null,
   total: "59.17",
   open_balance: "59.17",
@@ -34,8 +34,8 @@ const hillside = {
 };
 
 function render(stop?: () => Promise<{ ok: boolean }>) {
-  const { rows } = supplierDocumentRows({ documents: [hillside], bills: [], links: [], aliasRows: [] });
-  const jobs = [{ id: "j-045", jobNumber: "J-045", name: "13683 Hillside", status: "complete", address: "13683 Hillside Drive", createdAt: null }];
+  const { rows } = supplierDocumentRows({ documents: [hazelnut], bills: [], links: [], aliasRows: [] });
+  const jobs = [{ id: "j-045", jobNumber: "J-045", name: "13683 Hazelnut", status: "complete", address: "13683 Hazelnut Drive", createdAt: null }];
   const feed = supplierPaperFeed({ since: "2026-06-08", rows, jobs, accounts: [{ id: CED, name: "Consolidated Electrical Distributors" }], today: "2026-10-01" });
   expect(feed.cards).toEqual([]);
   return renderToStaticMarkup(
@@ -58,7 +58,7 @@ describe("the Waiting On A Credit fold under CED", () => {
     expect(html).toContain("Waiting On A Credit (1)");
     expect(html).toContain("$59.17");
     expect(html).toContain("8802-1107139");
-    expect(html).toContain("13683 HILLSIDE");
+    expect(html).toContain("13683 HAZELNUT");
     expect(html).toMatch(/waiting since Sep 26, 2026, back Oct 26, 2026/);
     expect(html).toContain("Stop Waiting");
   });
@@ -87,9 +87,9 @@ describe("the Waiting On A Credit fold under CED", () => {
 
 describe("Their Papers counts each open paper once (badges count what is open, once each)", () => {
   it("a STOCK paper with no job and no bill sits in both lists and is counted as one", () => {
-    const stock = { ...hillside, id: "stock-1", invoice_number: "8802-1103061", job_name_raw: "STOCK", waiting_credit_since: null };
+    const stock = { ...hazelnut, id: "stock-1", invoice_number: "8802-1103061", job_name_raw: "STOCK", waiting_credit_since: null };
     const { rows } = supplierDocumentRows({ documents: [stock], bills: [], links: [], aliasRows: [] });
-    const jobs = [{ id: "j-045", jobNumber: "J-045", name: "13683 Hillside", status: "complete", address: "13683 Hillside Drive", createdAt: null }];
+    const jobs = [{ id: "j-045", jobNumber: "J-045", name: "13683 Hazelnut", status: "complete", address: "13683 Hazelnut Drive", createdAt: null }];
     const feed = supplierPaperFeed({ since: "2026-06-08", rows, jobs, accounts: [{ id: CED, name: "Consolidated Electrical Distributors" }], today: "2026-10-01" });
     // Stock with no job is not a Needs You card: it stays in the supplier's own lists.
     expect(feed.cards).toEqual([]);
