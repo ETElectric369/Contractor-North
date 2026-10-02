@@ -121,6 +121,9 @@ export default async function TeamPage() {
                       id={m.id}
                       rate={m.hourly_rate ?? null}
                       billRate={m.bill_rate ?? null}
+                      // THE OWNER'S BUILD-TIME COST RATE (0373), off the same profile_pay read as the
+                      // other two. His row's box; null until he types one, never defaulted.
+                      costRate={payRows.get(String(m.id))?.cost_rate ?? null}
                       paidByDraw={isPaidByDraw(payRows.get(String(m.id)))}
                     />
                   )}

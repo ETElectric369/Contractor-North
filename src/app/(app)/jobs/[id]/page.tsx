@@ -804,12 +804,24 @@ export default async function JobDetailPage({
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
   // laborCost (what we PAY) via the shared helper — identical math to /analytics.
   //
-  // THE OWNER'S HOURS ARE NOT A COST (0286). Erik is paid by owner's draw, so laborCostForJob adds
-  // $0 for his hours and hands them back as ownerHours. `laborCost` is therefore CREW labor, and
-  // the tiles below show his hours as hours only, beside a "$X per hour you worked" that answers
-  // the question the old -$1,085 profit could not: what did this job leave him for his time.
-  const { hours: laborHours, cost: laborCost, ownerHours } = laborCostForJob(entries ?? [], id);
+  // BUILD TIME IS A DIRECT COST, WHOEVER WORKED IT (Erik, 2026-10-01: "build time, including my build
+  // time is considered COGS, so it would be considered a direct cost and should be counted that way").
+  // So laborCostForJob now costs the owner's hours too, at the cost rate HE SETS - never his bill rate,
+  // which is what made every hour of his net exactly $0 before 0286, and never a wage: he is still not
+  // on payroll. `laborCost` is the whole of what this job's labour cost; `ownerCost` is his share of it
+  // and `crewLabor` below is the rest, so the rows still say whose time was whose.
+  //
+  // UNTIL HE SETS THE RATE NOTHING MOVES. uncostedOwnerHours comes back instead, the tile says so in
+  // words, and this job's profit reads exactly what it read yesterday.
+  const {
+    hours: laborHours,
+    cost: laborCost,
+    ownerHours,
+    ownerCost,
+    uncostedOwnerHours,
+  } = laborCostForJob(entries ?? [], id);
   const crewHours = Math.max(0, Math.round((laborHours - ownerHours) * 100) / 100);
+  const crewLabor = Math.round((laborCost - ownerCost) * 100) / 100;
   const ownersOnJob = ((entries ?? []) as any[])
     .filter((e: any) => e?.profiles?.paid_by_draw === true && e.profile_id)
     .map((e: any) => ({ id: String(e.profile_id), name: e.profiles?.full_name ?? null }));
@@ -1822,10 +1834,13 @@ export default async function JobDetailPage({
               cash, the same as /analytics); the rows wait in its Why? fold. */}
           <ProfitLine
             collected={revenue}
-            crewLabor={laborCost}
+            crewLabor={crewLabor}
             crewHours={crewHours}
             ownerHours={ownerHours}
+            ownerCost={ownerCost}
+            uncostedOwnerHours={uncostedOwnerHours}
             ownerHoursLabel={ownerVoice.hoursLabel}
+            ownerWho={ownerVoice.viewerIsOwner ? "you" : ownerVoice.who}
             materialsAndBills={Math.round((materialCost + billsCost) * 100) / 100}
             shelfTouched={jobMaterials.shelfTouched}
             tickets={jobMaterials.tickets}

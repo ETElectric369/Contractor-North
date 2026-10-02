@@ -916,11 +916,18 @@ export async function removeMember(id: string): Promise<Result> {
  *  bill_rate alone left the box showing $0 with a green check while every draft billed him at the
  *  stored wage ($120 for Chris, above his own $110). So an owner's cleared bill rate clears that
  *  stored wage with it, here on the server where every door passes: after 0286 it is read by
- *  nothing else (the view reads an owner's pay as 0), and a pay figure for him is still refused. */
+ *  nothing else (the view reads an owner's pay as 0), and a pay figure for him is still refused.
+ *
+ *  `costRate` IS A THIRD, SEPARATE FIGURE (0373), and the only one of the three the owner HAS: what an
+ *  hour of his own build time COSTS the business. Erik, 2026-10-01: "build time, including my build
+ *  time is considered COGS". It is not a wage (payroll still refuses him, 0286's triggers stand) and it
+ *  must never be his bill rate - a cost equal to the price is what made every hour he worked net $0.
+ *  Nothing defaults it: null means nobody has said yet, and every surface says so rather than guess. */
 export async function updateMemberRate(
   id: string,
   hourlyRate: number | null | undefined,
   billRate?: number | null,
+  costRate?: number | null,
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -943,8 +950,16 @@ export async function updateMemberRate(
   const patch: Record<string, unknown> = {};
   if (hourlyRate !== undefined) patch.hourly_rate = clean(hourlyRate);
   if (billRate !== undefined) patch.bill_rate = clean(billRate);
+  // THE OWNER'S BUILD-TIME COST RATE (0373): its own column, its own box, its own write. It is NOT a
+  // wage - nothing pays him it, payroll still refuses him, and the profit and loss books the amount
+  // straight back. And it is NOT his bill rate: if the two were the same figure every hour he worked
+  // would net exactly $0, which is the literal defect 0286 was written to fix (his hourly_rate was 125
+  // and his bill_rate was also 125, and all-time job profit read -$1,085 against a real +$35,847). So
+  // this never reads or writes bill_rate, and the two boxes are never seeded from each other.
+  if (costRate !== undefined) patch.cost_rate = clean(costRate);
   // MR7: an owner's cleared bill rate takes the old stored wage with it, so billing falls to the
-  // customer's level or the default rate and never back to that wage (see the header).
+  // customer's level or the default rate and never back to that wage (see the header). It leaves
+  // cost_rate alone: what his hours COST is not what a customer is charged for them.
   if (isOwner && billRate !== undefined && patch.bill_rate === null) patch.hourly_rate = null;
   if (!Object.keys(patch).length) return { ok: true };
   const { data: wroteR, error } = await supabase
