@@ -14,7 +14,7 @@ import { useToast, type ToastAction } from "@/components/toast";
 import { formatDateTime, formatDate } from "@/lib/utils";
 import type { Inquiry } from "@/lib/types";
 import { LEAD_BUCKETS } from "@/lib/lead-triage";
-import { leadNextStep, monthDay, type LeadBucketLetter, type LeadVisits } from "@/lib/leads/next-step";
+import { leadNextStep, monthDay, type LeadBucketLetter, type LeadVisitsAnswer } from "@/lib/leads/next-step";
 import { IntakeFiles } from "./intake-files";
 import { PlanBriefPanel } from "./plan-brief-panel";
 import { intakePaths } from "@/lib/playbook/uploads";
@@ -103,10 +103,11 @@ export function InquiryRow({
   /** True when My Day (or an estimate backlink) deep-linked to this exact lead —
       scroll it into view and flash a highlight so the eye lands on the right row. */
   focused?: boolean;
-  /** This lead's visits (lib/leads/next-step LeadVisits): what the next-step chip reads. A lead with
-   *  a completed walk-through is CORRECTLY still open (a walk-through never converts it), and the chip
-   *  is what tells it apart from a lead nobody has touched. */
-  visits?: LeadVisits | null;
+  /** This lead's visits (lib/leads/visit-read, three answers): what the next-step chip reads. A lead
+   *  with a completed walk-through is CORRECTLY still open (a walk-through never converts it), and the
+   *  chip is what tells it apart from a lead nobody has touched. VISITS_UNREAD when the board could
+   *  not read them — then the chip says so instead of guessing the next step. */
+  visits?: LeadVisitsAnswer;
   /** The company's today (YYYY-MM-DD) and clock: a follow-up day and a visit's day are theirs. */
   todayYmd: string;
   tz: string;

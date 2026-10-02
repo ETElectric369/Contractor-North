@@ -11,7 +11,7 @@ import { InquiryModal } from "./inquiry-modal";
 import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
 import type { Inquiry } from "@/lib/types";
-import type { LeadVisits } from "@/lib/leads/next-step";
+import { readLeadVisits } from "@/lib/leads/visit-read";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
@@ -78,30 +78,22 @@ export default async function InquiriesPage({
    * done, how many are still booked, and the earliest booked start (with its type), so the chip
    * can say "Walk-Through · Tue Oct 1" or "Walked · Estimate Next". EVERY kind of visit counts,
    * not just walk-throughs; cancelled ones never do.
+   *
+   * THE READ'S ERROR IS KEPT, and the batching with it (lib/leads/visit-read): one request carrying
+   * every open lead's uuid outgrows the gateway past a couple of hundred leads, and five hundred rows
+   * is not a busy book's whole appointment list. Either way the old `const { data } = await …` dropped
+   * the error, so a failed read looked exactly like "no visits booked" and the chip told him to
+   * cold-call a lead he was seeing Tuesday. A lead whose visits could not be read now says so.
    */
   const leadIds = [...(inqData ?? []).map((i: { id: string }) => i.id), ...(focusExtra ? [focusExtra.id] : [])];
-  const { data: visitRows } = leadIds.length
-    ? await supabase
-        .from("appointments")
-        .select("inquiry_id, status, starts_at, type")
-        .in("inquiry_id", leadIds)
-        .neq("status", "cancelled")
-        .limit(500)
-    : { data: [] as { inquiry_id: string; status: string; starts_at: string | null; type: string | null }[] };
-  const visitState = new Map<string, LeadVisits>();
-  for (const r of (visitRows ?? []) as { inquiry_id: string; status: string; starts_at: string | null; type: string | null }[]) {
-    const cur = visitState.get(r.inquiry_id) ?? { done: 0, upcoming: 0, nextAt: null, nextType: null };
-    if (r.status === "completed") cur.done += 1;
-    else {
-      cur.upcoming += 1;
-      // The EARLIEST booked start wins; a visit waiting for a day (no start, 0368) never displaces one.
-      if (r.starts_at && (!cur.nextAt || r.starts_at < cur.nextAt)) {
-        cur.nextAt = r.starts_at;
-        cur.nextType = r.type;
-      } else if (!cur.nextAt && !cur.nextType) cur.nextType = r.type;
-    }
-    visitState.set(r.inquiry_id, cur);
-  }
+  const visitState = await readLeadVisits(leadIds, (batch, cap) =>
+    supabase
+      .from("appointments")
+      .select("inquiry_id, status, starts_at, type")
+      .in("inquiry_id", batch)
+      .neq("status", "cancelled")
+      .limit(cap),
+  );
   // ?due=1 — THE FOLLOW-UP LIST, as a lens on this board rather than a new page (the shape the
   // layout mock recommended and everyone agreed to). next_follow_up_at already IS the follow-up
   // list (cn-v612); this is the first surface that shows it as one.
@@ -172,7 +164,7 @@ export default async function InquiriesPage({
                 inquiry={i}
                 customers={customers}
                 focused={i.id === focus}
-                visits={visitState.get(i.id) ?? null}
+                visits={visitState.forLead(i.id)}
                 todayYmd={todayYmd}
                 tz={tz}
                 businessPhone={businessPhone}
