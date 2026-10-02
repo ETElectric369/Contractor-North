@@ -14,6 +14,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import type { Placeable } from "@/lib/schedule/place-by-town";
 import { KIND_FROM_APPT_TYPE } from "@/lib/schedule/work-shape";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
+import { TurnsSideways } from "@/components/turns-sideways";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { crewChips } from "@/lib/schedule/block-info";
@@ -309,7 +310,14 @@ export default async function SchedulePage({
        the calendar places what the rail has ticked. They can only be one gesture if they share
        state, and this is the smallest client shell that both sit inside. */
     <PlacementProvider items={waiting} todayISO={today} workDay={workDay}>
-      <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
+      {/* THE ONE SCREEN THAT MAY BE TURNED SIDEWAYS (Erik, 2026-10-01). Only on the calendar: the
+          map and Everyone's Day return above without it, so tapping either from the header turns the
+          phone upright on the way. Draws nothing. */}
+      <TurnsSideways />
+      {/* `schedule-split`: at lg the rail sits beside the calendar. Turned sideways on a phone
+          (globals.css `turned`) the calendar comes FIRST and the rail follows it — rotating to see
+          the calendar must not land you on the rail. */}
+      <div className="schedule-split space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
         <aside className="lg:sticky lg:top-4">
           {/* WAITING FOR A DAY (n): the open work on the rail, counted. A read that came back full may
               have left some out, so the count says "n+" and one line says where the rest are

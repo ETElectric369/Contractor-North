@@ -16,9 +16,21 @@ class NorthBridgeViewController: CAPBridgeViewController {
     /// WKWebView holds its navigation delegate weakly, so the relay lives here.
     private var navigationRelay: NavigationFailureRelay?
 
+    /// WHICH WAY THE PHONE MAY BE HELD. iOS asks the window's ROOT view controller — this one —
+    /// every time it considers rotating, so the page's answer (ScreenTurn.allowed, set by the
+    /// schedule's calendar through the ScreenTurn plugin) takes effect with no relaunch. Portrait
+    /// unless a screen has asked for sideways; Info.plist's iPhone list is the outer bound.
+    ///
+    /// THE iPAD IS NOT GATED HERE. It already rotates on every screen (the ~ipad list in
+    /// Info.plist) and keeps doing so: `.all` hands the decision straight back to that list.
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        UIDevice.current.userInterfaceIdiom == .pad ? .all : ScreenTurn.allowed
+    }
+
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(TapToPayEducationPlugin())
+        bridge?.registerPluginInstance(ScreenTurnPlugin())
         installNavigationFailureRelay()
         shareTheSpeaker()
         #if DEBUG
