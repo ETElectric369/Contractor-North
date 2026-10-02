@@ -86,6 +86,29 @@ export function appChoseSentence(label: string, from: AppPickSource): string {
   return `Your punch is on ${label}. The app picked that${pickedBecause(from)} — change it if you're somewhere else.`;
 }
 
+/**
+ * THE SAME FACTS FOR THE ONE DOOR THAT HAS NO BUTTON TO OFFER (Nort, 2026-10-01).
+ *
+ * Every screen ends the sentence with "change it if you're somewhere else" because Change The Job is
+ * right there. Nort relayed those words verbatim — and could not do it. His only move on a running
+ * shift is switch_job, which CUTS after two minutes: it closes the part so far and opens a new one, so
+ * the minutes already billed to the wrong customer stay exactly where they are. An instruction is a
+ * dead end when the door it names does not exist at the place it is read.
+ *
+ * So the spoken sentence says WHERE instead. No new write verb was registered for him: a punch is a
+ * money decision about which customer gets billed, the three doors that already move it are one tap
+ * away, and agent-write expansion stays frozen until multi-tenant is dialled (agent-security
+ * framework). Nort's job with a surface is to REDIRECT — his own product map says so.
+ *
+ * Both sentences are built HERE, from the same label and the same source, so they cannot drift.
+ */
+export function appChoseSentenceToSay(label: string, from: AppPickSource): string {
+  return (
+    `Your punch is on ${label}. The app picked that${pickedBecause(from)}. If you were somewhere else, ` +
+    `move it yourself on My Day's Now card or on Timeclock — tap ${CHANGE_JOB_LABEL} — or the office moves it on Timecards. I can't move it for you.`
+  );
+}
+
 /** The Change door's words, Title Case, one copy (buttons on three surfaces read the same). */
 export const CHANGE_JOB_LABEL = "Change The Job";
 
@@ -96,6 +119,8 @@ export type AppChoseNotice = {
   /** The job the app chose: its id (the sheet moves off it) and its label (said, and shown). */
   job: { id: string; label: string };
   sentence: string;
+  /** The same facts for a door with no Change button to offer — Nort (appChoseSentenceToSay). */
+  say: string;
 };
 
 /** The shape of a clock answer this module reads. Every clock door's result is one of these. */
@@ -110,7 +135,12 @@ export function tellAppChose(res: ToldResult | null | undefined): AppChoseNotice
   if (!res?.ok || !res.id) return null;
   const pick = res.jobPick;
   if (!pick || pick.chosenBy !== "app") return null;
-  return { entryId: res.id, job: { id: pick.id, label: pick.label }, sentence: appChoseSentence(pick.label, pick.from) };
+  return {
+    entryId: res.id,
+    job: { id: pick.id, label: pick.label },
+    sentence: appChoseSentence(pick.label, pick.from),
+    say: appChoseSentenceToSay(pick.label, pick.from),
+  };
 }
 
 /**

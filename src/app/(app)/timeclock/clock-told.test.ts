@@ -62,7 +62,7 @@ import {
   type SheetPhase,
 } from "./which-job-choices";
 import { NO_PUNCH_ON_SCREEN, noticeForEntry } from "./clock-told";
-import { timeActions } from "@/lib/actions/entities/time";
+import { switchJobSpoken, timeActions } from "@/lib/actions/entities/time";
 import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import type { ActionCtx, ActionResult } from "@/lib/actions/types";
 import { workedDaysFrom } from "@/lib/schedule-math";
@@ -548,6 +548,78 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
     }, calls);
     const res = await timeActions["time.clockIn"].handler({ job_id: ARR, job_code: null, clock_in_at: null }, CTX);
     expect(projected(res).warning).toBeUndefined();
+  });
+
+  /**
+   * THE DOOR WITH NO BUTTON MUST NOT READ OUT THE BUTTON'S WORDS (Erik, 2026-10-01).
+   *
+   * Nort relayed the screens' sentence verbatim — "change it if you're somewhere else" — and could not
+   * change it. His only move on a running shift is switch_job, which CUTS after two minutes: it closes
+   * the part so far and opens a new one, so the minutes already billed to the wrong customer stay
+   * exactly where they are. An instruction is a dead end when the door it names is not where it is read.
+   *
+   * NO NEW WRITE VERB WAS REGISTERED FOR HIM, on purpose: moving a punch decides which customer gets
+   * billed, the three doors that already do it are one tap away, and agent-write expansion stays frozen
+   * until multi-tenant is dialled. His sentence says WHERE, and says he cannot.
+   */
+  it("THE DEFECT: Nort's sentence never tells somebody to press a button he has not got", async () => {
+    state.client = fakeSupabase(schedulePutsHimOnArr(), calls);
+    const res = await timeActions["time.clockIn"].handler({ job_id: null, job_code: null, clock_in_at: null }, CTX);
+    const warning = String(projected(res).warning);
+
+    // Same facts: the job, named the way a person knows it, and the source it came from.
+    expect(warning).toContain("ARR 56 rough-in · 56 Alder Ridge Rd");
+    expect(warning).toContain("The app picked that from today's schedule");
+    // But NOT the screens' instruction, which points at a button that is not in this conversation.
+    expect(warning).not.toContain("change it if you're somewhere else");
+    // It names the doors that actually move a punch, and it says out loud that he cannot.
+    expect(warning).toContain("My Day");
+    expect(warning).toContain("Timeclock");
+    expect(warning).toContain("Timecards");
+    expect(warning).toContain(CHANGE_JOB_LABEL);
+    expect(warning).toContain("I can't move it for you");
+  });
+
+  it("and the screens keep their own words, because their button is right there", () => {
+    expect(appChoseSentence("ARR 56 rough-in", "schedule")).toContain("change it if you're somewhere else");
+    // One place builds both, off the same label and the same source, so they cannot drift.
+    const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "only-job", label: "ARR 56" } })!;
+    expect(told.sentence).toContain("because it's the only job going");
+    expect(told.say).toContain("because it's the only job going");
+    expect(told.say).not.toBe(told.sentence);
+  });
+
+  /**
+   * AND HE CANNOT ANNOUNCE A CORRECTION THAT DID NOT HAPPEN. The move he DOES have on a running shift
+   * cuts it, so a "put me on the right job" answered with switch_job leaves the hours already worked
+   * exactly where they were.
+   */
+  it("THE DEFECT, second half: a switch that CUT says where the hours before it stayed", () => {
+    const said = switchJobSpoken("cut", 2.32, "J-013 ARR 56 rough-in · 56 Alder Ridge Rd");
+    expect(said).toContain("2.32 hours");
+    expect(said).toContain("stayed on J-013 ARR 56 rough-in · 56 Alder Ridge Rd");
+    expect(said).toContain("it never moves hours already worked");
+    expect(said).toContain("Timecards");
+    // The old wording read as a correction: the part "closed", and you are on the new job. Nothing
+    // in it said the 2.32 hours were still billing the wrong customer.
+    expect(said).not.toMatch(/^Done/);
+  });
+
+  it("a switch that RE-POINTED really did move the whole shift, and keeps its own words", () => {
+    expect(switchJobSpoken("repointed", 0, "J-013 ARR 56")).toBe("Done — this whole shift is on the new job now.");
+  });
+
+  it("the hours are never dropped, even when the job they stayed on could not be read", () => {
+    const said = switchJobSpoken("cut", 0.75, null);
+    expect(said).toContain("0.75 hours");
+    expect(said).toContain("the job you were on");
+  });
+
+  it("the verb's own description tells the model it is not a way to correct a wrong job", () => {
+    const d = timeActions["time.switchJob"].description ?? "";
+    expect(d).toContain("NEVER MOVES HOURS ALREADY WORKED");
+    expect(d).toContain("Timecards");
+    expect(d).toMatch(/no verb that moves worked hours/i);
   });
 
   it("the projection carries every channel a write has to be heard on, and nothing else", () => {
