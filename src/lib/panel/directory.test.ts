@@ -12,7 +12,7 @@ import {
   spaceWords,
   unpanelledFromRows,
 } from "./directory";
-import { FINAL_MAP, PANEL, PANEL_ID, circuit } from "./__fixtures__/herringbone";
+import { FINAL_MAP, PANEL, PANEL_ID, circuit } from "./__fixtures__/honeysuckle";
 
 /**
  * THE DIRECTORY AS DATA (Panel plan, phase 5), on J-011's night: the printed map must carry what the

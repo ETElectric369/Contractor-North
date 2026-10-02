@@ -18,7 +18,7 @@ import type { Playbook } from "@/lib/playbook/types";
  *
  * WHY THIS ORDER. Trade first, and it is not close: one answer seeds the job codes they clock time
  * against, the walk-through questions the inspector asks on site, AND what the estimator thinks it
- * is pricing. Andrew Cohen signed up, left it blank, and got a generic six-question sheet — three
+ * is pricing. Andrew Crake signed up, left it blank, and got a generic six-question sheet — three
  * dead surfaces from one unanswered question.
  *
  * NOTHING HERE IS A GATE. A half-finished setup never blocks anything; the card just keeps

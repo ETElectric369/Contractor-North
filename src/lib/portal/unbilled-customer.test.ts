@@ -47,7 +47,7 @@ describe("customerUnbilled", () => {
 
 describe("netOfDeposit: the portal nets the deposit the office card nets", () => {
   const c = { hours: 19.5, laborByPerson: [], laborAmount: 2437.5, materials: 0, returnsCredit: 0, total: 2437.5 };
-  it("a deposit that covers the work takes all of it (Tao-shaped: $10,000 against $2,437.50)", () => {
+  it("a deposit that covers the work takes all of it (Tess-shaped: $10,000 against $2,437.50)", () => {
     expect(netOfDeposit(c, 10000).lessDeposit).toBe(2437.5);
   });
   it("a smaller deposit takes itself", () => {
@@ -103,7 +103,7 @@ describe("customerRateRow: the customer's page never prices with a pay rate", ()
 });
 
 describe("jobBillsItsActuals: the Unbilled card's rule, shared with the portal", () => {
-  it("EVERY T&M job with no schedule bills its actuals - an estimate is a guide, never a block (Tao J-002)", () => {
+  it("EVERY T&M job with no schedule bills its actuals - an estimate is a guide, never a block (Tess J-002)", () => {
     expect(jobBillsItsActuals("tm", 0)).toBe(true);
   });
   it("a schedule or a fixed-price job bills something else", () => {

@@ -131,7 +131,7 @@ describe("the session", () => {
 
 describe("masking", () => {
   it("shows the first letter and the domain, never the name", () => {
-    expect(maskEmail("mcpowder@comcast.net")).toBe("m*******@comcast.net");
+    expect(maskEmail("redfinch@comcast.net")).toBe("r*******@comcast.net");
     expect(maskEmail("  Erik@ETElectric.com ")).toBe("E***@ETElectric.com");
     // A short name doesn't give its length away.
     expect(maskEmail("jo@x.co")).toBe("j***@x.co");
@@ -180,12 +180,12 @@ describe("the words", () => {
   });
 
   it("a send says every earlier code stopped working; a code already out says when it went", () => {
-    expect(codeSentWords("m*******@comcast.net")).toBe(
-      "We sent a 6-digit code to m*******@comcast.net. It works for 10 minutes. Any code we sent before this one no longer works.",
+    expect(codeSentWords("r*******@comcast.net")).toBe(
+      "We sent a 6-digit code to r*******@comcast.net. It works for 10 minutes. Any code we sent before this one no longer works.",
     );
-    expect(liveCodeWords("m*******@comcast.net", 0)).toBe("We emailed a code to m*******@comcast.net just now. Enter it below.");
-    expect(liveCodeWords("m*******@comcast.net", 1)).toBe("We emailed a code to m*******@comcast.net 1 minute ago. Enter it below.");
-    expect(liveCodeWords("m*******@comcast.net", 7)).toMatch(/ 7 minutes ago\. /);
+    expect(liveCodeWords("r*******@comcast.net", 0)).toBe("We emailed a code to r*******@comcast.net just now. Enter it below.");
+    expect(liveCodeWords("r*******@comcast.net", 1)).toBe("We emailed a code to r*******@comcast.net 1 minute ago. Enter it below.");
+    expect(liveCodeWords("r*******@comcast.net", 7)).toMatch(/ 7 minutes ago\. /);
   });
 
   it("no answer ever prints an address", () => {

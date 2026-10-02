@@ -47,11 +47,11 @@ const WORK = {
 
 const card = (props: Partial<Parameters<typeof UnbilledCard>[0]> = {}) =>
   renderToStaticMarkup(
-    createElement(UnbilledCard, { jobId: "j-002", customerId: "c-tao", view: WORK, viewerIsStaff: true, openDraft: null, ...props }),
+    createElement(UnbilledCard, { jobId: "j-002", customerId: "c-tess", view: WORK, viewerIsStaff: true, openDraft: null, ...props }),
   );
 
 describe("UnbilledCard - Open: $X and the door that bills it", () => {
-  it("Tao J-002 with new hours: Open is the figure, the door is Create Progress Payment", () => {
+  it("Tess J-002 with new hours: Open is the figure, the door is Create Progress Payment", () => {
     const html = card({ drawBilled: true });
     expect(html).toContain("Open: $3,197.90");
     expect(html).toContain("Create Progress Payment for $3,197.90");

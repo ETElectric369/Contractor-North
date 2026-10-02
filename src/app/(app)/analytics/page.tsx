@@ -102,7 +102,7 @@ export default async function AnalyticsPage({
       supabase.from("purchase_orders").select("id, job_id, total, status").limit(50000),
       // A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
       // Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
-      // 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
+      // 13631 Nightshade and 41 Larkspur Place. The duplicate picker tells him the copy he sets aside "stops
       // counting against that job" - a sentence that was false everywhere, because every cost reader summed
       // bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
       // arrives and supersedes it, which is the case that has not happened yet and would otherwise have

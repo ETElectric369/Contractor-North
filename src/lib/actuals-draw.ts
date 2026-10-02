@@ -1,5 +1,5 @@
 /**
- * A DRAW BUILT FROM ACTUALS IS REFRESHED LIKE AN INVOICE (Erik, J-011 13897 Herringbone,
+ * A DRAW BUILT FROM ACTUALS IS REFRESHED LIKE AN INVOICE (Erik, J-011 13897 Honeysuckle,
  * 2026-09-24).
  *
  * INV-078 is a progress draw that "Progress Payment → Actual T&M" built: every hour at its bill
@@ -183,7 +183,7 @@ export type CardDoor =
  * INV-078 ($X)". An open draft that doesn't (a fixed or % draw) → "Open INV-0xx", which goes there:
  * the work waits for the next bill and the card says why. No draft on a job that already bills with
  * draws → "Create Progress Payment for $X": the draw door, which nets the deposit and never reopens
- * a paid one (Tao J-002, where the standard New Invoice opened his paid deposit). No draft
+ * a paid one (Tess J-002, where the standard New Invoice opened his paid deposit). No draft
  * otherwise → "Create Invoice for $X". Nothing pending → no button (the card's sentences carry the
  * door).
  */

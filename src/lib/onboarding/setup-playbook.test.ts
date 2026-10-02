@@ -5,7 +5,7 @@ import { holdingNeeds, isClosed, missingNeeds, splitAsk } from "@/lib/playbook/r
 import { coerceByPlaybook } from "@/lib/playbook/answers";
 
 /**
- * ANDREW COHEN's actual state on 2026-08-04, read out of production: trade null, city null,
+ * ANDREW CRAKE's actual state on 2026-08-04, read out of production: trade null, city null,
  * service area "", rate null, zero customers. He signed up, landed on an empty My Day, got a
  * generic six-question walk-through, and pressed "generate questions" without finding what it
  * made. Every one of those failures traces to the first unanswered question here.
@@ -39,19 +39,19 @@ describe("what a brand-new company is asked", () => {
   });
 
   it("nothing is left to ask once it's all answered — the card can disappear", () => {
-    const done = { full_name: "Andrew Cohen", trade: "general contractor", city: "Reno", service_area: "the valley", labor_rate: 110 };
+    const done = { full_name: "Andrew Crake", trade: "general contractor", city: "Reno", service_area: "the valley", labor_rate: 110 };
     expect(splitAsk(SETUP_PLAYBOOK, done).ask).toEqual([]);
   });
 });
 
 describe("ONE BREATH, and it is Andrew's — a GC who subs it all out", () => {
   const SAID =
-    "I'm Andrew Cohen, general contractor out of Reno, I sub out electrical and plumbing, " +
+    "I'm Andrew Crake, general contractor out of Reno, I sub out electrical and plumbing, " +
     "I cover the whole valley and I bill 110 an hour";
 
   const EXTRACTED = {
     fills: [
-      { key: "full_name", value: "Andrew Cohen", heard: "I'm Andrew Cohen" },
+      { key: "full_name", value: "Andrew Crake", heard: "I'm Andrew Crake" },
       { key: "trade", value: "general contractor, subs out electrical and plumbing", heard: "general contractor out of Reno, I sub out electrical and plumbing" },
       { key: "city", value: "Reno", heard: "out of Reno" },
       { key: "service_area", value: "the whole valley", heard: "I cover the whole valley" },

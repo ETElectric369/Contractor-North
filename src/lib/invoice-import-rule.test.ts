@@ -22,7 +22,7 @@ describe("shouldImportActuals — the contract-vs-actuals rule", () => {
   });
 });
 
-describe("estimateIsTheContract - on T&M the estimate is a guide (Erik, Tao J-002)", () => {
+describe("estimateIsTheContract - on T&M the estimate is a guide (Erik, Tess J-002)", () => {
   it("a T&M job's accepted estimate is not the bill; the hours and receipts are", () => {
     expect(estimateIsTheContract("tm", true)).toBe(false);
     expect(shouldImportActuals(estimateIsTheContract("tm", true), undefined)).toBe(true);
@@ -38,7 +38,7 @@ describe("estimateIsTheContract - on T&M the estimate is a guide (Erik, Tao J-00
 });
 
 describe("nextInvoiceImportsActuals - New Invoice's own rule (Already Billed asks it)", () => {
-  it("Purple Sage J-010: fixed price, no live estimate, no schedule: New Invoice pulls the actuals", () => {
+  it("Pinyon Sage J-010: fixed price, no live estimate, no schedule: New Invoice pulls the actuals", () => {
     expect(nextInvoiceImportsActuals("fixed", 0, false)).toBe(true);
     // ...where jobBillsItsActuals (the Overview card, the portal) says no.
     expect(jobBillsItsActuals("fixed", 0)).toBe(false);

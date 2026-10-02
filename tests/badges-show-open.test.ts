@@ -160,7 +160,7 @@ describe("every tab count in the app is an open count", () => {
     expect(costsOpen).toContain("(paperViews ?? []).filter((p) => !p.waitingOnCredit).length");
     expect(costsOpen).toContain("viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0");
     expect(page).toContain("looseIds={paperSort.loose ? paperSort.loose.map(");
-    // J-013 (TTP #56): 1 live bill, 0 papers, and the chip said 3. A "1" that is no row could never
+    // J-013 (ARR #56): 1 live bill, 0 papers, and the chip said 3. A "1" that is no row could never
     // be checked against the tab; the hours are said in words beside the door that bills them.
     expect(costsOpen).not.toContain("unbilled.hours");
     expect(costsOpen).not.toMatch(/\? 1 : 0/);

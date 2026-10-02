@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * ALREADY BILLED: THE SHEET AND ITS DOORS (Erik, 2026-09-26, Purple Sage: "i have a bill for purple
+ * ALREADY BILLED: THE SHEET AND ITS DOORS (Erik, 2026-09-26, Pinyon Sage: "i have a bill for pinyon
  * sage that was already charged and i have no way to associate it to the paid invoice becuase i did
  * it manually and that will happen for people i assure you").
  *
@@ -15,7 +15,7 @@
  * what the cost was, and presses Mark Billed On INV-x. For hours it lists the open shifts (for a line
  * that names one person, only that person's: 0361 holds a line to its person's hours) and ticks only
  * the line's own person's, up to the day the bill was written. For a receipt that cost more than
- * the line (Purple Sage: $110 against $186.93) with Shop Stock on, it first asks "Did J-010 Use All Of
+ * the line (Pinyon Sage: $110 against $186.93) with Shop Stock on, it first asks "Did J-010 Use All Of
  * It?": No opens the receipt's own card so the rest goes on the shelf, then comes back to Mark.
  *
  * Nothing on the bill changes: the toast says so, with Undo. Every button is 44px and Title Case.

@@ -586,10 +586,10 @@ const dollars = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
  * WHAT PROBABLY BELONGS ON THE SHELF, listed and never moved (the plan's read-only card). Signals,
  * strongest first:
  *   · a job's receipt line billed only in part (or "0 used") with nothing on the shelf from it -
- *     the Herringbone 14/2 coil: the customer isn't paying for it and the job still carries it;
+ *     the Honeysuckle 14/2 coil: the customer isn't paying for it and the job still carries it;
  *   · a job's receipt line that reads like a coil, a reel or a box (a container word, a count in
  *     its description, or a quantity over fifty) billed in full with nothing on the shelf - the
- *     Waldow Twister box;
+ *     Wexley Twister box;
  *   · a CED document whose job box says STOCK and that no bill covers yet;
  *   · a paper in the tray that says STOCK but was read with no lines.
  */

@@ -1,5 +1,5 @@
 /**
- * WHICH OF A JOB'S PAPERS A TECH IS HANDED (audit v994, herringbone HB-2).
+ * WHICH OF A JOB'S PAPERS A TECH IS HANDED (audit v994, honeysuckle HB-2).
  *
  * The job page loaded every document on the job, signed every one with the viewer's own login and
  * passed them all to the Photos tab, which is pinned for techs and picks "photos" by file

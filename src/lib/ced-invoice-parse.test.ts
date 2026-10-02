@@ -12,8 +12,8 @@ import { parseCedDocuments, parseCedInvoice, perUnitDivisor } from "./ced-invoic
  * to the total. These tests keep the shapes that were hard.
  */
 
-/** 8802-1101363, 235 Timber Creek, $162.45. Five lines, two of them priced per hundred. */
-const TIMBER_CREEK = `
+/** 8802-1101363, 235 Thistle Wood, $162.45. Five lines, two of them priced per hundred. */
+const THISTLE_WOOD = `
 10338 RIVER PARK PL # 2
 TRUCKEE, CA 96161
 Invoice
@@ -29,11 +29,11 @@ PLEASE SHOW INVOICE NO. AND REMIT TO:
 PO BOX 888835
 LOS ANGELES, CA 90088-8835
 ACCOUNT #/NAME
-TR-34426 ERIK TAYLOR
+AC-10427 ERIK TAYLOR
 JOB NAME
-235 TIMBER CREEK
+235 THISTLE WOOD
 CUSTOMER ORDER NO.
-235 TIMBER CREEK
+235 THISTLE WOOD
 SALESPERSON
 6710 DH
 SHIPPING INFORMATION
@@ -121,11 +121,11 @@ INVOICE DATE
 07/22/2026
 PLEASE SHOW INVOICE NO. AND REMIT TO:
 ACCOUNT #/NAME
-TR-34426 ERIK TAYLOR
+AC-10427 ERIK TAYLOR
 JOB NAME
-13631 NORTHWOODS
+13631 NIGHTSHADE
 CUSTOMER ORDER NO.
-13631 NORTHWOODS
+13631 NIGHTSHADE
 SALESPERSON
 QTY
 ORDERED
@@ -176,11 +176,11 @@ INVOICE DATE
 01/14/2026
 PLEASE SHOW INVOICE NO. AND REMIT TO:
 ACCOUNT #/NAME
-TR-34426 ERIK TAYLOR
+AC-10427 ERIK TAYLOR
 JOB NAME
-TTP 66
+ARR 66
 CUSTOMER ORDER NO.
-TTP 66
+ARR 66
 SALESPERSON
 QTY
 ORDERED
@@ -212,7 +212,7 @@ CASH DISCOUNT -0.85 OFF TOTAL DUE IF PAID BY THE
 `;
 
 describe("parseCedInvoice - a whole invoice off the portal", () => {
-  const result = parseCedInvoice(TIMBER_CREEK);
+  const result = parseCedInvoice(THISTLE_WOOD);
   const invoice = result.ok ? result.invoice : null;
 
   it("reads the header the way CED prints it, label then value on the next line", () => {
@@ -220,13 +220,13 @@ describe("parseCedInvoice - a whole invoice off the portal", () => {
     expect(invoice?.invoiceNumber).toBe("8802-1101363");
     expect(invoice?.kind).toBe("invoice");
     expect(invoice?.invoiceDate).toBe("2026-06-15");
-    expect(invoice?.accountNumber).toBe("TR-34426");
+    expect(invoice?.accountNumber).toBe("AC-10427");
     expect(invoice?.accountName).toBe("ERIK TAYLOR");
   });
 
   it("keeps the JOB NAME raw, because five of his jobs are on the same road", () => {
-    expect(invoice?.jobNameRaw).toBe("235 TIMBER CREEK");
-    expect(invoice?.customerOrderRaw).toBe("235 TIMBER CREEK");
+    expect(invoice?.jobNameRaw).toBe("235 THISTLE WOOD");
+    expect(invoice?.customerOrderRaw).toBe("235 THISTLE WOOD");
   });
 
   /** THE TRAP THAT COST AN HOUR. The totals block is stacked: three labels, THEN three values. A
@@ -268,17 +268,17 @@ describe("parseCedInvoice - a whole invoice off the portal", () => {
 
   // THE PAPER'S DAY, NOT CED'S (Wave 0): another supplier's terms name another day, or none.
   it("takes the claim-by day from the paper's own words", () => {
-    const on15th = parseCedInvoice(TIMBER_CREEK.replace("PAID BY THE 10TH", "PAID BY THE 15TH"));
+    const on15th = parseCedInvoice(THISTLE_WOOD.replace("PAID BY THE 10TH", "PAID BY THE 15TH"));
     expect(on15th.ok && on15th.invoice.discountBy).toBe("2026-07-15");
-    const on1st = parseCedInvoice(TIMBER_CREEK.replace("PAID BY THE 10TH", "PAID BY THE 1ST"));
+    const on1st = parseCedInvoice(THISTLE_WOOD.replace("PAID BY THE 10TH", "PAID BY THE 1ST"));
     expect(on1st.ok && on1st.invoice.discountBy).toBe("2026-07-01");
     // A day past the month's end is its last day (July has 31; "the 31st" of a 30-day month is the 30th).
-    const mayPaper = parseCedInvoice(TIMBER_CREEK.replace("PAID BY THE 10TH", "PAID BY THE 31ST").replace("INVOICE DATE\n06/15/2026", "INVOICE DATE\n05/15/2026"));
+    const mayPaper = parseCedInvoice(THISTLE_WOOD.replace("PAID BY THE 10TH", "PAID BY THE 31ST").replace("INVOICE DATE\n06/15/2026", "INVOICE DATE\n05/15/2026"));
     expect(mayPaper.ok && mayPaper.invoice.invoiceDate).toBe("2026-05-15");
     expect(mayPaper.ok && mayPaper.invoice.discountBy).toBe("2026-06-30");
     // Terms with no day of the month: the discount stands, with no date invented for it.
     const within = parseCedInvoice(
-      TIMBER_CREEK.replace("IF PAID BY THE 10TH\nOF THE MONTH FOLLOWING PURCHASE", "IF PAID WITHIN 10 DAYS"),
+      THISTLE_WOOD.replace("IF PAID BY THE 10TH\nOF THE MONTH FOLLOWING PURCHASE", "IF PAID WITHIN 10 DAYS"),
     );
     expect(within.ok && within.invoice.discountAmount).toBe(1.38);
     expect(within.ok && within.invoice.discountBy).toBeNull();
@@ -343,7 +343,7 @@ describe("credit memos", () => {
 describe("the self-check refuses rather than half-reads", () => {
   it("names the extensions when they do not add up to merchandise", () => {
     // One digit changed on one line: $35.49 becomes $35.40. Nothing else on the page moves.
-    const result = parseCedInvoice(TIMBER_CREEK.replace("\n35.49\n", "\n35.40\n"));
+    const result = parseCedInvoice(THISTLE_WOOD.replace("\n35.49\n", "\n35.40\n"));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.invoiceNumber).toBe("8802-1101363");
@@ -351,7 +351,7 @@ describe("the self-check refuses rather than half-reads", () => {
   });
 
   it("names the totals when the parts do not add up to the total", () => {
-    const result = parseCedInvoice(TIMBER_CREEK.replace("TOTAL DUE 162.45", "TOTAL DUE 172.45"));
+    const result = parseCedInvoice(THISTLE_WOOD.replace("TOTAL DUE 162.45", "TOTAL DUE 172.45"));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatch(/is 162\.45, but TOTAL DUE says 172\.45/);
@@ -367,7 +367,7 @@ describe("the self-check refuses rather than half-reads", () => {
 });
 
 describe("one download is usually several documents", () => {
-  const twoOfThem = `${TIMBER_CREEK}\n${CREDIT_MEMO}`;
+  const twoOfThem = `${THISTLE_WOOD}\n${CREDIT_MEMO}`;
 
   it("returns every document in the text, in the order they are printed", () => {
     const results = parseCedDocuments(twoOfThem);
@@ -405,13 +405,13 @@ describe("one download is usually several documents", () => {
 
   /** Every page also says "PLEASE SHOW INVOICE NO. AND REMIT TO:". That is not a document. */
   it("does not mistake the remit-to line for a second invoice", () => {
-    expect(parseCedDocuments(TIMBER_CREEK)).toHaveLength(1);
+    expect(parseCedDocuments(THISTLE_WOOD)).toHaveLength(1);
   });
 
   /** Whether the number lands on the heading's line or the next one is the EXTRACTOR's choice,
    *  not the document's, and a heading that failed to match would lose a whole invoice silently. */
   it("finds the document when the number shares a line with the heading", () => {
-    const merged = TIMBER_CREEK.replace("INVOICE NO.\n8802-1101363", "INVOICE NO. 8802-1101363");
+    const merged = THISTLE_WOOD.replace("INVOICE NO.\n8802-1101363", "INVOICE NO. 8802-1101363");
     const results = parseCedDocuments(merged);
     expect(results).toHaveLength(1);
     expect(results[0].ok && results[0].invoice.invoiceNumber).toBe("8802-1101363");
@@ -429,11 +429,11 @@ INVOICE DATE
 07/08/2025
 PLEASE SHOW INVOICE NO. AND REMIT TO:
 ACCOUNT #/NAME
-TR-34426 ERIK TAYLOR
+AC-10427 ERIK TAYLOR
 JOB NAME
-TTP 214
+ARR 214
 CUSTOMER ORDER NO.
-TTP 214
+ARR 214
 SALESPERSON
 ${rows}${totals}`;
 
@@ -516,7 +516,7 @@ Page 2 of 2
 describe("the awkward ones", () => {
   /** CED stamps the header of a settled document. It is the only voice that can say this. */
   it("hears the supplier say PAID IN FULL", () => {
-    const stamped = TIMBER_CREEK.replace("INVOICE NO.\n8802", "***PAID IN FULL*** INVOICE NO.\n8802");
+    const stamped = THISTLE_WOOD.replace("INVOICE NO.\n8802", "***PAID IN FULL*** INVOICE NO.\n8802");
     const result = parseCedInvoice(stamped);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -527,18 +527,18 @@ describe("the awkward ones", () => {
   /** When the two columns say the same thing CED prints one value under both headings. Looking
    *  only for a heading that ENDS in "JOB NAME" left $1,513.71 of material with no job on it. */
   it("reads the job name when it shares a heading with the customer order number", () => {
-    const merged = TIMBER_CREEK.replace(
-      "JOB NAME\n235 TIMBER CREEK\nCUSTOMER ORDER NO.\n235 TIMBER CREEK",
-      "JOB NAME CUSTOMER ORDER NO.\n235 TIMBER CREEK",
+    const merged = THISTLE_WOOD.replace(
+      "JOB NAME\n235 THISTLE WOOD\nCUSTOMER ORDER NO.\n235 THISTLE WOOD",
+      "JOB NAME CUSTOMER ORDER NO.\n235 THISTLE WOOD",
     );
     const result = parseCedInvoice(merged);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.invoice.jobNameRaw).toBe("235 TIMBER CREEK");
+    expect(result.invoice.jobNameRaw).toBe("235 THISTLE WOOD");
   });
 
   it("carries a December invoice's discount deadline into January", () => {
-    const december = TIMBER_CREEK.replace("06/15/2026", "12/15/2026");
+    const december = THISTLE_WOOD.replace("06/15/2026", "12/15/2026");
     const result = parseCedInvoice(december);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -549,7 +549,7 @@ describe("the awkward ones", () => {
   it("reads prices with four digits and no thousands comma", () => {
     // CED groups the totals ("2,558.98") and does not group the line prices ("1239.20"). A pattern
     // that required the comma refused 22 of his 64 documents.
-    const result = parseCedInvoice(TIMBER_CREEK);
+    const result = parseCedInvoice(THISTLE_WOOD);
     expect(result.ok && result.invoice.lines[3].unitPrice).toBe(1239.2);
   });
 
@@ -565,7 +565,7 @@ INVOICE DATE
 09/01/2026
 PLEASE SHOW INVOICE NO. AND REMIT TO:
 ACCOUNT #/NAME
-TR-34426 ERIK TAYLOR
+AC-10427 ERIK TAYLOR
 INVOICE TOTAL - PAY THIS AMOUNT
 $31.26
 `;
@@ -588,7 +588,7 @@ describe("a credit memo is negative twice (cn-v965 review)", () => {
    */
   const creditText = [
     "INVOICE NO.", "8802-1092311", "INVOICE DATE", "05/12/2026",
-    "ACCOUNT #/NAME", "TR-34426", "JOB NAME", "5659 RHODESIA",
+    "ACCOUNT #/NAME", "AC-10427", "JOB NAME", "5659 FERNHILL",
     "QTY", "ORDERED", "-55",
     "PRODUCT CODE", "WIRE", "NMB6/3WGNDX1000",
     "DESCRIPTION", "NMB 6/3 W/GND (1000' REEL)",
@@ -629,16 +629,16 @@ describe("the documents that are not itemised invoices", () => {
    *  page. Both halves of that broke the old anchor. */
   const SERVICE_CHARGE = `
 CED TRUCKEE
-PO BOX 888835 LOS ANGELES, CA 90088-8835 916-569-1770
+PO BOX 888835 LOS ANGELES, CA 90088-8835 916-555-0170
 INVOICE
 RETURN THIS PORTION WITH YOUR PAYMENT
 Remit to:
 CED TRUCKEE
 PO BOX 888835 LOS ANGELES, CA 90088-8835
-Phone: 916-569-1770
+Phone: 916-555-0170
 Erik Taylor
 ACCOUNT
-TR-34426
+AC-10427
 LOCATION
 8802
 DATE
@@ -646,7 +646,7 @@ DATE
 INVOICE
 9019059048
 ACCOUNT
-TR-34426
+AC-10427
 LOCATION
 8802
 DATE
@@ -703,17 +703,17 @@ $14.00
    *  "invoices...", which flattens to the exact phrase that used to re-type the next document. */
   const STATEMENT = `
 CED TRUCKEE
-PO BOX 888835 LOS ANGELES, CA 90088-8835 916-569-1770
+PO BOX 888835 LOS ANGELES, CA 90088-8835 916-555-0170
 STATEMENT
 Remit to:
 CED TRUCKEE
 PO BOX 888835 LOS ANGELES CA 90088-8835
-Phone: 916-569-1770
+Phone: 916-555-0170
 • Refer To Invoice For Terms
 • A Service Charge Will Be Made
 For Past Due Accounts
 ACCOUNT
-TR-34426
+AC-10427
 LOCATION
 8802
 DATE
@@ -776,7 +776,7 @@ invoices. Please call the number above for more information and to get set-up.
 
   /**
    * WITHOUT THE ACCOUNT NUMBER THE CHARGE LANDS ON NOTHING. The importer matches a document to his
-   * CED account on the printed TR-34426, falling back to the branch code in the invoice number -
+   * CED account on the printed AC-10427, falling back to the branch code in the invoice number -
    * and 9019059048 has no branch in it, so there is no fallback. The date matters the same way:
    * 2026-05-25 is what Erik typed onto this row by hand off this same page.
    */
@@ -785,7 +785,7 @@ invoices. Please call the number above for more information and to get set-up.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.invoice.invoiceDate).toBe("2026-05-25");
-    expect(result.invoice.accountNumber).toBe("TR-34426");
+    expect(result.invoice.accountNumber).toBe("AC-10427");
   });
 
   it("names the monthly statement instead of returning nothing at all", () => {
@@ -806,7 +806,7 @@ invoices. Please call the number above for more information and to get set-up.
    * bill prints.
    */
   it("keeps a statement's words out of the invoice pasted after it", () => {
-    const results = parseCedDocuments(`${STATEMENT}\n${TIMBER_CREEK}`);
+    const results = parseCedDocuments(`${STATEMENT}\n${THISTLE_WOOD}`);
     expect(results).toHaveLength(2);
     expect(results[0].ok).toBe(false);
     expect(results[1].ok).toBe(true);
@@ -824,7 +824,7 @@ invoices. Please call the number above for more information and to get set-up.
    * block is never a service charge, whatever words are sitting next to it.
    */
   it("never re-types an itemised invoice as the service charge beside it", () => {
-    const results = parseCedDocuments(`${SERVICE_CHARGE}\n${TIMBER_CREEK}`);
+    const results = parseCedDocuments(`${SERVICE_CHARGE}\n${THISTLE_WOOD}`);
     expect(results).toHaveLength(2);
     expect(results[0].ok && results[0].invoice.kind).toBe("service_charge");
     expect(results[0].ok && results[0].invoice.total).toBe(14);
@@ -834,7 +834,7 @@ invoices. Please call the number above for more information and to get set-up.
 
   /** And in the other order, because which document is "next" is whichever he pasted second. */
   it("reads both when the itemised invoice comes first", () => {
-    const results = parseCedDocuments(`${TIMBER_CREEK}\n${SERVICE_CHARGE}`);
+    const results = parseCedDocuments(`${THISTLE_WOOD}\n${SERVICE_CHARGE}`);
     expect(results.map((r) => (r.ok ? `${r.invoice.invoiceNumber}:${r.invoice.total}` : "refused"))).toEqual([
       "8802-1101363:162.45",
       "9019059048:14",
@@ -861,44 +861,44 @@ invoices. Please call the number above for more information and to get set-up.
  * landed on ONE line. His own PDF does not extract that way: it puts the two headings on two
  * consecutive lines with the single shared value under both of them. So the heading WAS found,
  * the read under it stopped dead on the very next line with nothing gathered, and 1101419 came
- * back with jobNameRaw null while customerOrderRaw held "235 TIMBER CREEK" from the same call.
+ * back with jobNameRaw null while customerOrderRaw held "235 THISTLE WOOD" from the same call.
  * 1102291 too. Those are the only two documents of his forty-seven with this layout, and they are
  * the two whose rows carry the literal column header "CUSTOMER ORDER NO." as a job name today,
  * typed in by hand during the reconciliation.
  */
 describe("the job name under two touching headings", () => {
   /** Exactly how PyMuPDF hands over invoice_8802-1101419.pdf: three separate lines. */
-  const REAL_LAYOUT = TIMBER_CREEK.replace(
-    "JOB NAME\n235 TIMBER CREEK\nCUSTOMER ORDER NO.\n235 TIMBER CREEK",
-    "JOB NAME\nCUSTOMER ORDER NO.\n235 TIMBER CREEK",
+  const REAL_LAYOUT = THISTLE_WOOD.replace(
+    "JOB NAME\n235 THISTLE WOOD\nCUSTOMER ORDER NO.\n235 THISTLE WOOD",
+    "JOB NAME\nCUSTOMER ORDER NO.\n235 THISTLE WOOD",
   );
 
   it("reads the job name off the value under both headings", () => {
     const result = parseCedInvoice(REAL_LAYOUT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.invoice.jobNameRaw).toBe("235 TIMBER CREEK");
-    expect(result.invoice.customerOrderRaw).toBe("235 TIMBER CREEK");
+    expect(result.invoice.jobNameRaw).toBe("235 THISTLE WOOD");
+    expect(result.invoice.customerOrderRaw).toBe("235 THISTLE WOOD");
   });
 
   /** The fallback must stay shut where the two headings have values of their own, or a customer
    *  order number would start standing in for a job name on documents that never asked it to. */
   it("still reads the two columns separately when each has its own value", () => {
-    const apart = TIMBER_CREEK.replace(
-      "CUSTOMER ORDER NO.\n235 TIMBER CREEK",
+    const apart = THISTLE_WOOD.replace(
+      "CUSTOMER ORDER NO.\n235 THISTLE WOOD",
       "CUSTOMER ORDER NO.\nPO 4471",
     );
     const result = parseCedInvoice(apart);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.invoice.jobNameRaw).toBe("235 TIMBER CREEK");
+    expect(result.invoice.jobNameRaw).toBe("235 THISTLE WOOD");
     expect(result.invoice.customerOrderRaw).toBe("PO 4471");
   });
 
   /** An invoice with no job name at all still reports none, rather than borrowing the order
    *  number. CED prints the heading on every invoice; the value is sometimes blank. */
   it("reports no job name when the column is empty", () => {
-    const blank = TIMBER_CREEK.replace("JOB NAME\n235 TIMBER CREEK\n", "");
+    const blank = THISTLE_WOOD.replace("JOB NAME\n235 THISTLE WOOD\n", "");
     const result = parseCedInvoice(blank);
     expect(result.ok).toBe(true);
     if (!result.ok) return;

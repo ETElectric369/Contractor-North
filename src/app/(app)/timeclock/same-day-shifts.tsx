@@ -12,7 +12,7 @@ import { putShiftOnJob, shiftsOnDay, takeShiftOffJob, type DayShift, type DayShi
  * WHAT THIS PERSON ALREADY HAS THAT DAY, above every form that adds hours (the duplicate punches,
  * 2026-09-26).
  *
- * On 9/19 the office billing 85 Whitney added Brian's 9/11 by hand. Brian's own clock punch for
+ * On 9/19 the office billing 41 Larkspur added Brian's 9/11 by hand. Brian's own clock punch for
  * that day was already in the book, 10:31 AM to 6:57 PM, on no job, and nothing on the form said
  * so. Payroll paid both. So the forms that add hours (Add Time Entry, on Timecards and on the job's
  * Time tab, and Log Hours) show the person's shifts on the day picked, and a shift on no job gets
@@ -102,7 +102,7 @@ export function SameDayShiftsList({
                 <span className={s.noJob ? "text-amber-800" : "text-slate-500"}> · {line.where}</span>
               </span>
               {/* THE DOOR WRAPS, it never spills: the label carries the job's whole name ("Put This
-                  On Service call — Nora & Fermin Arnoso" is ~300px), and at 375px the box inside
+                  On Service call — Nora & Fermin Avocet" is ~300px), and at 375px the box inside
                   the modal has ~277px. 44px tall, like every door a thumb has to hit. */}
               {door ? (
                 <Button

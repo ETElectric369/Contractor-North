@@ -99,8 +99,8 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
         [billId],
       )
     ).rows.map((r) => ({ ...r, quantity: num(r.quantity), unit_price: num(r.unit_price), amount: num(r.amount), billed_amount: r.billed_amount == null ? null : num(r.billed_amount) }));
-  /** Herringbone's 8/19 CED ticket, line for line (bill 11e96fc3 in ET's books). */
-  const herringbone819 = (job: string | null) =>
+  /** Honeysuckle's 8/19 CED ticket, line for line (bill 11e96fc3 in ET's books). */
+  const honeysuckle819 = (job: string | null) =>
     bill(job, "2001-08-19", [
       { description: "TEST Flexbox BH bar hanger ground", amount: 8.82, unit_price: 8.82 },
       { description: "TEST NMB 12/2 w/gnd wire 250 ft coil", amount: 165.29, quantity: 250, unit_price: 0.66 },
@@ -191,10 +191,10 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
     expect(typeof appliedHere).toBe("boolean");
   });
 
-  it("Put The Rest On The Shelf on Herringbone's 8/19 coil, 0 used: the job is billed $0, the shelf holds 250 ft at $180.17, and the job's cost drops by exactly that", async () => {
+  it("Put The Rest On The Shelf on Honeysuckle's 8/19 coil, 0 used: the job is billed $0, the shelf holds 250 ft at $180.17, and the job's cost drops by exactly that", async () => {
     if (!needs()) return;
     await step(async () => {
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const { plan, r } = await shelve(staffId, t.id, [
         { lineId: t.lineIds[1], pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "TEST 12/2 NM-B" },
       ]);
@@ -226,7 +226,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
   it("used on this job 60, the rest to the shelf: the job is billed what it used, the shelf holds 190 ft, and job part + roll = the ticket to the cent", async () => {
     if (!needs()) return;
     await step(async () => {
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const { plan } = await shelve(staffId, t.id, [
         { lineId: t.lineIds[1], pieces: 250, used: 60, unit: "ft", bought: 250, newItemName: "TEST 12/2 NM-B" },
       ]);
@@ -289,7 +289,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
   it("all or nothing: a roll the paper can't hold writes nothing at all, not even what the job used or a new item", async () => {
     if (!needs()) return;
     await step(async () => {
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const before = (await one("select count(*)::int as n from public.inventory_items where org_id = $1", [orgId])).n;
       const bad = await refusal(async () => {
         await as(staffId);
@@ -308,7 +308,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
   it("only this company's office: a tech and another company's office are refused, and nothing moves", async () => {
     if (!needs()) return;
     await step(async () => {
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const payload = JSON.stringify([{ line_id: t.lineIds[1], billed_amount: 0, pieces: 250, unit: "ft", cost: 180.17, item_name: "TEST x" }]);
       for (const who of [techId, otherStaffId]) {
         const r = await refusal(async () => {
@@ -325,7 +325,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
   it("a ticket a customer is already holding (a sent invoice claims it) is refused by name; a draft claimant is not a wall", async () => {
     if (!needs()) return;
     await step(async () => {
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const inv = await one(
         `insert into public.invoices (org_id, job_id, invoice_number, status, total, amount_paid) values ($1, $2, 'TEST-INV-S2', 'draft', 0, 0) returning id`,
         [orgId, jobA],
@@ -376,7 +376,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
     await step(async () => {
       // The order was billed on a sent invoice before its receipt arrived (po_number given, so no
       // sequence is touched).
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const po = await one(
         `insert into public.purchase_orders (org_id, job_id, po_number, vendor, status, total) values ($1, $2, 'TEST-PO-S2', 'TEST CED', 'sent', 199.48) returning id`,
         [orgId, jobA],
@@ -396,7 +396,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
     });
     await step(async () => {
       // An older itemised row: no source_ids, only the bill:<id>:remainder key.
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const inv = await one(
         `insert into public.invoices (org_id, job_id, invoice_number, status, total, amount_paid) values ($1, $2, 'TEST-INV-KEY', 'paid', 0, 0) returning id`,
         [orgId, jobA],
@@ -414,7 +414,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
   it("a roll landing on an item marked inactive makes it active again: no shelf money on a hidden item", async () => {
     if (!needs()) return;
     await step(async () => {
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const item = await one(
         `insert into public.inventory_items (org_id, name, unit, quantity_on_hand, reorder_point, active) values ($1, 'TEST 12/2 INACTIVE', 'ft', 0, 0, false) returning id`,
         [orgId],
@@ -435,7 +435,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
   it("Count It: fewer than the record are written off oldest roll first at cost; more are found at $0; a tech can't count", async () => {
     if (!needs()) return;
     await step(async () => {
-      const t = await herringbone819(jobA);
+      const t = await honeysuckle819(jobA);
       const { r } = await shelve(staffId, t.id, [{ lineId: t.lineIds[1], pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "TEST 12/2 C" }]);
       const itemId = r.lots[0].item_id;
       await as(staffId);

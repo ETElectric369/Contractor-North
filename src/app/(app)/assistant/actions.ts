@@ -120,7 +120,7 @@ export async function saveQuoteFromDraft(
   draft: AgentDraft,
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
   const supabase = await createClient();
-  // Nort builds an estimate "for Jackie Burks" (a NAME) but may not carry her customer_id — so the
+  // Nort builds an estimate "for Marla Finch" (a NAME) but may not carry her customer_id — so the
   // saved quote was landing "No customer attached". Resolve the name to a real customer: match an
   // existing one first (case-insensitive, exact then contains), and only create a new record if there's
   // genuinely no match. That way the quote is always attached and we don't spawn duplicate customers.

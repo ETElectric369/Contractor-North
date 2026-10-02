@@ -163,7 +163,7 @@ async function nameOf(m: Member, id: string | null): Promise<string> {
 }
 
 /** A crew change rings the office once per job per hour, with a running count ("Brian changed 3
- *  circuits on J-011 13897 Herringbone"). Only a crew change is news; the office edits its own list
+ *  circuits on J-011 13897 Honeysuckle"). Only a crew change is news; the office edits its own list
  *  all day. Everything it needs is resolved in request scope and handed to after(). */
 function ringIfCrew(m: Member, jobId: string) {
   if (m.staff) return;

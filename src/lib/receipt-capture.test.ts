@@ -60,7 +60,7 @@ describe("a reader that fails without a reason", () => {
  */
 describe("a paper whose number is already on a bill", () => {
   it("the outcome names the bill and whether it is this job's, beside the Different Purchase door", async () => {
-    bill.mockResolvedValueOnce({ ok: true, already: true, sameAs: "Already on the books: CED #8802, $301.81, on J-013 TTP #56. Nothing was recorded twice.", sameBillId: "b-ced", sameOnThisJob: true });
+    bill.mockResolvedValueOnce({ ok: true, already: true, sameAs: "Already on the books: CED #8802, $301.81, on J-013 ARR #56. Nothing was recorded twice.", sameBillId: "b-ced", sameOnThisJob: true });
     const out = await readReceiptDocument("doc-1");
     expect(out).toMatchObject({ kind: "already", tone: "warn", samePurchase: true, sameBillId: "b-ced", sameOnThisJob: true });
     expect(out.sentence).toContain("Different Purchase: Record It Anyway");

@@ -30,7 +30,7 @@ export function laborPersonKey(prof: { id?: unknown; full_name?: unknown } | nul
 /**
  * DROP THE HOURS ANOTHER INVOICE ALREADY BILLS (0255, "the invariant moves to the row").
  *
- * Erik, 2026-09-11: "i couldnt even make an invoice for 85 whitney… kept referring to the old
+ * Erik, 2026-09-11: "i couldnt even make an invoice for 41 larkspur… kept referring to the old
  * invoice even though i have new time and new bills". Each labor line claims the entry ids it
  * billed, so the rule is what it always meant: an hour is billed on at most ONE non-void invoice.
  * Feed this `claimed` (every source id held by the job's OTHER non-void invoices) and it returns

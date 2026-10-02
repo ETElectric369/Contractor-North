@@ -1235,7 +1235,7 @@ export async function createJobFromQuote(
   /* THE NAME IS THE STREET, NEVER "Estimate — …" OR "Job from Q-0012" (Erik 2026-09-27 / 09-28,
      "street number and name as always"). The one namer (lib/job-name): the street number and name
      the job inherits (" #56" with its unit); with no street, the customer as written and the
-     estimate's own words, tag off ("Jackie Burks · Panel Upgrade"). The public accept
+     estimate's own words, tag off ("Marla Finch · Panel Upgrade"). The public accept
      (accept_public_quote) names it through the SQL twin, public.job_name_from (0369). */
   const custForName = resolvedCustomerId ?? q.customer_id;
   const { data: whoRow } = custForName

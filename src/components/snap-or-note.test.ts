@@ -75,7 +75,7 @@ import {
 } from "./snap-or-note";
 
 const STAFF = { ok: true as const, userId: "u-office", orgId: "org-1", staff: true, punchJobId: null, jobs: [], shopStock: true };
-const TECH = { ok: true as const, userId: "u-tech", orgId: "org-1", staff: false, punchJobId: "j-11", jobs: [{ id: "j-11", label: "13897 Herringbone" }, { id: "j-2", label: "Smith Panel" }], shopStock: true };
+const TECH = { ok: true as const, userId: "u-tech", orgId: "org-1", staff: false, punchJobId: "j-11", jobs: [{ id: "j-11", label: "13897 Honeysuckle" }, { id: "j-2", label: "Smith Panel" }], shopStock: true };
 
 const photo = (name = "receipt.jpg", bytes = "JPEGDATA-1") => new File([bytes], name, { type: "image/jpeg" });
 const pdf = (name = "bill.pdf") => new File(["%PDF-1.7 a bill"], name, { type: "application/pdf" });
@@ -97,7 +97,7 @@ beforeEach(() => {
       return new Response(
         JSON.stringify({
           ok: true,
-          item: { id: "p-1", title: "receipt.jpg", vendor: "Home Depot", amount: 84.12, picture: false, destination: "none", suggestion: { jobLabel: "J-011 13897 Herringbone", bucket: null, picked: true } },
+          item: { id: "p-1", title: "receipt.jpg", vendor: "Home Depot", amount: 84.12, picture: false, destination: "none", suggestion: { jobLabel: "J-011 13897 Honeysuckle", bucket: null, picked: true } },
         }),
       );
     }),
@@ -121,7 +121,7 @@ describe("the office's files: one queue, one set of rules", () => {
     expect(m.addPaperwork.mock.calls[0][0]).toMatchObject({ source: "organize", mime: "image/jpeg", name: "receipt.jpg" });
     expect(m.addPaperwork.mock.calls[0][0].path).toMatch(/^org-1\/organize\/\d+-receipt\.jpg$/);
     expect(lines()).toEqual([
-      { name: "receipt.jpg", text: "Read: Home Depot, $84.12. Picked from the paper: J-011 13897 Herringbone. Waiting for your answer.", tone: "ok" },
+      { name: "receipt.jpg", text: "Read: Home Depot, $84.12. Picked from the paper: J-011 13897 Honeysuckle. Waiting for your answer.", tone: "ok" },
       { name: "again.jpg", text: "Already In: added Sep 27, 2026, waiting in the tray to be filed. Nothing was added twice.", tone: "warn" },
     ]);
     // The read ran on its own route (60 seconds from any page), never analyzeAndFile.
@@ -262,8 +262,8 @@ describe("notes", () => {
   it("a tech's note is his own row, never read, never routed to the importer", async () => {
     resetSnapForTest(TECH);
     m.saveVoiceNote.mockResolvedValue({ ok: true, id: "n-3" });
-    await snapNote("need more 12/2 at Herringbone");
-    expect(m.saveVoiceNote).toHaveBeenCalledWith("need more 12/2 at Herringbone");
+    await snapNote("need more 12/2 at Honeysuckle");
+    expect(m.saveVoiceNote).toHaveBeenCalledWith("need more 12/2 at Honeysuckle");
     expect(m.routePastedText).not.toHaveBeenCalled();
     expect(lines()[0]).toMatchObject({ tone: "ok", text: "Saved for the office." });
     // A tech's note is never read.
@@ -346,7 +346,7 @@ describe("a tech's photo: which job, no read, no amount", () => {
     await sendTechPhoto(snapStateForTest().pending[0].id, "j-11");
     expect(m.captureReceipt).toHaveBeenCalledTimes(1);
     expect(m.captureReceipt.mock.calls[0][0]).toMatchObject({ orgId: "org-1", jobId: "j-11", read: false, category: "Receipt" });
-    expect(lines()[1]).toMatchObject({ tone: "ok", text: "Filed On 13897 Herringbone For The Office." });
+    expect(lines()[1]).toMatchObject({ tone: "ok", text: "Filed On 13897 Honeysuckle For The Office." });
     // The reader never ran, and the office's paper door was never touched.
     expect(fetched).toEqual([]);
     expect(m.addPaperwork).not.toHaveBeenCalled();

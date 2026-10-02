@@ -92,7 +92,7 @@ describe("Read Circuits From The Plans: the model call", () => {
       ],
     });
     const { client, create } = stubModel(reply);
-    const r = await readPlanWithModel({ client, model: "m", media: { kind: "pdf", mime: "application/pdf" }, base64: "JVBER", name: "Herringbone E-sheets.pdf", orgId: "org-1" });
+    const r = await readPlanWithModel({ client, model: "m", media: { kind: "pdf", mime: "application/pdf" }, base64: "JVBER", name: "Honeysuckle E-sheets.pdf", orgId: "org-1" });
     const sent = create.mock.calls[0] as unknown as [{ messages: { content: { type: string }[] }[] }];
     expect(sent[0].messages[0].content[0]).toMatchObject({ type: "document" });
     expect(meter).toHaveBeenCalledWith(expect.objectContaining({ surface: "panel-plans" }));

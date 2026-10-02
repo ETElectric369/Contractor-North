@@ -42,7 +42,7 @@ const appt = {
   ends_at: "2026-09-28T17:00:00.000Z",
   job_id: null,
   customer_id: null,
-  location: "85 Whitney",
+  location: "41 Larkspur",
   notes: null,
   assigned_to: null,
 };

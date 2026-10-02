@@ -14,13 +14,13 @@
  * screen nobody can test:
  *
  *  · $1,765.72 of invoices he bought SINCE the app started and that were recorded nowhere in it.
- *    $523.47 of that is TTP56, a job about to be invoiced; $186.93 is on Randy's Purple Sage job,
+ *    $523.47 of that is ARR56, a job about to be invoiced; $186.93 is on Randy's Pinyon Sage job,
  *    which is already paid and closed, so its profit is overstated by exactly that.
  *  · $29.62 of prompt-pay discount still claimable, and $25.99 already expired unclaimed.
  *  · $60.42 of late-payment interest charged at 1.5% a month, WHILE those discounts sat there.
  *  · CED prints a JOB NAME on every invoice. It is the gift in the whole file - and it is also the
- *    trap, because the same road reads "5659 RHODESIA", "561 RHODESIA", "5661 RHODESIA" and
- *    "5659 RODESSIA", and he has five separate jobs on it.
+ *    trap, because the same road reads "5659 FERNHILL", "561 FERNHILL", "5661 FERNHILL" and
+ *    "5659 FERNHILE", and he has five separate jobs on it.
  *
  * THE MATCHER RANKS AND NEVER PICKS. matchJobName below returns a verdict and an ordered list; it
  * never returns "the answer", and nothing in the card preselects one. That is not caution for its
@@ -116,7 +116,7 @@ export interface SupplierInvoiceRow extends SupplierDocument {
   waitingCreditSince?: string | null;
 }
 
-/** One of his jobs, with enough on it to tell five Rhodesias apart. */
+/** One of his jobs, with enough on it to tell five Fernhills apart. */
 export interface ReconcileJob {
   id: string;
   jobNumber: string | null;
@@ -127,8 +127,8 @@ export interface ReconcileJob {
   createdAt?: string | null;
 }
 
-/** How a job reads in a picker: "J-033 · 5659 Rhodesia · complete · 5659 Rhodesia Rd". Everything
- *  a man needs to tell one 5659 Rhodesia from the next four, in one line. */
+/** How a job reads in a picker: "J-033 · 5659 Fernhill · complete · 5659 Fernhill Rd". Everything
+ *  a man needs to tell one 5659 Fernhill from the next four, in one line. */
 export function jobPickerLabel(job: ReconcileJob): string {
   return [job.jobNumber, job.name, sayStatus(job.status), job.address]
     .map((p) => String(p ?? "").trim())
@@ -412,9 +412,9 @@ export function lateInterest(invoices: SupplierInvoiceRow[]): InterestReading {
  * What the matcher concluded, in the only four shapes that are honest:
  *
  *  · "one"   - one job stands clear of the rest. Still a suggestion, still never preselected.
- *  · "ask"   - several are just as close. "235 TIMBER CREEK" is both Tao Zhu jobs; "5659 RODESSIA"
- *              is four separate Rhodesias. A machine picking here is guessing with his job costs.
- *  · "weak"  - nothing looks much like it. "561 RHODESIA" is a house number he has no job at.
+ *  · "ask"   - several are just as close. "235 THISTLE WOOD" is both Tess Zane jobs; "5659 FERNHILE"
+ *              is four separate Fernhills. A machine picking here is guessing with his job costs.
+ *  · "weak"  - nothing looks much like it. "561 FERNHILL" is a house number he has no job at.
  *  · "blank" - there is no job name to go on. CED's copy of invoice 1102291 carries the form's own
  *              header, "CUSTOMER ORDER NO.", where the name should be - $451.75 he cannot place.
  *  · "stock" - CED booked it to STOCK. That is not a job and must never be offered one: it is shop
@@ -436,8 +436,8 @@ export interface JobNameMatch {
   because: string;
 }
 
-/** Street types carry no information and drift constantly ("85 WHITNEY PLACE" against a job whose
- *  address is 85 Whitney COURT). Dropped from both sides before anything is compared. */
+/** Street types carry no information and drift constantly ("41 LARKSPUR PLACE" against a job whose
+ *  address is 41 Larkspur COURT). Dropped from both sides before anything is compared. */
 const STREET_TYPES = new Set([
   "RD", "ROAD", "ST", "STREET", "AVE", "AV", "AVENUE", "DR", "DRIVE", "LN", "LANE", "CT", "COURT",
   "PL", "PLACE", "BLVD", "BOULEVARD", "WAY", "TRL", "TRAIL", "CIR", "CIRCLE", "TER", "TERRACE",
@@ -445,7 +445,7 @@ const STREET_TYPES = new Set([
 ]);
 
 /** Postal noise on the end of a geocoded address. "USA" and a two-letter state say nothing about
- *  which of five Rhodesias this is. */
+ *  which of five Fernhills this is. */
 const ADDRESS_NOISE = new Set(["USA", "US", "CA", "NV", "N", "S", "E", "W"]);
 
 /** Strings CED prints where a job name should be, that are not job names. The first is the form's
@@ -460,7 +460,7 @@ const SHOP_STOCK = new Set(["STOCK", "SHOP", "SHOP STOCK", "TRUCK STOCK", "VAN S
 
 /**
  * Split a job-ish string into tokens the way a person reads it, not the way a computer stores it.
- * The letter/digit split is what makes "TTP106" and "TTP 106" and "TTP #106" the same thing.
+ * The letter/digit split is what makes "ARR106" and "ARR 106" and "ARR #106" the same thing.
  */
 function tokenize(raw: string): string[] {
   return String(raw ?? "")
@@ -474,13 +474,13 @@ function tokenize(raw: string): string[] {
 }
 
 interface NameKey {
-  /** Letters only, run together: "HERRING BONE" and "HERRINGBONE" both become HERRINGBONE, which
+  /** Letters only, run together: "HERRING BONE" and "HONEYSUCKLE" both become HONEYSUCKLE, which
    *  is the entire reason CED's two spellings of one street land on one job. */
   letters: string;
   /** Every number in the string. A zip code is in here too; the leading one is the house. */
   numbers: string[];
-  /** The house number - the first number in the string. "TTP 106" makes 106 the house number,
-   *  which is right: at Tahoe Tavern the unit number IS which job it is. */
+  /** The house number - the first number in the string. "ARR 106" makes 106 the house number,
+   *  which is right: at Alder Ridge the unit number IS which job it is. */
   lead: string | null;
 }
 
@@ -527,9 +527,9 @@ function editDistance(a: string, b: string): number {
 /**
  * How alike two run-together names are, 0 to 1.
  *
- * CONTAINMENT IS WORTH 0.9 AND ONLY ABOVE FOUR LETTERS. "TIMBERCREEK" inside "TIMBERCREEKRENO" is
- * the same place with a city stuck on it. "TTP" inside "TTPGARBAGEDISPOSAL" is three letters
- * inside eighteen, which is how "TTP 106" would have matched a garbage disposal at TTP 11.
+ * CONTAINMENT IS WORTH 0.9 AND ONLY ABOVE FOUR LETTERS. "THISTLEWOOD" inside "THISTLEWOODRENO" is
+ * the same place with a city stuck on it. "ARR" inside "ARRGARBAGEDISPOSAL" is three letters
+ * inside eighteen, which is how "ARR 106" would have matched a garbage disposal at ARR 11.
  */
 function similarity(a: string, b: string): number {
   if (!a || !b) return 0;
@@ -541,7 +541,7 @@ function similarity(a: string, b: string): number {
 }
 
 /** The house number is worth more than every letter in the street, because a street is shared and
- *  a house is not: "13631 NORTHWOODS" and "13466 Northwoods" are two different jobs on one road,
+ *  a house is not: "13631 NIGHTSHADE" and "13466 Nightshade" are two different jobs on one road,
  *  and the only thing that tells them apart is the number. */
 function numberScore(raw: NameKey, cand: NameKey): number {
   if (!raw.lead) return 0;
@@ -549,7 +549,7 @@ function numberScore(raw: NameKey, cand: NameKey): number {
   if (cand.lead === raw.lead) return 3;
   if (cand.numbers.includes(raw.lead)) return 2;
   // A candidate whose house number is a DIFFERENT number is evidence AGAINST, not the absence of
-  // evidence. Without this, every Northwoods job on his book scored the same.
+  // evidence. Without this, every Nightshade job on his book scored the same.
   return -3;
 }
 
@@ -563,9 +563,9 @@ const WORTH_GUESSING = 3;
  * RANK HIS JOBS AGAINST ONE OF CED'S JOB NAMES. Never picks; never filters.
  *
  * Checked against the real strings off his portal, in supplier-reconcile.test.ts: "13631
- * NORTHWOODS" against a book that also holds 13466 Northwoods, "13897 HARRINGBONE" and "13897
- * HERRING BONE" against 13897 Herringbone, "TTP 106" and "TTP106" against five TTP jobs, "5659
- * RODESSIA" against five Rhodesias (asks), "235 TIMBER CREEK" against both Tao Zhu jobs (asks),
+ * NIGHTSHADE" against a book that also holds 13466 Nightshade, "13897 HARRINGBONE" and "13897
+ * HERRING BONE" against 13897 Honeysuckle, "ARR 106" and "ARR106" against five ARR jobs, "5659
+ * FERNHILE" against five Fernhills (asks), "235 THISTLE WOOD" against both Tess Zane jobs (asks),
  * and "STOCK", which is offered nothing at all.
  */
 /**
@@ -608,7 +608,7 @@ export function matchJobName(raw: string | null | undefined, jobs: ReconcileJob[
       const byName = nameKey(job.name);
       const byAddress = nameKey(job.address, { address: true });
       // The name is his word for the job and the address is a geocoder's, so a name match counts
-      // slightly more. Numbers are taken from both together: "Tao Zhu" carries its house number
+      // slightly more. Numbers are taken from both together: "Tess Zane" carries its house number
       // only in its address, and dropping that would lose the one fact that places it.
       const words = Math.max(similarity(key.letters, byName.letters), similarity(key.letters, byAddress.letters) * 0.95);
       const merged: NameKey = {
@@ -745,8 +745,8 @@ export interface NeedsBillSlice {
 /**
  * PURCHASES THE APP HAS NO RECORD OF. A supplier invoice with no scanned bill against it.
  *
- * $523.47 of this is TTP56, on a job about to be invoiced - bill that job now and it goes out
- * $523.47 light. $186.93 is on Randy's Purple Sage, which is already paid and closed, so its
+ * $523.47 of this is ARR56, on a job about to be invoiced - bill that job now and it goes out
+ * $523.47 light. $186.93 is on Randy's Pinyon Sage, which is already paid and closed, so its
  * profit has been overstated by exactly that since June.
  *
  * `since` IS NOT A FILTER FOR TIDINESS. The app cannot have recorded a purchase made before its
@@ -775,7 +775,7 @@ export function invoicesNeedingBill(
    *
    * Erik ordered five light almond USB receptacles on 8802-1107230, sent them back, and CED wrote
    * 8802-1107337 to take the $225.47 straight off again: "skip the returns for the wrong color".
-   * Both documents are open, both name TTP 106, and the invoice had no bill against it - so the
+   * Both documents are open, both name ARR 106, and the invoice had no bill against it - so the
    * moment the Record button was wired, this list offered to put $225.47 of merchandise he does
    * not have onto his customer's job, one tap, with a credit memo sitting beside it saying so.
    *
@@ -880,9 +880,9 @@ export interface PaperJob {
   /** What the button says: the job number, or the name when there is no number. */
   label: string;
   name: string;
-  /** "in progress", "complete": the one thing that tells five 5659 Rhodesias apart on a chip. */
+  /** "in progress", "complete": the one thing that tells five 5659 Fernhills apart on a chip. */
   status: string | null;
-  /** When the job was made (its created_at), when known: J-006 and J-033 are both "5659 Rhodesia,
+  /** When the job was made (its created_at), when known: J-006 and J-033 are both "5659 Fernhill,
    *  complete", and only the day tells them apart at a glance. */
   opened?: string | null;
 }
@@ -896,11 +896,11 @@ export interface SupplierPaperCard {
   total: number;
   /** The supplier already shows it paid. */
   closed: boolean;
-  /** CED's job name, verbatim, when it wrote one: "13897 HERRINGBONE". Null when there is none. */
+  /** CED's job name, verbatim, when it wrote one: "13897 HONEYSUCKLE". Null when there is none. */
   said: string | null;
   /**
    * needs_job: nothing says which job it is for yet.
-   * record:    a person put it on a job already; only the bill is missing (the 3639 Saddle pair).
+   * record:    a person put it on a job already; only the bill is missing (the 3639 Sorrel pair).
    */
   state: "needs_job" | "record";
   verdict: JobNameVerdict;
@@ -909,7 +909,7 @@ export interface SupplierPaperCard {
   /** "ask": the jobs that match just as well, offered as chips. Empty otherwise. */
   candidates: PaperJob[];
   /**
-   * "weak": the matcher's nearest jobs all the same (5661 RHODESIA ranks the three 5659 Rhodesias
+   * "weak": the matcher's nearest jobs all the same (5661 FERNHILL ranks the three 5659 Fernhills
    * first), for the TOP of the picker only. Never a button, never preselected: the card says
    * "The closest are first", and this is what makes that true.
    */
@@ -975,7 +975,7 @@ export function creditWait(
   return { since, back, overdue: days !== null && days >= CREDIT_WAIT_DAYS };
 }
 
-/** How many candidate chips an "ask" card shows. Five Rhodesias is the worst he has. */
+/** How many candidate chips an "ask" card shows. Five Fernhills is the worst he has. */
 const MAX_CHIPS = 5;
 
 export function paperJob(job: ReconcileJob): PaperJob {
@@ -1098,7 +1098,7 @@ function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: 
       date: inv.invoiceDate ?? null,
       total,
       closed: !!inv.closed,
-      // Verbatim (spaces tidied): "TTP56" stays TTP56. It is CED's word, quoted, not our reading.
+      // Verbatim (spaces tidied): "ARR56" stays ARR56. It is CED's word, quoted, not our reading.
       said: isUsableJobName(inv.jobNameRaw) ? String(inv.jobNameRaw ?? "").trim().replace(/\s+/g, " ") : null,
       state: jobId ? "record" : "needs_job",
       verdict: match.verdict,
@@ -1156,7 +1156,7 @@ export function supplierPaperTotals(cards: SupplierPaperCard[]): { count: number
 export interface SupplierReconcileFeed {
   /** Every document the supplier issued on this account: open, settled, all four kinds. */
   invoices: SupplierInvoiceRow[];
-  /** His jobs, for the picker. Enough on each to tell five Rhodesias apart. */
+  /** His jobs, for the picker. Enough on each to tell five Fernhills apart. */
   jobs: ReconcileJob[];
   /**
    * The day this app's records begin - its earliest scanned bill. Purchases the supplier made

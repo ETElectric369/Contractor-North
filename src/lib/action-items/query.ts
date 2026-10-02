@@ -1176,7 +1176,7 @@ async function buildActionItems(ctx: {
   }
   counts.lien_deadlines = codeCount(lienR);
 
-  // ── The end-of-day money-leak sweep (staff only) — the "Apache Ct" detectors. ──
+  // ── The end-of-day money-leak sweep (staff only) — the "Acacia Ct" detectors. ──
   // Detection only, per the hard boundary: each item names the gap and deep-links to the surface
   // that fixes it; nothing infers hours, dollars, or clock-out times.
 

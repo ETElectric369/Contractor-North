@@ -51,7 +51,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => fakeCl
 import { customerActions } from "./customer";
 
 const ctx = { userId: "u1", orgId: "o1", role: "owner" };
-const TOM_VISIT = { id: "78fa75b1-8384-4148-8895-242846abcce5", title: "Walk-Through: Tom Goodman", location: "3245 W. Lake Blvd, Homewood, CA 96141", starts_at: "2026-09-25T17:00:00.000Z" };
+const TOM_VISIT = { id: "78fa75b1-8384-4148-8895-242846abcce5", title: "Walk-Through: Tom Goodman", location: "3245 W. Garnet Blvd, Homewood, CA 96141", starts_at: "2026-09-25T17:00:00.000Z" };
 const create = (input: Record<string, unknown>) => customerActions["customer.create"].handler(customerActions["customer.create"].input.parse(input), ctx);
 const update = (input: Record<string, unknown>) => customerActions["customer.update"].handler(customerActions["customer.update"].input.parse(input), ctx);
 
@@ -139,10 +139,10 @@ describe("customer.update — an open offer survives an answer that isn't a yes"
   it("his phone number, while the visit is still customer-less: the update carries the offer again", async () => {
     // The create offered (two candidates, say); Erik answered with the number, not a pick.
     db.visits = [TOM_VISIT, { ...TOM_VISIT, id: "second", title: "Final — Tom Goodman" }];
-    db.customer = { name: "Tom Goodman", phone: "(916) 992-4711", email: null, address: null };
-    const r = await update({ id: "cust-tom", phone: "916 992 4711" });
+    db.customer = { name: "Tom Goodman", phone: "(916) 555-0147", email: null, address: null };
+    const r = await update({ id: "cust-tom", phone: "916 555 0147" });
     expect(r.ok).toBe(true);
-    expect(r.recorded).toBe('Saved: "Tom Goodman" · (916) 992-4711.');
+    expect(r.recorded).toBe('Saved: "Tom Goodman" · (916) 555-0147.');
     const data = r.data as { link_offer: { appointment_id: string }[]; next_step: string };
     expect(data.link_offer.map((o) => o.appointment_id)).toEqual([TOM_VISIT.id, "second"]);
     expect(data.next_step).toContain("appointment.linkCustomer");
@@ -159,14 +159,14 @@ describe("customer.update — an open offer survives an answer that isn't a yes"
   });
 
   it("an update never links for them (they were editing the person), even when one visit certainly matches", async () => {
-    const r = await update({ id: "cust-tom", phone: "916 992 4711" });
+    const r = await update({ id: "cust-tom", phone: "916 555 0147" });
     expect(linkAppointmentTo).not.toHaveBeenCalled();
     expect((r.data as { link_offer: unknown[] }).link_offer).toHaveLength(1);
   });
 
   it("nothing pending: the update reads as it always did", async () => {
     db.visits = [];
-    const r = await update({ id: "cust-tom", phone: "916 992 4711" });
+    const r = await update({ id: "cust-tom", phone: "916 555 0147" });
     expect(r).toEqual({ ok: true, recorded: 'Saved: "Tom Goodman".' });
   });
 });

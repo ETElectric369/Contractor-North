@@ -37,7 +37,7 @@ export const PICK_MARKER = "␞CN_PICK␞";
 export type AgentPick = {
   /** What to pick — a contact (customer / subcontractor) for now. */
   kind: "contact";
-  /** Optional search term to pre-fill the picker, e.g. "Jackie". */
+  /** Optional search term to pre-fill the picker, e.g. "Marla". */
   search?: string;
   /** Optional type filter. */
   type?: "residential" | "commercial" | "industrial" | "subcontractor";
@@ -97,7 +97,7 @@ export type HudFact = {
  *  contact, a job in a set. label on the left, value on the right, an optional dimmer sub. */
 export type HudRow = {
   label: string;
-  /** Right-aligned value, e.g. "$3,600", "8:00a", "(530) 933-6686". */
+  /** Right-aligned value, e.g. "$3,600", "8:00a", "(530) 555-0133". */
   value?: string | null;
   /** A quieter second line under the label, e.g. "24 hr × $150", "Tue Jul 15". */
   sub?: string | null;

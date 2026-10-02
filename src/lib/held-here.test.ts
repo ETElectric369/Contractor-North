@@ -9,7 +9,7 @@ import type { ClaimedSources } from "./unbilled-work";
  * importer. The shapes are ET's own invoices, line for line (ids shortened where they don't matter).
  */
 
-// ── INV-060, Badger Lane J-039 (paid) ───────────────────────────────────────────────────────────
+// ── INV-060, Bayberry Lane J-039 (paid) ───────────────────────────────────────────────────────────
 const HD = "5e1b0b67-f0f3-4ee6-b420-004413d79a48"; // Home Depot, $196.18
 const ACE1 = "5b12146d-514a-4f7c-a34b-a68ad292dbda"; // Ace 8/17, $68.66
 const ACE2 = "d66d55a9-5b45-42d4-a68f-66f996509a32"; // Ace 8/17, $47.94
@@ -25,7 +25,7 @@ const INV060: HereLine[] = [
   { import_source: "labor", import_key: `labor:${ERIK}`, edited: true, source_ids: [E1, E2] }, // "Labor — Erik", $1,160
   { import_source: null, import_key: null, edited: false, source_ids: [B1, B2, B3] }, // "Labor - Brian", typed by hand
   // "Materials — Assorted light bulbs…", $390.98: keyed to the Home Depot bill, edited, and the two
-  // Ace receipts added to it by hand (badger-ace-on-inv060.sql).
+  // Ace receipts added to it by hand (bayberry-ace-on-inv060.sql).
   { import_source: "costs", import_key: `bill:${HD}`, edited: true, source_ids: [HD, ACE1, ACE2] },
 ];
 
@@ -86,7 +86,7 @@ describe("INV-060: a charge made by hand stays charged", () => {
   });
 });
 
-// ── INV-078, 13897 Herringbone (Andrew's running draft) ────────────────────────────────────────
+// ── INV-078, 13897 Honeysuckle (Andrew's running draft) ────────────────────────────────────────
 describe("INV-078: the person's own edited labor line keeps its hours in play, so new hours still JOIN it", () => {
   const OLD = "7e000000-0000-4000-8000-000000000001";
   const NEW = "7e000000-0000-4000-8000-000000000002";
@@ -94,7 +94,7 @@ describe("INV-078: the person's own edited labor line keeps its hours in play, s
   const J1 = "7e000000-0000-4000-8000-000000000003";
   const CED = "c9daf1b8-03fb-4435-a518-24a000d31c3a";
   const LINE = "d26f3d69-76ea-4e63-ae72-69c7d0a7c480";
-  const entries = [entry(OLD, ERIK, "Erik Taylor", "2026-09-10"), entry(NEW, ERIK, "Erik Taylor", "2026-09-22", 6), entry(J1, JIMMY, "Jimmy Santoliva", "2026-09-10")];
+  const entries = [entry(OLD, ERIK, "Erik Taylor", "2026-09-10"), entry(NEW, ERIK, "Erik Taylor", "2026-09-22", 6), entry(J1, JIMMY, "Jimmy Starling", "2026-09-10")];
   const lines: HereLine[] = [
     { import_source: "labor", import_key: `labor:${ERIK}`, edited: true, source_ids: [OLD] }, // Andrew's $100
     { import_source: "labor", import_key: `labor:${JIMMY}`, edited: true, source_ids: [J1] },
@@ -115,7 +115,7 @@ describe("INV-078: the person's own edited labor line keeps its hours in play, s
       heldEntries: entries,
       ownLines: [
         { id: "li-erik", import_key: `labor:${ERIK}`, edited: true, source_ids: [OLD], quantity: 8, unit_price: 100, unit: "hr", description: "Labor - Erik Taylor" },
-        { id: "li-jimmy", import_key: `labor:${JIMMY}`, edited: true, source_ids: [J1], quantity: 8, unit_price: 50, unit: "hr", description: "Labor - Jimmy Santoliva" },
+        { id: "li-jimmy", import_key: `labor:${JIMMY}`, edited: true, source_ids: [J1], quantity: 8, unit_price: 50, unit: "hr", description: "Labor - Jimmy Starling" },
       ],
       dismissed: new Set(),
       bill: (es) => computeJobLaborBilling(es, 95, null).lines,
@@ -131,17 +131,17 @@ describe("INV-078: the person's own edited labor line keeps its hours in play, s
   });
 });
 
-// ── INV-00023, Purple Sage J-010 (paid) ─────────────────────────────────────────────────────────
+// ── INV-00023, Pinyon Sage J-010 (paid) ─────────────────────────────────────────────────────────
 describe("INV-00023: a typed Materials line and a legacy keyless labor line", () => {
-  const PURPLE = "52462c4b-bbac-4865-9050-4af6e90dec45";
+  const PINYON = "52462c4b-bbac-4865-9050-4af6e90dec45";
   const T = ["3bd20403-0000-4000-8000-00000000000a", "3bd20403-0000-4000-8000-00000000000b", "3bd20403-0000-4000-8000-00000000000c"];
   const lines: HereLine[] = [
     { import_source: "labor", import_key: null, edited: true, source_ids: T }, // "Labor — Brian Taylor", before keys
-    { import_source: null, import_key: null, edited: false, source_ids: [PURPLE] }, // "Materials", $110, typed by hand
+    { import_source: null, import_key: null, edited: false, source_ids: [PINYON] }, // "Materials", $110, typed by hand
   ];
 
   it("the CED bill the Materials line charges is taken", () => {
-    expect(heldOnThisInvoice(lines, "costs", noCosts)).toEqual(expect.arrayContaining([PURPLE]));
+    expect(heldOnThisInvoice(lines, "costs", noCosts)).toEqual(expect.arrayContaining([PINYON]));
   });
 
   it("a keyless edited labor line names nobody, so its shifts are taken (no second Brian line)", () => {

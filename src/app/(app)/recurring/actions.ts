@@ -214,7 +214,7 @@ export async function createProgressInvoice(
   // H4 (reverse): don't open a %/fixed draw beside a standard DRAFT that already carries content —
   // a percent of the estimate on top of that draft's lines bills the same work twice. Mirrors the
   // forward import guard. The blocker is DRAFT-ONLY now (0255: a sent or paid invoice's rows are
-  // claimed, so a later draw bills only the delta — 85 Whitney's paid INV-061 no longer refuses
+  // claimed, so a later draw bills only the delta — 41 Larkspur's paid INV-061 no longer refuses
   // every draw for the rest of the job's life), and the sentence is the SHARED one, so this door
   // and createProgressReportInvoice refuse in the same words and name the same way out: finish
   // that draft (send it, or delete it). The local wording this replaced — "Invoice INV-0xx already

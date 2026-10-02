@@ -17,8 +17,8 @@ import { dayHoursOf, freezeDrawnDays, nextDayHours, readDayHours } from "./day-h
 import { ownHoursByJobDay } from "./segment-hours";
 
 /**
- * EACH DAY KEEPS ITS OWN HOURS (0370), as math. Erik, 2026-09-28: "i want to put heringbone on the page
- * for the rest of the day after Seiler". A job over several days had one time of day for all of them;
+ * EACH DAY KEEPS ITS OWN HOURS (0370), as math. Erik, 2026-09-28: "i want to put honysuckle on the page
+ * for the rest of the day after Siskin". A job over several days had one time of day for all of them;
  * a day now carries its own (job_schedule_segments.start_time / end_time), drawn exactly, carried
  * through every rewrite, and adding a day never moves another.
  */
@@ -29,19 +29,19 @@ const at = (ymd: string, hm: string) => tzDateTimeUtc(ymd, hm, LA)!;
 const noon5 = { start: "12:00", end: "17:00" };
 
 describe("the calendar draws a day by its own hours", () => {
-  // Herringbone: 9/24 to 9/28 on its usual hours (9:00 start, full days), today with its own noon to 5.
-  const herringbone = { scheduledStart: at("2026-09-24", "09:00"), scheduledEnd: at("2026-09-28", "17:00"), plannedMinutes: null, tz: LA, wd };
+  // Honeysuckle: 9/24 to 9/28 on its usual hours (9:00 start, full days), today with its own noon to 5.
+  const honeysuckle = { scheduledStart: at("2026-09-24", "09:00"), scheduledEnd: at("2026-09-28", "17:00"), plannedMinutes: null, tz: LA, wd };
 
   it("a day with its own hours draws exactly those; the job's other days draw its usual hours", () => {
-    expect(jobDayBlock({ day: "2026-09-28", ...herringbone, dayHours: noon5 })).toEqual({ startMin: 720, endMin: 1020, allDay: false });
+    expect(jobDayBlock({ day: "2026-09-28", ...honeysuckle, dayHours: noon5 })).toEqual({ startMin: 720, endMin: 1020, allDay: false });
     // The same day without its own: the last day of the span, the opening to the end.
-    expect(jobDayBlock({ day: "2026-09-28", ...herringbone })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
-    expect(jobDayBlock({ day: "2026-09-25", ...herringbone, dayHours: null })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
+    expect(jobDayBlock({ day: "2026-09-28", ...honeysuckle })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
+    expect(jobDayBlock({ day: "2026-09-25", ...honeysuckle, dayHours: null })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
   });
 
   it("own hours on the company's whole day read as all day; hours that don't read as a start before an end are ignored", () => {
-    expect(jobDayBlock({ day: "2026-09-26", ...herringbone, dayHours: { start: "09:00", end: "17:00" } }).allDay).toBe(true);
-    expect(jobDayBlock({ day: "2026-09-28", ...herringbone, dayHours: { start: "17:00", end: "12:00" } })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
+    expect(jobDayBlock({ day: "2026-09-26", ...honeysuckle, dayHours: { start: "09:00", end: "17:00" } }).allDay).toBe(true);
+    expect(jobDayBlock({ day: "2026-09-28", ...honeysuckle, dayHours: { start: "17:00", end: "12:00" } })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
   });
 
   it("a worked day kept as history with its own hours draws them (outside the plan it's otherwise all day)", () => {
@@ -104,19 +104,19 @@ describe("one day's new hours (the schedule tile's This Day, the writer's own ru
 });
 
 describe("adding a day never moves another (freezeDrawnDays)", () => {
-  const seiler: { scheduledStart: string; scheduledEnd: string; plannedMinutes: number | null } = { scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-28", "12:00"), plannedMinutes: null };
-  const grown = (first: string, last: string, prior: typeof seiler) => {
+  const siskin: { scheduledStart: string; scheduledEnd: string; plannedMinutes: number | null } = { scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-28", "12:00"), plannedMinutes: null };
+  const grown = (first: string, last: string, prior: typeof siskin) => {
     const t = planJobTimes({ firstDay: first, lastDay: last, tz: LA, workDay: WORK_DAY, prior });
     return { scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: t.plannedMinutes ?? prior.plannedMinutes };
   };
 
-  it("Seiler's one day, 10 to 12, gets a second day: it stays 10 to 12 by the rule itself, so nothing needs freezing", () => {
+  it("Siskin's one day, 10 to 12, gets a second day: it stays 10 to 12 by the rule itself, so nothing needs freezing", () => {
     const days = addDaySegment([{ start: "2026-09-28", end: "2026-09-28", hours: null }], "2026-09-30", noon5);
-    const after = grown("2026-09-28", "2026-09-30", seiler);
+    const after = grown("2026-09-28", "2026-09-30", siskin);
     // The grown span keeps the job's hours on the 28th (a job's hours are each day's), never 10 to 5.
     expect(after).toMatchObject({ scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-30", "12:00") });
     expect(jobDayBlock({ day: "2026-09-28", ...after, tz: LA, wd })).toEqual({ startMin: 600, endMin: 720, allDay: false });
-    const f = freezeDrawnDays({ segments: days, before: seiler, after, tz: LA, wd, skip: ["2026-09-30"] });
+    const f = freezeDrawnDays({ segments: days, before: siskin, after, tz: LA, wd, skip: ["2026-09-30"] });
     expect(f.frozen).toEqual([]);
     expect(hoursOnDay(f.segments, "2026-09-28")).toBeNull();
     expect(hoursOnDay(f.segments, "2026-09-30")).toEqual(noon5);
@@ -142,7 +142,7 @@ describe("adding a day never moves another (freezeDrawnDays)", () => {
 
   it("a day that already keeps its own hours is left alone", () => {
     const days = addDaySegment([{ start: "2026-09-28", end: "2026-09-28", hours: { start: "07:00", end: "08:00" } }], "2026-09-30", noon5);
-    const f = freezeDrawnDays({ segments: days, before: seiler, after: grown("2026-09-28", "2026-09-30", seiler), tz: LA, wd, skip: ["2026-09-30"] });
+    const f = freezeDrawnDays({ segments: days, before: siskin, after: grown("2026-09-28", "2026-09-30", siskin), tz: LA, wd, skip: ["2026-09-30"] });
     expect(f.frozen).toEqual([]);
     expect(hoursOnDay(f.segments, "2026-09-28")).toEqual({ start: "07:00", end: "08:00" });
   });

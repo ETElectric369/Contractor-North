@@ -5,7 +5,7 @@
  *  This module guards the opposite order — a progress DRAW on a job that has a standard
  *  invoice still OPEN AS A DRAFT with content on it.
  *
- *  Why only a draft (Erik, 2026-09-11, 85 Whitney): the old guard treated ANY content-carrying
+ *  Why only a draft (Erik, 2026-09-11, 41 Larkspur): the old guard treated ANY content-carrying
  *  standard invoice as "the job is on the standard path" and refused every draw for the rest of
  *  the job's life — "Invoice INV-061 … bill the rest there, or void it", where INV-061 was PAID
  *  and line-locked, so neither instruction could be followed. It had to be that blunt because a

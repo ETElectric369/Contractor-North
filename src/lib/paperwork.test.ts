@@ -207,9 +207,9 @@ describe("the bill carries what the paper IS, never a hard-coded Receipt", () =>
 
 describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
   it("a MARKED bill comes in with its job picked, and says why in a few words", () => {
-    const marked = receipt({ proposal: { jobId: "job-1", jobFrom: "address", jobHint: "518 CRATER LAKE RD" } });
+    const marked = receipt({ proposal: { jobId: "job-1", jobFrom: "address", jobHint: "518 CINDER LAKE RD" } });
     expect(suggestedDestination(marked, ["job-1"])).toBe("job:job-1");
-    expect(pickedBecause(marked)).toBe("Job picked from the address on the receipt: 518 CRATER LAKE RD");
+    expect(pickedBecause(marked)).toBe("Job picked from the address on the receipt: 518 CINDER LAKE RD");
     expect(pickedBecause(receipt({ doc_type: "bill", category: "Invoice", proposal: { jobId: "job-1", jobFrom: "po" } }))).toBe(
       "Job picked from the PO on the invoice",
     );
@@ -277,10 +277,10 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
  */
 describe("firstAnswer: the paper's own pick first, else a marked guess, else nothing", () => {
   it("the paper names the job: Put It On that job, and the sentence says why", () => {
-    const marked = receipt({ doc_type: "bill", proposal: { jobId: "job-11", jobFrom: "po", jobHint: "13897 HERRINGBONE" } });
+    const marked = receipt({ doc_type: "bill", proposal: { jobId: "job-11", jobFrom: "po", jobHint: "13897 HONEYSUCKLE" } });
     expect(firstAnswer(marked, ["job-11"])).toEqual({
       dest: "job:job-11",
-      because: "Job picked from the PO on the bill: 13897 HERRINGBONE",
+      because: "Job picked from the PO on the bill: 13897 HONEYSUCKLE",
       isGuess: false,
     });
     // A job that is no longer on anyone's list is no answer; with no guess, nothing.
@@ -330,7 +330,7 @@ describe("firstAnswer: the paper's own pick first, else a marked guess, else not
 
 describe("the card's words (W1-31)", () => {
   it("paperSays: the words that made the pick, else what is printed where a job goes, else nothing", () => {
-    expect(paperSays(receipt({ proposal: { jobId: "j", jobFrom: "po", jobHint: "13897 HERRINGBONE" } }))).toBe("13897 HERRINGBONE");
+    expect(paperSays(receipt({ proposal: { jobId: "j", jobFrom: "po", jobHint: "13897 HONEYSUCKLE" } }))).toBe("13897 HONEYSUCKLE");
     expect(paperSays(receipt({ proposal: { po: "TOOLS" }, on_paper: "PO TOOLS" }))).toBe("PO TOOLS");
     // The server's null (only the company's own names were printed) is an answer.
     expect(paperSays(receipt({ proposal: { jobHint: "ERIK TAYLOR" }, on_paper: null }))).toBeNull();
@@ -346,8 +346,8 @@ describe("the card's words (W1-31)", () => {
 
   it("cardSentence: a server sentence that still says 'press File It' loses that tail on the card, and nothing else", () => {
     expect(cardSentence("Read as a bill or receipt. Pick where it goes, then press File It.")).toBe("Read as a bill or receipt. Pick where it goes.");
-    expect(cardSentence("Read as a bill or receipt. Job picked from the PO on the receipt: 13897 HERRINGBONE: J-011 13897 Herringbone. Press File It if that's right.")).toBe(
-      "Read as a bill or receipt. Job picked from the PO on the receipt: 13897 HERRINGBONE: J-011 13897 Herringbone.",
+    expect(cardSentence("Read as a bill or receipt. Job picked from the PO on the receipt: 13897 HONEYSUCKLE: J-011 13897 Honeysuckle. Press File It if that's right.")).toBe(
+      "Read as a bill or receipt. Job picked from the PO on the receipt: 13897 HONEYSUCKLE: J-011 13897 Honeysuckle.",
     );
     expect(cardSentence("Kept in files.")).toBe("Kept in files.");
     expect(cardSentence(null)).toBe("");
@@ -367,38 +367,38 @@ describe("the card's words (W1-31)", () => {
 
 describe("jobFromPaperMarks: exact, never fuzzy", () => {
   const JOBS: MarkJob[] = [
-    { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd, Chilcoot CA 96105", customerNames: ["Jason Waldow", null] },
-    { id: "j50", job_number: "J-050", name: "Tao Zhu", address: "235 Timber Creek Rd, Truckee CA 96161", customerNames: ["Tao Zhu"] },
-    { id: "j51", job_number: "J-051", name: "Tao Zhu Shop", address: "13631 Northwoods Blvd Truckee CA 96161", customerNames: ["Tao Zhu"] },
-    { id: "j09", job_number: "J-009", name: "TTP #11", address: "300 W Lake Blvd, Tahoe City", customerNames: ["Tahoe Tavern Properties"] },
-    { id: "j13", job_number: "J-013", name: "TTP #56", address: "300 West Lake Boulevard", customerNames: ["Tahoe Tavern Properties"] },
+    { id: "j46", job_number: "J-046", name: "Jason Wexley", address: "518 Cinder Lake Rd, Chilcoot CA 96105", customerNames: ["Jason Wexley", null] },
+    { id: "j50", job_number: "J-050", name: "Tess Zane", address: "235 Thistle Wood Rd, Truckee CA 96161", customerNames: ["Tess Zane"] },
+    { id: "j51", job_number: "J-051", name: "Tess Zane Shop", address: "13631 Nightshade Blvd Truckee CA 96161", customerNames: ["Tess Zane"] },
+    { id: "j09", job_number: "J-009", name: "ARR #11", address: "300 W Garnet Blvd, Tahoe City", customerNames: ["Alder Ridge Rentals"] },
+    { id: "j13", job_number: "J-013", name: "ARR #56", address: "300 West Garnet Boulevard", customerNames: ["Alder Ridge Rentals"] },
   ];
 
   it("an address on the paper finds its job, spelled any of the ways a street is spelled", () => {
-    for (const address of ["518 Crater Lake Rd", "518 CRATER LAKE ROAD", "518 crater lake rd., Chilcoot CA"])
+    for (const address of ["518 Cinder Lake Rd", "518 CINDER LAKE ROAD", "518 cinder lake rd., Chilcoot CA"])
       expect(jobFromPaperMarks({ address }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "address" });
-    expect(jobFromPaperMarks({ address: "235 TIMBER CREEK ROAD" }, JOBS)).toMatchObject({ kind: "one", jobId: "j50" });
-    expect(streetKey("300 West Lake Boulevard")).toBe(streetKey("300 W Lake Blvd #11"));
+    expect(jobFromPaperMarks({ address: "235 THISTLE WOOD ROAD" }, JOBS)).toMatchObject({ kind: "one", jobId: "j50" });
+    expect(streetKey("300 West Garnet Boulevard")).toBe(streetKey("300 W Garnet Blvd #11"));
   });
   it("the street type is part of the street: Dr is not Rd, St is not Ave", () => {
-    expect(streetKey("518 Crater Lake Dr")).not.toBe(streetKey("518 Crater Lake Rd"));
+    expect(streetKey("518 Cinder Lake Dr")).not.toBe(streetKey("518 Cinder Lake Rd"));
     expect(streetKey("100 Oak St")).not.toBe(streetKey("100 Oak Ave"));
     expect(streetKey("100 Oak Street")).toBe(streetKey("100 Oak St"));
-    expect(streetKey("518 Crater Lake Road")).toBe(streetKey("518 Crater Lake Rd"));
-    expect(jobFromPaperMarks({ address: "518 Crater Lake Dr" }, JOBS)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ address: "518 Crater Lake Ct" }, JOBS)).toEqual({ kind: "none" });
+    expect(streetKey("518 Cinder Lake Road")).toBe(streetKey("518 Cinder Lake Rd"));
+    expect(jobFromPaperMarks({ address: "518 Cinder Lake Dr" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "518 Cinder Lake Ct" }, JOBS)).toEqual({ kind: "none" });
     // A street written with NO type is not a different street (Erik, 2026-09-24: "13897
-    // HERRINGBONE" in the PO box of a CED ticket). Only two written types that differ are two.
-    expect(jobFromPaperMarks({ address: "518 Crater Lake" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "address" });
+    // HONEYSUCKLE" in the PO box of a CED ticket). Only two written types that differ are two.
+    expect(jobFromPaperMarks({ address: "518 Cinder Lake" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "address" });
   });
   it("a near address is NOT a match: a different house number, a different word, no house number", () => {
-    expect(jobFromPaperMarks({ address: "13466 Northwoods Blvd" }, JOBS)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ address: "518 Crater Lakeview Rd" }, JOBS)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ address: "Crater Lake Rd" }, JOBS)).toEqual({ kind: "none" });
-    expect(streetKey("Crater Lake Rd")).toBeNull();
+    expect(jobFromPaperMarks({ address: "13466 Nightshade Blvd" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "518 Cinder Lakeview Rd" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "Cinder Lake Rd" }, JOBS)).toEqual({ kind: "none" });
+    expect(streetKey("Cinder Lake Rd")).toBeNull();
   });
   it("a street shared by several jobs picks none of them", () => {
-    expect(jobFromPaperMarks({ address: "300 W Lake Blvd #11" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "300 W Garnet Blvd #11" }, JOBS)).toEqual({ kind: "none" });
   });
   it("a job number or a PO number, however it is punctuated", () => {
     expect(jobFromPaperMarks({ jobNumber: "j046" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "job_number" });
@@ -411,15 +411,15 @@ describe("jobFromPaperMarks: exact, never fuzzy", () => {
     expect(jobFromPaperMarks({ jobNumber: "46" }, JOBS)).toEqual({ kind: "none" });
   });
   it("a job name or a customer, exactly; a customer with two open jobs picks neither", () => {
-    expect(jobFromPaperMarks({ jobName: "JASON WALDOW" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "job_name" });
-    expect(jobFromPaperMarks({ jobName: "Jason Waldo" }, JOBS)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ customer: "jason waldow" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "customer" });
-    expect(jobFromPaperMarks({ customer: "Tao Zhu" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ jobName: "JASON WEXLEY" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "job_name" });
+    expect(jobFromPaperMarks({ jobName: "Jason Wexle" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ customer: "jason wexley" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "customer" });
+    expect(jobFromPaperMarks({ customer: "Tess Zane" }, JOBS)).toEqual({ kind: "none" });
     // ...unless another mark on the same paper settles which.
-    expect(jobFromPaperMarks({ customer: "Tao Zhu", address: "13631 Northwoods Blvd" }, JOBS)).toMatchObject({ kind: "one", jobId: "j51", from: "address" });
+    expect(jobFromPaperMarks({ customer: "Tess Zane", address: "13631 Nightshade Blvd" }, JOBS)).toMatchObject({ kind: "one", jobId: "j51", from: "address" });
   });
   it("two marks naming two different jobs pick nothing, and say so", () => {
-    const r = jobFromPaperMarks({ jobNumber: "J-046", address: "235 Timber Creek Rd" }, JOBS);
+    const r = jobFromPaperMarks({ jobNumber: "J-046", address: "235 Thistle Wood Rd" }, JOBS);
     expect(r.kind).toBe("conflict");
     expect(r.kind === "conflict" && r.sentence).toContain("more than one job");
   });
@@ -430,37 +430,37 @@ describe("jobFromPaperMarks: exact, never fuzzy", () => {
 });
 
 describe("finished jobs: fileable, never picked, and a street they share picks nothing (Erik, audit v994 PR1)", () => {
-  // ET's live shape: 235 Timbercreek has J-002 in progress and J-032 complete; 300 W Lake Blvd has
-  // an open TTP job and finished ones.
+  // ET's live shape: 235 Thistlewood has J-002 in progress and J-032 complete; 300 W Garnet Blvd has
+  // an open ARR job and finished ones.
   const JOBS: MarkJob[] = [
-    { id: "j02", job_number: "J-002", name: "Tao Zhu", address: "235 Timbercreek Rd", customerNames: ["Tao Zhu"] },
-    { id: "j32", job_number: "J-032", name: "Tao Zhu Deck", address: "235 Timbercreek Rd", customerNames: ["Tao Zhu"], closed: true },
-    { id: "j44", job_number: "J-044", name: "Dino", address: "300 W Lake Blvd #99", customerNames: ["Tahoe Tavern Properties"] },
-    { id: "j52", job_number: "J-052", name: "TTP 99", address: "300 West Lake Boulevard", customerNames: ["Tahoe Tavern Properties"], closed: true },
-    { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd", customerNames: ["Jason Waldow"], closed: true },
-    { id: "j11", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customerNames: ["Andrew Cohen"] },
+    { id: "j02", job_number: "J-002", name: "Tess Zane", address: "235 Thistlewood Rd", customerNames: ["Tess Zane"] },
+    { id: "j32", job_number: "J-032", name: "Tess Zane Deck", address: "235 Thistlewood Rd", customerNames: ["Tess Zane"], closed: true },
+    { id: "j44", job_number: "J-044", name: "Remy", address: "300 W Garnet Blvd #99", customerNames: ["Alder Ridge Rentals"] },
+    { id: "j52", job_number: "J-052", name: "ARR 99", address: "300 West Garnet Boulevard", customerNames: ["Alder Ridge Rentals"], closed: true },
+    { id: "j46", job_number: "J-046", name: "Jason Wexley", address: "518 Cinder Lake Rd", customerNames: ["Jason Wexley"], closed: true },
+    { id: "j11", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", customerNames: ["Andrew Crake"] },
   ];
 
   it("a street shared with a finished job picks nothing, and says which finished job", () => {
-    const r = jobFromPaperMarks({ address: "235 TIMBERCREEK RD" }, JOBS);
+    const r = jobFromPaperMarks({ address: "235 THISTLEWOOD RD" }, JOBS);
     expect(r).toMatchObject({ kind: "conflict", veto: true });
-    expect((r as { sentence: string }).sentence).toBe("235 TIMBERCREEK RD also has finished job (J-032 Tao Zhu Deck), so no job was picked. Pick the job.");
+    expect((r as { sentence: string }).sentence).toBe("235 THISTLEWOOD RD also has finished job (J-032 Tess Zane Deck), so no job was picked. Pick the job.");
     // The same street in the PO box, the same answer.
-    expect(jobFromPaperMarks({ po: "300 W LAKE BLVD" }, JOBS)).toMatchObject({ kind: "conflict", veto: true });
+    expect(jobFromPaperMarks({ po: "300 W GARNET BLVD" }, JOBS)).toMatchObject({ kind: "conflict", veto: true });
   });
 
   it("a job number, a job name or a customer naming the open job still picks it", () => {
-    expect(jobFromPaperMarks({ address: "235 Timbercreek Rd", jobNumber: "J-002" }, JOBS)).toMatchObject({ kind: "one", jobId: "j02" });
-    expect(jobFromPaperMarks({ po: "13897 HERRINGBONE" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11" });
+    expect(jobFromPaperMarks({ address: "235 Thistlewood Rd", jobNumber: "J-002" }, JOBS)).toMatchObject({ kind: "one", jobId: "j02" });
+    expect(jobFromPaperMarks({ po: "13897 HONEYSUCKLE" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11" });
   });
 
   it("a finished job is never the pick, even when the paper names it exactly", () => {
     expect(jobFromPaperMarks({ jobNumber: "J-046" }, JOBS)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ address: "518 Crater Lake Rd" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "518 Cinder Lake Rd" }, JOBS)).toEqual({ kind: "none" });
   });
 
   it("a street only open jobs sit on still picks, as before", () => {
-    expect(jobFromPaperMarks({ address: "13897 Herringbone Way" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "address" });
+    expect(jobFromPaperMarks({ address: "13897 Honeysuckle Way" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "address" });
   });
 
   it("a row picked by its street before finished jobs counted stops picking on the next load, and says why", () => {
@@ -469,30 +469,30 @@ describe("finished jobs: fileable, never picked, and a street they share picks n
       status: "needs_review",
       doc_type: "bill",
       amount: 40,
-      proposal: { jobId: "j02", jobFrom: "address", jobHint: "235 TIMBERCREEK RD", marks: { address: "235 TIMBERCREEK RD" } },
+      proposal: { jobId: "j02", jobFrom: "address", jobHint: "235 THISTLEWOOD RD", marks: { address: "235 THISTLEWOOD RD" } },
     };
     const again = rematchPaper(row, JOBS);
     expect(suggestedDestination(again, JOBS.map((j) => j.id))).toBe("");
     expect((again.proposal as { jobConflict?: string }).jobConflict).toContain("also has finished job (J-032");
     // A pick a job NUMBER made is never second-guessed.
-    const byNumber: PaperItem = { ...row, proposal: { jobId: "j02", jobFrom: "job_number", jobHint: "J-002", marks: { jobNumber: "J-002", address: "235 TIMBERCREEK RD" } } };
+    const byNumber: PaperItem = { ...row, proposal: { jobId: "j02", jobFrom: "job_number", jobHint: "J-002", marks: { jobNumber: "J-002", address: "235 THISTLEWOOD RD" } } };
     expect(rematchPaper(byNumber, JOBS)).toBe(byNumber);
   });
 
   it("a row picked while its job was open stops picking once that job is finished, from a street or a PO alone", () => {
-    // J-046 has since finished; nothing else sits on 518 Crater Lake Rd, so the street alone finds nothing.
+    // J-046 has since finished; nothing else sits on 518 Cinder Lake Rd, so the street alone finds nothing.
     const row: PaperItem = {
       id: "p2",
       status: "needs_review",
       doc_type: "bill",
       amount: 40,
-      proposal: { jobId: "j46", jobFrom: "address", jobHint: "518 CRATER LAKE RD", marks: { address: "518 CRATER LAKE RD" } },
+      proposal: { jobId: "j46", jobFrom: "address", jobHint: "518 CINDER LAKE RD", marks: { address: "518 CINDER LAKE RD" } },
     };
     const again = rematchPaper(row, JOBS);
     // The pickers list finished jobs, and still nothing is picked.
     expect(suggestedDestination(again, JOBS.map((j) => j.id))).toBe("");
-    expect((again.proposal as { jobConflict?: string }).jobConflict).toBe("J-046 Jason Waldow is finished, so no job was picked. Pick the job.");
-    const byPo: PaperItem = { ...row, proposal: { jobId: "j46", jobFrom: "po", jobHint: "WALDOW", marks: { po: "WALDOW" } } };
+    expect((again.proposal as { jobConflict?: string }).jobConflict).toBe("J-046 Jason Wexley is finished, so no job was picked. Pick the job.");
+    const byPo: PaperItem = { ...row, proposal: { jobId: "j46", jobFrom: "po", jobHint: "WEXLEY", marks: { po: "WEXLEY" } } };
     expect(suggestedDestination(rematchPaper(byPo, JOBS), JOBS.map((j) => j.id))).toBe("");
     // A printed job number is that job, finished or not: it stands.
     const byNumber: PaperItem = { ...row, proposal: { jobId: "j46", jobFrom: "job_number", jobHint: "J-046", marks: { jobNumber: "J-046" } } };
@@ -500,19 +500,19 @@ describe("finished jobs: fileable, never picked, and a street they share picks n
   });
 });
 
-describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {
-  // ET's live row 12962a84: a CED sales order, $323.71, 8802-SO-257555, PO "13897 HERRINGBONE",
-  // hint "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE". It came in with no job picked.
+describe("the job in the PO box: 13897 HONEYSUCKLE (Erik, 2026-09-24)", () => {
+  // ET's live row 12962a84: a CED sales order, $323.71, 8802-SO-257555, PO "13897 HONEYSUCKLE",
+  // hint "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE". It came in with no job picked.
   const J011: MarkJob = {
     id: "j11",
     job_number: "J-011",
-    name: "13897 Herringbone",
-    address: "13897 Herringbone Way",
-    customerNames: ["Andrew Cohen", null],
+    name: "13897 Honeysuckle",
+    address: "13897 Honeysuckle Way",
+    customerNames: ["Andrew Crake", null],
   };
   const OTHERS: MarkJob[] = [
-    { id: "j20", job_number: "J-020", name: "1860 Tahoe Park Heights", address: "1860 Tahoe Park Heights Dr, Tahoe City, CA 96145, USA", customerNames: ["Chris Taylor"] },
-    { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd, Chilcoot CA 96105", customerNames: ["Jason Waldow"] },
+    { id: "j20", job_number: "J-020", name: "1860 Cedar Park Heights", address: "1860 Cedar Park Heights Dr, Tahoe City, CA 96145, USA", customerNames: ["Chris Taylor"] },
+    { id: "j46", job_number: "J-046", name: "Jason Wexley", address: "518 Cinder Lake Rd, Chilcoot CA 96105", customerNames: ["Jason Wexley"] },
   ];
   const JOBS = [J011, ...OTHERS];
   const SELF = ["ET Electric", "Erik Taylor", "Brian Taylor"];
@@ -529,10 +529,10 @@ describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {
   });
 
   it("a PO that IS a job's name picks that job, and says where it came from", () => {
-    expect(jobFromPaperMarks({ po: "13897 HERRINGBONE" }, JOBS)).toEqual({ kind: "one", jobId: "j11", from: "po", words: "13897 HERRINGBONE" });
+    expect(jobFromPaperMarks({ po: "13897 HONEYSUCKLE" }, JOBS)).toEqual({ kind: "one", jobId: "j11", from: "po", words: "13897 HONEYSUCKLE" });
     // ...whatever the job is named, if the PO is its street.
-    const renamed = [{ ...J011, name: "Cohen Remodel" }, ...OTHERS];
-    expect(jobFromPaperMarks({ po: "13897 HERRINGBONE" }, renamed)).toMatchObject({ kind: "one", jobId: "j11", from: "po" });
+    const renamed = [{ ...J011, name: "Crake Remodel" }, ...OTHERS];
+    expect(jobFromPaperMarks({ po: "13897 HONEYSUCKLE" }, renamed)).toMatchObject({ kind: "one", jobId: "j11", from: "po" });
     // ...or its number.
     expect(jobFromPaperMarks({ po: "J011" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "po" });
     // A PO that names no job exactly picks nothing.
@@ -541,35 +541,35 @@ describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {
   });
 
   it("an address written without its street type matches the job whose address has one", () => {
-    const renamed = [{ ...J011, name: "Cohen Remodel" }, ...OTHERS];
-    expect(jobFromPaperMarks({ address: "13897 HERRINGBONE" }, renamed)).toMatchObject({ kind: "one", jobId: "j11", from: "address" });
-    expect(jobFromPaperMarks({ address: "13897 Herringbone Way, Truckee CA" }, renamed)).toMatchObject({ kind: "one", jobId: "j11" });
+    const renamed = [{ ...J011, name: "Crake Remodel" }, ...OTHERS];
+    expect(jobFromPaperMarks({ address: "13897 HONEYSUCKLE" }, renamed)).toMatchObject({ kind: "one", jobId: "j11", from: "address" });
+    expect(jobFromPaperMarks({ address: "13897 Honeysuckle Way, Truckee CA" }, renamed)).toMatchObject({ kind: "one", jobId: "j11" });
     // And the other way round: the paper writes the type, the job's address doesn't.
-    const untyped = [{ ...J011, address: "13897 Herringbone" }, ...OTHERS];
-    expect(jobFromPaperMarks({ address: "13897 HERRINGBONE WAY" }, untyped)).toMatchObject({ kind: "one", jobId: "j11" });
+    const untyped = [{ ...J011, address: "13897 Honeysuckle" }, ...OTHERS];
+    expect(jobFromPaperMarks({ address: "13897 HONEYSUCKLE WAY" }, untyped)).toMatchObject({ kind: "one", jobId: "j11" });
   });
 
-  it("a type that DISAGREES is another street: 13897 Herringbone Dr is not 13897 Herringbone Way", () => {
-    const renamed = [{ ...J011, name: "Cohen Remodel" }, ...OTHERS];
-    expect(jobFromPaperMarks({ address: "13897 Herringbone Dr" }, renamed)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ po: "13897 Herringbone Dr" }, renamed)).toEqual({ kind: "none" });
+  it("a type that DISAGREES is another street: 13897 Honeysuckle Dr is not 13897 Honeysuckle Way", () => {
+    const renamed = [{ ...J011, name: "Crake Remodel" }, ...OTHERS];
+    expect(jobFromPaperMarks({ address: "13897 Honeysuckle Dr" }, renamed)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "13897 Honeysuckle Dr" }, renamed)).toEqual({ kind: "none" });
     // A different house number, or a different word, is never the street.
-    expect(jobFromPaperMarks({ address: "13898 HERRINGBONE" }, renamed)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ address: "13897 HERRINGBONE LOOP" }, renamed)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "13898 HONEYSUCKLE" }, renamed)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "13897 HONEYSUCKLE LOOP" }, renamed)).toEqual({ kind: "none" });
   });
 
   it("two jobs on the same street pick neither", () => {
     const twoOnIt: MarkJob[] = [
-      { ...J011, name: "Cohen Remodel" },
-      { id: "j12", job_number: "J-012", name: "Cohen Garage", address: "13897 Herringbone Ct", customerNames: ["Andrew Cohen"] },
+      { ...J011, name: "Crake Remodel" },
+      { id: "j12", job_number: "J-012", name: "Crake Garage", address: "13897 Honeysuckle Ct", customerNames: ["Andrew Crake"] },
       ...OTHERS,
     ];
-    expect(jobFromPaperMarks({ address: "13897 HERRINGBONE" }, twoOnIt)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ po: "13897 HERRINGBONE" }, twoOnIt)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "13897 HONEYSUCKLE" }, twoOnIt)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "13897 HONEYSUCKLE" }, twoOnIt)).toEqual({ kind: "none" });
     // A written type still settles it.
-    expect(jobFromPaperMarks({ address: "13897 HERRINGBONE CT" }, twoOnIt)).toMatchObject({ kind: "one", jobId: "j12" });
+    expect(jobFromPaperMarks({ address: "13897 HONEYSUCKLE CT" }, twoOnIt)).toMatchObject({ kind: "one", jobId: "j12" });
     // Two marks pointing at two jobs pick nothing, and say so.
-    const torn = jobFromPaperMarks({ po: "13897 HERRINGBONE", jobNumber: "J-046" }, JOBS);
+    const torn = jobFromPaperMarks({ po: "13897 HONEYSUCKLE", jobNumber: "J-046" }, JOBS);
     expect(torn.kind).toBe("conflict");
   });
 
@@ -579,49 +579,49 @@ describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {
     expect(jobFromPaperMarks({ jobName: "Erik Taylor" }, eriksJob, [], SELF)).toEqual({ kind: "none" });
     expect(jobFromPaperMarks({ po: "ERIK TAYLOR" }, eriksJob, [], SELF)).toEqual({ kind: "none" });
     // ...and it never stands against the street printed beside it.
-    expect(jobFromPaperMarks({ customer: "ERIK TAYLOR", po: "13897 HERRINGBONE" }, eriksJob, [], SELF)).toMatchObject({ kind: "one", jobId: "j11" });
+    expect(jobFromPaperMarks({ customer: "ERIK TAYLOR", po: "13897 HONEYSUCKLE" }, eriksJob, [], SELF)).toMatchObject({ kind: "one", jobId: "j11" });
   });
 
   it("a job named after its customer is not decisive when that customer has other open jobs", () => {
-    // ET live: J-014 "5659 Rhodesia", J-034 "5659 Rhodesia - Panel Upgrade" and J-047 "Jackie Burks"
-    // are all open, all for Jackie Burks. "JACKIE BURKS" in the PO box names her, not J-047.
-    const burks: MarkJob[] = [
+    // ET live: J-014 "5659 Fernhill", J-034 "5659 Fernhill - Panel Upgrade" and J-047 "Marla Finch"
+    // are all open, all for Marla Finch. "MARLA FINCH" in the PO box names her, not J-047.
+    const finch: MarkJob[] = [
       ...JOBS,
-      { id: "j14", job_number: "J-014", name: "5659 Rhodesia", address: "5659 Rhodesia Rd", customerNames: ["Jackie Burks"] },
-      { id: "j34", job_number: "J-034", name: "5659 Rhodesia - Panel Upgrade", address: "5659 Rhodesia Rd", customerNames: ["Jackie Burks"] },
-      { id: "j47", job_number: "J-047", name: "Jackie Burks", address: null, customerNames: ["Jackie Burks"] },
+      { id: "j14", job_number: "J-014", name: "5659 Fernhill", address: "5659 Fernhill Rd", customerNames: ["Marla Finch"] },
+      { id: "j34", job_number: "J-034", name: "5659 Fernhill - Panel Upgrade", address: "5659 Fernhill Rd", customerNames: ["Marla Finch"] },
+      { id: "j47", job_number: "J-047", name: "Marla Finch", address: null, customerNames: ["Marla Finch"] },
     ];
-    expect(jobFromPaperMarks({ po: "JACKIE BURKS" }, burks, [], SELF)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ jobName: "Jackie Burks" }, burks, [], SELF)).toEqual({ kind: "none" });
-    expect(jobFromPaperMarks({ po: "JACKIE BURKS", customer: "Jackie Burks" }, burks, [], SELF)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "MARLA FINCH" }, finch, [], SELF)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ jobName: "Marla Finch" }, finch, [], SELF)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "MARLA FINCH", customer: "Marla Finch" }, finch, [], SELF)).toEqual({ kind: "none" });
     // A job number still decides, and the name agrees with it.
-    expect(jobFromPaperMarks({ po: "JACKIE BURKS", jobNumber: "J-034" }, burks, [], SELF)).toMatchObject({ kind: "one", jobId: "j34" });
+    expect(jobFromPaperMarks({ po: "MARLA FINCH", jobNumber: "J-034" }, finch, [], SELF)).toMatchObject({ kind: "one", jobId: "j34" });
     // Her only open job, named after her, is still picked by her name.
-    const onlyOne = burks.filter((j) => j.id !== "j14" && j.id !== "j34");
-    expect(jobFromPaperMarks({ po: "JACKIE BURKS" }, onlyOne, [], SELF)).toMatchObject({ kind: "one", jobId: "j47", from: "po" });
+    const onlyOne = finch.filter((j) => j.id !== "j14" && j.id !== "j34");
+    expect(jobFromPaperMarks({ po: "MARLA FINCH" }, onlyOne, [], SELF)).toMatchObject({ kind: "one", jobId: "j47", from: "po" });
   });
 
   it("the reader's hint gives up its street, and only its street", () => {
-    expect(addressInHint("JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE")).toBe("13897 HERRINGBONE");
-    expect(addressInHint("PO 4471 13897 HERRINGBONE WAY")).toBe("13897 HERRINGBONE WAY");
-    expect(addressInHint("SHIP TO: COHEN, 13897 Herringbone Way, Truckee")).toBe("13897 Herringbone Way");
+    expect(addressInHint("JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE")).toBe("13897 HONEYSUCKLE");
+    expect(addressInHint("PO 4471 13897 HONEYSUCKLE WAY")).toBe("13897 HONEYSUCKLE WAY");
+    expect(addressInHint("SHIP TO: CRAKE, 13897 Honeysuckle Way, Truckee")).toBe("13897 Honeysuckle Way");
     expect(addressInHint("ERIK TAYLOR")).toBeNull();
     expect(addressInHint(null)).toBeNull();
-    const renamed = [{ ...J011, name: "Cohen Remodel" }, ...OTHERS];
-    expect(jobFromPaperMarks({ hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" }, renamed, [], SELF)).toMatchObject({
+    const renamed = [{ ...J011, name: "Crake Remodel" }, ...OTHERS];
+    expect(jobFromPaperMarks({ hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE" }, renamed, [], SELF)).toMatchObject({
       kind: "one",
       jobId: "j11",
       from: "address",
-      words: "13897 HERRINGBONE",
+      words: "13897 HONEYSUCKLE",
     });
   });
 
   it("the row: its job picked, and why, in the reason line", () => {
     const row = ced({
-      po: "13897 HERRINGBONE",
+      po: "13897 HONEYSUCKLE",
       jobId: null,
       jobFrom: null,
-      jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE",
+      jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE",
       guessJobId: null,
       jobConflict: null,
       bucket: null,
@@ -631,23 +631,23 @@ describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {
     // Matched again in the tray from what it stored: no model, the same exact rules.
     const now = rematchPaper(row, JOBS, [], SELF);
     expect(suggestedDestination(now, ["j11", "j20", "j46"])).toBe("job:j11");
-    expect(pickedBecause(now)).toBe("Job picked from the PO on the bill: 13897 HERRINGBONE");
+    expect(pickedBecause(now)).toBe("Job picked from the PO on the bill: 13897 HONEYSUCKLE");
     // The stored row itself is untouched.
     expect(row.proposal).toMatchObject({ jobId: null, jobFrom: null });
   });
 
   it("the tray never re-decides a row a person or the paper already settled", () => {
     // Filed or set aside: as it is.
-    const filed = { ...ced({ po: "13897 HERRINGBONE" }), status: "filed" };
+    const filed = { ...ced({ po: "13897 HONEYSUCKLE" }), status: "filed" };
     expect(rematchPaper(filed, JOBS)).toBe(filed);
     // Already picked by its paper: as it is, even if the PO would say something else.
-    const picked = ced({ po: "13897 HERRINGBONE", jobId: "j46", jobFrom: "job_number", jobHint: "J-046" });
+    const picked = ced({ po: "13897 HONEYSUCKLE", jobId: "j46", jobFrom: "job_number", jobHint: "J-046" });
     expect(rematchPaper(picked, JOBS)).toBe(picked);
     // A conflict already said stays said.
-    const torn = ced({ po: "13897 HERRINGBONE", jobConflict: "The paper points to more than one job." });
+    const torn = ced({ po: "13897 HONEYSUCKLE", jobConflict: "The paper points to more than one job." });
     expect(rematchPaper(torn, JOBS)).toBe(torn);
     // A model's old job stays a guess beside the paper's pick.
-    const guessed = rematchPaper(ced({ po: "13897 HERRINGBONE", jobId: "j46", jobFrom: null }), JOBS);
+    const guessed = rematchPaper(ced({ po: "13897 HONEYSUCKLE", jobId: "j46", jobFrom: null }), JOBS);
     expect(suggestedDestination(guessed, ["j11", "j46"])).toBe("job:j11");
     expect(guessOf(guessed, ["j11", "j46"])).toBe("job:j46");
     // Nothing on it that names a job: as it is.
@@ -731,7 +731,7 @@ describe("findSameNumber: the same purchase already on the books", () => {
     amount: 653.25,
     bill_date: "2026-09-17",
     job_id: "job-046",
-    jobs: { job_number: "J-046", name: "Jason Waldow" },
+    jobs: { job_number: "J-046", name: "Jason Wexley" },
   };
   const aliases = indexSupplierAliases([
     { alias: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" },
@@ -816,14 +816,14 @@ describe("findSameNumber: the same purchase already on the books", () => {
             invoice_number: "8802-1108330",
             supplier_account_id: "acct-ced",
             total: 653.25,
-            covered_by: { id: "bill-7", job_id: "job-046", jobs: { job_number: "J-046", name: "Jason Waldow" } },
+            covered_by: { id: "bill-7", job_id: "job-046", jobs: { job_number: "J-046", name: "Jason Wexley" } },
           },
         ],
       },
       aliases,
     );
     expect(m).toEqual([expect.objectContaining({ kind: "bill", billId: "bill-7", jobId: "job-046" })]);
-    expect(m[0].sentence).toBe("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
+    expect(m[0].sentence).toBe("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Wexley.");
   });
 
   it("a covering bill that also carries the number is found once, not twice", () => {
@@ -840,7 +840,7 @@ describe("findSameNumber: the same purchase already on the books", () => {
 
   it("a short number is not matched on number alone", () => {
     expect(
-      findSameNumber(receipt({ vendor: "Swigard's", doc_number: "1234" }), {
+      findSameNumber(receipt({ vendor: "Brandow's", doc_number: "1234" }), {
         supplierInvoices: [{ id: "si-2", invoice_number: "1234", supplier_account_id: null, total: 10 }],
       }),
     ).toEqual([]);

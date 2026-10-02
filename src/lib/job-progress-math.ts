@@ -109,9 +109,9 @@ export type BilledWorkLine = {
 };
 
 /**
- * THE WORK A JOB'S INVOICES ALREADY CARRY, AT THE PRICE THEY CARRY IT (Tao Zhu, J-002, 2026-09-25).
+ * THE WORK A JOB'S INVOICES ALREADY CARRY, AT THE PRICE THEY CARRY IT (Tess Zane, J-002, 2026-09-25).
  *
- * INV-080's Progress Summary said "Work completed to date $18,624.14" while Tao had been billed
+ * INV-080's Progress Summary said "Work completed to date $18,624.14" while Tess had been billed
  * $19,716.64 for work: the panel priced every hour ever worked at TODAY's bill rate (Erik $125,
  * Brian $85), and the June hours had gone out on INV-00028 at $150 and $75. A billed line is the
  * truth for what was billed. So on Time & Material, work to date is these lines plus the unbilled

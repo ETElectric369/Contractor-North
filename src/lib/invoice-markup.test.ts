@@ -103,24 +103,24 @@ describe("the % box's seed and words (Erik 2026-09-25: '11% ... but the marker s
   it("lines at one markup: the box starts there, and names the customer's usual only because it differs", () => {
     const seed = markupBoxSeed({ kind: "one", pct: 11 }, 15);
     expect(seed).toEqual({ pct: 11, source: "invoice", usualPct: 15 });
-    expect(markupBoxWords(seed, "Andrew Cohen")).toEqual({ main: "Priced at 11%", usual: "Andrew Cohen's usual is 15%" });
+    expect(markupBoxWords(seed, "Andrew Crake")).toEqual({ main: "Priced at 11%", usual: "Andrew Crake's usual is 15%" });
     // No pricing level: the usual is the org's default, not the customer's.
     expect(markupBoxWords(seed, null)).toEqual({ main: "Priced at 11%", usual: "Your default is 15%" });
     // At the usual (numeric arrives as "15.00" from some reads): nothing secondary to say.
-    expect(markupBoxWords(markupBoxSeed({ kind: "one", pct: 15 }, "15.00"), "Andrew Cohen")).toEqual({ main: "Priced at 15%", usual: null });
+    expect(markupBoxWords(markupBoxSeed({ kind: "one", pct: 15 }, "15.00"), "Andrew Crake")).toEqual({ main: "Priced at 15%", usual: null });
   });
 
   it("a fresh invoice (no materials lines) starts at the customer's level, claiming nothing about lines", () => {
     const seed = markupBoxSeed(null, 15);
     expect(seed).toEqual({ pct: 15, source: "usual", usualPct: 15 });
-    expect(markupBoxWords(seed, "Andrew Cohen")).toEqual({ main: null, usual: null });
+    expect(markupBoxWords(seed, "Andrew Crake")).toEqual({ main: null, usual: null });
     expect(markupBoxSeed({ kind: "none" }, 15).pct).toBe(15);
   });
 
   it("lines at different markups: says so, and starts at the customer's level", () => {
     const seed = markupBoxSeed({ kind: "mixed" }, 15);
     expect(seed).toEqual({ pct: 15, source: "mixed", usualPct: 15 });
-    expect(markupBoxWords(seed, "Andrew Cohen").main).toBe("Lines are at different markups");
+    expect(markupBoxWords(seed, "Andrew Crake").main).toBe("Lines are at different markups");
   });
 
   it("a failed read is said as a failed read, never as 'no lines'", () => {

@@ -44,25 +44,25 @@ const team = [
   { id: "p-erik", full_name: "Erik Taylor" },
   { id: "p-brian", full_name: "Brian Cole" },
 ];
-const seiler = (over: Partial<Extract<TileTarget, { kind: "job" }>["job"]> = {}): TileTarget => ({
+const siskin = (over: Partial<Extract<TileTarget, { kind: "job" }>["job"]> = {}): TileTarget => ({
   kind: "job",
   day: "2026-09-28",
   job: {
     id: "j058",
-    name: "Seiler · 3-way switches",
+    name: "Siskin · 3-way switches",
     status: "scheduled",
     scheduled_start: at("2026-09-28", "10:00"),
     scheduled_end: at("2026-09-28", "12:00"),
     planned_minutes: null,
     assigned_to: ["p-erik"],
-    customers: { name: "Rich Seiler" },
+    customers: { name: "Rich Siskin" },
     ...over,
   },
 });
 const visit: TileTarget = {
   kind: "visit",
   day: "2026-09-28",
-  visit: { id: "v1", title: "Site inspection: Rich Seiler", status: "scheduled", starts_at: at("2026-09-28", "09:00")!, ends_at: null, assigned_to: null },
+  visit: { id: "v1", title: "Site inspection: Rich Siskin", status: "scheduled", starts_at: at("2026-09-28", "09:00")!, ends_at: null, assigned_to: null },
 };
 const render = (target: TileTarget, canEdit = true) =>
   renderToStaticMarkup(createElement(TileSheetBody, { target, tz: LA, workDay: WORK_DAY, team, canEdit, onClose: () => {} }));
@@ -77,7 +77,7 @@ const text = (html: string) =>
     .replace(/\s+/g, " ");
 
 describe("a job's sheet, for the office", () => {
-  const html = render(seiler());
+  const html = render(siskin());
 
   it("carries the day, the start and the end, the quick lengths, the crew, Open The Job and Clear The Date", () => {
     expect(html).toMatch(/<input[^>]*type="date"[^>]*value="2026-09-28"/);
@@ -107,17 +107,17 @@ describe("a job's sheet, for the office", () => {
   });
 
   it("nobody on it is a dashed Nobody, never a blank", () => {
-    const empty = render(seiler({ assigned_to: [] }));
+    const empty = render(siskin({ assigned_to: [] }));
     expect(empty).toMatch(/<span[^>]*border-dashed[^>]*>Nobody<\/span>/);
   });
 
   it("a chosen length reads as chosen", () => {
-    expect(text(render(seiler({ planned_minutes: 120 })))).toContain("10:00 AM – 12:00 PM · 2 hours ");
-    expect(text(render(seiler({ planned_minutes: 120 })))).not.toContain("change it");
+    expect(text(render(siskin({ planned_minutes: 120 })))).toContain("10:00 AM – 12:00 PM · 2 hours ");
+    expect(text(render(siskin({ planned_minutes: 120 })))).not.toContain("change it");
   });
 
   it("a job over several days keeps its End and its lengths, and says its hours each day", () => {
-    const many = render(seiler({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
+    const many = render(siskin({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
     expect(many).toMatch(/>4h</);
     expect(many).toMatch(/aria-label="End time"/);
     expect(text(many)).toContain("10:00 AM – 12:00 PM each day through Wed, Sep 30 · 2 hours");
@@ -147,7 +147,7 @@ describe("a visit's sheet", () => {
     const span: TileTarget = {
       kind: "visit",
       day: "2026-09-28",
-      visit: { id: "v3", title: "Walk-through: Rich Seiler", status: "scheduled", starts_at: at("2026-09-28", "10:00")!, ends_at: at("2026-09-30", "18:00"), assigned_to: null },
+      visit: { id: "v3", title: "Walk-through: Rich Siskin", status: "scheduled", starts_at: at("2026-09-28", "10:00")!, ends_at: at("2026-09-30", "18:00"), assigned_to: null },
     };
     const office = render(span);
     expect(text(office)).toContain("Starts 10:00 AM · ends 6:00 PM Wed, Sep 30. One visit over several days; Open The Visit changes its end.");
@@ -165,14 +165,14 @@ describe("a visit's sheet", () => {
     expect(src).toMatch(/if \(block\.multiDay && !\("start" in patch\)\) \{\s*return \{ ok: false, error: `This visit runs over several days/);
     expect(src).toMatch(/multiDay=\{block\.multiDay\}\s*(\/\/[^\n]*\n\s*)?oneSpan\s/);
     // A job over several days is never one span: its End and its lengths stay.
-    const many = render(seiler({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
+    const many = render(siskin({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
     expect(many).toMatch(/aria-label="End time"/);
   });
 });
 
 describe("staff only: the crew reads it, with nothing to tap", () => {
   it("no button, no input, the block and the crew in words and chips, and still the way to the job", () => {
-    const html = render(seiler(), false);
+    const html = render(siskin(), false);
     expect(html).not.toContain("<button");
     expect(html).not.toContain("<input");
     expect(text(html)).toContain("10:00 AM – 12:00 PM · 2 hours — change it");
@@ -218,14 +218,14 @@ describe("the day drill's job card opens the same sheet", () => {
       createElement(JobScheduleCard, {
         job: {
           id: "j058",
-          name: "Seiler · 3-way switches",
+          name: "Siskin · 3-way switches",
           job_number: "J-058",
           status: "scheduled",
           scheduled_start: at("2026-09-28", "10:00"),
           scheduled_end: at("2026-09-28", "12:00"),
           planned_minutes: null,
           assigned_to: [],
-          customers: { name: "Rich Seiler" },
+          customers: { name: "Rich Siskin" },
         },
         members: team,
         tz: LA,
@@ -233,7 +233,7 @@ describe("the day drill's job card opens the same sheet", () => {
         onOpen: () => {},
       }),
     );
-    const tap = (html.match(/<button[^>]*>/g) ?? []).find((b) => b.includes('aria-label="Seiler · 3-way switches: day, time and crew"'));
+    const tap = (html.match(/<button[^>]*>/g) ?? []).find((b) => b.includes('aria-label="Siskin · 3-way switches: day, time and crew"'));
     expect(tap).toBeTruthy();
     expect(tap).toMatch(/\bmin-h-11\b/);
     expect(text(html)).toContain("10:00 AM – 12:00 PM · 2 hours — change it");
@@ -250,14 +250,14 @@ describe("the day drill's job card opens the same sheet", () => {
         createElement(JobScheduleCard, {
           job: {
             id: "j058",
-            name: "Seiler · 3-way switches",
+            name: "Siskin · 3-way switches",
             job_number: "J-058",
             status: "scheduled",
             scheduled_start: at("2026-09-29", "09:00"),
             scheduled_end: at("2026-09-29", "11:00"),
             planned_minutes: 120,
             assigned_to: [],
-            customers: { name: "Rich Seiler" },
+            customers: { name: "Rich Siskin" },
             ...over,
           },
           members: team,
@@ -281,7 +281,7 @@ describe("the day drill's job card opens the same sheet", () => {
 
 describe("a worked day kept as history, tapped", () => {
   const history = (over: Partial<Extract<TileTarget, { kind: "job" }>["job"]> = {}) => {
-    const t = seiler({ scheduled_start: at("2026-09-29", "10:00"), scheduled_end: at("2026-09-29", "12:00"), ...over });
+    const t = siskin({ scheduled_start: at("2026-09-29", "10:00"), scheduled_end: at("2026-09-29", "12:00"), ...over });
     return { ...t, day: "2026-09-22" } as TileTarget;
   };
 
@@ -373,20 +373,20 @@ describe("nothing said to a sheet nobody can see", () => {
 });
 
 describe("This Day: the tile's time is the tapped day's, once a day can keep its own hours (0370)", () => {
-  const herringbone = (over: Record<string, unknown> = {}): TileTarget =>
+  const honeysuckle = (over: Record<string, unknown> = {}): TileTarget =>
     ({
       kind: "job",
       day: "2026-09-28",
       job: {
         id: "j011",
-        name: "Herringbone",
+        name: "Honeysuckle",
         status: "in_progress",
         scheduled_start: at("2026-09-24", "09:00"),
         scheduled_end: at("2026-09-28", "17:00"),
         planned_minutes: null,
         assigned_to: ["p-erik"],
         customers: { name: "Kim Hale" },
-        address: "22 Herringbone Way",
+        address: "22 Honeysuckle Way",
         city: "Truckee",
       },
       dayHours: { start: "12:00", end: "17:00" },
@@ -396,7 +396,7 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
     renderToStaticMarkup(createElement(TileSheetBody, { target, tz: LA, workDay: WORK_DAY, team, canEdit, perDayHours: true, onClose: () => {} }));
 
   it("a day of several with its own hours: This Day's noon to 5, said, the quick lengths, and the way back to the usual hours", () => {
-    const html = renderDay(herringbone());
+    const html = renderDay(honeysuckle());
     const t = text(html);
     expect(t).toContain("This Day, Mon, Sep 28: its own hours. The job's other days keep theirs.");
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="12:00"/);
@@ -408,7 +408,7 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
   });
 
   it("a day of several on the usual hours: only this day changes, and it says so; no way back for hours it doesn't have", () => {
-    const html = renderDay(herringbone({ dayHours: null }));
+    const html = renderDay(honeysuckle({ dayHours: null }));
     expect(text(html)).toContain("This Day, Mon, Sep 28. Only this day changes; the job page sets the hours of its other days.");
     expect(html).not.toContain("Usual Hours");
     // The last day of the run draws the opening to its end: 9 to 5.
@@ -416,17 +416,17 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
   });
 
   it("the job's one day: This Day is the job's time", () => {
-    const t = text(renderDay(seiler()));
+    const t = text(renderDay(siskin()));
     expect(t).toContain("This Day, Mon, Sep 28: the job's one day, so this is the job's time.");
     expect(t).toContain("10:00 AM – 12:00 PM · 2 hours — change it");
   });
 
   it("where and who under the name: the street and the town", () => {
-    expect(text(renderDay(herringbone()))).toContain("22 Herringbone Way · Truckee");
+    expect(text(renderDay(honeysuckle()))).toContain("22 Honeysuckle Way · Truckee");
   });
 
   it("the crew reads This Day's hours with nothing to tap", () => {
-    const html = renderDay(herringbone(), false);
+    const html = renderDay(honeysuckle(), false);
     expect(html).not.toContain("<button");
     expect(html).not.toContain("<input");
   });
@@ -449,7 +449,7 @@ describe("the crew, each in their own color, and whose crew it is (Wave 2, SV-ch
     renderToStaticMarkup(createElement(TileSheetBody, { target, tz: LA, workDay: WORK_DAY, team, canEdit: true, onClose: () => {}, ...extra }));
 
   it("a job's crew circles and a visit's people wear each person's color (one person, one color)", () => {
-    const job = renderWith(seiler());
+    const job = renderWith(siskin());
     expect((job.match(/<button[^>]*aria-label="Erik Taylor"[^>]*>/) ?? [""])[0]).toContain(pillColorForPerson("p-erik").dot);
     const v = renderWith({ ...visit, visit: { ...(visit as Extract<TileTarget, { kind: "visit" }>).visit, assigned_to: "p-brian" } } as TileTarget);
     const brian = (v.match(/<button[^>]*aria-label="Brian Cole"[^>]*>/) ?? [""])[0];
@@ -463,13 +463,13 @@ describe("the crew, each in their own color, and whose crew it is (Wave 2, SV-ch
   });
 
   it("under a job's crew: the whole job, every day; with the Crew Board on, Everyone's Day for one day", () => {
-    expect(text(renderWith(seiler()))).toContain("The whole job, every day.");
-    expect(text(renderWith(seiler()))).not.toContain("Everyone's Day");
-    expect(text(renderWith(seiler(), { crewBoard: true }))).toContain("The whole job, every day. To change one day, use Everyone's Day.");
+    expect(text(renderWith(siskin()))).toContain("The whole job, every day.");
+    expect(text(renderWith(siskin()))).not.toContain("Everyone's Day");
+    expect(text(renderWith(siskin(), { crewBoard: true }))).toContain("The whole job, every day. To change one day, use Everyone's Day.");
   });
 
   it("when that day's rows move someone, one more line says so", () => {
-    const t = seiler({ assigned_to: ["p-erik", "p-brian"] }) as Extract<TileTarget, { kind: "job" }>;
+    const t = siskin({ assigned_to: ["p-erik", "p-brian"] }) as Extract<TileTarget, { kind: "job" }>;
     const dayCrew = crewChips(["p-erik", "p-brian"], team, {
       rows: [
         { profile_id: "p-erik", work_date: "2026-09-28", kind: "off", job_id: null },
@@ -501,7 +501,7 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
   const ghost: TileTarget = {
     kind: "ghost",
     day: "2026-09-25",
-    ghost: { jobId: "j11", name: "22 Herringbone Way", jobNumber: "J-011", customer: "Kim Hale", people },
+    ghost: { jobId: "j11", name: "22 Honeysuckle Way", jobNumber: "J-011", customer: "Kim Hale", people },
   };
 
   it("who worked it, as a track and in words, and the two doors: Book This Day and Open The Job", () => {
@@ -524,7 +524,7 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
   });
 
   it("titled with the job and who it's for; the number second, small; one sheet per block", () => {
-    expect(ghostTitle({ name: "22 Herringbone Way", customer: "Kim Hale" })).toBe("22 Herringbone Way · Kim Hale");
+    expect(ghostTitle({ name: "22 Honeysuckle Way", customer: "Kim Hale" })).toBe("22 Honeysuckle Way · Kim Hale");
     expect(ghostTitle({ name: "Kim Hale · Panel", customer: "Kim Hale" })).toBe("Kim Hale · Panel");
     const sheet = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
     expect(sheet).toContain('| { kind: "ghost"; day: string; ghost: GhostTarget };');
@@ -549,7 +549,7 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
     const html = renderToStaticMarkup(createElement(GhostRow, { day: "2026-09-25", ghost: (ghost as Extract<TileTarget, { kind: "ghost" }>).ghost, canEdit: true }));
     const t = text(html);
     expect(t).toContain("Worked, Not Booked");
-    expect(t).toContain("22 Herringbone Way · Kim Hale — Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM");
+    expect(t).toContain("22 Honeysuckle Way · Kim Hale — Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM");
     expect(html).toContain("border-2 border-dashed border-slate-400");
     expect(t).toContain("Book This Day");
     expect(t).toContain("Open The Job");

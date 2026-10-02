@@ -38,7 +38,7 @@ import { JobPanel, PanelDoor, carryQuick, type PanelData } from "./job-panel";
 import { CircuitEditSheet } from "./circuit-edit-sheet";
 import { freePanelName } from "./panel-setup-sheet";
 import { quoteCircuitsToSuggestions } from "@/lib/panel/model";
-import { E017, E017_ID, FINAL_MAP, J011, PANEL, circuit } from "@/lib/panel/__fixtures__/herringbone";
+import { E017, E017_ID, FINAL_MAP, J011, PANEL, circuit } from "@/lib/panel/__fixtures__/honeysuckle";
 import type { JobCircuit } from "@/lib/types";
 
 const suggestions: JobCircuit[] = quoteCircuitsToSuggestions({ id: E017_ID, quote_number: "E-017", circuits: E017 }).map((d, i) =>
@@ -51,7 +51,7 @@ const data = (over: Partial<PanelData> = {}): PanelData => ({
   panels: [PANEL],
   circuits: FINAL_MAP,
   estimates: [
-    { id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", address: "13897 Herringbone", count: 12, created_at: null, onJob: 0, fresh: 12, alsoFrom: null },
+    { id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", address: "13897 Honeysuckle", count: 12, created_at: null, onJob: 0, fresh: 12, alsoFrom: null },
   ],
   photos: [],
   orgId: "org",
@@ -281,7 +281,7 @@ describe("the office bar's words", () => {
 
 describe("phase 4: the readers and the label checks on the tab", () => {
   const PHOTO = { id: "ph1", name: "panel.jpg", created_at: "2026-09-25T08:00:00Z", url: "https://example.test/panel.jpg" };
-  const PLAN = { id: "pl1", name: "Herringbone E-sheets.pdf", created_at: "2026-09-20T08:00:00Z", onCustomer: true };
+  const PLAN = { id: "pl1", name: "Honeysuckle E-sheets.pdf", created_at: "2026-09-20T08:00:00Z", onCustomer: true };
   const fridge = FINAL_MAP.find((c) => c.description === "Fridge")!;
   const check = circuit({
     room: fridge.room,
@@ -304,14 +304,14 @@ describe("phase 4: the readers and the label checks on the tab", () => {
     expect(html).toContain('src="https://example.test/panel.jpg"');
     expect(labels).toContain("Take A Photo");
     expect(labels).not.toContain("Read Circuits From The Plans");
-    expect(t).not.toContain("Herringbone E-sheets.pdf");
+    expect(t).not.toContain("Honeysuckle E-sheets.pdf");
     phoneSafe(html);
   });
 
   it("the office reads circuits from the plans, the customer's kept plans among them", () => {
     const html = render(data({ photos: [PHOTO], plans: [PLAN] }));
     expect(buttons(html).map((b) => b.text)).toContain("Read Circuits From The Plans");
-    expect(textOf(html)).toContain("Herringbone E-sheets.pdf");
+    expect(textOf(html)).toContain("Honeysuckle E-sheets.pdf");
     expect(textOf(html)).toContain("On The Customer");
   });
 

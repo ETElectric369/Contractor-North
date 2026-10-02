@@ -1,7 +1,7 @@
 import { jobLabel } from "@/lib/schedule-options";
 
 /**
- * A JOB IN A PICKER, AS ERIK READS IT: the place first, the number second ("13897 Herringbone ·
+ * A JOB IN A PICKER, AS ERIK READS IT: the place first, the number second ("13897 Honeysuckle ·
  * J-011"). jobLabel (the place alone) stays the screen's label; a picker that lists every job needs
  * the number too, because one street can hold several jobs. Pure, so a server page and the typed
  * cost sheet label a job the same way.

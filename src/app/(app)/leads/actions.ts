@@ -148,9 +148,9 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   // every one still status='scheduled', the oldest from Jul 20.
   //
   // Worse, it is indistinguishable from real work. Erik created ONE lead and did ONE
-  // walk-through for Sarah Cain, and the system showed him three appointment rows — his
+  // walk-through for Sarah Dale, and the system showed him three appointment rows — his
   // cancelled phone attempt, his completed one, and this phantom — all looking alike:
-  // "i had a lead sarah cain and started an inspection and theres only one string and all this
+  // "i had a lead sarah dale and started an inspection and theres only one string and all this
   // other stuff is recorded and im completely confused by it."
   //
   // `inquiries.next_follow_up_at` already IS the follow-up list: /leads orders by it and the
@@ -405,7 +405,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
     .eq("status", "proposed");
   if (aErr) return { ok: false, error: dbError(aErr) };
   // AND ITS EMPTY WALK-THROUGHS (Erik: "we shouldnt hold onto old orphaned data anyway").
-  // Andrew's first test lead left a blank "Site inspection: andrew cohen" behind — inquiry_id
+  // Andrew's first test lead left a blank "Site inspection: andrew crake" behind — inquiry_id
   // nulled by the FK, no answers, no capture — a duplicate that later read as "the inspector
   // is empty". An inspection with FIELD DATA (photos, notes, measurements — hasCaptureData) or
   // already completed is real work and survives, link severed, exactly as before; one that was
@@ -1130,7 +1130,7 @@ export async function setLeadContact(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const clean: Record<string, string> = {};
   // ONE SHAPE IN THE COLUMN. Erik typed 4153703682 and it stayed raw next to Mike's
-  // "(530) 606-0045" — two formats for one fact. formatPhone is the app's ONE formatter
+  // "(530) 555-0145" — two formats for one fact. formatPhone is the app's ONE formatter
   // (PhoneInput uses it as-you-type); normalizing at the write means every entrance agrees.
   const phone = formatPhone(String(patch.phone ?? "").trim());
   const email = String(patch.email ?? "").trim();

@@ -23,12 +23,12 @@ vi.mock("@/app/(app)/quotes/actions", () => ({ emailQuote: vi.fn(), textQuote: v
 const { SendSheet, SendButton, sendConfirmSentence } = await import("./send-sheet");
 const { TEXT_NOT_READY_REFUSAL } = await import("@/lib/sms-readiness");
 
-const INV = { kind: "invoice" as const, id: "inv-078", number: "INV-078", customerName: "Andrew Cohen", amount: 9590.89, lineCount: 34 };
+const INV = { kind: "invoice" as const, id: "inv-078", number: "INV-078", customerName: "Andrew Crake", amount: 9590.89, lineCount: 34 };
 const open = (p: Record<string, unknown>) => renderToStaticMarkup(createElement(SendSheet as any, { open: true, onClose: () => {}, ...p }));
 
 describe("the sentence the sheet asks", () => {
   it("names the bill, the amount, the lines and who gets it - and on an invoice, that it marks it Sent", () => {
-    expect(sendConfirmSentence(INV)).toBe("Send INV-078 for $9,590.89 (34 lines) to Andrew Cohen? This marks it Sent.");
+    expect(sendConfirmSentence(INV)).toBe("Send INV-078 for $9,590.89 (34 lines) to Andrew Crake? This marks it Sent.");
     expect(sendConfirmSentence({ ...INV, lineCount: 1 })).toContain("(1 line)");
   });
   it("an estimate is not marked anything by the sentence; a missing line count or name is left out, never guessed", () => {

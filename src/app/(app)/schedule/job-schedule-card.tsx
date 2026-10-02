@@ -98,7 +98,7 @@ export function JobScheduleCard({
         <Badge tone={statusTone(job.status)}>{jobStatusLabel(job.status)}</Badge>
       </div>
       {/* WHERE: the street, never the city or the zip (the town small beside it); who when the name
-          already is the street; nothing when the name says both ("Jackie Burks · Panel Upgrade"), never
+          already is the street; nothing when the name says both ("Marla Finch · Panel Upgrade"), never
           the job number in its place (the same as every other block). */}
       {(place || job.city) && (
         <div className="flex min-w-0 items-center gap-1 text-slate-500">

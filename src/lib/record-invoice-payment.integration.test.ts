@@ -48,10 +48,10 @@ d("the payment writer's and the job-completion gate's schema (DB integration)", 
 
   async function scaffold() {
     const { orgId } = await mintThrowawayOrg(client, { label: "tap-truth", techs: 0 });
-    const { rows: [cust] } = await client.query("insert into customers (org_id, name) values ($1,'TEST Rich Seiler') returning id", [orgId]);
+    const { rows: [cust] } = await client.query("insert into customers (org_id, name) values ($1,'TEST Rich Siskin') returning id", [orgId]);
     const { rows: [job] } = await client.query(
       `insert into jobs (org_id, name, job_number, status, billing_type)
-       values ($1,'700 North Lake Boulevard','TEST-J83','in_progress','tm') returning id`,
+       values ($1,'700 North Juniper Boulevard','TEST-J83','in_progress','tm') returning id`,
       [orgId],
     );
     const { rows: [inv] } = await client.query(

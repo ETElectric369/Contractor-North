@@ -33,10 +33,10 @@ describe("jobMaterialCost: bills - off_shelf + from_shelf, to the cent", () => {
     expect(splitJobMaterialCost(676.88)).toEqual({ total: 676.88, tickets: 676.88, fromStock: 0, offShelf: 0, shelfTouched: false });
   });
 
-  it("Herringbone puts both coils and the 14/2 on the shelf; another job takes 60 ft", () => {
+  it("Honeysuckle puts both coils and the 14/2 on the shelf; another job takes 60 ft", () => {
     // J-011's two CED tickets: $477.40 + $199.48. Shelf: $180.17 + $180.17 + $121.64 = $481.98.
-    const herringbone = splitJobMaterialCost(676.88, { offShelf: 481.98, fromShelf: 0 });
-    expect(herringbone).toMatchObject({ total: 194.9, tickets: 194.9, fromStock: 0, shelfTouched: true });
+    const honeysuckle = splitJobMaterialCost(676.88, { offShelf: 481.98, fromShelf: 0 });
+    expect(honeysuckle).toMatchObject({ total: 194.9, tickets: 194.9, fromStock: 0, shelfTouched: true });
     const other = splitJobMaterialCost(0, { offShelf: 0, fromShelf: 43.24 });
     expect(other).toMatchObject({ total: 43.24, tickets: 0, fromStock: 43.24, shelfTouched: true });
   });

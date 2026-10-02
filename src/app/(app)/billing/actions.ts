@@ -337,7 +337,7 @@ async function publicInvoiceLink(
 /**
  * SHARE SHEET payload for an invoice — the thing that was missing entirely.
  *
- * Erik went to send Jackie an invoice, found no Share button, and fell back to the iOS share
+ * Erik went to send Marla an invoice, found no Share button, and fell back to the iOS share
  * sheet from /print/pdf-preview. iOS shares the PAGE, so she received the root layout's metadata:
  * the title "Contractor North", the description "AI-powered field service platform for
  * contractors — CRM, quoting, scheduling…", and a link to app.contractornorth.com that is not in
@@ -729,8 +729,8 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     .limit(1)
     .maybeSingle();
   if (existingInv) {
-    // REUSED ONLY WHILE IT'S A DRAFT (Connected North Phase 1; Tao Zhu J-002). Handing back a bill
-    // that already went out made "New Invoice" open Tao's PAID $10,000 deposit as the place for new
+    // REUSED ONLY WHILE IT'S A DRAFT (Connected North Phase 1; Tess Zane J-002). Handing back a bill
+    // that already went out made "New Invoice" open Tess's PAID $10,000 deposit as the place for new
     // work. A draft is still being built - open it. One that went out is said, with where to go.
     const ex = existingInv as { id: string; invoice_number: string | null; status: string | null; invoice_kind: string | null };
     if (ex.status === "draft") return { ok: true, id: ex.id };
@@ -764,7 +764,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
        * A quote's notes describe an OFFER — "OPTIONS — not included in the total above",
        * A/B upgrades the customer didn't take, "this estimate is based on the assumption
        * that no obstacles arise". Copied onto an invoice they read as things being billed,
-       * on a document that bills work already finished. Badger Lane's invoice carried its
+       * on a document that bills work already finished. Bayberry Lane's invoice carried its
        * estimate's options block verbatim, three weeks after the work was done.
        *
        * The invoice starts with its own empty notes. The work narrative has its own field
@@ -1531,8 +1531,8 @@ async function contractDrawGuard(
 // cn-v479's GAP B guard (billedOnAnotherStandardInvoice) refused to import labor / materials /
 // change orders / estimate lines onto a second standard invoice for the job — "already billed on
 // INV-061. Edit that invoice, or bill extra work as a progress payment." It was the only way to
-// stop the Tao chandelier double while a labor line could not say WHICH hours it held, and it
-// made billing anything NEW after the first invoice went out impossible: Erik, 85 Whitney,
+// stop the Tess chandelier double while a labor line could not say WHICH hours it held, and it
+// made billing anything NEW after the first invoice went out impossible: Erik, 41 Larkspur,
 // 2026-09-11 — three refusal sentences pointing at each other, none naming a door that worked.
 // Each importer now reads the job's claims (claimedSourcesOnJob), skips the rows another non-void
 // invoice holds, writes its own claims (invoice_items.source_ids + import_key), and reports
@@ -1647,7 +1647,7 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
   if (contract) return contract;
   // THE DOUBLE-CHARGE THIS USED TO GUARD IS GUARDED SOMEWHERE BETTER NOW (0269 reading 0255).
   //
-  // The draft lock here was cn-v479's answer to Tao J-002: labor and materials piled onto an
+  // The draft lock here was cn-v479's answer to Tess J-002: labor and materials piled onto an
   // already-partial deposit invoice AFTER a progress draw had billed the same actuals. But a
   // status was only ever a proxy for the real question — is this hour already on a bill? — and
   // since 0255/0258/0260 the LINE answers it: every imported line carries the source ids it
@@ -1742,7 +1742,7 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
     /**
      * THE LINE THE CUSTOMER READS SAYS WHO, AND THE NUMBERS SAY THE REST.
      *
-     * This used to append the rate's provenance — "(Jimmy Santoliva's bill rate)" — because Erik
+     * This used to append the rate's provenance — "(Jimmy Starling's bill rate)" — because Erik
      * once stared at an import saying "still importing at 150" and nothing told him the number
      * was his tech's own bill_rate doing its job. That was a real confusion and the note answered
      * it, but it answered it IN THE WRONG PLACE: `description` is the line text on the invoice the
@@ -1886,7 +1886,7 @@ async function joinLaborHours(
  *
  * THROUGH THE ONE BILLING PATH, not beside it. This is an importer with the same shape as labour
  * and costs — same draft lock, same draw-job conflict check, same idempotent upsert, same
- * `edited` protection — because a second way to put a line on an invoice is how Tao Zhu got
+ * `edited` protection — because a second way to put a line on an invoice is how Tess Zane got
  * charged twice. Nothing here writes an invoice total; recalcInvoice does, as it does for
  * everything else.
  *
@@ -2045,7 +2045,7 @@ async function importCostsCore(
     // the read that decides what a CUSTOMER pays. Erik taps the duplicate picker before the job
     // is invoiced (sort the shoebox, then bill), so no 0255 claim exists to stop it, and the copy
     // he just set aside is itemised onto the invoice beside the one he kept. $95.27 of CED is in
-    // exactly that state on 13631 Northwoods today.
+    // exactly that state on 13631 Nightshade today.
     supabase
       .from("bills")
       // `pricing_provisional` (0271) rides in the same projection as `superseded_by_bill_id`, for
@@ -2086,7 +2086,7 @@ async function importCostsCore(
   ]);
   if (blis.error) return { ok: false, error: blis.error };
   // A RECEIPT THIS INVOICE ALREADY CHARGES BY HAND IS TAKEN (lib/held-here): INV-00023's typed
-  // "Materials" line holds Purple Sage's CED bill, and INV-060's edited Home Depot line holds the
+  // "Materials" line holds Pinyon Sage's CED bill, and INV-060's edited Home Depot line holds the
   // two Ace receipts beside it. Without this, the materials import on that paid invoice offered
   // them again as new lines (the claim trigger allows a repeat on one invoice).
   const hereRead = await readHeldHere(
@@ -2139,7 +2139,7 @@ async function importCostsCore(
    * asterisks and prints its own retail counter price beside it, and the receipt reader records
    * those retail figures while correctly flagging the receipt `pricing_provisional`. 0271 taught
    * the price book to ignore those rows. Nothing taught THIS loop, so the $467.87 Sunnyvale ticket
-   * on Jason Waldow's job was marked up and itemised onto his invoice at the counter's numbers, and
+   * on Jason Wexley's job was marked up and itemised onto his invoice at the counter's numbers, and
    * no screen ever said the prices were unconfirmed. When the real Truckee-priced invoice arrives
    * there is no mechanism to true up a bill that has already gone out.
    *
@@ -2500,7 +2500,7 @@ async function editedRemainderWarnings(
  * It used to be cumulative (AIA-style): re-itemize ALL of the job's labor + materials every time,
  * then credit every prior invoice's subtotal so the balance came out to the new work. That was the
  * only honest build while a labor line could not say which hours it held — and it is why Erik's
- * "Progress Payment" and "Request Next Payment" on 85 Whitney both refused: a paid standard
+ * "Progress Payment" and "Request Next Payment" on 41 Larkspur both refused: a paid standard
  * invoice on the job made the re-itemization a double bill, so the guard forbade the draw.
  *
  * Now every imported row carries its claim, so the draw imports ONLY the rows no non-void invoice
@@ -3412,7 +3412,7 @@ export async function setInvoiceStatus(
   // is the one the customer holds, so it stays. Before recalc, so the PDF reads the stamped row.
   if (status === "sent" && cur.status === "draft" && sentAtKnown && !cur.sent_at) await restampDueOnFirstSend(supabase, id);
   // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid
-  // (Jackie's Venmo before the invoice went out) leaves this call marked 'sent' and stays
+  // (Marla's Venmo before the invoice went out) leaves this call marked 'sent' and stays
   // there forever — never 'paid', permanently on the AR list. Recompute once the row is no
   // longer a draft; recalcInvoice re-derives status from total vs amount_paid.
   if (status !== "draft" && status !== "void") await recalcInvoice(supabase, id);

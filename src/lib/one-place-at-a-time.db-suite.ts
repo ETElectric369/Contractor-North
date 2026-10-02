@@ -168,7 +168,7 @@ export function defineOnePlaceAtATimeSuite(connect: () => Promise<SqlClient>) {
       });
     });
 
-    it("a no-job punch is named as one, with the advice to put it on the job (the 85 Whitney case)", async () => {
+    it("a no-job punch is named as one, with the advice to put it on the job (the 41 Larkspur case)", async () => {
       if (!needs()) return;
       await step(async () => {
         // Brian's 9/11 shape: an app punch with no job, then the office types the day on the job.

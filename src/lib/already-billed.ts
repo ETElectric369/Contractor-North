@@ -1,7 +1,7 @@
 /**
  * ALREADY BILLED: THE RULES THE SHEET SUGGESTS FROM (pure; migration 0357 enforces the same).
  *
- * Erik, 2026-09-26: "i have a bill for purple sage that was already charged and i have no way to
+ * Erik, 2026-09-26: "i have a bill for pinyon sage that was already charged and i have no way to
  * associate it to the paid invoice becuase i did it manually and that will happen for people i
  * assure you". The Costs tab's Already Billed door asks "Which line already charged for this?" and a
  * person picks it. Everything here only decides what is OFFERED and what is ticked to start with:
@@ -23,7 +23,7 @@
  *                     WRITTEN (created), never the day it was sent: INV-00023 went out 76 days after it
  *                     was written, and the sent date would have ticked 76 days of unbilled work; and
  *                     only as many as the line has room for beside the hours it already holds
- *   askUsedAll        Purple Sage's question, only when Shop Stock is on and the line is less than the
+ *   askUsedAll        Pinyon Sage's question, only when Shop Stock is on and the line is less than the
  *                     receipt's cost ($110 against $186.93): "Did J-010 Use All Of It?"
  */
 
@@ -243,7 +243,7 @@ export function lineLabel(inv: Pick<AbInvoice, "invoice_number">, line: Pick<AbL
 }
 
 /**
- * PURPLE SAGE'S QUESTION: "Did J-010 Use All Of It?" Only when Shop Stock is on, the receipt has
+ * PINYON SAGE'S QUESTION: "Did J-010 Use All Of It?" Only when Shop Stock is on, the receipt has
  * lines to shelve, and the line that charged for it is less than what the receipt cost ($110 against
  * $186.93: Erik kept 3 GFCIs). The shelf has to come first: once a sent invoice bills a receipt, the
  * shelf refuses it (0328), so No opens the shelf card and comes back to Mark.

@@ -16,17 +16,17 @@ const lead = (name: string, city: string | null, over: Partial<Placeable> = {}):
  */
 const REAL = [
   lead("Eileen", "Truckee"),
-  lead("Erik Nyborg", "Truckee"),
+  lead("Erik Norrel", "Truckee"),
   lead("Macey Dade", "Truckee"),
   lead("Matt Warren", "Truckee"),
   lead("Steph McCafee", "Truckee"),
   lead("Braden Lang", "Tahoe City"),
-  lead("Dino Dargenzio", "Tahoe City"),
-  lead("Karen Wucher", "Tahoe City"),
-  lead("Nora & Fermin Arnoso", "Tahoe City"),
-  lead("Jackie Burks", "Carnelian Bay"),
-  lead("Jason Waldow", "Sunnyvale"),
-  lead("Mike Scrivano", null),
+  lead("Remy Dunsmore", "Tahoe City"),
+  lead("Karen Willet", "Tahoe City"),
+  lead("Nora & Fermin Avocet", "Tahoe City"),
+  lead("Marla Finch", "Carnelian Bay"),
+  lead("Jason Wexley", "Sunnyvale"),
+  lead("Mike Sparrow", null),
 ];
 
 describe("groupByTown — geography picks the day", () => {
@@ -142,19 +142,19 @@ describe("spreadTimes — several visits on one day are several appointments", (
  * WHAT A LEAD IS MISSING IS A NEXT ACTION, NOT A PENALTY.
  *
  * Measured on Erik's real twelve: NINE have no phone and no email (four of the five Truckee ones),
- * and ONE — Mike Scrivano — has no address but a phone, an email, and "I have another job I'll
+ * and ONE — Mike Sparrow — has no address but a phone, an email, and "I have another job I'll
  * need a quote on … 3 cans in a walkway". He is among the most actionable leads he owns, and the
  * first version buried him for a blank field.
  */
 describe("whatsMissing — the gap decides the next move", () => {
-  it("Mike Scrivano: no address, but you can call him right now", () => {
-    const m = whatsMissing({ city: null, address: null, phone: "(530) 606-0045", email: "n@x.com" });
+  it("Mike Sparrow: no address, but you can call him right now", () => {
+    const m = whatsMissing({ city: null, address: null, phone: "(530) 555-0145", email: "n@x.com" });
     expect(m).toBe("place");
     expect(nextAction(m)).toBe("Call to get the address");
   });
 
   it("the nine with an address and no number: you cannot call, but you can go and look", () => {
-    const m = whatsMissing({ city: "Truckee", address: "14424 Swiss Lane", phone: null, email: null });
+    const m = whatsMissing({ city: "Truckee", address: "14424 Sumac Lane", phone: null, email: null });
     expect(m).toBe("contact");
     expect(nextAction(m)).toMatch(/go and look/);
   });
@@ -171,7 +171,7 @@ describe("whatsMissing — the gap decides the next move", () => {
   });
 
   it("a street with no town still counts as a place — you can drive to it", () => {
-    expect(whatsMissing({ city: null, address: "14424 Swiss Lane", phone: null, email: null })).toBe("contact");
+    expect(whatsMissing({ city: null, address: "14424 Sumac Lane", phone: null, email: null })).toBe("contact");
   });
 
   it("whitespace is not an answer", () => {
@@ -181,24 +181,24 @@ describe("whatsMissing — the gap decides the next move", () => {
 
 /**
  * THE TOWN IS OFTEN IN THE ADDRESS (Erik, reading the rail: "look closer they should all have an
- * address except Scrivano … 10244 Schaffer is certainly a real place").
+ * address except Sparrow … 10244 Snowbell is certainly a real place").
  *
- * J-012 carries "10244 Schaffer Dr, Truckee, CA 96161, USA" in `address` with `city` EMPTY — a
+ * J-012 carries "10244 Snowbell Dr, Truckee, CA 96161, USA" in `address` with `city` EMPTY — a
  * whole Google formatted address in one column, which is exactly what the places autocomplete
  * hands back. Reading only `city` filed a Truckee job under "No town yet" with the word Truckee
  * sitting right there.
  */
 describe("townFromAddress — use what IS there", () => {
   it("digs Truckee out of the real J-012 address", () => {
-    expect(townFromAddress("10244 Schaffer Dr, Truckee, CA 96161, USA")).toBe("Truckee");
+    expect(townFromAddress("10244 Snowbell Dr, Truckee, CA 96161, USA")).toBe("Truckee");
   });
 
   it("handles a two-part address", () => {
-    expect(townFromAddress("1370 Sequoia Avenue, Tahoe City")).toBe("Tahoe City");
+    expect(townFromAddress("1370 Sycamore Avenue, Tahoe City")).toBe("Tahoe City");
   });
 
   it("a bare street yields nothing — an honest blank beats a guess", () => {
-    expect(townFromAddress("14424 Swiss Lane")).toBe("");
+    expect(townFromAddress("14424 Sumac Lane")).toBe("");
     expect(townFromAddress(null)).toBe("");
   });
 
@@ -210,8 +210,8 @@ describe("townFromAddress — use what IS there", () => {
 
   it("groups a city-less job WITH the town it names", () => {
     const g = groupByTown([
-      { id: "j", kind: "job", name: "J-012", address: "10244 Schaffer Dr, Truckee, CA 96161, USA", city: null },
-      { id: "l", kind: "lead", name: "Eileen", address: "14424 Swiss Lane", city: "Truckee" },
+      { id: "j", kind: "job", name: "J-012", address: "10244 Snowbell Dr, Truckee, CA 96161, USA", city: null },
+      { id: "l", kind: "lead", name: "Eileen", address: "14424 Sumac Lane", city: "Truckee" },
     ]);
     expect(g).toHaveLength(1);
     expect(g[0].town).toBe("Truckee");
@@ -222,7 +222,7 @@ describe("townFromAddress — use what IS there", () => {
 describe("whatsMissing — a job has no phone, and that is not a gap", () => {
   it("J-012 with a full address is complete, not 'no phone or email'", () => {
     expect(whatsMissing({
-      kind: "job", city: null, address: "10244 Schaffer Dr, Truckee, CA 96161, USA",
+      kind: "job", city: null, address: "10244 Snowbell Dr, Truckee, CA 96161, USA",
       phone: null, email: null,
     })).toBe("nothing");
   });
@@ -232,7 +232,7 @@ describe("whatsMissing — a job has no phone, and that is not a gap", () => {
   });
 
   it("a LEAD still reports a missing number — that one matters", () => {
-    expect(whatsMissing({ kind: "lead", city: "Truckee", address: "14424 Swiss Lane", phone: null, email: null }))
+    expect(whatsMissing({ kind: "lead", city: "Truckee", address: "14424 Sumac Lane", phone: null, email: null }))
       .toBe("contact");
   });
 });

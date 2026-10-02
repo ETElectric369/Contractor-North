@@ -3,9 +3,9 @@ import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "./kno
 
 const cust = (over: Partial<KnownCustomer> = {}): KnownCustomer => ({
   id: "c1",
-  name: "Jackie Burks",
+  name: "Marla Finch",
   phone: "(530) 555-0142",
-  email: "jackie@example.com",
+  email: "marla@example.com",
   address: "1180 Bear Run",
   city: "Truckee",
   state: "CA",
@@ -15,7 +15,7 @@ const cust = (over: Partial<KnownCustomer> = {}): KnownCustomer => ({
 
 describe("matchKnownCustomer — does the app already know this person?", () => {
   it("matches the way a person reads a name, not the way a database does", () => {
-    const m = matchKnownCustomer("  jackie   BURKS ", [cust()]);
+    const m = matchKnownCustomer("  marla   FINCH ", [cust()]);
     expect(m.kind).toBe("one");
   });
 
@@ -44,8 +44,8 @@ describe("carryFromCustomer — fill the blanks, never overwrite", () => {
     // one table away.
     const c = carryFromCustomer({ phone: null, email: null }, cust());
     expect(c.patch.phone).toBe("(530) 555-0142");
-    expect(c.patch.email).toBe("jackie@example.com");
-    expect(c.note).toContain("Linked to Jackie Burks");
+    expect(c.patch.email).toBe("marla@example.com");
+    expect(c.note).toContain("Linked to Marla Finch");
     expect(c.note).toContain("phone");
   });
 

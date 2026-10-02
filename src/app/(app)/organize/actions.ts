@@ -611,7 +611,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
       // after another Record as Cost press (another paid read).
       //
-      // THE PHOTO IS FILED WITH THAT BILL (J-013 "TTP #56", 2026-09-30: one live bill, and the
+      // THE PHOTO IS FILED WITH THAT BILL (J-013 "ARR #56", 2026-09-30: one live bill, and the
       // Costs badge said 3 with the receipts fold reading "Not On A Bill Yet"). This answer used to
       // write NOTHING, so the second photo of the same ticket stayed a Receipt on no tie: the job
       // page called it loose, counted it on the Costs chip, flagged it "Not on a bill yet." and
@@ -874,7 +874,7 @@ function billClaimRefusal(err: unknown, tail: string): string | null {
 
 // NO PETTY CASH DESTINATION (2026-09-24). Filing a receipt to petty cash wrote an expense with no
 // job and replaced the receipt's category with "Receipt", so a job purchase quietly became a
-// business cost: that is how CED 8802-1101094, $379.35 of parts for the Rhodesia job, ended up in
+// business cost: that is how CED 8802-1101094, $379.35 of parts for the Fernhill job, ended up in
 // the cash box. A receipt now goes to a job or to one of the business-cost buckets. An item
 // filed to petty cash before this still has its petty_cash_id, and re-filing it tears that row
 // down below exactly as before.
@@ -1126,7 +1126,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
 
   // WHO DECIDED WHERE IT WENT (audit v994, tray F1). The tray's pick lived only in memory: the tray
   // re-matches every waiting paper on each load and writes nothing, so a paper read before a rule
-  // learned something (Paper B, "13897 HERRINGBONE", read 24 minutes before the PO-street rule
+  // learned something (Paper B, "13897 HONEYSUCKLE", read 24 minutes before the PO-street rule
   // shipped) was filed with nothing on record saying the PO picked J-011, and a person overriding
   // the paper looked exactly like a person agreeing with it. The same exact match runs here, on
   // the server, while the row is still waiting (so rematchPaper does not step aside), and the
@@ -1899,7 +1899,7 @@ const SUGGEST_MISSED =
  * or keep a reference note. Returns what it did.
  *
  * THE RULES GO FIRST, THE MODEL ONLY FOR WHAT THEY CANNOT SETTLE (Erik, 2026-09-24: a CED sales
- * order with "13897 HERRINGBONE" in its PO box came back from AI Suggest, in a red box, as
+ * order with "13897 HONEYSUCKLE" in its PO box came back from AI Suggest, in a red box, as
  * "Materials receipt lacks a job reference"). The model was handed the title and a one-line
  * summary and nothing the reader had already copied off the paper: not the PO, not the hint, not
  * the lines, and only 40 jobs. Now:

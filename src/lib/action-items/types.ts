@@ -47,7 +47,7 @@ export type ActionKind =
   | "quote_draft" // an estimate started and never sent — the lead it converted is invisible behind it
   | "lien_deadline" // a lien prelim/recording deadline coming due or past
   | "contract_unsigned" // a contract sent but not yet signed
-  // ── The end-of-day money-leak sweep (the "Apache Ct" detectors) ──
+  // ── The end-of-day money-leak sweep (the "Acacia Ct" detectors) ──
   | "time_stray" // a time entry left running past its day, or closed with no job — hours nobody can bill
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
   | "materials_needed" // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)

@@ -34,7 +34,7 @@ import {
 
 /**
  * ALREADY BILLED: WHAT THE SHEET OFFERS AND TICKS (lib/already-billed). ET's own invoices, as they
- * stand: INV-00023 (Purple Sage J-010, paid, written 6/22 and sent 9/6), INV-060 (Badger J-039),
+ * stand: INV-00023 (Pinyon Sage J-010, paid, written 6/22 and sent 9/6), INV-060 (Bayberry J-039),
  * INV-076's hand "Discount" (-$120), INV-078 (Andrew's running draft).
  */
 
@@ -75,7 +75,7 @@ describe("which invoices can hold it", () => {
     expect(eligibleInvoice({ status: "draft", invoice_kind: "standard" })).toBe(false);
     expect(eligibleInvoice({ status: "void", invoice_kind: "standard" })).toBe(false);
     expect(eligibleInvoice({ status: "paid", invoice_kind: "deposit" })).toBe(false);
-    // Herringbone's draws are claimants too: a sent progress or final draw can hold it.
+    // Honeysuckle's draws are claimants too: a sent progress or final draw can hold it.
     expect(eligibleInvoice({ status: "sent", invoice_kind: "progress" })).toBe(true);
     expect(eligibleInvoice({ status: "sent", invoice_kind: null })).toBe(true);
   });
@@ -91,7 +91,7 @@ describe("which invoices can hold it", () => {
 });
 
 describe("which lines can hold it", () => {
-  it("Purple Sage: the typed Materials line is offered first for a receipt, and preselected; the edited labor lines follow", () => {
+  it("Pinyon Sage: the typed Materials line is offered first for a receipt, and preselected; the edited labor lines follow", () => {
     const lines = eligibleLines(INV00023, { kind: "bill" });
     expect(lines.map((l) => l.id)).toEqual(["materials", "brian", "erik"]);
     expect(preselectLine(INV00023, lines, "bill")).toBe("materials");

@@ -13,7 +13,7 @@ const TODAY = "2026-09-27";
 const item = (o: Partial<Omit<ActionItem, "stream">>): Omit<ActionItem, "stream"> => ({
   id: "materials-j1",
   kind: "materials_needed",
-  title: "Rhodesia Panel · J-034",
+  title: "Fernhill Panel · J-034",
   when: null,
   urgency: 1,
   done: false,

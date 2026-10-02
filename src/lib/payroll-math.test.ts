@@ -480,7 +480,7 @@ describe("the sentences Erik reads back", () => {
 
   it("says when a man is AHEAD, in plain words, without calling it an error", () => {
     const s = paymentSentence({
-      name: "Jimmy Santoliva", amount: 1500, method: "transfer", paidOn: today, today,
+      name: "Jimmy Starling", amount: 1500, method: "transfer", paidOn: today, today,
       locked: [{ start: "2026-08-01", end: "2026-08-16" }, { start: "2026-08-16", end: "2026-09-01" }], owed: -68,
     });
     expect(s).toContain("That covers Aug 1 to Aug 15 and Aug 16 to Aug 31 in full");
@@ -729,7 +729,7 @@ describe("the Pay board and its CSV leave the owner off, and say so (0286)", () 
   });
 
   it("wagesOnly drops the owner and keeps every crew member in order", () => {
-    const board = [row("brian", "Brian Taylor", 10, 40), row("erik", "Erik Taylor", 341, 0), row("jimmy", "Jimmy Santoliva", 5, 50)];
+    const board = [row("brian", "Brian Taylor", 10, 40), row("erik", "Erik Taylor", 341, 0), row("jimmy", "Jimmy Starling", 5, 50)];
     expect(wagesOnly(board, drawIdsFrom(rates)).map((r) => r.profileId)).toEqual(["brian", "jimmy"]);
   });
 

@@ -3,7 +3,7 @@
  * to see whats on it to be able to approve or deny").
  *
  * The Supplier Bills card asks what a paper was for. He cannot answer that from "$59.17 · It Says
- * 13683 HILLSIDE" alone: he has to SEE the paper before the tap. This turns the rows the CED import
+ * 13683 HAZELNUT" alone: he has to SEE the paper before the tap. This turns the rows the CED import
  * kept (supplier_invoice_lines, in the order CED printed them) into the lines the card draws.
  * Pure, so every rule below is tested without a database; supplierPaperContents (supplier-actions)
  * does the staff-only, org-filtered read and hands the rows here.

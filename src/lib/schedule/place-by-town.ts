@@ -26,7 +26,7 @@
  * The first version sorted a townless lead LAST. Erik: "just becuase it doesnt have a town doesnt
  * mean it goes at the end of the list, wrong logic, fragment first."
  *
- * He is right and it was a real violation. Mike Scrivano has no address — and a phone, an email,
+ * He is right and it was a real violation. Mike Sparrow has no address — and a phone, an email,
  * and "I have another job I'll need a quote on … 3 cans in a walkway". He is one of the most
  * actionable leads in the pile: you can call him RIGHT NOW, and the address comes out of the call.
  * Demoting him for a blank field is the app demanding data before it will treat him seriously,
@@ -134,9 +134,9 @@ const norm = (s: string | null | undefined): string => String(s ?? "").trim().re
 /**
  * THE TOWN IS OFTEN IN THE ADDRESS, and refusing to look there is the app demanding a tidy field.
  *
- * Erik, reading the rail: "look closer they should all have an address except Scrivano … 10244
- * Schaffer is certainly a real place." He was right. J-012 carries
- * "10244 Schaffer Dr, Truckee, CA 96161, USA" in `address` with `city` EMPTY — a whole Google
+ * Erik, reading the rail: "look closer they should all have an address except Sparrow … 10244
+ * Snowbell is certainly a real place." He was right. J-012 carries
+ * "10244 Snowbell Dr, Truckee, CA 96161, USA" in `address` with `city` EMPTY — a whole Google
  * formatted address in one column, which is exactly what the places autocomplete returns. Reading
  * only `city` put a Truckee job in "No town yet" while the word Truckee sat right there.
  *

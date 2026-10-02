@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * come back as CED printed them, the extension is the price (never unit price × quantity), a $0.00
  * line is Not Shipped, a paper with no lines still says its total, and the PDF door.
  *
- * The fixture is 8802-1107139, his real $59.17 CED paper for 13683 HILLSIDE, plus the real
+ * The fixture is 8802-1107139, his real $59.17 CED paper for 13683 HAZELNUT, plus the real
  * back-ordered track light (H8010CSWT, quantity 0, $38.98 printed, $0.00 extension) and a real
  * per-hundred plate price to prove the unit price is decoration.
  */
@@ -67,7 +67,7 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[], opts: { role
   };
 }
 
-const HILLSIDE = {
+const HAZELNUT = {
   id: "43cf4f98-7660-4214-9dc0-b797edeaab25",
   invoice_number: "8802-1107139",
   tax: "4.89",
@@ -76,7 +76,7 @@ const HILLSIDE = {
   source_file: "invoice_8802-1107139.pdf",
 };
 // Out of order on purpose: CED's order is sort_order, not the order rows happen to arrive in.
-const HILLSIDE_LINES = [
+const HAZELNUT_LINES = [
   { description: "1/2 FILLER PLATE", part_number: "TFH", quantity: "4.000", unit_price: "4.5700", extension: "18.28", sort_order: 1 },
   { description: "20A 120/277VAC SW", part_number: "PS20AC2RPL", quantity: "1.000", unit_price: "36.0000", extension: "36.00", sort_order: 0 },
 ];
@@ -89,26 +89,26 @@ beforeEach(() => {
 describe("supplierPaperContents: who may read it", () => {
   it("a tech is refused before any paper is read (these are supplier costs)", async () => {
     state.client = fakeSupabase({}, calls, { role: "tech" });
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     expect(res.ok).toBe(false);
     expect(calls).toEqual([]);
   });
 
   it("a paper in another company is 'not here', never read by id alone", async () => {
     state.client = fakeSupabase({ supplier_invoices: [{ data: null, error: null }] }, calls);
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     expect(res).toEqual({ ok: false, error: "That paper isn't here anymore. Reload the page." });
     expect(calls[0].filters).toEqual([
       ["eq", "org_id", "org-1"],
-      ["eq", "id", HILLSIDE.id],
+      ["eq", "id", HAZELNUT.id],
     ]);
   });
 });
 
-describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
+describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HAZELNUT", () => {
   const script = (over: Record<string, any[]> = {}) => ({
-    supplier_invoices: [{ data: HILLSIDE, error: null }],
-    supplier_invoice_lines: [{ data: HILLSIDE_LINES, error: null }],
+    supplier_invoices: [{ data: HAZELNUT, error: null }],
+    supplier_invoice_lines: [{ data: HAZELNUT_LINES, error: null }],
     documents: [{ data: [], error: null }],
     organized_items: [{ data: [], error: null }],
     ...over,
@@ -116,12 +116,12 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
 
   it("reads the lines org-filtered, by this paper, in CED's order, and adds up to the card's $59.17", async () => {
     state.client = fakeSupabase(script(), calls);
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     if (!res.ok) throw new Error(res.error);
     const lines = calls.find((c) => c.table === "supplier_invoice_lines")!;
     expect(lines.filters).toEqual([
       ["eq", "org_id", "org-1"],
-      ["eq", "supplier_invoice_id", HILLSIDE.id],
+      ["eq", "supplier_invoice_id", HAZELNUT.id],
     ]);
     expect(lines.order).toEqual(["sort_order", { ascending: true }]);
     // Every other read names the org too.
@@ -145,7 +145,7 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     state.client = fakeSupabase(script({ organized_items: [{ data: [{ file_url: path }], error: null }] }), calls, {
       signed: { [path]: "https://signed.example/ced.pdf" },
     });
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     if (!res.ok) throw new Error(res.error);
     expect(res.contents.pdfUrl).toBe("https://signed.example/ced.pdf");
     expect(res.contents.pdfNote).toBeNull();
@@ -159,10 +159,10 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
 
   it("opens the PDF the import kept, straight from source_file, with no other lookup", async () => {
     const path = `org-1/organize/ced/${"a".repeat(64)}.pdf`;
-    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HILLSIDE, source_file: path }, error: null }] }), calls, {
+    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HAZELNUT, source_file: path }, error: null }] }), calls, {
       signed: { [path]: "https://signed.example/kept.pdf" },
     });
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     if (!res.ok) throw new Error(res.error);
     expect(res.contents.pdfUrl).toBe("https://signed.example/kept.pdf");
     expect(res.contents.pdfNote).toBeNull();
@@ -171,25 +171,25 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
 
   it("a source_file naming ANOTHER org's folder is never signed as this paper's PDF", async () => {
     const theirs = `org-2/organize/ced/${"b".repeat(64)}.pdf`;
-    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HILLSIDE, source_file: theirs }, error: null }] }), calls, {
+    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HAZELNUT, source_file: theirs }, error: null }] }), calls, {
       signed: { [theirs]: "https://signed.example/theirs.pdf" },
     });
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     if (!res.ok) throw new Error(res.error);
     expect(res.contents.pdfUrl).toBeNull();
   });
 
   it("a kept PDF that can't be signed says it is on file, never 'read from <hash>.pdf'", async () => {
     const path = `org-1/organize/ced/${"c".repeat(64)}.pdf`;
-    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HILLSIDE, source_file: path }, error: null }] }), calls);
-    const res = await supplierPaperContents(HILLSIDE.id);
+    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HAZELNUT, source_file: path }, error: null }] }), calls);
+    const res = await supplierPaperContents(HAZELNUT.id);
     if (!res.ok) throw new Error(res.error);
     expect(res.contents.pdfNote).toBe("Its PDF is on file but couldn't be opened just now.");
   });
 
   it("a stored PDF that can't be signed is said, not dropped", async () => {
     state.client = fakeSupabase(script({ documents: [{ data: [{ file_url: "org-1/x.pdf" }], error: null }] }), calls);
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     if (!res.ok) throw new Error(res.error);
     expect(res.contents.pdfUrl).toBeNull();
     expect(res.contents.pdfNote).toBe("Its PDF is on file but couldn't be opened just now.");
@@ -197,13 +197,13 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
 
   it("a failed line read is a failed read (the card offers Try Again), never an empty paper", async () => {
     state.client = fakeSupabase(script({ supplier_invoice_lines: [{ data: null, error: { message: "timeout" } }] }), calls);
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     expect(res.ok).toBe(false);
   });
 
   it("a paper with no lines on file still says its tax and total, and how much is on no line", async () => {
     state.client = fakeSupabase(script({ supplier_invoice_lines: [{ data: [], error: null }] }), calls);
-    const res = await supplierPaperContents(HILLSIDE.id);
+    const res = await supplierPaperContents(HAZELNUT.id);
     if (!res.ok) throw new Error(res.error);
     expect(res.contents.lines).toEqual([]);
     expect(res.contents.total).toBe(59.17);

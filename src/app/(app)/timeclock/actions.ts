@@ -62,7 +62,7 @@ export type ClockResult = {
    *  no job and no code, so the door asks "Which Job Are You On?" once, with a Skip. Only ever set
    *  on a punch that is ALREADY saved: the question never holds the clock up. */
   noJob?: boolean;
-  /** THE CLOCK DID TELL THE JOB, AND WHO CHOSE IT (Erik, 2026-10-01: TTP 56). `chosenBy: "app"`
+  /** THE CLOCK DID TELL THE JOB, AND WHO CHOSE IT (Erik, 2026-10-01: ARR 56). `chosenBy: "app"`
    *  means nobody picked it — the resolver did, from the schedule — so every door says one plain
    *  sentence naming the job and offers one tap to move it (clock-told: tellAppChose). Never infer
    *  this from job_id being present: a person-picked punch carries one too. */
@@ -203,7 +203,7 @@ async function clockInInner(
   // in_progress job → none (the office attaches it later).
   //
   // WHO CHOSE THE JOB IS A FACT ONLY THIS LINE KNOWS, so it is carried out in the answer rather
-  // than guessed at later from job_id (Erik's TTP 56 morning, 2026-10-01). `appPick` is set for the
+  // than guessed at later from job_id (Erik's ARR 56 morning, 2026-10-01). `appPick` is set for the
   // resolver's pick and ONLY for it — including when a job_id came in and the caller couldn't see
   // it, because then the job on the punch is still not the one anybody asked for — and it carries
   // WHICH tier picked, so the sentence names the source it actually used.
@@ -351,7 +351,7 @@ async function clockInInner(
   if (!id) return { ok: true, ...said };
   if (!jobId) return !(input.job_code ?? "").trim() ? { ok: true, id, noJob: true } : { ok: true, id, ...said };
   // AND WHEN THE CLOCK *CAN* TELL THE JOB, IT SAYS WHICH ONE IT CHOSE (Erik, 2026-10-01: Brian's
-  // punch on TTP 56). The pick rides back with WHO made it, so the door can say one sentence naming
+  // punch on ARR 56). The pick rides back with WHO made it, so the door can say one sentence naming
   // the job and offer the move — and say nothing at all when the person picked it themselves. The
   // label is read only on the app's pick: a person-picked punch needs no sentence, so it pays for no
   // extra read and the clock answers as fast as it always did.
@@ -1422,9 +1422,9 @@ export async function createManualEntry(input: {
   // ever looked. The office reaches for it when it should be EDITING the row that exists.
   //
   // AND THE REFUSAL HANDS BACK THE SHIFT IN THE WAY (the duplicate punches, 2026-09-26). On 9/19
-  // the office billing 85 Whitney typed Brian's 9/11 again because his punch that day had no job
+  // the office billing 41 Larkspur typed Brian's 9/11 again because his punch that day had no job
   // and the job page never showed it. The form now gets that punch, so it can offer "Put This On
-  // 85 Whitney" (the punch's own clock times) instead of a sentence with no door.
+  // 41 Larkspur" (the punch's own clock times) instead of a sentence with no door.
   // "Put that shift on the job" only while no invoice bills that punch: the form's door is for an
   // unbilled one, and a billed shift keeps its job (0288).
   const putOnJobIf = async (id: string) => {
@@ -1485,7 +1485,7 @@ export async function createManualEntry(input: {
  * CLOCK OUT FOR THEM: the office closes somebody's RUNNING shift at the time it really stopped.
  *
  * Erik, 2026-09-24: "Brian did it the other day too and I had no way to stop it to set the time for
- * the invoice". Brian clocked in on Herringbone at 1:37 PM and forgot. The office could see the
+ * the invoice". Brian clocked in on Honeysuckle at 1:37 PM and forgot. The office could see the
  * clock running on Timecards and on the job, and the only doors it had either refused an open row
  * or closed it at "now", which would have billed the customer for the night. Erik fixed the times
  * by hand a day later, and the invoice waited on it.
@@ -1681,7 +1681,7 @@ export async function stopShift(input: {
         ? jobLabel(job)
         : null;
   const when = `${dayOnly(startOut, tz)}, ${clockOnly(startOut, tz)} to ${clockOnly(stopOut, tz)}`;
-  // "5.00 h on Herringbone, Mon Jan 1, 12:00 PM to 5:00 PM": the facts every line below names.
+  // "5.00 h on Honeysuckle, Mon Jan 1, 12:00 PM to 5:00 PM": the facts every line below names.
   const facts = `${hours.toFixed(2)} h${newJobLabel ? ` on ${newJobLabel}` : ""}, ${when}`;
 
   if (!self) {
@@ -2446,7 +2446,7 @@ export type DayShifts =
 /**
  * What one person already has on one day (the org's day), for the add-hours forms: Add Time Entry
  * (on Timecards and on the job's Time tab) and Log Hours. Office only. `for_job_id` is the job the
- * form would put the hours on, named back so the door can say "Put This On 85 Whitney". The answer
+ * form would put the hours on, named back so the door can say "Put This On 41 Larkspur". The answer
  * also says where the schedule put the person that day (scheduledJob, offThatDay), which Add Time
  * Entry starts its Job field on.
  */

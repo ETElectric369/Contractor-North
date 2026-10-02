@@ -57,10 +57,10 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
 
 const STAFF = { data: { role: "owner", org_id: "org-1", active: true }, error: null };
 const OK = (data: any) => ({ data, error: null });
-const INVOICE = "si-herringbone";
+const INVOICE = "si-honeysuckle";
 const NUMBER = "8802-1106969";
 
-/** CED's 8802-1106969, $301.81, "13897 HERRINGBONE", open, as recordSupplierInvoiceAsBill reads it. */
+/** CED's 8802-1106969, $301.81, "13897 HONEYSUCKLE", open, as recordSupplierInvoiceAsBill reads it. */
 const recordRow = (jobId: string | null) =>
   OK({
     id: INVOICE,
@@ -75,7 +75,7 @@ const recordRow = (jobId: string | null) =>
     open_balance: "301.81",
     closed: false,
     supplier_accounts: { name: "Consolidated Electrical Distributors" },
-    jobs: jobId ? { name: "13897 Herringbone", job_number: "J-011" } : null,
+    jobs: jobId ? { name: "13897 Honeysuckle", job_number: "J-011" } : null,
   });
 const siblings = OK([{ id: INVOICE, kind: "invoice", total: "301.81", open_balance: "301.81", closed: false }]);
 const docsForSamePurchase = OK([{ id: INVOICE, invoice_number: NUMBER, supplier_account_id: "acct-ced", job_id: null, total: "301.81", invoice_date: "2026-09-04" }]);
@@ -97,7 +97,7 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
       siblings, // the reversal check
       docsForSamePurchase, // the record's own "already in your books?"
     ],
-    "jobs.select": [OK({ id: "j-011", name: "13897 Herringbone", job_number: "J-011" })],
+    "jobs.select": [OK({ id: "j-011", name: "13897 Honeysuckle", job_number: "J-011" })],
     "supplier_invoices.update": [OK([{ id: INVOICE, invoice_number: NUMBER, supplier_account_id: "acct-ced", total: "301.81", invoice_date: "2026-09-04" }])],
     "bill_supplier_invoices.select": [OK([]), OK([]), OK([]), OK([])],
     "bills.select": [OK([]), OK([])],
@@ -112,7 +112,7 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
     state.client = fakeSupabase(happy(), calls);
     const res = await fileSupplierPaper({ invoiceId: INVOICE, jobId: "j-011" });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain(`${NUMBER} is a bill on 13897 Herringbone now: $301.81`);
+    expect(res.message).toContain(`${NUMBER} is a bill on 13897 Honeysuckle now: $301.81`);
     expect(res.undo).toEqual({ invoiceId: INVOICE, billId: "bill-new", jobSetTo: "j-011", jobBefore: null });
     expect(calls.find((c) => c.table === "supplier_invoices" && c.verb === "update")?.payload).toEqual({ job_id: "j-011" });
     expect(calls.find((c) => c.table === "bills" && c.verb === "insert")?.payload).toMatchObject({ job_id: "j-011", amount: 301.81, org_id: "org-1" });
@@ -122,9 +122,9 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
     state.client = fakeSupabase(
       happy({
         "jobs.select": [
-          OK({ id: "j-011", name: "13897 Herringbone", job_number: "J-011" }),
+          OK({ id: "j-011", name: "13897 Honeysuckle", job_number: "J-011" }),
           // The offer's read (ids as the database returns them: uuids, spliced into its filter).
-          OK({ id: "0110aaaa-0000-4000-8000-000000000011", job_number: "J-011", name: "13897 Herringbone", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: "tm" }),
+          OK({ id: "0110aaaa-0000-4000-8000-000000000011", job_number: "J-011", name: "13897 Honeysuckle", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: "tm" }),
         ],
         "payment_milestones.select": [OK([])],
         "quotes.select": [OK([])],
@@ -235,7 +235,7 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
 
   /** A CED counter ticket already on J-011 for the same money: the near match samePurchaseFor finds. */
   const counterTicket = OK([
-    { id: "bill-counter", supplier: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced", bill_number: "8802-SO-257555", supplier_invoice_number: null, amount: "301.81", bill_date: "2026-09-04", job_id: "j-011", is_statement: false, notes: null, jobs: { job_number: "J-011", name: "13897 Herringbone" }, bill_line_items: [] },
+    { id: "bill-counter", supplier: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced", bill_number: "8802-SO-257555", supplier_invoice_number: null, amount: "301.81", bill_date: "2026-09-04", job_id: "j-011", is_statement: false, notes: null, jobs: { job_number: "J-011", name: "13897 Honeysuckle" }, bill_line_items: [] },
   ]);
 
   it("Different Purchase sets aside only the bills the card showed: one it never drew still stops it", async () => {

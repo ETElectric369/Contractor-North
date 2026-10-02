@@ -8,7 +8,7 @@
  *   the place    the STREET NUMBER AND NAME, never the city or the zip. But a job named for its street
  *                (Erik's rule for names, "street number and name as always") would say the street
  *                twice, so then the place is WHO: the customer's name (and nothing when the name
- *                already says who, "Jackie Burks · Panel Upgrade");
+ *                already says who, "Marla Finch · Panel Upgrade");
  *   the time     start to end on the company's clock;
  *   the crew     initials chips, a dashed "Nobody" when no one is on it. A visit carries one person.
  *   (the town small, only where there is room: the week's day header already names the day's towns.)
@@ -39,7 +39,7 @@ export function townOf(line: string | null | undefined): string {
   return "";
 }
 
-// Street words as a key, so "498 Mil Drae Ln." and "498 Mil Drae Lane" are the same street.
+// Street words as a key, so "498 May Dell Ln." and "498 May Dell Lane" are the same street.
 const SUFFIX: Record<string, string> = {
   street: "st", str: "st", avenue: "ave", av: "ave", road: "rd", drive: "dr", lane: "ln", court: "ct",
   boulevard: "blvd", boul: "blvd", place: "pl", circle: "cir", highway: "hwy", parkway: "pkwy", terrace: "ter",
@@ -78,7 +78,7 @@ export function placeLine(p: { name: string | null | undefined; street: string |
 }
 
 /** WHERE A VISIT IS: its own place, else its job's address (a visit booked on a job with no location of
- *  its own, "book an inspection on Herringbone at 9"). My Day's agenda row and the schedule's block and
+ *  its own, "book an inspection on Honeysuckle at 9"). My Day's agenda row and the schedule's block and
  *  day drill all read it from here, so the same visit never says two places. */
 export function visitPlace(a: { location?: string | null; jobs?: { address?: string | null } | null }): string | null {
   return a.location?.trim() || a.jobs?.address?.trim() || null;

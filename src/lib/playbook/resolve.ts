@@ -17,7 +17,7 @@ export function isAnswered(v: AnswerValue | undefined): boolean {
   if (typeof v === "string") return v.trim() !== "";
   if (Array.isArray(v)) return v.length > 0;
   // false is a DECISION, 0 is a MEASUREMENT. Silence is neither — see coerceAnswers, and the
-  // permit that vanished at 13125 Moraine Rd.
+  // permit that vanished at 13125 Mayfern Rd.
   return true;
 }
 

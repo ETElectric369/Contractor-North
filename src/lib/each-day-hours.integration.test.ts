@@ -10,8 +10,8 @@ import { tzDateTimeUtc, tzOffsetMs } from "@/lib/tz";
 
 /**
  * EACH DAY KEEPS ITS OWN HOURS (0370), where it is stored: the database, with the office's own session
- * and the customer's anonymous pick-a-date tap. Erik, 2026-09-28: "i want to put heringbone on the page
- * for the rest of the day after Seiler".
+ * and the customer's anonymous pick-a-date tap. Erik, 2026-09-28: "i want to put honysuckle on the page
+ * for the rest of the day after Siskin".
  *
  *   A · job_schedule_segments carries start_time / end_time: a day's own hours, set together or not at
  *       all, the end after the start; the office writes them and reads them back as the wall clock it

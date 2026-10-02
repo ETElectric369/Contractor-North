@@ -75,7 +75,7 @@ const APPT_KIND: Record<string, WorkKind> = {
   // overruling the only person who knew — twice, silently.
   job: "job",
   // 0232. The rail has been telling him to call people for weeks — "Call to get the address" is
-  // Mike Scrivano's next action — and a call was the one kind of work it could name but not book.
+  // Mike Sparrow's next action — and a call was the one kind of work it could name but not book.
   call: "call",
   inspection: "walkthrough",
   final_inspection: "walkthrough",
@@ -316,7 +316,7 @@ function round(minutes: number): number | null {
 /**
  * THREE DAYS MEANS THREE DAYS ON THE CALENDAR.
  *
- * Erik: "check 10244 Schaffer i just set it for 3 days and it only showed up on the schedule for 1
+ * Erik: "check 10244 Snowbell i just set it for 3 days and it only showed up on the schedule for 1
  * day."
  *
  * Placing a job added exactly one day segment, whatever it was sized at — so the size was written,
@@ -372,7 +372,7 @@ export function workingDaysFrom(startISO: string, count: number): string[] {
 /**
  * A WEEK OF WORK ENDS ON FRIDAY, NOT AT MIDNIGHT ON MONDAY.
  *
- * Erik: "look at the Jason Waldow job i set it for a week (lets make that the 5 working days by
+ * Erik: "look at the Jason Wexley job i set it for a week (lets make that the 5 working days by
  * default) but it only showed up as 1 day."
  *
  * A lead booked as work becomes an appointment, and an appointment is one starts_at/ends_at pair —

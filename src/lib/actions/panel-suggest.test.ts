@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * NORT AND THE PANEL (Panel plan, phase 4): Nort FILLS, a person saves.
  *
  *   get_job_panel   Nort reads the job's panel (both the crew and the office: "what's on 7 at
- *                   Herringbone"), the door by space, what's waiting to be kept, and the breaker
+ *                   Honeysuckle"), the door by space, what's waiting to be kept, and the breaker
  *                   count. No price, supplier or ticket number anywhere in it.
  *   panel.suggest   Nort's only write to the circuit list: SUGGESTIONS, source 'nort', which count
  *                   for nothing until a person taps Keep. There is no keep verb for the agent.
@@ -18,7 +18,7 @@ import { REGISTRY, listActions } from "./registry";
 import { AGENT_WRITE_ALLOWED, agentWriteToolsForRole } from "./agent-tools";
 import { needsConsent } from "./risk";
 import { DATA_TOOLS, STAFF_ONLY_DATA_TOOLS, runDataTool } from "@/lib/assistant-tools";
-import { FINAL_MAP, PANEL, PANEL_ID } from "@/lib/panel/__fixtures__/herringbone";
+import { FINAL_MAP, PANEL, PANEL_ID } from "@/lib/panel/__fixtures__/honeysuckle";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const JOB = "8760a051-b6f8-4a6b-b3a5-6ac7078f9ac1";
@@ -72,10 +72,10 @@ describe("panel.suggest: the registry's only panel verb, a suggestion", () => {
     expect(def.description).toMatch(/NEVER say the circuit is added, kept/);
   });
 
-  it("'add a 20 amp for the garage freezer on Herringbone' lands as a suggestion from Nort and says a person keeps it", async () => {
+  it("'add a 20 amp for the garage freezer on Honeysuckle' lands as a suggestion from Nort and says a person keeps it", async () => {
     s.client = fakeSupabase(
       {
-        "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Herringbone" }, error: null }],
+        "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Honeysuckle" }, error: null }],
         "job_circuits.select": [{ data: FINAL_MAP, error: null }, { data: { sort_order: 22 }, error: null }],
         "job_panels.select": [{ data: [{ id: PANEL_ID }], error: null }],
         "job_circuits.insert": [
@@ -97,13 +97,13 @@ describe("panel.suggest: the registry's only panel verb, a suggestion", () => {
       expect.objectContaining({ job_id: JOB, panel_id: PANEL_ID, room: "Garage", description: "Freezer", amps: 20, poles: 1, state: "suggested", source: "nort", source_document_id: null, sort_order: 23 }),
     ]);
     expect(ins.payload[0].source_row).not.toHaveProperty("quote_number");
-    expect(r.recorded).toBe("Suggested on 13897 Herringbone: 20A · 1P · Garage Freezer. Nothing counts until someone taps Keep on the job's Panel tab.");
+    expect(r.recorded).toBe("Suggested on 13897 Honeysuckle: 20A · 1P · Garage Freezer. Nothing counts until someone taps Keep on the job's Panel tab.");
   });
 
   it("a circuit already on the list is said, not suggested twice (nothing written)", async () => {
     s.client = fakeSupabase(
       {
-        "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Herringbone" }, error: null }],
+        "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Honeysuckle" }, error: null }],
         "job_circuits.select": [{ data: FINAL_MAP, error: null }],
         "job_panels.select": [{ data: [{ id: PANEL_ID }], error: null }],
       },
@@ -118,7 +118,7 @@ describe("panel.suggest: the registry's only panel verb, a suggestion", () => {
   });
 
   it("an amps figure that isn't a breaker size is refused in plain words before anything is read", async () => {
-    s.client = fakeSupabase({ "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Herringbone" }, error: null }] }, calls);
+    s.client = fakeSupabase({ "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Honeysuckle" }, error: null }] }, calls);
     const r = await REGISTRY["panel.suggest"].handler(
       REGISTRY["panel.suggest"].input.parse({ job_id: JOB, circuits: [{ description: "Freezer", amps: 17 }] }),
       { userId: "u1", orgId: ORG, role: "tech" },
@@ -138,7 +138,7 @@ describe("get_job_panel: Nort reads the panel", () => {
     const waiting = { ...FINAL_MAP[0], id: "sug", state: "suggested", source: "photo", description: null, panel_label: "Smokes", amps: null, kind: "afci", space: null, source_row: { key: "k", check: null } };
     s.client = fakeSupabase(
       {
-        "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Herringbone" }, error: null }],
+        "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Honeysuckle" }, error: null }],
         "job_panels.select": [{ data: [PANEL], error: null }],
         "job_circuits.select": [{ data: [...placed, waiting], error: null }],
         "rpc.breakers_bought_for_job": [{ data: [{ description: "SIEM Q2020", qty: 8 }, { description: "SIEM Q21530CT", qty: 1 }], error: null }],

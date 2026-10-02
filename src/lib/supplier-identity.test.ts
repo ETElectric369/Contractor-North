@@ -27,8 +27,8 @@ const SCANNED = [
   "Mountain Hardware and Sports",
   "Outdoor Supply Hardware (OSH - Cupertino)",
   "OSH - Cupertino",
-  "Swigard's Hardware",
-  "Swigards",
+  "Brandow's Hardware",
+  "Brandows",
 ];
 
 const groupWith = (name: string) =>
@@ -73,7 +73,7 @@ describe("normalising a scanned supplier name", () => {
   });
 
   it("drops possessives and treats & and and alike", () => {
-    expect(normalizeSupplierName("Swigard's Hardware")).toBe("swigards hardware");
+    expect(normalizeSupplierName("Brandow's Hardware")).toBe("brandows hardware");
     expect(normalizeSupplierName("Mountain Hardware & Sports")).toBe(
       normalizeSupplierName("Mountain Hardware and Sports"),
     );
@@ -148,15 +148,15 @@ describe("the other splits in his book", () => {
     expect(g?.suggestedName).toBe("Outdoor Supply Hardware (OSH - Cupertino)");
   });
 
-  it("pairs Swigards with Swigard's Hardware", () => {
-    const g = groupWith("Swigards");
-    expect(g?.members.sort()).toEqual(["Swigard's Hardware", "Swigards"]);
-    expect(g?.suggestedName).toBe("Swigard's Hardware");
+  it("pairs Brandows with Brandow's Hardware", () => {
+    const g = groupWith("Brandows");
+    expect(g?.members.sort()).toEqual(["Brandow's Hardware", "Brandows"]);
+    expect(g?.suggestedName).toBe("Brandow's Hardware");
     expect(g?.reasons.join(" ")).toContain('"Hardware"');
   });
 
   it("proposes nothing at all for a book with no near-misses in it", () => {
-    const { groups, candidates } = suggestSupplierGroups(["Home Depot", "Swigards", "CED"]);
+    const { groups, candidates } = suggestSupplierGroups(["Home Depot", "Brandows", "CED"]);
     expect(groups).toEqual([]);
     expect(candidates).toEqual([]);
   });
@@ -211,8 +211,8 @@ describe("an alias is the only automatic mapping", () => {
 
 describe("reading the invoice number off a CED portal filename", () => {
   it("reads account, date and invoice number", () => {
-    expect(parseSupplierFilename("TR-34426_20260616_32136931_15165103264.pdf")).toEqual({
-      accountNumber: "TR-34426",
+    expect(parseSupplierFilename("AC-10427_20260616_32136931_15165103264.pdf")).toEqual({
+      accountNumber: "AC-10427",
       date: "2026-06-16",
       invoiceNumber: "32136931",
       internalId: "15165103264",
@@ -221,14 +221,14 @@ describe("reading the invoice number off a CED portal filename", () => {
 
   it("sees through both importer prefixes and a reconciliation note underneath", () => {
     expect(
-      parseSupplierFilename("Receipt recorded as cost: TR-34426_20260730_32270817_15165103264.pdf")?.invoiceNumber,
+      parseSupplierFilename("Receipt recorded as cost: AC-10427_20260730_32270817_15165103264.pdf")?.invoiceNumber,
     ).toBe("32270817");
     expect(
-      parseSupplierFilename("Receipt filed by Organize My: TR-34426_20260616_32136931_15165103264.pdf")?.date,
+      parseSupplierFilename("Receipt filed by Organize My: AC-10427_20260616_32136931_15165103264.pdf")?.date,
     ).toBe("2026-06-16");
     expect(
       parseSupplierFilename(
-        "Receipt recorded as cost: TR-34426_20260616_32136931_15165103264.pdf\n\nCHECK THIS ONE: the items read off this receipt add up to...",
+        "Receipt recorded as cost: AC-10427_20260616_32136931_15165103264.pdf\n\nCHECK THIS ONE: the items read off this receipt add up to...",
       )?.invoiceNumber,
     ).toBe("32136931");
   });
@@ -237,10 +237,10 @@ describe("reading the invoice number off a CED portal filename", () => {
     for (const bad of [
       "image.jpg",
       "85 Whit.pdf",
-      "85 Whitney Pl - CED.pdf",
+      "41 Larkspur Pl - CED.pdf",
       "Receipt recorded as cost: 85 Whit.pdf",
-      "TR-34426_20260616_32136931.pdf", // three parts, not four
-      "TR-34426_20261345_32136931_151.pdf", // month 13 is not a date
+      "AC-10427_20260616_32136931.pdf", // three parts, not four
+      "AC-10427_20261345_32136931_151.pdf", // month 13 is not a date
       "",
       null,
       undefined,
@@ -280,18 +280,18 @@ describe("reading invoice numbers out of OCR'd line descriptions", () => {
 describe("one reading per bill", () => {
   it("prefers the portal filename when the lines carry no number", () => {
     const r = readBillInvoice({
-      notes: "Receipt recorded as cost: TR-34426_20260616_32136931_15165103264.pdf",
+      notes: "Receipt recorded as cost: AC-10427_20260616_32136931_15165103264.pdf",
       lineDescriptions: ["3/4 EMT connector"],
     });
     expect(r.invoiceNumber).toBe("32136931");
     expect(r.source).toBe("filename");
-    expect(r.file?.accountNumber).toBe("TR-34426");
-    expect(describeInvoiceReading(r)).toContain("TR-34426");
+    expect(r.file?.accountNumber).toBe("AC-10427");
+    expect(describeInvoiceReading(r)).toContain("AC-10427");
   });
 
   it("a statement has no single number, whatever the file was called", () => {
     const r = readBillInvoice({
-      notes: "Receipt recorded as cost: TR-34426_20260616_32136931_15165103264.pdf",
+      notes: "Receipt recorded as cost: AC-10427_20260616_32136931_15165103264.pdf",
       lineDescriptions: ["Sales Tax (Invoice 8802-1101363)", "Wire (Invoice 8802-1105963)"],
     });
     expect(r.isStatement).toBe(true);
@@ -319,44 +319,44 @@ describe("one reading per bill", () => {
 });
 
 describe("the same ticket filed to two jobs", () => {
-  // The real pair in his book: $95.27, 8 lines, CED, one filed 07-29 to 13631 Northwoods and one
-  // filed 08-28 to 85 Whitney Place.
-  const northwoods = {
+  // The real pair in his book: $95.27, 8 lines, CED, one filed 07-29 to 13631 Nightshade and one
+  // filed 08-28 to 41 Larkspur Place.
+  const nightshade = {
     id: "b1",
     supplier: "Consolidated Electrical Distributors, Inc.",
     amount: 95.27,
     billDate: "2026-07-29",
-    jobLabel: "13631 Northwoods",
+    jobLabel: "13631 Nightshade",
     lineCount: 8,
   };
-  const whitney = {
+  const larkspur = {
     id: "b2",
     supplier: "Consolidated Electrical Dist.",
     amount: 95.27,
     billDate: "2026-08-28",
-    jobLabel: "85 Whitney Place",
+    jobLabel: "41 Larkspur Place",
     lineCount: 8,
   };
 
   it("asks about it, naming both jobs, and picks neither", () => {
-    const found = findDuplicateBills([northwoods, whitney]);
+    const found = findDuplicateBills([nightshade, larkspur]);
     expect(found).toHaveLength(1);
     expect(found[0].amount).toBe(95.27);
-    expect(found[0].reason).toContain("13631 Northwoods");
-    expect(found[0].reason).toContain("85 Whitney Place");
+    expect(found[0].reason).toContain("13631 Nightshade");
+    expect(found[0].reason).toContain("41 Larkspur Place");
     expect(found[0].reason).toContain("until you say which");
   });
 
   it("stays quiet when only the amount matches", () => {
-    expect(findDuplicateBills([northwoods, { ...whitney, lineCount: 3 }])).toEqual([]);
-    expect(findDuplicateBills([northwoods, { ...whitney, supplier: "Swigards", lineCount: 8 }])).toEqual([]);
-    expect(findDuplicateBills([northwoods, { ...whitney, amount: 95.28 }])).toEqual([]);
+    expect(findDuplicateBills([nightshade, { ...larkspur, lineCount: 3 }])).toEqual([]);
+    expect(findDuplicateBills([nightshade, { ...larkspur, supplier: "Brandows", lineCount: 8 }])).toEqual([]);
+    expect(findDuplicateBills([nightshade, { ...larkspur, amount: 95.28 }])).toEqual([]);
   });
 
   it("matches on a shared invoice number even when the line counts differ", () => {
     const found = findDuplicateBills([
-      { ...northwoods, lineCount: 8, invoiceNumber: "8802-1101363" },
-      { ...whitney, lineCount: 2, invoiceNumber: "8802-1101363" },
+      { ...nightshade, lineCount: 8, invoiceNumber: "8802-1101363" },
+      { ...larkspur, lineCount: 2, invoiceNumber: "8802-1101363" },
     ]);
     expect(found).toHaveLength(1);
     expect(found[0].reason).toContain("8802-1101363");
@@ -384,8 +384,8 @@ describe("one distinctive word is a question, not a merge (cn-v963 review)", () 
 });
 
 describe("a shorter name is not a conflicting one (cn-v963 review, second pass)", () => {
-  it("still pairs Swigards with Swigard's Hardware", () => {
-    const m = matchSupplierNames("Swigards", "Swigard's Hardware");
+  it("still pairs Brandows with Brandow's Hardware", () => {
+    const m = matchSupplierNames("Brandows", "Brandow's Hardware");
     expect(m?.confidence === "strong" || m?.confidence === "likely").toBe(true);
   });
   it("still refuses Ace Hardware against Ace Rentals", () => {

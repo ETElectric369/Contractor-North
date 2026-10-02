@@ -23,7 +23,7 @@ export type ShelfLotView = {
   cost: number;
   piecesLeft: number;
   costLeft: number;
-  /** Where it came from, in words: "from CED, 8/19 (bought on Herringbone)". */
+  /** Where it came from, in words: "from CED, 8/19 (bought on Honeysuckle)". */
   from: string;
   boughtOn: string | null;
   live: boolean;

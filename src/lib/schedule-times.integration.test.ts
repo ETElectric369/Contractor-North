@@ -7,7 +7,7 @@ import { tzDateTimeUtc } from "@/lib/tz";
 
 /**
  * A JOB LANDS EXACTLY WHERE AND AS LONG AS CHOSEN, where it is stored: the database, with the office's
- * own session (Erik, 2026-09-28, J-058 Seiler · 3-way switches: "i set it for 2 hours and it jumped to a
+ * own session (Erik, 2026-09-28, J-058 Siskin · 3-way switches: "i set it for 2 hours and it jumped to a
  * later time block for many hours").
  *
  *   · the company's clock on any date: Postgres' own timezone database agrees with lib/tz's wall-clock

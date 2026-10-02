@@ -32,7 +32,7 @@ import { generateQuoteDraftFromPlan, generateQuoteDraftFromSupplier } from "./ac
 const ORG = "11111111-1111-4111-8111-111111111111";
 const JOB = "22222222-2222-4222-8222-222222222222";
 const CUST = "66666666-6666-4666-8666-666666666666";
-const STASH = `${ORG}/ai-uploads/9b2c-Herringbone_E-sheets.pdf`;
+const STASH = `${ORG}/ai-uploads/9b2c-Honeysuckle_E-sheets.pdf`;
 
 type Ops = { removed: string[][]; moved: [string, string][]; downloads: string[]; inserts: { table: string; payload: any }[] };
 let ops: Ops;
@@ -110,18 +110,18 @@ beforeEach(() => {
 describe("Upload Plans keeps the plans", () => {
   it("on the job (and its customer): moved into the job's folder, filed as a Plan, never removed from storage", async () => {
     s.client = fakeSupabase({
-      "jobs.select.one": { id: JOB, job_number: "J-011", name: "13897 Herringbone", customer_id: CUST },
-      "customers.select.one": { id: CUST, name: "Andrew Cohen" },
+      "jobs.select.one": { id: JOB, job_number: "J-011", name: "13897 Honeysuckle", customer_id: CUST },
+      "customers.select.one": { id: CUST, name: "Andrew Crake" },
       "documents.insert": [{ id: "doc-1" }],
     });
     stubModel(JSON.stringify({ description: "", items: [], questions: [] }));
-    const r = await generateQuoteDraftFromPlan(form({ storagePath: STASH, fileName: "Herringbone E-sheets.pdf", jobId: JOB }));
-    expect(r.kept).toEqual({ kept: true, words: "Kept as a Plan on 13897 Herringbone.", documentId: "doc-1" });
+    const r = await generateQuoteDraftFromPlan(form({ storagePath: STASH, fileName: "Honeysuckle E-sheets.pdf", jobId: JOB }));
+    expect(r.kept).toEqual({ kept: true, words: "Kept as a Plan on 13897 Honeysuckle.", documentId: "doc-1" });
     expect(ops.moved).toHaveLength(1);
     expect(ops.moved[0][0]).toBe(STASH);
-    expect(ops.moved[0][1]).toMatch(new RegExp(`^${ORG}/${JOB}/\\d+-Herringbone_E-sheets\\.pdf$`));
+    expect(ops.moved[0][1]).toMatch(new RegExp(`^${ORG}/${JOB}/\\d+-Honeysuckle_E-sheets\\.pdf$`));
     const doc = ops.inserts.find((i) => i.table === "documents")!;
-    expect(doc.payload).toMatchObject({ org_id: ORG, job_id: JOB, customer_id: CUST, category: "Plan", kind: "other", name: "Herringbone E-sheets.pdf", uploaded_by: "user-1" });
+    expect(doc.payload).toMatchObject({ org_id: ORG, job_id: JOB, customer_id: CUST, category: "Plan", kind: "other", name: "Honeysuckle E-sheets.pdf", uploaded_by: "user-1" });
     // The stash itself is never deleted out from under the filed plan.
     expect(ops.removed).toEqual([]);
   });

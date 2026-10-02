@@ -10,7 +10,7 @@ import { paymentMethodKey } from "@/lib/payment-method";
  * THE ONE WRITER FOR STRIPE MONEY ON AN INVOICE.
  *
  * Until 2026-09-30 this lived inside the webhook handler as a closure, and the webhook was the
- * only door card money came through. Then Rich Seiler's $420 (INV-083): the phone said
+ * only door card money came through. Then Rich Siskin's $420 (INV-083): the phone said
  * "approved", Stripe never charged, and the sheet waited for a webhook that could never come.
  * The fix makes the Pay Now sheet ask Stripe itself (tapPaymentOutcome) — and when Stripe says
  * succeeded and the webhook hasn't landed yet, the sheet has to be able to BOOK it. A second

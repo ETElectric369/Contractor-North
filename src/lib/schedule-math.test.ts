@@ -52,7 +52,7 @@ describe("removeDaySegment: take ONE day off (the undo of Book This Day, Wave 2 
 });
 
 describe("keepWorkedDays: a reschedule moves the plan, not the history", () => {
-  it("Herringbone: moving a 22nd-23rd job to the 24th keeps the 22nd, where time was logged", () => {
+  it("Honeysuckle: moving a 22nd-23rd job to the 24th keeps the 22nd, where time was logged", () => {
     const before = [{ start: "2026-09-22", end: "2026-09-23" }];
     const after = [{ start: "2026-09-24", end: "2026-09-24" }];
     const r = keepWorkedDays(before, after, ["2026-09-18", "2026-09-22"], "2026-09-24");
@@ -92,7 +92,7 @@ describe("keepWorkedDays: a reschedule moves the plan, not the history", () => {
   });
 
   it("the job's listed start (the mirror) follows the new window, not the kept day", () => {
-    // Herringbone again: the calendar keeps the 22nd, but the job's scheduled_start must read the
+    // Honeysuckle again: the calendar keeps the 22nd, but the job's scheduled_start must read the
     // 24th, or Nort's "what's on the 24th" (which reads the mirror) no longer lists the job.
     const r = keepWorkedDays(
       [{ start: "2026-09-22", end: "2026-09-23" }],

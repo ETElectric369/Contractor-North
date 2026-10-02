@@ -163,8 +163,8 @@ describe("createJob: never born on hold", () => {
   it("refuses On Hold in words, before anything (a customer included) is written", async () => {
     const fd = new FormData();
     fd.set("status", "on_hold");
-    fd.set("new_customer_name", "Jackie Burks");
-    fd.set("name", "5659 Rhodesia");
+    fd.set("new_customer_name", "Marla Finch");
+    fd.set("name", "5659 Fernhill");
     expect(await createJob(fd)).toEqual({ ok: false, error: "Make the job first, then put it on hold. It asks why and for a day." });
     expect(state.writes).toEqual([]);
   });

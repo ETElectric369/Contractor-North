@@ -453,7 +453,7 @@ describe("My Day's cards (structural: the page is a server component over the da
 describe("the Now card (rendered)", () => {
   const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
   const punch = (over: Record<string, unknown> = {}) => ({ id: "p1", clock_in: at(2), notes: null, onJob: true, ...over });
-  const job = { name: "J-055 Smith Panel", sub: "Nora Smith · 85 Whitney", href: "/jobs/j55" };
+  const job = { name: "J-055 Smith Panel", sub: "Nora Smith · 41 Larkspur", href: "/jobs/j55" };
   const render = (props: Record<string, unknown>) =>
     renderToStaticMarkup(createElement(NowCard, { userId: "u1", ...props } as any, createElement("div", null, "THE-DOORS")));
 
@@ -463,7 +463,7 @@ describe("the Now card (rendered)", () => {
     expect(html).toMatch(/tabular-nums[^>]*>\d+:\d{2}:\d{2}</);
     expect(html).toMatch(/<a[^>]*href="\/jobs\/j55"[^>]*>J-055 Smith Panel<\/a>/);
     expect(html.match(/href="\/jobs\/j55"/g)).toHaveLength(1);
-    expect(html).toContain("Nora Smith · 85 Whitney");
+    expect(html).toContain("Nora Smith · 41 Larkspur");
     expect(html).not.toMatch(/>\s*Open\s*</);
     // Top to bottom: the name, the doors, the lunch box, Timeclock, Clock Out.
     const order = ["J-055 Smith Panel", "THE-DOORS", LUNCH_LABEL, ">Timeclock<", "Clock Out"].map((w) => html.indexOf(w));

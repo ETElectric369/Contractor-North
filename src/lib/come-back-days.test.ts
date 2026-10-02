@@ -101,7 +101,7 @@ describe("the words", () => {
     expect(offHoldWords({ jobNumber: "J-048", reason: "Waiting on the permit." })).toBe(
       "J-048 was on hold (Waiting on the permit). It's off hold now.",
     );
-    expect(offHoldWords({ jobNumber: null, name: "Tanager Ln", reason: null })).toBe("Tanager Ln was on hold. It's off hold now.");
+    expect(offHoldWords({ jobNumber: null, name: "Tupelo Ln", reason: null })).toBe("Tupelo Ln was on hold. It's off hold now.");
     expect(offHoldWords({})).toBe("That job was on hold. It's off hold now.");
   });
 });

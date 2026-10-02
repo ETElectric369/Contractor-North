@@ -11,12 +11,12 @@ const APPLE = [
   "BEGIN:VCARD",
   "VERSION:3.0",
   "PRODID:-//Apple Inc.//iPhone OS 17.5.1//EN",
-  "N:Cain;Sara;;;",
-  "FN:Sara Cain",
-  "ORG:Cain Residence;",
+  "N:Dale;Sara;;;",
+  "FN:Sara Dale",
+  "ORG:Dale Residence;",
   "item1.TEL;type=HOME;type=VOICE:(530) 555-9999",
   "item2.TEL;type=CELL;type=VOICE;type=pref:(775) 555-0142",
-  "item3.EMAIL;type=INTERNET;type=HOME;type=pref:sara.cain@example.com",
+  "item3.EMAIL;type=INTERNET;type=HOME;type=pref:sara.dale@example.com",
   "item4.ADR;type=HOME;type=pref:;;1234 Alder Creek Rd;Truckee;CA;96161;United States",
   "END:VCARD",
 ].join("\r\n");
@@ -25,10 +25,10 @@ describe("parseVCards", () => {
   it("reads every field off a real iPhone export, not just the name", () => {
     const [c] = parseVCards(APPLE);
     expect(c).toEqual({
-      name: "Sara Cain",
-      company_name: "Cain Residence",
+      name: "Sara Dale",
+      company_name: "Dale Residence",
       phone: "(775) 555-0142",
-      email: "sara.cain@example.com",
+      email: "sara.dale@example.com",
       address: "1234 Alder Creek Rd",
       city: "Truckee",
       state: "CA",
@@ -42,9 +42,9 @@ describe("parseVCards", () => {
   });
 
   it("still reads an ungrouped card (Google/Outlook emit these)", () => {
-    const plain = "BEGIN:VCARD\nVERSION:3.0\nFN:Andrew Cohen\nTEL;TYPE=CELL:5305551234\nEMAIL:a@b.com\nEND:VCARD";
+    const plain = "BEGIN:VCARD\nVERSION:3.0\nFN:Andrew Crake\nTEL;TYPE=CELL:5305551234\nEMAIL:a@b.com\nEND:VCARD";
     const [c] = parseVCards(plain);
-    expect(c.name).toBe("Andrew Cohen");
+    expect(c.name).toBe("Andrew Crake");
     expect(c.phone).toBe("5305551234");
     expect(c.email).toBe("a@b.com");
   });
@@ -55,7 +55,7 @@ describe("parseVCards", () => {
   });
 
   it("honours RFC line folding", () => {
-    const folded = "BEGIN:VCARD\r\nFN:Sara Cain\r\nitem1.ADR;type=HOME:;;1234 Alder\r\n  Creek Rd;Truckee;CA;96161;\r\nEND:VCARD";
+    const folded = "BEGIN:VCARD\r\nFN:Sara Dale\r\nitem1.ADR;type=HOME:;;1234 Alder\r\n  Creek Rd;Truckee;CA;96161;\r\nEND:VCARD";
     expect(parseVCards(folded)[0].address).toBe("1234 Alder Creek Rd");
   });
 });

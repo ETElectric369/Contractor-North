@@ -40,27 +40,27 @@ const TODAY = "2026-09-19";
  *  not possibly have been recorded here, so it is counted and named, never nagged about. */
 const RECORDS_START = "2026-06-01";
 
-/** His jobs, exactly as they read in his book tonight. Five of them are on Rhodesia Road and two
- *  are at 235 Timbercreek, which is the entire reason this matcher refuses to pick. */
+/** His jobs, exactly as they read in his book tonight. Five of them are on Fernhill Road and two
+ *  are at 235 Thistlewood, which is the entire reason this matcher refuses to pick. */
 const JOBS: ReconcileJob[] = [
-  { id: "j-002", jobNumber: "J-002", name: "Tao Zhu", status: "in_progress", address: "235 Timbercreek Court" },
-  { id: "j-006", jobNumber: "J-006", name: "5659 Rhodesia", status: "complete", address: "5659 Rhodesia Road" },
-  { id: "j-009", jobNumber: "J-009", name: "TTP #11", status: "complete", address: "300 W Lake Blvd, Tahoe City, CA 96145, USA" },
-  { id: "j-010", jobNumber: "J-010", name: "11301 Purple Sage", status: "complete", address: "11301 Purple Sage Rd, Truckee, CA 96161, USA" },
-  { id: "j-011", jobNumber: "J-011", name: "13897 Herringbone", status: "in_progress", address: "13897 Herringbone Way" },
-  { id: "j-013", jobNumber: "J-013", name: "TTP #56", status: "on_hold", address: "300 W Lake Blvd, Tahoe City, CA 96145, USA" },
-  { id: "j-014", jobNumber: "J-014", name: "5659 Rhodesia", status: "to_be_scheduled", address: "5659 Rhodesia Rd, Carnelian Bay, CA 96140, USA" },
-  { id: "j-016", jobNumber: "J-016", name: "13466 Northwoods", status: "complete", address: "13466 Northwoods Boulevard" },
-  { id: "j-017", jobNumber: "J-017", name: "TTP #224", status: "complete", address: "300 West Lake Boulevard" },
-  { id: "j-028", jobNumber: "J-028", name: "85 Whitney Place", status: "in_progress", address: "85 Whitney Court" },
-  { id: "j-030", jobNumber: "J-030", name: "13631 Northwoods", status: "complete", address: "13631 Northwoods Boulevard" },
-  { id: "j-032", jobNumber: "J-032", name: "Tao Zhu - Chandalier", status: "complete", address: "235 Timbercreek Ct, Reno, NV 89511, USA" },
-  { id: "j-033", jobNumber: "J-033", name: "5659 Rhodesia", status: "complete", address: "5659 Rhodesia Rd, Carnelian Bay, CA 96140, USA" },
-  { id: "j-034", jobNumber: "J-034", name: "5659 Rhodesia - Panel Upgrade", status: "on_hold", address: "5659 Rhodesia Road" },
-  { id: "j-039", jobNumber: "J-039", name: "10410 Badger Lane", status: "complete", address: "10410 Badger Lane" },
-  { id: "j-042", jobNumber: "J-042", name: "TTP #106", status: "in_progress", address: "300 West Lake Boulevard" },
-  { id: "j-045", jobNumber: "J-045", name: "13683 Hillside", status: "complete", address: "13683 Hillside Drive" },
-  { id: "j-047", jobNumber: "J-047", name: "Jackie Burks", status: "scheduled", address: "5659 Rhodesia Road" },
+  { id: "j-002", jobNumber: "J-002", name: "Tess Zane", status: "in_progress", address: "235 Thistlewood Court" },
+  { id: "j-006", jobNumber: "J-006", name: "5659 Fernhill", status: "complete", address: "5659 Fernhill Road" },
+  { id: "j-009", jobNumber: "J-009", name: "ARR #11", status: "complete", address: "300 W Garnet Blvd, Tahoe City, CA 96145, USA" },
+  { id: "j-010", jobNumber: "J-010", name: "11301 Pinyon Sage", status: "complete", address: "11301 Pinyon Sage Rd, Truckee, CA 96161, USA" },
+  { id: "j-011", jobNumber: "J-011", name: "13897 Honeysuckle", status: "in_progress", address: "13897 Honeysuckle Way" },
+  { id: "j-013", jobNumber: "J-013", name: "ARR #56", status: "on_hold", address: "300 W Garnet Blvd, Tahoe City, CA 96145, USA" },
+  { id: "j-014", jobNumber: "J-014", name: "5659 Fernhill", status: "to_be_scheduled", address: "5659 Fernhill Rd, Carnelian Bay, CA 96140, USA" },
+  { id: "j-016", jobNumber: "J-016", name: "13466 Nightshade", status: "complete", address: "13466 Nightshade Boulevard" },
+  { id: "j-017", jobNumber: "J-017", name: "ARR #224", status: "complete", address: "300 West Garnet Boulevard" },
+  { id: "j-028", jobNumber: "J-028", name: "41 Larkspur Place", status: "in_progress", address: "41 Larkspur Court" },
+  { id: "j-030", jobNumber: "J-030", name: "13631 Nightshade", status: "complete", address: "13631 Nightshade Boulevard" },
+  { id: "j-032", jobNumber: "J-032", name: "Tess Zane - Chandalier", status: "complete", address: "235 Thistlewood Ct, Reno, NV 89511, USA" },
+  { id: "j-033", jobNumber: "J-033", name: "5659 Fernhill", status: "complete", address: "5659 Fernhill Rd, Carnelian Bay, CA 96140, USA" },
+  { id: "j-034", jobNumber: "J-034", name: "5659 Fernhill - Panel Upgrade", status: "on_hold", address: "5659 Fernhill Road" },
+  { id: "j-039", jobNumber: "J-039", name: "10410 Bayberry Lane", status: "complete", address: "10410 Bayberry Lane" },
+  { id: "j-042", jobNumber: "J-042", name: "ARR #106", status: "in_progress", address: "300 West Garnet Boulevard" },
+  { id: "j-045", jobNumber: "J-045", name: "13683 Hazelnut", status: "complete", address: "13683 Hazelnut Drive" },
+  { id: "j-047", jobNumber: "J-047", name: "Marla Finch", status: "scheduled", address: "5659 Fernhill Road" },
 ];
 
 const jobNamed = (name: string) => JOBS.find((j) => j.name === name)!.id;
@@ -95,40 +95,40 @@ function invoice(partial: Partial<SupplierInvoiceRow>): SupplierInvoiceRow {
 function hisBook(): SupplierInvoiceRow[] {
   return [
     // ── open ────────────────────────────────────────────────────────────────────────────────
-    invoice({ invoiceNumber: "8802-1107820", invoiceDate: "2026-09-16", jobNameRaw: "85 WHITNEY", total: 187.64, openBalance: 187.64, discountAmount: 1.77, discountBy: "2026-10-10" }),
-    invoice({ invoiceNumber: "8802-1107695", invoiceDate: "2026-09-16", jobNameRaw: "85 WHITNEY", total: 1062.18, openBalance: 1062.18, discountAmount: 8.47, discountBy: "2026-10-10", billCount: 1 }),
-    invoice({ invoiceNumber: "8802-1106969", invoiceDate: "2026-09-04", jobNameRaw: "13897 HERRINGBONE", total: 301.81, openBalance: 301.81, discountAmount: 5.54, discountBy: "2026-10-10" }),
-    invoice({ invoiceNumber: "8802-1107337", invoiceDate: "2026-09-03", kind: "credit_memo", jobNameRaw: "TTP 106", total: -225.47, openBalance: -225.47 }),
-    invoice({ invoiceNumber: "8802-1107338", invoiceDate: "2026-09-03", jobNameRaw: "TTP106", total: 223.29, openBalance: 223.29, discountAmount: 4.1, discountBy: "2026-10-10" }),
-    invoice({ invoiceNumber: "8802-1107230", invoiceDate: "2026-09-03", jobNameRaw: "TTP 106", total: 225.47, openBalance: 225.47, discountAmount: 4.14, discountBy: "2026-10-10" }),
-    invoice({ invoiceNumber: "8802-1107139", invoiceDate: "2026-09-01", jobNameRaw: "13683 HILLSIDE", total: 59.17, openBalance: 59.17, discountAmount: 0.9, discountBy: "2026-10-10" }),
-    invoice({ invoiceNumber: "8802-1107088", invoiceDate: "2026-09-01", jobNameRaw: "13683 HILLSIDE", total: 456.02, openBalance: 456.02, discountAmount: 4.7, discountBy: "2026-10-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1107820", invoiceDate: "2026-09-16", jobNameRaw: "41 LARKSPUR", total: 187.64, openBalance: 187.64, discountAmount: 1.77, discountBy: "2026-10-10" }),
+    invoice({ invoiceNumber: "8802-1107695", invoiceDate: "2026-09-16", jobNameRaw: "41 LARKSPUR", total: 1062.18, openBalance: 1062.18, discountAmount: 8.47, discountBy: "2026-10-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1106969", invoiceDate: "2026-09-04", jobNameRaw: "13897 HONEYSUCKLE", total: 301.81, openBalance: 301.81, discountAmount: 5.54, discountBy: "2026-10-10" }),
+    invoice({ invoiceNumber: "8802-1107337", invoiceDate: "2026-09-03", kind: "credit_memo", jobNameRaw: "ARR 106", total: -225.47, openBalance: -225.47 }),
+    invoice({ invoiceNumber: "8802-1107338", invoiceDate: "2026-09-03", jobNameRaw: "ARR106", total: 223.29, openBalance: 223.29, discountAmount: 4.1, discountBy: "2026-10-10" }),
+    invoice({ invoiceNumber: "8802-1107230", invoiceDate: "2026-09-03", jobNameRaw: "ARR 106", total: 225.47, openBalance: 225.47, discountAmount: 4.14, discountBy: "2026-10-10" }),
+    invoice({ invoiceNumber: "8802-1107139", invoiceDate: "2026-09-01", jobNameRaw: "13683 HAZELNUT", total: 59.17, openBalance: 59.17, discountAmount: 0.9, discountBy: "2026-10-10" }),
+    invoice({ invoiceNumber: "8802-1107088", invoiceDate: "2026-09-01", jobNameRaw: "13683 HAZELNUT", total: 456.02, openBalance: 456.02, discountAmount: 4.7, discountBy: "2026-10-10", billCount: 1 }),
     invoice({ invoiceNumber: "9019994306", invoiceDate: "2026-08-25", kind: "service_charge", total: 15.16, openBalance: 15.16 }),
     invoice({ invoiceNumber: "8802-1106249", invoiceDate: "2026-08-21", jobNameRaw: "13897 HERRING BONE", total: 150.27, openBalance: 150.27, discountAmount: 1.15, discountBy: "2026-09-10", billCount: 1 }),
     invoice({ invoiceNumber: "8802-1106188", invoiceDate: "2026-08-21", jobNameRaw: "13897 HARRINGBONE", total: 199.48, openBalance: 199.48, discountAmount: 3.67, discountBy: "2026-09-10", billCount: 1 }),
-    invoice({ invoiceNumber: "8802-1105997", invoiceDate: "2026-08-19", jobNameRaw: "10429 BADGER", total: 2.3, openBalance: 2.3, discountAmount: 0.04, discountBy: "2026-09-10" }),
-    invoice({ invoiceNumber: "8802-1105963", invoiceDate: "2026-08-19", jobNameRaw: "85 WHITNEY PL", total: 84.37, openBalance: 84.37, discountAmount: 0.26, discountBy: "2026-09-10", billCount: 1 }),
-    invoice({ invoiceNumber: "8802-1104645", invoiceDate: "2026-08-06", kind: "credit_memo", jobNameRaw: "13631 NORTHWOODS", total: -31.86, openBalance: -31.86 }),
-    invoice({ invoiceNumber: "8802-1104646", invoiceDate: "2026-07-29", jobNameRaw: "13631 NORTHWOODS", total: 36.54, openBalance: 36.54, discountAmount: 0.34, discountBy: "2026-08-10", billCount: 1 }),
-    invoice({ invoiceNumber: "8802-1104644", invoiceDate: "2026-07-29", jobNameRaw: "85 WHITNEY PLACE", total: 95.27, openBalance: 95.27, discountAmount: 1.48, discountBy: "2026-08-10", billCount: 1 }),
-    invoice({ invoiceNumber: "8802-1104268", invoiceDate: "2026-07-28", jobNameRaw: "13631 NORTHWOODS", total: 859.99, openBalance: 859.99, discountAmount: 6.25, discountBy: "2026-08-10", billCount: 1 }),
-    invoice({ invoiceNumber: "8802-1104147", invoiceDate: "2026-07-28", jobNameRaw: "13631 NORTHWOODS", total: 101.96, openBalance: 101.96, discountAmount: 0.93, discountBy: "2026-08-10" }),
+    invoice({ invoiceNumber: "8802-1105997", invoiceDate: "2026-08-19", jobNameRaw: "10429 BAYBERRY", total: 2.3, openBalance: 2.3, discountAmount: 0.04, discountBy: "2026-09-10" }),
+    invoice({ invoiceNumber: "8802-1105963", invoiceDate: "2026-08-19", jobNameRaw: "41 LARKSPUR PL", total: 84.37, openBalance: 84.37, discountAmount: 0.26, discountBy: "2026-09-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1104645", invoiceDate: "2026-08-06", kind: "credit_memo", jobNameRaw: "13631 NIGHTSHADE", total: -31.86, openBalance: -31.86 }),
+    invoice({ invoiceNumber: "8802-1104646", invoiceDate: "2026-07-29", jobNameRaw: "13631 NIGHTSHADE", total: 36.54, openBalance: 36.54, discountAmount: 0.34, discountBy: "2026-08-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1104644", invoiceDate: "2026-07-29", jobNameRaw: "41 LARKSPUR PLACE", total: 95.27, openBalance: 95.27, discountAmount: 1.48, discountBy: "2026-08-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1104268", invoiceDate: "2026-07-28", jobNameRaw: "13631 NIGHTSHADE", total: 859.99, openBalance: 859.99, discountAmount: 6.25, discountBy: "2026-08-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1104147", invoiceDate: "2026-07-28", jobNameRaw: "13631 NIGHTSHADE", total: 101.96, openBalance: 101.96, discountAmount: 0.93, discountBy: "2026-08-10" }),
     invoice({ invoiceNumber: "9019682437", invoiceDate: "2026-07-25", kind: "service_charge", total: 31.26, openBalance: 31.26 }),
     // Part paid: $998.77 raised, $10.29 still open. The balance must read the OPEN figure.
-    invoice({ invoiceNumber: "8802-1103832", invoiceDate: "2026-07-22", jobNameRaw: "13631 NORTHWOODS", total: 998.77, openBalance: 10.29, discountAmount: 11.87, discountBy: "2026-08-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1103832", invoiceDate: "2026-07-22", jobNameRaw: "13631 NIGHTSHADE", total: 998.77, openBalance: 10.29, discountAmount: 11.87, discountBy: "2026-08-10", billCount: 1 }),
 
     // ── settled, and recorded nowhere in the app: the $1,765.72 ─────────────────────────────
-    invoice({ invoiceNumber: "8802-1105878", invoiceDate: "2026-08-19", jobNameRaw: "5659 RHODESIA", total: 216.44, closed: true }),
+    invoice({ invoiceNumber: "8802-1105878", invoiceDate: "2026-08-19", jobNameRaw: "5659 FERNHILL", total: 216.44, closed: true }),
     invoice({ invoiceNumber: "8802-1102291", invoiceDate: "2026-06-29", jobNameRaw: "CUSTOMER ORDER NO.", total: 451.75, closed: true }),
-    invoice({ invoiceNumber: "8802-1102103", invoiceDate: "2026-06-25", jobNameRaw: "TTP56", total: 523.47, closed: true }),
-    invoice({ invoiceNumber: "8802-1101475", invoiceDate: "2026-06-16", jobNameRaw: "11301 PURPLE SAGE", total: 186.93, closed: true }),
-    invoice({ invoiceNumber: "8802-1101219", invoiceDate: "2026-06-11", jobNameRaw: "5659 RODESSIA", total: 4.63, closed: true }),
-    invoice({ invoiceNumber: "8802-1101094", invoiceDate: "2026-06-10", jobNameRaw: "561 RHODESIA", total: 379.35, closed: true }),
-    invoice({ invoiceNumber: "8802-1100911", invoiceDate: "2026-06-08", jobNameRaw: "5661 RHODESIA", total: 3.15, closed: true }),
+    invoice({ invoiceNumber: "8802-1102103", invoiceDate: "2026-06-25", jobNameRaw: "ARR56", total: 523.47, closed: true }),
+    invoice({ invoiceNumber: "8802-1101475", invoiceDate: "2026-06-16", jobNameRaw: "11301 PINYON SAGE", total: 186.93, closed: true }),
+    invoice({ invoiceNumber: "8802-1101219", invoiceDate: "2026-06-11", jobNameRaw: "5659 FERNHILE", total: 4.63, closed: true }),
+    invoice({ invoiceNumber: "8802-1101094", invoiceDate: "2026-06-10", jobNameRaw: "561 FERNHILL", total: 379.35, closed: true }),
+    invoice({ invoiceNumber: "8802-1100911", invoiceDate: "2026-06-08", jobNameRaw: "5661 FERNHILL", total: 3.15, closed: true }),
 
     // ── settled, before his records start, and with a bill or without ───────────────────────
-    invoice({ invoiceNumber: "8802-1100090", invoiceDate: "2026-05-28", jobNameRaw: "5659 RHODESIA", total: 744.96, closed: true }),
-    invoice({ invoiceNumber: "8802-1099048", invoiceDate: "2026-05-28", jobNameRaw: "3639 SADDLE RD", total: 355.17, closed: true }),
+    invoice({ invoiceNumber: "8802-1100090", invoiceDate: "2026-05-28", jobNameRaw: "5659 FERNHILL", total: 744.96, closed: true }),
+    invoice({ invoiceNumber: "8802-1099048", invoiceDate: "2026-05-28", jobNameRaw: "3639 SORREL RD", total: 355.17, closed: true }),
     invoice({ invoiceNumber: "9019059048", invoiceDate: "2026-05-25", kind: "service_charge", total: 14, closed: true }),
 
     // A statement is a SUMMARY of invoices already in this list. It must never touch the balance.
@@ -141,8 +141,8 @@ function hisBook(): SupplierInvoiceRow[] {
 describe("matching a CED job name to one of his jobs", () => {
   const top = (raw: string) => matchJobName(raw, JOBS).ranked[0]?.job.name;
 
-  it("picks 13631 Northwoods over 13466 Northwoods, because the house number decides", () => {
-    const m = matchJobName("13631 NORTHWOODS", JOBS);
+  it("picks 13631 Nightshade over 13466 Nightshade, because the house number decides", () => {
+    const m = matchJobName("13631 NIGHTSHADE", JOBS);
     expect(m.verdict).toBe("one");
     expect(m.ranked[0].job.id).toBe("j-030");
     // Same street, wrong house. It must not be the front-runner, and it must not tie.
@@ -150,37 +150,37 @@ describe("matching a CED job name to one of his jobs", () => {
     expect(m.ranked[0].score - m.ranked[1].score).toBeGreaterThan(0.75);
   });
 
-  it("matches 85 WHITNEY PLACE and the shorter 85 WHITNEY to the same job", () => {
-    expect(matchJobName("85 WHITNEY PLACE", JOBS).verdict).toBe("one");
-    expect(top("85 WHITNEY PLACE")).toBe("85 Whitney Place");
-    expect(matchJobName("85 WHITNEY", JOBS).verdict).toBe("one");
-    expect(top("85 WHITNEY")).toBe("85 Whitney Place");
-    // And "85 WHITNEY PL", the third spelling on the same account.
-    expect(top("85 WHITNEY PL")).toBe("85 Whitney Place");
+  it("matches 41 LARKSPUR PLACE and the shorter 41 LARKSPUR to the same job", () => {
+    expect(matchJobName("41 LARKSPUR PLACE", JOBS).verdict).toBe("one");
+    expect(top("41 LARKSPUR PLACE")).toBe("41 Larkspur Place");
+    expect(matchJobName("41 LARKSPUR", JOBS).verdict).toBe("one");
+    expect(top("41 LARKSPUR")).toBe("41 Larkspur Place");
+    // And "41 LARKSPUR PL", the third spelling on the same account.
+    expect(top("41 LARKSPUR PL")).toBe("41 Larkspur Place");
   });
 
-  it("reads through CED's two Herringbone spellings, one of them a typo", () => {
-    for (const raw of ["13897 HERRINGBONE", "13897 HERRING BONE", "13897 HARRINGBONE"]) {
+  it("reads through CED's two Honeysuckle spellings, one of them a typo", () => {
+    for (const raw of ["13897 HONEYSUCKLE", "13897 HERRING BONE", "13897 HARRINGBONE"]) {
       const m = matchJobName(raw, JOBS);
       expect(m.verdict, raw).toBe("one");
       expect(m.ranked[0].job.id, raw).toBe("j-011");
     }
   });
 
-  it("treats TTP 106 and TTP106 as the same unit, and does not confuse it with TTP 11 or TTP 56", () => {
-    for (const raw of ["TTP 106", "TTP106"]) {
+  it("treats ARR 106 and ARR106 as the same unit, and does not confuse it with ARR 11 or ARR 56", () => {
+    for (const raw of ["ARR 106", "ARR106"]) {
       const m = matchJobName(raw, JOBS);
       expect(m.verdict, raw).toBe("one");
       expect(m.ranked[0].job.id, raw).toBe("j-042");
     }
-    expect(matchJobName("TTP56", JOBS).ranked[0].job.id).toBe("j-013");
-    expect(matchJobName("TTP 56", JOBS).ranked[0].job.id).toBe("j-013");
+    expect(matchJobName("ARR56", JOBS).ranked[0].job.id).toBe("j-013");
+    expect(matchJobName("ARR 56", JOBS).ranked[0].job.id).toBe("j-013");
   });
 
-  it("ASKS about 5659 RODESSIA, because he has five jobs on that road", () => {
-    const m = matchJobName("5659 RODESSIA", JOBS);
+  it("ASKS about 5659 FERNHILE, because he has five jobs on that road", () => {
+    const m = matchJobName("5659 FERNHILE", JOBS);
     expect(m.verdict).toBe("ask");
-    // Every job whose address is 5659 Rhodesia is in the running, under whatever name he gave it.
+    // Every job whose address is 5659 Fernhill is in the running, under whatever name he gave it.
     const close = m.ranked.filter((g) => m.ranked[0].score - g.score < 0.75).map((g) => g.job.id);
     expect(close).toContain("j-006");
     expect(close).toContain("j-033");
@@ -189,8 +189,8 @@ describe("matching a CED job name to one of his jobs", () => {
     expect(m.because).toContain("Only you know");
   });
 
-  it("ASKS about 235 TIMBER CREEK, because both Tao Zhu jobs are at that address", () => {
-    const m = matchJobName("235 TIMBER CREEK", JOBS);
+  it("ASKS about 235 THISTLE WOOD, because both Tess Zane jobs are at that address", () => {
+    const m = matchJobName("235 THISTLE WOOD", JOBS);
     expect(m.verdict).toBe("ask");
     const close = m.ranked.filter((g) => m.ranked[0].score - g.score < 0.75).map((g) => g.job.id);
     expect(close).toContain("j-002");
@@ -221,14 +221,14 @@ describe("matching a CED job name to one of his jobs", () => {
     expect(isUsableJobName("  ")).toBe(false);
     expect(isUsableJobName(null)).toBe(false);
     expect(isUsableJobName("N/A")).toBe(false);
-    expect(isUsableJobName("5659 RODESSIA")).toBe(true);
+    expect(isUsableJobName("5659 FERNHILE")).toBe(true);
     expect(isUsableJobName("STOCK")).toBe(true); // a real word CED meant; just never a job
   });
 
   it("says so plainly when a house number is one he has no job at", () => {
     // CED wrote 561 and 5661 for a road where his five jobs are all at 5659. Guessing one of them
     // would be inventing a job cost; saying nothing looks right is the true answer.
-    for (const raw of ["561 RHODESIA", "5661 RHODESIA"]) {
+    for (const raw of ["561 FERNHILL", "5661 FERNHILL"]) {
       const m = matchJobName(raw, JOBS);
       expect(m.verdict, raw).toBe("weak");
       expect(m.ranked.length, raw).toBe(JOBS.length);
@@ -237,22 +237,22 @@ describe("matching a CED job name to one of his jobs", () => {
   });
 
   it("ranks the closest job first even when it will not call it a guess", () => {
-    // "10429 BADGER" against a job at 10410 Badger Lane: same street, a house number that is not
-    // his. Badger still goes to the top of the list - a ranking is a convenience, never a filter.
-    const m = matchJobName("10429 BADGER", JOBS);
+    // "10429 BAYBERRY" against a job at 10410 Bayberry Lane: same street, a house number that is not
+    // his. Bayberry still goes to the top of the list - a ranking is a convenience, never a filter.
+    const m = matchJobName("10429 BAYBERRY", JOBS);
     expect(m.verdict).toBe("weak");
     expect(m.ranked[0].job.id).toBe("j-039");
     expect(m.ranked).toHaveLength(JOBS.length);
   });
 
   it("always hands back every job, so the one he wants is never missing", () => {
-    for (const raw of ["13631 NORTHWOODS", "5659 RODESSIA", "235 TIMBER CREEK", "10429 BADGER"]) {
+    for (const raw of ["13631 NIGHTSHADE", "5659 FERNHILE", "235 THISTLE WOOD", "10429 BAYBERRY"]) {
       expect(matchJobName(raw, JOBS).ranked, raw).toHaveLength(JOBS.length);
     }
   });
 
   it("has nothing to offer when he has no jobs, and does not pretend otherwise", () => {
-    const m = matchJobName("13631 NORTHWOODS", []);
+    const m = matchJobName("13631 NIGHTSHADE", []);
     expect(m.ranked).toEqual([]);
     expect(m.verdict).toBe("weak");
   });
@@ -344,7 +344,7 @@ describe("invoices with no job", () => {
 
   it("puts the biggest money first, because that is the job cost most worth two minutes", () => {
     // 8802-1107695 ($1,062.18) is bigger, and a bill already covers it, so it asks nothing. Of
-    // what is left, from the day his records start, TTP56's $523.47 leads.
+    // what is left, from the day his records start, ARR56's $523.47 leads.
     expect(invoicesNeedingJob(hisBook(), JOBS, { since: RECORDS_START })[0].invoice.invoiceNumber).toBe("8802-1102103");
   });
 
@@ -357,14 +357,14 @@ describe("invoices with no job", () => {
 
   it("leaves out everything dated before his books began, and keeps the day itself", () => {
     const listed = invoicesNeedingJob(hisBook(), JOBS, { since: "2026-06-08" }).map((r) => r.invoice.invoiceNumber);
-    expect(listed).not.toContain("8802-1100090"); // 5/28 5659 RHODESIA
-    expect(listed).not.toContain("8802-1099048"); // 5/28 3639 SADDLE RD
+    expect(listed).not.toContain("8802-1100090"); // 5/28 5659 FERNHILL
+    expect(listed).not.toContain("8802-1099048"); // 5/28 3639 SORREL RD
     expect(listed).toContain("8802-1100911"); // 6/08 itself counts
   });
 
   it("leaves out an invoice a person has already placed", () => {
     const placed = hisBook().map((i) =>
-      i.invoiceNumber === "8802-1107695" ? { ...i, jobId: jobNamed("85 Whitney Place"), jobName: "85 Whitney Place" } : i,
+      i.invoiceNumber === "8802-1107695" ? { ...i, jobId: jobNamed("41 Larkspur Place"), jobName: "41 Larkspur Place" } : i,
     );
     const numbers = invoicesNeedingJob(placed, JOBS).map((r) => r.invoice.invoiceNumber);
     expect(numbers).not.toContain("8802-1107695");
@@ -394,8 +394,8 @@ describe("invoices with no bill", () => {
     expect(slice.settledTotal).toBe(1765.72);
     expect(slice.settledRows).toBe(7);
     const numbers = slice.rows.filter((r) => r.closed).map((r) => r.invoiceNumber);
-    expect(numbers).toContain("8802-1102103"); // TTP56, $523.47, on a job about to be billed
-    expect(numbers).toContain("8802-1101475"); // Purple Sage, $186.93, job already paid and closed
+    expect(numbers).toContain("8802-1102103"); // ARR56, $523.47, on a job about to be billed
+    expect(numbers).toContain("8802-1101475"); // Pinyon Sage, $186.93, job already paid and closed
   });
 
   it("counts the open ones too, and keeps the two totals apart", () => {
@@ -434,7 +434,7 @@ describe("invoices with no bill", () => {
   /**
    * THE WRONG COLOUR RETURN. 8802-1107230 is five light almond USB receptacles Erik sent straight
    * back; 8802-1107337 is CED taking the $225.47 off again, and its own PDF names its parent
-   * ("ORIGINAL INVOICE(S): 1107230"). Both are open, both name TTP 106, and no bill covers the
+   * ("ORIGINAL INVOICE(S): 1107230"). Both are open, both name ARR 106, and no bill covers the
    * invoice - so before this rule the list offered "Record It As A Bill" on merchandise he does
    * not have, one tap from a customer's job. The ivory replacement beside it, 8802-1107338, is a
    * real purchase and must stay.
@@ -531,7 +531,7 @@ describe("the summary the account card reads", () => {
 
   it("has no open questions on an account that is fully placed, billed and in date", () => {
     const clean = [
-      invoice({ total: 100, closed: true, billCount: 1, jobId: "j-030", jobNameRaw: "13631 NORTHWOODS" }),
+      invoice({ total: 100, closed: true, billCount: 1, jobId: "j-030", jobNameRaw: "13631 NIGHTSHADE" }),
     ];
     const s = reconcileSummary(clean, JOBS, TODAY, { since: RECORDS_START });
     expect(s.anyOpenQuestions).toBe(false);

@@ -258,11 +258,11 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     { id: "l3", description: "Tax at 9.000 percent", quantity: 1, unit_price: 16.47, amount: 16.47, category: "Tax", billable: true, billed_amount: null },
   ];
   const DRAFT_ROW = { id: "ii-1", edited: false, invoice_id: "inv-78", invoices: { id: "inv-78", invoice_number: "INV-078", status: "draft" } };
-  it("Herringbone 8/19, 0 used: one RPC, billed $0, 250 ft at $180.17, and the draft that bills it follows the receipt in the same press", async () => {
+  it("Honeysuckle 8/19, 0 used: one RPC, billed $0, 250 ft at $180.17, and the draft that bills it follows the receipt in the same press", async () => {
     state.client = fakeSupabase(
       {
         "bill_line_items.select": [
-          { data: { id: "l1", bill_id: "11e96fc3", bills: { job_id: "j011", po_id: null, jobs: { name: "13897 Herringbone" } } }, error: null }, // the card's read
+          { data: { id: "l1", bill_id: "11e96fc3", bills: { job_id: "j011", po_id: null, jobs: { name: "13897 Honeysuckle" } } }, error: null }, // the card's read
           { data: { id: "l1", bill_id: "11e96fc3" }, error: null }, // putOnShelf: which bill
           { data: COIL_LINES, error: null }, // shelveLines: the ticket
         ],
@@ -284,7 +284,7 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2 NM-B" });
     expect(res.ok).toBe(true);
     expect(res.message).toBe(
-      "250 ft is in stock at $180.17 (about 72¢ a foot). 13897 Herringbone's cost drops by $180.17. INV-078 (a draft) now bills this receipt as it stands.",
+      "250 ft is in stock at $180.17 (about 72¢ a foot). 13897 Honeysuckle's cost drops by $180.17. INV-078 (a draft) now bills this receipt as it stands.",
     );
     // The draft's materials were pulled in again, once, at the markup already on it.
     expect(importCosts.mock.calls).toEqual([["inv-78", undefined, { keepInvoiceMarkup: true }]]);
@@ -299,7 +299,7 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     state.client = fakeSupabase(
       {
         "bill_line_items.select": [
-          { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", jobs: { name: "Herringbone" } } }, error: null },
+          { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", jobs: { name: "Honeysuckle" } } }, error: null },
           { data: { id: "l1", bill_id: "b" }, error: null },
           { data: COIL_LINES, error: null },
         ],
@@ -322,7 +322,7 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     const items = [{ id: "item-122", name: "12/2 NM-B", unit: "ft", key_part: null, part_number: null, price_item_id: null, created_at: "2026-09-01" }];
     const script = (itemRows: any[]) => ({
       "bill_line_items.select": [
-        { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", jobs: { name: "Herringbone" } } }, error: null },
+        { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", jobs: { name: "Honeysuckle" } } }, error: null },
         { data: { id: "l1", bill_id: "b" }, error: null },
         { data: COIL_LINES, error: null },
       ],
@@ -352,7 +352,7 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
 });
 
 describe("Put The Rest On The Shelf: who already bills the receipt (review of Phase 2)", () => {
-  const LINE = { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", po_id: "po-7", jobs: { name: "Herringbone" } } }, error: null };
+  const LINE = { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", po_id: "po-7", jobs: { name: "Honeysuckle" } } }, error: null };
   const row = (status: string, edited = false) => ({ id: `ii-${status}`, edited, invoice_id: `inv-${status}`, invoices: { id: `inv-${status}`, invoice_number: "INV-050", status } });
   it("a receipt whose ORDER a paid invoice bills is refused before anything is read off the shelf", async () => {
     state.client = fakeSupabase(

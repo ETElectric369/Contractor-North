@@ -1,10 +1,10 @@
 import "server-only";
 
 /**
- * NAMED ON A PAPER, NOT RECORDED YET (Erik, 2026-09-25, 85 Whitney / INV-081).
+ * NAMED ON A PAPER, NOT RECORDED YET (Erik, 2026-09-25, 41 Larkspur / INV-081).
  *
  * "i think theres a bill missing from this": there was. CED invoice 8802-1107820 ($187.64, job name
- * "85 WHITNEY") was in the app as a supplier document and in nobody's books as a bill, so it was on
+ * "41 LARKSPUR") was in the app as a supplier document and in nobody's books as a bill, so it was on
  * no cost list and no invoice. The /bills page already knew - it sits under Purchases Not In Your
  * Books - but nothing on the job said so.
  *

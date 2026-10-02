@@ -11,7 +11,7 @@ import { join } from "node:path";
  *               goes through the one match-then-insert door, so no twin is made.
  *   createJob   the status comes from the date on the company's today (none: To Be Scheduled), the
  *               instant is built on the company's clock at its work-day start, the name is "Smith ·
- *               1871 Apache Ct" when none is sent, the billing is the company's usual kind, and a
+ *               1871 Acacia Ct" when none is sent, the billing is the company's usual kind, and a
  *               sent status or name still wins (the Timeclock's quick add, Nort). Never on hold.
  */
 type Row = Record<string, any>;
@@ -107,8 +107,8 @@ const today = () => todayStrInTz("America/Denver");
 beforeEach(() => {
   state.calls = [];
   state.customers = [
-    { id: "cust-smith", name: "Rita Smith", company_name: null, type: "residential", phone: "(530) 606-0045", email: null },
-    { id: "cust-hoa", name: "Pat Lee", company_name: "Tahoe Tavern HOA", type: "commercial", phone: null, email: "pat@example.test" },
+    { id: "cust-smith", name: "Rita Smith", company_name: null, type: "residential", phone: "(530) 555-0145", email: null },
+    { id: "cust-hoa", name: "Pat Lee", company_name: "Alder Ridge HOA", type: "commercial", phone: null, email: "pat@example.test" },
   ];
   state.counts = { tm: 0, fixed: 0 };
   vi.mocked(notifyJobCrewAdded).mockClear();
@@ -116,12 +116,12 @@ beforeEach(() => {
 });
 
 describe("updateJob: the short Edit Job never clears what it didn't send", () => {
-  const EDIT_FORM = { name: "Smith · 1871 Apache Ct", customer_id: "cust-smith", address: "1871 Apache Ct", city: "Olympic Valley", state: "CA", zip: "96146", unit: "", billing_type: "tm" };
+  const EDIT_FORM = { name: "Smith · 1871 Acacia Ct", customer_id: "cust-smith", address: "1871 Acacia Ct", city: "Olympic Valley", state: "CA", zip: "96146", unit: "", billing_type: "tm" };
 
   it("the five fields are written; the dates, the description and the crew are left alone", async () => {
     expect(await updateJob("j1", fd(EDIT_FORM))).toEqual({ ok: true });
     const patch = writes("jobs", "update")[0].row!;
-    expect(patch).toMatchObject({ name: EDIT_FORM.name, customer_id: "cust-smith", address: "1871 Apache Ct", city: "Olympic Valley", unit: null, billing_type: "tm" });
+    expect(patch).toMatchObject({ name: EDIT_FORM.name, customer_id: "cust-smith", address: "1871 Acacia Ct", city: "Olympic Valley", unit: null, billing_type: "tm" });
     for (const col of ["scheduled_start", "scheduled_end", "description", "assigned_to"]) expect(patch, col).not.toHaveProperty(col);
     // No crew was sent, so nobody is told they were put on the job.
     expect(notifyJobCrewAdded).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ describe("updateJob: the short Edit Job never clears what it didn't send", () =>
   });
 
   it("a typed new customer already in the book is linked, never made twice", async () => {
-    await updateJob("j1", fd({ name: "X", new_customer_name: "Rita Smith", new_customer_phone: "5306060045" }));
+    await updateJob("j1", fd({ name: "X", new_customer_name: "Rita Smith", new_customer_phone: "5305550145" }));
     expect(writes("customers", "insert")).toEqual([]);
     expect(writes("jobs", "update")[0].row!.customer_id).toBe("cust-smith");
   });
@@ -189,17 +189,17 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
   });
 
   it("no name sent (Erik 2026-09-28, \"street number and name as always\"): the street, #<unit> with a unit; no street, the customer as written; else New Job on the company's day", async () => {
-    await createJob(fd({ customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
-    expect(inserted().name).toBe("1871 Apache Ct");
+    await createJob(fd({ customer_id: "cust-smith", address: "1871 Acacia Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("1871 Acacia Ct");
     state.calls = [];
-    await createJob(fd({ customer_id: "cust-hoa", address: "300 W Lake Blvd", unit: "56", scheduled_date: "" }));
-    expect(inserted()).toMatchObject({ name: "300 W Lake Blvd #56", unit: "56" });
+    await createJob(fd({ customer_id: "cust-hoa", address: "300 W Garnet Blvd", unit: "56", scheduled_date: "" }));
+    expect(inserted()).toMatchObject({ name: "300 W Garnet Blvd #56", unit: "56" });
     state.calls = [];
     await createJob(fd({ customer_id: "cust-smith", address: "", scheduled_date: "" }));
     expect(inserted().name).toBe("Rita Smith");
     state.calls = [];
     await createJob(fd({ customer_id: "cust-hoa", address: "", scheduled_date: "" }));
-    expect(inserted().name).toBe("Tahoe Tavern HOA");
+    expect(inserted().name).toBe("Alder Ridge HOA");
     state.calls = [];
     await createJob(fd({ scheduled_date: "" }));
     const words = new Date(`${today()}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -213,8 +213,8 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
 
   it("a sent name stays as typed unless it is only a tag, or a tag and the person or the street (Erik 2026-09-28)", async () => {
     // Nort's job.create carrying a visit's title: the tag and the customer's name are no name at all.
-    await createJob(fd({ name: "Site inspection: Rita Smith", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
-    expect(inserted().name).toBe("1871 Apache Ct");
+    await createJob(fd({ name: "Site inspection: Rita Smith", customer_id: "cust-smith", address: "1871 Acacia Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("1871 Acacia Ct");
     state.calls = [];
     await createJob(fd({ name: "Inspection", customer_id: "cust-smith", address: "", scheduled_date: "" }));
     expect(inserted().name).toBe("Rita Smith");
@@ -230,11 +230,11 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     expect(inserted().name).toBe("12 Elm St Apt 4");
     state.calls = [];
     // A tag and real words is a name a person typed: kept exactly as typed.
-    await createJob(fd({ name: "Service call — Panel swap", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    await createJob(fd({ name: "Service call — Panel swap", customer_id: "cust-smith", address: "1871 Acacia Ct", scheduled_date: "" }));
     expect(inserted().name).toBe("Service call — Panel swap");
     state.calls = [];
     // A name with no leading tag goes in exactly as sent, and the customer isn't even read for it.
-    await createJob(fd({ name: "RV Inspection", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    await createJob(fd({ name: "RV Inspection", customer_id: "cust-smith", address: "1871 Acacia Ct", scheduled_date: "" }));
     expect(inserted().name).toBe("RV Inspection");
     expect(state.calls.some((c) => c.table === "customers" && c.op === "select")).toBe(false);
   });
@@ -258,7 +258,7 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
   });
 
   it("a new customer already in the book (by phone) is linked, never a twin", async () => {
-    await createJob(fd({ new_customer_name: "Rita S", new_customer_phone: "530.606.0045", address: "9 Pine Rd", scheduled_date: "" }));
+    await createJob(fd({ new_customer_name: "Rita S", new_customer_phone: "530.555.0145", address: "9 Pine Rd", scheduled_date: "" }));
     expect(writes("customers", "insert")).toEqual([]);
     expect(inserted().customer_id).toBe("cust-smith");
   });
@@ -277,7 +277,7 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
   });
 
   it("a picked customer wins over anything typed, and a form with no customer at all still makes the job", async () => {
-    await createJob(fd({ customer_id: "cust-hoa", new_customer_phone: "530-555-0100", address: "300 W Lake Blvd", scheduled_date: "" }));
+    await createJob(fd({ customer_id: "cust-hoa", new_customer_phone: "530-555-0100", address: "300 W Garnet Blvd", scheduled_date: "" }));
     expect(inserted().customer_id).toBe("cust-hoa");
     state.calls = [];
     await createJob(fd({ customer_id: "", address: "1 A St", scheduled_date: "" }));

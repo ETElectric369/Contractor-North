@@ -28,7 +28,7 @@ import { BreakersCardView, type BreakersData } from "./job-panel-breakers";
 import { PlaceBreakerSheet } from "./place-breaker-sheet";
 import { groupBreakers } from "@/lib/panel/breakers";
 import { lineKey } from "@/lib/panel/breakers";
-import { FINAL_MAP, PANEL, PHOTO_EXISTING } from "@/lib/panel/__fixtures__/herringbone";
+import { FINAL_MAP, PANEL, PHOTO_EXISTING } from "@/lib/panel/__fixtures__/honeysuckle";
 
 const all = [...FINAL_MAP, ...PHOTO_EXISTING];
 const BOUGHT = [

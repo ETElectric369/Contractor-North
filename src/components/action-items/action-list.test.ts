@@ -274,7 +274,7 @@ describe("ActionList — a verb's refusal is always said, and the server's list 
 });
 
 describe("the Waiting fold", () => {
-  const w = (o: Partial<WaitingItem>): WaitingItem => ({ id: "w1", kind: "job_on_hold", title: "Rhodesia Panel · J-034", why: "Waiting on the permit", backOn: "2026-10-03", href: "/jobs/j34", ...o });
+  const w = (o: Partial<WaitingItem>): WaitingItem => ({ id: "w1", kind: "job_on_hold", title: "Fernhill Panel · J-034", why: "Waiting on the permit", backOn: "2026-10-03", href: "/jobs/j34", ...o });
 
   it("drawn only when something waits; a grey count, never a badge; collapsed", () => {
     expect(renderToStaticMarkup(createElement(WaitingFold, { items: [] }))).toBe("");
@@ -297,7 +297,7 @@ describe("the Waiting fold", () => {
   });
 
   it("each row says what, why and the day it comes back", () => {
-    expect(waitingLine(w({}))).toBe("Rhodesia Panel · J-034 · Waiting on the permit · Back Oct 3");
+    expect(waitingLine(w({}))).toBe("Fernhill Panel · J-034 · Waiting on the permit · Back Oct 3");
     const fold = readFileSync(join(process.cwd(), "src/components/action-items/waiting-fold.tsx"), "utf8");
     expect(fold).toContain('className="flex min-h-11 items-center px-5 py-1.5');
   });

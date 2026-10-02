@@ -89,7 +89,7 @@ export function QuoteItemsEditor({
   // details modal state
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // THE SCOPE PARAGRAPH, ON THE PAGE. Erik, mid-estimate on Sarah Cain: "theres nowhere to add a
+  // THE SCOPE PARAGRAPH, ON THE PAGE. Erik, mid-estimate on Sarah Dale: "theres nowhere to add a
   // description at the top." It WAS there — behind a button labelled "Edit Details", docked to the
   // Line items card. Which is two clicks and a wrong label for the first thing the customer reads.
   // Invoices already got this right (billing/[id]/invoice-detail.tsx): its own box, always visible,

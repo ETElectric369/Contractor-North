@@ -5,7 +5,7 @@ import pg from "pg";
 import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
- * Migration 0346: a supplier bill can wait on a credit (Erik, 2026-09-26; the Hillside switch).
+ * Migration 0346: a supplier bill can wait on a credit (Erik, 2026-09-26; the Hazelnut switch).
  *
  * supplier_invoices gains waiting_credit_since and waiting_credit_by. Pinned here, against the real
  * database, inside ONE transaction that is always rolled back:
@@ -93,7 +93,7 @@ d("0346: a supplier bill can wait on a credit", () => {
     paperId = (
       await one(
         `insert into supplier_invoices (org_id, invoice_number, kind, invoice_date, job_name_raw, total, open_balance, closed)
-         values ($1, 'TEST 0346 8802-1107139', 'invoice', '2001-01-01', '13683 HILLSIDE', 59.17, 59.17, false) returning id`,
+         values ($1, 'TEST 0346 8802-1107139', 'invoice', '2001-01-01', '13683 HAZELNUT', 59.17, 59.17, false) returning id`,
         [orgId],
       )
     ).id;

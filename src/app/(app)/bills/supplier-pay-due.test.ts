@@ -101,7 +101,7 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
     const rows = rowsOf();
     const [due] = supplierPayDue({ rows, accounts: ACCOUNTS, today: TONIGHT });
     const account: SupplierAccountRow = {
-      id: CED, name: "Consolidated Electrical Distributors", accountNumber: "TR-34426", branchCode: null, onAccount: true, note: null,
+      id: CED, name: "Consolidated Electrical Distributors", accountNumber: "AC-10427", branchCode: null, onAccount: true, note: null,
       aliases: [], bills: [{ id: "b1", supplier: "CED", billDate: "2026-09-01", amount: 999, status: "unpaid", jobId: null, jobName: null, invoiceNumber: null, isStatement: false }],
       payments: [{ id: "p1", amount: 6000, paidOn: "2026-08-05", method: "check", reference: null, note: null, voided: false }],
       supplierInvoices: rows,

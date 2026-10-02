@@ -38,8 +38,8 @@ const job = (o: Partial<DoneRow> = {}): DoneRow => ({
   job_id: "j11",
   title: null,
   job_number: "J-011",
-  job_name: "13897 Herringbone",
-  customer_name: "Andrew Cohen",
+  job_name: "13897 Honeysuckle",
+  customer_name: "Andrew Crake",
   at: "2026-09-20T16:00:00+00:00",
   open_invoice_id: null,
   total_count: 1,
@@ -80,8 +80,8 @@ describe("the function's rows as Needs You rows: the same ids, chips, hrefs and 
       {
         id: "jdone-j11",
         kind: "visit_unbilled",
-        title: "13897 Herringbone · J-011",
-        subtitle: "Andrew Cohen",
+        title: "13897 Honeysuckle · J-011",
+        subtitle: "Andrew Crake",
         who: null,
         when: "2026-09-20T16:00:00+00:00",
         urgency: 1,
@@ -106,7 +106,7 @@ describe("the function's rows as Needs You rows: the same ids, chips, hrefs and 
       { id: "a4", title: "Billed job day", starts_at: "2026-07-05T17:00:00+00:00", job_id: "j-billed", customers: null, inquiries: null },
     ];
     const doneJobs = [
-      { id: "j11", job_number: "J-011", name: "13897 Herringbone", updated_at: "2026-09-20T16:00:00+00:00", customers: { name: "Andrew Cohen" } },
+      { id: "j11", job_number: "J-011", name: "13897 Honeysuckle", updated_at: "2026-09-20T16:00:00+00:00", customers: { name: "Andrew Crake" } },
       { id: "j-billed", job_number: "J-012", name: "9 Pine", updated_at: "2026-09-21T16:00:00+00:00", customers: null },
     ];
     const settled = [

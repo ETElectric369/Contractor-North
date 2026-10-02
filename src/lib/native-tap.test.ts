@@ -359,7 +359,7 @@ describe("Nort's voice lets the reader go, and the phone stays set up (audit v99
 });
 
 /**
- * THE CONFIRM'S WORD IS CHECKED (0e2cb937 — Rich Seiler, INV-083, $420, 2026-09-30).
+ * THE CONFIRM'S WORD IS CHECKED (0e2cb937 — Rich Siskin, INV-083, $420, 2026-09-30).
  *
  * The plugin's confirm resolved, the bridge said ok, the sheet said "Stripe confirmed the
  * charge", and Stripe had charged nothing. A resolve is only "the bridge answered": the patched

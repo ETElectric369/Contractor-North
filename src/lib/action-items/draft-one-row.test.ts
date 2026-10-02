@@ -3,8 +3,8 @@ import { describe, it, expect, vi } from "vitest";
 /**
  * ONE FACT, ONE ROW: A FINISHED JOB WHOSE BILL IS A DRAFT (Wave 1 seam fix). Finish Job on J-011
  * completes the job and drafts INV-081. The draft feeder shows the draft ("Draft invoice INV-081",
- * or "Herringbone · J-011 Finished · Send INV-081" when it had been set aside), and the done-jobs
- * feeder skipped only jobs with a SENT bill, so the same job's one bill was a second row, "Herringbone
+ * or "Honeysuckle · J-011 Finished · Send INV-081" when it had been set aside), and the done-jobs
+ * feeder skipped only jobs with a SENT bill, so the same job's one bill was a second row, "Honeysuckle
  * · J-011" under Done, Not Billed: two rows, two piles, 2 on the badge. The draft's row is the one.
  */
 
@@ -87,7 +87,7 @@ vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
 import { getActionItems } from "./query";
 
-const J011 = { id: "job-11", job_number: "J-011", name: "Herringbone", status: "complete", updated_at: `${TODAY}T16:00:00Z`, customers: { name: "Andrew Cohen" } };
+const J011 = { id: "job-11", job_number: "J-011", name: "Honeysuckle", status: "complete", updated_at: `${TODAY}T16:00:00Z`, customers: { name: "Andrew Crake" } };
 const draft = (over: Record<string, unknown> = {}) => ({
   id: "inv-81",
   invoice_number: "INV-081",
@@ -98,8 +98,8 @@ const draft = (over: Record<string, unknown> = {}) => ({
   hold_until: null,
   hold_reason: null,
   job_id: "job-11",
-  customers: { name: "Andrew Cohen" },
-  jobs: { job_number: "J-011", name: "Herringbone", status: "complete" },
+  customers: { name: "Andrew Crake" },
+  jobs: { job_number: "J-011", name: "Honeysuckle", status: "complete" },
   ...over,
 });
 
@@ -126,7 +126,7 @@ for (const [path, before0371] of [
       state.drafts = [draft({ hold_until: ahead, hold_reason: "Waiting on the walk-through" })];
       const rows = rowsFor(await build());
       expect(rows.map((i: any) => i.id)).toEqual(["inv-81"]);
-      expect(rows[0].title).toBe("Herringbone · J-011 Finished · Send INV-081");
+      expect(rows[0].title).toBe("Honeysuckle · J-011 Finished · Send INV-081");
     });
 
     it("a finished job with no bill at all still says Done, Not Billed", async () => {
@@ -135,8 +135,8 @@ for (const [path, before0371] of [
       state.drafts = [];
       const rows = rowsFor(await build());
       expect(rows.map((i: any) => i.id)).toEqual(["jdone-job-11"]);
-      expect(rows[0].title).toBe("Herringbone · J-011");
-      expect(rows[0].subtitle).toBe("Andrew Cohen");
+      expect(rows[0].title).toBe("Honeysuckle · J-011");
+      expect(rows[0].subtitle).toBe("Andrew Crake");
     });
   });
 }

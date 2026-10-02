@@ -1,8 +1,8 @@
 /**
  * WHICH DRAFT SLOT AN ESTIMATE-IN-PROGRESS BELONGS TO.
  *
- * Erik, mid-estimate: "im creating an estimate for [13125 Moraine Rd] now and its pulling info from
- * a sarah cain inspection but i cant see anything i wrote for this job."
+ * Erik, mid-estimate: "im creating an estimate for [13125 Mayfern Rd] now and its pulling info from
+ * a sarah dale inspection but i cant see anything i wrote for this job."
  *
  * The key was `jobId ?? customerId ?? inquiryId ?? "new"`, and the comment beside it already knew
  * the failure mode — it explained that inquiryId had been ADDED because a lead-sourced estimate
@@ -11,8 +11,8 @@
  *
  * AN ESTIMATE STARTED FROM A WALK-THROUGH HAS NONE OF THE THREE. An inspection happens before the
  * job exists, often before the customer exists, and outside the lead funnel entirely: both of his
- * live inspections — 13125 Moraine Rd and Sarah Cain — carry job_id, customer_id AND inquiry_id all
- * null. So both resolved to "new", and the Sarah Cain draft restored straight over the Moraine Rd
+ * live inspections — 13125 Mayfern Rd and Sarah Dale — carry job_id, customer_id AND inquiry_id all
+ * null. So both resolved to "new", and the Sarah Dale draft restored straight over the Mayfern Rd
  * prefill. Nothing was deleted; somebody else's job was painted on top of his.
  *
  * The appointment is the most specific identity available (one job can hold several walk-throughs),
@@ -38,7 +38,7 @@ export function quoteDraftKey(ids: {
 /**
  * WHERE THIS DRAFT MIGHT STILL BE SITTING, newest scheme first.
  *
- * cn-v680's "v2:" prefix orphaned every pre-fix draft — and Erik had an unsaved Moraine Rd estimate,
+ * cn-v680's "v2:" prefix orphaned every pre-fix draft — and Erik had an unsaved Mayfern Rd estimate,
  * built by hand and never submitted, in the exact slot it orphaned. sessionStorage still had the
  * bytes; the app had simply stopped asking for them.
  *

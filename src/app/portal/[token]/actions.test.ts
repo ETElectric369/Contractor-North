@@ -49,7 +49,7 @@ const ISSUED = {
   ok: true,
   code_id: "11111111-1111-4111-8111-111111111111",
   channel: "email",
-  to: "mcpowder@comcast.net",
+  to: "redfinch@comcast.net",
   expires_at: "2026-09-24T12:10:00Z",
   org: { name: "ET Electric", phone: "(530) 555-0100", email: "office@example.com", glass_tint: "#006d8f" },
 };
@@ -68,7 +68,7 @@ describe("Send My Code", () => {
   it("sends the code to the address the DATABASE read off the customer, from the business, and never bccs the owner", async () => {
     rpc.mockResolvedValue({ data: ISSUED, error: null });
     const r = await sendPortalCode(TOKEN);
-    expect(r).toEqual({ ok: true, maskedEmail: "m*******@comcast.net" });
+    expect(r).toEqual({ ok: true, maskedEmail: "r*******@comcast.net" });
 
     expect(rpc).toHaveBeenCalledTimes(1);
     const [fn, args] = rpc.mock.calls[0];
@@ -80,7 +80,7 @@ describe("Send My Code", () => {
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
     const mail = sendEmail.mock.calls[0][0];
-    expect(mail.to).toBe("mcpowder@comcast.net");
+    expect(mail.to).toBe("redfinch@comcast.net");
     expect(mail.subject).toBe("Your ET Electric code");
     expect(mail.fromName).toBe("ET Electric");
     expect(mail.replyTo).toBe("office@example.com");
@@ -244,7 +244,7 @@ describe("the Customer Portal switch (0352, rule f)", () => {
   it("on (stored) or not stored: exactly today's send", async () => {
     portalOrgSettings = { features: { customer_portal: true, website: false } };
     rpc.mockResolvedValue({ data: ISSUED, error: null });
-    expect(await sendPortalCode(TOKEN)).toEqual({ ok: true, maskedEmail: "m*******@comcast.net" });
+    expect(await sendPortalCode(TOKEN)).toEqual({ ok: true, maskedEmail: "r*******@comcast.net" });
     expect(reportError).not.toHaveBeenCalled();
   });
 });

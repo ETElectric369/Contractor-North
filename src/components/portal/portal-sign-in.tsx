@@ -44,7 +44,7 @@ export function PortalSignIn({
   check,
 }: {
   org: PortalOrg;
-  /** "m*******@comcast.net", or null when there is no email on file. Never the full address. */
+  /** "r*******@comcast.net", or null when there is no email on file. Never the full address. */
   maskedEmail: string | null;
   /** A code is already out and still good: how many minutes ago it went (0331 portal_gate). */
   codeSentMinutesAgo?: number | null;

@@ -64,7 +64,7 @@ import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app
  * same way whichever door it came in by. It is built on the Supplier Bills card grammar, so a tray
  * paper and a supplier's paper look and answer the same way:
  *
- *   Home Depot · $84.12 · It Says 13897 HERRINGBONE
+ *   Home Depot · $84.12 · It Says 13897 HONEYSUCKLE
  *   #8802-1108330 · Sep 24, 2026 · Receipt (Paid)
  *   [Open Paper]
  *   [Put It On J-011] [Another Job] [Shop Stock] [Business Cost]

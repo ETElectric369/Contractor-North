@@ -98,7 +98,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       getMoneyPipeline(supabase),
       listCustomerOptions(supabase),
       // NEW INVOICE ASKS "WHICH JOB OR CUSTOMER?" (W1-28): the jobs that aren't cancelled, newest
-      // first, each with its customer's name so a row reads "J-011 · Timbercreek · Tao Zhu". A job
+      // first, each with its customer's name so a row reads "J-011 · Thistlewood · Tess Zane". A job
       // is billed through its own door, which finds its estimate itself - so no quotes are read here.
       supabase.from("jobs").select("id, name, job_number, customer_id, customers(name)").not("status", "in", "(cancelled)").order("created_at", { ascending: false }).limit(300),
       // Bounded (audit v921): PostgREST silently truncates at its max-rows cap, so an unbounded

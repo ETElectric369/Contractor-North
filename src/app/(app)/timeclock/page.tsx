@@ -106,7 +106,7 @@ export default async function TimeclockPage() {
   // NAME, NOT NUMBER (cn-v697). Erik, on this exact list: "this week should show jobs worked not
   // job codes" — and twice more elsewhere, "timecards and all jobs need to be displayed as job
   // name not job number everywhere". The codes-on branch returned a bare `job_number`, so his
-  // week read J-009, J-013, J-017 — three different dwellings at 300 W Lake Blvd whose only
+  // week read J-009, J-013, J-017 — three different dwellings at 300 W Garnet Blvd whose only
   // distinguishing text lives in the NAME. jobLabel is the SSOT and already prefers the name,
   // falling back to the number for a job that hasn't got one.
   //

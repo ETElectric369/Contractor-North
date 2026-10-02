@@ -251,8 +251,8 @@ export async function setReceiptLineUsage(input: {
  * off this job's cost. Both land in one transaction (0328), so a job is never billed for less while
  * nothing went on the shelf.
  *
- * Herringbone's 8/19 CED coil: 250 ft, 0 used. The job is billed $0 of it, the shelf holds 250 ft
- * of 12/2 at $180.17, and Herringbone's cost drops by $180.17.
+ * Honeysuckle's 8/19 CED coil: 250 ft, 0 used. The job is billed $0 of it, the shelf holds 250 ft
+ * of 12/2 at $180.17, and Honeysuckle's cost drops by $180.17.
  */
 export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsageResult & { message?: string }> {
   const ctx = await requireStaff();

@@ -175,7 +175,7 @@ type Loaded = { ok: true; data: AlreadyBilledSheetData } | { ok: false; error: s
  * What the Already Billed sheet offers for one cost on one job. Staff only (the caller checks, and
  * RLS reads nothing money-shaped for a tech anyway). Only on a job whose next New Invoice pulls its
  * actual costs (nextInvoiceImportsActuals, createInvoiceForJob's own rule): every T&M job with no
- * schedule, and a fixed-price one with no live estimate (J-010 Purple Sage), where a charge made by
+ * schedule, and a fixed-price one with no live estimate (J-010 Pinyon Sage), where a charge made by
  * hand that can't be recorded is billed again.
  */
 export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId: string, target: AlreadyBilledTarget): Promise<Loaded> {

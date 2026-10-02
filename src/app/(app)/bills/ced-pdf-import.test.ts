@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TIMBER_CREEK } from "@/test/ced-timber-creek";
+import { THISTLE_WOOD } from "@/test/ced-thistle-wood";
 
 /**
  * THE CED PDF ITSELF IS KEPT (Erik, 2026-09-26: Open Bill said "The PDF itself isn't kept here").
@@ -67,10 +67,10 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
   };
 }
 
-// One downloaded PDF, two invoices in it (CED sends them that way): Timber Creek, and the same
+// One downloaded PDF, two invoices in it (CED sends them that way): Thistle Wood, and the same
 // paper under a second number. Both reconcile on their own arithmetic.
-const SECOND = TIMBER_CREEK.replace(/8802-1101363/g, "8802-1101364");
-const TWO_INVOICE_TEXT = `${TIMBER_CREEK}\n${SECOND}`;
+const SECOND = THISTLE_WOOD.replace(/8802-1101363/g, "8802-1101364");
+const TWO_INVOICE_TEXT = `${THISTLE_WOOD}\n${SECOND}`;
 const PDF = new TextEncoder().encode("%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n");
 let PATH: string;
 
@@ -153,7 +153,7 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
       invoice_number: number,
       kind: "invoice",
       invoice_date: "2026-06-15",
-      job_name_raw: "235 TIMBER CREEK",
+      job_name_raw: "235 THISTLE WOOD",
       job_id: null,
       supplier_account_id: null,
       merchandise: 149.04,
@@ -187,7 +187,7 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
       invoice_number: number,
       kind: "invoice",
       invoice_date: "2026-06-15",
-      job_name_raw: "235 TIMBER CREEK",
+      job_name_raw: "235 THISTLE WOOD",
       job_id: null,
       supplier_account_id: null,
       merchandise: 149.04,
@@ -257,7 +257,7 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
       invoice_number: "8802-1101363",
       kind: "invoice",
       invoice_date: "2026-06-15",
-      job_name_raw: "235 TIMBER CREEK",
+      job_name_raw: "235 THISTLE WOOD",
       job_id: null,
       supplier_account_id: null,
       merchandise: 149.04,
@@ -278,7 +278,7 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
       },
       calls,
     );
-    const res = await importCedInvoices({ files: [{ name: "something-else.pdf", text: TIMBER_CREEK }] });
+    const res = await importCedInvoices({ files: [{ name: "something-else.pdf", text: THISTLE_WOOD }] });
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "update")).toEqual([]);
     expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
@@ -286,13 +286,13 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
 });
 
 describe("already on file is per supplier account, not per number (Wave 0, 0354)", () => {
-  // Timber Creek prints account TR-34426. Another supplier's paper can carry the same bare number.
+  // Thistle Wood prints account AC-10427. Another supplier's paper can carry the same bare number.
   const row = (account: string | null) => ({
     id: `si-${account ?? "none"}`,
     invoice_number: "8802-1101363",
     kind: "invoice",
     invoice_date: "2026-06-15",
-    job_name_raw: "235 TIMBER CREEK",
+    job_name_raw: "235 THISTLE WOOD",
     job_id: null,
     supplier_account_id: account,
     merchandise: 149.04,
@@ -306,7 +306,7 @@ describe("already on file is per supplier account, not per number (Wave 0, 0354)
     source_file: PATH,
   });
   const ACCOUNTS = [
-    { id: "acct-ced", name: "Consolidated Electrical Distributors", account_number: "TR-34426", branch_code: null },
+    { id: "acct-ced", name: "Consolidated Electrical Distributors", account_number: "AC-10427", branch_code: null },
     { id: "acct-other", name: "Main Street Supply", account_number: "MS-1", branch_code: null },
   ];
 
@@ -321,7 +321,7 @@ describe("already on file is per supplier account, not per number (Wave 0, 0354)
       },
       calls,
     );
-    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    const res = await importCedInvoices({ text: THISTLE_WOOD });
     expect(res.ok).toBe(true);
     const insert = did("supplier_invoices", "insert")[0];
     expect(insert.payload).toEqual([expect.objectContaining({ invoice_number: "8802-1101363", supplier_account_id: "acct-ced" })]);
@@ -337,14 +337,14 @@ describe("already on file is per supplier account, not per number (Wave 0, 0354)
       },
       calls,
     );
-    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    const res = await importCedInvoices({ text: THISTLE_WOOD });
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "insert")).toEqual([]);
     expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
   });
 
   it("a paper that matches no account finds its one row on the account a person picked: no second copy", async () => {
-    // No account on file carries TR-34426, so the paper can't say whose it is; an open list's Apply
+    // No account on file carries AC-10427, so the paper can't say whose it is; an open list's Apply
     // had already filed its row onto Main Street Supply.
     state.client = fakeSupabase(
       {
@@ -354,7 +354,7 @@ describe("already on file is per supplier account, not per number (Wave 0, 0354)
       },
       calls,
     );
-    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    const res = await importCedInvoices({ text: THISTLE_WOOD });
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "insert")).toEqual([]);
     expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
@@ -371,7 +371,7 @@ describe("already on file is per supplier account, not per number (Wave 0, 0354)
       },
       calls,
     );
-    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    const res = await importCedInvoices({ text: THISTLE_WOOD });
     expect(res.ok).toBe(true);
     // Neither supplier's row is touched.
     expect(did("supplier_invoices", "update")).toEqual([]);
@@ -387,7 +387,7 @@ describe("already on file is per supplier account, not per number (Wave 0, 0354)
       },
       calls,
     );
-    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    const res = await importCedInvoices({ text: THISTLE_WOOD });
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "insert")).toEqual([]);
     expect(did("supplier_invoices", "update")[0].payload).toEqual({ supplier_account_id: "acct-ced" });

@@ -73,8 +73,8 @@ describe("toNewJobCustomerOptions", () => {
   });
 
   it("carries the company name and the kind when the query read them (the It'll Be Called line)", () => {
-    expect(toNewJobCustomerOptions([{ id: "c3", name: "Pat Lee", company_name: "Tahoe Tavern HOA", type: "commercial" }])).toEqual([
-      { id: "c3", name: "Pat Lee", address: null, company_name: "Tahoe Tavern HOA", type: "commercial" },
+    expect(toNewJobCustomerOptions([{ id: "c3", name: "Pat Lee", company_name: "Alder Ridge HOA", type: "commercial" }])).toEqual([
+      { id: "c3", name: "Pat Lee", address: null, company_name: "Alder Ridge HOA", type: "commercial" },
     ]);
   });
 
@@ -134,20 +134,20 @@ describe("statusFromDate", () => {
 describe("defaultJobName — street number and name, as always (Erik 2026-09-28)", () => {
   const todayStr = "2026-09-27";
   it("with a street: the street number and name only, never the person or the town", () => {
-    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Apache Ct", todayStr })).toBe("1871 Apache Ct");
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Acacia Ct", todayStr })).toBe("1871 Acacia Ct");
     expect(defaultJobName({ customer: { name: "Bob & Mary Smith Jr." }, street: " 12  Pine St ", todayStr })).toBe("12 Pine St");
-    expect(defaultJobName({ customer: { name: "Pat Lee", company_name: "Test Tavern HOA" }, street: "300 W Lake Blvd", todayStr })).toBe("300 W Lake Blvd");
+    expect(defaultJobName({ customer: { name: "Pat Lee", company_name: "Test Tavern HOA" }, street: "300 W Garnet Blvd", todayStr })).toBe("300 W Garnet Blvd");
     expect(defaultJobName({ customer: null, street: "12 Elm St, Testville, CA 96161", todayStr })).toBe("12 Elm St");
   });
   it("the street wins over a source's work words", () => {
-    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Apache Ct", work: "Panel Upgrade", todayStr })).toBe("1871 Apache Ct");
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Acacia Ct", work: "Panel Upgrade", todayStr })).toBe("1871 Acacia Ct");
   });
   it("a unit rides on the street as #<unit>, however it was typed, never twice", () => {
     for (const unit of ["56", "#56", "# 56", "Unit 56", "unit #56", "Apt 56", "Suite 56"]) {
-      expect(defaultJobName({ customer: null, street: "300 West Lake Boulevard", unit, todayStr }), unit).toBe("300 West Lake Boulevard #56");
+      expect(defaultJobName({ customer: null, street: "300 West Garnet Boulevard", unit, todayStr }), unit).toBe("300 West Garnet Boulevard #56");
     }
-    expect(defaultJobName({ customer: null, street: "300 West Lake Boulevard #56", unit: "56", todayStr })).toBe("300 West Lake Boulevard #56");
-    expect(defaultJobName({ customer: null, street: "300 West Lake Boulevard", unit: "  ", todayStr })).toBe("300 West Lake Boulevard");
+    expect(defaultJobName({ customer: null, street: "300 West Garnet Boulevard #56", unit: "56", todayStr })).toBe("300 West Garnet Boulevard #56");
+    expect(defaultJobName({ customer: null, street: "300 West Garnet Boulevard", unit: "  ", todayStr })).toBe("300 West Garnet Boulevard");
     // No street: a unit alone says nothing.
     expect(defaultJobName({ customer: { name: "Rita Smith" }, street: null, unit: "56", todayStr })).toBe("Rita Smith");
   });
@@ -180,12 +180,12 @@ describe("defaultJobName — street number and name, as always (Erik 2026-09-28)
     expect(defaultJobName({ customer: null, street: "12 Box Canyon Rd", todayStr })).toBe("12 Box Canyon Rd");
   });
   it("no street: who as written, the whole name or the company, then the work words", () => {
-    expect(defaultJobName({ customer: { name: "Jackie Test" }, street: "", todayStr })).toBe("Jackie Test");
+    expect(defaultJobName({ customer: { name: "Marla Test" }, street: "", todayStr })).toBe("Marla Test");
     expect(defaultJobName({ customer: { name: "Bob Moss Jr." }, street: null, todayStr })).toBe("Bob Moss Jr.");
     expect(defaultJobName({ customer: { name: "Truckee Lumber Co", type: "commercial" }, street: null, todayStr })).toBe("Truckee Lumber Co");
     expect(defaultJobName({ customer: { name: "Pat Lee", company_name: "Test Tavern HOA" }, street: null, todayStr })).toBe("Test Tavern HOA");
-    expect(defaultJobName({ customer: { name: "Jackie Test" }, street: null, work: "Panel Upgrade", todayStr })).toBe("Jackie Test · Panel Upgrade");
-    expect(defaultJobName({ customer: { name: "Jackie Test" }, street: null, work: "  ", todayStr })).toBe("Jackie Test");
+    expect(defaultJobName({ customer: { name: "Marla Test" }, street: null, work: "Panel Upgrade", todayStr })).toBe("Marla Test · Panel Upgrade");
+    expect(defaultJobName({ customer: { name: "Marla Test" }, street: null, work: "  ", todayStr })).toBe("Marla Test");
   });
   it("neither: New Job on the company's day (the work words alone when that is all there is)", () => {
     expect(defaultJobName({ customer: null, street: null, todayStr })).toBe("New Job · Sep 27");
@@ -228,17 +228,17 @@ describe("usualBillingKind — the kind most of this company's jobs use", () => 
 
 describe("the unit hint: another job at this street has a unit", () => {
   const keys = unitStreetKeys([
-    { address: "300 W. Lake Blvd", unit: "224" },
-    { address: "300 W Lake Blvd", unit: "12" },
+    { address: "300 W. Garnet Blvd", unit: "224" },
+    { address: "300 W Garnet Blvd", unit: "12" },
     { address: "9 Pine Rd", unit: null },
     { address: null, unit: "3" },
   ]);
   it("reads the streets that carry a unit, once each, whatever the spelling", () => {
-    expect(keys).toEqual(["300 w lake blvd"]);
-    expect(streetKey("300  W. Lake Blvd,")).toBe("300 w lake blvd");
+    expect(keys).toEqual(["300 w garnet blvd"]);
+    expect(streetKey("300  W. Garnet Blvd,")).toBe("300 w garnet blvd");
   });
   it("a matching street suggests More Options; others don't", () => {
-    expect(streetHasUnits("300 w lake blvd", keys)).toBe(true);
+    expect(streetHasUnits("300 w garnet blvd", keys)).toBe(true);
     expect(streetHasUnits("9 Pine Rd", keys)).toBe(false);
     expect(streetHasUnits("", keys)).toBe(false);
   });

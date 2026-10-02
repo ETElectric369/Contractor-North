@@ -10,7 +10,7 @@ import { DATA_TOOLS } from "@/lib/assistant-tools";
  * NO BAKED-IN EXAMPLES FROM ONE COMPANY OR ONE TRADE (Nort-guide Wave A).
  *
  * Erik: "Nort cant be giving examples that dont make sense like in the tour." Every company's Nort
- * was taught with ET's crew and jobs ("have Brian install the ground rod", "2 4S boxes at Apache",
+ * was taught with ET's crew and jobs ("have Brian install the ground rod", "2 4S boxes at Acacia",
  * "30 feet of 10/3 romex"), every company's walk-through showed "roughly 200' of 12-2", and every
  * why box offered a deck builder's board count or an electrician's subpanel fork. An example comes
  * from THIS company's own data and trade; with none, it shows the shape (<job>, <item>) or asks.
@@ -23,7 +23,7 @@ const ROOT = process.cwd();
 
 /** ET's people, jobs, places and account; and the electrician-only examples that leaked everywhere. */
 const EXAMPLE_WORDS =
-  /\b(brian|apache|romex|subpanels?|home ?runs?|homeruns?|board count|joists?|TR-34426|truckee|herringbone|burks|chmura|chamorro|waldow)\b|\b1[24][-/]2\b|\b10[-/]3\b/gi;
+  /\b(brian|acacia|romex|subpanels?|home ?runs?|homeruns?|board count|joists?|AC-10427|truckee|honeysuckle|finch|clover|cardell|wexley)\b|\b1[24][-/]2\b|\b10[-/]3\b/gi;
 /** The same words, for a yes/no test (no /g, so no lastIndex carried between calls). */
 const ANY_EXAMPLE_WORD = new RegExp(EXAMPLE_WORDS.source, "i");
 

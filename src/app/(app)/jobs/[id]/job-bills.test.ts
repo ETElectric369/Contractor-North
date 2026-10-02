@@ -181,7 +181,7 @@ describe("the Costs tab's bill row", () => {
 });
 
 /**
- * ALREADY BILLED ON THE COSTS TAB (0357, Purple Sage). An open row gets Already Billed; a billed row
+ * ALREADY BILLED ON THE COSTS TAB (0357, Pinyon Sage). An open row gets Already Billed; a billed row
  * a person marked says so and gets Not Billed After All; an importer's claim gets neither. The page
  * hands these over only for staff on a job that bills its actuals: a fixed-price job has no piles,
  * and no doors.

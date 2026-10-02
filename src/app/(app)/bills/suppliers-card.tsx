@@ -255,7 +255,7 @@ export function SuppliersCard({
    */
   reconcile?: {
     byAccount: Record<string, SupplierInvoiceRow[]>;
-    /** His jobs, for the picker. Enough on each to tell five Rhodesias apart. */
+    /** His jobs, for the picker. Enough on each to tell five Fernhills apart. */
     jobs: ReconcileJob[];
     /** The day this app's records begin. Purchases older than it are counted, never nagged about. */
     recordsSince: string | null;

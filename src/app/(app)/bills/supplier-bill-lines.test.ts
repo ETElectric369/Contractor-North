@@ -9,7 +9,7 @@ import { billItemisation, billLineCost } from "@/lib/bill-itemisation";
  */
 describe("supplierBillLines", () => {
   it("bills CED 8802-1107338 exactly as CED does", () => {
-    // The ivory replacement on TTP 106. "50.00 C" on the plate is fifty dollars per HUNDRED.
+    // The ivory replacement on ARR 106. "50.00 C" on the plate is fifty dollars per HUNDRED.
     const out = supplierBillLines(
       [
         { description: "AC CHARGER/RCP", part_number: "R26USBAC6I", quantity: 5, unit_price: 40.47, extension: 202.35 },

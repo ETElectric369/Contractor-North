@@ -52,7 +52,7 @@ export function CustomerSelect({
   const [value, setValue] = useState(customer?.id ?? "");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  // MAKING ONE FROM HERE. Erik, on the Sarah Cain estimate: "it says sarah cain punch list and no
+  // MAKING ONE FROM HERE. Erik, on the Sarah Dale estimate: "it says sarah dale punch list and no
   // address and i cant even edit it anywhere." The address on a quote comes from the attached
   // customer — quotes.address/city/state/zip are never rendered — and this picker could only
   // choose someone who already existed. First estimate for a new customer was therefore a dead

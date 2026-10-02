@@ -360,7 +360,7 @@ export const timeActions: Record<string, ActionDef> = {
   },
   /**
    * WHICH SHIFT DID THEY MEAN? A read of one day's finished and running entries, with the ids the
-   * split and fix verbs need. Before this, "the last hour of Brian's Tuesday was Herringbone" had no
+   * split and fix verbs need. Before this, "the last hour of Brian's Tuesday was Honeysuckle" had no
    * way to an entry id: hours_summary gives totals and who_is_clocked_in only open rows, so Nort
    * would have had to guess a uuid. Office only; it writes nothing.
    */

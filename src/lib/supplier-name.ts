@@ -5,7 +5,7 @@
 
 /**
  * A supplier's name, short enough to lead a card on a phone. "Consolidated Electrical
- * Distributors" is "CED" everywhere he goes; "Swigard's Hardware" is already short. A bracketed
+ * Distributors" is "CED" everywhere he goes; "Brandow's Hardware" is already short. A bracketed
  * short form the account itself carries ("Outdoor Supply Hardware (OSH - Cupertino)") wins.
  */
 export function shortSupplierName(name: string | null | undefined): string {
@@ -27,7 +27,7 @@ export interface SupplierAccountLite {
 
 /**
  * WHICH OF THE COMPANY'S SUPPLIER ACCOUNTS A SUPPLIER'S OWN INVOICE BELONGS TO. Matched on the
- * account number it prints (TR-34426), falling back to the branch code in its number
+ * account number it prints (AC-10427), falling back to the branch code in its number
  * (8802-1103832). Both are identifiers the supplier printed, not guesses about a spelling: a fuzzy
  * match here would file somebody else's money onto the account. Null when neither matches.
  */

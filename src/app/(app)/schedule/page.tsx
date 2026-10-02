@@ -193,7 +193,7 @@ export default async function SchedulePage({
      with nobody able to say which one the customer was told about.
 
      /leads already carries exactly this cross-check — added when Erik reported the same thing
-     ("the sarah cain lead was already converted to an inspection but still shows up as a new
+     ("the sarah dale lead was already converted to an inspection but still shows up as a new
      lead"). THE PROJECTION LAW: the bug was never a missing column, it was a select list. The
      booked ones are on the calendar four inches to the right, so this is a move, not a dead end. */
   const leadIds = ((leadRows ?? []) as { id: string }[]).map((r) => String(r.id));

@@ -10,7 +10,7 @@ import { putShiftOnJob, takeShiftOffJob } from "../../timeclock/actions";
 /**
  * PUNCHES WITH NO JOB, ON THE JOB'S TIME TAB (the duplicate punches, 2026-09-26).
  *
- * On 9/19 the office billing 85 Whitney opened the job's Time tab, saw no 9/11 hours and typed the
+ * On 9/19 the office billing 41 Larkspur opened the job's Time tab, saw no 9/11 hours and typed the
  * day in again. Brian's own 9/11 punch had been in the book all along, 10:31 AM to 6:57 PM on no
  * job, and this tab never showed it. Now it lists the shifts on no job that this job's crew
  * (assigned, or with hours on it) clocked from the day before its first day to two days after its

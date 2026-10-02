@@ -9,12 +9,12 @@ import { billItemisation, editedRemainderDrift, editedRemainderSentence, remaind
  * edits kept". The bills and lines below are his, out of the database.
  */
 
-const SWIGARDS_1 = { id: "b-swig-1", supplier: "Swigard's", amount: 17.15 };
+const BRANDOWS_1 = { id: "b-swig-1", supplier: "Brandow's", amount: 17.15 };
 const CED = { id: "b-ced", supplier: "CED", amount: 147.92 };
-const SWIGARDS_2 = { id: "b-swig-2", supplier: "Swigard's", amount: 27.43 };
-const BILLS = [SWIGARDS_1, CED, SWIGARDS_2];
+const BRANDOWS_2 = { id: "b-swig-2", supplier: "Brandow's", amount: 27.43 };
+const BILLS = [BRANDOWS_1, CED, BRANDOWS_2];
 const LINES: Record<string, BillLine[]> = {
-  [SWIGARDS_1.id]: [
+  [BRANDOWS_1.id]: [
     { id: "flex", description: "Duct Flex", quantity: 1, amount: 15.99, category: "Materials" },
     { id: "t1", description: "Sales Tax", quantity: 1, amount: 1.16, category: "Sales Tax" },
   ],
@@ -22,7 +22,7 @@ const LINES: Record<string, BillLine[]> = {
     { id: "fan", description: "PANIS fan", quantity: 1, amount: 135.71, category: "Materials" },
     { id: "t2", description: "Sales Tax", quantity: 1, amount: 12.21, category: "Sales Tax" },
   ],
-  [SWIGARDS_2.id]: [
+  [BRANDOWS_2.id]: [
     { id: "timer", description: "Timer", quantity: 1, amount: 23.99, category: "Materials" },
     { id: "plate", description: "Wallplate", quantity: 1, amount: 1.59, category: "Materials" },
     { id: "t3", description: "Sales Tax", quantity: 1, amount: 1.85, category: "Sales Tax" },
@@ -54,9 +54,9 @@ describe("editedRemainderDrift — the tax rows his markup change left behind", 
   it("names all three bills with the figure billItemisation gives at the new markup", () => {
     const drift = editedRemainderDrift(BILLS, offerAt(30), inv074());
     expect(drift).toEqual([
-      { billId: SWIGARDS_1.id, supplier: "Swigard's", kept: 1.45, computed: 1.51 },
+      { billId: BRANDOWS_1.id, supplier: "Brandow's", kept: 1.45, computed: 1.51 },
       { billId: CED.id, supplier: "CED", kept: 15.26, computed: 15.88 },
-      { billId: SWIGARDS_2.id, supplier: "Swigard's", kept: 2.31, computed: 2.4 },
+      { billId: BRANDOWS_2.id, supplier: "Brandow's", kept: 2.31, computed: 2.4 },
     ]);
     // The 77 cents INV-074 went out short, accounted for row by row.
     expect(Math.round(drift.reduce((t, d) => t + (d.computed - d.kept), 0) * 100)).toBe(77);
@@ -64,7 +64,7 @@ describe("editedRemainderDrift — the tax rows his markup change left behind", 
 
   it("says it the way the toast reads it", () => {
     const [first] = editedRemainderDrift(BILLS, offerAt(30), inv074());
-    expect(editedRemainderSentence(first, 30)).toBe("Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51");
+    expect(editedRemainderSentence(first, 30)).toBe("Brandow's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51");
     expect(editedRemainderSentence(first, 27.5)).toContain("at 27.5% it would be");
     expect(editedRemainderSentence(first, 30)).not.toContain("—");
   });
@@ -81,14 +81,14 @@ describe("editedRemainderDrift — the tax rows his markup change left behind", 
   });
 
   it("a bill the office froze entirely is consistent at its own numbers — no nag", () => {
-    // Every row of Swigard's #1 edited: the importer refreshed none of it.
+    // Every row of Brandow's #1 edited: the importer refreshed none of it.
     const rows = inv074().map((r) => (r.import_key === "bli:flex" ? { ...r, edited: true } : r));
-    expect(editedRemainderDrift(BILLS, offerAt(30), rows).map((d) => d.billId)).toEqual([CED.id, SWIGARDS_2.id]);
+    expect(editedRemainderDrift(BILLS, offerAt(30), rows).map((d) => d.billId)).toEqual([CED.id, BRANDOWS_2.id]);
   });
 
   it("a bill this run did not offer (another invoice holds it) is not this invoice's business", () => {
     const offered = offerAt(30).filter((r) => !(r.source_ids ?? []).includes(CED.id));
-    expect(editedRemainderDrift(BILLS, offered, inv074()).map((d) => d.billId)).toEqual([SWIGARDS_1.id, SWIGARDS_2.id]);
+    expect(editedRemainderDrift(BILLS, offered, inv074()).map((d) => d.billId)).toEqual([BRANDOWS_1.id, BRANDOWS_2.id]);
   });
 
   it("a receipt whose new itemisation has no tax row says what the row would be: nothing", () => {
@@ -103,7 +103,7 @@ describe("editedRemainderDrift — the tax rows his markup change left behind", 
 });
 
 /**
- * THE WALDOW BOX ON PAID INV-069 (Shop Stock plan, Phase 4's cleanup, tested in Phase 1).
+ * THE WEXLEY BOX ON PAID INV-069 (Shop Stock plan, Phase 4's cleanup, tested in Phase 1).
  *
  * Bill c0535cdb, $653.25 of CED on J-046, is claimed by eight lines of INV-069, which Jason has
  * paid. Erik typed the Twister row down to 60 nuts at 27 cents by hand (edited), and the invoice's
@@ -112,8 +112,8 @@ describe("editedRemainderDrift — the tax rows his markup change left behind", 
  * That must not wake a drift banner on the paid invoice: its remainder row is not an edited row,
  * so there is nothing of his to be left behind, whatever the itemisation now says.
  */
-describe("editedRemainderDrift: fixing the Waldow line stays quiet on paid INV-069", () => {
-  const WALDOW = { id: "c0535cdb-e485-4679-8e56-fd0918fd728b", supplier: "Contractors Electrical Distributors", amount: 653.25 };
+describe("editedRemainderDrift: fixing the Wexley line stays quiet on paid INV-069", () => {
+  const WEXLEY = { id: "c0535cdb-e485-4679-8e56-fd0918fd728b", supplier: "Contractors Electrical Distributors", amount: 653.25 };
   const lines = (twisterBilled: number | null): BillLine[] => [
     { id: "90cf614c", description: "ITE PN1632L1125C 125A Plug On Neutral Load Center", quantity: 1, amount: 119.26, category: "Electrical" },
     { id: "374b0d23", description: "3M 33+SUPER3/4X76FT 3/4 x 76 33+ Super Vinyl Tape", quantity: 2, amount: 20.6, category: "Electrical" },
@@ -135,17 +135,17 @@ describe("editedRemainderDrift: fixing the Waldow line stays quiet on paid INV-0
     { import_key: "bli:266c063c", line_total: 75.6, edited: false },
     { import_key: "bli:1c3216e4", line_total: 75.6, edited: false },
     { import_key: "bli:99fb20d5", line_total: 94.48, edited: false },
-    { import_key: remainderKey(WALDOW.id), line_total: 0.46, edited: false },
+    { import_key: remainderKey(WEXLEY.id), line_total: 0.46, edited: false },
   ];
   const offered = (twisterBilled: number | null) =>
-    billItemisation(WALDOW, lines(twisterBilled), 25).map((r) => ({ ...r, source_ids: [WALDOW.id] }));
+    billItemisation(WEXLEY, lines(twisterBilled), 25).map((r) => ({ ...r, source_ids: [WEXLEY.id] }));
 
   it("says nothing before the fix, and nothing after it (60 of 500 nuts = $9.29 billed)", () => {
-    expect(editedRemainderDrift([WALDOW], offered(null), inv069)).toEqual([]);
-    expect(editedRemainderDrift([WALDOW], offered(9.29), inv069)).toEqual([]);
+    expect(editedRemainderDrift([WEXLEY], offered(null), inv069)).toEqual([]);
+    expect(editedRemainderDrift([WEXLEY], offered(9.29), inv069)).toEqual([]);
   });
 
   it("and says nothing on any other invoice, which is never offered a bill INV-069 holds", () => {
-    expect(editedRemainderDrift([WALDOW], [], inv069)).toEqual([]);
+    expect(editedRemainderDrift([WEXLEY], [], inv069)).toEqual([]);
   });
 });

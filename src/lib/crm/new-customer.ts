@@ -30,8 +30,8 @@ export function typedNewCustomer(formData: FormData): { name: string; phone: str
  * phone or an email is one person; a name only when it is unique: findMatchingCustomerId), and only
  * when nobody matches, insert, with the phone in the one format every other customer door writes.
  *
- * Audit v921: New Job used to mint blind ("start a job for Mike Scrivano, 5306060045" made a second
- * Mike beside the first's (530) 606-0045), and Edit Job still did until this helper. A book that
+ * Audit v921: New Job used to mint blind ("start a job for Mike Sparrow, 5305550145" made a second
+ * Mike beside the first's (530) 555-0145), and Edit Job still did until this helper. A book that
  * can't be read is a refusal, never a blind insert: the person is told, and nothing is made.
  *
  * The caller's own client (RLS scopes the book and stamps the org on insert).

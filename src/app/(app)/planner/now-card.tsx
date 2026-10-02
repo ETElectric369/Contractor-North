@@ -34,7 +34,7 @@ const OFFLINE_MSG = "No connection — try again when you have bars.";
  *  Nothing priced ever crosses into this client component (a tech's phone reads it too). */
 export interface NowJob {
   name: string;
-  /** "Nora Smith · 85 Whitney", or null when the job has neither. */
+  /** "Nora Smith · 41 Larkspur", or null when the job has neither. */
   sub: string | null;
   href: string;
 }
@@ -99,7 +99,7 @@ export function NowCard({
   // the card's Pick The Job. Lives here, above the open/closed branches, so the card flipping to
   // "on the clock" (or back) underneath doesn't take the question with it.
   const [ask, setAsk] = useState<WhichJobAsk | null>(null);
-  // THE APP CHOSE THE JOB AND SAYS SO (Erik, 2026-10-01: Brian's punch on TTP 56). One sentence
+  // THE APP CHOSE THE JOB AND SAYS SO (Erik, 2026-10-01: Brian's punch on ARR 56). One sentence
   // naming the job, with the Change door — never a toast that is gone before the truck. Lives up
   // here with `ask` for the same reason: the card flips branches underneath it.
   const [chose, setChose] = useState<AppChoseNotice | null>(null);

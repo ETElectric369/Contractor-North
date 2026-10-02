@@ -9,7 +9,7 @@ import { jobLabel } from "@/lib/schedule-options";
  * never sit where a field tech can list and open it. That rule stands: a supplier quote is still
  * deleted the moment it is read.
  *
- * But Herringbone's plans went the same way, and Read Circuits From The Plans had nothing left to
+ * But Honeysuckle's plans went the same way, and Read Circuits From The Plans had nothing left to
  * read. So an upload that says it is PLANS (the Upload Plans door, never the Supplier Quote door) is
  * now kept: moved out of the stash into the job's folder (or the customer's, when the estimate has
  * no job yet) and filed as a Plan document on the customer, and on the job when there is one. Plans

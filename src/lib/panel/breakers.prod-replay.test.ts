@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { breakerCard, lineKey, groupLabel, type ListLine } from "./breakers";
 import { decodeBreaker, decodeCode } from "./breaker-catalog";
 import { normalisePartNumber } from "@/lib/shelf-plan";
-import { FINAL_MAP, PHOTO_EXISTING } from "./__fixtures__/herringbone";
+import { FINAL_MAP, PHOTO_EXISTING } from "./__fixtures__/honeysuckle";
 import type { JobPanel } from "@/lib/types";
 
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));

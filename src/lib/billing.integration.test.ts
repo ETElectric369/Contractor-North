@@ -143,7 +143,7 @@ d("billing draw invariants (DB integration)", () => {
         [orgId, std.id],
       );
       expect((await blockersOnJob()).map((r: any) => r.id)).toContain(std.id);
-      // Send it (or pay it) → finished business: the 85 Whitney case. INV-061 was paid and still
+      // Send it (or pay it) → finished business: the 41 Larkspur case. INV-061 was paid and still
       // refused every progress payment on the job; that must never be true again.
       await client.query(`update invoices set status='paid', total=950, amount_paid=950 where id=$1`, [std.id]);
       expect((await blockersOnJob()).length).toBe(0);

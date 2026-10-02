@@ -1,11 +1,11 @@
 /**
- * THE PLACE A DOCUMENT IS ABOUT, in a link and a filename (Erik 2026-09-25, after sharing Tao
- * Zhu's INV-080: "the invoice link and filename should also have the street number and name like
+ * THE PLACE A DOCUMENT IS ABOUT, in a link and a filename (Erik 2026-09-25, after sharing Tess
+ * Zane's INV-080: "the invoice link and filename should also have the street number and name like
  * the job name", then "estimates too but we dont need the street label", then "KISS").
  *
- *   "235 Timbercreek Court"                    -> "235 Timbercreek"
- *   "3245 West Lake Boulevard"                 -> "3245 West Lake"
- *   "13897 Herringbone Way Truckee  CA 96161"  -> "13897 Herringbone"
+ *   "235 Thistlewood Court"                    -> "235 Thistlewood"
+ *   "3245 West Garnet Boulevard"                 -> "3245 West Garnet"
+ *   "13897 Honeysuckle Way Truckee  CA 96161"  -> "13897 Honeysuckle"
  *
  * The place is the job site's first address line (a quote's own site first, when it has one),
  * else the customer's; else nothing. Never the customer's name, phone, city or anything else:
@@ -34,7 +34,7 @@ const ZIP = /\s\d{5}(?:-\d{4})?\b/;
  * street-type word. "" when there is no address at all.
  *
  * The cut is at the LAST street-type word, not only a literal last word, because a third of the
- * addresses on file are one comma-less blob ("1871 Apache Ct Olympic Valley CA 96146 United
+ * addresses on file are one comma-less blob ("1871 Acacia Ct Olympic Valley CA 96146 United
  * States") where the street label is followed by the town. It never cuts down to the bare house
  * number ("94248 Highway 70" stays whole). A one-line address with a ZIP and no street label gives
  * "": the town can't be told from the street, and a bare link beats a link with the town in it.
@@ -91,7 +91,7 @@ export function projectionPlace(
   );
 }
 
-/** "235 Timbercreek" -> "235-timbercreek": lowercase ASCII letters, digits and dashes only. */
+/** "235 Thistlewood" -> "235-thistlewood": lowercase ASCII letters, digits and dashes only. */
 export function placeSlug(place: string | null | undefined): string {
   return String(place ?? "")
     .normalize("NFKD")
@@ -103,19 +103,19 @@ export function placeSlug(place: string | null | undefined): string {
     .replace(/-+$/, "");
 }
 
-/** A link with the place on the end: ".../i/<token>/235-timbercreek". No place, no slug. */
+/** A link with the place on the end: ".../i/<token>/235-thistlewood". No place, no slug. */
 export function withPlace(url: string, place: string | null | undefined): string {
   const slug = placeSlug(place);
   return slug ? `${url}/${slug}` : url;
 }
 
-/** "INV-080_235 Timbercreek.pdf" / "E-017_13897 Herringbone.pdf". Characters a filesystem
+/** "INV-080_235 Thistlewood.pdf" / "E-017_13897 Honeysuckle.pdf". Characters a filesystem
  *  refuses (/ \ : * ? " < > |) are dropped. */
 export function docFileName(number: string | null | undefined, place: string | null | undefined): string {
   const name = [number, place]
     .map((p) => String(p ?? "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim())
     .filter(Boolean)
-    // Erik, 2026-09-25: "just _235 Timbercreek" - one underscore after the number, spaces in the street.
+    // Erik, 2026-09-25: "just _235 Thistlewood" - one underscore after the number, spaces in the street.
     .join("_")
     .slice(0, 100)
     .trim();

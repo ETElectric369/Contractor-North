@@ -10,7 +10,7 @@ import { formatCurrency } from "./utils";
 
 /**
  * THE T&M RUNNING TOTAL, REPLAYED READ-ONLY AGAINST ET'S LIVE BOOKS (Erik, 2026-09-26: "i dont see
- * a running total anywhere on tao's job page"; "the only thing i was looking for was the amount
+ * a running total anywhere on tess's job page"; "the only thing i was looking for was the amount
  * open"). For every Time & Material job it runs the page's own readers - unbilledWorkForJob,
  * openDraftOnJob, fixedBillingsNotYetNetted - and the card's own door (unbilledCardDoor, openFigure)
  * and prints what the Overview card would say ("Open: $X" and its button) and what Finish Job would
@@ -295,7 +295,7 @@ d("T&M running total and Finish Job, replayed read-only against ET's live books"
       }
       console.log(`[tm-replay] ${JSON.stringify(cards, null, 2)}`);
 
-      // Tao J-002: complete, everything on a bill - the card is there now, and it says $0.00 open.
+      // Tess J-002: complete, everything on a bill - the card is there now, and it says $0.00 open.
       expect(cards["J-002"].open).toBe("Open: $0.00");
       expect(cards["J-002"].button).toBe("(no button)");
       // Every T&M job carries the card (no ET T&M job is on a schedule).

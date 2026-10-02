@@ -84,7 +84,7 @@ export function quoteNoAnswerFilter(todayStr: string, quietDays: number, soonDay
  * door on it:
  *   "waiting"   set aside until a later day and its job still going: the Waiting fold, with that day;
  *   "finished"  set aside, but its job is finished or cancelled: the day it waited for has come, so it
- *               is back on top at once ("Herringbone · J-011 Finished · Send INV-078");
+ *               is back on top at once ("Honeysuckle · J-011 Finished · Send INV-078");
  *   "now"       not set aside, or its day has come: a plain draft row.
  * A DRAFT WHOSE JOB IS FINISHED OR CANCELLED HAS NOTHING LEFT TO WAIT FOR: Set Aside Until… on it
  * would write a day and put it straight back on top as "Finished · Send", so the door is never drawn

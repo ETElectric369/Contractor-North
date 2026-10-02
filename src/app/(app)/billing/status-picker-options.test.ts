@@ -10,7 +10,7 @@ import { invoiceStatusItems, statusToSend, SENT_BY_HAND, type InvoiceStatusDeed 
  * The invoice's Status <select> rendered a DEED you could declare ("Sent Again - I re-sent it
  * myself") above a disabled option showing what the invoice actually IS ("Sent"). Both carried
  * value="sent", and a browser resolves a select's value by the FIRST option in tree order that
- * matches - so on Karen Wucher's INV-071 ($1,875.98, sent 2026-09-19, revised 2026-09-20) the CLOSED
+ * matches - so on Karen Willet's INV-071 ($1,875.98, sent 2026-09-19, revised 2026-09-20) the CLOSED
  * dropdown read "Sent Again" as though the corrected bill were already in her hands, while the amber
  * banner three inches below was asking Erik to go send it. The duplicate also broke the action:
  * picking the option the browser already considers selected fires no change event.

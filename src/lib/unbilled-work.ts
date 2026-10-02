@@ -1,7 +1,7 @@
 /**
  * WHAT A JOB HAS WORKED THAT NO INVOICE HOLDS YET — the running total behind "bill what's new".
  *
- * Erik, 2026-09-11, on 85 Whitney: "i couldnt even make an invoice… kept referring to the old
+ * Erik, 2026-09-11, on 41 Larkspur: "i couldnt even make an invoice… kept referring to the old
  * invoice even though i have new time and new bills… we should have a running total of open time
  * and materials on the overview". Both sentences are this module. "Unbilled" means: closed time
  * entries NOT claimed by a labor line on any non-void invoice (invoice_items.
@@ -475,7 +475,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
      *
      * This card's header promises "nothing here is a second arithmetic: if this figure and the
      * invoice that gets drafted from it ever differ, one of them is a defect". Since 0268/0272 it
-     * differed. His OSH run for Jason Waldow is $16.28 with two bags of Kettle Chips and an ice
+     * differed. His OSH run for Jason Wexley is $16.28 with two bags of Kettle Chips and an ice
      * cream bar switched off: the card said $20.35 of unbilled material and the button beside it
      * wrote $8.13. He was being shown $12.22 of his own snacks, marked up 25%, as money a customer
      * owed - and createProgressReportInvoice decides from this same figure whether a job has
@@ -623,7 +623,7 @@ export function netOfDeposit(c: CustomerUnbilled, lump: number): CustomerUnbille
  *
  * A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
  * Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
- * 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
+ * 13631 Nightshade and 41 Larkspur Place. The duplicate picker tells him the copy he sets aside "stops
  * counting against that job" - a sentence that was false everywhere, because every cost reader summed
  * bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
  * arrives and supersedes it, which is the case that has not happened yet and would otherwise have

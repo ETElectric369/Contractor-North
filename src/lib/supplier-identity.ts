@@ -91,7 +91,7 @@ const ABBREV: Record<string, string> = {
   centre: "center",
 };
 
-/** Lowercase, drop possessives ("Swigard's" is "Swigards"), turn every other mark into a space.
+/** Lowercase, drop possessives ("Brandow's" is "Brandows"), turn every other mark into a space.
  *  Punctuation is the noise this whole file exists to see through. */
 function fold(raw: unknown): string {
   return String(raw ?? "")
@@ -256,7 +256,7 @@ function evidenceFor(A: SupplierNameShape, B: SupplierNameShape): Ev[] {
       const onlyB = B.core.filter((t) => !A.core.includes(t));
       // BOTH sides must carry a trade word the other lacks. That is the difference between two
       // names pulling apart ("Ace Hardware" / "Ace Rentals" - a hardware store and an equipment
-      // yard) and one name simply written shorter ("Swigards" / "Swigard's Hardware" - the same
+      // yard) and one name simply written shorter ("Brandows" / "Brandow's Hardware" - the same
       // counter, and a pair this rule broke on its first attempt by treating a missing word as a
       // conflicting one).
       const thin = A.distinctive.length === 1 && onlyA.length > 0 && onlyB.length > 0;
@@ -565,15 +565,15 @@ export function resolveSupplierAccount(
 
 // ── THE INVOICE NUMBER THE APP ALREADY HAS AND THROWS AWAY ───────────────────────────────────
 //
-// CED's portal names every PDF `TR-34426_20260616_32136931_15165103264.pdf`: account, date,
+// CED's portal names every PDF `AC-10427_20260616_32136931_15165103264.pdf`: account, date,
 // invoice number, and its own internal id. The importer files that whole string in bills.notes as
-// "Receipt recorded as cost: TR-34426_..." while bills.bill_number sits EMPTY on all 21 bills. So
+// "Receipt recorded as cost: AC-10427_..." while bills.bill_number sits EMPTY on all 21 bills. So
 // "I sent CED $4,000" could not be matched to anything CED lists when they ask which invoices it
 // covered, even though the numbers were sitting in the notes the whole time.
 
 /** What a CED portal filename says. Every field read, none inferred. */
 export type SupplierFileRef = {
-  /** "TR-34426". His account number, as the portal wrote it. */
+  /** "AC-10427". His account number, as the portal wrote it. */
   accountNumber: string;
   /** "2026-06-16". */
   date: string;
@@ -604,7 +604,7 @@ function ymdFrom(digits: string): string | null {
  * importer prefix on the front.
  *
  * Returns null, never a guess, for everything else: "image.jpg", "85 Whit.pdf",
- * "85 Whitney Pl - CED.pdf". A wrong invoice number on a supplier payment is worse than no number
+ * "41 Larkspur Pl - CED.pdf". A wrong invoice number on a supplier payment is worse than no number
  * at all, because a missing one is visibly missing and a wrong one is not.
  */
 export function parseSupplierFilename(raw: string | null | undefined): SupplierFileRef | null {
@@ -739,7 +739,7 @@ export type DuplicateBillSuggestion = {
  * TWO BILLS THAT LOOK LIKE ONE TICKET (found in his book, 2026-09-18).
  *
  * An identical CED ticket, line for line to the penny ($95.27, 8 lines), is filed BOTH to "13631
- * Northwoods" (07-29, from TR-34426_20260730_32270817_...pdf) and to "85 Whitney Place" (08-28,
+ * Nightshade" (07-29, from AC-10427_20260730_32270817_...pdf) and to "41 Larkspur Place" (08-28,
  * from "85 Whit.pdf"). One of those two jobs is carrying a cost that is not its own, which quietly
  * moves real profit from one job to the other.
  *

@@ -215,7 +215,7 @@ export default async function BillsPage({
       .in("category", ["Receipt", "Bill"])
       .order("created_at", { ascending: false }),
     // status and address ride along for the supplier-invoice job picker (0273): CED's job name is
-    // "5659 RHODESIA", "561 RHODESIA", "5661 RHODESIA" and "5659 RODESSIA" for ONE road he has
+    // "5659 FERNHILL", "561 FERNHILL", "5661 FERNHILL" and "5659 FERNHILE" for ONE road he has
     // five jobs on, and a picker with nothing but a name on it cannot tell them apart. The limit
     // went from 100 to 500 for the same reason - a job missing from the list is a document he
     // cannot file, which is a dead end wearing a dropdown.
@@ -576,7 +576,7 @@ export default async function BillsPage({
     // 21 bills and these rows would have shown no invoice number for the life of the feature -
     // while the duplicate finder further down was reading it perfectly well out of the very same
     // bills. readBillInvoice recovers it from the CED portal filename sitting in `notes`
-    // (TR-34426_20260616_32136931_...) or from the numbers OCR captured inside line text
+    // (AC-10427_20260616_32136931_...) or from the numbers OCR captured inside line text
     // ("(Invoice 8802-1101363)"). Persisting it is a later job; reading it costs nothing.
     ...(() => {
       const stored = b.supplier_invoice_number ?? null;
@@ -764,7 +764,7 @@ export default async function BillsPage({
     };
   });
 
-  // His jobs, with enough on each to tell five Rhodesias apart.
+  // His jobs, with enough on each to tell five Fernhills apart.
   const reconcileJobs = reconcileJobsOf((jobs ?? []) as any[]);
 
   // THE DAY THE COMPANY'S BOOKS BEGIN (booksBeginOn): the day it named (settings.books_begin; ET's

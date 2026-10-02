@@ -54,21 +54,21 @@ beforeEach(() => {
 
 describe("the panel ring: one notice per job per hour", () => {
   it("rings once, then refreshes the same bell line with the running count and buzzes nobody", async () => {
-    expect(await ringOffice("org", ["erik", "office"], { ...base, title: "Brian changed 3 circuits on J-011 13897 Herringbone" })).toBe("rang");
+    expect(await ringOffice("org", ["erik", "office"], { ...base, title: "Brian changed 3 circuits on J-011 13897 Honeysuckle" })).toBe("rang");
     expect(table).toHaveLength(2);
     expect(push).toHaveBeenCalledTimes(1);
-    expect(await ringOffice("org", ["erik", "office"], { ...base, title: "Brian changed 5 circuits on J-011 13897 Herringbone" })).toBe("refreshed");
+    expect(await ringOffice("org", ["erik", "office"], { ...base, title: "Brian changed 5 circuits on J-011 13897 Honeysuckle" })).toBe("refreshed");
     expect(table).toHaveLength(2);
-    expect(table.map((r) => r.title)).toEqual(["Brian changed 5 circuits on J-011 13897 Herringbone", "Brian changed 5 circuits on J-011 13897 Herringbone"]);
+    expect(table.map((r) => r.title)).toEqual(["Brian changed 5 circuits on J-011 13897 Honeysuckle", "Brian changed 5 circuits on J-011 13897 Honeysuckle"]);
     expect(push).toHaveBeenCalledTimes(1);
   });
 
   it("a change after the office read the line brings the line back unread (still no second buzz)", async () => {
-    await ringOffice("org", ["erik"], { ...base, title: "Brian changed 1 circuit on J-011 13897 Herringbone" });
+    await ringOffice("org", ["erik"], { ...base, title: "Brian changed 1 circuit on J-011 13897 Honeysuckle" });
     table[0].read_at = "2026-09-25T09:05:00Z";
-    expect(await ringOffice("org", ["erik"], { ...base, title: "Brian changed 9 circuits on J-011 13897 Herringbone" })).toBe("refreshed");
+    expect(await ringOffice("org", ["erik"], { ...base, title: "Brian changed 9 circuits on J-011 13897 Honeysuckle" })).toBe("refreshed");
     expect(table).toHaveLength(1);
-    expect(table[0]).toMatchObject({ title: "Brian changed 9 circuits on J-011 13897 Herringbone", read_at: null });
+    expect(table[0]).toMatchObject({ title: "Brian changed 9 circuits on J-011 13897 Honeysuckle", read_at: null });
     expect(push).toHaveBeenCalledTimes(1);
   });
 
@@ -87,7 +87,7 @@ describe("the panel ring: one notice per job per hour", () => {
 
 describe("the materials ring: every add on the bell, one push per 15 minutes", () => {
   it("bells each time and pushes once", async () => {
-    const m = { type: "materials_added", url: "/jobs/j1?tab=materials", windowMinutes: 15, mode: "bell_each_push_once" as const, title: "Brian added to Herringbone materials" };
+    const m = { type: "materials_added", url: "/jobs/j1?tab=materials", windowMinutes: 15, mode: "bell_each_push_once" as const, title: "Brian added to Honeysuckle materials" };
     expect(await ringOffice("org", ["erik"], { ...m, body: "1 ea — Q220" })).toBe("rang");
     expect(await ringOffice("org", ["erik"], { ...m, body: "2 ea — faceplates" })).toBe("bell_only");
     expect(table.map((r) => r.body)).toEqual(["1 ea — Q220", "2 ea — faceplates"]);
@@ -98,7 +98,7 @@ describe("the materials ring: every add on the bell, one push per 15 minutes", (
 describe("when the window can't be read", () => {
   it("the bell line is still written (never dropped) and nobody is buzzed", async () => {
     failReads = true;
-    const m = { type: "materials_added", url: "/jobs/j1?tab=materials", windowMinutes: 15, mode: "bell_each_push_once" as const, title: "Brian added to Herringbone materials" };
+    const m = { type: "materials_added", url: "/jobs/j1?tab=materials", windowMinutes: 15, mode: "bell_each_push_once" as const, title: "Brian added to Honeysuckle materials" };
     expect(await ringOffice("org", ["erik", "office"], { ...m, body: "1 ea — Q220" })).toBe("bell_only");
     expect(table).toHaveLength(2);
     expect(await ringOffice("org", ["erik"], { ...base, title: "Brian changed 2 circuits" })).toBe("bell_only");

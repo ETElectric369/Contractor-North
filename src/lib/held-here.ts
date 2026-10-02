@@ -1,7 +1,7 @@
 /**
  * A CLAIM ON THIS INVOICE THAT ITS OWN IMPORTER DID NOT WRITE IS TAKEN (Already Billed, wave 1).
  *
- * Erik, 2026-09-26: "i have a bill for purple sage that was already charged and i have no way to
+ * Erik, 2026-09-26: "i have a bill for pinyon sage that was already charged and i have no way to
  * associate it to the paid invoice becuase i did it manually and that will happen for people i
  * assure you". A charge made by hand is a line the importer does not own: INV-00023's "Materials"
  * ($110, typed by hand) now holds CED 8802-1101475, INV-059's and INV-060's "Labor - Brian" hold

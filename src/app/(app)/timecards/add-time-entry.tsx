@@ -36,7 +36,7 @@ import { StopClockSheet } from "./stop-clock-sheet";
  * opens in one tap ("Open That Shift"); an end on another day is the "Ends The Next Day" box.
  *
  * THE JOB IS ALWAYS SOMETHING SOMEBODY CHOSE. On the job's own page it is that job ("Job · 85
- * Whitney"). On Timecards it starts where the schedule put the person that day (shiftsOnDay's
+ * Larkspur"). On Timecards it starts where the schedule put the person that day (shiftsOnDay's
  * scheduledJob: the crew board's day row, else a rostered job whose days cover it), and on "Pick
  * The Job" when the schedule says nothing, so Save refuses until someone picks: a job, Company Time
  * (the company's own not-billed code), or, for a company with no such code, No Job, said to wait
@@ -75,7 +75,7 @@ export function endsBeforeStart(startT: string, endT: string): boolean {
   return endT.slice(0, 5) <= startT.slice(0, 5);
 }
 
-/** What the toast says after a save: "Added 7.5 h for Brian · Tue, Sep 23 · 85 Whitney". */
+/** What the toast says after a save: "Added 7.5 h for Brian · Tue, Sep 23 · 41 Larkspur". */
 export function addedWords(f: { hours: number; who: string; day: string; where: string }): string {
   return `Added ${hoursWords(f.hours)} for ${f.who} · ${dayWords(f.day)} · ${f.where}`;
 }
@@ -123,7 +123,7 @@ function clockWords(iso: string, tz: string): string {
 }
 
 /**
- * A REFUSAL HANDS BACK THE DOOR (Erik, 2026-09-29: Add Time Entry on 700 North Lake Boulevard for
+ * A REFUSAL HANDS BACK THE DOOR (Erik, 2026-09-29: Add Time Entry on 700 North Juniper Boulevard for
  * Brian while Brian's punch was still running elsewhere). The refusal said "Clock Brian out first: tap
  * their shift on Timecards", and this form had no such door: the clock-out sheet was never mounted
  * here, and the job's Time tab lists Clock Out <Name> only for punches on this job. So when the shift
