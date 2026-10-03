@@ -52,6 +52,7 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
     shopStockLost,
     stockMovedOut: f.stockMovedOut ?? 0,
     left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - fuel - businessCostsTotal - putOnShelf - shopStockLost) * 100) / 100,
+    ownerMoneyIn: 0,
     ownerHours: 0,
     perOwnerHour: null,
     // The owner's build time and its contra net to zero, so `left` above is untouched by them.

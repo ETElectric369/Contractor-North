@@ -68,6 +68,32 @@ const VIEW: BankView = {
     { key: "draw", label: "Owner's Draw", cents: 250000 },
     { key: "personal", label: "Personal", cents: 22000 },
   ],
+  // WHERE THE MONEY CAME IN: invented figures of the shape bank-money-in.ts returns - a channel that
+  // reaches the account, one that only reaches it after its fee, one that is still in the app, cash that
+  // never reaches it at all, and payments nobody said the method of.
+  channels: {
+    rows: [
+      { key: "check", label: "Check", fate: "as_itself", recordedCents: 2_536_711, expectedCents: 2_536_711, namedCents: null, why: "Expect all of it here, a few days after it was paid." },
+      {
+        key: "card",
+        label: "Card",
+        fate: "net_of_fee",
+        recordedCents: 1_775_163,
+        expectedCents: 1_722_855,
+        namedCents: 1_722_855,
+        why: "A payout lands days later: $17,228.55 after $523.08 of fees. The statement names exactly that much.",
+      },
+      { key: "venmo", label: "Venmo", fate: "when_swept", recordedCents: 1_638_411, expectedCents: 1_638_411, namedCents: 0, why: "Sits in Venmo until somebody moves it to the bank. Nothing on the statement says this way of being paid." },
+      { key: "cash", label: "Cash", fate: "never_banked", recordedCents: 645_135, expectedCents: 0, namedCents: null, why: "Cash never reaches the bank. Its receipts are already costs." },
+      { key: "not_said", label: "Not Said How It Was Paid", fate: "unsaid", recordedCents: 41_000, expectedCents: null, namedCents: null, why: "Nobody wrote down how these were paid, so there is no saying where they land." },
+    ],
+    recordedCents: 6_636_420,
+    expectedCents: 5_897_977,
+    reachedCents: 3_423_956,
+    unsaidCents: 41_000,
+    unnamedCents: 1_701_101,
+    say: "$24,740.21 of what you were paid hasn't reached this account. $16,384.11 of it is Venmo nobody has moved to the bank yet.",
+  },
   inCents: 1200000,
   outCents: 368500,
   sorted: [{ label: "Payments Already Recorded", n: 12, cents: 900000 }],
@@ -84,6 +110,43 @@ const VIEW: BankView = {
 const render = (view: BankView | null) => renderToStaticMarkup(createElement(BankCard, { itemId: "i1", view, run: () => {}, busy: null, working: false }));
 
 describe("the bank card", () => {
+  /**
+   * WHERE YOUR MONEY CAME IN (0376's lane), the block above the rows: one line per way of being paid,
+   * what was paid and what should reach THIS account, then the one sentence. It is what makes most of
+   * the rows below it stop mattering, so it is drawn before them.
+   */
+  it("says how he was paid and what should reach this account, above the rows", () => {
+    const text = textOf(render(VIEW));
+    expect(text).toContain("How You Were Paid");
+    expect(text).toContain("Check $25,367.11 $25,367.11");
+    // A CARD IS ITSELF LESS ITS FEE, and the row says so where he reads the figure.
+    expect(text).toContain("Card $17,751.63 $17,228.55");
+    expect(text).toContain("A payout lands days later: $17,228.55 after $523.08 of fees.");
+    // CASH IS A STATEMENT, NOT A ROW TO BALANCE.
+    expect(text).toContain("Cash $6,451.35 $0.00");
+    expect(text).toContain("Cash never reaches the bank.");
+    // A FIGURE THAT COULD NOT BE WORKED OUT SHOWS A DASH, never a 0 this card made up - and says why.
+    expect(text).toContain("Not Said How It Was Paid $410.00 \u2014");
+    expect(text).toContain("Nobody wrote down how these were paid");
+    // THE TWO TOTALS, the deposits that say nothing, and THE ONE SENTENCE leading with the figure.
+    expect(text).toContain("Should Reach Here $58,979.77");
+    expect(text).toContain("Reached It $34,239.56");
+    expect(text).toContain("Deposits That Don't Say Which $17,011.01");
+    expect(text).toContain(VIEW.channels!.say);
+    // It is ABOVE the rows and above the where-it-went bar.
+    const html = render(VIEW);
+    expect(html.indexOf("How You Were Paid")).toBeLessThan(html.indexOf("Where $3,685.00 Went"));
+    expect(html.indexOf("How You Were Paid")).toBeLessThan(html.indexOf("SHELL 123 ANYTOWN"));
+  });
+
+  it("draws no block at all when there is nothing worked out to say", () => {
+    // The card an office viewer the owner keeps owner money from is handed has channels null, and a block
+    // of dashes would be a dead end. Nothing of it reaches the markup either.
+    const text = textOf(render({ ...VIEW, channels: null }));
+    expect(text).not.toContain("How You Were Paid");
+    expect(text).not.toContain("Should Reach Here");
+  });
+
   it("leads with the one line, draws where the money went, and asks one row per merchant", () => {
     const html = render(VIEW);
     const text = textOf(html);

@@ -9,6 +9,7 @@ import {
   hasUnratedHours,
   isOwnerMoneySegmentKey,
   notCountedLine,
+  hasOwnerMoneyIn,
   ownerDrawUnseen,
   stockLine,
   uncostedBuildTime,
@@ -110,6 +111,10 @@ export function LeftForCard({
         // The build-time PAIR, through the one predicate both this card and the accountant's Summary ask.
         ownerBuildTime: hasOwnerBuildTime(t),
         ownerDraw: true,
+        // MONEY IN FROM THE OWNER (0376): the same section the other way, through the one predicate.
+        // Unlike the draw this row is drawn only when there is some, and hasOwnerMoneyIn is where the
+        // reason for that difference is written down.
+        ownerMoneyIn: hasOwnerMoneyIn(t),
       })
     : [];
   // Zero draws THAT THE APP CAN SEE. Not the same claim as "he drew nothing", and said as such.
@@ -197,7 +202,11 @@ export function LeftForCard({
     }
   };
   const net = pnl.find((r) => r.key === "net_profit");
-  const draw = pnl.find((r) => r.key === "owner_draw");
+  /** THE EQUITY BLOCK, from the layout rather than by key: Owner's Draw, and Owner's Money In when
+   *  there is some (0376). It used to be one hand-picked row, and a second equity line added to
+   *  profit-and-loss.ts would have rendered NOWHERE on this card while sitting in the data - the exact
+   *  dead-end `lineOf`'s missing default case once was. isBelowNetProfit is the one answer. */
+  const belowTheLine = pnl.filter((r) => isBelowNetProfit(r.kind));
 
   return (
     <Card className="mb-6">
@@ -260,12 +269,14 @@ export function LeftForCard({
                 this month"). Drawn as a plain row, deliberately not bold and with no top rule of its
                 own: it must never look like a total of the figure above it. And it says what it can
                 see - bank lines sorted as Owner's Draw, not cash. */}
-            {draw && (
+            {belowTheLine.length > 0 && (
               <div className="mt-3 border-t border-dashed border-slate-200 pt-2">
-                <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-sm text-slate-700">{draw.label}</span>
-                  <span className="text-sm tabular-nums text-slate-800">{formatCurrency(draw.amount ?? 0)}</span>
-                </div>
+                {belowTheLine.map((r) => (
+                  <div key={r.key} className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm text-slate-700">{r.label}</span>
+                    <span className="text-sm tabular-nums text-slate-800">{formatCurrency(r.amount ?? 0)}</span>
+                  </div>
+                ))}
                 {/* $0.00 IS NOT "YOU TOOK NOTHING OUT". The figure has ONE source - bank lines sorted as
                     Owner's Draw - so an empty one means "nothing this period that the app can see", and
                     the door that changes the answer is the statement drop line. It used to sit three
@@ -274,7 +285,7 @@ export function LeftForCard({
                     pointing "below" at a door that is no longer there is a dead end. So it is a link,
                     and it lands on the card that holds the door. */}
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Equity, not a cost: it is not taken off Net Profit. {money.ownerDrawSeen}
+                  {belowTheLine.length === 1 ? "Equity, not a cost: it is" : "Equity, not costs: neither is"} taken off Net Profit. {money.ownerDrawSeen}
                   {drawUnseen ? " Nothing this period that the app can see: a bank download is what tells it." : ""}
                 </p>
                 {drawUnseen && (

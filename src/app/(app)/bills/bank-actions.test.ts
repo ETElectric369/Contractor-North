@@ -981,6 +981,41 @@ describe("Undo", () => {
     expect(db.petty_cash ?? []).toHaveLength(0);
   });
 
+  /**
+   * MONEY IN FROM THE OWNER (0376), the mirror of Owner's Draw. It writes NO income row and NO cost row:
+   * the bank line IS the record, and the profit and loss reads it back as equity below Net Profit. And
+   * unlike a job or Other Income it MAY be learned as a rule, because "a transfer from my own other
+   * account is money I put in" is true of that account every time - which the apply loop used to refuse
+   * with a line of its own ("money in teaches only Not Income"), one line away from the list that decides.
+   */
+  it("a deposit answered Owner's Money In writes nothing, and IS remembered as a rule", async () => {
+    const id = await drop(`Date,Description,Amount\n09/12/2026,ONLINE TRANSFER FROM CHK XXXXXX9876 REF #IB9900,3000.00\n09/19/2026,ONLINE TRANSFER FROM CHK XXXXXX9876 REF #IB9901,1500.00\n`, "Owner1234.csv");
+    const v = await view(id);
+    // IT IS NEVER THE GUESS: Erik's own first case looked exactly like this and was customers paying his
+    // Venmo, already recorded. The answer is in the Other... list and a person picks it on purpose.
+    for (const r of v.rows) expect(r.guess).not.toBe("owner_in");
+    expect(v.otherIn.map((b) => b.id)).toContain("owner_in");
+    expect(v.otherIn.find((b) => b.id === "owner_in")!.label).toBe("Owner's Money In");
+
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: Object.fromEntries(v.rows.map((r) => [r.id, "owner_in"])) });
+    expect(res.ok).toBe(true);
+    // NO INCOME, NO COST: filing his own money as income is the overstatement 0376 exists to end.
+    expect(db.payments.filter((p) => p.bank_line_id)).toHaveLength(0);
+    expect(db.bills ?? []).toHaveLength(0);
+    expect(db.bank_lines.map((l) => [l.choice, l.bucket, l.invoice_id])).toEqual([
+      ["owner_in", null, null],
+      ["owner_in", null, null],
+    ]);
+    // LEARNED, for the amounts it was answered for, on the account the words name.
+    expect(db.bank_rules.map((r) => [r.direction, r.merchant_key, r.choice, r.min_cents, r.max_cents])).toEqual([["in", "transfer 9876", "owner_in", 150_000, 300_000]]);
+    expect(res.message).toContain("Owner's Money In");
+
+    // And Undo takes the lines off with nothing else to take back.
+    await undoBankDownload(id);
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.bills ?? []).toHaveLength(0);
+  });
+
   it("a petty cash top-up an ATM line wrote before W1-34 is still taken back only while it is still that top-up", async () => {
     const id = await drop(`Date,Description,Amount\n09/15/2026,ATM WITHDRAWAL MAIN ST,-200.00\n09/16/2026,ATM WITHDRAWAL MAIN ST,-100.00\n`, "Atm1234.csv");
     const v = await view(id);

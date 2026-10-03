@@ -1,4 +1,5 @@
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS, bucketOf, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { channelWhyFor, moneyInChannels, processorWordsRe, type ChannelPayment, type MoneyInChannels } from "@/lib/bank-money-in";
 import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
 import { findHeaderRow, fingerprintOf, headerKey, looksLikePaperNumber, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars, type ReadFacts } from "@/lib/supplier-open-list";
 // THE RULE EVERY DOOR THAT PUTS A COST ON A JOB IS HELD TO (audit v994's DB4). A bank line writes a
@@ -405,9 +406,15 @@ export function merchantWords(description: string): string[] {
 }
 
 const TRANSFER_RE = /\b(transfer|xfer|trnsfr)\b/i;
-/** Card processors and payment apps: their "transfer" is a payout of customers' money, not a move
- *  between the company's own accounts, so it keeps its merchant's name. */
-const PROCESSOR_RE = /\b(stripe|square|sq|venmo|zelle|paypal|cash ?app|clover|toast|shopify|intuit|quickbooks)\b/i;
+/**
+ * Card processors and payment apps: their "transfer" is a payout of customers' money, not a move between
+ * the company's own accounts, so it keeps its merchant's name.
+ *
+ * BUILT FROM THE ONE TABLE (bank-money-in.ts's CHANNEL_WORDS), because the channel view reads the same
+ * brands to say which way of being paid a deposit came through. Two hand-kept copies of one vocabulary
+ * is how a brand ends up a processor on one screen and the company's own bank on the next.
+ */
+const PROCESSOR_RE = processorWordsRe();
 
 /**
  * THE MERCHANT KEY: the first word, or two when the first names nobody ("the home", "sq coffee",
@@ -839,7 +846,21 @@ export type BankChoice =
   | { choice: "crew"; profileId: string }
   | { choice: "invoice"; invoiceId: string }
   | { choice: "other_income" }
-  | { choice: "not_income" };
+  | { choice: "not_income" }
+  /**
+   * MONEY IN FROM THE OWNER (0376), the mirror of 'draw'. Money OUT to him has been an answer since
+   * 0363, and 2026-10-01 settled it as equity below Net Profit. Money IN from him had no word at all,
+   * so his own money could only be filed as Other Income — which overstates Revenue, Gross Margin %
+   * and Net Profit by every cent of it.
+   *
+   * IT WRITES NO ROW, exactly like 'draw': the bank line IS the record, and the profit and loss reads
+   * it back from bank_lines (owner-money.ts). Money IN only, as 'draw' is money OUT only.
+   *
+   * IT IS NEVER A GUESS. Erik's own first case looked exactly like this and was not — three deposits
+   * from his personal account were customers paying his Venmo, already recorded against their
+   * invoices, so the right answer was Already Counted. A person picks this one on purpose.
+   */
+  | { choice: "owner_in" };
 
 export type ChoiceName = BankChoice["choice"];
 
@@ -905,13 +926,17 @@ export function parseChoiceId(id: unknown): BankChoice | null {
     case "not_cost":
     case "other_income":
     case "not_income":
+    case "owner_in":
       return s === head ? ({ choice: head } as BankChoice) : null;
     default:
       return null;
   }
 }
 
-const IN_CHOICES = new Set<ChoiceName>(["invoice", "other_income", "not_income"]);
+/** The answers money coming IN may take. owner_in is in here and 'draw' is not, which is the whole of
+ *  "the mirror of the draw": each goes one way only, and choiceFits keeps both to their own side. The
+ *  database holds the same rule for a learned rule (bank_rules_income_is_in, 0376). */
+const IN_CHOICES = new Set<ChoiceName>(["invoice", "other_income", "not_income", "owner_in"]);
 
 /** THE ANSWERS THAT PUT A COST ON THE BOOKS AND MAY BE GIVEN BACK: a bucket, and a bucket only — a
  *  store's refund comes off that bucket, the company's own book, which never reaches a customer. A JOB
@@ -994,6 +1019,13 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
       // What it is for: a deposit already in North (a payment recorded), or money that was never
       // income (a transfer from the company's own account, a loan).
       return "Already Counted Or Not Income";
+    // THE MIRROR OF "Owner's Draw", IN THE SAME WORDS PLUS THE DIRECTION (0376). Not "Owner's
+    // Contribution" or "Capital In", which are an accountant's words for it and this card is read by
+    // an electrician between jobs; not "Money I Put In", which reads right only to the one person who
+    // did it. These two labels beside each other say whose money it is and which way it went, and they
+    // are the same words on the bank card, in the Other… list and on the profit and loss.
+    case "owner_in":
+      return "Owner's Money In";
   }
 }
 
@@ -1087,6 +1119,14 @@ export type BankBooks = {
   already: Map<string, AlreadyLine>;
   /** Only rows no bank line marks yet. */
   payments: BooksPayment[];
+  /**
+   * EVERY payment recorded in the download's own days, matched or not: the channel view's left-hand
+   * column. `payments` above is deliberately only the UNMARKED ones, because that is what a match may
+   * still claim - so reading the channel view off it would make "what you were paid" shrink every time
+   * somebody pressed Apply. Empty until the read supplies it, and the card then draws no channel block
+   * rather than a short one.
+   */
+  periodPayments?: ChannelPayment[];
   payPayments: BooksPay[];
   supplierPayments: BooksSupplierPay[];
   bills: BooksBill[];
@@ -1472,6 +1512,9 @@ function bankCentsOf(p: BooksPayment): number | null {
  * one row per merchant. Pure, deterministic for the same download and books (the fingerprint).
  */
 export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
+  // THE REASON A MONEY-IN GUESS SHOWS ITS WORKING (0376's lane): worked out ONCE for the download, not
+  // per row — it is a period total, and forty deposits asking for it would be forty identical sums.
+  const channels = channelViewOf(dl, books);
   const lines = [...dl.lines].sort((a, b) => a.postedOn.localeCompare(b.postedOn) || a.row - b.row);
   const dispositions = new Map<string, Disposition>();
   const used = new Set<string>();
@@ -1678,9 +1721,22 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
         buttons: [],
         learnable: !single && !!line.merchantKey && !isGenericKey(line.merchantKey),
         merchantKey: line.merchantKey,
+        /**
+         * WHY, IN ONE SHORT LINE, OR NOTHING AT ALL. Erik, on a $7,714.09 deposit offered a bare "Already
+         * Counted Or Not Income": the guess asked him to take its word. Two reasons can actually be
+         * worked out, and they are asked most specific first:
+         *   1. a payment of this very money already in North, by invoice and day;
+         *   2. the CHANNEL the statement's own words name, with that channel's two period totals —
+         *      "your card payments and this account's payouts agree over these weeks" is a reason a
+         *      person can check.
+         * Where neither holds, the words name no channel and there is nothing to say beyond "money in
+         * with nothing else to say", so this is null and the row says nothing extra. Invented confidence
+         * is worse than none.
+         */
         hint: (() => {
           const p = lookalikePayment(line, books, used);
-          return p ? `Maybe the payment on ${p.invoiceNumber} of ${sayRange(p.day, p.day)}, already in North.` : null;
+          if (p) return `Maybe the payment on ${p.invoiceNumber} of ${sayRange(p.day, p.day)}, already in North.`;
+          return line.cents > 0 ? channelWhyFor(line.description, channels) : null;
         })(),
       };
       groups.set(id, g);
@@ -1752,10 +1808,23 @@ function buttonsFor(g: NeedGroup, books: BankBooks): string[] {
  *     that put them all on the first would spend one job's money on another's, silently, forever;
  *   · an invoice — one deposit, one invoice;
  *   · Other Income (0363) — money in is a customer's until a person says otherwise, every time.
- * One list, because the learning loop and ruleChoice must agree about this.
+ *
+ * AND MONEY IN LEARNS ONLY TWO ANSWERS, which is why the direction is an argument here rather than a
+ * second `if` at the one caller. A merchant sending money in is a CUSTOMER until a person says
+ * otherwise, so a rule on money in may only hold what is true of that merchant every time: Already
+ * Counted (0363), and the owner's own money going in (0376 — "a transfer from my own other account is
+ * money I put in" really is true of that account every time, which is why 0376 taught
+ * bank_rules_income_is_in the word). The apply loop used to carry this half of the rule itself, one
+ * line away from the list it belongs with, where neither half could see the other.
+ *
+ * One list, because the learning loop, ruleChoice and the database's CHECK must agree about this.
  */
-export function learnableAnswer(c: BankChoice): boolean {
-  return c.choice !== "job" && c.choice !== "invoice" && c.choice !== "other_income";
+export function learnableAnswer(c: BankChoice, direction: "in" | "out"): boolean {
+  // An answer that does not even fit the direction can never be a rule for it: bank_rules_income_is_in
+  // refuses the row, and one refused rule loses the whole Apply's rule write.
+  if (!choiceFits(c, direction)) return false;
+  if (c.choice === "job" || c.choice === "invoice" || c.choice === "other_income") return false;
+  return direction === "out" || c.choice === "not_income" || c.choice === "owner_in";
 }
 
 /** Every answer a row may take, for its Other… list. */
@@ -1779,7 +1848,10 @@ export function everyChoice(direction: "in" | "out", books: Pick<BankBooks, "acc
   if (direction === "in") {
     const out: BankChoice[] = [];
     if (single) for (const i of books.invoices) out.push({ choice: "invoice", invoiceId: i.id });
-    out.push({ choice: "other_income" }, { choice: "not_income" });
+    // THE OWNER'S OWN MONEY GOING IN (0376) sits with the other fixed words, AFTER Already Counted:
+    // Erik's own first case looked like a contribution and was a customer's payment, so the answer a
+    // person's hand reaches first must stay the one that is right more often.
+    out.push({ choice: "other_income" }, { choice: "not_income" }, { choice: "owner_in" });
     // A REFUND OF A COST: money back from a store or a supplier comes off that bucket.
     for (const b of BUSINESS_COST_BUCKETS) out.push({ choice: "cost", bucket: b });
     return [...out, ...jobs()];
@@ -1866,6 +1938,23 @@ export function flowLabelOf(choice: string, bucket: string | null): { key: strin
     default:
       return { key: "other", label: "Other" };
   }
+}
+
+/**
+ * THE CHANNEL VIEW FOR THIS DOWNLOAD, or null when there is nothing worked out to say.
+ *
+ * Null rather than an empty block in three cases that all mean the same thing on screen: a download with
+ * no dates to be a period, a read that could not supply the period's payments (problemView, and the card
+ * an office viewer the owner keeps owner money from is handed), and a period that holds neither a payment
+ * nor a deposit. A block of dashes is a dead end; no block says the same thing and takes no room.
+ */
+export function channelViewOf(dl: Pick<BankDownload, "from" | "to" | "lines">, books: Pick<BankBooks, "periodPayments">): MoneyInChannels | null {
+  if (!dl.from || !dl.to) return null;
+  const payments = books.periodPayments ?? [];
+  const moneyIn = dl.lines.filter((l) => l.cents > 0).map((l) => ({ cents: l.cents, description: l.description }));
+  if (!payments.length && !moneyIn.length) return null;
+  const view = moneyInChannels({ payments, moneyIn, window: { from: dl.from, to: dl.to } });
+  return view.rows.length ? view : null;
 }
 
 export function moneyFlow(dl: BankDownload, plan: BankPlan, books: BankBooks): { out: FlowSegment[]; inCents: number; outCents: number } {
@@ -2068,6 +2157,12 @@ export type BankView = {
   otherIn: BankButton[];
   otherInSingle: BankButton[];
   flow: FlowSegment[];
+  /**
+   * WHERE THE MONEY CAME IN: what was paid, by channel, what of it should reach THIS account and what
+   * the statement names. Null when there is nothing to say (no payments in the period and no money in),
+   * and on the card a viewer who may not see owner money is handed.
+   */
+  channels: MoneyInChannels | null;
   inCents: number;
   outCents: number;
   /** What Apply writes or marks without a question, by kind. */
@@ -2160,6 +2255,9 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     sorted.set(name, s);
   }
   const flow = moneyFlow(dl, plan, books);
+  // THE CHANNEL VIEW, ABOVE THE ROWS, because it is what makes most of the rows stop mattering: once the
+  // card says how he was paid and what reached the bank, the deposits below need no matching at all.
+  const channels = channelViewOf(dl, books);
   const passes = opts.applied ?? [];
   const lastPass = passes[passes.length - 1];
   const appliedSaid = lastPass
@@ -2192,6 +2290,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     otherIn: everyChoice("in", books, false).map(inButton),
     otherInSingle: everyChoice("in", books, true).map(inButton),
     flow: flow.out,
+    channels,
     inCents: flow.inCents,
     outCents: flow.outCents,
     sorted: [...sorted.values()].sort((a, b) => Math.abs(b.cents) - Math.abs(a.cents)),

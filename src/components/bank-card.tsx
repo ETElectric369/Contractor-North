@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { sayDollars } from "@/lib/supplier-open-list";
 import type { BankRowView, BankView, FlowSegment } from "@/lib/bank-download";
+import type { MoneyInChannels } from "@/lib/bank-money-in";
 import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
 import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
 
@@ -17,6 +18,7 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  *   [one bar: where the money went]
  *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Auto] [Personal] [Other…]
  *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted Or Not Income] [Other…]
+ *       Card: $17,751.63 paid this period, $17,228.55 to reach here after $523.08 of fees.
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
  *   [Apply] [Set Aside]
  *
@@ -77,6 +79,57 @@ function FlowBar({ flow, outCents }: { flow: FlowSegment[]; outCents: number }) 
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * WHERE YOUR MONEY CAME IN - one short block, above the rows, because it is what makes most of the rows
+ * stop mattering.
+ *
+ *   How You Were Paid                     Paid     Should Reach Here
+ *   Check                           $25,367.11            $25,367.11   Expect all of it here, a few days after it was paid.
+ *   Card                            $17,751.63            $17,228.55   A payout lands days later: $17,228.55 after $523.08 of fees.
+ *   Venmo                           $16,384.11            $16,384.11   Sits in Venmo until somebody moves it to the bank.
+ *   Cash                             $6,451.35                 $0.00   Cash never reaches the bank. Its receipts are already costs.
+ *   Should Reach Here $69,735.55 · Reached It $34,239.56
+ *   $35,496.00 of what you were paid hasn't reached this account. $26,384.11 of it is Venmo and Zelle …
+ *
+ * EVERY FIGURE IS THE PURE FUNCTION'S (bank-money-in.ts). This component adds no arithmetic of its own:
+ * a dash is what a figure that could not be worked out LOOKS like, never a 0 this file substituted.
+ */
+function MoneyInBlock({ channels }: { channels: MoneyInChannels }) {
+  const dash = <span className="text-slate-400">—</span>;
+  return (
+    <div className="space-y-1.5 rounded-lg border border-slate-200 px-3 py-2">
+      <p className="text-xs font-medium text-slate-600">How You Were Paid</p>
+      <ul className="space-y-1">
+        {channels.rows.map((r) => (
+          <li key={r.key} className="space-y-0.5">
+            <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
+              <span className="min-w-0 break-words text-slate-800">{r.label}</span>
+              <span className="ml-auto tabular-nums text-slate-700">{sayDollars(r.recordedCents / 100)}</span>
+              {/* WHAT SHOULD REACH THIS ACCOUNT. A channel nobody has worked out a fate for shows a dash,
+                  with its reason beside it: it is in no total on this card either. */}
+              <span className="w-28 text-right tabular-nums text-slate-900">{r.expectedCents == null ? dash : sayDollars(r.expectedCents / 100)}</span>
+            </div>
+            <p className="text-xs text-slate-500">{r.why}</p>
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-baseline gap-x-3 border-t border-slate-100 pt-1 text-xs text-slate-600">
+        <span>
+          Should Reach Here <span className="tabular-nums text-slate-900">{sayDollars(channels.expectedCents / 100)}</span>
+        </span>
+        <span>
+          Reached It <span className="tabular-nums text-slate-900">{sayDollars(channels.reachedCents / 100)}</span>
+        </span>
+        {/* MONEY IN WITH NOTHING ELSE TO SAY: deposits whose words name no way of being paid. Said, and
+            never quietly attached to a channel to make the arithmetic look finished. */}
+        {channels.unnamedCents > 0 && <span>Deposits That Don&apos;t Say Which {sayDollars(channels.unnamedCents / 100)}</span>}
+      </div>
+      {/* THE ONE SENTENCE, leading with the figure he can act on. */}
+      <p className="text-sm text-slate-800">{channels.say}</p>
     </div>
   );
 }
@@ -260,6 +313,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
           {view.readSaid}
         </p>
       )}
+      {view.channels && <MoneyInBlock channels={view.channels} />}
       <FlowBar flow={view.flow} outCents={view.outCents} />
       {view.appliedSaid && <p className="text-xs text-slate-600">{view.appliedSaid}</p>}
       {view.rows.length > 0 && <p className="text-xs text-slate-500">A button marked Guess is the app&apos;s guess. Nothing counts until you tap one.</p>}
@@ -344,7 +398,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
               </ul>
             )}
             <p className="text-xs text-slate-500">
-              Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw, Personal and Cash Taken Out are kept as the bank line only, never a cost; cash counts when its receipts come in.
+              Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw, Owner&apos;s Money In, Personal and Cash Taken Out are kept as the bank line only, never a cost and never income; cash counts when its receipts come in.
             </p>
             {view.rules.length > 0 && (
               <div>

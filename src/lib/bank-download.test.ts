@@ -8,6 +8,7 @@ import {
   bankHeadline,
   bankViewOf,
   billPlacement,
+  channelViewOf,
   branchFromNumbers,
   choiceFits,
   choiceId,
@@ -50,6 +51,9 @@ import {
   type BooksPayment,
   type BooksRule,
 } from "./bank-download";
+import { NOT_SAID } from "./bank-money-in";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { findHeaderRow, readHeaderRow } from "./supplier-open-list";
 import { readOfx } from "./ofx-read";
 
@@ -1103,7 +1107,7 @@ describe("the card and the person's answers", () => {
 
   it("every out answer offers each bucket once, Fuel and Auto first, and a refund may go back on any bucket", () => {
     const outs = everyChoice("out", ORG_BOOKS(), true).filter((c) => c.choice === "cost").map(choiceId);
-    expect(outs).toEqual(["cost:Fuel", "cost:Auto", "cost:Tools & Supplies", "cost:Phone & Office", "cost:Insurance & Licenses", "cost:Fees", "cost:Other"]);
+    expect(outs).toEqual(["cost:Fuel", "cost:Auto", "cost:Tools & Supplies", "cost:Phone & Office", "cost:Insurance & Licenses", "cost:Fees", "cost:Rent", "cost:Other"]);
     const ins = everyChoice("in", ORG_BOOKS(), true).filter((c) => c.choice === "cost").map(choiceId);
     expect(ins).toEqual(outs);
   });
@@ -1237,16 +1241,25 @@ describe("a bank line on a job", () => {
     const { group } = sortOf(BOUGHT);
     expect(group.single).toBe(true);
     expect(group.learnable).toBe(true);
-    expect(learnableAnswer({ choice: "job", jobId: "job-kitchen" })).toBe(false);
-    expect(learnableAnswer({ choice: "invoice", invoiceId: "inv-1" })).toBe(false);
-    expect(learnableAnswer({ choice: "other_income" })).toBe(false);
-    expect(learnableAnswer({ choice: "cost", bucket: "Fuel" })).toBe(true);
-    expect(learnableAnswer({ choice: "draw" })).toBe(true);
+    expect(learnableAnswer({ choice: "job", jobId: "job-kitchen" }, "out")).toBe(false);
+    expect(learnableAnswer({ choice: "invoice", invoiceId: "inv-1" }, "in")).toBe(false);
+    expect(learnableAnswer({ choice: "other_income" }, "in")).toBe(false);
+    expect(learnableAnswer({ choice: "cost", bucket: "Fuel" }, "out")).toBe(true);
+    expect(learnableAnswer({ choice: "draw" }, "out")).toBe(true);
+    // MONEY IN LEARNS ONLY THE TWO ANSWERS THAT ARE TRUE OF A MERCHANT EVERY TIME (0376), and the list
+    // says so rather than the apply loop: Already Counted, and the owner's own money going in.
+    expect(learnableAnswer({ choice: "not_income" }, "in")).toBe(true);
+    expect(learnableAnswer({ choice: "owner_in" }, "in")).toBe(true);
+    expect(learnableAnswer({ choice: "cost", bucket: "Fuel" }, "in")).toBe(false);
+    // Each of the owner's two words goes ONE way only, so neither can be learned for the other
+    // direction - bank_rules_income_is_in (0376) refuses exactly these two rows.
+    expect(learnableAnswer({ choice: "owner_in" }, "out")).toBe(false);
+    expect(learnableAnswer({ choice: "draw" }, "in")).toBe(false);
     // A rule row that somehow carried the word places nothing: its lines ask, every time.
     expect(ruleChoice({ id: "r", direction: "out", key: "supply", choice: "job", bucket: null, supplierAccountId: null, profileId: null }, ORG_BOOKS())).toBeNull();
     // And the one door that learns reads it, so it cannot be forgotten there.
     const { readFileSync } = await import("node:fs");
-    expect(readFileSync("src/app/(app)/bills/bank-core.ts", "utf8")).toContain("!learnableAnswer(w.choice)");
+    expect(readFileSync("src/app/(app)/bills/bank-core.ts", "utf8")).toContain("!learnableAnswer(w.choice, g.direction)");
   });
 
   it("refuses a job that isn't this company's, and a job on a row that is several lines", () => {
@@ -1280,5 +1293,167 @@ describe("a bank line on a job", () => {
     expect("job_id" in storedAnswer(null)).toBe(false);
     // WHERE THE MONEY WENT: the same segment a bill already on a job draws, by the P&L's own words.
     expect(flowLabelOf("job", null)).toEqual({ key: "materials", label: "Materials & Bills" });
+  });
+});
+
+/**
+ * WHERE YOUR MONEY CAME IN, ON THE CARD (0376's lane). The pure arithmetic is pinned in
+ * bank-money-in.test.ts; this is the part that has to be true of the DOWNLOAD: the block is on the card
+ * above the rows, its left-hand column is every payment of the period (not the ones a match may still
+ * claim), and a deposit's guess shows the channel's working instead of asking to be believed.
+ *
+ * The fixture statement carries one card payout (STRIPE TRANSFER $485.40), one swept app balance (VENMO
+ * CASHOUT $300.00) and one deposit whose words say nothing at all (DEPOSIT $1,275.00).
+ */
+describe("where your money came in", () => {
+  /** An invented month of payments behind that statement. */
+  const PERIOD = [
+    { cents: 50_000, day: "2026-09-16", method: "card", feeCents: 1_460 },
+    { cents: 30_000, day: "2026-09-19", method: "venmo", feeCents: null },
+    { cents: 20_000, day: "2026-09-06", method: "cash", feeCents: null },
+    { cents: 12_750, day: "2026-09-04", method: "", feeCents: null },
+  ];
+  const booksWith = (over: Partial<BankBooks> = {}) => ORG_BOOKS({ periodPayments: PERIOD, ...over });
+  const cardOf = (books = booksWith()) => {
+    const dl = download();
+    return bankViewOf(dl, planBankDownload(dl, books), books);
+  };
+
+  it("says per channel what was recorded and what should reach THIS account", () => {
+    const ch = cardOf().channels!;
+    expect(ch.rows.map((r) => [r.key, r.recordedCents, r.expectedCents])).toEqual([
+      ["card", 50_000, 48_540],
+      ["venmo", 30_000, 30_000],
+      ["cash", 20_000, 0],
+      [NOT_SAID, 12_750, null],
+    ]);
+    // Cash is a statement, not a row to balance; the method nobody wrote down is in no total.
+    expect(ch.expectedCents).toBe(48_540 + 30_000);
+    expect(ch.unsaidCents).toBe(12_750);
+  });
+
+  it("compares it with the download's own money in, and never with its money out", () => {
+    const ch = cardOf().channels!;
+    // The three deposits on the statement, and nothing else: a charge is not money that came in.
+    expect(ch.reachedCents).toBe(48_540 + 30_000 + 127_500);
+    // The one deposit whose words name no way of being paid is said on its own.
+    expect(ch.unnamedCents).toBe(127_500);
+    expect(ch.say).toBe("Everything you were paid that should reach this account did, and $1,275.00 more came in besides.");
+  });
+
+  it("does not move when a line is applied, because it reads EVERY payment of the period", () => {
+    // `payments` is the unmarked rows only - what a match may still claim - so it shrinks with every
+    // Apply. Reading the channel view off it would make "what you were paid" fall as he sorted.
+    const bare = cardOf(booksWith({ payments: [] })).channels!;
+    const withSome = cardOf(
+      booksWith({ payments: [{ id: "p1", invoiceId: "i1", invoiceNumber: "INV-1001", cents: 127_500, day: "2026-09-04", method: "check", feeCents: null, stripe: false }] }),
+    ).channels!;
+    expect(withSome.rows).toEqual(bare.rows);
+    expect(withSome.recordedCents).toBe(bare.recordedCents);
+  });
+
+  it("has nothing to say, and says nothing, where there is nothing worked out", () => {
+    // No payments read (the card an office viewer who may not see owner money is handed, and the card a
+    // failed read gives) and no money in: a block of dashes is a dead end, so there is no block.
+    expect(channelViewOf({ from: "2026-09-01", to: "2026-09-30", lines: [] }, {})).toBeNull();
+    expect(channelViewOf({ from: null, to: null, lines: download().lines }, { periodPayments: PERIOD })).toBeNull();
+    const dl = download();
+    expect(bankViewOf({ ...dl, lines: [] }, planBankDownload({ ...dl, lines: [] }, ORG_BOOKS()), ORG_BOOKS()).channels).toBeNull();
+  });
+
+  it("A GUESS SHOWS ITS WORKING: a deposit the statement names gets the channel's own figures", () => {
+    const rows = cardOf().rows;
+    const stripe = rows.find((r) => r.title.includes("STRIPE"))!;
+    expect(stripe.hint).toBe("Card: $500.00 paid this period. A payout lands days later: $485.40 after $14.60 of fees. The statement names exactly that much.");
+    const venmo = rows.find((r) => r.title.includes("VENMO"))!;
+    expect(venmo.hint).toContain("Venmo: $300.00 paid this period.");
+  });
+
+  it("and says NOTHING on a deposit whose words name no channel", () => {
+    // Erik's $7,714.09 case: three deposits from his personal account were customers paying his Venmo.
+    // "It looks like a deposit" is not a reason, so the row carries none.
+    const plain = cardOf().rows.find((r) => r.title.startsWith("Deposit"))!;
+    expect(plain.hint).toBeNull();
+  });
+
+  it("a payment of this very money already in North still wins the line, as the more exact reason", () => {
+    const books = booksWith({
+      payments: [{ id: "p1", invoiceId: "i1", invoiceNumber: "INV-1001", cents: 48_540, day: "2026-09-16", method: "card", feeCents: null, stripe: true }],
+    });
+    const stripe = cardOf(books).rows.find((r) => r.title.includes("STRIPE"))!;
+    expect(stripe.hint).toMatch(/^Maybe the payment on INV-1001 /);
+  });
+});
+
+/**
+ * MONEY IN FROM THE OWNER (0376): the mirror of Owner's Draw. Money OUT to him has been an answer since
+ * 0363; money IN from him could only be filed as Other Income, which is inside Revenue, so his Revenue
+ * and his bottom line read high by every cent he put in.
+ */
+describe("the owner's own money going in", () => {
+  const NAMES = namesOf(ORG_BOOKS());
+
+  it("reads back exactly, and is said in the words that pair with Owner's Draw", () => {
+    expect(choiceId({ choice: "owner_in" })).toBe("owner_in");
+    expect(parseChoiceId("owner_in")).toEqual({ choice: "owner_in" });
+    expect(parseChoiceId("owner_in:something")).toBeNull();
+    expect(choiceLabel({ choice: "owner_in" }, NAMES)).toBe("Owner's Money In");
+    expect(choiceLabel({ choice: "draw" }, NAMES)).toBe("Owner's Draw");
+  });
+
+  it("goes ONE way only, the mirror of the draw, at both ends", () => {
+    expect(choiceFits({ choice: "owner_in" }, "in")).toBe(true);
+    expect(choiceFits({ choice: "owner_in" }, "out")).toBe(false);
+    expect(choiceFits({ choice: "draw" }, "out")).toBe(true);
+    expect(choiceFits({ choice: "draw" }, "in")).toBe(false);
+    // On the card: in the money-in Other... list, and nowhere on money out.
+    const ins = everyChoice("in", ORG_BOOKS(), true).map(choiceId);
+    expect(ins).toContain("owner_in");
+    expect(everyChoice("out", ORG_BOOKS(), true).map(choiceId)).not.toContain("owner_in");
+    // AFTER Already Counted: his own first case looked like a contribution and was a customer's payment,
+    // so the answer a hand reaches first stays the one that is right more often.
+    expect(ins.indexOf("owner_in")).toBeGreaterThan(ins.indexOf("not_income"));
+  });
+
+  it("IS NEVER THE GUESS, on any line of the statement", () => {
+    const dl = download();
+    for (const l of dl.lines) expect(guessFor(l, ORG_BOOKS())?.choice, l.description).not.toBe("owner_in");
+    const plan = planBankDownload(dl, ORG_BOOKS());
+    for (const g of plan.groups) expect(g.guess, g.label).not.toBe("owner_in");
+  });
+
+  it("writes NO row: the bank line IS the record, exactly like the draw", () => {
+    expect(storedAnswer({ choice: "owner_in" })).toEqual({ choice: "owner_in", bucket: null, supplier_account_id: null, profile_id: null, invoice_id: null });
+    expect("job_id" in storedAnswer({ choice: "owner_in" })).toBe(false);
+    expect(billPlacement(storedAnswer({ choice: "owner_in" }))).toEqual({ job_id: null, category: null });
+    expect(storedChoice({ choice: "owner_in" })).toBe("owner_in");
+    expect(storedChoiceName("owner_in")).toBe("owner_in");
+  });
+
+  it("MAY be learned as a rule, and a rule row holding it places the answer", () => {
+    // Unlike a job (0375), "a transfer from my own other account is money I put in" is true of that
+    // account every time - which is why 0376 taught bank_rules_income_is_in the word.
+    const r: BooksRule = { id: "r-own", direction: "in", key: "transfer 9876", choice: "owner_in", bucket: null, supplierAccountId: null, profileId: null };
+    expect(ruleChoice(r, ORG_BOOKS())).toEqual({ choice: "owner_in" });
+  });
+
+  it("the database allows the word on both tables, and only one way round (0376)", () => {
+    const sql = readFileSync(fileURLToPath(new URL("../../supabase/migrations/0376_rent_is_a_bucket_and_money_can_come_from_the_owner.sql", import.meta.url)), "utf8");
+    // THE CHOICE LISTS: a word the card offers that the database refuses is a raw error mid-Apply.
+    const lists = [...sql.matchAll(/choice in \(([^)]*)\)/g)].map((m) => [...m[1].matchAll(/'([^']+)'/g)].map((w) => w[1]));
+    expect(lists.length).toBeGreaterThanOrEqual(3);
+    for (const list of lists) expect(list).toContain("owner_in");
+    // AND THE DIRECTION RULE, which is the teeth behind choiceFits: a money-in rule carries a money-in
+    // answer and nothing else, and owner_in is one of them.
+    expect(sql).toMatch(/\(direction = 'in'\) = \(choice in \('other_income', 'not_income', 'owner_in'\)\)/);
+  });
+
+  it("is refused on a line of money going OUT, in the door's own words", () => {
+    const dl = download();
+    const plan = planBankDownload(dl, ORG_BOOKS());
+    const out = plan.groups.find((g) => g.direction === "out")!;
+    const res = validPicks({ [out.id]: "owner_in" }, plan, ORG_BOOKS());
+    expect(res.ok.size).toBe(0);
+    expect(res.refused[0]).toContain("that answer doesn't fit money out");
   });
 });

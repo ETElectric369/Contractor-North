@@ -52,6 +52,14 @@ const ALLOWED: Record<string, Allowance> = {
   // prompt only. The same file builds the estimator prompt every trade gets.
   "src/app/(app)/quotes/actions.ts": { words: /^(12\/2|14\/2|10\/3)$/, within: "ckt = circuit position" },
   "src/app/(app)/price-list/vendor-import-math.ts": { words: /^brian$/i },
+  // A CARD PROCESSOR'S OWN BRAND NAME, in the one table the app matches a bank line's printed words
+  // against (bank-money-in.ts's CHANNEL_WORDS). "Clover" here is the processor and has nothing to do
+  // with the invented customer of the same name: nobody reads this string, a bank wrote it, and it has
+  // to stay because PROCESSOR_RE is built from this list - a brand dropped out of it starts reading as
+  // "a transfer between the company's own accounts" on every statement that names it. It was invisible
+  // to this guard while it lived inside a regular expression literal, which is the only reason this
+  // allowance is new rather than old.
+  "src/lib/bank-money-in.ts": { words: /^clover$/i },
 };
 
 function allows(a: Allowance | undefined, word: string, s: string): boolean {

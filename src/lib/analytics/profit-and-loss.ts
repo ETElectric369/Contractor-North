@@ -121,6 +121,12 @@ export const PNL_WORDS = {
    *  subtracted (Erik: "an actual draw from the owner is considered equity and should be a line item
    *  below net profit stating what Ive taken out this month"). */
   ownerDraw: "Owner's Draw",
+  /** EQUITY, BELOW THE LINE, THE OTHER WAY (0376): money the owner put into the business from his own
+   *  pocket. The mirror of Owner's Draw in the same two words plus the direction, so the pair reads as
+   *  one idea - and never "Owner's Contribution" or "Capital Introduced", which are an accountant's
+   *  words and this card is read by an electrician between jobs. Never added to Revenue: the owner's own
+   *  money filed as Other Income overstates Revenue and Net Profit by every cent of it. */
+  ownerMoneyIn: "Owner's Money In",
 } as const;
 
 /** What a line's name is when it stands alone (a chart's chip), where the row name is longer. */
@@ -148,7 +154,8 @@ export type PnlKey =
   | "overhead"
   | "total_overhead"
   | "net_profit"
-  | "owner_draw";
+  | "owner_draw"
+  | "owner_money_in";
 
 /**
  * The figures a profit and loss is made from: computeOwnerMoney's own. THE PICK IS THE ENFORCEMENT -
@@ -166,6 +173,7 @@ export type PnlFigures = Pick<
   | "crewMileagePaid"
   | "ownerBuildTimeOnJobs"
   | "ownerDraw"
+  | "ownerMoneyIn"
   | "fuel"
   | "businessCosts"
   | "left"
@@ -210,6 +218,10 @@ export type PnlOptions = {
   /** Say Owner's Draw below the bottom line: what the owner actually took out. A surface passes true
    *  when any figure it shows has some. */
   ownerDraw?: boolean;
+  /** Say Owner's Money In below the bottom line (0376): what he put in from his own pocket. A surface
+   *  passes true through the one predicate (owner-money.ts's hasOwnerMoneyIn), which is also where the
+   *  reason this line is conditional and the draw's is not is written down. */
+  ownerMoneyIn?: boolean;
   /** False for an office viewer the owner hasn't shared the owner's money with: no `ownerOnly` line.
    *  True (the default) for the owner, or an office the owner has shared it with. */
   showOwner?: boolean;
@@ -369,6 +381,13 @@ export function pnlLines(opts: PnlOptions = {}): PnlLine[] {
   const ownerDraw: Def[] = opts.ownerDraw
     ? [{ key: "owner_draw", label: PNL_WORDS.ownerDraw, kind: "equity", section: "equity", ownerOnly: true, cents: (f) => pnlCents(f.ownerDraw ?? 0) }]
     : [];
+  // MONEY IN FROM THE OWNER (0376): the same section, the other way. `section: "equity"` is the whole of
+  // its arithmetic - PNL_SECTION_SHAPE.equity is `subtracted: false`, so sum() above cannot reach it and
+  // no total, Gross Profit or Net Profit moves by a cent when this line appears. It is NOT added to
+  // Revenue either: a positive equity line is not income, which is the overstatement 0376 ends.
+  const ownerMoneyIn: Def[] = opts.ownerMoneyIn
+    ? [{ key: "owner_money_in", label: PNL_WORDS.ownerMoneyIn, kind: "equity", section: "equity", ownerOnly: true, cents: (f) => pnlCents(f.ownerMoneyIn ?? 0) }]
+    : [];
 
   const defs: Def[] = [
     { key: "revenue", label: PNL_WORDS.revenue, kind: "revenue", section: null, ownerOnly: true, cents: revenue },
@@ -390,6 +409,7 @@ export function pnlLines(opts: PnlOptions = {}): PnlLine[] {
     // above can reach it (PNL_SECTION_SHAPE.equity.subtracted === false), and `kind: "equity"` tells
     // every surface to draw it as a line below the rule, never as a total.
     ...ownerDraw,
+    ...ownerMoneyIn,
   ];
 
   return defs

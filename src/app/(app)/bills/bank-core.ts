@@ -169,7 +169,12 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     chunks(keys, 150).map((ks) => supabase.from("bank_lines").select("line_key, choice, bucket, amount").eq("org_id", orgId).in("line_key", ks)),
   );
   const paged = <T,>(q: (f: number, t: number) => PromiseLike<{ data: T[] | null; error: unknown }>) => readAllPages<T>(q, 20);
-  const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR, jobR, namesJobs] = await Promise.all([
+  // THE CHANNEL VIEW'S OWN DAYS: the download's first and last, as the org reads a day. The pure
+  // function filters to them again (bank-money-in.ts owns what "the period" means); this read only has
+  // to avoid dragging a year of payments across the wire.
+  const periodStartIso = tzDayStartUtc(dl.from, tz).toISOString();
+  const periodEndIso = tzDayStartUtc(shiftDay(dl.to, 1), tz).toISOString();
+  const [alreadyR, payR, periodPayR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR, jobR, namesJobs] = await Promise.all([
     already,
     paged<any>((f, t) =>
       supabase
@@ -179,6 +184,20 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
         .is("bank_line_id", null)
         .gte("paid_at", startIso)
         .lt("paid_at", endIso)
+        .order("id")
+        .range(f, t),
+    ),
+    // EVERY PAYMENT IN THE DOWNLOAD'S OWN DAYS, MARKED OR NOT (the channel view). Deliberately NOT the
+    // read above: that one is the rows a match may still claim, so it shrinks as lines are applied, and
+    // "what you were paid this month" must not move because somebody pressed Apply. org_id on the read
+    // as well as RLS (0173: a rule at one read path is a convention, not a boundary).
+    paged<any>((f, t) =>
+      supabase
+        .from("payments")
+        .select("amount, paid_at, method, processor_fee, invoices(status)")
+        .eq("org_id", orgId)
+        .gte("paid_at", periodStartIso)
+        .lt("paid_at", periodEndIso)
         .order("id")
         .range(f, t),
     ),
@@ -269,7 +288,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
 
   const errors = [
     ...(alreadyR as { error: unknown }[]).map((r) => r.error),
-    payR.error, crewR.error, supR.error, billR.error, pettyR.error, acctR.error, aliasR.error, invR.error, peopleR.error, ruleR.error, paidR.error, storedR.error,
+    payR.error, periodPayR.error, crewR.error, supR.error, billR.error, pettyR.error, acctR.error, aliasR.error, invR.error, peopleR.error, ruleR.error, paidR.error, storedR.error,
   ].filter(Boolean);
   if (errors.length) {
     if (errors.some(isMissingBank)) return { books: null, problem: BANK_NEEDS_UPDATE };
@@ -330,6 +349,18 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
         method: String(p.method ?? ""),
         feeCents: p.processor_fee === null || p.processor_fee === undefined ? null : centsOf(p.processor_fee),
         stripe: !!p.stripe_payment_intent,
+      })),
+    // THE CHANNEL VIEW'S LEFT-HAND COLUMN. A payment on a VOIDED invoice is no revenue and is left out,
+    // the same test the matching read above applies. The method goes through AS STORED, blank included:
+    // "nobody wrote it down" is its own honest row on the card (bank-money-in.ts's NOT_SAID), and
+    // normalizing a blank to "other" here would hide it behind a word somebody chose.
+    periodPayments: (periodPayR.rows as any[])
+      .filter((p) => p.invoices?.status !== "void")
+      .map((p) => ({
+        cents: centsOf(p.amount),
+        day: dayOf(String(p.paid_at)),
+        method: String(p.method ?? ""),
+        feeCents: p.processor_fee === null || p.processor_fee === undefined ? null : centsOf(p.processor_fee),
       })),
     payPayments: (crewR.rows as any[]).map((p) => ({ id: String(p.id), profileId: String(p.profile_id), cents: centsOf(p.amount), day: String(p.paid_on), reference: p.reference ?? null })),
     supplierPayments: (supR.rows as any[]).map((p) => ({ id: String(p.id), accountId: String(p.supplier_account_id), cents: centsOf(p.amount), day: String(p.paid_on), reference: p.reference ?? null })),
@@ -852,14 +883,17 @@ export async function applyBankCore(
   const learned = new Map<string, { direction: "in" | "out"; key: string; c: BankChoice; min: number; max: number; title: string }>();
   const groupsById = new Map(plan.groups.map((g) => [g.id, g]));
   for (const w of work) {
-    // ONLY AN ANSWER A RULE MAY HOLD (learnableAnswer): never a job (0375: a rule is per merchant, and
-    // three trips to the supply house can be three jobs), never an invoice (one deposit, one invoice),
-    // never Other Income (0363: money in is a customer's until a person says otherwise, every time).
-    if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice || !learnableAnswer(w.choice)) continue;
+    if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice) continue;
     const g = groupsById.get(w.group);
-    // Money in teaches only Not Income (0363); a refund's bucket is answered each time.
-    if (g?.direction === "in" && w.choice.choice !== "not_income") continue;
     if (!g?.learnable || g.merchantKey.length < 2) continue;
+    // ONLY AN ANSWER A RULE MAY HOLD, FOR THIS DIRECTION (learnableAnswer): never a job (0375: a rule
+    // is per merchant, and three trips to the supply house can be three jobs), never an invoice (one
+    // deposit, one invoice), never Other Income (0363: money in is a customer's until a person says
+    // otherwise). Money in teaches Already Counted and, since 0376, the owner's own money going in —
+    // and THAT RULE LIVES IN THE LIST, not here. This loop used to carry the money-in half itself
+    // ("teaches only Not Income"), so 0376's new word would have been offered on the card, learnable
+    // by the database and silently dropped by this one line.
+    if (!learnableAnswer(w.choice, g.direction)) continue;
     const k = `${g.direction}:${g.merchantKey}:${choiceId(w.choice)}`;
     const amt = Math.abs(w.line.cents);
     const had = learned.get(k);

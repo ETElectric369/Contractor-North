@@ -251,6 +251,7 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
       "Phone & Office",
       "Insurance & Licenses",
       "Fees",
+      "Rent",
       "Other",
       "Total Overhead",
       "Net Profit",
@@ -293,7 +294,7 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
     // claim that nothing was drawn.
     const note = String(summary.rows[drawAt + 1].cells[0]);
     expect(note).toContain("is equity, not an expense");
-    expect(note).toContain("Cash you took without a bank line is not in it");
+    expect(note).toContain("Cash you took or put in without a bank line is not in it");
     expect(note).toContain("Nothing this period that the app can see");
   });
 
@@ -355,7 +356,7 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
     // What the two halves are, in the accounting industry's own test, with the lines from the data.
     expect(summary.rows.map((r) => r.cells[0])).toContain(cogsOverheadNote());
     expect(cogsOverheadNote()).toBe(
-      "Cost of Goods Sold (COGS) is what doing the jobs costs: Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099) and Crew Mileage Paid. Overhead is what keeps running whether there is work or not: Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other.",
+      "Cost of Goods Sold (COGS) is what doing the jobs costs: Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099) and Crew Mileage Paid. Overhead is what keeps running whether there is work or not: Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees, Rent and Other.",
     );
   });
 
@@ -460,6 +461,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
       "Phone & Office",
       "Insurance & Licenses",
       "Fees",
+      "Rent",
       "Other",
     ]);
     // Headings bold, the lines under them indented, as on the Summary.
@@ -663,7 +665,9 @@ describe("the owner's switch: an office download without Owner's Draw", () => {
     // The cost rows stay, one by one, each with its months, the period, the period before and the change.
     const officeLines = summaryLines({ hasOtherIncome: true, showOwner: false });
     const costRows = officeLines.filter((l) => l.kind === "cost");
-    expect(costRows).toHaveLength(12);
+    // 5 job-side lines + 8 buckets (Rent since 0376). The figure is written out so a bucket added
+    // without this tab being looked at fails here rather than appearing unnoticed.
+    expect(costRows).toHaveLength(5 + BUSINESS_COST_BUCKETS.length);
     for (const l of costRows) expect(rowOf(summary, l.label)!.cells.slice(1, 5).map(cents), l.label).toEqual([...cur.months.map((m) => l.cents(m)), l.cents(cur.totals)]);
     // The table is the two headings and their cost rows and nothing else, then the owner's note.
     const header = summary.rows.findIndex((r) => r.bold && r.cells[0] === "");
@@ -682,6 +686,7 @@ describe("the owner's switch: an office download without Owner's Draw", () => {
       "Phone & Office",
       "Insurance & Licenses",
       "Fees",
+      "Rent",
       "Other",
     ]);
     expect(summary.rows[header + 1 + officeLines.length].cells).toEqual([OWNER_HIDDEN_NOTE]);
