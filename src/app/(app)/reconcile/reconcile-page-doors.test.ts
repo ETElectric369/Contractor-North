@@ -5,6 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { countDoors, doorsIn, sectionOf, textOf } from "@/test/rendered-page";
 import { RECONCILE_ANSWERED_HERE, RECONCILE_KINDS } from "@/lib/reconcile-kinds";
 import { LIST_ACCEPT, STATEMENT_ACCEPT } from "@/lib/open-list-file";
+import { createElement } from "react";
+import { InfoBullets } from "@/components/info-popup";
+import { STATEMENT_FACTS } from "./statement-facts";
 
 /**
  * EVERY DOOR THAT MOVED OFF /bills HAS A HOME HERE, AND NOWHERE ELSE (cn-v1037).
@@ -335,44 +338,65 @@ describe("the page reads; it does not re-rule", () => {
    * STATEMENT_ACCEPT and must NOT be in LIST_ACCEPT, where isListFile would send every PDF to
    * readListFile, a reader that cannot open one.
    */
-  it("the card names no file formats, takes a scan too, and says what checks it", () => {
-    const card = text(html.slice(html.indexOf("Bring In A Statement")));
+  /**
+   * ── THE CARD KEEPS ONE LINE; THE REST IS BEHIND THE INFO ICON, AS BULLETS (Erik, 2026-10-03) ──
+   *
+   * "this huge box of text in front of me is hard for me to read and takes up a lot of space on the
+   * screen, valuable space for reconciling, so my idea is in places like this we can have a little info
+   * icon with a popup text box" — and: "inside the info box that wall of text will be a lot easier to
+   * read if its broken into bullet points".
+   *
+   * This test used to read all eleven facts off the card itself. They are still every one of them here,
+   * one bullet each (STATEMENT_FACTS), and each one still traced to the code that does it — which is
+   * the half of this test that matters: an explanation must not be lost on its way into the box.
+   */
+  it("the card keeps one line, names no file formats, and the icon is a real target with a name", () => {
+    const card = text(sectionOf(html, "bring-in-a-statement"));
     for (const lecture of ["CSV", "TSV", "Excel", "OFX", "QFX", "QBO", ".xlsx"]) expect(card, lecture).not.toContain(lecture);
     expect(card).toContain("whatever your bank or supplier gave you");
+    // ONE LINE: the wall of prose is not on the card any more, in any of its clauses.
+    for (const moved of ["PICTURES", "scanned, photographed", "running balance", "takes a minute"])
+      expect(card, moved).not.toContain(moved);
+    // THE ICON IS A 44px TARGET, KEYBOARD REACHABLE, AND HAS A NAME A SCREEN READER CAN SAY.
+    const icon = /<button[^>]*aria-label="How A Statement Is Read"[^>]*>/.exec(sectionOf(html, "bring-in-a-statement"))?.[0];
+    expect(icon, "the info icon").toBeTruthy();
+    expect(icon).toMatch(/\bh-11\b/);
+    expect(icon).toMatch(/\bw-11\b/);
+    expect(icon).toContain('type="button"');
+    expect(icon).toContain('aria-expanded="false"');
+  });
+
+  it("every fact that was on the card is in the box, one bullet each, and still traces to the code", () => {
+    const box = textOf(renderToStaticMarkup(createElement(InfoBullets, { bullets: STATEMENT_FACTS })));
+    expect((renderToStaticMarkup(createElement(InfoBullets, { bullets: STATEMENT_FACTS })).match(/<li/g) ?? []).length).toBe(STATEMENT_FACTS.length);
     // A SCAN IS READ HERE, and it is no longer sent anywhere else.
-    expect(card).toContain("PICTURES");
-    expect(card).not.toContain("+ button");
+    expect(box).toContain("PICTURES");
+    expect(box).not.toContain("+ button");
     /**
      * AND THE CLAIM TRACES TO THE CODE. "with no text on its pages at all" was narrower than the
      * routing: open-list-file.ts sends EVERY PDF the text lane cannot tabulate to the reader, and the
      * file this lane exists for — his September statement — has 125 text marks on it and a table that
      * is an image. A promise that doesn't trace to the code is how he finds out by being turned away.
      */
-    expect(card).not.toContain("no text on its pages");
-    expect(card).toContain("scanned, photographed");
-    // A CARD'S BALANCE RUNS THE OTHER WAY, and the gate walks it that way, so the card may say so.
-    expect(card).toContain("what you owe goes up with a purchase");
+    expect(box).not.toContain("no text on its pages");
+    expect(box).toContain("scanned, photographed");
+    // A CARD'S BALANCE RUNS THE OTHER WAY, and the gate walks it that way, so the box may say so.
+    expect(box).toContain("what you owe goes up with a purchase");
     // AND THE TIME IS THE READ'S REAL TIME. "A few seconds" is an Opus transcription's worst lie.
-    expect(card).toContain("takes a minute");
+    expect(box).toContain("takes a minute");
     // AND THE PROMISE THAT MAKES IT SAFE: arithmetic first, and a word when there is none to do.
-    expect(card).toContain("held against what came off them");
-    expect(card).toContain("nothing is");
-    expect(card).toContain("prints no totals");
-    /**
-     * AND THE PROMISE IS THE ONE THE CODE NOW KEEPS (onboarding-truth law, 2026-10-02). This paragraph was
-     * written when a statement's printed totals were the only arithmetic there was. Since the
-     * running-balance walk shipped, a paper that prints NO totals and whose balance walks says "its own
-     * running balance proves every line" — so "if your statement prints no totals at all … nothing but your
-     * own eyes has checked it" became a false claim at exactly the moment the app had just said otherwise.
-     * The page has to name the walk, and the silence has to be conditioned on BOTH checks being absent.
-     */
-    expect(card).toContain("running balance");
-    expect(card).not.toContain("prints no totals at all");
-    expect(card).toContain("no totals and no running balance");
+    expect(box).toContain("held against what came off them");
+    expect(box).toContain("nothing is");
+    expect(box).toContain("prints no totals");
+    expect(box).toContain("running balance");
+    expect(box).not.toContain("prints no totals at all");
+    expect(box).toContain("no totals and no running balance");
     // AND WHAT A BREAK DOES AT EACH DOOR, because a scan is refused on one and a file only warned: a person
     // turned away for a reason the page never mentioned is how he finds out by being turned away.
-    expect(card).toContain("refused");
-    expect(card).toContain("names the line");
+    expect(box).toContain("refused");
+    expect(box).toContain("names the line");
+    // AND NO BULLET LECTURES HIM ON FILE TYPES EITHER (no merry-go-round): the app works it out.
+    for (const lecture of ["CSV", "TSV", "Excel", "OFX", "QFX", "QBO", ".xlsx"]) expect(box, lecture).not.toContain(lecture);
     for (const ext of [".csv", ".tsv", ".txt", ".xlsx", ".xls", ".ofx", ".qfx", ".qbo"]) expect(LIST_ACCEPT, ext).toContain(ext);
     expect(LIST_ACCEPT).not.toContain(".pdf");
     for (const ext of [".pdf", ".csv", ".xlsx", ".ofx", ".qbo"]) expect(STATEMENT_ACCEPT, ext).toContain(ext);
@@ -515,7 +539,10 @@ describe("a new company sees words, not an error", () => {
       // print a flat "Nothing for you to do here" above a door, and it does not: it names the door.
       // (The link to Bills that used to sit beside it is gone: the statement is answered here, so there
       // is nothing on Bills to send him to.)
-      expect(doors(fresh)).toEqual(["Drop A Bank Or Supplier Statement"]);
+      // The info icon is a door with no words on it, so it reads as "" here; it is asserted by the name a
+      // screen reader says, above. Everything else on a quiet page is the one intake.
+      expect(doors(fresh).filter(Boolean)).toEqual(["Drop A Bank Or Supplier Statement"]);
+      expect(fresh).toContain('aria-label="How A Statement Is Read"');
       expect(text(fresh)).toContain("drop it in below");
       expect(text(fresh)).not.toContain("Nothing for you to do here");
     } finally {
