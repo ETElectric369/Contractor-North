@@ -48,7 +48,6 @@ const GOOD = {
   ],
 };
 
-const read = (answer: unknown) => readScannedBank(answer);
 const gate = (answer: unknown) => {
   const got = readScannedBank(answer);
   return { got, check: checkScanTotals(got.lines, got.controls) };

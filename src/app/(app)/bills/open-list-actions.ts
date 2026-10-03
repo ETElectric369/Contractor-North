@@ -9,7 +9,6 @@ import {
   OPEN_LIST_FIELDS,
   listReadFacts,
   pdfReadSaid,
-  readHeaderRow,
   readOpenListTable,
   rememberColumns,
   type OpenListColumns,
