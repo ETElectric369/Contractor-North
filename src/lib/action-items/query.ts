@@ -39,6 +39,13 @@ import {
   tieReadFilters,
   type ReceiptDoc,
 } from "./receipts-not-on-a-bill";
+import {
+  PERMIT_FEED_COLUMNS,
+  PERMITS_READ_CAP,
+  permitInspectionItems,
+  type PermitFeedRow,
+} from "./permit-inspection-items";
+import { PERMIT_INSPECTION_COLUMNS, type PermitInspection } from "@/lib/permit-inspections";
 import { foldWaitingRows, readNeedsYouWaits, waitKey, type NeedsYouWaits } from "./needs-you-waits";
 import { codeCount, isTrayPaper, rollUpPiles, sqlCount, type PileCount } from "./piles";
 import { firstNameOf, jobWords } from "./words";
@@ -265,6 +272,46 @@ async function buildActionItems(ctx: {
     }
   });
 
+  // WHO STILL HAS TO COME (0378). The permits on a job, then those permits' visits: two reads chained,
+  // started here so they ride beside the fan-out below rather than adding a serial wave to every staff
+  // build. No status filter on the permits — a permit marked passed can still have a re-inspection
+  // added to it, and the only honest answer about where a permit stands comes from its rows — so the
+  // read is the NEWEST PERMITS_READ_CAP of them and the pile says "N+" when there are more.
+  // A FAILED READ CLAIMS NOTHING: no rows, so no row on the card and no job quietly dropped from Jobs
+  // Needing A Day. Saying a town has been somewhere it hasn't is the one thing this must never do.
+  const permitFeedP: Promise<{ permits: PermitFeedRow[]; inspections: PermitInspection[]; capped: boolean }> =
+    isStaff && feederOn("permit_inspection", features)
+      ? (async () => {
+          const permitsR: Read = await Promise.resolve(
+            supabase
+              .from("permits")
+              .select(PERMIT_FEED_COLUMNS, { count: "exact" })
+              .not("job_id", "is", null)
+              .order("created_at", { ascending: false })
+              .limit(PERMITS_READ_CAP),
+          );
+          if (permitsR.error) return { permits: [], inspections: [], capped: false };
+          const permits = (permitsR.data ?? []) as PermitFeedRow[];
+          const ids = permits.map((p) => String(p.id ?? "")).filter(Boolean);
+          if (!ids.length) return { permits: [], inspections: [], capped: false };
+          const visits = await inChunks(
+            ids,
+            (chunk) =>
+              supabase
+                .from("permit_inspections")
+                .select(PERMIT_INSPECTION_COLUMNS)
+                .in("permit_id", chunk)
+                .order("position", { ascending: true }) as PromiseLike<Read>,
+          );
+          if (visits.error) return { permits: [], inspections: [], capped: false };
+          return {
+            permits,
+            inspections: (visits.data ?? []) as PermitInspection[],
+            capped: typeof permitsR.count === "number" ? permitsR.count > permits.length : permits.length >= PERMITS_READ_CAP,
+          };
+        })().catch(() => ({ permits: [], inspections: [], capped: false }))
+      : Promise.resolve({ permits: [], inspections: [], capped: false });
+
   // ── The four aged reads, floored by the books start (chained, started now) ──
   // Visits from PAST days nobody closed out. absorbed=false (0237): a booking that became a job is
   // the job's business now. The ceiling is the org's midnight: today's visits are the agenda's rows.
@@ -431,8 +478,11 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("jobs")
+          // blocked_on / blocked_since (0178) ride along: a job waiting on somebody else is not asked
+          // for a date (jobsNeedingADay reads them through lib/waiting-on). They were written in 0178
+          // and had no reader at all until now.
           .select(
-            "id, job_number, name, status, scheduled_start, scheduled_end, created_at, customers(name), job_schedule_segments(start_date, end_date), time_entries!time_entries_job_id_fkey(clock_in)",
+            "id, job_number, name, status, scheduled_start, scheduled_end, created_at, blocked_on, blocked_since, customers(name), job_schedule_segments(start_date, end_date), time_entries!time_entries_job_id_fkey(clock_in)",
             { count: "exact" },
           )
           .in("status", [...NEEDS_A_DAY_STATUSES])
@@ -1308,6 +1358,16 @@ async function buildActionItems(ctx: {
     }
   }
 
+  // 2b) WHO STILL HAS TO COME (0378) — one row per permit whose inspections are not finished, and only
+  // where the next one is HIS: to phone for, or to write up. One booked for today or later waits in the
+  // fold with that day; one still waiting on the authority in front of it is in neither, which is the
+  // gate's whole point (permit-inspection-items). Its jobs are then asked for no date in 3).
+  const permitFeed = await permitFeedP;
+  const inspectionFeed = permitInspectionItems({ permits: permitFeed.permits, inspections: permitFeed.inspections, todayStr });
+  for (const it of inspectionFeed.now) items.push(it);
+  for (const w of inspectionFeed.waiting) waiting.push(w);
+  if (inspectionFeed.now.length) counts.permit_inspections = permitFeed.capped ? { capped: true } : {};
+
   // 3) JOBS NEEDING A DAY — nothing ahead of it (jobsNeedingADay), minus a job with a visit booked
   // today or later; its open lines to buy ride its row. A lost read of the jobs or of their visits
   // would call every job dateless: one "Couldn't Check" line instead.
@@ -1334,6 +1394,9 @@ async function buildActionItems(ctx: {
       clockedInJobIds,
       wonJobIds,
       toBuy: toBuyCount,
+      // A job whose permit is still waiting on the town or the utility needs that visit, not a date
+      // (2b above gives it its own row, naming the authority). One job, one row.
+      awaitingInspectionJobIds: inspectionFeed.awaitingJobIds,
     });
     for (const f of findings) {
       const j = f.job;

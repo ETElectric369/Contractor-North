@@ -69,6 +69,12 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
   materials_to_buy: { label: "Materials To Buy", verb: "Buy Materials", listHref: "/materials", listLabel: "See All Materials" },
   contracts_not_signed: { label: "Contracts Not Signed", verb: "See Contract", listHref: null, listLabel: null },
   lien_deadlines: { label: "Lien Deadlines", verb: "See Deadline", listHref: null, listLabel: null },
+  // "PERMIT Inspections", because the site visit is called an Inspection too (inspection-word.test.ts)
+  // and these are the city's, on a permit. No list page holds them: permits live on their job, and
+  // /permits is a redirect to Jobs — so See All unfolds the rows read here rather than opening a page
+  // that lists none of them. Its rows say different things (one to phone for, one to write up), so its
+  // button is the plain one that opens the pile.
+  permit_inspections: { label: "Permit Inspections", verb: "See Them", listHref: null, listLabel: null },
 };
 
 /** The notes pile's words when it also holds papers that aren't notes (they file in Organize too). */
@@ -135,6 +141,8 @@ export function pileOf(item: Pick<ActionItem, "kind" | "id" | "paper" | "pile">)
       return "receipts_not_on_a_bill";
     case "stock_short":
       return "stock_to_settle";
+    case "permit_inspection":
+      return "permit_inspections";
     case "materials_needed":
       return "materials_to_buy";
     case "contract_unsigned":

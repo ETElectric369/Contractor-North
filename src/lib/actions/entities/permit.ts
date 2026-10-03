@@ -11,8 +11,11 @@ export const permitActions: Record<string, ActionDef> = {
     name: "permit.create",
     group: "permit",
     label: "Add a permit",
+    // NO INSPECTION DATE HERE (0378). A permit needs SEVERAL inspections, from different authorities,
+    // in order — they are rows in permit_inspections now, booked on the permit's own card, and
+    // permits.inspection_date is superseded. `authority` is who ISSUED the permit, not who inspects it.
     description:
-      "Log a PERMIT — e.g. 'add a <type> permit for the <job> job, applied today, inspection next Tuesday'. Resolve the job first with list_jobs and pass job_id (optional — a permit can stand alone). type defaults to Electrical, status to applied; dates are YYYY-MM-DD.",
+      "Log a PERMIT — e.g. 'add a <type> permit for the <job> job, applied today'. Resolve the job first with list_jobs and pass job_id (optional — a permit can stand alone). type defaults to Electrical, status to applied; dates are YYYY-MM-DD. `authority` is who ISSUED it. The inspections it needs are separate: each authority that has to come is added on the permit itself, in the order they come.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       permit_number: z.string().nullable().optional(),
@@ -20,7 +23,6 @@ export const permitActions: Record<string, ActionDef> = {
       authority: z.string().nullable().optional(),
       status: z.string().optional(),
       applied_date: z.string().nullable().optional(),
-      inspection_date: z.string().nullable().optional(),
       notes: z.string().nullable().optional(),
     }),
     auth: "staff",
@@ -38,7 +40,6 @@ export const permitActions: Record<string, ActionDef> = {
         authority: i.authority ?? null,
         status: i.status,
         applied_date: i.applied_date ?? null,
-        inspection_date: i.inspection_date ?? null,
         notes: i.notes ?? null,
       });
     },

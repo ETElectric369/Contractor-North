@@ -28,24 +28,18 @@ export const PERMIT_STATUSES: [string, string][] = [
   ["closed", "Closed"],
 ];
 
-export const PERMIT_INSPECTION_RESULTS: [string, string][] = [
-  ["pending", "Pending"],
-  ["passed", "Passed"],
-  ["partial", "Partial"],
-  ["failed", "Failed"],
-];
-
+/**
+ * THE INSPECTION RESULTS ARE NOT HERE ANY MORE (0378). They described permits.inspection_result — ONE
+ * inspection, inline on the permit — and a permit needs several, from different authorities, in order.
+ * The results a visit can have (passed / failed / cancelled) are 0378's own check constraint, named
+ * once in lib/permit-inspections beside the rule that reads them. "pending" and "partial" are gone with
+ * the column: a visit nobody has written up has no result at all, and "partial" was never a thing an
+ * inspector says — the permit simply still has a visit outstanding.
+ */
 export function permitStatusTone(s: string): PermitTone {
   if (["issued", "passed", "closed"].includes(s)) return "green";
   if (s === "failed") return "red";
   // "scheduled" is the legacy job-tab key for "inspection_scheduled" — tone both.
   if (["applied", "scheduled", "inspection_scheduled"].includes(s)) return "amber";
-  return "slate";
-}
-
-export function permitResultTone(s: string): PermitTone {
-  if (s === "passed") return "green";
-  if (s === "failed") return "red";
-  if (s === "partial") return "amber";
   return "slate";
 }

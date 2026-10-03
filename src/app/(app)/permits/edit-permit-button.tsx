@@ -18,8 +18,6 @@ type Permit = {
   applied_date?: string | null;
   issued_date?: string | null;
   expires_date?: string | null;
-  inspection_date?: string | null;
-  inspector?: string | null;
   notes?: string | null;
   portal_url?: string | null;
 };
@@ -42,8 +40,6 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
   const [applied, setApplied] = useState(d(permit.applied_date));
   const [issued, setIssued] = useState(d(permit.issued_date));
   const [expires, setExpires] = useState(d(permit.expires_date));
-  const [inspDate, setInspDate] = useState(d(permit.inspection_date));
-  const [inspector, setInspector] = useState(permit.inspector ?? "");
   const [portal, setPortal] = useState(permit.portal_url ?? "");
   const [notes, setNotes] = useState(permit.notes ?? "");
 
@@ -59,8 +55,6 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
         applied_date: applied || null,
         issued_date: issued || null,
         expires_date: expires || null,
-        inspection_date: inspDate || null,
-        inspector: inspector || null,
         portal_url: portal || null,
         notes: notes || null,
       });
@@ -95,9 +89,9 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
             <div><Label htmlFor="ep-applied">Applied date</Label><Input id="ep-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
             <div><Label htmlFor="ep-issued">Issued date</Label><Input id="ep-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
             <div><Label htmlFor="ep-expires">Expires</Label><Input id="ep-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></div>
-            <div><Label htmlFor="ep-insp">Inspection date</Label><Input id="ep-insp" type="date" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /></div>
-            <div><Label htmlFor="ep-inspector">Inspector</Label><Input id="ep-inspector" value={inspector} onChange={(e) => setInspector(e.target.value)} /></div>
           </div>
+          {/* NO INSPECTION FIELDS HERE (0378): a permit needs several inspections, from different
+              authorities, in order — they are booked and written up on the permit's own card. */}
           <div><Label htmlFor="ep-portal">Portal URL</Label><Input id="ep-portal" value={portal} onChange={(e) => setPortal(e.target.value)} placeholder="https://… status page" /></div>
           <div><Label htmlFor="ep-notes">Notes</Label><Textarea id="ep-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
         </div>

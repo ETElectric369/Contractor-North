@@ -58,7 +58,17 @@ describe("To-Do Extras never reaches a job's Tasks (0358: the switch is the Remi
 });
 
 describe("Permits & Inspections on the job's Permits tab", () => {
-  const permits = [{ id: "p1", type: "Electrical", permit_number: "E-1", authority: null, status: "applied", applied_date: null, issued_date: null, inspection_date: null, inspector: null, inspection_result: "pending", fee: 0, notes: null, portal_url: null }];
+  // No inspection_date / inspector / inspection_result on a permit any more (0378): a permit's visits
+  // are rows of their own, and tests/no-superseded-permit-columns fails if they come back.
+  const permits = [{ id: "p1", type: "Electrical", permit_number: "E-1", authority: null, status: "applied", applied_date: null, issued_date: null, fee: 0, notes: null, portal_url: null }];
+  const TOWN = "Town of Truckee";
+  const UTIL = "Liberty Utilities";
+  const visit = (over: any) => ({ id: `i${over.position}`, permit_id: "p1", authority: TOWN, scheduled_for: null, scheduled_window: null, inspector: null, result: null, result_on: null, ...over });
+  const booked = [
+    visit({ position: 1, authority: TOWN, scheduled_for: "2026-10-15", scheduled_window: "morning" }),
+    visit({ position: 2, authority: UTIL, scheduled_for: "2026-10-15", scheduled_window: "morning" }),
+  ];
+
   it("on (the default): Add Permit", () => {
     expect(r(JobPermits, { jobId: "j1", permits })).toContain("Add Permit");
   });
@@ -66,6 +76,29 @@ describe("Permits & Inspections on the job's Permits tab", () => {
     const html = r(JobPermits, { jobId: "j1", permits, canAdd: false });
     expect(html).not.toContain("Add Permit");
     expect(html).toContain("E-1");
+  });
+
+  it("the permit says who still has to come, in order, with the day and the part of the day", () => {
+    const html = r(JobPermits, { jobId: "j1", permits, inspections: booked, todayStr: "2026-10-14" });
+    expect(html).toContain("Town of Truckee · Thu Oct 15, morning");
+    // The utility is booked for the same morning AND waits on the town: both halves are true.
+    expect(html).toContain("Liberty Utilities · Thu Oct 15, morning · Waits for Town of Truckee");
+    expect(html).toContain("Waiting on Town of Truckee");
+    expect(html).toContain("Add Inspection");
+    expect(html.indexOf("Town of Truckee ·")).toBeLessThan(html.indexOf("Liberty Utilities ·"));
+  });
+
+  it("a permit with no inspections says so, and the switch off leaves the list readable with nothing to press", () => {
+    expect(r(JobPermits, { jobId: "j1", permits, todayStr: "2026-10-14" })).toContain("No inspections on this permit yet");
+    const off = r(JobPermits, { jobId: "j1", permits, inspections: booked, todayStr: "2026-10-14", canAdd: false });
+    expect(off).toContain("Town of Truckee · Thu Oct 15, morning");
+    expect(off).not.toContain("Add Inspection");
+    expect(off).not.toContain("Say How It Went");
+  });
+
+  it("every inspection passed: the card says the meter is on", () => {
+    const done = booked.map((b) => ({ ...b, result: "passed", result_on: "2026-10-15" }));
+    expect(r(JobPermits, { jobId: "j1", permits, inspections: done, todayStr: "2026-10-16" })).toContain("Every inspection passed — the meter is on");
   });
 });
 

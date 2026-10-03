@@ -57,7 +57,16 @@ import { jobTaskTally, readJobTasks, taskPhoto } from "@/lib/job-tasks";
 import { buyMaterials, openToBuyCount } from "@/lib/materials-checklist";
 import { countOpen, isOpenAppointment, isOpenChangeOrder, isOpenInvoice, isOpenPermit, isOpenQuote, isOpenWorkOrder } from "@/lib/open-counts";
 import { JobPermits } from "./job-permits";
-import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
+import { permitStatusTone } from "@/lib/permit-options";
+import {
+  PERMIT_INSPECTION_COLUMNS,
+  authoritySuggestions,
+  inspectionLine,
+  mostPressingStand,
+  permitInspectionStand,
+  standLine,
+  type PermitInspection,
+} from "@/lib/permit-inspections";
 import { AddTimeEntry } from "../../timecards/add-time-entry";
 import { NoJobPunches, type NearPunches } from "./no-job-punches";
 import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
@@ -313,7 +322,10 @@ export default async function JobDetailPage({
   const invoiceIds = (invoices ?? []).map((i: any) => i.id);
   // PROJECTION LAW (cn-v945): the fee is money, and the read-only permit rows a tech gets are
   // rendered from this same array — so the column is never selected for him, not dropped after.
-  const PERMIT_COLUMNS = "id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, notes, portal_url";
+  // THE THREE INSPECTION COLUMNS ARE GONE FROM THIS LIST (0378): permits.inspection_date, .inspector
+  // and .inspection_result are superseded by permit_inspections, which is read below. `authority` stays
+  // and means who ISSUED the permit.
+  const PERMIT_COLUMNS = "id, permit_number, type, authority, status, applied_date, issued_date, notes, portal_url";
   // THE CARD'S MONEY IS THE DOOR'S MONEY (MONEY law). EVERY Time & Material job bills its actuals
   // (unclaimed hours + bills), estimate or not: on T&M the estimate is a guide, never a block (Erik,
   // 2026-09-26, Tess J-002, whose accepted estimate hid the running total). A payment schedule is
@@ -714,6 +726,41 @@ export default async function JobDetailPage({
   );
   const navTarget = directionsTarget(jobAddress, customerAddress, j.name);
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
+
+  // ── WHO STILL HAS TO COME (0378) ───────────────────────────────────────────────────────────────
+  // Each of this job's permits needs one or more inspections, from DIFFERENT authorities, in order:
+  // the town tags it, then the utility comes and puts the meter back on. Two reads side by side — the
+  // rows on this job's permits, and the authorities this company has called before (the suggestions
+  // under the free text box) — and neither runs on a job with no permit.
+  //
+  // NOT A STAFF-ONLY READ: the crew on site needs to know the town has to tag it before the utility
+  // will come (techs see all job info), and there is no price anywhere in it. The suggestions are for
+  // the form, so they are the office's. Both name org_id as well as leaning on RLS: three
+  // organizations share one database.
+  const permitRows = (permits ?? []) as { id?: string | null }[];
+  const permitIds = permitRows.map((p) => String(p.id ?? "")).filter(Boolean);
+  const [inspectionsR, authoritiesR] = await Promise.all([
+    permitIds.length
+      ? supabase
+          .from("permit_inspections")
+          .select(PERMIT_INSPECTION_COLUMNS)
+          .eq("org_id", j.org_id)
+          .in("permit_id", permitIds)
+          .order("position", { ascending: true })
+      : Promise.resolve({ data: [] as any[], error: null }),
+    viewerIsStaff && permitIds.length
+      ? supabase.from("permit_inspections").select("authority").eq("org_id", j.org_id).order("created_at", { ascending: false }).limit(200)
+      : Promise.resolve({ data: [] as any[], error: null }),
+  ]);
+  const jobInspections = ((inspectionsR as any).data ?? []) as PermitInspection[];
+  const inspectionAuthorities = authoritySuggestions(((authoritiesR as any).data ?? []) as { authority: string }[]);
+  // THE JOB'S ONE LINE — "Waiting on Liberty Utilities", the state it had no way to express. The most
+  // pressing of its permits' verdicts, worked out from the rows on every read: never a second copy
+  // stored on the job to go stale. A permit that wants nothing says nothing.
+  const inspectionStand = mostPressingStand(
+    permitIds.map((pid) => permitInspectionStand(jobInspections.filter((r) => String(r.permit_id) === pid), todayStrInTz(tz))),
+  );
+  const inspectionSays = inspectionStand ? standLine(inspectionStand) : null;
 
   // PUNCHES WITH NO JOB near this job (the duplicate punches, 2026-09-26): its crew's closed,
   // job-less, unbilled shifts from the day before its first day to two days after its last, for
@@ -1495,7 +1542,14 @@ export default async function JobDetailPage({
                 portal link on site; adding, editing and deleting are staff writes, and the
                 fee is a money figure. Same rows, read-only, fee omitted. */}
             {viewerIsStaff ? (
-              <JobPermits jobId={j.id} permits={(permits ?? []) as any} canAdd={on("permits")} />
+              <JobPermits
+                jobId={j.id}
+                permits={(permits ?? []) as any}
+                canAdd={on("permits")}
+                inspections={jobInspections}
+                todayStr={todayStrInTz(tz)}
+                authorities={inspectionAuthorities}
+              />
             ) : (
               <div>
                 <div className="mb-3 text-sm text-slate-500">
@@ -1527,14 +1581,27 @@ export default async function JobDetailPage({
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
                               {p.applied_date && <span>Applied {formatDate(p.applied_date)}</span>}
-                              {p.inspection_date && <span>Inspection {formatDate(p.inspection_date)}</span>}
-                              {p.inspector && <span>· {p.inspector}</span>}
                             </div>
                             {p.notes && <div className="mt-1 whitespace-pre-wrap text-xs text-slate-500">{p.notes}</div>}
+                            {/* WHO STILL HAS TO COME (0378), read-only: the same line the office reads
+                                (lib/permit-inspections inspectionLine), so the crew on site knows the
+                                town has to tag it before the utility will come. Nothing to press. */}
+                            {(() => {
+                              const mine = jobInspections.filter((r) => String(r.permit_id) === String(p.id));
+                              if (!mine.length) return null;
+                              return (
+                                <ul className="mt-1 space-y-0.5">
+                                  {mine.map((r) => (
+                                    <li key={r.id} className="text-xs text-slate-500">
+                                      {inspectionLine(mine, r)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              );
+                            })()}
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-1">
                             <Badge tone={permitStatusTone(p.status)}>{String(p.status).replace("_", " ")}</Badge>
-                            <Badge tone={permitResultTone(p.inspection_result)}>{p.inspection_result}</Badge>
                           </div>
                         </div>
                       </li>
@@ -2211,6 +2278,21 @@ export default async function JobDetailPage({
             </Link>
           )}
         </div>
+        {/* WAITING ON LIBERTY UTILITIES (0378) — the state this job had no way to express. One line,
+            for the office and the crew alike: who still has to come before the permit closes, or that
+            it is his move. Derived from the permit's rows (lib/permit-inspections), so it cannot say
+            something the Permits tab disagrees with, and it disappears the moment the last one passes. */}
+        {inspectionSays && (
+          <div className="mt-1">
+            <Link
+              href={`/jobs/${j.id}?tab=permits`}
+              className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              <ClipboardCheck aria-hidden className="h-4 w-4 shrink-0 text-slate-400" />
+              {inspectionSays}
+            </Link>
+          </div>
+        )}
         {/* What the customer attached at intake (plans, photos) — carried the whole trail, because
             the lead leaves the inbox on conversion and the crew builds from these. */}
         {(j as any).inquiry && (
