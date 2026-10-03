@@ -7,7 +7,7 @@ import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { LONG_SHIFT_HOURS, forgottenReason } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
-import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
@@ -1952,7 +1952,11 @@ export async function runDataTool(
           appointments: (apptRes.data ?? []).map((a: any) => ({
             id: a.id, // pass to appointment.update (reschedule) / appointment.setStatus
             title: a.title,
-            type: a.type,
+            // THE LABEL, not the stored value (W2-10): the product map tells Nort "inspection" is the
+            // city's word, so handing him the raw type made him call a walk-through an inspection —
+            // the one word the map reserves. Nothing echoes this back: a reschedule takes the id, and
+            // appointment.create takes its own type from PICKABLE_APPOINTMENT_TYPES.
+            type: appointmentTypeLabel(a.type),
             starts_at: a.starts_at,
             ends_at: a.ends_at,
             location: a.location,
