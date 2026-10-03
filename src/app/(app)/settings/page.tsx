@@ -471,7 +471,7 @@ export default async function SettingsPage({
                     />
                     <p className="mb-4 text-sm text-slate-500">
                       {on("leads") || walkThroughOff
-                        ? <>These are the questions your inspector asks on site, in order, and the reason each one exists.
+                        ? <>These are the questions your walk-through asks on site, in order, and the reason each one exists.
                           A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
                           from the lead, never gets asked at all.</>
                         : <>These are the questions your website asks a customer, in order, and the reason each one exists.</>}

@@ -10,8 +10,8 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ESTIMATE_VISIT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
-import { bucketInspections, hasCaptureData } from "@/lib/inspections";
+import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { bucketInspections, inspectionRowTags } from "@/lib/inspections";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { featureOn } from "@/lib/features";
@@ -219,11 +219,14 @@ function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; w
         <Link href={`/appointments/${a.id}`} className="group block">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate font-medium text-slate-900 group-hover:text-brand">{a.title}</span>
-            {a.type === "final_inspection" && <Badge tone="indigo">{appointmentTypeLabel(a.type)}</Badge>}
-            {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
-            {a.status === "completed" && <Badge tone="green">done</Badge>}
-            {a.status === "cancelled" && <Badge tone="slate">cancelled</Badge>}
-            {writeUp && !hasCaptureData(a.capture) && <Badge tone="slate">no field notes</Badge>}
+            {/* ONE rule for the tags (lib/inspections inspectionRowTags) — this row draws the open
+                piles AND the filed pile, and a tag written inline here rode into the wrong one: a
+                green "Done" pill on every row of "To write up" (8592392b). No tag is written here. */}
+            {inspectionRowTags(a, writeUp).map((t) => (
+              <Badge key={t.label} tone={t.tone}>
+                {t.label}
+              </Badge>
+            ))}
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
             {a.starts_at ? <span>{formatDateTimeTz(a.starts_at, tz)}</span> : <span>Waiting For A Day</span>}

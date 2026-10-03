@@ -889,7 +889,7 @@ export function PlaybookManager({
       {dirty && !pending && !err && (
         <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 shadow-md backdrop-blur shell:bottom-2">
           <span className="text-sm font-medium text-amber-900">
-            Not saved yet &mdash; {form.isWebsite ? "your website still asks the old questions" : "your inspector still asks the old questions"}
+            Not saved yet &mdash; {form.isWebsite ? "your website still asks the old questions" : "your walk-through still asks the old questions"}
           </span>
           <Button type="button" onClick={() => run(() => savePlaybook(form.id, needs, baseStamp), "Saved.")}>
             <Check className="h-4 w-4" /> Save

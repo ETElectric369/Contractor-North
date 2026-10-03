@@ -10,7 +10,10 @@
  *   • "Upcoming & proposed" — scheduled/proposed visits, including a past-dated one with
  *     NO capture (it may not have happened; hiding it would lie).
  *   • Filed — completed-and-written-up + cancelled, behind the ?view=completed toggle.
+ *
+ * The tags a row wears live here too (inspectionRowTags), for the same reason: one rule, one place.
  */
+import { appointmentTypeLabel } from "@/lib/statuses";
 
 export interface InspectionBucketRow {
   id: string;
@@ -44,6 +47,41 @@ export function hasCaptureData(capture: unknown): boolean {
     filled(c.materials) ||
     (Array.isArray(c.photos) && c.photos.length > 0)
   );
+}
+
+/** One tag on a Walk-Throughs row: what it says, and the Badge tone it says it in. The tone names
+ *  are components/ui/badge's `Tone`, spelled out here so this module stays pure (no component
+ *  import); the page's `<Badge tone={t.tone}>` is what checks the two against each other. */
+export interface InspectionRowTag {
+  tone: "indigo" | "amber" | "slate";
+  label: string;
+}
+
+/**
+ * EVERY TAG A WALK-THROUGHS ROW WEARS, in ONE place. /inspections draws one row component for the
+ * open piles AND the filed pile, so a tag written inline on that row rides into the pile it was
+ * never meant for.
+ *
+ * THERE IS NO "done" TAG, and that is the rule. Report 8592392b (2026-10-02): "glaring on the front
+ * is [a customer] tagged Done while it sits in the open box." The green pill was drawn from
+ * `status === "completed"` alone, so every row of "To write up" — the OPEN pile, each row carrying a
+ * Create Estimate button — advertised itself as finished work. BADGES AND TAGS SHOW ONLY WHAT IS
+ * OPEN. Nothing is lost by dropping it: every heading on this page already says the bucket ("To
+ * write up", "Completed & written up", "Cancelled").
+ */
+export function inspectionRowTags(
+  row: { type?: string | null; status: string; capture?: unknown },
+  /** The row is in "To write up", the one pile where a visit with no field notes is worth saying. */
+  writeUp = false,
+): InspectionRowTag[] {
+  const tags: InspectionRowTag[] = [];
+  // The city's inspection on a permit is a different animal from the walk-through, and this list
+  // holds both (ESTIMATE_VISIT_TYPES), so the row says which one it is.
+  if (row.type === "final_inspection") tags.push({ tone: "indigo", label: appointmentTypeLabel(row.type) });
+  if (row.status === "proposed") tags.push({ tone: "amber", label: "pending pick" });
+  if (row.status === "cancelled") tags.push({ tone: "slate", label: "cancelled" });
+  if (writeUp && !hasCaptureData(row.capture)) tags.push({ tone: "slate", label: "no field notes" });
+  return tags;
 }
 
 export interface InspectionBuckets<T> {

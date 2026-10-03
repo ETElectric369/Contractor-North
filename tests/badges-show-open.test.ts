@@ -175,6 +175,24 @@ describe("every tab count in the app is an open count", () => {
   });
 });
 
+/**
+ * A PILE OF OPEN WORK WEARS NO SETTLED PILL EITHER (report 8592392b, 2026-10-02: "glaring on the
+ * front is [a customer] tagged Done while it sits in the open box"). /inspections draws ONE row
+ * component for the open piles and the filed pile, and its green Done pill came off
+ * `status === "completed"` alone — so every row of "To write up", Create Estimate button and all,
+ * said it was finished. The tags now come from ONE rule (lib/inspections inspectionRowTags) and the
+ * page writes none of its own, which is what stops the next one riding into the wrong pile.
+ */
+describe("the open Walk-Throughs pile wears no Done pill", () => {
+  it("every tag on a row comes from the one rule — the page writes none itself", () => {
+    const page = read("app/(app)/inspections/page.tsx");
+    expect(page).toContain("{inspectionRowTags(a, writeUp).map((t) => (");
+    // One <Badge> on the page, and it is the mapped one. A tag written inline here is the bug.
+    expect([...page.matchAll(/<Badge\b/g)].length).toBe(1);
+    expect(page).not.toMatch(/<Badge[^>]*tone="/);
+  });
+});
+
 describe("the chrome's other numbers", () => {
   it("the dock badges Needs You (/planner), new unanswered leads (/leads) and Reconcile — and nothing else", () => {
     const layout = read("app/(app)/layout.tsx");

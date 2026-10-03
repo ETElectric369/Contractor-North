@@ -339,7 +339,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "visit_days_ahead",
     description:
-      "The next two weeks' WALK-THROUGH DAYS — days that already hold booked estimate visits (inspections / quote visits), each with its towns and visit count. Use to cluster new visits onto days the truck already rolls ('when should I offer to see this lead', 'which day is the <town> day'), then book with appointment.create or offer times via the lead's pick link. Days not listed have no estimate visits booked.",
+      "The next two weeks' WALK-THROUGH DAYS — days that already hold booked estimate visits (walk-throughs / quote visits, the site visit before a price), each with its towns and visit count. Use to cluster new visits onto days the truck already rolls ('when should I offer to see this lead', 'which day is the <town> day'), then book with appointment.create or offer times via the lead's pick link. Days not listed have no estimate visits booked.",
     input_schema: { type: "object", properties: {} },
   },
   {
