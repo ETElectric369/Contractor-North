@@ -65,9 +65,21 @@ export function BankDropLine() {
       // written until a person presses Apply there — and the server holds the read against the
       // statement's own printed totals before it proposes anything at all.
       if (!read.ok) {
-        // NOTHING SILENT, AND NOTHING THAT FEELS BROKEN: looking at three pages takes a few seconds,
-        // and a spinner with no words beside it is how a person decides the button doesn't work.
-        setSaid({ text: "There is no text on these pages, so they are being read as pictures. A few seconds.", ok: true });
+        // NOTHING SILENT, AND NOTHING THAT FEELS BROKEN: a spinner with no words beside it is how a
+        // person decides the button doesn't work.
+        //
+        // AND NOTHING UNTRUE EITHER. This said "There is no text on these pages" for EVERY scan, and
+        // the file this lane was built for — his September statement, 125 text marks of back-page
+        // legal notice — has text on it; it is the TABLE that is a picture. A claim on screen has to
+        // trace to the code (the onboarding-truth law), so `noText` decides which clause is shown.
+        // "A few seconds" was untrue too: the careful look is an Opus transcription of a whole
+        // statement, which is tens of seconds and more. A wrong duration reads as a hung button.
+        setSaid({
+          text: read.scan.noText
+            ? "There is no text on these pages, so they are being read as pictures. That takes a minute, and a long statement takes a few."
+            : "These pages don't read as a table of text, so they are being read as pictures. That takes a minute, and a long statement takes a few.",
+          ok: true,
+        });
         const got = await readStatementScan({ name: file.name || "Statement", base64: read.scan.base64, pages: read.scan.pages, sha256: sha, listDate: read.scan.listDate });
         if (!got.ok) return setSaid({ text: got.already ? `${got.already} Nothing was added twice.` : (got.error ?? "Not added."), ok: !!got.already });
         setSaid({ text: (got.line ?? "Waiting under Needs You on Bills.").replace("Waiting below", "Waiting under Needs You on Bills"), ok: true, waiting: true });

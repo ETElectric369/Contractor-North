@@ -334,8 +334,20 @@ describe("the page reads; it does not re-rule", () => {
     for (const lecture of ["CSV", "TSV", "Excel", "OFX", "QFX", "QBO", ".xlsx"]) expect(card, lecture).not.toContain(lecture);
     expect(card).toContain("whatever your bank or supplier gave you");
     // A SCAN IS READ HERE, and it is no longer sent anywhere else.
-    expect(card).toContain("SCANNED");
+    expect(card).toContain("PICTURES");
     expect(card).not.toContain("+ button");
+    /**
+     * AND THE CLAIM TRACES TO THE CODE. "with no text on its pages at all" was narrower than the
+     * routing: open-list-file.ts sends EVERY PDF the text lane cannot tabulate to the reader, and the
+     * file this lane exists for — his September statement — has 125 text marks on it and a table that
+     * is an image. A promise that doesn't trace to the code is how he finds out by being turned away.
+     */
+    expect(card).not.toContain("no text on its pages");
+    expect(card).toContain("scanned, photographed");
+    // A CARD'S BALANCE RUNS THE OTHER WAY, and the gate walks it that way, so the card may say so.
+    expect(card).toContain("what you owe goes up with a purchase");
+    // AND THE TIME IS THE READ'S REAL TIME. "A few seconds" is an Opus transcription's worst lie.
+    expect(card).toContain("takes a minute");
     // AND THE PROMISE THAT MAKES IT SAFE: arithmetic first, and a word when there is none to do.
     expect(card).toContain("held against what came off them");
     expect(card).toContain("nothing is");

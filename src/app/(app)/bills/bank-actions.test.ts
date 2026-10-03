@@ -1104,6 +1104,25 @@ describe("the read report on a scanned statement's card", () => {
     expect(owner.proposal.bankImport.download.readSaid).toBeUndefined();
     expect(row.proposal.bankImport.download.readSaid).toBe(SAID); // the stored row is untouched
   });
+
+  /**
+   * AND THE DOOR CANNOT BE HANDED ONE. `addOpenList` is a "use server" export, which is a PUBLIC POST
+   * ENDPOINT (report-client-error.ts says so), so while the sentence was a field of its argument any
+   * staffer who may sort the bank could post a table of their own making together with "agree to the
+   * cent" and get a bank card claiming arithmetic that never ran. The card prints no totals to hold it
+   * against and Apply never reads it, so nobody downstream could tell. The sentence is now the CORE's
+   * second argument (open-list-add-core.ts) and the action has no field for it at all.
+   */
+  it("a sentence posted at the door is never stored as what checked the read", async () => {
+    const forged = { pages: 3, rows: 9, checked: SAID };
+    const res = await addOpenList({ name: "Checking.csv", sha256: null, table: parseCSV(CHECKING_CSV), listDate: "2026-09-26", source: "bills_drop", pdf: forged } as never);
+    expect(res.ok).toBe(true);
+    const row = db.organized_items.find((i) => i.id === res.id)!;
+    expect(row.proposal.bankImport.download.readSaid).toBeUndefined();
+    expect(JSON.stringify(row)).not.toContain("agree to the cent");
+    // The pages it DID say are still facts about the paper, so the read report still has them.
+    expect(res.line).toContain("3 pages");
+  });
 });
 
 describe("before 0363 is applied", () => {

@@ -24,6 +24,8 @@ const state = vi.hoisted(() => ({
   answers: [] as any[],
   calls: [] as any[],
   over: false,
+  /** What the Nth call throws instead of answering — a timeout, an outage. Null: it answers. */
+  throwOn: null as null | ((nth: number) => unknown),
 }));
 
 vi.mock("@/lib/staff-guard", () => ({
@@ -36,8 +38,11 @@ vi.mock("@/lib/anthropic", () => ({
   DEFAULT_MODEL: "model-test",
   getAnthropic: () => ({
     messages: {
-      create: async (args: unknown) => {
-        state.calls.push(args);
+      // THE SECOND ARGUMENT IS KEPT TOO: a read's own timeout is what stops the platform ending it.
+      create: async (args: unknown, options?: unknown) => {
+        state.calls.push(Object.assign({ options }, args));
+        const bang = state.throwOn?.(state.calls.length);
+        if (bang) throw bang;
         const next = state.answers.shift();
         if (!next) throw new Error("the test queued no answer for this call");
         return next;
@@ -54,7 +59,7 @@ vi.mock("@/lib/ai-cost", async (orig) => ({
 }));
 
 import { readStatementScan } from "./statement-scan-actions";
-import { SCAN_MORE_CALLS } from "@/lib/statement-scan";
+import { SCAN_MORE_CALLS, SCAN_READ_MS } from "@/lib/statement-scan";
 
 type Row = Record<string, any>;
 let db: Record<string, Row[]>;
@@ -153,6 +158,7 @@ beforeEach(() => {
   state.answers = [];
   state.calls = [];
   state.over = false;
+  state.throwOn = null;
 });
 
 describe("a scanned bank statement becomes the one bank card, and nothing else", () => {
@@ -275,13 +281,163 @@ describe("length: a cut-off answer is continued, and never passes as a short lis
     expect(asked).toContain("do not repeat");
   });
 
+  /**
+   * AND IT CONTINUES A REPLY THAT IS REALLY CUT OFF — invalid JSON, stopped in the middle of a line.
+   *
+   * This is the test the branch did not have, and its absence hid a dead capability. `answer()` queues
+   * `JSON.stringify(...)` with stop_reason "max_tokens", which is VALID JSON and so parses directly; a
+   * real max_tokens reply never is. The real one went to parseAiJson's repair round trip, which has to
+   * re-emit the whole 16,000-token answer inside its own budget, could not, and threw "too large to
+   * repair" — leaving the loop BEFORE a line had been kept and before a continuation was ever built. So
+   * every statement past one answer read "it got 0 and the statement goes on": the continuation, the
+   * roughly thousand-line reach and the count in the sentence were all fiction in production.
+   *
+   * A repair answer is queued after the cut one on purpose. If it is ever taken, the queue runs dry on
+   * the continuation and the test fails on the call count — so this pins that the repair is NOT reached.
+   */
+  it("a reply cut off mid-JSON is closed in code, continued, and never sent to the repair model", async () => {
+    const whole = JSON.stringify({ ...CONTROLS, lines: LINES });
+    // Cut inside the fourth line's description: exactly what a max_tokens stop leaves behind.
+    const truncated = whole.slice(0, whole.indexOf("DEPOSIT INVOICE PAYMENT") + 7);
+    expect(() => JSON.parse(truncated)).toThrow();
+    state.answers = [
+      isBank(),
+      { model: "model-test", stop_reason: "max_tokens", usage: { input_tokens: 2000, output_tokens: 16000 }, content: [{ type: "text", text: truncated }] },
+      answer({ ...CONTROLS, lines: LINES.slice(3) }),
+    ];
+    const got = await drop();
+    expect(got.ok).toBe(true);
+    expect(items()[0].proposal.bankImport.download.lines).toHaveLength(6);
+    expect(got.line).toContain("agree to the cent");
+    // Three calls: the cheap look, the cut read, the continuation. No repair call anywhere.
+    expect(state.calls).toHaveLength(3);
+    expect(state.answers).toHaveLength(0);
+    // THE CONTROL FIGURES SURVIVED THE CUT, because they come before "lines" in the asked-for shape.
+    expect(items()[0].proposal.bankImport.download.readSaid).toContain("agree to the cent");
+    // The continuation carries on after the last WHOLE line, so the half line is simply re-read.
+    const asked = state.calls[2].messages[2].content as string;
+    expect(asked).toContain("CHECK 1042");
+    expect(asked).toContain("do not repeat");
+  });
+
   it("still cut off after the last continuation: nothing is added, and it says so", async () => {
     state.answers = [isBank(), ...Array.from({ length: SCAN_MORE_CALLS + 1 }, (_, i) => answer({ ...CONTROLS, lines: [LINES[i]] }, "max_tokens"))];
     const got = await drop();
     expect(got.ok).toBe(false);
     expect(got.error).toContain("looks complete and isn't");
+    // THE COUNT IS NOW A REAL ONE (four passes, one line each), and the way out is one that works:
+    // the gate refuses the half of a split statement its printed totals no longer describe.
+    expect(got.error).toContain("it got 4 lines");
+    expect(got.error).not.toContain("two shorter PDFs");
+    expect(got.error).toContain("CSV or OFX");
     expect(items()).toEqual([]);
     expect(state.calls).toHaveLength(SCAN_MORE_CALLS + 2);
+  });
+
+  it("a reply cut so early that no whole line closed says it was cut, with no count and no dead end", async () => {
+    const whole = JSON.stringify({ ...CONTROLS, lines: LINES });
+    state.answers = [
+      isBank(),
+      { model: "model-test", stop_reason: "max_tokens", usage: { input_tokens: 2000, output_tokens: 16000 }, content: [{ type: "text", text: whole.slice(0, whole.indexOf('"lines"') + 12) }] },
+    ];
+    const got = await drop();
+    expect(got.ok).toBe(false);
+    expect(got.error).toContain("more lines on it than the reader can hand back in one go.");
+    expect(got.error).not.toContain("it got 0");
+    expect(got.error).toContain("+ button");
+    // NOT "the reader didn't answer": it answered, and what it said was cut. And nothing was repaired.
+    expect(got.error).not.toContain("couldn't be read");
+    expect(state.calls).toHaveLength(2);
+    expect(items()).toEqual([]);
+  });
+});
+
+describe("a credit-card statement reads, instead of being refused for being a card", () => {
+  /** Previous 1,200.00 owed, one payment of 1,200.00, purchases of 845.31, new balance 845.31. */
+  const CARD = {
+    account_kind: "card",
+    beginning_balance: 1200.0,
+    ending_balance: 845.31,
+    deposits_total: 1200.0,
+    withdrawals_total: 845.31,
+    account_last4: "9921",
+    lines: [
+      { date: "2026-09-04", description: "PAYMENT - THANK YOU", money_out: null, money_in: 1200.0 },
+      { date: "2026-09-11", description: "HARROWGATE FUEL", money_out: 312.44, money_in: null },
+      { date: "2026-09-19", description: "WESTMERE HARDWARE", money_out: 532.87, money_in: null },
+    ],
+  };
+
+  it("a card month read perfectly becomes a card, and the report says which way it was walked", async () => {
+    state.answers = [answer({ paper: "bank_statement", what: "a credit card statement" }), answer(CARD)];
+    const got = await drop();
+    expect(got.ok).toBe(true);
+    expect(got.line).toContain("a card's balance: what you owe");
+    expect(items()).toHaveLength(1);
+    expect(items()[0].proposal.bankImport.download.lines).toHaveLength(3);
+    // The charges are money OUT and the payment money IN, which is the bank reader's own convention.
+    const cents = items()[0].proposal.bankImport.download.lines.map((l: { cents: number }) => l.cents);
+    expect(cents).toEqual([120000, -31244, -53287]);
+  });
+
+  it("a card with a line missed is still refused, so the direction is not a way to pass", async () => {
+    state.answers = [isBank(), answer({ ...CARD, lines: CARD.lines.slice(0, 2) })];
+    const got = await drop();
+    expect(got.ok).toBe(false);
+    expect(got.error).toContain("$532.87 short");
+    expect(items()).toEqual([]);
+  });
+});
+
+/**
+ * THE GATE JUDGES THE LINES THAT LAND, read by the one reader that lands them (readBankDownload). It
+ * used to read the reader's answer a second way, with a different day reader, so the two sets drifted:
+ * a line dated "2026/09/03" was invisible to the gate but landed on the card.
+ */
+describe("the gate and the card hold the same lines", () => {
+  it("a correct read with one non-ISO date is not refused as short", async () => {
+    state.answers = [isBank(), answer({ ...GOOD, lines: LINES.map((l, i) => (i === 1 ? { ...l, date: "2026/09/03" } : l)) })];
+    const got = await drop();
+    expect(got.ok).toBe(true);
+    expect(items()[0].proposal.bankImport.download.lines).toHaveLength(6);
+    // THE TWO FIGURES IN THE REPORT ARE ADDED UP FROM THE LINES THAT LANDED, and the gate's "agree"
+    // is about those same lines. If the gate had judged its own set, these could not both be here.
+    expect(got.line).toContain("$2,216.41 out and $3,437.42 in");
+    expect(got.line).toContain("agree to the cent");
+  });
+
+  it("a duplicated line in a date form the gate used to miss is caught", async () => {
+    state.answers = [isBank(), answer({ ...GOOD, lines: [...LINES, { date: "5 Sep 2026", description: "CHECK 1042", money_out: 1250.0, money_in: null }] })];
+    const got = await drop();
+    expect(got.ok).toBe(false);
+    expect(got.error).toContain("$1,250.00 over");
+    expect(items()).toEqual([]);
+  });
+});
+
+describe("the clock is the reader's, and it ends in words", () => {
+  it("a read the clock ran out on says so, and names one action then the fallback", async () => {
+    state.answers = [isBank()];
+    // The cheap look answers; the careful one times out, which is where the real time goes.
+    state.throwOn = (nth) => (nth === 2 ? Object.assign(new Error("Request timed out."), { name: "APIConnectionTimeoutError" }) : null);
+    const got = await drop();
+    expect(got.ok).toBe(false);
+    expect(got.error).toContain("time one read gets ran out");
+    expect(got.error).toContain("Drop it again");
+    expect(got.error).toContain("+ button");
+    expect(items()).toEqual([]);
+  });
+
+  it("every read gets a deadline, so the platform is never what ends it", async () => {
+    state.answers = [isBank(), answer(GOOD)];
+    await drop();
+    // BOTH looks, on one clock started before either, with no silent retries behind it.
+    for (const call of state.calls) {
+      expect(call.options).toMatchObject({ maxRetries: 0 });
+      expect(call.options.timeout).toBeGreaterThan(0);
+      expect(call.options.timeout).toBeLessThanOrEqual(SCAN_READ_MS);
+    }
+    expect(state.calls).toHaveLength(2);
   });
 });
 

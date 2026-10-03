@@ -30,6 +30,17 @@ import {
 import { BankDropLine } from "./bank-drop-line";
 
 export const dynamic = "force-dynamic";
+/**
+ * A SERVER ACTION RUNS UNDER THIS PAGE'S TIME (api/paperwork/read/route.ts says so; intake's page says
+ * it too). Bring In A Statement now hosts a read that is an Opus transcription of a whole statement —
+ * up to four passes of 16,000 output tokens — so the platform default would end the invocation in the
+ * middle of it, which says nothing to the person and cannot meter the tokens already bought. The
+ * reader gets the reader's own time, as Bills and Organize already give theirs (audit v994, SI4); 300
+ * is what google/sync and the intake page use. 60 would be the kill, not the cure: forty lines is
+ * already tens of seconds of model output. The read keeps its OWN budget inside this one
+ * (statement-scan.ts SCAN_READ_MS), so it always comes back in words.
+ */
+export const maxDuration = 300;
 
 /**
  * WHAT TO CALL THE SUPPLIER FIGURES READ WHEN IT DOES NOT COME BACK AT ALL. Its own failures arrive
@@ -394,7 +405,14 @@ export default async function ReconcilePage() {
           and held against its own printed figures (statement-scan.ts). What the copy promises instead
           is the thing that makes a model read safe to look at — the arithmetic, and the plain word
           when a paper prints nothing to check against. Copy that promises or refuses the wrong thing
-          is how he finds out by being turned away. */}
+          is how he finds out by being turned away.
+
+          AND IT SAYS "PICTURES", NOT "no text at all". The lane takes every PDF the text lane cannot
+          tabulate, which includes his own September statement — that file HAS text (125 marks of
+          back-page legal notice) and its table is an image. "With no text on its pages at all" was
+          narrower than the code, and the drop line said the same untrue thing (bank-drop-line.tsx).
+          The duration is here for the same reason: looking at the pages is a model reading a whole
+          statement, which is not "a few seconds". */}
       {/* THE ANCHOR IS DRAWN FOR EVERY STAFF VIEWER, both halves of the gate, because the Net Profit
           card on /analytics links to it: an anchor that is not drawn is the dead end this page's own
           "File It" door already taught us (see the not-on-an-account section above). */}
@@ -407,11 +425,13 @@ export default async function ReconcilePage() {
               North works out what it is. When it comes off a PDF, the line underneath says how many pages and rows it
               read and what they add up to: hold that against the total printed on your own statement, because two
               numbers agreeing is the proof it read them right. If two columns could both be the amount, it asks you
-              which is which and adds them up once you have said. A statement that was SCANNED, with no text on its
-              pages at all, is read as well — its pages are looked at, and then its own beginning balance, ending
-              balance and totals are held against what came off them, to the cent. If those don&apos;t agree nothing is
-              added and the line below says which one is out and by how much; if your statement prints no totals at
-              all, it says that too, so you know nothing but your own eyes has checked it.
+              which is which and adds them up once you have said. A statement whose lines are PICTURES is read as
+              well — scanned, photographed, or a PDF whose columns don&apos;t come off as text: its pages are looked
+              at, and then its own beginning balance, ending balance and totals are held against what came off them,
+              to the cent. A card statement is read the way a card works, where what you owe goes up with a purchase.
+              If those figures don&apos;t agree nothing is added and the line below says which one is out and by how
+              much; if your statement prints no totals at all, it says that too, so you know nothing but your own eyes
+              has checked it. Looking at the pages takes a minute, and a long statement takes a few.
             </p>
             <BankDropLine />
           </>

@@ -108,11 +108,44 @@ describe("a PDF the text lane cannot read goes to the reader, never to a dead en
     expect(got.error).toContain("Save just the statement pages");
   });
 
-  it("too heavy to look at is said here, before 11 MB goes anywhere", async () => {
+  /**
+   * TOO HEAVY TO SEND IS SAID HERE, AT EVERY SIZE THE PLATFORM WOULD HAVE REFUSED.
+   *
+   * The cap used to be 8 MB, so a 4 MB phone scan passed every check in this file, became a 5.3 MB
+   * request body (base64 is a third bigger) and was rejected by the platform before the action existed
+   * — "Not added: An unexpected response was received from the server.", no cause, no next action, and
+   * the whole band from about 3.3 MB to 8 MB failed that way. A server function takes about 4.5 MB,
+   * which this repo has recorded in the field twice; SCAN_MAX_BYTES is now 3 MB of file.
+   */
+  it("a scan too heavy to send is refused here, in words, with a next action", async () => {
     m.readPdf.mockResolvedValue({ ok: false, error: "scan.pdf had no text in it.", noText: true, pages: 4 });
-    const got = await readStatementFile(pdf("scan.pdf", 9 * 1024 * 1024));
-    expect(got.ok).toBe(false);
-    if (got.ok || "scan" in got) throw new Error("a refusal should have come back");
-    expect(got.error).toContain("more than the reader can look at");
+    for (const mb of [4, 9]) {
+      const got = await readStatementFile(pdf("scan.pdf", mb * 1024 * 1024));
+      expect(got.ok, `${mb} MB`).toBe(false);
+      if (got.ok || "scan" in got) throw new Error(`${mb} MB should have been refused`);
+      expect(got.error).toContain("more than can be sent up in one go");
+      // NO DEAD END: the one thing to try, and then the door that keeps the paper whatever happens.
+      expect(got.error).toContain("+ button");
+    }
+    // And a file under it still goes up, so the cap is a cap and not a closed door.
+    const fine = await readStatementFile(pdf("scan.pdf", 2 * 1024 * 1024));
+    expect("scan" in fine).toBe(true);
+  });
+
+  /**
+   * WHICH SENTENCE THE DROP LINE MAY SAY. It told every scan "There is no text on these pages", which
+   * is false for the file this lane was built for, so the two cases are told apart where the
+   * difference is known. bank-drop-line.tsx branches on this flag and nothing else.
+   */
+  it("noText is true only when the pages really carry none", async () => {
+    m.readPdf.mockResolvedValue({ ok: false, error: "statement.pdf had no text in it.", noText: true, pages: 3 });
+    const july = await readStatementFile(pdf());
+    if (july.ok || !("scan" in july)) throw new Error("a scan should have come back");
+    expect(july.scan.noText).toBe(true);
+
+    m.readPdf.mockResolvedValue({ ok: true, text: "In Case of Errors", table: LEGAL_NOTICE_TABLE, pages: 3 });
+    const september = await readStatementFile(pdf());
+    if (september.ok || !("scan" in september)) throw new Error("a scan should have come back");
+    expect(september.scan.noText).toBe(false);
   });
 });

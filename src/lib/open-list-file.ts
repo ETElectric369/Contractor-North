@@ -140,7 +140,19 @@ const STATEMENT_MAX = 15 * 1024 * 1024;
  * LOOKED at. This branch carries the file's own bytes up for that read (statement-scan-actions.ts),
  * and it is not an error — it is the second half of the one door.
  */
-export type StatementScan = { base64: string; pages: number; listDate: string | null };
+export type StatementScan = {
+  base64: string;
+  pages: number;
+  listDate: string | null;
+  /**
+   * TRUE ONLY WHEN THE PAGES REALLY CARRY NO TEXT (July's file). A statement whose text is there but
+   * tabulates into nothing — his September file, whose 125 text marks are all the back-page legal
+   * notice — is a scan too, and the drop line used to tell him "There is no text on these pages" about
+   * the very file this lane was built for. A claim on screen has to trace to the code, so the two cases
+   * are told apart here, where the difference is actually known.
+   */
+  noText: boolean;
+};
 
 export type StatementFileRead =
   | { ok: true; table: string[][]; listDate: string | null; pdf: { pages: number; rows: number } | null }
@@ -193,21 +205,27 @@ export async function readStatementFile(file: File): Promise<StatementFileRead> 
    * routing stops guessing — the cheap look answers, and an ordinary receipt, invoice or plan is sent
    * back to the + button by name, the same door the old refusal here named.
    *
-   * A PDF THAT WOULD NOT OPEN IS STILL A REFUSAL. Only `noText` — it opened, the pages are blank of
-   * text — is a scan. "It isn't a PDF inside" is not something a reader can fix.
+   * A PDF THAT WOULD NOT OPEN IS STILL A REFUSAL. Of readPdf's own failures, only `noText` — it opened,
+   * the pages are blank of text — is a scan. "It isn't a PDF inside" is not something a reader can fix.
+   * (A PDF that opened and whose table doesn't read is the OTHER scan, below, with noText false.)
    */
-  const scan = (pages: number): StatementFileRead => {
+  const scan = (pages: number, noText: boolean): StatementFileRead => {
     if (pages > SCAN_MAX_PAGES) return { ok: false, error: `${name} is ${pages} pages — more than a statement. Save just the statement pages as their own PDF and drop that.` };
-    // SAID HERE, NOT AFTER AN 11 MB UPLOAD: the reader's own weight limit is the server's
-    // (SCAN_MAX_BYTES), and asking it here answers instantly and sends nothing.
+    // SAID HERE, BEFORE ANY OF IT GOES ANYWHERE. base64 makes a file a third bigger and it rides up as
+    // an argument, so a file over SCAN_MAX_BYTES is one a server function will not accept whole — the
+    // old 8 MB let a 4 MB phone scan through to a platform 413 with no sentence on it at all. Asking
+    // here answers instantly and sends nothing. One constant, both sides (statement-scan-actions.ts).
     if (bytes.byteLength > SCAN_MAX_BYTES) {
-      return { ok: false, error: `${name} is ${Math.round(bytes.byteLength / (1024 * 1024))} MB, which is more than the reader can look at. Save just the statement pages as their own PDF and drop that.` };
+      const mb = (bytes.byteLength / (1024 * 1024)).toFixed(1).replace(/\.0$/, "");
+      return { ok: false, error: `${name} is ${mb} MB, which is more than can be sent up in one go. Scan it again at a smaller size, or add it with the + button at the top, which keeps it as a paper.` };
     }
-    return { ok: false, scan: { base64: base64Of(bytes), pages, listDate: savedOn(file.lastModified) } };
+    return { ok: false, scan: { base64: base64Of(bytes), pages, listDate: savedOn(file.lastModified), noText } };
   };
-  if (!got.ok) return got.noText ? scan(Math.max(1, Math.trunc(Number(got.pages) || 1))) : { ok: false, error: got.error };
+  if (!got.ok) return got.noText ? scan(Math.max(1, Math.trunc(Number(got.pages) || 1)), true) : { ok: false, error: got.error };
   const list = tableReadsAsList(got.table);
-  if (!list) return scan(got.pages);
+  // TEXT IS THERE, AND IT TABULATES INTO NOTHING A READER KNOWS (his September file). Still a scan, and
+  // `noText: false` is what stops the drop line claiming the pages have no text on them.
+  if (!list) return scan(got.pages, false);
   // THE ROWS THE QUESTION WAS ANSWERED ABOUT, never `got.table`: a statement whose letterhead pushed
   // the heading row past the readers' 15-row reach comes back cropped to that heading, and handing the
   // uncropped table on would ask the readers the question this door just answered and get "no heading".

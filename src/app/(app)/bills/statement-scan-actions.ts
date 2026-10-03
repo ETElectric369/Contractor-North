@@ -14,17 +14,22 @@ import {
   SCAN_MAX_BYTES,
   SCAN_MAX_TOKENS,
   SCAN_MORE_CALLS,
+  SCAN_READ_MS,
   checkScanTotals,
+  closeCutJson,
+  landedScanLines,
   notABankScanSaid,
   readScannedBank,
   scanCheckSaid,
   scanKindFrom,
   scanMoreAsked,
   scanRefusalSaid,
+  scanTooSlowSaid,
   scanTruncatedSaid,
   type ScanLine,
 } from "@/lib/statement-scan";
-import { addOpenList } from "./open-list-actions";
+import { addOpenListCore } from "./open-list-add-core";
+import { readBankDownload } from "./bank-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
 
 /**
@@ -69,6 +74,10 @@ type Result = { ok: boolean; error?: string; id?: string; line?: string; already
  */
 const READER_SILENT = (name: string) => `${name} couldn't be read just now. Drop it again — and if it still won't read, add it with the + button at the top, which keeps it as a paper.`;
 
+/** A read the clock ended, by its own budget or by the SDK's: both mean the same thing to a person. */
+const ranOutOfTime = (e: unknown, since: number): boolean =>
+  Date.now() - since >= SCAN_READ_MS || /timeout|timed out|aborted/i.test(String((e as { name?: string })?.name ?? "") + " " + String((e as { message?: string })?.message ?? ""));
+
 export async function readStatementScan(input: {
   name: string;
   /** The PDF itself. The browser already has the bytes (it tried the text lane on them). */
@@ -102,7 +111,9 @@ export async function readStatementScan(input: {
     return { ok: false, error: `${name} didn't arrive in one piece. Drop it again.` };
   }
   if (!bytes.length || !isPdfBytes(new Uint8Array(bytes))) return { ok: false, error: `${name} isn't a PDF inside, whatever its name says.` };
-  if (bytes.length > SCAN_MAX_BYTES) return { ok: false, error: `${name} is more than the reader can look at. Save just the statement pages as their own PDF and drop that.` };
+  // THE BELT ON THE BROWSER'S OWN CHECK (open-list-file.ts), the same constant: a file over this never
+  // arrives whole anyway — the bytes ride up as an argument and a server function takes about 4.5 MB.
+  if (bytes.length > SCAN_MAX_BYTES) return { ok: false, error: `${name} is more than can be sent up in one go. Scan it again at a smaller size, or add it with the + button at the top, which keeps it as a paper.` };
 
   // ALREADY IN, BEFORE A PENNY IS SPENT: the same file read twice is the same statement, and the card
   // it made the first time is where the answer already is.
@@ -114,6 +125,9 @@ export async function readStatementScan(input: {
 
   const pages = Math.max(1, Math.trunc(Number(input?.pages) || 1));
   const client = getAnthropic();
+  // ONE CLOCK FOR BOTH LOOKS, started before either (SCAN_READ_MS). No call may outlive the request:
+  // the platform killing an invocation says nothing to the person and meters nothing.
+  const since = Date.now();
   // THE PAGES, RENDERED VISUALLY BY THE API. This is the same document block the paper reader sends
   // (organize/actions.ts), which is what reads his handwriting today — there is no second OCR here.
   const paper: any = { type: "document", source: { type: "base64", media_type: "application/pdf", data: bytes.toString("base64") } };
@@ -122,18 +136,22 @@ export async function readStatementScan(input: {
   let kind: ReturnType<typeof scanKindFrom>;
   try {
     const model = modelFor("classify");
-    const msg = await client.messages.create({
-      model,
-      max_tokens: 300,
-      system: SCAN_KIND_SYSTEM,
-      messages: [{ role: "user", content: [paper, { type: "text", text: `Filename: ${name}. What is this paper?` }] }],
-    });
+    const msg = await client.messages.create(
+      {
+        model,
+        max_tokens: 300,
+        system: SCAN_KIND_SYSTEM,
+        messages: [{ role: "user", content: [paper, { type: "text", text: `Filename: ${name}. What is this paper?` }] }],
+      },
+      { timeout: SCAN_READ_MS, maxRetries: 0 },
+    );
     // METER THE MODEL THAT RAN (0162), never the constant: costOf prices from this string.
     void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? model, surface: "statement-scan-kind", usage: msg.usage as never });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     kind = scanKindFrom(await parseAiJson(client, text?.text ?? "", ctx.orgId));
   } catch (e) {
     reportError("bills:statementScan.kind", e, { name });
+    if (ranOutOfTime(e, since)) return { ok: false, error: scanTooSlowSaid(name) };
     return { ok: false, error: READER_SILENT(name) };
   }
   if (kind.kind !== "bank_statement") return { ok: false, error: notABankScanSaid(name, kind.kind, kind.what) };
@@ -145,6 +163,15 @@ export async function readStatementScan(input: {
    * from its last line in the same conversation, which still holds the pages. Still cut off after
    * SCAN_MORE_CALLS and nothing is written at all: a short list that looks complete is worse than no
    * list, because the totals would then disagree and read like a bad parse instead of a cut one.
+   *
+   * A CUT ANSWER IS CLOSED IN CODE BEFORE ANYTHING PARSES IT, and that is what makes the continuation
+   * above real. It used to go through parseAiJson first, which cannot parse a text that stops mid-list
+   * and so paid a repair call to re-emit the whole 16,000-token answer inside 4,096 — impossible, so it
+   * threw "too large to repair" and left the loop BEFORE a single line had been kept. Every statement
+   * past one answer died with "it got 0 and the statement goes on": the advertised reach of roughly a
+   * thousand lines was really one answer, and the count in the sentence was false. ai-json.ts asks for
+   * exactly this ("a caller that can be truncated should check stop_reason BEFORE it gets here"), and
+   * every other caller in the repo does it (quotes/actions.ts, read-plan-circuits.ts, plan-brief-run).
    */
   const model = modelFor("reasoning");
   const turns: any[] = [{ role: "user", content: [paper, { type: "text", text: `Filename: ${name}. Transcribe every transaction line and the statement's own control figures.` }] }];
@@ -153,21 +180,42 @@ export async function readStatementScan(input: {
   let table: string[][] = [];
   let returned = 0;
   let cut = false;
+  let slow = false;
   try {
     for (let pass = 0; pass <= SCAN_MORE_CALLS; pass++) {
-      const msg = await client.messages.create({
-        model,
-        max_tokens: SCAN_MAX_TOKENS,
-        system: SCAN_LINES_SYSTEM,
-        messages: turns,
-      });
+      const left = SCAN_READ_MS - (Date.now() - since);
+      if (left <= 0) {
+        slow = true;
+        break;
+      }
+      const msg = await client.messages.create(
+        {
+          model,
+          max_tokens: SCAN_MAX_TOKENS,
+          system: SCAN_LINES_SYSTEM,
+          messages: turns,
+        },
+        // NO SILENT RETRY, AND NEVER PAST THE PAGE'S OWN BUDGET (price-list/vendor-lookup.ts does the
+        // same): a read that outlives the request is killed by the platform, which says nothing to the
+        // person and cannot meter the tokens it already bought. Coming back in words is the point.
+        { timeout: left, maxRetries: 0 },
+      );
+      // METERED THE MOMENT THE CALL RETURNS, before anything can throw on its contents: a cut answer,
+      // an answer that won't parse and an answer the gate refuses all cost the same tokens.
       void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? model, surface: "statement-scan", usage: msg.usage as never });
       const raw = (msg.content.find((b) => b.type === "text") as { text: string } | undefined)?.text ?? "";
       cut = msg.stop_reason === "max_tokens";
-      // A CUT-OFF ANSWER IS NOT VALID JSON, so it is repaired exactly as every other reply is
-      // (ai-json.ts), and a repair that itself ran out of room throws rather than closing the arrays
-      // over an amputation. Either way `cut` is what decides, not how the text happened to parse.
-      const got = readScannedBank(await parseAiJson(client, raw, ctx.orgId));
+      // THE CUT IS CLOSED HERE, IN CODE, and never handed to the repair model (see the note above).
+      // Nothing is invented: the text is cut back to its last whole transaction line and the open
+      // arrays are shut, so the control figures — which come first in the asked-for shape — survive and
+      // the continuation picks up after the last whole line. A cut that closed nothing at all has no
+      // lines to keep, and says so rather than guessing.
+      const closed = cut ? closeCutJson(raw) : null;
+      if (cut && closed === null) break;
+      // SIZED TO THIS LANE'S OWN ANSWER (SCAN_MAX_TOKENS): a repair capped at a receipt's 4,096 tokens
+      // reported "too large to repair" for one unescaped inch mark on line 90 of 100, which is a
+      // length diagnosis for a paper that has no length problem.
+      const got = readScannedBank(await parseAiJson(client, closed ?? raw, ctx.orgId, SCAN_MAX_TOKENS));
       // THE FIRST PASS OWNS THE CONTROL FIGURES AND THE TABLE'S HEAD; a continuation only adds lines.
       // The asked-for JSON puts those figures BEFORE "lines" on purpose: an answer cut off mid-list
       // still carries the figures that judge it, so length can never quietly disarm the gate.
@@ -194,41 +242,63 @@ export async function readStatementScan(input: {
     }
   } catch (e) {
     reportError("bills:statementScan.lines", e, { name });
-    // AN ANSWER TOO BIG TO EVEN REPAIR IS A LENGTH PROBLEM, and it is said as one: ai-json.ts throws
-    // that rather than closing the open arrays over an amputation, and "the reader didn't answer"
-    // would send him off looking for the wrong thing.
-    if (/too large to repair/i.test(String((e as { message?: string })?.message ?? ""))) return { ok: false, error: scanTruncatedSaid(name, lines.length) };
+    // THE CLOCK IS SAID AS THE CLOCK. Everything else is "the reader didn't answer", which names the
+    // one action and then the door that keeps the paper. "Too large to repair" is no longer one of
+    // these: a cut answer never reaches the repair, and the repair now gets this lane's own budget.
+    if (ranOutOfTime(e, since)) return { ok: false, error: scanTooSlowSaid(name) };
     return { ok: false, error: READER_SILENT(name) };
   }
-  if (!read) return { ok: false, error: READER_SILENT(name) };
+  if (slow) return { ok: false, error: scanTooSlowSaid(name) };
+  // CUT IS ANSWERED BEFORE "the reader said nothing": a first pass cut off so early that not one whole
+  // line closed has no `read` either, and telling him to drop it again as if nothing came back would
+  // send him off looking for the wrong thing.
   if (cut) return { ok: false, error: scanTruncatedSaid(name, lines.length) };
-  if (!lines.length) {
+  if (!read) return { ok: false, error: READER_SILENT(name) };
+
+  /**
+   * ── THE GATE, OVER THE LINES THAT ACTUALLY LAND ──────────────────────────────────────────────
+   *
+   * The sums are taken from the ONE reader that turns this table into lines — the same
+   * `readBankDownload` call `addOpenListCore` makes of the same rows — so the gate cannot judge a
+   * different set from the one the card carries. It used to judge its own parallel reading of the
+   * reader's answer, and the two drifted on dates: a day printed "2026/09/03" or "3 Sep 2026" lands
+   * through readBankDate and was invisible to the gate, so a correct read was refused "$37.42 short"
+   * while a duplicated row in one of those forms rode onto a card that said the read agreed. ONE RULE
+   * IN ONE PLACE is not a style here; it is the only way this gate means anything.
+   */
+  const landed = landedScanLines(readBankDownload(table, name)?.lines ?? []);
+  if (!landed.length) {
     // A CONFIDENT EMPTY ANSWER IS THE WORST OUTCOME HERE, so it is never a card.
     return { ok: false, error: `${name} reads as a bank statement, but the reader got no transaction lines off it. Nothing was added — drop it again, or add it with the + button at the top to keep it as a paper.` };
   }
-
-  // ── THE GATE ────────────────────────────────────────────────────────────────────────────────
-  const check = checkScanTotals(lines, read.controls);
+  const check = checkScanTotals(landed, read.controls);
   if (!check.pass) return { ok: false, error: scanRefusalSaid(name, check) };
 
   /**
-   * ONE DESTINATION, THE ONE THE CSV USES. The rows go through `addOpenList`, which recognises
+   * ONE DESTINATION, THE ONE THE CSV USES. The rows go through `addOpenListCore`, which recognises
    * Withdrawal and Deposit as a bank's own words, cuts every run of 6+ digits out of a description
    * (cleanDescription → redactDigits, so migration 0363's CHECK can never be the thing that notices an
    * account number), asks `viewerSortsBank` again before it stores anything, and makes the one bank
    * card. `expect: "bank"` is the belt: a read this action vouched for as a bank statement can never
    * become a supplier's list, which is a class of paper the whole office may read.
    *
+   * THE CORE, NOT THE ACTION, because the sentence saying what was checked is the second argument and
+   * only server code may pass it: through the exported action any staffer who may sort the bank could
+   * have handed the card "agree to the cent" over a table of their own making (open-list-add-core.ts).
+   *
    * `rows` IS WHAT THE READER HANDED BACK, not the lines that survived: the read report then says "43
    * rows on them, 41 lines", and the two rows that didn't read are named by line with their reason.
    */
-  return addOpenList({
-    name,
-    sha256: sha,
-    table,
-    listDate: input?.listDate ?? null,
-    source: "bills_drop",
-    expect: "bank",
-    pdf: { pages, rows: returned, checked: scanCheckSaid(check) },
-  });
+  return addOpenListCore(
+    {
+      name,
+      sha256: sha,
+      table,
+      listDate: input?.listDate ?? null,
+      source: "bills_drop",
+      expect: "bank",
+      pdf: { pages, rows: returned },
+    },
+    { checked: scanCheckSaid(check) },
+  );
 }
