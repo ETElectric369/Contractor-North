@@ -172,6 +172,12 @@ describe("the bank card", () => {
     expect(text).not.toContain("No guess");
     expect(labels).toContain("Apply");
     expect(labels).toContain("Set Aside");
+    // DELETE IS ON THE CARD, AND BOTH DOORS SAY WHERE THE PAPER GOES (2026-10-03). Erik dropped a
+    // statement, wanted to bin it, and could not: this row draws no menu, so Set Aside was the only way
+    // out and it archived the download with no word on the card about where it went.
+    expect(labels).toContain("Delete");
+    expect(text).toContain("Set Aside keeps it in Organize, under Archive");
+    expect(text).toContain("Delete removes it and its file for good");
     // "Not Now" means nothing here: a pick is cleared by tapping it again.
     expect(labels).not.toContain("Not Now");
     for (const b of buttons(html)) {
@@ -214,11 +220,14 @@ describe("the bank card", () => {
     expect(buttons(render(VIEW)).every((b) => !b.text.includes("J-054"))).toBe(true);
   });
 
-  it("a problem is said, with Set Aside; no Apply", () => {
-    const text = textOf(render({ ...VIEW, problem: "Sorting a bank download needs one database update first. It is waiting here and nothing was changed." }));
+  it("a problem is said, with Set Aside and Delete; no Apply", () => {
+    const html = render({ ...VIEW, problem: "Sorting a bank download needs one database update first. It is waiting here and nothing was changed." });
+    const text = textOf(html);
     expect(text).toContain("needs one database update");
     expect(text).not.toContain("Apply");
     expect(text).toContain("Set Aside");
+    // A DOWNLOAD HE CANNOT ANSWER IS STILL ONE HE CAN BIN: the way out is drawn in every state.
+    expect(buttons(html).map((b) => b.text)).toContain("Delete");
   });
 
   it("the same month downloaded again: nothing to Apply, one tap puts it away", () => {

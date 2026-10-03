@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, ArrowLeftRight, Check, Loader2, Undo2 } from "lucide-react";
+import { ArrowLeftRight, Check, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { sayDollars } from "@/lib/supplier-open-list";
@@ -10,6 +10,7 @@ import type { BankRowView, BankView, FlowSegment } from "@/lib/bank-download";
 import type { MoneyInChannels } from "@/lib/bank-money-in";
 import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
 import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
+import { NotNowOrDelete } from "@/components/not-now-or-delete";
 
 /**
  * A BANK DOWNLOAD, AS ONE CARD IN SORT THESE (Erik, 2026-09-27: "yes go for those").
@@ -36,7 +37,7 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  *  wraps inside the card at 375px instead of running off it, and is never shorter than a thumb. */
 const ANSWER = "h-auto min-h-11 max-w-full whitespace-normal py-2 text-left";
 
-type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) => void;
+type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string, gone?: string) => void;
 
 /** Each segment its own colour. Where Money by Month (money-chart.ts) has the same money, the same
  *  colour: Fuel pink-800 (the Fuel bucket, as on the chart and the Fuel card), Overhead
@@ -245,11 +246,9 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [four, setFour] = useState("");
 
-  const notNow = (
-    <Button variant="outline" onClick={() => run("keep", () => keepPaperwork(itemId), "Set aside.")} disabled={working} title="Set the whole download aside in Organize's Archive">
-      <Archive /> Set Aside
-    </Button>
-  );
+  // PUT IT AWAY OR BIN IT, with where it goes said on the card (NotNowOrDelete, 2026-10-03): the same
+  // pair, the same words and the same destination as a supplier's open list, from one place.
+  const notNow = <NotNowOrDelete itemId={itemId} what="bank download" label="Set Aside" run={run} working={working} />;
   const undo = view?.canUndo ? (
     <Button
       variant="outline"
@@ -361,7 +360,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
         {/* EVERY LINE ALREADY IN NORTH (the same month downloaded again): nothing to write, one tap
             puts the card away. */}
         {!canApply && view.rows.length === 0 ? (
-          <Button onClick={() => run("keep", () => keepPaperwork(itemId), "Nothing new in it. Set aside.")} disabled={working}>
+          <Button onClick={() => run("keep", () => keepPaperwork(itemId), "Nothing new in it. Kept in files.")} disabled={working}>
             {busy === "keep" ? <Loader2 className="animate-spin" /> : <Check />} Done: Nothing New
           </Button>
         ) : (

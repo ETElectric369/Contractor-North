@@ -54,12 +54,17 @@ const render = (view: OpenListView | null) =>
   renderToStaticMarkup(createElement(OpenListCard, { itemId: "i1", view, run: () => {}, busy: null, working: false }));
 
 describe("the open-list card", () => {
-  it("says it in one sentence, with Apply and Not Now, the detail folded", () => {
+  it("says it in one sentence, with Apply, Not Now and Delete, the detail folded", () => {
     const html = render(BASE);
     const text = textOf(html);
     expect(text).toContain(BASE.plan!.headline);
     expect(text).toContain("$3,273.94");
-    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now"]);
+    // DELETE IS ON THE CARD (2026-10-03). Erik dropped a statement, wanted to bin it, and could not:
+    // this row draws no menu at all, so Not Now was the only way out and it archived the paper without
+    // a word on the card about where it went. Both now say where the paper goes, in writing.
+    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now", "Delete"]);
+    expect(textOf(html)).toContain("Not Now keeps it in Organize, under Archive");
+    expect(textOf(html)).toContain("Delete removes it and its file for good");
     expect(html).toContain("<details");
     expect(text).toContain("See What It Changes");
   });
@@ -74,7 +79,7 @@ describe("the open-list card", () => {
 
   it("is just Apply when the list is known to be whole", () => {
     const html = render({ ...BASE, plan: { ...BASE.plan!, complete: { ok: true, said: "", overridable: false } } });
-    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now", "Delete"]);
     expect(html).not.toMatch(/type="checkbox"/);
     expect(buttons(html)[0].markup).not.toMatch(/disabled=""/);
   });
@@ -85,15 +90,15 @@ describe("the open-list card", () => {
     expect(html).not.toMatch(/type="checkbox"/);
     expect(textOf(html)).toContain("Left Open, List May Be Short");
     // Apply still adds and corrects what it lists; with nothing to add or correct there is no Apply.
-    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now", "Delete"]);
     const nothing = render({ ...BASE, plan: { ...short, add: [], nothing: true } });
-    expect(buttons(nothing).map((b) => b.text)).toEqual(["Not Now"]);
+    expect(buttons(nothing).map((b) => b.text)).toEqual(["Not Now", "Delete"]);
   });
 
   it("asks whose list it is when nothing on it names an account", () => {
     const html = render({ ...BASE, supplier: null, accountId: null, plan: null });
     expect(textOf(html)).toContain("Whose list is this?");
-    expect(buttons(html).map((b) => b.text)).toEqual(["Use This Supplier", "Not Now"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Use This Supplier", "Not Now", "Delete"]);
     // A supplier whose remembered column names read it is offered first, and still has to be pressed.
     const suggested = render({ ...BASE, supplier: null, accountId: null, plan: null, suggestedAccountId: "a1" });
     expect(suggested).toMatch(/<option value="a1" selected="">/);
@@ -108,13 +113,15 @@ describe("the open-list card", () => {
     const text = textOf(html);
     expect(text).toContain("Doc Ref Code");
     expect(text).toContain("Q-1001");
-    expect(buttons(html).map((b) => b.text)).toEqual(["Read It With These Columns", "Not Now"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Read It With These Columns", "Not Now", "Delete"]);
   });
 
   it("says what stops it, and never leaves a dead end", () => {
     const html = render({ ...BASE, plan: null, problem: "There is no supplier account to check it against yet." });
     expect(textOf(html)).toContain("There is no supplier account");
-    expect(buttons(html).map((b) => b.text)).toEqual(["Not Now"]);
+    // A STATEMENT HE CANNOT ANSWER IS STILL ONE HE CAN BIN: the dead end was having no way out but an
+    // archive he could not find, so Delete is drawn in every state this card has, not only the happy one.
+    expect(buttons(html).map((b) => b.text)).toEqual(["Not Now", "Delete"]);
   });
 
   it("every button is Title Case and 44px tall", () => {
