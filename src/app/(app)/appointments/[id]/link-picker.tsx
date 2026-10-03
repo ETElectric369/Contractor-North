@@ -18,7 +18,7 @@ import { linkAppointmentTo, searchLinkTargets, type LinkTarget } from "../action
  * it, and standing at a job the honest answer is "it's the Dale place", not "it is an inquiry
  * record". So the kind is an OUTCOME of the pick, not a question asked first.
  *
- * FRAGMENT FIRST. Nothing is required. You can capture a whole walk-through connected to nothing
+ * FRAGMENT FIRST. Nothing is required. You can capture a whole inspection connected to nothing
  * and link it afterwards — or never. This is an offer, not a gate. It exists because the create
  * paths made linking impossible, not because a person was careless: only 2 of the 7 doors that
  * make an inspection can set `inquiry_id` at all, which is why 10 of 13 in production float free.

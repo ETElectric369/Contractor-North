@@ -419,7 +419,7 @@ export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly 
   unplanned: UnplannedGroup[];
 } {
   // Only a block ON A JOB is judged: time is clocked to jobs, so a visit with no job (a pre-sale
-  // walk-through) has nothing to be compared with, and "No time clocked to this job" would be a false zero.
+  // inspection) has nothing to be compared with, and "No time clocked to this job" would be a false zero.
   const past = p.blocks.filter((b) => b.dayStr < p.todayStr && !!b.jobId);
   const jobBlock = new Map<string, PlanBlock>();
   const visitBlock = new Map<string, PlanBlock>();

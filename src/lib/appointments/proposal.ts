@@ -60,7 +60,7 @@ export interface ProposalInput {
   /** How long the work is sized at — a number is only worth asking for once (the lead's
    *  How-long tag rides every booking door; this one used to drop it). */
   plannedMinutes?: number | null;
-  /** The walk-through this inspection will be filled in on, and any answers the CUSTOMER already
+  /** The inspection SHEET this inspection will be filled in on, and any answers the CUSTOMER already
    *  gave through the public intake door. Resolved by the caller (only it knows the lead); this
    *  module just carries them onto the row. Omitted by every non-inspection caller. */
   inspectionTemplateId?: string | null;

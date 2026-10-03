@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
-import { readViaView } from "@/lib/inspection/walkthrough-access";
+import { readViaView } from "@/lib/inspection/inspection-access";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
@@ -90,14 +90,14 @@ export default async function NewQuotePage({
   // DELIBERATELY not carried into the prefill — only notes/measurements/materials;
   // they stay on the appointment's capture page (signed URLs, private bucket).
   let initialScope: string | undefined;
-  // Square/linear feet from the walk-through, handed to the kit picker so its sizing boxes open
+  // Square/linear feet from the inspection, handed to the kit picker so its sizing boxes open
   // with the numbers the inspector already took.
   let measured: { sqft: number | null; linearFt: number | null; byKey?: Record<string, number | null> } | undefined;
   const pickedScopes: { label: string; picks: ScopePick[] }[] = [];
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
   // The inspection already knows WHOSE house this is. Without carrying these through, a repeat
-  // customer's walk-through wrote up into a blank estimate and you re-picked them from the full
+  // customer's inspection wrote up into a blank estimate and you re-picked them from the full
   // contact list standing in their yard.
   let captureCustomerId: string | undefined;
   let captureJobId: string | undefined;
@@ -120,7 +120,7 @@ export default async function NewQuotePage({
       // prices included. The view carries the sheet's id and the lead's id; the sheet and the lead's
       // intake are then two reads of their own (an embed through a view is PostgREST's guess, never
       // pinned, so it isn't relied on). Before 0366 the table is read the same way (readViaView). A
-      // failed read is an error, exactly as before: an estimate never seeds from a walk-through it
+      // failed read is an error, exactly as before: an estimate never seeds from an inspection it
       // couldn't read. Pre-0165 (no such column on the table) is still no measured block.
       const ans = await readViaView<{ inspection_answers: unknown; inspection_template_id: string | null; inquiry_id: string | null }>(
         supabase,
@@ -161,7 +161,7 @@ export default async function NewQuotePage({
           : new Set<string>();
       // THE CUSTOMER'S OWN FORM IS NOT THE CONTRACTOR'S WORD EITHER (v800 audit). A carried
       // intake answer arrived in the "his words — take them as given" bucket, even though a
-      // stranger typed it and the intake and walk-through playbooks can drift until the same
+      // stranger typed it and the intake and inspection playbooks can drift until the same
       // key means different things on each side. Still-untouched carried values join the
       // verify bucket; the moment he edits one on site it stops matching and becomes his.
       const leadIntake = (Array.isArray(inqRel) ? inqRel[0] : inqRel)?.intake as
@@ -184,32 +184,32 @@ export default async function NewQuotePage({
         .map((path) => path.split("/").pop() ?? path)
         .map((n) => n.replace(/^\d+-/, "").replace(/_/g, " "));
       const parts = [
-        // W2-10: it is a WALK-THROUGH everywhere a person reads it, and the place is named.
-        `From the walk-through — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
+        // It is an INSPECTION everywhere a person reads it (lib/statuses), and the place is named.
+        `From the inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
         // HIS WORDS, TAKEN AS GIVEN — but not called a measurement, because mostly they aren't.
         // Not one need in his playbook is marked `measured`, yet this header fired on ANY answer,
         // so a paragraph reading "(bulbs or inserts pricing)", "(~$500 optional)" and "(T&M) unknown"
         // was handed over labelled as measured fact not to be re-derived. And nothing told the
         // estimator that eight lines means eight line items — so his list arrived as one blob.
         measuredText
-          ? `FROM THE WALK-THROUGH (his words — take them as given). Where he wrote a list, quote ONE LINE ITEM PER LINE:\n${measuredText}`
+          ? `FROM THE INSPECTION (his words — take them as given). Where he wrote a list, quote ONE LINE ITEM PER LINE:\n${measuredText}`
           : "",
         // The machine's answers cross under their own flag, never as his words: a model's
         // unverified count from a stranger's PDF must be a claim to confirm, not a given.
         machineText
-          ? `NOT CONFIRMED ON SITE (unverified — the customer typed these into your web form, or a machine read them off their plans; treat as claims to check, and the walk-through notes above override them):\n${machineText}`
+          ? `NOT CONFIRMED ON SITE (unverified — the customer typed these into your web form, or a machine read them off their plans; treat as claims to check, and the inspection notes above override them):\n${machineText}`
           : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
         // WHAT'S ATTACHED, BY NAME. Erik, estimating Sara Dale: "the estimator said it didnt have
         // the file even though its there." It was there — a home-inspection PDF sitting in the
-        // walk-through's capture — and this hand-off simply never mentioned it, so the estimator
+        // inspection's capture — and this hand-off simply never mentioned it, so the estimator
         // answered honestly about a world it couldn't see. It still can't READ a PDF; naming the
         // document is the difference between "I don't have it" and "I have it and can't open it",
         // and only one of those is true.
         docNames.length
-          ? `ATTACHED TO THIS WALK-THROUGH (you cannot open these — say so rather than guessing at their contents):\n${docNames.map((d) => `- ${d}`).join("\n")}`
+          ? `ATTACHED TO THIS INSPECTION (you cannot open these — say so rather than guessing at their contents):\n${docNames.map((d) => `- ${d}`).join("\n")}`
           : "",
       ].filter(Boolean);
       if (parts.length > 1) initialScope = parts.join("\n\n");
@@ -219,7 +219,7 @@ export default async function NewQuotePage({
       // ONLY THE QUESTIONS THAT STILL APPLY, cleared to a fixed point first (the same read as the
       // facts above). A crew lead's save (0356) keeps the office's priced picks under a scopes
       // question his answers have since turned off; the Inspector hides that question, so its
-      // picks must not become lines on an estimate nobody can see them on the walk-through of.
+      // picks must not become lines on an estimate nobody can see them on the inspection of.
       const liveAnswers = clearInapplicable(pb, answers);
       for (const n of applicableNeeds(pb, liveAnswers)) {
         if (n.slot?.type !== "scopes") continue;
@@ -276,19 +276,19 @@ export default async function NewQuotePage({
      * QUOTING STRAIGHT FROM A LEAD ARRIVED BLANK (Erik, 2026-09-07, the Andy Kolar lead).
      *
      * The "Ready to quote" triage bucket's own button lands here with ?inquiry=<id> and no
-     * ?capture= — no walk-through has happened, and none needs to. Everything the customer typed
+     * ?capture= — no inspection has happened, and none needs to. Everything the customer typed
      * into the web form was already on the row (intake.intake_answers) and, flattened, in
      * `message`. This page read neither: the estimator opened with an empty scope box and the
      * office retyped from the Leads board, or quoted without it.
      *
-     * Same provenance split the walk-through path uses, and for the same reason — a stranger
+     * Same provenance split the inspection path uses, and for the same reason — a stranger
      * typed these into a web form, so they are CLAIMS TO CHECK, never "his words, take them as
      * given" and never measurements. Labels come from the intake playbook (intakeAnswerLines,
      * which also rescues answers under questions since deleted from the form); the flattened
      * `message` is only printed for the lines it does not already cover, so a lead that came in
      * by phone still carries its note and an intake lead is not shown the same ten lines twice.
      *
-     * Never overwrites a walk-through prefill: this runs only when nothing above produced one.
+     * Never overwrites an inspection prefill: this runs only when nothing above produced one.
      */
     if (!initialScope && lr?.id) {
       const intakePb = intakeForm ? playbookForForm(intakeForm) : null;
@@ -359,7 +359,7 @@ export default async function NewQuotePage({
       firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
-  // THE WALK-THROUGH'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
+  // THE INSPECTION'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
   // (the answer stores codes, never prose), and a code that has since left the price list is
   // dropped rather than rendered as a bare code with a price beside it.
   const book = new Map((priceItems ?? []).map((p: any) => [p.code as string, { description: p.description, unit: p.unit }]));

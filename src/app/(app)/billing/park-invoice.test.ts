@@ -61,7 +61,7 @@ beforeEach(() => {
 describe("parkInvoice on a draft whose job is over", () => {
   it("refuses a day in the same words as Nort, and writes nothing", async () => {
     state.job = { job_number: "J-011", name: "Honeysuckle", status: "complete" };
-    const r = await parkInvoice("inv-81", "2026-10-10", "Waiting on the walk-through");
+    const r = await parkInvoice("inv-81", "2026-10-10", "Waiting on the inspection");
     expect(r).toEqual({
       ok: false,
       error: "Honeysuckle · J-011 is finished, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.",

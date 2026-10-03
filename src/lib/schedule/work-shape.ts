@@ -8,7 +8,7 @@
  * and the other has 1 hour set i can see that the visit is on the way."
  *
  * Two facts per item, and between them a day becomes plannable by eye rather than by arithmetic:
- * a 6h job and a 1h walk-through in the same town is a full day with a stop on the way; two 6h
+ * a 6h job and a 1h inspection in the same town is a full day with a stop on the way; two 6h
  * jobs is two days whatever the map says.
  *
  * ── ONE THING IS NEW, THE OTHER ALREADY EXISTED ────────────────────────────────────────────
@@ -19,7 +19,7 @@
  *
  * DURATION did not exist anywhere in the schema (0229 adds planned_minutes). `scheduled_start` and
  * `scheduled_end` are a date SPAN — which days a job occupies — and say nothing about effort. Every
- * walk-through in production had a null `ends_at`, so appointments were points, not blocks.
+ * inspection in production had a null `ends_at`, so appointments were points, not blocks.
  */
 
 /** The tags Erik named, in his words. A job is a kind; the rest come off appointments.type. */
@@ -53,7 +53,7 @@ export const isWorkKind = (v: unknown): v is WorkKind =>
   (WORK_KINDS as readonly string[]).includes(String(v ?? ""));
 
 /**
- * THE KINDS A PICKER OFFERS (W2-06): Walk-Through, Job, Service Call, Phone Call, Other — the same
+ * THE KINDS A PICKER OFFERS (W2-06): Inspection, Job, Service Call, Phone Call, Other — the same
  * five the appointment's Type select offers (lib/statuses PICKABLE_APPOINTMENT_TYPES), in the same
  * order. Other is offered at last (it was accepted but never offered).
  *
@@ -71,7 +71,7 @@ export function kindOptions(current: string | null | undefined): WorkKind[] {
 }
 
 const APPT_KIND: Record<string, WorkKind> = {
-  // 0231. A day marked as the WORK is not a walk-through, and calling it one was the app
+  // 0231. A day marked as the WORK is not an inspection, and calling it one was the app
   // overruling the only person who knew — twice, silently.
   job: "job",
   // 0232. The rail has been telling him to call people for weeks — "Call to get the address" is
@@ -104,7 +104,7 @@ export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: stri
   const told = String(i.workKind ?? "");
   if (isWorkKind(told) || told === "other") return told as WorkKind;
   if (i.kind === "job") return "job";
-  // A LEAD's next step is a walk-through — that is the only thing a lead can be scheduled as, and
+  // A LEAD's next step is an inspection — that is the only thing a lead can be scheduled as, and
   // it is what scheduleLeadsOnDay books.
   // An untyped item on the rail is a site visit — that is the only thing a lead can be booked as,
   // and an appointment sitting undated is one somebody agreed to and never dated. "Other" would be
@@ -116,8 +116,8 @@ export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: stri
 /** Short enough to sit on a chip in a calendar cell. */
 export const KIND_LABEL: Record<WorkKind, string> = {
   job: "Job",
-  // The site visit's one word, the same as the appointment type's label (W2-10, lib/statuses).
-  walkthrough: "Walk-Through",
+  // The site visit's one word, the same as the appointment type's label (lib/statuses, which holds the history).
+  walkthrough: "Inspection",
   service: "Service Call",
   office: "Office",
   quote: "Quote",
@@ -216,8 +216,8 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
     case "quote": return "quote";
     case "job": return "job";
     case "call": return "call";
-    // OTHER BOOKS AS OTHER (W2-06). It used to fall through to 'inspection': an Other lead booked a
-    // walk-through, and the write-up nag that follows every walk-through came after it.
+    // OTHER BOOKS AS OTHER (W2-06). It used to fall through to 'inspection': an Other lead booked an
+    // inspection, and the write-up nag that follows every inspection came after it.
     case "other": return "other";
     default: return "inspection";
   }
@@ -227,11 +227,11 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
  * What to call this booking on the calendar.
  *
  * "Site inspection: Matt Warren" on a day he booked as a full day of work is the app telling him
- * what he did, incorrectly, in the one place he goes to check. The label follows the kind, and a
- * walk-through is called one: "Walk-Through: Matt Warren" (W2-10; stored titles keep their words).
+ * what he did, incorrectly, in the one place he goes to check. The label follows the kind, and an
+ * inspection is called one: "Inspection: Matt Warren" (lib/statuses; stored titles keep their words).
  *
  * OTHER IS NO KIND (W2-06): a visit booked as Other is just who it's with. It used to fall through to
- * the walk-through's title, so an Other booking read "Site inspection: …" on the calendar.
+ * the inspection's title, so an Other booking read "Site inspection: …" on the calendar.
  */
 export function bookingTitle(kind: WorkKind, name: string): string {
   const who = String(name ?? "").trim() || "Visit";
@@ -242,13 +242,13 @@ export function bookingTitle(kind: WorkKind, name: string): string {
     case "quote": return `Quote: ${who}`;
     case "call": return `Call ${who}`;
     case "other": return who;
-    default: return `Walk-Through: ${who}`;
+    default: return `Inspection: ${who}`;
   }
 }
 
 /**
- * THE TITLE THE NEW-VISIT FORM SUGGESTS, following its Type (W2-06): a walk-through is
- * "Walk-Through: <customer or place>" (W2-10); a job is the job's own name (lib/job-name's street,
+ * THE TITLE THE NEW-VISIT FORM SUGGESTS, following its Type (W2-06): an inspection is
+ * "Inspection: <customer or place>" (lib/statuses); a job is the job's own name (lib/job-name's street,
  * never "Inspection — J-012"); every other kind is bookingTitle's. Nothing to name it by, nothing
  * suggested: an empty title asks, a made-up one pretends somebody answered.
  */

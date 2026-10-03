@@ -31,7 +31,7 @@ interface Member {
  *  instead of the pencil icon; the modal renders IN-PLACE, so the menu that owns
  *  this must stay mounted while it's open (see TeamMemberMenu's modal-rule handler).
  *  The Crew Leader box is drawn whatever the switches: since 0356 the flag also lets its holder
- *  fill in the walk-through on a visit they're on, and that reads no switch, so the office must
+ *  fill in the inspection on a visit they're on, and that reads no switch, so the office must
  *  always be able to grant it and take it away. `dailyReports` (the 0352 switch) only picks the
  *  box's line: off, it says nothing about a clock-out report. The home address and commute
  *  baseline stay whatever the switches: the Tax Report's mileage deduction reads them. */
@@ -174,9 +174,9 @@ export function EditMemberButton({
           )}
           {/* Crew lead (any role): with Daily Reports on, Nort asks them the end-of-day debrief —
               "what did you do today?" + "what materials tomorrow?" — right after they clock out. And
-              (0356) it is the switch that lets them fill in the walk-through on a visit they're on,
+              (0356) it is the switch that lets them fill in the inspection on a visit they're on,
               whatever the switches say, so the box is always here and says both while Daily Reports
-              is on: turning it on for the debrief must not silently hand over the walk-through. */}
+              is on: turning it on for the debrief must not silently hand over the inspection. */}
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
             <input
               type="checkbox"
@@ -190,10 +190,10 @@ export function EditMemberButton({
                 {dailyReports ? (
                   <>
                     Files a daily report at clock-out (what got done + materials for tomorrow), and fills in
-                    the walk-through on visits they&rsquo;re assigned to. The office still prices it.
+                    the inspection on visits they&rsquo;re assigned to. The office still prices it.
                   </>
                 ) : (
-                  <>Fills in the walk-through on visits they&rsquo;re assigned to. The office still prices it.</>
+                  <>Fills in the inspection on visits they&rsquo;re assigned to. The office still prices it.</>
                 )}
               </span>
             </span>

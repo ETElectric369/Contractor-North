@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 /**
  * /TEAM AND THE SWITCH BOARD (0352). The Crew Leader box and the Crew Lead badge are drawn whatever
- * the switches say: since 0356 the flag also lets its holder fill in the walk-through on a visit
+ * the switches say: since 0356 the flag also lets its holder fill in the inspection on a visit
  * they're on, which reads no switch, so the office must always be able to see it, grant it and take
  * it away. Daily Reports off only takes the clock-out report out of the box's line.
  * Crew & Payroll takes nothing here: the pay and charge rates price labor, and the home address and
@@ -40,20 +40,20 @@ const r = (p: Record<string, unknown>) =>
   renderToStaticMarkup(createElement(EditMemberButton, { member, isSelf: false, authConfigured: true, ...p }));
 
 describe("a member's edit on /team", () => {
-  it("Daily Reports on: the Crew Leader box says both the report and the walk-through, with the mileage fields", () => {
+  it("Daily Reports on: the Crew Leader box says both the report and the inspection, with the mileage fields", () => {
     const html = r({});
     expect(html).toContain("Crew Leader");
     expect(html).toContain("daily report at clock-out");
-    expect(html).toMatch(/walk-through on visits they.{1,6}re assigned to/);
+    expect(html).toMatch(/inspection on visits they.{1,6}re assigned to/);
     expect(html).toContain("Daily commute baseline");
     expect(html).toContain("Home address");
   });
 
-  it("Daily Reports off: the Crew Leader box stays (it grants the walk-through), without the clock-out report", () => {
+  it("Daily Reports off: the Crew Leader box stays (it grants the inspection), without the clock-out report", () => {
     const html = r({ dailyReports: false });
     expect(html).toContain("Crew Leader");
     expect(html).toContain('type="checkbox"');
-    expect(html).toMatch(/Fills in the walk-through on visits they.{1,6}re assigned to\. The office still prices it\./);
+    expect(html).toMatch(/Fills in the inspection on visits they.{1,6}re assigned to\. The office still prices it\./);
     expect(html).not.toContain("daily report at clock-out");
     expect(html).toContain("Daily commute baseline");
     expect(html).toContain("Home address");

@@ -507,11 +507,11 @@ const BRANDS: [RegExp, string][] = [
 ];
 
 /**
- * THE WALK-THROUGH'S ANSWERS (the inspector's panel_brand, panel_amps and the one-box
+ * THE INSPECTION'S ANSWERS (the inspector's panel_brand, panel_amps and the one-box
  * panel_condition, "Siemens, 200A, two slots open") as header suggestions. The one box is read for a
  * brand it names and an amps figure only; the words themselves are shown whole, never parsed further.
  */
-export function walkthroughSaid(answers: Record<string, unknown>[]): { said: HeaderSaid; words: string | null } {
+export function inspectionSaid(answers: Record<string, unknown>[]): { said: HeaderSaid; words: string | null } {
   const said: HeaderSaid = {};
   let words: string | null = null;
   for (const a of answers) {

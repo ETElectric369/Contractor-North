@@ -8,8 +8,8 @@ import { leadNextStep, VISITS_UNREAD, type LeadStepInput } from "./next-step";
  * WHAT WAS WRONG. The board read every open lead's appointments in ONE request — `.in(inquiry_id,
  * <every open lead's uuid>)`, 500 rows — and threw the error away: `const { data: visitRows } = await
  * …`. A read that FAILED and a lead with NO visits came out of that identical (an empty Map), so the
- * one next-step chip fell through to its last rule and printed "New · Call Them" on a lead with a
- * walk-through booked for Tuesday. The two ways it fails are both ordinary: past ~200 open leads the
+ * one next-step chip fell through to its last rule and printed "New · Call Them" on a lead with an
+ * inspection booked for Tuesday. The two ways it fails are both ordinary: past ~200 open leads the
  * uuid list makes the request too long for the gateway, and a busy book overflows 500 rows.
  *
  * SO: the request is bounded by the number of ids in it, never by hiding leads (the lead read keeps
@@ -47,7 +47,7 @@ describe("the visits behind the chip: read, or honestly unknown", () => {
       { inquiry_id: "lead-0001", status: "completed", starts_at: "2026-09-20T17:00:00Z", type: "inspection" },
     ];
     const read = await readLeadVisits(ids(3), async (chunk) => ({ data: rows.filter((r) => chunk.includes(r.inquiry_id!)), error: null }));
-    // The EARLIEST booked start wins, as the chip's "Walk-Through · Fri Oct 2" needs.
+    // The EARLIEST booked start wins, as the chip's "Inspection · Fri Oct 2" needs.
     expect(read.forLead("lead-0000")).toEqual({ done: 0, upcoming: 2, nextAt: "2026-10-02T17:00:00Z", nextType: "inspection" });
     expect(read.forLead("lead-0001")).toEqual({ done: 1, upcoming: 0, nextAt: null, nextType: null });
     expect(read.forLead("lead-0002")).toBeNull();
@@ -128,6 +128,6 @@ describe("the chip when the visits are not known", () => {
 
   it("a lead the board DID read is unchanged: no visits still means New · Call Them", () => {
     expect(chip({}, null).label).toBe("New · Call Them");
-    expect(chip({}, { done: 0, upcoming: 1, nextAt: "2026-10-06T17:00:00Z", nextType: "inspection" }).label).toBe("Walk-Through · Tue Oct 6");
+    expect(chip({}, { done: 0, upcoming: 1, nextAt: "2026-10-06T17:00:00Z", nextType: "inspection" }).label).toBe("Inspection · Tue Oct 6");
   });
 });

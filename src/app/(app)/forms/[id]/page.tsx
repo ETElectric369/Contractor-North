@@ -67,8 +67,8 @@ export default async function FormDetailPage({
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/forms" fallbackLabel="Back to Forms" />
-      {/* Safety Log's Off line (the switch board, 0352) belongs on a crew checklist only: a
-          walk-through sheet is Leads', and the website's intake form is a public door. */}
+      {/* Safety Log's Off line (the switch board, 0352) belongs on a crew checklist only: an
+          inspection sheet is Leads', and the website's intake form is a public door. */}
       {!(form as { is_inspection?: boolean | null }).is_inspection && !(form as { is_public_intake?: boolean | null }).is_public_intake && (
         <FeatureOffLineFor feature="safety_log" />
       )}
@@ -107,10 +107,10 @@ export default async function FormDetailPage({
           <span>
             {(form as { is_public_intake?: boolean }).is_public_intake
               ? "These are the questions on your website. What you see below is a read-only copy — editing it here would change nothing."
-              : "This walk-through is a playbook now — the questions below are a copy of its closed half."}
+              : "This inspection is a playbook now — the questions below are a copy of its closed half."}
           </span>
           {/* CARRIES THE FORM ID. Without it the editor opens on whichever form it defaults to,
-              which for an org with both a website form and a walk-through is the other one —
+              which for an org with both a website form and an inspection is the other one —
               so "edit it over there" landed on ten questions that were not the ones he came to
               change, and looked like a playbook that refused to show him his own work. */}
           <Link href={`/settings?tab=playbook&form=${form.id}`} className="font-medium underline underline-offset-2">

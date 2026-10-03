@@ -15,7 +15,7 @@ const walk = (d: string): string[] =>
 
 /**
  * ONE TRADE READER. Sign-up keeps only the trade KEY (0352); every guide read the WORDS, so a new
- * company was asked its trade twice, its Nort had no trade line, and its starter walk-through was
+ * company was asked its trade twice, its Nort had no trade line, and its starter inspection was
  * chosen by nothing. The key decides; the words describe; free text is the last resort.
  */
 describe("the key decides, the words describe", () => {

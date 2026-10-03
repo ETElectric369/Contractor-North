@@ -293,9 +293,9 @@ export async function createTriagedInquiry(
       await supabase.from("appointments").insert({
         org_id: orgId,
         type: "inspection",
-        // The site visit's one word (W2-10), the same stock title every booking door gives a
-        // walk-through (lib/schedule/work-shape bookingTitle).
-        title: `Walk-Through: ${input.name}`,
+        // The site visit's one word (lib/statuses), the same stock title every booking door gives an
+        // inspection (lib/schedule/work-shape bookingTitle).
+        title: `Inspection: ${input.name}`,
         starts_at: when.toISOString(),
         location: input.address ?? null,
         notes: input.message ?? null,

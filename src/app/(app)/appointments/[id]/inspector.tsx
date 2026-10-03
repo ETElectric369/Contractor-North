@@ -32,7 +32,7 @@ import { LinkPicker } from "./link-picker";
 import { TellNort } from "@/components/tell-nort";
 import { hearIntoPlaybook } from "../hear-actions";
 import { addInspectionPhotos, removeInspectionPhoto, saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
-import type { WalkthroughAccess } from "@/lib/inspection/walkthrough-access";
+import type { InspectionAccess } from "@/lib/inspection/inspection-access";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
  *  it renders 0 as blank, so "I didn't count it" and "zero of them" become the same stored value —
@@ -172,13 +172,13 @@ export function Inspector({
   /** The lead's preliminary plan report (ready only) — server-parsed, so the card is in the
    *  initial HTML and Zone A's height never shifts after mount (the iOS keyboard law). */
   planBrief?: PlanBrief | null;
-  /** WHO IS FILLING IT IN (0356, lib/inspection/walkthrough-access). "office": everything. "crewLead"
+  /** WHO IS FILLING IT IN (0356, lib/inspection/inspection-access). "office": everything. "crewLead"
    *  (a crew lead on this visit): the answers, notes, measurements, materials and photos save, through
    *  save_walkthrough_capture; no price, no price book, no Start The Estimate, no address or links, no
    *  sheet switch once one is saved, and photos are added, never taken off. "view" (anyone else): one
    *  disabled fieldset, and the doors that would only fail (Take, Add, Save, Start The Estimate, Set Up
    *  My Questions) don't render. */
-  access?: WalkthroughAccess;
+  access?: InspectionAccess;
   /** The line a "view" reader sees instead of the default (a crew lead before 0356 is applied). */
   viewNote?: string | null;
   /** The Nort switch (0352): the voice fill keeps working, named without Nort. */
@@ -212,7 +212,7 @@ export function Inspector({
     const chosen = templates.find((x) => x.id === chosenId);
     if (chosen) return chosen;
     // No (surviving) choice: prefer the sheet with a WRITTEN playbook — that's the org's real
-    // walk-through, not a converted checklist — else whatever the org has.
+    // inspection, not a converted checklist — else whatever the org has.
     return templates.find((t) => !!t.playbook) ?? templates[0] ?? null;
   }, [templates, chosenId]);
   const templateId = template?.id ?? null;
@@ -342,14 +342,14 @@ export function Inspector({
   const open = useMemo(() => missingNeeds(playbook, answers, held), [playbook, answers, held]);
 
   // ── THE SPINE STAYS UP TOP ───────────────────────────────────────────────────────────────
-  // Erik, looking at the Sara Dale walk-through: "i updated the scope and now its at the bottom
+  // Erik, looking at the Sara Dale inspection: "i updated the scope and now its at the bottom
   // and all this other stuff doesnt make sense." He was right about the effect and generous about
   // the cause — nothing broke. The rule above did exactly what it says, and the rule is wrong for
   // one kind of need.
   //
   // A need WITH a control is a question you finish: tap it, it's done, it belongs downstairs. A
   // need with NO control is a sentence he is still writing. The scope is the working document of
-  // the whole walk-through — every other answer refers back to it — so demoting it the instant he
+  // the whole inspection — every other answer refers back to it — so demoting it the instant he
   // types into it buries the one thing he's working against underneath six things he isn't.
   //
   // It never actually reached the bottom, which is worth knowing for the next person reading this:
@@ -448,7 +448,7 @@ export function Inspector({
     //    scheduled a flush carrying only THAT keystroke, so the answers before it were gone with
     //    no trace, and the last thing on screen was a green "Saved" tick.
     // 2. There was no try/catch at all. A rejected fetch inside a transition is an unhandled
-    //    rejection, which takes the whole walk-through down to the error boundary — losing every
+    //    rejection, which takes the whole inspection down to the error boundary — losing every
     //    unsaved answer on a page whose entire promise is that it saves itself.
     //
     // So: restore, say so, and RE-ARM. Newer keystrokes win the merge, because the retry must not
@@ -542,7 +542,7 @@ export function Inspector({
 
   // ── THE PRELIMINARY REPORT'S ANSWERS ─────────────────────────────────────────────────────
   // What the plan reading prepared that THIS sheet still has open. Booking an inspection from
-  // the lead seeds these server-side; this covers the other orderings — a walk-through booked
+  // the lead seeds these server-side; this covers the other orderings — an inspection booked
   // before the reading finished, or a sheet switched after. FILLS HOLES ONLY, through the same
   // setAnswers/clearInapplicable spine as every other write — never a second write path.
   // computeBriefFills re-coerces against the CURRENT playbook (the brief was coerced against the
@@ -628,7 +628,7 @@ export function Inspector({
       },
       () => {
         setPhotos((cur) => (cur.some((x) => x.path === p.path) ? cur : [...cur, p]));
-        setError("No signal — the photo is still on the walk-through. Try again when you're back in range.");
+        setError("No signal — the photo is still on the inspection. Try again when you're back in range.");
       },
     );
   }
@@ -880,7 +880,7 @@ export function Inspector({
       );
     }
 
-    // FILES on the walk-through — the same question type the public door uses, so a playbook can
+    // FILES on the inspection — the same question type the public door uses, so a playbook can
     // hold "upload the plans" whichever side answers it. Authenticated here, so it goes straight to
     // the private `documents` bucket the rest of the inspector already uses; the answer stores
     // PATHS, matching the public side.
@@ -963,7 +963,7 @@ export function Inspector({
         onChange={(e) => setAnswer(n.key, e.target.value)}
       />
     ) : (
-      // NO AUTOFILL ON AN ANSWER BOX. Erik, mid-walk-through: "a window to my personal contacts
+      // NO AUTOFILL ON AN ANSWER BOX. Erik, mid-inspection: "a window to my personal contacts
       // popped up where it shouldnt." Safari heuristically offers Contacts on any bare text input,
       // and a playbook question is the worst possible place for it — he types a customer's name
       // into Scope and the browser then offers his address book over the Materials field.
@@ -981,7 +981,7 @@ export function Inspector({
     <Card className="overflow-hidden p-0">
       {readOnly && (
         <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-          {viewNote || "Only the office can change the walk-through."}
+          {viewNote || "Only the office can change the inspection."}
         </p>
       )}
       {crew && (
@@ -995,7 +995,7 @@ export function Inspector({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium">
             <ClipboardList className="h-4 w-4 text-slate-400" />
-            Walk-Through
+            Inspection
           </div>
           {/* A crew lead picks the sheet only while none is saved: switching a saved one clears
               every answer, and that is the office's call. */}
@@ -1177,13 +1177,13 @@ export function Inspector({
           <div className="mt-3">
             {office ? (
               <p className="text-sm text-slate-500">
-                You don&rsquo;t have a set of walk-through questions yet. Start with the ones for your trade —
+                You don&rsquo;t have a set of inspection questions yet. Start with the ones for your trade —
                 one question at a time, and only what applies to the job in front of you.
               </p>
             ) : (
               // Setting up the questions is the office's (createStarterInspectionSheet is staff-only).
               <p className="text-sm text-slate-500">
-                The office hasn&rsquo;t set up walk-through questions yet.
+                The office hasn&rsquo;t set up inspection questions yet.
                 {crew ? " Notes, measurements and photos below still save." : ""}
               </p>
             )}
@@ -1593,7 +1593,7 @@ export function Inspector({
           >
             {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
           </Button>
-          {/* Pricing is the office's: a crew lead fills the walk-through in and the office starts the
+          {/* Pricing is the office's: a crew lead fills the inspection in and the office starts the
               estimate from it. */}
           {office && estimateHref && (
             <Link href={estimateHref}>

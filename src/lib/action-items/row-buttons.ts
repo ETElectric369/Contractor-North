@@ -171,7 +171,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
         primary: open("Write It Up", item.href),
         also: null,
         more: has(item, "dismiss")
-          ? [ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The walk-through is marked lost; you can change it back on its own page.`, "Mark It Lost")]
+          ? [ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The inspection is marked lost; you can change it back on its own page.`, "Mark It Lost")]
           : [],
       };
     case "job_to_schedule":

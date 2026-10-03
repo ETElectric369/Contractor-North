@@ -70,7 +70,7 @@ export default async function TeamPage() {
     viewerSwitches(),
   ]);
   // THE SWITCH BOARD (0352). The Crew Lead badge and the Crew Leader box are drawn whatever the
-  // switches say: since 0356 the flag also lets its holder fill in the walk-through on a visit
+  // switches say: since 0356 the flag also lets its holder fill in the inspection on a visit
   // they're on, which reads no switch, so the office must always be able to see it, grant it and
   // take it away. Daily Reports only picks the box's line (off, it says nothing about a clock-out
   // report). Crew & Payroll moves nothing here: pay and charge rates price labor, and the home

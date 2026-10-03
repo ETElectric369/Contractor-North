@@ -15,7 +15,7 @@ import { uploadJobPhotos } from "./upload-job-photos";
  * Circuits From The Plans (the office). A read writes SUGGESTIONS only; they land in the Suggestions
  * card above, dimmed and named by where they came from, and count for nothing until a person keeps
  * them. What a read says about the panel itself (brand, main, spaces, No Stab), and what the
- * walk-through said, shows here with a Use beside each line: nothing is written by being read.
+ * inspection said, shows here with a Use beside each line: nothing is written by being read.
  *
  * Nothing silent: the cap (three photo reads per job per day) and the cost (a few cents a read) are
  * said before the tap, every refusal is said in plain words, and what a reader couldn't read is
@@ -39,7 +39,7 @@ export function PanelReaders({
   photoReadsLeft = null,
   planReadsLeft = null,
   panel,
-  walkthrough,
+  inspectionSays,
   onRows,
   onPanel,
 }: {
@@ -51,7 +51,7 @@ export function PanelReaders({
   photoReadsLeft?: number | null;
   planReadsLeft?: number | null;
   panel: JobPanel | null;
-  walkthrough: { said: HeaderSaid; words: string | null } | null;
+  inspectionSays: { said: HeaderSaid; words: string | null } | null;
   onRows: (rows: JobCircuit[]) => void;
   onPanel: (row: JobPanel, placed?: { adopted: JobCircuit[]; notAdopted: string[] }) => void;
 }) {
@@ -92,14 +92,14 @@ export function PanelReaders({
     }
   }
 
-  // The walk-through's suggestions are worked out against the panel as it is now, so each one goes
+  // The inspection's suggestions are worked out against the panel as it is now, so each one goes
   // away by itself once the panel says the same.
-  const fromWalk = useMemo(() => (walkthrough ? headerSuggestions(panel, walkthrough.said, "The Walk-Through") : []), [walkthrough, panel]);
+  const fromInspection = useMemo(() => (inspectionSays ? headerSuggestions(panel, inspectionSays.said, "The Inspection") : []), [inspectionSays, panel]);
   const fromRead = useMemo(() => {
     if (!result) return [];
     return headerSuggestions(panel, Object.fromEntries(result.header.map((h) => [h.field, h.value])) as HeaderSaid, result.from);
   }, [result, panel]);
-  const header = [...fromRead, ...fromWalk];
+  const header = [...fromRead, ...fromInspection];
 
   async function read(kind: "photo" | "plan") {
     const id = kind === "photo" ? photoId : planId;
@@ -299,12 +299,12 @@ export function PanelReaders({
         </div>
       )}
 
-      {/* THE PANEL ITSELF: what a read or the walk-through said that the panel doesn't say yet. */}
+      {/* THE PANEL ITSELF: what a read or the inspection said that the panel doesn't say yet. */}
       {header.length > 0 && (
         <div className="mt-4 border-t border-slate-100 pt-3">
           <h4 className="text-sm font-semibold text-slate-900">About The Panel</h4>
-          {walkthrough?.words && fromWalk.length > 0 && (
-            <p className="mt-1 text-xs text-slate-500">The walk-through said: &ldquo;{walkthrough.words}&rdquo;</p>
+          {inspectionSays?.words && fromInspection.length > 0 && (
+            <p className="mt-1 text-xs text-slate-500">The inspection said: &ldquo;{inspectionSays.words}&rdquo;</p>
           )}
           <ul className="mt-2 space-y-2">
             {header.map((h) => (

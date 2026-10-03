@@ -223,7 +223,7 @@ export function QuoteBuilder({
   /** The org's open leads. An estimate is written for whoever asked for it, and that is usually
    *  someone who is not a customer yet — see the "Who's this for?" picker below. */
   leads?: LeadOption[];
-  /** Measurements the inspector already took on the walk-through (?capture=). They prefill the
+  /** Measurements the inspector already took on the inspection (?capture=). They prefill the
    *  kit picker's sizing boxes, so nobody types a number twice — which is the whole reason the
    *  inspection sheet asks for them as NUMBERS instead of prose. */
   measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
@@ -232,7 +232,7 @@ export function QuoteBuilder({
   jobId?: string;
   /** When launched from a lead conversion, the quote keeps the provenance backlink. */
   inquiryId?: string;
-  /** An existing DRAFT for this lead/walk-through, found server-side at mount — the builder
+  /** An existing DRAFT for this lead/inspection, found server-side at mount — the builder
       adopts it so cross-session re-entry (or a different door) updates ONE row instead of
       minting twins (review of cn-v796). */
   initialQuoteId?: string | null;
@@ -258,7 +258,7 @@ export function QuoteBuilder({
   /** Prefill for the estimator scope box — e.g. an inspection's field capture
    *  (notes/measurements/materials) threaded in via /quotes/new?capture=. */
   initialScope?: string;
-  /** Line items the WALK-THROUGH already priced — a `scopes` question's picks, mapped straight
+  /** Line items the INSPECTION already priced — a `scopes` question's picks, mapped straight
    *  onto quote lines. They arrive as real editable rows, not as prose to re-type. */
   seededLines?: DraftLineItem[];
   priceItems?: PriceItemLite[];
@@ -311,12 +311,12 @@ export function QuoteBuilder({
     d.setDate(d.getDate() + (quoteExpiryDays || 30));
     return d.toISOString().slice(0, 10);
   });
-  // A walk-through that already picked and priced its scopes seeds the estimate with those exact
+  // An inspection that already picked and priced its scopes seeds the estimate with those exact
   // rows. Erik: the remodel codes sit at $0 in the book because "it gets built with the
   // inspection" — so by the time the office opens this, the building is done and re-typing it
   // would be the only manual step left in an otherwise automatic chain.
   const [items, setItems] = useState<DraftLineItem[]>(
-    // Adoption precedence: the DRAFT ROW's lines (they ARE the document) beat a walk-through
+    // Adoption precedence: the DRAFT ROW's lines (they ARE the document) beat an inspection
     // seed beat the blank starter. A session draft, when one exists, restores over all three.
     adoptedSeed?.items?.length
       ? adoptedSeed.items.map((l) => ({ ...l }))
@@ -489,14 +489,14 @@ export function QuoteBuilder({
     // Erik: "im creating an estimate for [Mayfern Rd] now and its pulling info from a sarah dale
     // inspection but i cant see anything i wrote for this job."
     //
-    // An estimate started from a WALK-THROUGH is exactly the case that has none of the other three.
+    // An estimate started from an INSPECTION is exactly the case that has none of the other three.
     // Both of his live inspections — 13125 Mayfern Rd and Sarah Dale — carry customer_id, job_id
     // and inquiry_id all null, because an inspection can happen before any of those records exist.
     // So both collapsed to "quote-builder:new", the shared slot, and Sarah Dale's saved draft
     // restored straight over the Mayfern Rd prefill: her scope, her description, her line items.
     // Not lost — overwritten on screen by somebody else's job.
     //
-    // The appointment is the MOST specific identity here (a job can hold several walk-throughs), so
+    // The appointment is the MOST specific identity here (a job can hold several inspections), so
     // it goes first. Precedence + the one-time eviction prefix live in quoteDraftKey, tested.
     quoteDraftKey({ captureId, jobId, customerId: preselected, inquiryId, userId: draftUserId }),
     draftState,
@@ -1222,7 +1222,7 @@ export function QuoteBuilder({
                 const isCollapsed = collapsed.has(group);
                 // NO overflow-hidden on the group box. It was only rounding the header's corners,
                 // and it CLIPPED the price-book dropdown of every line inside the group — so on
-                // any estimate built from a kit or a walk-through, tapping a Description opened a
+                // any estimate built from a kit or an inspection, tapping a Description opened a
                 // list you couldn't see. The header rounds its own corners instead.
                 return (
                   <div key={group || "__ungrouped"} className={group ? "rounded-lg border border-slate-200" : ""}>

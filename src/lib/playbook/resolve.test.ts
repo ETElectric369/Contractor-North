@@ -260,7 +260,7 @@ describe("applyFills — fill holes, never overwrite, never drop silently", () =
 
 /**
  * THE KEYBOARD BUG, as a resolver fact — bug 48fbfd6e, "Can't type, keyboard disappears with one
- * click", filed from 13125 Mayfern Rd. That walk-through's scope still reads "The scope of the job
+ * click", filed from 13125 Mayfern Rd. That inspection's scope still reads "The scope of the job
  * is to add" and stops there: he could not enter the rest.
  *
  * The inspector renders a need in exactly ONE of three lists — ask / spine / answered — chosen by

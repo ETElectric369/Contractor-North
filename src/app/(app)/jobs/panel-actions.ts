@@ -9,7 +9,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
-import { readViaView } from "@/lib/inspection/walkthrough-access";
+import { readViaView } from "@/lib/inspection/inspection-access";
 import {
   circuitName,
   countWord,
@@ -29,7 +29,7 @@ import {
   readerSummary,
   readerSuggestions,
   readsLeftWords,
-  walkthroughSaid,
+  inspectionSaid,
   type HeaderSaid,
   type HeaderSuggestion,
 } from "@/lib/panel/readers";
@@ -263,8 +263,8 @@ export type PanelLoad =
       /** The office only: the Plan papers Read Circuits From The Plans can read (this job's, and
        *  its customer's that aren't on another job yet). Never sent to a tech. */
       plans: { id: string; name: string | null; created_at: string; onCustomer: boolean }[];
-      /** What the walk-through said about the panel, for header suggestions (null when nothing). */
-      walkthrough: { said: HeaderSaid; words: string | null } | null;
+      /** What the inspection said about the panel, for header suggestions (null when nothing). */
+      inspectionSays: { said: HeaderSaid; words: string | null } | null;
       people: Record<string, string>;
     }
   | Fail;
@@ -290,10 +290,10 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
 
   // THE ESTIMATE FINDER RUNS IN AN OFFICE SESSION ONLY: a tech's page never carries it (an estimate
   // is the office's paper), and the door it feeds is the office's.
-  const [estimates, plans, walkthrough] = await Promise.all([
+  const [estimates, plans, inspectionSays] = await Promise.all([
     m.staff ? findEstimates(m, job, circuits) : Promise.resolve([] as PanelEstimate[]),
     m.staff ? findPlans(m, job) : Promise.resolve([] as { id: string; name: string | null; created_at: string; onCustomer: boolean }[]),
-    walkthroughOf(m, job),
+    inspectionOf(m, job),
   ]);
 
   const ids = [...new Set(circuits.flatMap((c) => [c.verified_by, c.updated_by]).filter(Boolean))] as string[];
@@ -314,7 +314,7 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
     photoReadsLeft,
     planReadsLeft,
     plans,
-    walkthrough,
+    inspectionSays,
     people,
   };
 }
@@ -342,12 +342,12 @@ async function findPlans(m: Member, job: JobRow): Promise<{ id: string; name: st
   }));
 }
 
-/** What the walk-through's inspector said about the panel (panel_brand, panel_amps, the one-box
+/** What the inspection's inspector said about the panel (panel_brand, panel_amps, the one-box
  *  panel_condition), from this job's visits, newest first. Shown as suggestions; never written.
  *  THROUGH appointment_answers (0366, LEAK-0227): a tech reads the answers without a price (and only
- *  his own visits, 0227's rule), the office as stored; and only the three answers walkthroughSaid
+ *  his own visits, 0227's rule), the office as stored; and only the three answers inspectionSaid
  *  reads leave this function's read, whoever asks. */
-async function walkthroughOf(m: Member, job: JobRow): Promise<{ said: HeaderSaid; words: string | null } | null> {
+async function inspectionOf(m: Member, job: JobRow): Promise<{ said: HeaderSaid; words: string | null } | null> {
   const { data, error } = await readViaView<{ inspection_answers: Record<string, unknown> | null }[]>(m.supabase, "answers", (from) =>
     from
       .select("inspection_answers, starts_at")
@@ -358,14 +358,14 @@ async function walkthroughOf(m: Member, job: JobRow): Promise<{ said: HeaderSaid
       .limit(5),
   );
   if (error) {
-    reportError("panel.walkthroughOf", error, { jobId: job.id });
+    reportError("panel.inspectionOf", error, { jobId: job.id });
     return null;
   }
   const answers = (data ?? []).map((a) => {
     const all = a.inspection_answers ?? {};
     return { panel_brand: all.panel_brand, panel_amps: all.panel_amps, panel_condition: all.panel_condition };
   });
-  const w = walkthroughSaid(answers);
+  const w = inspectionSaid(answers);
   return w.words || w.said.brand || w.said.main_amps ? w : null;
 }
 

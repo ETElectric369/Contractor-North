@@ -148,7 +148,7 @@ export function PlaybookManager({
   // NOT forms[0] — that is alphabetical, and cn-v683 added the WEBSITE form to this picker.
   // For Vivian Builders "Customer intake" sorts before "Site inspection", so the editor started
   // opening on the questions that are live on Andrew's website rather than on his own
-  // walk-through. Default to the private one; orgs with a single form are unaffected.
+  // inspection. Default to the private one; orgs with a single form are unaffected.
   /** The last option list each question carried, so a kind round trip can put it back. */
   const lastOptions = useRef(new Map<string, string[]>());
   /** Option value at focus time, keyed need:index — what a blur-commit rename renames FROM. */
@@ -156,7 +156,7 @@ export function PlaybookManager({
   // ?form=<id> WINS. The default below is a guess about which set you probably meant; a link that
   // names one is not a guess. /forms/[id]'s "edit it in Settings → Playbook" banner carries the id,
   // because without it Andrew followed that link from his WEBSITE form and landed on the
-  // walk-through — ten questions that were not the ones he came to change.
+  // inspection — ten questions that were not the ones he came to change.
   const linked = useSearchParams().get("form");
   const [formId, setFormId] = useState(
     (forms.find((f) => f.id === linked) ?? forms.find((f) => !f.isWebsite) ?? forms[0])?.id ?? "",
@@ -217,7 +217,7 @@ export function PlaybookManager({
   if (!form)
     return (
       <p className="text-sm text-slate-500">
-        You don&rsquo;t have a walk-through sheet yet. Start a walk-through and it&rsquo;ll show up here.
+        You don&rsquo;t have an inspection sheet yet. Start an inspection and it&rsquo;ll show up here.
       </p>
     );
 
@@ -352,7 +352,7 @@ export function PlaybookManager({
   // TWO DOORS, PAINTED DIFFERENT COLORS (Erik + Andrew: "we dont like the dropdown … two
   // seaglass buttons left and right on the top always visible … and a background color
   // differentiation matching the button color so its painfully obvious which set of questions
-  // we are working on"). The walk-through wears teal; the website form wears amber — and the
+  // we are working on"). The inspection wears teal; the website form wears amber — and the
   // whole workspace below is washed in the active hue, so the answer to "which list am I
   // editing" is the color of the page, not a line of text.
   const hueOf = (f: PlaybookForm) => (f.isWebsite ? "amber" : "teal");
@@ -397,7 +397,7 @@ export function PlaybookManager({
                 >
                   {f.name}
                   <span className={`block text-[11px] font-normal ${active ? "text-white/85" : "text-slate-400"}`}>
-                    {f.isWebsite ? "your website — customers see these" : "your walk-through — only you see these"}
+                    {f.isWebsite ? "your website — customers see these" : "your inspection — only you see these"}
                   </span>
                 </button>
               );
@@ -416,7 +416,7 @@ export function PlaybookManager({
         </p>
       ) : (
         <p className="rounded-lg bg-teal-100/70 px-3 py-2 text-sm text-teal-900">
-          Your own walk-through — what you ask yourself standing on the job. Never shown to a customer.
+          Your own inspection questions — what you ask yourself standing on the job. Never shown to a customer.
           {forms.some((f) => f.isWebsite) ? " Your website's questions live behind the amber button above." : ""}
         </p>
       )}
@@ -889,7 +889,7 @@ export function PlaybookManager({
       {dirty && !pending && !err && (
         <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 shadow-md backdrop-blur shell:bottom-2">
           <span className="text-sm font-medium text-amber-900">
-            Not saved yet &mdash; {form.isWebsite ? "your website still asks the old questions" : "your walk-through still asks the old questions"}
+            Not saved yet &mdash; {form.isWebsite ? "your website still asks the old questions" : "your inspection still asks the old questions"}
           </span>
           <Button type="button" onClick={() => run(() => savePlaybook(form.id, needs, baseStamp), "Saved.")}>
             <Check className="h-4 w-4" /> Save

@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { runHear, type HearRun } from "@/lib/playbook/hear-run";
-import { readViaView } from "@/lib/inspection/walkthrough-access";
+import { readViaView } from "@/lib/inspection/inspection-access";
 import type { Answers } from "@/lib/playbook/types";
 
 /**
@@ -24,12 +24,12 @@ export async function hearIntoPlaybook(
    *
    * This was dead on every fresh inspection. The inspector auto-selects the org's sheet in CLIENT
    * state, but `appointments.inspection_template_id` is not written until an answer saves — so the
-   * very first press of "Fill it in", which is the whole designed first action, came back "Pick a
-   * walk-through first." The one escape was to hand-tap an answer and wait out the 900ms debounce:
+   * very first press of "Fill it in", which is the whole designed first action, came back "Pick an
+   * inspection first." The one escape was to hand-tap an answer and wait out the 900ms debounce:
    * exactly the work the feature exists to replace.
    *
    * Passing an id is not the same as passing a playbook. RLS confines the lookup to this org and
-   * the is_inspection check bounds it to a walk-through, so the worst a crafted id can name is one
+   * the is_inspection check bounds it to an inspection, so the worst a crafted id can name is one
    * of this org's own sheets — which is what the picker offers anyway.
    */
   templateId: string | null,
@@ -49,11 +49,11 @@ export async function hearIntoPlaybook(
     .select("id, org_id, inspection_template_id")
     .eq("id", appointmentId)
     .maybeSingle();
-  if (!appt) return { ok: false, error: "That walk-through no longer exists." };
+  if (!appt) return { ok: false, error: "That inspection no longer exists." };
 
   // What he's looking at wins; the stored column is the fallback for anything that calls without one.
   const useId = templateId || (appt as { inspection_template_id?: string | null }).inspection_template_id;
-  if (!useId) return { ok: false, error: "Pick a walk-through first." };
+  if (!useId) return { ok: false, error: "Pick an inspection first." };
   // Through form_playbooks (0366): a crew lead can't read a playbook sheet from forms itself any more,
   // and gets its questions without the owner's notes or dollar figures (which filling never needs).
   // A failed read is said, never "no sheet".
@@ -62,11 +62,11 @@ export async function hearIntoPlaybook(
     "sheets",
     (from) => from.select("schema, playbook, is_inspection").eq("id", useId).maybeSingle(),
   );
-  if (formErr) return { ok: false, error: "Couldn't read the walk-through just now. Try again." };
-  if (!form) return { ok: false, error: "That walk-through no longer exists." };
-  // Same bound saveInspectionAnswersInner applies: an id must name a WALK-THROUGH, not any old form.
+  if (formErr) return { ok: false, error: "Couldn't read the inspection just now. Try again." };
+  if (!form) return { ok: false, error: "That inspection no longer exists." };
+  // Same bound saveInspectionAnswersInner applies: an id must name an INSPECTION, not any old form.
   if (!(form as { is_inspection?: boolean }).is_inspection)
-    return { ok: false, error: "That form isn't a walk-through." };
+    return { ok: false, error: "That form isn't an inspection." };
 
   return runHear(playbookForForm(form as { schema?: unknown; playbook?: unknown }), answers, transcript, {
     orgId: (appt as { org_id?: string } | null)?.org_id ?? null,

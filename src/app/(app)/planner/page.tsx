@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { splitAgenda } from "@/lib/agenda-split";
-import { isInspectionType, appointmentTypeLabel } from "@/lib/statuses";
+import { isInspectionType, appointmentTypeLabel, visitTitle } from "@/lib/statuses";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
 import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, Navigation, MessageSquare } from "lucide-react";
@@ -511,7 +511,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       key: `a-${a.id}`,
       kind: "appt" as const,
       time: a.starts_at,
-      title: a.title,
+      // The ROW's words, so a title stored during the three days the visit was a "Walk-Through"
+      // reads today's word here too (lib/statuses visitTitle). `appt.title` below stays the STORED
+      // string: that one is the edit form's value, and a display word must never be saved back.
+      title: visitTitle(a.title),
       sub: a.location ?? null,
       ...visitRowInfo(a),
       // Fall back to the linked job's address so the Navigate button appears on a
@@ -653,7 +656,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         key: `wa-${a.id}`,
         kind: "appt" as const,
         time: a.starts_at,
-        title: a.title,
+        title: visitTitle(a.title), // the week's rows read the same word as today's
         sub: a.location ?? null,
         address: a.location ?? null,
         ...visitRowInfo(a),

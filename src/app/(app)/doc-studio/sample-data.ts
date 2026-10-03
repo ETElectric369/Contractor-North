@@ -44,7 +44,7 @@ export const SAMPLE_QUOTE_ITEMS: SampleItem[] = [
 ];
 
 export const SAMPLE_DESCRIPTION =
-  "Recessed lighting package for the main floor — fixtures supplied, installed, and dimmed per the walk-through. All penetrations fire-caulked; switch legs labeled at the panel.";
+  "Recessed lighting package for the main floor — fixtures supplied, installed, and dimmed per the inspection. All penetrations fire-caulked; switch legs labeled at the panel.";
 
 export function sampleTotals(items: SampleItem[]) {
   const subtotal = Math.round(items.reduce((t, i) => t + i.line_total, 0) * 100) / 100;

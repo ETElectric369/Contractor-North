@@ -36,8 +36,15 @@ import { tradeKeyFromWords } from "@/lib/org-trade";
 export type StarterTrade = "electrical" | "deck" | "plumbing" | "generic";
 
 interface Starter {
-  /** The forms.name the tenant will see and can rename: "Walk-Through", the site visit's one word
-   *  (W2-10; new companies only, a sheet already made keeps its name). */
+  /** The forms.name the tenant will see and can rename: "Inspection", the site visit's one word
+   *  (new companies only; a sheet already made keeps its name).
+   *
+   *  A COMPANY SET UP BETWEEN cn-v1034 (2026-09-30) AND 2026-10-03 HAS A SHEET STORED AS
+   *  "Walk-Through", and it is NOT re-said on read the way a visit's title is (lib/statuses
+   *  visitTitle). The difference is who owns the string: a sheet's name is the tenant's, renamed in
+   *  one tap on Settings → Inspection Sheet, and the rename box has to show the name it will save.
+   *  Showing "Inspection" over a box holding "Walk-Through" is the display-over-stored split this
+   *  whole rename exists to end. So it reads as stored until somebody renames it. */
   name: string;
   fields: unknown[];
 }
@@ -48,7 +55,7 @@ const ROUTER = "work_type";
 const STARTERS: Record<StarterTrade, Starter> = {
   // ── ELECTRICAL ────────────────────────────────────────────────────────────────
   electrical: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       {
         key: ROUTER,
@@ -78,7 +85,7 @@ const STARTERS: Record<StarterTrade, Starter> = {
 
   // ── DECK ──────────────────────────────────────────────────────────────────────
   deck: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       {
         key: ROUTER,
@@ -104,7 +111,7 @@ const STARTERS: Record<StarterTrade, Starter> = {
 
   // ── PLUMBING ──────────────────────────────────────────────────────────────────
   plumbing: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       {
         key: ROUTER,
@@ -129,7 +136,7 @@ const STARTERS: Record<StarterTrade, Starter> = {
   // Deliberately thin. A wrong question is worse than a missing one: it teaches the person that
   // the sheet does not understand their work, and they stop filling it in.
   generic: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       { key: ROUTER, label: "What kind of work", type: "select", options: ["New install","Repair","Replacement","Service call","Other"] },
       { key: "scope", label: "Scope", type: "textarea", showIf: { key: ROUTER, in: ["New install","Repair","Replacement","Service call","Other"] } },

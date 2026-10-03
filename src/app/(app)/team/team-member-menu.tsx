@@ -53,7 +53,7 @@ export function TeamMemberMenu({
   isOwnerRow: boolean;
   authConfigured: boolean;
   /** The Daily Reports switch (0352): off, the edit's Crew Leader box says nothing about a
-   *  clock-out report. The box itself is always drawn (0356: it also grants the walk-through). */
+   *  clock-out report. The box itself is always drawn (0356: it also grants the inspection). */
   dailyReports?: boolean;
 }) {
   const router = useRouter();

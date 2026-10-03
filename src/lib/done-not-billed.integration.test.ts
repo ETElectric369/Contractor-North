@@ -171,7 +171,7 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     // Never candidates: absorbed into its job, not finished, not a service call or job-day, before the floor.
     await visit(orgId, "absorbed visit", { startsAt: "2001-02-08T18:00:00Z", absorbed: true });
     await visit(orgId, "scheduled visit", { startsAt: "2001-02-09T18:00:00Z", status: "scheduled" });
-    await visit(orgId, "walk-through", { type: "inspection", startsAt: "2001-02-10T18:00:00Z" });
+    await visit(orgId, "inspection", { type: "inspection", startsAt: "2001-02-10T18:00:00Z" });
     // 11:30 PM Pacific on Dec 31, 2000 is 07:30 UTC on Jan 1: before the org's midnight floor.
     await visit(orgId, "the night before the floor", { startsAt: "2001-01-01T07:30:00Z" });
     // Finished jobs: no invoice, only a draft, only a void (all back); a sent invoice (hidden).
@@ -240,7 +240,7 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     expect(row("owed visit").open_invoice_id).toBe(ids["owed invoice"]);
     expect(rows.some((r) => r.id === ids["paid visit"])).toBe(false);
     expect(row("void-anchor visit").open_invoice_id).toBeNull();
-    for (const hidden of ["visit on billed job", "absorbed visit", "scheduled visit", "walk-through", "the night before the floor", "done job, billed", "job still going"]) {
+    for (const hidden of ["visit on billed job", "absorbed visit", "scheduled visit", "inspection", "the night before the floor", "done job, billed", "job still going"]) {
       expect(rows.some((r) => r.id === ids[hidden]), hidden).toBe(false);
     }
     // The floor is the org's midnight, an instant: a floor read as UTC midnight would take the night before.

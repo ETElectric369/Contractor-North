@@ -17,6 +17,7 @@ import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { crewChips } from "@/lib/schedule/block-info";
+import { visitTitle } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
 
@@ -189,7 +190,7 @@ export default async function SchedulePage({
      That is worse than cosmetic now that the tick IS the booking. He taps Thursday, the lead comes
      straight back on the board, and the natural read is either "it didn't take" or "I'll move it to
      Friday" — either way he ticks it again, and convertInquiry's inspection branch has no existence
-     check, so that is a SECOND walk-through inserted, a second Google push, and two calendar chips
+     check, so that is a SECOND inspection inserted, a second Google push, and two calendar chips
      with nobody able to say which one the customer was told about.
 
      /leads already carries exactly this cross-check — added when Erik reported the same thing
@@ -266,7 +267,7 @@ export default async function SchedulePage({
       // card draws no chip rather than a false "No Day Set".
       ...("hold_until" in r ? { holdUntil: r.hold_until ?? null } : {}),
     })),
-    // ── THE BOOKED-BUT-UNPLANNED WALK-THROUGHS. Erik: "we have to roll in the 'to be scheduled'
+    // ── THE BOOKED-BUT-UNPLANNED INSPECTIONS. Erik: "we have to roll in the 'to be scheduled'
     //    stuff somehow for example i have a couple inspections that already link to the leads i
     //    inputted." An appointment with NO start is a decision already taken and a day not yet
     //    chosen — which is exactly what this rail is for. Without it they were invisible: not on
@@ -277,7 +278,9 @@ export default async function SchedulePage({
       // convertInquiry — the one thing on this board that was already agreed was the one thing that
       // could not be placed. It is dated via rescheduleAppointment instead.
       kind: "appointment" as const,
-      name: String(r.title ?? "Site visit"),
+      // A dateless visit titled during the three days the visit was a "Walk-Through" reads today's
+      // word on the rail too (lib/statuses visitTitle); a name a person typed is untouched.
+      name: visitTitle(r.title) || "Site visit",
       address: r.location ?? null,
       city: null,
       // Who, and the one person going ([] draws a dashed Nobody).

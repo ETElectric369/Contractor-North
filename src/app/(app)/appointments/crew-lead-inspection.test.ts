@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * THE WALK-THROUGH'S TWO WRITERS, AND WHO GETS WHICH (0356; Erik, 2026-09-26: "crew leader yes tech
+ * THE INSPECTION'S TWO WRITERS, AND WHO GETS WHICH (0356; Erik, 2026-09-26: "crew leader yes tech
  * no").
  *
  *   · the office: saveInspectionCapture / saveInspectionAnswers exactly as before, an UPDATE under
@@ -13,9 +13,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *   · before 0356 is applied: a plain sentence, nothing saved, never a raw PGRST202.
  *
  * The fake client holds one appointment row, one sheet and the caller's profile; the database's own
- * half of the rule is walkthrough-crew-lead.integration.test.ts.
+ * half of the rule is inspection-crew-lead.integration.test.ts.
  *
- * AFTER 0366 (LEAK-0227) the walk-through's reads go through the two views, as the database does:
+ * AFTER 0366 (LEAK-0227) the inspection's reads go through the two views, as the database does:
  * appointment_answers (the office reads the answers as stored, anyone else without a price) and
  * form_playbooks (a crew lead can no longer read a playbook sheet from forms itself). `views: false`
  * is a database before 0366: the views answer PGRST205 and the table is read as before. `viewError`
@@ -55,7 +55,7 @@ vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: vi.fn(async () => {}),
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 
 import { addInspectionPhotos, removeInspectionPhoto, saveInspectionAnswers, saveInspectionCapture } from "./actions";
-import { answersWithoutPrices } from "@/lib/inspection/walkthrough-access";
+import { answersWithoutPrices } from "@/lib/inspection/inspection-access";
 
 const MISSING_VIEW = (name: string) => ({ code: "PGRST205", message: `Could not find the table 'public.${name}' in the schema cache` });
 
@@ -247,14 +247,33 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     expect(await saveInspectionCapture("appt-1", { notes: "x" })).toMatchObject({ ok: false, error: expect.stringMatching(/didn't save/) });
   });
 
-  it("the database's refusal comes back in its own words, and stops the retry", async () => {
-    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office can fill in the walk-through." } };
+  /**
+   * THE DATABASE'S REFUSAL COMES BACK IN ITS OWN WORDS — WITH THE VISIT'S NAME PUT RIGHT.
+   *
+   * The mock says what save_walkthrough_capture ACTUALLY raises (0356 line 222, still "walk-through":
+   * the migration is applied and is not edited for a word). A mock that already said "inspection" is
+   * how this gap hid — it tested a sentence the real function never speaks, so the unit project
+   * stayed green while a crew lead read the old word under his Save. inspectionRefusal re-says it
+   * (lib/inspection/db-refusal), and nothing else about the sentence moves.
+   */
+  it("the database's refusal comes back in its own words, with the visit's name put right, and stops the retry", async () => {
+    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office, or the crew lead on this visit, can fill in the walk-through." } };
     expect(await saveInspectionCapture("appt-1", { photos: [] })).toEqual({
       ok: false,
       refused: true,
-      error: "Only the office can fill in the walk-through.",
+      error: "Only the office, or the crew lead on this visit, can fill in the inspection.",
     });
     expect(db.rpcCalls).toHaveLength(2); // read again once (see the race below), then said
+  });
+
+  it("a shape or size the database turns down is said in the one word too, and it is not a refusal", async () => {
+    // 22023, so it goes the dbError way out of inspectionRefusal rather than the 42501 way: raw text
+    // (db-error.ts hands an unrecognised sentence back on purpose), re-said all the same.
+    db.rpcResult = { data: null, error: { code: "22023", message: "The walk-through's notes are too long to save in one go." } };
+    expect(await saveInspectionCapture("appt-1", { notes: "x" })).toEqual({
+      ok: false,
+      error: "The inspection's notes are too long to save in one go.",
+    });
   });
 
   it("a photo the office put on between his read and his save is merged on a second read, not called his removal", async () => {
@@ -262,6 +281,7 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     db.rpcQueue = [
       {
         // The office's photo lands after his read; the database sees it missing from his list.
+        // 0356 line 255's own sentence, which still says the old word (see the refusal test above).
         before: () => db.appt.capture.photos.push(officeNew),
         data: null,
         error: { code: "42501", message: "Only the office can take a photo off the walk-through." },
@@ -297,12 +317,12 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     db.rpcResult = { data: null, error: { code: "PGRST202", message: "Could not find the function public.save_walkthrough_capture" } };
     const r = await saveInspectionAnswers("appt-1", "sheet-1", { work: "Remodel" });
     expect(r).toMatchObject({ ok: false, refused: true });
-    expect(r.error).toMatch(/Crew leads can't save the walk-through until the office finishes an update/);
+    expect(r.error).toMatch(/Crew leads can't save the inspection until the office finishes an update/);
     expect(r.error).not.toMatch(/PGRST|function/);
   });
 });
 
-describe("the walk-through's reads go through the views (0366, LEAK-0227)", () => {
+describe("the inspection's reads go through the views (0366, LEAK-0227)", () => {
   it("the office's save reads the sheet and the stored answers through the views, prices and all", async () => {
     db.staff = true;
     db.appt.inspection_answers = { work: "Deck", scope: [{ code: "R1", qty: 1, price: 500 }], retired_q: "kept" };

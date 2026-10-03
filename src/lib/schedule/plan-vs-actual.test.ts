@@ -393,7 +393,7 @@ describe("the other real shapes", () => {
     expect(both.byKey.get("a-v1-0923")!.state).toBe("hollow");
   });
 
-  it("a visit with no job (a walk-through before the sale) is never judged: time is clocked to jobs", () => {
+  it("a visit with no job (an inspection before the sale) is never judged: time is clocked to jobs", () => {
     const res = run([block("a-walk", null, "2026-09-23", 600, 660, "visit")], []);
     expect(res.byKey.has("a-walk")).toBe(false);
   });

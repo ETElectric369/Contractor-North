@@ -67,7 +67,7 @@ describe("what a crafted intake payload cannot do", () => {
     expect(answers.plans).toBeUndefined();
   });
 
-  it("drops a key the WALK-THROUGH doesn't declare, however the payload spells it", () => {
+  it("drops a key the INSPECTION doesn't declare, however the payload spells it", () => {
     const { answers, carried } = answersFromIntake(pb, { not_a_need: "boom", "<img src=x>": "boom" });
     expect(answers).toEqual({});
     expect(carried).toEqual([]);
@@ -95,7 +95,7 @@ describe("nothing to carry means nothing is touched", () => {
   });
 });
 
-describe("the walk-through's declaration governs, but its RULES wait their turn", () => {
+describe("the inspection's declaration governs, but its RULES wait their turn", () => {
   const pb: Playbook = {
     needs: [
       { key: "project_type", label: "Kind of project", ask: "?", slot: { type: "select", options: ["New deck", "Remodel"] } },
@@ -110,7 +110,7 @@ describe("the walk-through's declaration governs, but its RULES wait their turn"
     ],
   } as Playbook;
 
-  it("a value outside the walk-through's option list is dropped, not forced in", () => {
+  it("a value outside the inspection's option list is dropped, not forced in", () => {
     const { answers } = answersFromIntake(pb, { project_type: "Gazebo" });
     expect(answers.project_type).toBeUndefined();
   });
@@ -133,9 +133,9 @@ describe("the walk-through's declaration governs, but its RULES wait their turn"
   });
 });
 
-describe("what the walk-through cannot ask is shown, not dropped (Andy Colar)", () => {
-  // Vivian Builders' real shape, trimmed: an intake form with its own auto-generated keys and a
-  // walk-through that shares none of them. Before this, everything below reached the visit as one
+describe("what the inspection cannot ask is shown, not dropped (Andy Colar)", () => {
+  // Vivian Builders' real shape, trimmed: an intake form with its own auto-generated keys and an
+  // inspection that shares none of them. Before this, everything below reached the visit as one
   // unattributed paragraph in the appointment's notes.
   const intakePb = {
     needs: [
@@ -175,7 +175,7 @@ describe("what the walk-through cannot ask is shown, not dropped (Andy Colar)", 
     expect(lines.some((l) => l.key === "plan_files")).toBe(false);
   });
 
-  it("says nothing twice: what the walk-through already pre-filled is skipped", () => {
+  it("says nothing twice: what the inspection already pre-filled is skipped", () => {
     const lines = intakeAnswerLines(intakePb, answered, new Set(["describe", "timeline"]));
     expect(lines.map((l) => l.key)).toEqual(["q_msmg9uwv", "q_mst1drw8", "has_plans"]);
   });

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { TellNort } from "./tell-nort";
 
 /**
- * JUST TELL NORT, OPENED. The walk-through's 44px count (appointments/[id]/inspector.test.ts) renders
+ * JUST TELL NORT, OPENED. The inspection's 44px count (appointments/[id]/inspector.test.ts) renders
  * it closed, where its one door is the full-width button; one tap opens this panel, and a crew lead on
  * the truck reaches every door in it too. The close X was a ~24px icon with no name.
  */
@@ -50,7 +50,7 @@ describe("the opened Tell Nort panel", () => {
     expect(close).toContain('aria-label="Close"');
   });
 
-  it("closed by default, as the walk-through draws it", () => {
+  it("closed by default, as the inspection draws it", () => {
     const closed = render({ defaultOpen: undefined });
     expect(closed).not.toContain("<textarea");
     expect(buttons(closed).map((b) => b.text)).toEqual(["Just Tell Nort"]);

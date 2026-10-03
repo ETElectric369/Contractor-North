@@ -36,7 +36,7 @@ export function KitPickerModal({
   pricing,
 }: {
   kit: KitForPicker;
-  /** What the walk-through already measured — prefilled so the sizing boxes open with the real
+  /** What the inspection already measured — prefilled so the sizing boxes open with the real
    *  numbers rather than zeros. Typing a measurement a second time is how the two copies drift. */
   measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
   /** 0240: how a LINKED kit line prices for THIS customer — the org default plus the selected
@@ -124,7 +124,7 @@ export function KitPickerModal({
             <p className="mb-2 text-xs font-medium text-slate-600">
               This list sizes itself.{" "}
               {measured?.sqft || measured?.linearFt
-                ? "Taken from the walk-through — change them if the job did."
+                ? "Taken from the inspection — change them if the job did."
                 : "Enter the job\u2019s measurements and the quantities fill in."}
             </p>
             <div className="flex flex-wrap items-end gap-2">

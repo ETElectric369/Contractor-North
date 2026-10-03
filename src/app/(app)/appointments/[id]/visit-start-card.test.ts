@@ -22,7 +22,7 @@ import { VisitStartCard, visitStartState, visitTimeOffered } from "./visit-start
 
 const TZ = "America/Los_Angeles";
 const preview = {
-  // The name Start The Job gives (lib/job-name): the street, never the visit's "Walk-Through:" tag.
+  // The name Start The Job gives (lib/job-name): the street, never the visit's "Inspection:" tag.
   name: "3245 W. Garnet Blvd",
   customer: "Tom Goodman",
   address: "3245 W. Garnet Blvd, Homewood, CA 96141",

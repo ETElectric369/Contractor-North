@@ -9,8 +9,8 @@
  *   1. it became something (converted_at): Became An Estimate / Became A Job     slate  (a ?focus= row)
  *   2. it said no (status lost): Lost                                           slate
  *   3. a follow-up day has passed: Call Back · Sep 20                            amber
- *   4. a visit is booked: Walk-Through · Tue Oct 1 (its earliest, on the
- *      company's clock); one waiting for a day: Walk-Through · No Day Yet        blue
+ *   4. a visit is booked: Inspection · Tue Oct 1 (its earliest, on the
+ *      company's clock); one waiting for a day: Inspection · No Day Yet        blue
  *   5. a visit was done: Walked · Estimate Next (Walked, with Estimates off)      green
  *   6. a follow-up day is coming: Call Back · Oct 3                              slate
  *   7. contacted: Contacted                                                      slate
@@ -27,7 +27,7 @@
  */
 import { isWebSource } from "@/lib/inquiries/sources";
 import { todayStrInTz } from "@/lib/tz";
-import { workKind } from "@/lib/schedule/work-shape";
+import { KIND_LABEL, workKind } from "@/lib/schedule/work-shape";
 
 export type LeadStepInput = {
   status: string | null;
@@ -48,7 +48,7 @@ export type LeadVisits = { done: number; upcoming: number; nextAt: string | null
 /**
  * NOBODY COULD READ THIS LEAD'S VISITS (lib/leads/visit-read). The third answer, and the whole point
  * of having one: a failed read used to arrive here as `null` — the same value as "this lead has no
- * visits" — so the chip printed "New · Call Them" on a lead with a walk-through booked for Tuesday.
+ * visits" — so the chip printed "New · Call Them" on a lead with an inspection booked for Tuesday.
  */
 export const VISITS_UNREAD = "unread" as const;
 
@@ -94,22 +94,25 @@ export const monthDay = (ymd: string): string => words(ymd, false);
 /** "Tue Oct 1": a visit's day. */
 export const weekdayMonthDay = (ymd: string): string => words(ymd, true);
 
-/** What a booked visit is called on the chip: the site visit is a Walk-Through; the rest say their
- *  own kind, never a walk-through they aren't. */
+/**
+ * What a booked visit is called on the chip: the site visit is an Inspection; the rest say their own
+ * kind, never an inspection they aren't.
+ *
+ * THE WORD ITSELF IS NOT DECIDED HERE. This chip is short — "Meeting", "Visit" — where the schedule
+ * spine is long ("Client Meeting", "Other"), so the shortening stays local; but the one case this
+ * file exists to say, the site visit, reads KIND_LABEL like every other surface. A literal here is
+ * how the app came to disagree with itself: My Day printed one word while the planner, the calendar
+ * and the job page printed another, and Erik read both on 2026-10-03.
+ */
 function visitWord(type: string | null | undefined): string {
-  switch (workKind({ kind: "appointment", type: type || "inspection" })) {
-    case "service":
-      return "Service Call";
-    case "job":
-      return "Job";
-    case "call":
-      return "Phone Call";
+  const kind = workKind({ kind: "appointment", type: type || "inspection" });
+  switch (kind) {
     case "office":
       return "Meeting";
     case "other":
       return "Visit";
     default:
-      return "Walk-Through";
+      return KIND_LABEL[kind];
   }
 }
 

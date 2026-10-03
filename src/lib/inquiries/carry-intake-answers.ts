@@ -5,7 +5,7 @@ import { answersFromBrief, layerBriefAnswers, parsePlanBrief } from "@/lib/plan-
 import type { AnswerValue, Answers, Playbook } from "@/lib/playbook/types";
 
 /**
- * WHAT THE CUSTOMER ALREADY TOLD YOU, CARRIED ONTO THE WALK-THROUGH.
+ * WHAT THE CUSTOMER ALREADY TOLD YOU, CARRIED ONTO THE INSPECTION.
  *
  * The public intake door writes a customer's answers to `inquiries.intake.intake_answers`. Until
  * now that column was read in exactly two places: to draw the lead card, and to sign the URLs of
@@ -24,7 +24,7 @@ import type { AnswerValue, Answers, Playbook } from "@/lib/playbook/types";
  * boundary, and it is one the contractor can move himself without touching code.
  *
  * It matters because of where a measured answer GOES. quotes/new hands the estimator a block
- * headed "FROM THE WALK-THROUGH (his words — take them as given)", and lib/playbook/answers'
+ * headed "FROM THE INSPECTION (his words — take them as given)", and lib/playbook/answers'
  * comments record what happened the last time a stale number reached it: a 25-ft feeder from an
  * abandoned branch was priced as fact. A homeowner's guess at a deck's depth is exactly that kind
  * of number — plausible, unverified, and multiplied by a rate. Chris pulls the tape; the customer
@@ -36,7 +36,7 @@ import type { AnswerValue, Answers, Playbook } from "@/lib/playbook/types";
  *   · `file`   — the paths live in the intake bucket under `<org>/intake/`. The inspector's
  *     uploader writes somewhere else, so carrying a path across would produce an attachment that
  *     renders as a broken name. The files stay reachable from the lead, which is where they are.
- *   · anything the walk-through does not declare — coerceByPlaybook drops unknown keys outright,
+ *   · anything the inspection does not declare — coerceByPlaybook drops unknown keys outright,
  *     which is what keeps a crafted intake payload from stuffing jsonb onto an appointment.
  *
  * `carried` is returned separately so the caller can say out loud, in the appointment's own notes,
@@ -50,7 +50,7 @@ export function answersFromIntake(
   if (!pb.needs.length || !intakeAnswers || typeof intakeAnswers !== "object")
     return { answers: {}, carried: [] };
 
-  // Coerce against the WALK-THROUGH, not the intake form: same key, and it is the walk-through's
+  // Coerce against the INSPECTION, not the intake form: same key, and it is the inspection's
   // declaration of that key that governs from here on. A question the customer answered as free
   // text that the contractor has since made a select coerces to null and is simply not carried,
   // which is the honest outcome — nobody has to guess which of his options they meant.
@@ -68,7 +68,7 @@ export function answersFromIntake(
   // ── AND DELIBERATELY NOT clearInapplicable ────────────────────────────────────────────────
   //
   // Every other boundary in this codebase clears to a fixed point before it hands answers on, and
-  // this one must not. Chris's walk-through gates `shape` and `wrap_around` behind
+  // this one must not. Chris's inspection gates `shape` and `wrap_around` behind
   // `{ key: "length_ft", known: true }` — reasonable, because on site he has a tape in his hand
   // before he thinks about the outline. But `length_ft` is MEASURED, so it is exactly the answer a
   // customer is never allowed to give. Clear here and the resolver throws away "irregular, and it
@@ -76,7 +76,7 @@ export function answersFromIntake(
   // corner rate — on the grounds that nobody has measured the deck yet. Which is true, and is not
   // a reason to forget what the customer told us.
   //
-  // Nothing is lost by waiting: the walk-through clears on its own save (appointments/actions),
+  // Nothing is lost by waiting: the inspection clears on its own save (appointments/actions),
   // and factsForEstimator clears again before a single fact reaches the estimator. Both of those
   // run at a moment when the measurements exist, which is the moment the question can actually be
   // answered. So a carried answer under a question that never becomes applicable is inert — it is
@@ -89,21 +89,23 @@ export function answersFromIntake(
 }
 
 /**
- * THE OTHER HALF OF THE CARRY: WHAT THE WALK-THROUGH CANNOT ASK, SHOWN INSTEAD OF DROPPED.
+ * THE OTHER HALF OF THE CARRY: WHAT THE INSPECTION CANNOT ASK, SHOWN INSTEAD OF DROPPED.
  *
  * answersFromIntake pre-fills by KEY, and a key only matches when the same question exists on both
  * playbooks. That is the right rule and it is deliberately strict — but it is also, for most orgs,
- * every answer. Vivian Builders' intake declares 26 questions; their walk-through declares one, and
+ * every answer. Vivian Builders' intake declares 26 questions; their inspection declares one, and
  * the two share nothing. So Andy Colar's lead arrived with the project, the room, the timeline, the
- * designer and the plans all answered, `carried` came back empty, and both of his walk-throughs
+ * designer and the plans all answered, `carried` came back empty, and both of his inspections
  * were written with `inspection_answers: {}` — Erik's three reports ("the walk-through starts
- * blank", "the intake answers don't carry over", "they aren't on the lead at all").
+ * blank", "the intake answers don't carry over", "they aren't on the lead at all"). HIS WORDS ARE
+ * HIS, OLD WORD AND ALL: he filed these on 2026-09-09, while the app itself still said Inspection
+ * everywhere, so this is him calling it a walk-through of his own accord. Do not sweep a quote.
  *
  * Nothing here writes an answer. A question the contractor never put on his sheet has nowhere to be
  * pre-filled TO, and guessing a mapping — by label, by resemblance — is exactly the drift the
  * module header warns about (ET's `gotcha` means two different things on the two forms). What was
  * missing is smaller and honest: the customer's answers, in the words they were ASKED in, on the
- * walk-through, marked as theirs. He confirms rather than re-asks, which was the promise.
+ * inspection, marked as theirs. He confirms rather than re-asks, which was the promise.
  *
  * LABELS COME FROM THE INTAKE PLAYBOOK because that is the only place they exist — `intake_answers`
  * is a bag of keys, and `q_mst1drw8` on its own is not a question. Retired keys are rescued the way
@@ -113,7 +115,7 @@ export function answersFromIntake(
  * FILE ANSWERS ARE SKIPPED — IntakeFiles renders those as openable names wherever this card goes,
  * and a storage path is not something to read out.
  *
- * `skipKeys` is what the walk-through DID pre-fill: those are already on the sheet as editable
+ * `skipKeys` is what the inspection DID pre-fill: those are already on the sheet as editable
  * answers, and repeating them here would invite him to confirm the same thing twice.
  */
 export function intakeAnswerLines(
@@ -141,13 +143,13 @@ export function intakeAnswerLines(
 }
 
 /**
- * EVERYTHING A NEW WALK-THROUGH INHERITS FROM ITS LEAD, in one place — the customer's own intake
+ * EVERYTHING A NEW INSPECTION INHERITS FROM ITS LEAD, in one place — the customer's own intake
  * answers plus the plan brief's, layered so the person always outranks the machine. Shared by
  * every door that mints an inspection from a lead (the booked paths on the Leads board AND the
  * one-tap Inspect-now), because two doors carrying different halves is how Andrew's plans got
  * read into a report the inspector then opened blank.
  *
- * Reads THE org walk-through (is_inspection, singular) on the CALLER's client — RLS-scoped
+ * Reads THE org inspection (is_inspection, singular) on the CALLER's client — RLS-scoped
  * callers can only ever find their own org's.
  */
 export async function carryForInquiry(
@@ -182,16 +184,16 @@ export async function carryForInquiry(
   return { inspectionTemplateId: (form as { id: string }).id, inspectionAnswers: answers, carried, briefCarried };
 }
 
-/** WHICH ANSWERS ON A WALK-THROUGH CAME FROM THE CUSTOMER'S OWN FORM (v800 audit).
+/** WHICH ANSWERS ON AN INSPECTION CAME FROM THE CUSTOMER'S OWN FORM (v800 audit).
  *
  *  The estimator splits facts into "his words — take them as given" and "read by machine —
  *  verify". A carried intake answer is NEITHER: a stranger typed it into a web form, and the
  *  two playbooks can drift so far that the same key means different things on each side (ET
  *  Electric's `gotcha` is "Anything that'll bite us" on intake and "Man hours" on the
- *  walk-through). It reached the estimator wearing the contractor's own voice.
+ *  inspection). It reached the estimator wearing the contractor's own voice.
  *
  *  Provenance test mirrors briefProvenanceKeys: a key is still the CUSTOMER's only while the
- *  walk-through value is untouched — the moment the contractor edits it on site it becomes his.
+ *  inspection value is untouched — the moment the contractor edits it on site it becomes his.
  */
 export function intakeProvenanceKeys(
   carried: string[],

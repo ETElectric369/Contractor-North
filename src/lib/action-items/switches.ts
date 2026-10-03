@@ -9,7 +9,7 @@ import { AFFORDANCES, type ActionItem, type ActionKind } from "./types";
 export const FEEDER_SWITCHES: Partial<Record<ActionKind, readonly FeatureKey[]>> = {
   // An estimate started and never sent: an Estimates nudge.
   quote_draft: ["estimates"],
-  // A walk-through that happened and was never written up: a Leads & Walk-Throughs nudge, and its
+  // An inspection that happened and was never written up: a Leads & Inspections nudge, and its
   // door is the estimate builder, so it needs Estimates too.
   inspection_writeup: ["leads", "estimates"],
 };

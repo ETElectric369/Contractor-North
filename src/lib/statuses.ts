@@ -36,7 +36,7 @@ export const APPT_PUSH_STATUSES: readonly string[] = APPOINTMENT_STATUSES.filter
  *  inspections are ONE platform. His "client_meeting" converges onto the pre-existing
  *  `meeting` value (label-only change — no data rewrite), and `final_inspection` is the
  *  one genuinely new value (the code-inspection at job end, distinct from the pre-sale
- *  site walk-through). The create/edit dropdown and the write-guards both read this list.
+ *  site inspection). The create/edit dropdown and the write-guards both read this list.
  *  (Audit 2026-07-16: TS spine and the 0131 DB check are in lockstep; final_inspection
  *  simply has no rows yet — expected early adoption lag, not a dead value.) */
 export const APPOINTMENT_TYPES = [
@@ -44,7 +44,7 @@ export const APPOINTMENT_TYPES = [
   "final_inspection",
   // A SERVICE CALL IS A KIND OF BOOKING. Erik: "At booking: [Service call] [Contract job] →
   // service calls land on the job board → walk-through never asks; it already knows." It used to
-  // be the walk-through's first question, where its answer was already settled — the phone knew
+  // be the inspection's first question, where its answer was already settled — the phone knew
   // it while Alexa wrote the address down. See migration 0188.
   "service_call",
   // THE WORK ITSELF, ON A DAY (0231). Not every booking is a visit before the work — a job he
@@ -62,7 +62,7 @@ export const APPOINTMENT_TYPES = [
 export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 
 /**
- * THE KINDS A PERSON PICKS (W2-06): five, in his words — Walk-Through, Job, Service Call, Phone Call,
+ * THE KINDS A PERSON PICKS (W2-06): five, in his words — Inspection, Job, Service Call, Phone Call,
  * Other. Nine was a list nobody could choose from: "Quote / Estimate", "Client Meeting" and
  * "Appointment" each meant Other in practice, and a final inspection is the city's, on the job's
  * permit (production: inspection 44, appointment 8, job 4, service_call 2, call 1, quote 1, meeting 1).
@@ -85,14 +85,14 @@ export function appointmentTypeOptions(current?: string | null): string[] {
   return legacy ? [...PICKABLE_APPOINTMENT_TYPES, own] : [...PICKABLE_APPOINTMENT_TYPES];
 }
 
-/** The inspection-shaped subset — what the Sales → Walk-Throughs tab shows. */
+/** The inspection-shaped subset — what the Sales → Inspections tab shows. */
 export const INSPECTION_TYPES = ["inspection", "final_inspection"] as const;
 
-/** Visits whose PRODUCT is an estimate — the write-up-nag set: the walk-throughs plus the
+/** Visits whose PRODUCT is an estimate — the write-up-nag set: the inspections plus the
  *  explicit "quote" booking ("you are going out to price it" — lib/schedule/work-shape).
  *  A completed quote visit used to leave every surface at once: not an inspection (write-up
  *  feeder passed it by), not billable work (visit_unbilled is service_call/job only) — priced
- *  it and vanished. INSPECTION_TYPES itself stays narrow: it gates walk-through-only UI. */
+ *  it and vanished. INSPECTION_TYPES itself stays narrow: it gates inspection-only UI. */
 export const ESTIMATE_VISIT_TYPES = [...INSPECTION_TYPES, "quote"] as const;
 
 /** The squeeze-it-in work — what the job board is for. Erik: "these are the ones that would go to
@@ -103,11 +103,24 @@ export const isServiceCall = (t: string | null | undefined): boolean => t === "s
 export const isInspectionType = (t: string | null | undefined): boolean =>
   (INSPECTION_TYPES as readonly string[]).includes(t ?? "");
 
-/* ONE WORD FOR THE SITE VISIT (W2-10): the visit before a price is a Walk-Through wherever staff or
-   Nort read it. "Inspection" stays only for the city's inspection (the permit, and the legacy
-   final_inspection rows). The stored value is still 'inspection': a word, not a data change. */
+/* ONE WORD FOR THE SITE VISIT, AND IT IS THE STORED ONE. The visit before a price is an INSPECTION
+   wherever staff or Nort read it, and this map is the only place that says so.
+
+   THE WORD WENT OUT AND CAME BACK, so do not "tidy" it again: W2-10 (8c3e9bc5, written 2026-09-28,
+   live as cn-v1034 on the night of 2026-09-30) laid "Walk-Through" over the stored type, and Erik
+   reversed it on 2026-10-03 after about three days of it — "im still see walk-throughs as a bucket
+   when everything is about inspections and to be called Inspections". Three reasons it is his to
+   name and this is where it lands:
+     · THE STORED VALUE IS ALREADY 'inspection' (44 rows in production). A display word laid over a
+       different stored word is what produced the My Day defect: a reader capitalised the type by
+       hand and printed "Inspection" while every other screen said Walk-Through. Matching the display
+       word to the stored word kills that whole class.
+     · THE PAGE IS /inspections, with Inspections in the dock.
+     · THE CITY'S IS NOT THIS. It is the separate type `final_inspection`, "Final Inspection", on the
+       job's permit — so nothing had to be reserved for it in the first place.
+   Words only: no stored type, column or route changes, and `inspection` is what it always was. */
 const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
-  inspection: "Walk-Through",
+  inspection: "Inspection",
   final_inspection: "Final Inspection",
   service_call: "Service Call",
   job: "Job",
@@ -122,6 +135,35 @@ const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
  *  rather than crashing or lying. */
 export function appointmentTypeLabel(t: string | null | undefined): string {
   return APPOINTMENT_TYPE_LABELS[(t ?? "") as AppointmentType] ?? (t || "appointment");
+}
+
+/* A STORED TITLE FROM THE THREE DAYS THE VISIT WAS A "WALK-THROUGH", SAID IN TODAY'S WORD.
+   The label above fixes the TYPE everywhere. It does not fix a title, and titles were written too:
+   from cn-v1034 (2026-09-30) to 2026-10-03 every booking door stamped "Walk-Through: <who>" into
+   appointments.title (lib/schedule/work-shape bookingTitle, the lead doors, the public intake's
+   auto-book). Nothing rewrote those rows, so Activity printed BOTH words in one line —
+   "Inspection booked — Walk-Through: Tom Goodman" — on exactly the visits Erik made while testing
+   that change. Two words for one thing is the fault he reported, so the stock tag is re-said where
+   it is READ, which is the only fix that needs no edit to a row somebody may have retyped since.
+
+   ONLY THE STOCK TAG AT THE VERY FRONT MOVES, and only when a separator or the end follows it —
+   job-name.ts's LEADING_TAG rule, for the same reason: a title is the office's to type, so
+   "Walk the attic with Tom" and "Walkthrough video for Rita" come back byte for byte. Nothing is
+   written back: the edit form and the Google push keep the stored string, so re-saying it here can
+   never quietly rewrite a row.
+
+   The matcher below is a MATCHER, not a word anybody reads — which is why inspection-word.test.ts
+   (string literals, template chunks and JSX text) does not sweep it and this file needs no entry on
+   its allowlist. What this function RETURNS is the swept word. */
+const STORED_OLD_TAG = /^(\s*)(walk\s*-?\s*through(s)?)((?:\s*[:—–·|]\s*)|(?:\s+-\s+)|(?:\s*$))/i;
+
+/** A visit's stored title as a person should read it today: a stock "Walk-Through: Tom Goodman" row
+ *  reads "Inspection: Tom Goodman", a bare "Walk-Throughs" reads "Inspections", and a title a person
+ *  typed is returned unchanged. Every surface that PRINTS appointments.title reads it through here. */
+export function visitTitle(title: string | null | undefined): string {
+  return String(title ?? "").replace(STORED_OLD_TAG, (_m, lead: string, _word: string, plural: string | undefined, sep: string) =>
+    `${lead}${plural ? "Inspections" : "Inspection"}${sep}`,
+  );
 }
 
 /** Sort weights for the /quotes default view (mirrors JOB_STATUS_PRIORITY): the LIVE pipeline

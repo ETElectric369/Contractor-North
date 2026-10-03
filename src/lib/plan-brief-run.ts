@@ -19,7 +19,7 @@ import {
 } from "@/lib/plan-brief";
 
 /**
- * THE READING ITSELF — a lead's uploaded plans become a preliminary walk-through report.
+ * THE READING ITSELF — a lead's uploaded plans become a preliminary inspection report.
  *
  * Runs on the SERVICE client because its two callers both arrive without a usable session for
  * this work: the public intake door (a stranger's browser, via after()) and the staff retry
@@ -64,7 +64,7 @@ async function writeBrief(
   return !!upd?.length;
 }
 
-/** The question list the model answers — the org's own walk-through, typed. */
+/** The question list the model answers — the org's own inspection, typed. */
 function questionLines(needs: Need[]): string {
   return needs
     .filter((n) => n.slot?.type !== "scopes" && n.slot?.type !== "file")
@@ -221,14 +221,14 @@ export async function runPlanBrief(
       model: DEFAULT_MODEL,
       max_tokens: 4096,
       system:
-        `You prepare a PRELIMINARY walk-through report for ${withArticle(trade)}, from plan documents a customer uploaded with their request — before anyone has visited the site. ` +
+        `You prepare a PRELIMINARY inspection report for ${withArticle(trade)}, from plan documents a customer uploaded with their request — before anyone has visited the site. ` +
         "You are a careful reader, not an estimator: report what the documents and the customer's own words actually state, and nothing else. " +
         "THE CUSTOMER'S WORDS OVERRIDE THE DRAWINGS — if they say the work covers only part of the plans (rooms excluded, phases, work already done), the report and every answer must honor that, even where the sheets still show the excluded work. " +
         'Respond with ONLY a JSON object: {"summary": string, "scope_included": string[], "scope_excluded": string[], "answers": object, "observations": string[], "cautions": string[]}. ' +
         "summary = 2-4 plain sentences: what the project is, per the plans and the request. " +
         "scope_included / scope_excluded = the work the customer is asking for vs. explicitly not asking for (empty arrays when they didn't limit it). " +
-        '"answers" = the walk-through questions below, keyed EXACTLY by their keys. Answer ONLY what the documents or the customer state — OMIT any key you cannot support; never guess. A select answer must be one of its listed options, verbatim. A number answer is a plain number in the stated unit. ' +
-        "observations = concrete details from the sheets a walk-through should know that no question asks (counts, callouts, notes, existing conditions) — at most 10, each one sentence. " +
+        '"answers" = the inspection questions below, keyed EXACTLY by their keys. Answer ONLY what the documents or the customer state — OMIT any key you cannot support; never guess. A select answer must be one of its listed options, verbatim. A number answer is a plain number in the stated unit. ' +
+        "observations = concrete details from the sheets an inspection should know that no question asks (counts, callouts, notes, existing conditions) — at most 10, each one sentence. " +
         "cautions = what to verify on site: dimension ambiguities, conflicts between the request and the drawings, sheets too dense to count reliably. " +
         "No prose outside the JSON.",
       messages: [
@@ -241,8 +241,8 @@ export async function runPlanBrief(
               text:
                 `THE CUSTOMER'S REQUEST (their words govern):\nName: ${String(inq.name ?? "")}\n${String(inq.message ?? "").slice(0, 4000) || "(no message)"}\n\n` +
                 (questions
-                  ? `THE WALK-THROUGH QUESTIONS (answer by key, only what the documents support):\n${questions}`
-                  : "This organization has no walk-through question list — return answers as {}."),
+                  ? `THE INSPECTION QUESTIONS (answer by key, only what the documents support):\n${questions}`
+                  : "This organization has no inspection question list — return answers as {}."),
             },
           ],
         },

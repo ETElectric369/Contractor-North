@@ -58,7 +58,7 @@ const data = (over: Partial<PanelData> = {}): PanelData => ({
   photoReadsLeft: null,
   planReadsLeft: null,
   plans: [],
-  walkthrough: null,
+  inspectionSays: null,
   people: {},
   ...over,
 });
@@ -352,16 +352,16 @@ describe("phase 4: the readers and the label checks on the tab", () => {
     for (const b of buttons(html)) if (b.text) expect(isTitleCase(b.text), b.text).toBe(true);
   });
 
-  it("the walk-through's panel answer is a suggestion with its own Use, and goes away once the panel says the same", () => {
+  it("the inspection's panel answer is a suggestion with its own Use, and goes away once the panel says the same", () => {
     const walk = { said: { brand: "Siemens", main_amps: 200 }, words: "Siemens, 200A, two slots open" };
-    const html = render(data({ walkthrough: walk, estimates: [] }));
+    const html = render(data({ inspectionSays: walk, estimates: [] }));
     const t = textOf(html);
     expect(t).toContain("About The Panel");
-    expect(t).toContain("The walk-through said: “Siemens, 200A, two slots open”");
+    expect(t).toContain("The inspection said: “Siemens, 200A, two slots open”");
     expect(t).toContain("Main: 200A (Yours Says 125A)");
     expect(t).not.toContain("Brand: Siemens"); // the panel already says Siemens
     expect(buttons(html).map((b) => b.text)).toContain("Use");
-    const same = render(data({ walkthrough: walk, estimates: [], panels: [{ ...PANEL, main_amps: 200 }] }));
+    const same = render(data({ inspectionSays: walk, estimates: [], panels: [{ ...PANEL, main_amps: 200 }] }));
     expect(textOf(same)).not.toContain("About The Panel");
   });
 });

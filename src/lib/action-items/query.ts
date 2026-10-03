@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
 import { bucketInspections } from "@/lib/inspections";
-import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
@@ -201,7 +201,7 @@ async function buildActionItems(ctx: {
       )
     : Promise.resolve(null);
 
-  /* THE BOOKS START REPLACES THE AGE LIMITS (NY-feeders). A visit nobody closed out, a walk-through
+  /* THE BOOKS START REPLACES THE AGE LIMITS (NY-feeders). A visit nobody closed out, an inspection
      nobody wrote up, a visit or a job done and never billed: these aged OUT after 14, 60 or 30 days,
      so work went quiet by the calendar, never by being done. Now they reach back to the day the
      company's books begin (readBooksStart: the day it named, else its first bill, else the day it
@@ -281,7 +281,7 @@ async function buildActionItems(ctx: {
     if (!isStaff) q = q.eq("assigned_to", userId);
     return q.order("starts_at", { ascending: true }).limit(50);
   });
-  // ── Walk-throughs that HAPPENED and have no estimate — staff only ───────────
+  // ── Inspections that HAPPENED and have no estimate — staff only ───────────
   // The visit is the expensive part and it is already spent; until it becomes an estimate it earns
   // nothing.
   const inspP: Promise<Read> = isStaff && feederOn("inspection_writeup", features)
@@ -603,7 +603,7 @@ async function buildActionItems(ctx: {
     // MONEY IS AN OUTCOME (0205): a job carrying real billing is finished. Draft invoices don't
     // count — a draft is work in progress, not a decision. (Also: an estimate draft whose job has
     // real billing is no longer an estimate to send.) Done, Not Billed asks this in SQL now (0371);
-    // the walk-throughs, the estimate drafts and the deploy window's old done reads still read it.
+    // the inspections, the estimate drafts and the deploy window's old done reads still read it.
     // The kind rides along: a deposit or progress draw is money for work NOT done yet, so the two
     // needs-a-day feeders read a narrower set.
     isStaff
@@ -707,7 +707,7 @@ async function buildActionItems(ctx: {
   // A visit with a lead rides the lead's row (one fact, one row).
   const leadIds = new Set<string>([...((inqR.data ?? []) as any[]), ...((inqLaterR.data ?? []) as any[])].map((q) => String(q.id)));
 
-  // ── A finished walk-through, waiting to become money. bucketInspections is the SAME function
+  // ── A finished inspection, waiting to become money. bucketInspections is the SAME function
   // /inspections uses, so the inbox and the list can never disagree about what is outstanding.
   const writeUpApptIds = new Set<string>();
   {
@@ -725,7 +725,13 @@ async function buildActionItems(ctx: {
       items.push({
         id: a.id,
         kind: "inspection_writeup",
-        title: a.title || "Walk-Through",
+        // The TYPE'S label, not the word "Inspection" typed in here. This feeder carries every
+        // estimate visit (ESTIMATE_VISIT_TYPES), so a literal printed "Inspection" over an untitled
+        // quote visit and over the city's Final Inspection — and it would be the next place to be
+        // left behind the day the owner names a different word, which is the fault he reported.
+        // And a STORED title from the three days the visit was a "Walk-Through" is re-said here too
+        // (visitTitle), so Needs You never prints a word no other screen uses.
+        title: visitTitle(a.title) || appointmentTypeLabel(a.type),
         subtitle: who,
         who: null,
         // The DAY IT HAPPENED, not a due date — how long this has been sitting is the pressure.
@@ -737,7 +743,7 @@ async function buildActionItems(ctx: {
       });
       writeUpApptIds.add(a.id);
     }
-    counts.walkthroughs_to_write_up = codeCount(inspR);
+    counts.inspections_to_write_up = codeCount(inspR);
   }
 
   // ── VISITS NOBODY CLOSED OUT.
@@ -745,17 +751,22 @@ async function buildActionItems(ctx: {
     if (!isStaff && a.assigned_to !== userId) continue;
     if (writeUpApptIds.has(a.id)) continue; // already surfaced as a write-up
     if (a.inquiry_id && leadIds.has(String(a.inquiry_id))) continue; // rides its lead's row
-    // ONE WORD FOR THE SITE VISIT (W2-10): read the type by the SAME label as every other
-    // surface. Capitalising the stored value made this front-screen row say "Inspection" where
-    // the planner, the calendar, the job page, the crew board and Google all say "Walk-Through"
-    // — two words for one thing, on the first screen he opens. A computed string like that one is
-    // invisible to the literal sweep in walk-through-word.test.ts, so visit-word.test.ts drives
-    // the row instead. It also fixed "Service call" / "Call" (now Service Call / Phone Call).
+    // ONE WORD FOR THE SITE VISIT: read the type by the SAME label as every other surface.
+    // Capitalising the stored value by hand made this front-screen row say "Inspection" while
+    // W2-10 (cn-v1034, 2026-09-30) had the planner, the calendar, the job page, the crew board and Google
+    // all saying "Walk-Through" — two words for one thing, on the first screen he opens, which is
+    // the split Erik reported. (The label went back to Inspection on 2026-10-03, so the two happen
+    // to agree again for THIS type; they still would not for any other.) A computed string like
+    // that is invisible to the literal sweep in inspection-word.test.ts, so visit-word.test.ts
+    // drives the row instead. It also fixed "Service call" / "Call" (now Service Call / Phone Call).
     const type = a.type ? appointmentTypeLabel(a.type) : null;
     items.push({
       id: a.id,
       kind: "appointment",
-      title: a.title || type || "Appointment",
+      // And the STORED title is re-said too (visitTitle), for the same reason as the type's label:
+      // a row stamped "Walk-Through: <who>" between 2026-09-30 and 2026-10-03 would otherwise make
+      // THIS row the one that disagrees with every other screen.
+      title: visitTitle(a.title) || type || "Appointment",
       subtitle: [one(a.customers as any)?.name ?? null, type].filter(Boolean).join(" · ") || null,
       who: null,
       when: a.starts_at,

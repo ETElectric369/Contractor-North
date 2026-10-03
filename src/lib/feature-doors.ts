@@ -58,7 +58,7 @@ export function requestHref(features: FeatureMap | null | undefined): "/leads" |
  * from a link, a bell entry or a bookmark; the layout's RouteOffLine puts the Off line on top of
  * it. Path prefixes only: a page's own tabs (?tab=) are the page's business. Not here on purpose:
  *   /tax-report  the mileage deduction lives there, and it is not Sales Tax (rule g);
- *   /forms       it also holds every company's walk-through sheet and intake form;
+ *   /forms       it also holds every company's inspection sheet and intake form;
  *   /recurring   Recurring Billing takes only its repeat invoices; repeat jobs and expenses live there;
  *   /jobs/…      the job page switches its own tabs (offStrip).
  */

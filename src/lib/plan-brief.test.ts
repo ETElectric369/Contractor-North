@@ -60,7 +60,7 @@ describe("parsePlanBrief — tolerant, or nothing", () => {
   });
 });
 
-describe("answersFromBrief — the walk-through's own coercion, measured KEPT", () => {
+describe("answersFromBrief — the inspection's own coercion, measured KEPT", () => {
   it("keeps a measured number (a plan sheet is where a pre-site dimension legitimately comes from)", () => {
     expect(answersFromBrief(pb, { sqft: 2400 })).toEqual({ sqft: 2400 });
   });

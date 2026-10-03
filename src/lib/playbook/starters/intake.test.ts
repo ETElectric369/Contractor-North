@@ -17,15 +17,15 @@ describe.each(PAIRS)("%s — a shared key must stay shareable", (_trade, intake,
   const wk = byKey(walk);
   const shared = intake.needs.filter((n) => wk.has(n.key));
 
-  it("shares real keys with the walk-through — otherwise nothing carries at all", () => {
+  it("shares real keys with the inspection — otherwise nothing carries at all", () => {
     expect(shared.length).toBeGreaterThanOrEqual(4);
   });
 
   it.each(shared.map((n) => [n.key, n] as [string, Need]))(
-    "%s — same option strings as the walk-through",
+    "%s — same option strings as the inspection",
     (key, need) => {
       const other = wk.get(key)!;
-      // coerceByPlaybook matches a select answer against the WALK-THROUGH's option list, exactly.
+      // coerceByPlaybook matches a select answer against the INSPECTION's option list, exactly.
       // "Composite (Trex/TimberTech)" here against "Composite (Trex / TimberTech)" there is not a
       // near miss, it is a dropped answer — and a dropped answer is silent.
       if (need.slot?.type === "select" && other.slot?.type === "select") {

@@ -5,7 +5,7 @@ import type { Need, NeedSlot, Playbook } from "./types";
  *
  * Erik: "since the inspector will be doing the job of collecting information we need a playbook
  * for that or is it built in?" The ENGINE is built in — resolver, slots, when-rules, renderer.
- * What must never be built in is the leak: a walk-through playbook carries `why` (where the
+ * What must never be built in is the leak: an inspection playbook carries `why` (where the
  * answer lands in his price) and `note` (his war stories and asking rules). Those are the
  * contractor's pricing logic, and a public page that renders them hands his estimating method to
  * every competitor with a browser. Same law as public-RPC projection parity: THE FAILURE IS
@@ -51,7 +51,7 @@ export function publicIntakeNeeds(pb: Playbook): PublicNeed[] {
 
 /**
  * THE STARTER INTAKE — five questions a customer can actually answer, seeded when the org flips
- * the door on. Deliberately small: every public question is friction, and the walk-through will
+ * the door on. Deliberately small: every public question is friction, and the inspection will
  * re-ask anything that matters once a human is involved. Slots on EVERY need — there is no Nort
  * on the public page (v1), so an open need would render nothing.
  *

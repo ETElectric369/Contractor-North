@@ -39,11 +39,11 @@ export function sizingOf(item: ParametricKitItem): KitSizing {
 export type JobDimensions = {
   sqft?: number | null;
   linearFt?: number | null;
-  /** 0241: every measured walk-through number by its need key (plus area_sqft / length_lf). */
+  /** 0241: every measured inspection number by its need key (plus area_sqft / length_lf). */
   byKey?: Record<string, number | null | undefined> | null;
 };
 
-/** The measurement an item is counted per — a built-in dimension or a walk-through need's value. */
+/** The measurement an item is counted per — a built-in dimension or an inspection need's value. */
 export function measurementValue(dims: JobDimensions, key: string): number | null {
   if (key === "area_sqft") return num(dims.sqft);
   if (key === "length_lf") return num(dims.linearFt);

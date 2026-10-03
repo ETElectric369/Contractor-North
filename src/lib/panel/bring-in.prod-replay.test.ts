@@ -80,7 +80,7 @@ d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
         photoReadsLeft: null,
         planReadsLeft: null,
         plans: [],
-        walkthrough: null,
+        inspectionSays: null,
         people: {},
         estimates: offerEstimates(J011, job.customer_id, quotes, []),
       };

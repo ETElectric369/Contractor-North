@@ -201,7 +201,7 @@ export async function hearSetup(answers: Answers, transcript: string): Promise<H
  * button. [[fill-vs-execute]].
  *
  * THE TRADE SEEDS THE SHEET. Andrew Crake signed up with a blank trade and got a generic
- * six-question walk-through, then pressed "generate questions" and couldn't find what it made.
+ * six-question inspection, then pressed "generate questions" and couldn't find what it made.
  * Naming the trade is what was missing, so naming it is what fixes it — here, in the same press,
  * rather than as a second thing to go and discover.
  */
@@ -241,7 +241,7 @@ export async function saveSetup(answers: Answers): Promise<Result> {
   }
 
   // The trade is only worth naming if something happens because of it. If they have no
-  // walk-through yet, this is the moment it exists — seeded for the trade they just said.
+  // inspection yet, this is the moment it exists — seeded for the trade they just said.
   let seededSheet = false;
   if (patch.trade_label) {
     const { count } = await supabase
@@ -301,7 +301,7 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
   if (!form) return { ok: false, error: "Say what trade you're in first — that's what builds your questions." };
 
   const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
-  if (!pb.needs.length) return { ok: false, error: "That walk-through has no questions in it yet." };
+  if (!pb.needs.length) return { ok: false, error: "That inspection has no questions in it yet." };
   // THE PLAIN QUESTIONS, UNDRAFTED, whenever a model shouldn't be paid to draft them: no key, Nort
   // switched off (0352), or this month's ceiling reached (talkSetup's own escape, which this door
   // never had). Their own questions and any why lines already written come back as they are.

@@ -145,7 +145,7 @@ describe("the switch couldn't be read: no model call, and never said as Nort bei
  * The questions step shows the key's words in the Trade box, so Next with nothing edited skipped
  * the save and was told "Say what trade you're in first" under a filled Trade box.
  */
-describe("draftMyPlaybook: a company with a trade on file and no walk-through yet", () => {
+describe("draftMyPlaybook: a company with a trade on file and no inspection yet", () => {
   const keyOnly = (nort: boolean) => ({ data: { settings: { trade: "plumbing", features: { nort } } }, error: null });
 
   it("seeds the starter for its trade and hands back its questions (Nort off: undrafted)", async () => {

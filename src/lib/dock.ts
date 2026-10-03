@@ -162,14 +162,14 @@ export const DOCK: DockSection[] = [
     staffOnly: true,
     // Leads and Estimates both off: the one row left is Customers, so the tile says so.
     whenOnly: { rowId: "sl-customers", label: "Customers" },
-    // The pipeline in order: Leads → Walk-Throughs (the site visit between a lead and its
-    // estimate — a walk-through IS an appointment type, Erik 2026-07-14; one word for it, W2-10: the
+    // The pipeline in order: Leads → Inspections (the site visit between a lead and its
+    // estimate — an inspection IS an appointment type, Erik 2026-07-14; one word for it (lib/statuses): the
     // route stays /inspections and the id stays sl-inspections) → Estimates, and the people it all
     // ends up with: Customers (the Contacts tile folded in here, W1-07). Customers carries no
     // switch, so Sales never disappears; /crm/[id] lights it.
     children: [
       { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads", feature: "leads" },
-      { id: "sl-inspections", label: "Walk-Throughs", icon: ClipboardCheck, href: "/inspections", feature: "leads" },
+      { id: "sl-inspections", label: "Inspections", icon: ClipboardCheck, href: "/inspections", feature: "leads" },
       { id: "sl-quotes", label: "Estimates", icon: FileText, href: "/quotes", feature: "estimates" },
       { id: "sl-customers", label: "Customers", icon: Users, href: "/crm" },
     ],
@@ -276,7 +276,7 @@ export const DOCK: DockSection[] = [
       { id: "o-hr-h", label: "HR", icon: UserCog, header: true },
       { id: "o-team", label: "Team", icon: Users, href: "/team", staffOnly: true },
       { id: "o-docs", label: "Employee Docs", icon: IdCard, href: "/employee-docs", staffOnly: true, feature: "crew_payroll" },
-      // Forms carries no switch: every company's /forms also holds its walk-through sheet and its
+      // Forms carries no switch: every company's /forms also holds its inspection sheet and its
       // intake form, not only the safety checklists.
       { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
       { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },

@@ -24,9 +24,9 @@ const el = <P extends object>(type: FunctionComponent<P>, props: Omit<P, "childr
 
 describe("the ⋯ trigger", () => {
   it("is 44px and says which row it is for", () => {
-    const html = renderToStaticMarkup(el(RowMoreSheet, { title: "Smith walk-through" }, "rows"));
+    const html = renderToStaticMarkup(el(RowMoreSheet, { title: "Smith inspection" }, "rows"));
     expect(ROW_MORE_TRIGGER).toContain("h-11 w-11");
-    expect(html).toMatch(/<button type="button" aria-label="More For Smith walk-through"[^>]*class="[^"]*h-11 w-11[^"]*"/);
+    expect(html).toMatch(/<button type="button" aria-label="More For Smith inspection"[^>]*class="[^"]*h-11 w-11[^"]*"/);
     // Closed, the sheet draws nothing.
     expect(html).not.toContain("rows");
   });
@@ -37,11 +37,11 @@ describe("the sheet", () => {
     const html = renderToStaticMarkup(
       el(
         RowMoreSheetView,
-        { open: true, title: "Smith walk-through", subline: "9:00 AM · 41 Larkspur", onClose: () => {} },
+        { open: true, title: "Smith inspection", subline: "9:00 AM · 41 Larkspur", onClose: () => {} },
         createElement("button", { type: "button", className: SHEET_ROW }, "Mark Done"),
       ),
     );
-    expect(html).toContain(">Smith walk-through</h2>");
+    expect(html).toContain(">Smith inspection</h2>");
     expect(html).toContain("9:00 AM · 41 Larkspur");
     expect(html).toContain("max-w-sm"); // size sm
     expect(html).toMatch(/<button type="button" class="[^"]*min-h-\[44px\][^"]*">Mark Done<\/button>/);
@@ -50,8 +50,8 @@ describe("the sheet", () => {
 
   it("stays mounted while a child sheet is open; the child renders after it, so it stacks above it at the same z-index", () => {
     const child = el(Modal, { open: true, onClose: () => {}, title: "Move To Another Day" }, "day chips");
-    const html = renderToStaticMarkup(el(RowMoreSheetView, { open: true, title: "Smith walk-through", onClose: () => {} }, child));
-    const sheetTitle = html.indexOf(">Smith walk-through</h2>");
+    const html = renderToStaticMarkup(el(RowMoreSheetView, { open: true, title: "Smith inspection", onClose: () => {} }, child));
+    const sheetTitle = html.indexOf(">Smith inspection</h2>");
     const childTitle = html.indexOf(">Move To Another Day</h2>");
     expect(sheetTitle).toBeGreaterThan(0);
     expect(childTitle).toBeGreaterThan(sheetTitle);

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { kitItemQuantity, measurementValue } from "./parametric-kit";
 
-/** 0241 — counted per ONE measurement of the org's own walk-through, not the deck's two. */
+/** 0241 — counted per ONE measurement of the org's own inspection, not the deck's two. */
 describe("counted per measurement", () => {
   const strap = { description: "1-1/2 2H COND STRAP", quantity: 1, unit: "ea", unit_price: 1.46, price_list_item_id: "i1",
     price_list_items: { id: "i1", description: "1-1/2 2H COND STRAP", unit: "ea", buy_price: 1.17, markup_pct: 0, sized_by: "run_ft", qty_per: 0.1, qty_min: 2, qty_round: "up" } };
-  it("counts an item per a walk-through measurement by key", () => {
+  it("counts an item per an inspection measurement by key", () => {
     const r = kitItemQuantity(strap, { byKey: { run_ft: 85 } });
     expect(r.parametric).toBe(true);
     expect(r.quantity).toBe(9); // 0.1 × 85 = 8.5 → up

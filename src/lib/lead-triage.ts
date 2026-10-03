@@ -119,7 +119,7 @@ export function classifyLead(
   // it. (Erik's own intake test, 2026-08-06.)
   const plansNote = intake.plansApproved === "yes" ? " · plans approved" : "";
   const reason = siteInspectionRequired
-    ? `Over threshold (${money}) — needs a walk-through`
+    ? `Over threshold (${money}) — needs an inspection`
     : bucket === "C"
       ? `Design consult — ${money}`
       : showInstantPrice

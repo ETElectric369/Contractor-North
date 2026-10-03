@@ -448,8 +448,8 @@ describe("no claim in the onboarding promises something the code does not do", (
     for (const t of [on, off]) {
       if (!WHY_LINE_FEEDS_ESTIMATE) {
         expect(t).not.toMatch(/write the estimate, your why line|estimate gets written, your why line/);
-        // What IS true today: the walk-through fill reads it, and it shows under the question.
-        expect(t).toContain("walk-through");
+        // What IS true today: the inspection fill reads it, and it shows under the question.
+        expect(t).toContain("inspection");
         expect(t).toContain("under the question");
       }
     }
@@ -519,7 +519,7 @@ describe("with Nort off, a lesson speaks as nobody", () => {
     expect(off).toContain("nothing lands until you do");
     expect(off).toContain("unless you tick the box");
     expect(off).toContain("you send it");
-    // With Nort off, the walk-through's say-it button is "Just Say It" (tell-nort.tsx).
+    // With Nort off, the inspection's say-it button is "Just Say It" (tell-nort.tsx).
     expect(off).toContain("just say it");
   });
 });
@@ -542,7 +542,7 @@ describe("the tour reads the switches", () => {
     expect(gateOn("leads", undefined)).toBe(true);
   });
 
-  it("Leads off: no run-lead, no run-walk and no trust step (welded to the walk-through)", () => {
+  it("Leads off: no run-lead, no run-walk and no trust step (welded to the inspection)", () => {
     const k = keys(stepsOn(run, off("leads")));
     for (const gone of ["run-lead", "run-walk", "trust"]) expect(k).not.toContain(gone);
     expect(k).toEqual(["run-estimate", "run-job", "run-money", "run-win"]);
@@ -562,28 +562,28 @@ describe("the tour reads the switches", () => {
     return out.join("\n");
   };
 
-  it("Leads and Estimates both off: the run that's left names no lead, no walk-through and no estimate", () => {
+  it("Leads and Estimates both off: the run that's left names no lead, no inspection and no estimate", () => {
     const words = runWords(off("leads", "estimates"));
     expect(words).not.toMatch(/estimate accepted/i);
     expect(words).not.toMatch(/\blead\b/i);
-    expect(words).not.toMatch(/walk-through/i);
+    expect(words).not.toMatch(/inspection/i);
     expect(words).not.toMatch(/estimate/i);
     // It says where their job starts instead, and where the address was first typed.
     expect(words).toContain("tap Plus, then New Job");
     expect(words).toContain("You typed that address once, on the job,");
   });
 
-  it("Leads off alone: no lead and no walk-through in what's left; the estimate starts under Plus", () => {
+  it("Leads off alone: no lead and no inspection in what's left; the estimate starts under Plus", () => {
     const words = runWords(off("leads"));
     expect(words).not.toMatch(/\blead\b/i);
-    expect(words).not.toMatch(/walk-through/i);
+    expect(words).not.toMatch(/inspection/i);
     expect(words).not.toContain("Start The Estimate");
     expect(words).toContain("tap Plus, then New Estimate");
     expect(words).toContain("You mark the estimate accepted and the job builds itself — same customer, same site address, plus a work order");
     expect(words).toContain("You typed that address once, on the estimate,");
   });
 
-  it("Estimates off alone: no estimate to accept or to be the bill; the lead and walk-through still read", () => {
+  it("Estimates off alone: no estimate to accept or to be the bill; the lead and inspection still read", () => {
     const words = runWords(off("estimates"));
     expect(words).not.toMatch(/estimate/i);
     expect(words).toContain("tap Plus, then New Job");
@@ -595,7 +595,7 @@ describe("the tour reads the switches", () => {
     const words = runWords(ALL_ON);
     expect(words).toContain("the lead it came from, plus a work order and a material list off the estimate");
     expect(words).toContain("You typed that address once, on the phone call, and it was still with you at the invoice");
-    expect(words).toContain("same with the numbers off the walk-through and the hours off the clock. So you're not typing it four times");
+    expect(words).toContain("same with the numbers off the inspection and the hours off the clock. So you're not typing it four times");
     expect(words).toContain("if there's an accepted estimate, that estimate IS the bill");
     expect(words).toContain("Back in the truck you press Start The Estimate");
   });

@@ -6,7 +6,7 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
 
 /**
- * A CREW LEAD FILLS IN THE WALK-THROUGH (0356), where the boundary lives: the database.
+ * A CREW LEAD FILLS IN THE INSPECTION (0356), where the boundary lives: the database.
  *
  * Erik (2026-09-26): "crew leader yes tech no". The page and the server actions decide who gets the
  * editable Inspector; this proves the database says the same thing when somebody skips both and
@@ -17,7 +17,7 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *   · he cannot take a photo off, add one from another folder or one he didn't upload himself (so a
  *     photo the office took off stays off, though its file is still in the folder), touch a priced answer (add, change or
  *     clear), take a file off a file question (he adds only his own uploads), switch or clear a
- *     saved sheet, or name a form that isn't a walk-through sheet;
+ *     saved sheet, or name a form that isn't an inspection sheet;
  *   · a crew lead NOT on the visit, a plain tech (who can READ his visit under 0227), another
  *     company's crew lead and a deactivated crew lead are all refused, and nothing moves;
  *   · the function writes only the capture columns, and a crew lead has no UPDATE on appointments;
@@ -27,6 +27,20 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *   · a visit's FILES: only the office or the file's uploader deletes, overwrites or moves one
  *     (docs_update / docs_delete); uploading, and every other folder, keep 0213's rule;
  *   · anon can't call it.
+ *
+ * THE SENTENCES BELOW SAY "walk-through", AND THAT IS NOT A MISS. This is a boundary test: `tryAs`
+ * returns pg's own message, so what it compares has to be the literal 0356 actually raises. Editing
+ * 0356 is not an option — it is applied, and scripts/test-db/check-test-db.cjs fails CI when an
+ * applied migration changes — and recreating the function for a word is a migration nobody needs. So
+ * the database keeps its sentence and the APP re-says it on the way to the screen
+ * (lib/inspection/db-refusal inspectionDbWords, called from appointments/actions.ts
+ * inspectionRefusal). inspection-word.test.ts reads this migration and proves every sentence it can
+ * raise comes out in the new word; that test runs in the unit project, so it catches a drift here
+ * without the test database.
+ *
+ * This file went red once for exactly the opposite reason: these expectations were swept to the new
+ * word while 0356 kept raising the old one, and the unit project could not see it. If you change a
+ * sentence here, change the migration's or you have only moved the break.
  *
  * Everything happens inside ONE transaction that is always rolled back, on throwaway companies
  * (lib/throwaway-org.db-fixture). People speak by planted request.jwt.claims under
@@ -45,7 +59,7 @@ const M0356 = readFileSync(join(migrations, readdirSync(migrations).find((n) => 
 const M0366 = readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith("0366_"))!), "utf8");
 const FN = "public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb)";
 
-d("a crew lead fills in the walk-through (0356)", () => {
+d("a crew lead fills in the inspection (0356)", () => {
   let c: pg.Client;
   let waiting = false;
   let orgId = "";
@@ -132,12 +146,12 @@ d("a crew lead fills in the walk-through (0356)", () => {
     const have = await one(`select to_regprocedure('${FN}') is not null as ok`);
     if (!have.ok && CREWLEAD_APPLY_0356 === "1") {
       await c.query(M0356);
-      console.warn("[walkthrough-crew-lead] 0356 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
+      console.warn("[inspection-crew-lead] 0356 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
     } else if (!have.ok) {
-      waiting = !notOnThisDatabase("[walkthrough-crew-lead] 0356 is not on this database yet: run node scripts/test-db/rebuild.cjs.");
+      waiting = !notOnThisDatabase("[inspection-crew-lead] 0356 is not on this database yet: run node scripts/test-db/rebuild.cjs.");
       if (waiting) return;
     }
-    // AND WITH 0366 (LEAK-0227): the walk-through's answers column is revoked from the signed-in role
+    // AND WITH 0366 (LEAK-0227): the inspection's answers column is revoked from the signed-in role
     // and a playbook sheet is the office's to read from forms. Every case below must hold with it, so
     // it runs inside this transaction too (safe to run twice: a database that has it runs it again).
     await c.query(M0366);
@@ -145,7 +159,7 @@ d("a crew lead fills in the walk-through (0356)", () => {
 
     // A TEST company: the owner (office), a crew lead, a second crew lead, a plain tech, and a crew
     // lead whose seat is cut. And a stranger company with its own crew lead.
-    const org = await mintThrowawayOrg(c, { label: "0356 walk-through", techs: 4 });
+    const org = await mintThrowawayOrg(c, { label: "0356 inspection", techs: 4 });
     orgId = org.orgId;
     ownerId = org.owner.id;
     [leadId, lead2Id, techId, goneId] = org.techs.map((t) => t.id);

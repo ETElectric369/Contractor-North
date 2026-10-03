@@ -18,7 +18,7 @@ import { putVisitBackOnSchedule, setAppointmentStatus, wontHappenAppointment } f
  * THE VISIT PAGE'S ⋯ ACTIONS ROWS (W2-11). The header used to carry up to seven controls: Get Paid,
  * "Mark inspection complete" (under 44px), a Delete for empty visits, a bare ✓ and ✗, Clear The Date
  * and Edit Details (whose modal footer had a hard Delete). Now it carries at most ONE main button
- * (Get Paid on a work visit, Mark Walk-Through Done on a booked walk-through) and this menu, last on
+ * (Get Paid on a work visit, Mark Inspection Done on a booked inspection) and this menu, last on
  * the row: Mark Done · Edit Details… · Clear The Date · Put It Back On The Schedule · — · Won't Happen.
  *
  * Each row says what happened in a toast and closes the panel; a status it changes has an Undo.
@@ -127,7 +127,7 @@ export function WontHappenRow({ id, deletes, afterHref }: { id: string; deletes:
       if (res.did === "deleted") {
         toast(wontHappenToast("deleted"), "success");
         // GO BACK WHERE THEY CAME FROM, not to a hardcoded parent (Erik deleted from the
-        // Walk-Throughs list and landed on /schedule). Real in-app history wins; the explicit
+        // Inspections list and landed on /schedule). Real in-app history wins; the explicit
         // fallback, the visit's schedule day, only covers a cold entry. The deleted page can't
         // re-render itself.
         if (hasInAppHistory()) router.back();

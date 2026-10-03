@@ -174,19 +174,19 @@ describe("DOCK office — Team present, Settings link absent (settings doctrine)
   });
 });
 
-/** Drift guard #2c: the Sales pipeline order — Leads · Walk-Throughs · Estimates (Erik
- *  2026-07-14: appointments and walk-throughs are ONE platform; the Walk-Throughs tab is the
+/** Drift guard #2c: the Sales pipeline order — Leads · Inspections · Estimates (Erik
+ *  2026-07-14: appointments and inspections are ONE platform; the Inspections tab is the
  *  site-visit step between a lead and its estimate), then Customers, the Contacts tile
  *  folded in (W1-07). Pins presence, order and the zero-duplication law. */
-describe("DOCK sales — Leads · Walk-Throughs · Estimates · Customers", () => {
+describe("DOCK sales — Leads · Inspections · Estimates · Customers", () => {
   const sales = DOCK.find((s) => s.key === "sales");
   const children = sales?.children ?? [];
 
-  it("children are exactly Leads · Walk-Throughs · Estimates · Customers, in pipeline order", () => {
+  it("children are exactly Leads · Inspections · Estimates · Customers, in pipeline order", () => {
     expect(children.map((c) => c.href)).toEqual(["/leads", "/inspections", "/quotes", "/crm"]);
-    // One word for the site visit (W2-10): the row reads Walk-Throughs; the route and the id stay.
+    // One word for the site visit (lib/statuses): the row reads Inspections; the route and the id stay.
     expect(children.find((c) => c.id === "sl-inspections")).toMatchObject({
-      label: "Walk-Throughs",
+      label: "Inspections",
       href: "/inspections",
     });
     // Customers carries no switch: Sales never disappears with Leads and Estimates off.
@@ -537,7 +537,7 @@ describe("visibleDock — role and switches, one filter", () => {
     }
   });
 
-  it("Leads off: Leads and Walk-Throughs go, and Sales lands on Estimates", () => {
+  it("Leads off: Leads and Inspections go, and Sales lands on Estimates", () => {
     const d = visibleDock({ isStaff: true, features: off("leads") });
     expect(tile(d, "sales")?.children.map((c) => c.id)).toEqual(["sl-quotes", "sl-customers"]);
     expect(tile(d, "sales")?.href).toBe("/quotes");
@@ -594,7 +594,7 @@ describe("visibleDock — role and switches, one filter", () => {
     const s = visibleDock({ isStaff: false, features: off("safety_log") });
     expect(rows(s)).not.toContain("o-safety");
     expect(rows(s)).toEqual(expect.arrayContaining(["o-liab-h", "o-comply", "o-insurance", "o-audits"]));
-    // Forms is not a Safety Log door: it also holds the walk-through sheet and the intake form.
+    // Forms is not a Safety Log door: it also holds the inspection sheet and the intake form.
     expect(rows(s)).toContain("o-forms");
   });
 

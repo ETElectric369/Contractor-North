@@ -369,7 +369,7 @@ describe("the two slots whose STORED shape isn't the shape a person says out lou
  *
  * retiredOptions rescues the chip. Nothing rescued its CHILDREN: rename "Deck" to "Decking" and
  * every question gated on `scope = Deck` stops applying, so clearInapplicable nulls the square
- * footage, the joist spacing, the railing count — an entire walk-through branch — on the next
+ * footage, the joist spacing, the railing count — an entire inspection branch — on the next
  * autosave of every finished visit. That is the biggest of the three losses and was the last one
  * uncovered.
  *

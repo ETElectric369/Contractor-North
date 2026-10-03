@@ -147,7 +147,7 @@ interface ApptForm {
 // leave this door shut for the rest of the session.
 const newParam = createParamClaim();
 
-/** Create or edit an appointment / walk-through. */
+/** Create or edit an appointment / inspection. */
 export function AppointmentButton({
   jobs,
   customers,
@@ -183,11 +183,11 @@ export function AppointmentButton({
   /** Preselect a job in create mode (e.g. mounted on that job's page) — prefills the location from
    *  the job address, books the kind Job, and suggests the job's own name as the title. */
   defaultJobId?: string;
-  /** Preselect a TYPE in create mode (e.g. "inspection" on the Walk-Throughs tab) — one of the five
+  /** Preselect a TYPE in create mode (e.g. "inspection" on the Inspections tab) — one of the five
    *  PICKABLE_APPOINTMENT_TYPES. (The old fromLead prop this superseded, and the never-passed
    *  dayStarts suggest-a-slot input, were removed in the 2026-07-16 churn audit.) */
   defaultType?: string;
-  /** Create-button copy override ("Book A Walk-Through" on the Walk-Throughs tab). */
+  /** Create-button copy override ("Book An Inspection" on the Inspections tab). */
   buttonLabel?: string;
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;
@@ -227,7 +227,7 @@ export function AppointmentButton({
   const typeOptions = appointmentTypeOptions(appointment?.type ?? defaultType ?? null);
 
   /** The title this form would suggest for these fields: follows the type (W2-06), the job's own
-   *  name when a job is picked, "Walk-Through: <customer or place>" for a walk-through (W2-10). */
+   *  name when a job is picked, "Inspection: <customer or place>" for an inspection (lib/statuses). */
   const suggestFor = (f: Pick<ApptForm, "type" | "job_id" | "customer_id" | "new_customer_name" | "location">): string =>
     suggestedVisitTitle(f.type, {
       jobName: jobs.find((j) => j.id === f.job_id)?.label ?? null,
@@ -247,7 +247,7 @@ export function AppointmentButton({
     const st = appointment ? toLocal(appointment.starts_at, tz) : { date, time: "08:00" };
     const en = appointment ? toLocal(appointment.ends_at, tz) : { date: "", time: "" };
     const base = {
-      // Default TYPE (W2-06): the caller's explicit defaultType first (the Walk-Throughs tab passes
+      // Default TYPE (W2-06): the caller's explicit defaultType first (the Inspections tab passes
       // "inspection"); booked from a job, a Job (the work on that job's day); anywhere else Other,
       // today's plain appointment, with no write-up nag after it.
       type: appointment?.type ?? defaultType ?? (defaultJobId ? "job" : "other"),
@@ -262,7 +262,7 @@ export function AppointmentButton({
       ...base,
       assigned_to: appointment?.assigned_to ?? "",
       // The title FOLLOWS THE TYPE (W2-06): the job's name from a job, the customer's name for Other,
-      // "Walk-Through: <customer or place>" on the Walk-Throughs tab. An edit keeps its own.
+      // "Inspection: <customer or place>" on the Inspections tab. An edit keeps its own.
       title: appointment?.title ?? suggestFor(base),
       date,
       start_time: st.time || "08:00",
@@ -621,7 +621,7 @@ export function AppointmentButton({
 
           <div>
             <Label htmlFor="ap-title">Title</Label>
-            <Input id="ap-title" name="title" value={form.title} onChange={(e) => patch({ title: e.target.value })} placeholder="e.g. Walk-through at the Smiths', follow-up visit" required />
+            <Input id="ap-title" name="title" value={form.title} onChange={(e) => patch({ title: e.target.value })} placeholder="e.g. Inspection at the Smiths', follow-up visit" required />
           </div>
 
           {!editing && (

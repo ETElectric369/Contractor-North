@@ -104,7 +104,7 @@ export function InquiryRow({
       scroll it into view and flash a highlight so the eye lands on the right row. */
   focused?: boolean;
   /** This lead's visits (lib/leads/visit-read, three answers): what the next-step chip reads. A lead
-   *  with a completed walk-through is CORRECTLY still open (a walk-through never converts it), and the
+   *  with a completed inspection is CORRECTLY still open (an inspection never converts it), and the
    *  chip is what tells it apart from a lead nobody has touched. VISITS_UNREAD when the board could
    *  not read them — then the chip says so instead of guessing the next step. */
   visits?: LeadVisitsAnswer;
@@ -135,7 +135,7 @@ export function InquiryRow({
     return () => clearTimeout(t);
   }, [focused]);
 
-  /* ONE NEXT-STEP CHIP (W2-07) in place of up to nine badges (status, walk-through counts, bucket,
+  /* ONE NEXT-STEP CHIP (W2-07) in place of up to nine badges (status, inspection counts, bucket,
      site visit, web, deck site, referred by, follow up): lib/leads/next-step reads the same facts and
      says what to do next. The bucket's letter and dot lead it only on a lead that carries one. */
   const step = leadNextStep(
@@ -416,8 +416,8 @@ export function LeadDetails({
             // A CONVERTED lead is an estimate's provenance (audit 7): deleting it severs the
             // estimate's only link back to the person. Say so before the click.
             if (!confirm(inquiry.converted_at
-              ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person, cancels any un-confirmed booking links, and removes the lead's uploaded files and any walk-through that has no field notes or photos. Mark it Lost instead unless it was junk.`
-              : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing: its uploaded files and any walk-through without field notes or photos go with it.`)) return;
+              ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person, cancels any un-confirmed booking links, and removes the lead's uploaded files and any inspection that has no field notes or photos. Mark it Lost instead unless it was junk.`
+              : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing: its uploaded files and any inspection without field notes or photos go with it.`)) return;
             start(async () => {
               const r = await deleteInquiry(inquiry.id);
               if (!r.ok) {

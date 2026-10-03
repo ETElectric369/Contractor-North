@@ -167,18 +167,28 @@ describe("Nort's product map after the shell wave", () => {
     expect(sheet).toMatch(/addStockPurchase\(purchase\)/);
   });
 
-  it("says Walk-Through where the app says Walk-Through (W2-10), keeping 'inspection' for the city's", () => {
-    // No line offers the user the old word for the site visit. Two uses are allowed and no others:
-    // the route /inspections (the path never moved — a word changed, not data) and the one sentence
-    // that names the word itself to say the city keeps it. Any new prose use fails here.
+  /**
+   * NORT CALLS THE SITE VISIT WHAT THE APP CALLS IT, AND BOTH HALVES OF THIS LINE HAD BEEN WRONG.
+   *
+   * W2-10 (cn-v1034, 2026-09-30) made this line say "Walk-Throughs" and "inspection is kept for the city's".
+   * Erik reversed the word on 2026-10-03, so the first half was wrong; and the second half was
+   * never right — the city's is its OWN type, final_inspection, labelled Final Inspection, so
+   * nothing had to be reserved for it. This test now forbids the OLD word in Nort's vocabulary.
+   */
+  it("gives Nort one word for the site visit — Inspection — and names the city's as its own type", () => {
+    // The old word reaches nobody through Nort: not a surface name, not a verb, not an aside.
     for (const line of NORT_PRODUCT_MAP.split("\n")) {
-      const prose = line.replace(/\/inspections/g, "").replace(/"inspection" is kept for the city's/, "");
-      expect(prose, line.slice(0, 48)).not.toMatch(/\binspections?\b/i);
+      expect(line, line.slice(0, 48)).not.toMatch(/walk.?through/i);
     }
-    expect(NORT_PRODUCT_MAP).toContain("- Sales → Walk-Throughs (/inspections):");
+    expect(NORT_PRODUCT_MAP).toContain("- Sales → Inspections (/inspections):");
+    // And the city's is told apart by its own name, not by reserving the word this page uses.
+    const sales = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Sales → Inspections"))!;
+    expect(sales).toContain("Final Inspection");
+    expect(sales).toContain("the job's permit");
     // True in code: the one label the app reads it by, and the dock row that opens it.
-    expect(appointmentTypeLabel("inspection")).toBe("Walk-Through");
-    expect(DOCK.find((s) => s.key === "sales")!.children.find((c) => c.href === "/inspections")?.label).toBe("Walk-Throughs");
+    expect(appointmentTypeLabel("inspection")).toBe("Inspection");
+    expect(appointmentTypeLabel("final_inspection")).toBe("Final Inspection");
+    expect(DOCK.find((s) => s.key === "sales")!.children.find((c) => c.href === "/inspections")?.label).toBe("Inspections");
   });
 
   it("names what a past day and a dateless job now do on the Schedule (SV-actual, SV-ghost, W2-05)", () => {

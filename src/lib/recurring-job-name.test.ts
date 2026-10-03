@@ -75,6 +75,9 @@ describe("recurring jobs keep the template's title as typed", () => {
     });
   }
 
+  // "Walk-through" is a TEMPLATE A PERSON TYPED between 2026-09-30 and 2026-10-03, stored as typed.
+  // It stays here beside today's word: the matcher has to read both, and two identical cases in this
+  // loop would be two tests with one name, which is how this one went missing.
   for (const title of ["Inspection", "Walk-through", "Site visit: Rita Moss", "  "]) {
     it(`"${title}" is only a tag (or nothing): the job is named for the customer as written`, async () => {
       const { client, inserts } = fakeDb(rita);

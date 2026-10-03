@@ -12,7 +12,7 @@ import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { convertInquiry, suggestVisitSlots } from "./actions";
 import { workKind } from "@/lib/schedule/work-shape";
 
-/** A sensible default walk-through day: 2 days out. */
+/** A sensible default inspection day: 2 days out. */
 function defaultInspectDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 2);
@@ -22,7 +22,7 @@ function defaultInspectDate(): string {
 const p2 = (n: number) => String(n).padStart(2, "0");
 
 /** Next three weekdays at 9 AM — default options for "Let them pick" (9 AM is
- *  the walk-through convention; the office fine-tunes per slot). */
+ *  the inspection convention; the office fine-tunes per slot). */
 function defaultSlots(): { date: string; time: string }[] {
   const out: { date: string; time: string }[] = [];
   const d = new Date();
@@ -35,10 +35,10 @@ function defaultSlots(): { date: string; time: string }[] {
 }
 
 /**
- * The lead's front-and-center next steps — no more "Convert ▾" grab-bag. A lead either needs a
- * walk-through to gather scope, or it's ready to price:
- *   • Walk-Through — starts one now, when you're already there.
- *   • Schedule — books a walk-through onto the Schedule; the lead STAYS a lead. Two ways:
+ * The lead's front-and-center next steps — no more "Convert ▾" grab-bag. A lead either needs an
+ * inspection to gather scope, or it's ready to price:
+ *   • Inspection — starts one now, when you're already there.
+ *   • Schedule — books an inspection onto the Schedule; the lead STAYS a lead. Two ways:
  *     "Book It" (a firm date) or "Let Them Pick" (offer up to 3 times → a /pick link to text them,
  *     same pattern as the appointment modal's Propose Times).
  *   • Create estimate — opens the estimate builder from this lead.
@@ -90,7 +90,7 @@ export function ConvertMenu({
   const [busy, setBusy] = useState<null | "estimate" | "inspection" | "job" | "contact">(null);
   const [error, setError] = useState<string | null>(null);
   /* RIDE-ALONG SLOTS. The modal opens INSTANTLY on the blind defaults (60mph law), then the
-     calendar's own suggestion lands async: days already holding walk-throughs, at times that fit
+     calendar's own suggestion lands async: days already holding inspections, at times that fit
      around them, the lead's town first. touchedRef is the not-annoying guard — the moment he
      edits a date by hand, a late-arriving suggestion must NOT yank the form out from under him. */
   const [slotNote, setSlotNote] = useState<string | null>(null);
@@ -181,29 +181,29 @@ export function ConvertMenu({
           positioning the contact takes it out of the flow, so the three verbs centre on the row
           itself and land at the same x all the way down the list however long the name is. */}
       <div className="relative flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
-        {/* Already there? One tap creates the walk-through (linked to this lead) and lands
+        {/* Already there? One tap creates the inspection (linked to this lead) and lands
             straight on its capture page — no booking ceremony (nowOnly: the schedule
             options live right here in the modal alongside).
-            ERIK'S ONE-WORD VERBS (July), with the site visit's one word (W2-10): Walk-Through ·
+            ERIK'S ONE-WORD VERBS (July), with the site visit's one word (lib/statuses): Inspection ·
             Schedule · Estimate. 44px each; on a phone the icons step aside so the three still fit
             one line at 375px (the words carry the meaning). */}
         <NewInspectionButton
           nowOnly
-          label="Walk-Through"
-          title="Start a walk-through now — you're already there"
+          label="Inspection"
+          title="Start an inspection now — you're already there"
           iconClassName="hidden h-4 w-4 sm:block"
           inquiryId={inquiryId}
           variant="outline"
         />
         {/* "Schedule", not "Schedule inspection" — Erik: "takes up way too much space on the
-            screen and is distracting". A walk-through is the only thing there is to schedule on
-            a LEAD row; the modal it opens says "Book A Walk-Through" in its title, which is where
+            screen and is distracting". An inspection is the only thing there is to schedule on
+            a LEAD row; the modal it opens says "Book An Inspection" in its title, which is where
             that word belongs. */}
         <Button
           variant="outline"
           onClick={openInspect}
           disabled={busy !== null}
-          title={isWork ? `Put the ${workNoun} on the Schedule` : "Book a walk-through — the lead stays open"}
+          title={isWork ? `Put the ${workNoun} on the Schedule` : "Book an inspection — the lead stays open"}
         >
           <CalendarPlus className="hidden h-4 w-4 sm:block" /> Schedule
         </Button>
@@ -229,7 +229,7 @@ export function ConvertMenu({
           // day, so the work-flavored title would promise a conversion pick mode never does.
           : isWork && mode === "book" ? (kind === "job" ? "Schedule The Job" : "Book The Service Call")
           : isWork ? "Offer Times For The Visit"
-          : "Book A Walk-Through"
+          : "Book An Inspection"
         }
         size="sm"
         footer={
@@ -291,7 +291,7 @@ export function ConvertMenu({
               </p>
             ) : (
               <p className="text-sm text-slate-600">
-                Books a walk-through for <strong>{inquiryName}</strong> onto your Schedule (a booking you can move or
+                Books an inspection for <strong>{inquiryName}</strong> onto your Schedule (a booking you can move or
                 reassign). The lead stays open, so you can create the estimate after the visit.
               </p>
             )}

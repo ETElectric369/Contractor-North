@@ -162,7 +162,7 @@ export async function submitIntake(
   }
 
   // THE PRELIMINARY REPORT (Erik + Andrew, 8/21): a lead that arrives with plan PDFs gets them
-  // read into a walk-through brief in the background, so the report is waiting when the office
+  // read into an inspection brief in the background, so the report is waiting when the office
   // opens the lead. after() — the customer's confirmation never waits on a model. The runner
   // carries its own harness (org AI ceiling, fail-closed daily cap, meter) because this is the
   // one model call a stranger's form post can start. Values are snapshotted; the callback

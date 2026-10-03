@@ -278,10 +278,10 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
   const page = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/page.tsx"), "utf8");
   const rows = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/visit-header-actions.tsx"), "utf8");
 
-  it("Get Paid on a work visit, Mark Walk-Through Done on a booked walk-through, none otherwise", () => {
-    expect(page).toContain("{viewerIsStaff && a.status !== \"cancelled\" && !walkThrough && (");
-    expect(page).toContain("{viewerIsStaff && walkThrough && booked && (");
-    expect(page).toContain('<MarkCompleteButton id={a.id} label="Mark Walk-Through Done" />');
+  it("Get Paid on a work visit, Mark Inspection Done on a booked inspection, none otherwise", () => {
+    expect(page).toContain("{viewerIsStaff && a.status !== \"cancelled\" && !isInspection && (");
+    expect(page).toContain("{viewerIsStaff && isInspection && booked && (");
+    expect(page).toContain('<MarkCompleteButton id={a.id} label="Mark Inspection Done" />');
     expect(page).not.toContain("Mark inspection complete");
   });
 

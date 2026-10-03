@@ -191,7 +191,7 @@ export function retiredOptions(pb: Playbook, stored: unknown): Record<string, st
  * retiredAnswers covers a KEY leaving. retiredOptions covers a VALUE leaving. Neither covers the
  * one that loses the most: rename the chip "Deck" to "Decking" and every question GATED behind
  * "Deck" — the square footage, the joist spacing, the railing count, an entire branch of the
- * walk-through — stops applying, and clearInapplicable nulls all of it on the next autosave. The
+ * inspection — stops applying, and clearInapplicable nulls all of it on the next autosave. The
  * parent chip gets rescued into `scope__was`; its children were not rescued by anything.
  *
  * THE HARD PART IS THAT CLEARING IS USUALLY RIGHT. When Andrew changes his answer from Deck to

@@ -88,7 +88,7 @@ describe("STRUCTURE IS NEVER TAKEN FROM THE MODEL — only prose", () => {
   });
 
   it("FILL HOLES, NEVER OVERWRITE A HAND — a why somebody wrote is untouchable", () => {
-    // Erik's own playbook carries fifteen long why lines in his own words. A walk-through that
+    // Erik's own playbook carries fifteen long why lines in his own words. A setup pass that
     // quietly reworded them would destroy the exact thing this build exists to capture, and he'd
     // have to read fifteen paragraphs closely to notice. Enforced in code, not asked for in the
     // prompt — same law as the provenance gate.

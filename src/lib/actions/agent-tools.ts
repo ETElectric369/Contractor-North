@@ -207,7 +207,7 @@ export const AGENT_TOOL_FEATURE: Readonly<Record<string, FeatureKey>> = {
   "permit.create": "permits",
   "compliance.create": "licenses",
   "safety.log": "safety_log",
-  // Crew checklists are Safety Log's; a walk-through's answers live on its visit, not in a form submission.
+  // Crew checklists are Safety Log's; an inspection's answers live on its visit, not in a form submission.
   "form.submit": "safety_log",
   "panel.suggest": "panel_map",
   "stock.take": "shop_stock",

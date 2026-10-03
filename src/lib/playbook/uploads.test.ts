@@ -88,7 +88,7 @@ describe("AN UPLOAD MUST SURVIVE CONVERSION — Andrew's plan set 'disappeared' 
 
   /**
    * THE PROJECTION LAW, pinned. The lead leaves the inbox on conversion (`.is("converted_at",
-   * null)`), so the estimate, job and walk-through pages are the only remaining doors to the
+   * null)`), so the estimate, job and inspection pages are the only remaining doors to the
    * customer's files — and each reaches them through `inquiry.intake`. A select list that drops
    * `intake` doesn't error; it renders an empty list and the upload silently "disappears" again.
    */

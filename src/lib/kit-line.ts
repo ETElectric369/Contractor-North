@@ -23,7 +23,7 @@ import { priceBookLine, type PriceItemOptionRow } from "@/lib/pricing/item-optio
 import { normalizeUnit } from "@/lib/pricing/units";
 
 /** The sizing rule — on the item when linked, on the line when not. 0241 made it generic: an item
- *  is counted per ONE measurement (`sized_by` = a walk-through need key, or the built-ins area_sqft /
+ *  is counted per ONE measurement (`sized_by` = an inspection need key, or the built-ins area_sqft /
  *  length_lf), `qty_per` of it per unit; qty_per_sqft / qty_per_lf are the 0166 legacy pair. */
 export type KitSizing = {
   sized_by: string | null;

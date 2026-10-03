@@ -116,7 +116,7 @@ d("the shell's new reads: Bug Watch's open count and the link offer's candidates
           )
         ).id,
       );
-    const booked = await visit("Walk-Through: Tom Goodman");
+    const booked = await visit("Inspection: Tom Goodman");
     const offered = await visit("Walk — Tom Goodman", { status: "proposed" });
     await visit("Linked already — Tom Goodman", { customer: cust });
     await visit("Done — Tom Goodman", { status: "completed" });
@@ -138,7 +138,7 @@ d("the shell's new reads: Bug Watch's open count and the link offer's candidates
       ).rows,
     );
     expect(rows.map((r) => r.id).sort()).toEqual([booked, offered].sort());
-    // The columns it selects are plain: no walk-through answers (0366 revokes those, not these).
+    // The columns it selects are plain: no inspection answers (0366 revokes those, not these).
     expect(Object.keys(rows[0]).sort()).toEqual(["id", "location", "starts_at", "title"]);
     // Another company's visit is invisible to him whatever the filters say.
     const theirs = await asPerson(owner, async () => Number((await one("select count(*)::int as n from public.appointments where org_id = $1", [b.orgId])).n));

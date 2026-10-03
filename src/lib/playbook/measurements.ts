@@ -2,7 +2,7 @@ import type { Playbook } from "./types";
 
 /**
  * THE MEASUREMENTS AN ORG CAN COUNT BY (0241). A price-list item is "counted per" one of these:
- * the two built-in dimensions the deck flow already derives (area, length), then every walk-through
+ * the two built-in dimensions the deck flow already derives (area, length), then every inspection
  * need marked `measured` with a number slot — conduit run, device count, ceiling height, stair
  * steps, doors — whatever THIS company's own questions measure. Pure; the pages feed it the org's
  * playbooks (every form that has one), deduped by key, first label wins.

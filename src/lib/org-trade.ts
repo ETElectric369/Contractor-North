@@ -4,7 +4,7 @@
  * Sign-up keeps the trade as a KEY (settings.trade, 0352), and never writes the words
  * (settings.trade_label). Every guide read the words, so a company that signed up yesterday was
  * asked its trade again by the tour, got no trade line in Nort's instructions, and got a starter
- * walk-through chosen by nothing. This reader closes that: the KEY decides, the words describe.
+ * inspection chosen by nothing. This reader closes that: the KEY decides, the words describe.
  *
  *   key    settings.trade when it is one of the app's trades; otherwise, as a LAST RESORT, the key
  *          read out of the words a person typed (tradeKeyFromWords). "" when neither says.

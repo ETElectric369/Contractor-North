@@ -4,10 +4,10 @@ import { join } from "node:path";
 import pg from "pg";
 import { assertTestDatabase } from "@/lib/db-guard";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
-import { answersWithoutPrices, sheetsWithoutMoney, withoutMoney } from "@/lib/inspection/walkthrough-access";
+import { answersWithoutPrices, sheetsWithoutMoney, withoutMoney } from "@/lib/inspection/inspection-access";
 
 /**
- * WALK-THROUGH PRICES STAY IN THE OFFICE (0366), proven where the boundary lives: the database, with a
+ * INSPECTION PRICES STAY IN THE OFFICE (0366), proven where the boundary lives: the database, with a
  * tech's own session (the anon key plus his JWT is all PostgREST needs). Modelled on
  * timeclock/pay-column-guard (the pay spine's column guard), but with people, not only the catalog:
  *
@@ -24,7 +24,7 @@ import { answersWithoutPrices, sheetsWithoutMoney, withoutMoney } from "@/lib/in
  *               included: 0056 already made inquiries staff-only, and 0366 checks it stays so.
  *   the mirrors answers_without_prices and playbook_without_money say exactly what the app's
  *               answersWithoutPrices and sheetsWithoutMoney say, sample by sample.
- *   0356 stands a crew lead still saves the walk-through through save_walkthrough_capture, and a
+ *   0356 stands a crew lead still saves the inspection through save_walkthrough_capture, and a
  *               priced answer stays the office's.
  *
  * When the database doesn't have 0366 yet, the leak is shown first (a tech CAN read the prices), then
@@ -49,7 +49,7 @@ const PLAYBOOK = {
   extra: { secret: "$99" },
 };
 
-d("walk-through prices stay in the office (0366)", () => {
+d("inspection prices stay in the office (0366)", () => {
   let c: pg.Client;
   let ready = false;
   let had = false;
@@ -223,7 +223,7 @@ d("walk-through prices stay in the office (0366)", () => {
     expect(p).toEqual({ col: false, id: true });
   });
 
-  it("a crew lead still saves the walk-through through save_walkthrough_capture, and a priced answer stays the office's", async () => {
+  it("a crew lead still saves the inspection through save_walkthrough_capture, and a priced answer stays the office's", async () => {
     const r = await tryAs(leadId, "select public.save_walkthrough_capture($1, null, $2, $3::jsonb)::text as id", [
       visitLead,
       sheetId,

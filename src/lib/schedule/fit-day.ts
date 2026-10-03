@@ -27,7 +27,7 @@
 
 export type Busy = { startMin: number; endMin: number };
 
-/** The width assumed for an unsized item while fitting — a walk-through's usual hour and a half. */
+/** The width assumed for an unsized item while fitting — an inspection's usual hour and a half. */
 export const NOMINAL_SLOT = 90;
 
 /** A call is made from wherever you are, so it never occupies the day's clock. See fitIntoDay. */

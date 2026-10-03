@@ -173,7 +173,7 @@ export function TellNort({
         <p className="text-xs text-slate-500">
           {hint ? `Say the whole thing — ${hint.replace(/\?$/, "")}, and anything else you'd tell somebody.` : "Say the whole thing, the way you'd say it to a person."}
         </p>
-        {/* A thumb-sized close with a name: 44px like every other door on the walk-through, and a
+        {/* A thumb-sized close with a name: 44px like every other door on the inspection, and a
             screen reader says what the X does. */}
         <button
           type="button"

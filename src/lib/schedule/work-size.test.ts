@@ -154,7 +154,7 @@ describe("every kind the app offers survives the round trip", () => {
 });
 
 /**
- * FIVE KINDS TO PICK (W2-06): Walk-Through, Job, Service Call, Phone Call, Other. The pickers offer
+ * FIVE KINDS TO PICK (W2-06): Inspection, Job, Service Call, Phone Call, Other. The pickers offer
  * exactly these (and a row's own old kind); the guards still accept every known kind, so nothing an
  * old row already is can be refused.
  */
@@ -162,7 +162,7 @@ describe("the five kinds a person picks survive the round trip, Other included",
   it("are the five, in the picker's order, each a kind a writer accepts", () => {
     expect([...PICKABLE_WORK_KINDS]).toEqual(["walkthrough", "job", "service", "call", "other"]);
     for (const k of PICKABLE_WORK_KINDS) expect(isWorkKind(k) || k === "other", k).toBe(true);
-    expect(PICKABLE_WORK_KINDS.map((k) => KIND_LABEL[k])).toEqual(["Walk-Through", "Job", "Service Call", "Phone Call", "Other"]);
+    expect(PICKABLE_WORK_KINDS.map((k) => KIND_LABEL[k])).toEqual(["Inspection", "Job", "Service Call", "Phone Call", "Other"]);
   });
 
   it("book as a type the table allows and a person can pick, and read back as the kind picked", () => {
@@ -175,11 +175,11 @@ describe("the five kinds a person picks survive the round trip, Other included",
     }
   });
 
-  it("Other books as Other, never a walk-through (and never the walk-through's title)", () => {
+  it("Other books as Other, never an inspection (and never the inspection's title)", () => {
     expect(appointmentTypeFor("other")).toBe("other");
     expect(workKind({ kind: "appointment", type: "other" })).toBe("other");
     expect(bookingTitle("other", "Braden Lang")).toBe("Braden Lang");
-    // …while a lead nobody tagged still books the walk-through it always did.
+    // …while a lead nobody tagged still books the inspection it always did.
     expect(appointmentTypeFor(null)).toBe("inspection");
     expect(appointmentTypeFor("")).toBe("inspection");
   });
@@ -199,8 +199,8 @@ describe("the five kinds a person picks survive the round trip, Other included",
   it("the New Appointment title follows its type", () => {
     const ctx = { jobName: "3245 West Garnet Boulevard", customerName: "Rita Moss", place: "12 Elm St, Testville, CA 96161" };
     expect(suggestedVisitTitle("job", ctx)).toBe("3245 West Garnet Boulevard"); // the job's own name
-    expect(suggestedVisitTitle("inspection", ctx)).toBe("Walk-Through: Rita Moss");
-    expect(suggestedVisitTitle("inspection", { place: "12 Elm St, Testville, CA 96161" })).toBe("Walk-Through: 12 Elm St");
+    expect(suggestedVisitTitle("inspection", ctx)).toBe("Inspection: Rita Moss");
+    expect(suggestedVisitTitle("inspection", { place: "12 Elm St, Testville, CA 96161" })).toBe("Inspection: 12 Elm St");
     expect(suggestedVisitTitle("other", ctx)).toBe("Rita Moss");
     expect(suggestedVisitTitle("service_call", ctx)).toBe("Service call: Rita Moss");
     expect(suggestedVisitTitle("call", ctx)).toBe("Call Rita Moss");

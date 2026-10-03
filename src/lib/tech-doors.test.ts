@@ -63,7 +63,7 @@ describe("the job's side doors", () => {
     expect(s).toContain('t.id !== "quotes" && t.id !== "invoices"');
   });
 
-  it("an appointment: the office's verbs don't render for a tech; the walk-through is the office's, a crew lead's on his visit (0356), and read-only for anyone else", () => {
+  it("an appointment: the office's verbs don't render for a tech; the inspection is the office's, a crew lead's on his visit (0356), and read-only for anyone else", () => {
     const s = src("appointments/[id]/page.tsx");
     // At most one main button, then the ⋯ Actions (W2-11): each behind the viewer's role.
     for (const tag of ["<SettleUpButton", "<MarkCompleteButton", "<SectionActionsMenu"]) {
@@ -79,9 +79,9 @@ describe("the job's side doors", () => {
     // The bare ✓ / ✗ and the top-row Delete are gone from the page (the ✓ / ✗ stay on the calendar row).
     expect(s).not.toContain("<ApptQuickActions");
     expect(s).not.toContain("<DeleteEmptyInspectionButton");
-    // Who fills it in comes from one rule (lib/inspection/walkthrough-access), and a crew lead's door
+    // Who fills it in comes from one rule (lib/inspection/inspection-access), and a crew lead's door
     // is the database's probe of save_walkthrough_capture, never a guess.
-    expect(s).toMatch(/const access = walkthroughAccess\(\{\s*isStaff: viewerIsStaff,/);
+    expect(s).toMatch(/const access = inspectionAccess\(\{\s*isStaff: viewerIsStaff,/);
     expect(s).toContain('supabase.rpc("save_walkthrough_capture", { p_appointment: a.id })');
     expect(s).toContain("rpcReady: !!crewProbe && !crewProbe.error");
     expect(s).toContain("access={access}");
@@ -93,7 +93,7 @@ describe("the job's side doors", () => {
     expect(s).toContain("templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}");
     expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
     // The heading names the estimate only for the people who get its door.
-    expect(s).toContain('{viewerIsStaff && estimatesOn ? "Walk-Through Or Estimate" : "Walk-Through"}');
+    expect(s).toContain('{viewerIsStaff && estimatesOn ? "Inspection Or Estimate" : "Inspection"}');
   });
 
   it("the job's Tasks card is the crew's too: the Overview and the Tasks tab render it for every role (0358)", () => {

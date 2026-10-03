@@ -4,7 +4,7 @@ import { extOf, uploadDisplayName } from "@/lib/playbook/uploads";
 import type { AnswerValue, Answers, Playbook } from "@/lib/playbook/types";
 
 /**
- * THE PRELIMINARY WALK-THROUGH REPORT, read from the customer's own plans.
+ * THE PRELIMINARY INSPECTION REPORT, read from the customer's own plans.
  *
  * Erik + Andrew, 8/21: "have Nort process any lead that comes in to have a preliminary inspection
  * report ready to go for the boss ... all of that information ready in the inspector, for us to
@@ -13,13 +13,13 @@ import type { AnswerValue, Answers, Playbook } from "@/lib/playbook/types";
  * never saw it at all.
  *
  * This module is the PURE half: the brief's shape, its tolerant parse, its clamps, and the filter
- * that turns the model's raw answers into ones the walk-through playbook accepts. The server
+ * that turns the model's raw answers into ones the inspection playbook accepts. The server
  * runner (plan-brief-run.ts) does the reading; every surface (lead row, inspector, carry) reads
  * through here.
  *
  * The brief lives INSIDE `inquiries.intake` (key `plan_brief`) — deliberately not a column. The
  * intake jsonb already rides to every surface that needs it (the leads board reads *, and the
- * estimate/job/walk-through pages carry `inquiry.intake` since cn-v759), so no projection ever
+ * estimate/job/inspection pages carry `inquiry.intake` since cn-v759), so no projection ever
  * has to remember it exists.
  *
  * PROVENANCE LAW: everything here is a MACHINE's reading of a document. The customer's own
@@ -49,7 +49,7 @@ export interface PlanBrief {
   summary?: string;
   scope_included?: string[];
   scope_excluded?: string[];
-  /** Typed to the org's walk-through playbook — already coerced, sparse. */
+  /** Typed to the org's inspection playbook — already coerced, sparse. */
   answers?: Answers;
   /** Concrete details the plans show that no playbook question asks. */
   observations?: string[];
@@ -104,9 +104,9 @@ export function parsePlanBrief(intake: unknown): PlanBrief | null {
 }
 
 /**
- * The model's raw answers → ones the walk-through accepts.
+ * The model's raw answers → ones the inspection accepts.
  *
- * Same spine as answersFromIntake (coerce against the walk-through's own playbook, drop unknown
+ * Same spine as answersFromIntake (coerce against the inspection's own playbook, drop unknown
  * keys, drop scopes/file slots, sparse output) with ONE deliberate difference: `measured` needs
  * are KEPT. A customer may answer a question but never take a measurement — a plan sheet is the
  * opposite case: its dimensions are the architect's, exactly what a take-off reads, and the
@@ -126,7 +126,7 @@ export function answersFromBrief(pb: Playbook, raw: unknown): Answers {
 }
 
 /**
- * Layer the brief's answers UNDER the customer's own for the walk-through seed.
+ * Layer the brief's answers UNDER the customer's own for the inspection seed.
  *
  * The customer answered questions in their own words; the brief is a machine's reading of their
  * documents. Where both speak, the person wins. Returns the merged answers plus the labels of
@@ -173,9 +173,9 @@ export function computeBriefFills(
 }
 
 /**
- * Which of the walk-through's CURRENT answers are still the machine's, verbatim.
+ * Which of the inspection's CURRENT answers are still the machine's, verbatim.
  *
- * The estimator hand-off frames walk-through answers as "his words — take them as given"; an
+ * The estimator hand-off frames inspection answers as "his words — take them as given"; an
  * answer the brief seeded and nobody touched is NOT his words, it is a model's reading of a
  * stranger's document, and it must cross that boundary wearing its own label. Equality is the
  * provenance test: the moment he edits a value it stops matching and becomes his.

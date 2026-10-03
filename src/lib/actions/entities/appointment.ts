@@ -85,7 +85,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Reschedule appointment",
     description:
-      "Reschedule an appointment / walk-through to a new time — e.g. 'move the Smith walk-through to Thursday at 9am'. Find it first with schedule_overview (it returns the id), then pass that id plus the new starts_at (optionally ends_at). Without ends_at the visit keeps its length and the end moves with it. Keeps everything else; no cancel+recreate. " +
+      "Reschedule an appointment / inspection to a new time — e.g. 'move the Smith inspection to Thursday at 9am'. Find it first with schedule_overview (it returns the id), then pass that id plus the new starts_at (optionally ends_at). Without ends_at the visit keeps its length and the end moves with it. Keeps everything else; no cancel+recreate. " +
       LOCAL_TIME_RULE,
     input: z.object({ id: z.string(), starts_at: z.string().min(1), ends_at: z.string().nullable().optional() }),
     auth: "staff",
@@ -115,7 +115,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Add appointment",
     description:
-      "Create an appointment or walk-through with a title and a start time (starts_at). Its type is one of five kinds: 'inspection' is a Walk-Through (the site visit before a price), 'job' is the work itself on a day, 'service_call' a service call, 'call' a phone call somebody has to make, and 'other' anything else (the default; a meeting books as other). A city or final inspection goes on the job's permit, never here. Title a site visit \"Walk-Through: <customer or place>\"; \"inspection\" means the city's inspection on a permit. Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at, notes. " +
+      "Create an appointment or inspection with a title and a start time (starts_at). Its type is one of five kinds: 'inspection' is an Inspection (the site visit before a price), 'job' is the work itself on a day, 'service_call' a service call, 'call' a phone call somebody has to make, and 'other' anything else (the default; a meeting books as other). THE CITY'S INSPECTION IS NOT THIS: it is the separate type 'final_inspection' and it goes on the job's permit, never here. Title a site visit \"Inspection: <customer or place>\". Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at, notes. " +
       LOCAL_TIME_RULE +
       " When the person isn't in the contacts yet, book it without a customer; if you then add them with customer.create, it links this visit in the same action when it's the one visit booked for that name (its result says `linked`), and otherwise offers the link.",
     // Fragment-first: the columns are nullable and createAppointment already reads every
@@ -124,7 +124,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     input: z.object({
       title: z.string().trim().min(1),
       // THE FIVE A PERSON PICKS (W2-06, statuses.ts): spine-derived, so Nort can book exactly what the
-      // New Appointment form offers and createAppointment accepts. No kind is Other, never a walk-through.
+      // New Appointment form offers and createAppointment accepts. No kind is Other, never an inspection.
       type: z.enum(PICKABLE_APPOINTMENT_TYPES).default("other"),
       starts_at: z.string().min(1),
       ends_at: z.string().nullable().optional(),
@@ -164,7 +164,7 @@ export const appointmentActions: Record<string, ActionDef> = {
       return { ...r, data: { id: r.id }, ...(recorded ? { recorded } : {}) };
     },
   },
-  /** The door the Tom Goodman conversation was missing (2026-09-24): Nort booked the walk-through,
+  /** The door the Tom Goodman conversation was missing (2026-09-24): Nort booked the inspection,
    *  added him as a customer, asked "Want me to link him to tomorrow's inspection?", and had no
    *  verb to do it with. The same weight as appointment.create, which can already set customer_id
    *  itself; it wraps the inspector's own link door (linkAppointmentTo), so it fills an empty
@@ -174,7 +174,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Link appointment to customer",
     description:
-      "Attach a customer to an appointment / walk-through ('link Tom to tomorrow's walk-through'). Pass the appointment id (from customer.create's or customer.update's link_offer, or schedule_overview) and customer_id (an id, or the exact name). ONLY call this after the user said yes to linking: offering is your job, deciding is theirs. Confirm from the result's `recorded` line.",
+      "Attach a customer to an appointment / inspection ('link Tom to tomorrow's inspection'). Pass the appointment id (from customer.create's or customer.update's link_offer, or schedule_overview) and customer_id (an id, or the exact name). ONLY call this after the user said yes to linking: offering is your job, deciding is theirs. Confirm from the result's `recorded` line.",
     input: z.object({ id: z.string().min(1), customer_id: z.string().min(1) }),
     auth: "staff",
     effect: "write",
@@ -205,13 +205,13 @@ export const appointmentActions: Record<string, ActionDef> = {
     describe: (i) => `${statusVerb(i.status)} this appointment? Check the details below before you confirm.`,
     handler: (i) => setAppointmentStatus(i.id, i.status),
   },
-  /** How a walk-through ended (0205) — the exit the inbox was missing. */
+  /** How an inspection ended (0205) — the exit the inbox was missing. */
   "appointment.setOutcome": {
     name: "appointment.setOutcome",
     group: "appointment",
     label: "Record how it ended",
     description:
-      "Record how a walk-through ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs You without inventing an estimate.",
+      "Record how an inspection ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs You without inventing an estimate.",
     input: z.object({ id: z.string(), outcome: z.enum(["won", "lost", "no_bid"]) }),
     auth: "staff",
     effect: "write",

@@ -46,11 +46,14 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
   "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items"],
   "/leads": ["prospects", "inquiries", "pipeline"],
-  // THE WORD THE PAGE USED FOR YEARS STILL FINDS IT (cn-v1034 renamed the dock row to Walk-Throughs
-  // and nothing was typed here, so "inspection" — still the route, still the stored appointment type,
-  // still the word in Nort's own description — found NOTHING). "walkthrough" and "walk through" are
-  // separate words because a one-word spelling matches neither the label nor a hyphenated alias.
-  "/inspections": ["inspection", "inspections", "walkthrough", "walk through", "site visit", "visit"],
+  // EVERY WORD THIS PAGE HAS EVER WORN STILL FINDS IT. cn-v1034 (2026-09-30) renamed the dock row
+  // from Inspections to Walk-Throughs and added no aliases here, so "inspection" stopped matching
+  // the LABEL and found NOTHING — while the route, the stored type and Nort's own description all
+  // still said it. 33f527a0 (2026-10-01) wrote these aliases; the row is Inspections again
+  // (2026-10-03, the owner's word), and the Walk-Through spellings stay for the people who learned
+  // them in between. Each spelling is written out because a search matches the label or an alias,
+  // never a word's other shapes: "walk-through" and "walkthrough" and "walk through" are three strings.
+  "/inspections": ["inspection", "inspections", "walk-through", "walk-throughs", "walkthrough", "walk through", "site visit", "visit"],
   "/quotes": ["estimate", "proposal", "bid", "quote", "quotes"],
   "/crm": ["customers", "clients", "people", "contact", "contacts"],
   // The Reminders page was "Tasks" until 0358, and people still type the old word.

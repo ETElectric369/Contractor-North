@@ -22,7 +22,7 @@ import {
  * row and the schedule rail render THIS component, and a kind or a bucket added here exists
  * everywhere at once.
  *
- * FIVE KINDS TO PICK (W2-06): Walk-Through, Job, Service Call, Phone Call, Other (kindOptions), plus
+ * FIVE KINDS TO PICK (W2-06): Inspection, Job, Service Call, Phone Call, Other (kindOptions), plus
  * the row's own old kind (Quote, Office) when it carries one, so an old row never reads "Kind?" and
  * re-picking it still saves (the write guards accept any known kind). 44px, like every tap.
  */

@@ -1016,7 +1016,7 @@ export async function saveQuote(input: SaveQuoteInput) {
   // used to stamp it 'quoted' at click time — abandon the builder and the lead left the inbox
   // with no quote existing, taking its intake attachments with it. The lead now converts at the
   // moment an estimate for it actually lands, whichever door built it (seeded conversion, blank
-  // builder, walk-through write-up). `.is(converted_at, null)` keeps it first-deed-only: the
+  // builder, inspection write-up). `.is(converted_at, null)` keeps it first-deed-only: the
   // zero-row update on an already-converted lead is the intended no-op, not a silent failure.
   if (inquiryId) {
     await supabase
@@ -1374,7 +1374,7 @@ export async function updateQuoteStatus(id: string, status: string) {
    * ONE DECISION, RECORDED WHEREVER IT IS MADE (Erik, 8/19: "it would be the one in the same
    * with the estimate acceptance").
    *
-   * The walk-through behind this estimate is asking the same question the status dropdown just
+   * The inspection behind this estimate is asking the same question the status dropdown just
    * answered — so answer it there too (0205). Best-effort: the estimate's own status is the
    * fact that matters, and a missing appointment link must never fail the save.
    */

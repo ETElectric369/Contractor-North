@@ -331,7 +331,7 @@ describe("Undo on the rail's place", () => {
      same visit in that time, Undo must not take their newer time away and call it "Put back where it
      was." — it says what happened instead. */
   describe("a placed visit", () => {
-    const waiting = () => [{ id: "a1", title: "Smith walk-through", type: "inspection", status: "scheduled", starts_at: null, ends_at: null, planned_minutes: null }];
+    const waiting = () => [{ id: "a1", title: "Smith inspection", type: "inspection", status: "scheduled", starts_at: null, ends_at: null, planned_minutes: null }];
 
     it("the place hands back the start it wrote, and the Undo puts the visit back to waiting", async () => {
       db.appts = waiting();
@@ -367,7 +367,7 @@ describe("Undo on the rail's place", () => {
   });
 });
 
-describe("the small parts: every header door 44px (W2-01), one word (W2-10), no junk kind (W2-06)", () => {
+describe("the small parts: every header door 44px (W2-01), one word (lib/statuses), no junk kind (W2-06)", () => {
   const view = () => read("src/app/(app)/calendar/calendar-view.tsx");
 
   it("the header's icons are 44px targets, Everyone's Day first, its link, gate and href exactly as they were", () => {
@@ -390,9 +390,9 @@ describe("the small parts: every header door 44px (W2-01), one word (W2-10), no 
     expect(v).not.toMatch(/const iconBtn = "flex h-8 w-8/);
   });
 
-  it("the calendar's walk-through tooltip says Walk-through", () => {
+  it("the calendar's inspection tooltip says Inspection", () => {
     const v = view();
-    expect(v).toContain('title="Walk-through — notes, measurements, photos"');
+    expect(v).toContain('title="Inspection — notes, measurements, photos"');
     expect(v).not.toContain("Inspection capture");
   });
 

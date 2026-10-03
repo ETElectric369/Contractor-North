@@ -20,12 +20,12 @@ describe("feederOn — which Needs You feeders a switch turns off", () => {
     for (const k of KINDS) expect(feederOn(k, featuresFromOffKey("")), k).toBe(true);
   });
 
-  it("Estimates off: the started-never-sent nudge goes, and so does the walk-through write-up", () => {
+  it("Estimates off: the started-never-sent nudge goes, and so does the inspection write-up", () => {
     expect(feederOn("quote_draft", off("estimates"))).toBe(false);
     expect(feederOn("inspection_writeup", off("estimates"))).toBe(false);
   });
 
-  it("Leads off: the walk-through write-up goes", () => {
+  it("Leads off: the inspection write-up goes", () => {
     expect(feederOn("inspection_writeup", off("leads"))).toBe(false);
     expect(feederOn("quote_draft", off("leads"))).toBe(true);
   });

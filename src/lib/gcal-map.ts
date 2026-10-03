@@ -10,7 +10,7 @@
  * "external" events (the feedback-loop guard).
  */
 
-import { appointmentTypeLabel } from "@/lib/statuses";
+import { appointmentTypeLabel, visitTitle } from "@/lib/statuses";
 
 /** The private extendedProperty that marks an event as CN-pushed. */
 export const CN_TAG_KEY = "cn";
@@ -172,7 +172,8 @@ export function apptEventBody(appt: ApptForEvent, opts?: { linkUrl?: string | nu
   if (!(end.getTime() > start.getTime())) end = new Date(start.getTime() + 3600_000);
   // Label from the statuses.ts spine (pure/import-safe, so the file's no-server-imports
   // rule holds) — an inline replace(/_/g," ") pushed "[final inspection]" while the app
-  // says "Final inspection". A site visit reads "[Walk-Through] …" (W2-10). 'appointment' and
+  // says "Final inspection". A site visit reads "[Inspection] …"; the CITY'S reads
+  // "[Final Inspection] …", because that is its own type. 'appointment' and
   // 'other' both mean NO kind, so neither gets a prefix: 'other' is the new default booking, and
   // "[Other] Dentist" on his phone's calendar would be a tag that says nothing.
   const typeLabel = appt.type && !NO_KIND_TYPES.has(appt.type) ? `[${appointmentTypeLabel(appt.type)}] ` : "";
@@ -180,7 +181,13 @@ export function apptEventBody(appt: ApptForEvent, opts?: { linkUrl?: string | nu
     .filter(Boolean)
     .join("\n\n");
   return {
-    summary: `${typeLabel}${(appt.title ?? "").trim() || "Appointment"}`,
+    // THE TITLE IS RE-SAID, NEVER THE STORED ROW. A visit titled during the three days the visit was
+    // a "Walk-Through" would otherwise go out as "[Inspection] Walk-Through: Tom Goodman" — the type
+    // in one word and the title in the other, on his phone's calendar (lib/statuses visitTitle).
+    // An event ALREADY in Google keeps the summary it was pushed with until that row is next touched:
+    // calendar-sync only re-pushes rows changed since last_synced_at, and there is no full re-push of
+    // appointments. Opening and saving the visit (or moving it) sends the new summary.
+    summary: `${typeLabel}${visitTitle(appt.title).trim() || "Appointment"}`,
     location: appt.location ?? undefined,
     description: description || undefined,
     start: { dateTime: start.toISOString() },

@@ -98,7 +98,9 @@ describe("the top bar's controls", () => {
   it("no graduation cap: its rows live under Search Or Ask; Nort's host draws no control of its own", () => {
     const html = render(owner, ALL_ON, { onboarded: false, setup: {} });
     expect(html).not.toContain('data-tour="setup"');
-    expect(html).not.toMatch(/Start here|Finish setup|Take the walk-through/);
+    // "Take the walk-through" was the cap's own label for SETUP, not for the site visit — a third
+    // noun that wore the word. Both spellings are refused, so neither can grow a control here.
+    expect(html).not.toMatch(/Start here|Finish setup|Take the walk-through|Take the inspection/);
     // The panel host is mounted (the panel and the ?debrief= / ?attention= openers)...
     expect(html).toContain('data-x="nort-host"');
     // ...and the real one draws no button in the bar: the Nort button is the bar's own.

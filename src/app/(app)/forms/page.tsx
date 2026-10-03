@@ -11,7 +11,7 @@ import { NewFormButton } from "./new-form-button";
 
 export const dynamic = "force-dynamic";
 
-/** A crew checklist: any form that is neither a walk-through sheet (Leads') nor the website's
+/** A crew checklist: any form that is neither an inspection sheet (Leads') nor the website's
  *  intake form. The one rule forms/[id]'s Off line and 0355's Safety Log count use. */
 const isChecklist = (f: { is_inspection?: boolean | null; is_public_intake?: boolean | null }) =>
   !f.is_inspection && !f.is_public_intake;
@@ -34,7 +34,7 @@ export default async function FormsPage() {
   const isStaff = isStaffRole(me?.role);
 
   // SAFETY LOG (the switch board, 0352) owns the crew checklists, and only those: this page also
-  // holds every company's walk-through sheet and intake form, so the dock row carries no switch.
+  // holds every company's inspection sheet and intake form, so the dock row carries no switch.
   // Off, the checklists leave the list and New Form goes (a new form is one); each still opens
   // from its link under the Off line (forms/[id]), and the line here says why the list is shorter.
   const safetyOn = featureOn(sw.features, "safety_log");
@@ -42,13 +42,13 @@ export default async function FormsPage() {
 
   return (
     <div>
-      {/* THE SHEET GETS ITS OWN NAME. This list really does hold the walk-through sheet
+      {/* THE SHEET GETS ITS OWN NAME. This list really does hold the inspection sheet
           (is_inspection) next to the crew's checklists, so a bare "inspections" in the description
           read as the site visit — the second word for the one thing (04a9369a). Nothing is lost: a
           safety inspection is already a safety checklist. */}
       <PageHeader
         title="Forms"
-        description="Field forms — safety checklists, sign-offs, and your walk-through sheet."
+        description="Field forms — safety checklists, sign-offs, and your inspection sheet."
       >
         {isStaff && safetyOn && <NewFormButton />}
       </PageHeader>

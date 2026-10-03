@@ -147,7 +147,7 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
       // CHUNKED AND FAIL-CLOSED (audit v800). PostgREST selects are GET requests, so .in() with
       // every folder id becomes a URL ~38 bytes per uuid — a few hundred inspections and the
       // request line blows the proxy's limit and errors. `alive ?? []` then read as "no
-      // appointment exists", and the sweep deleted the capture photos of LIVE walk-throughs.
+      // appointment exists", and the sweep deleted the capture photos of LIVE inspections.
       const aliveSet = new Set<string>();
       let refsOk = true;
       for (let i = 0; i < ids.length && refsOk; i += 200) {

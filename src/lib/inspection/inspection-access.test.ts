@@ -1,26 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { answersWithoutPrices, isMissingRpc, keepStoredPhotos, sheetsWithoutMoney, walkthroughAccess, withoutMoney } from "./walkthrough-access";
+import { answersWithoutPrices, isMissingRpc, keepStoredPhotos, sheetsWithoutMoney, inspectionAccess, withoutMoney } from "./inspection-access";
 
 /**
  * "crew leader yes tech no" (Erik, 2026-09-26), as the page decides it. The database decides it again
- * (save_walkthrough_capture, 0356; its DB suite is walkthrough-crew-lead.integration.test.ts).
+ * (save_walkthrough_capture, 0356; its DB suite is inspection-crew-lead.integration.test.ts).
  */
-describe("who fills in the walk-through", () => {
+describe("who fills in the inspection", () => {
   const base = { isStaff: false, crewLead: false, onThisVisit: false, rpcReady: true };
 
   it("the office, always, whatever else is true", () => {
-    expect(walkthroughAccess({ ...base, isStaff: true })).toBe("office");
-    expect(walkthroughAccess({ ...base, isStaff: true, rpcReady: false })).toBe("office");
+    expect(inspectionAccess({ ...base, isStaff: true })).toBe("office");
+    expect(inspectionAccess({ ...base, isStaff: true, rpcReady: false })).toBe("office");
   });
 
   it("a crew lead on this visit, once the database has the door", () => {
-    expect(walkthroughAccess({ ...base, crewLead: true, onThisVisit: true })).toBe("crewLead");
+    expect(inspectionAccess({ ...base, crewLead: true, onThisVisit: true })).toBe("crewLead");
   });
 
   it("everyone else reads: a plain tech, a crew lead on someone else's visit, a crew lead before 0356", () => {
-    expect(walkthroughAccess({ ...base, onThisVisit: true })).toBe("view");
-    expect(walkthroughAccess({ ...base, crewLead: true })).toBe("view");
-    expect(walkthroughAccess({ ...base, crewLead: true, onThisVisit: true, rpcReady: false })).toBe("view");
+    expect(inspectionAccess({ ...base, onThisVisit: true })).toBe("view");
+    expect(inspectionAccess({ ...base, crewLead: true })).toBe("view");
+    expect(inspectionAccess({ ...base, crewLead: true, onThisVisit: true, rpcReady: false })).toBe("view");
   });
 
   it("the missing function reads as missing, from PostgREST or Postgres; a refusal does not", () => {
@@ -93,7 +93,7 @@ describe("the sheets, with no money in them, for anyone who isn't the office", (
     const sheets = [
       {
         id: "s1",
-        name: "Electrical walk-through",
+        name: "Electrical inspection",
         schema: [],
         playbook: {
           needs: [

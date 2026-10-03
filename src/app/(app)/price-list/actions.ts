@@ -37,7 +37,7 @@ export interface PriceItemInput {
   qty_per_lf?: number | null;
   qty_min?: number | null;
   qty_round?: string | null;
-  /** 0241: counted per this walk-through measurement (need key, or area_sqft / length_lf), so many per. */
+  /** 0241: counted per this inspection measurement (need key, or area_sqft / length_lf), so many per. */
   sized_by?: string | null;
   qty_per?: number | null;
 }

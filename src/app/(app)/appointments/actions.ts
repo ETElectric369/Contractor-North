@@ -5,7 +5,8 @@ import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
-import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/walkthrough-access";
+import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
+import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
@@ -46,12 +47,12 @@ async function resolveIso(
 }
 
 /** `refused`: the database said no to WHO is asking, so trying again won't change it (the
- *  walk-through's autosave stops retrying and says so instead). */
+ *  inspection's autosave stops retrying and says so instead). */
 export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean };
 
 /** The one refusal for a kind nobody can pick (W2-06), in the picker's own words. (Not exported: a
  *  "use server" file exports only async functions.) */
-const PICK_A_KIND = "Pick a kind: Walk-Through, Job, Service Call, Phone Call or Other.";
+const PICK_A_KIND = "Pick a kind: Inspection, Job, Service Call, Phone Call or Other.";
 
 /**
  * THE KIND A NEW OR EDITED VISIT MAY CARRY (W2-06). Create and Propose Times take one of the five a
@@ -169,7 +170,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   return { ok: true, id: data.id };
 }
 
-/** "Start A Walk-Through" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
+/** "Start An Inspection" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
  *  onsite already — too many steps today"). Creates a type='inspection' appointment starting NOW (status
  *  'scheduled'; filling in the capture is what makes it *done*), linked to the lead when
  *  launched from one, so the caller can route STRAIGHT to /appointments/<id> and start
@@ -227,13 +228,13 @@ export async function createInspectionNow(
          tapped the row's one-tap door, and got "Site inspection" — the third booking door off one
          lead, and the only one still discarding the declared kind. All three obey it now. */
       type: appointmentTypeFor((inq as { work_kind?: string | null } | null)?.work_kind),
-      // The stock title of a walk-through with no lead is the site visit's one word (W2-10); the
+      // The stock title of an inspection with no lead is the site visit's one word (lib/statuses); the
       // STOCK lists below rename it once an address or a customer arrives.
       title: inq
         ? bookingTitle(workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind }), inq.name)
-        : "Walk-Through",
+        : "Inspection",
       starts_at: new Date().toISOString(), // now — an instant is an instant in any tz
-      status: "scheduled", // NOT completed: the capture (or "Mark Walk-Through Done") finishes it
+      status: "scheduled", // NOT completed: the capture (or "Mark Inspection Done") finishes it
       // The WHOLE address, not just the street line — and the parts alongside it, so nothing
       // downstream has to re-parse a string to learn which city the work is in.
       location: formatFullAddress(inq?.address ?? null, inq?.city ?? null, inq?.state ?? null, inq?.zip ?? null) || inq?.address || null,
@@ -283,10 +284,10 @@ export async function createInspectionNow(
 }
 
 /**
- * THE LEAD'S ONE DOOR INTO ITS WALK-THROUGH (Erik: "a preliminary inspection report button on
+ * THE LEAD'S ONE DOOR INTO ITS INSPECTION (Erik: "a preliminary inspection report button on
  * the lead page itself so i can open the inspector right there with the data all filled in").
  * Opens the lead's EXISTING inspection when one is live — a second tap must never mint a second
- * walk-through — and otherwise starts one now through createInspectionNow, which seeds the
+ * inspection — and otherwise starts one now through createInspectionNow, which seeds the
  * intake answers and the plan brief.
  */
 export async function openLeadInspection(inquiryId: string): Promise<Result> {
@@ -329,7 +330,7 @@ export async function createAppointmentProposal(
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
 
-  // Offering a customer times is how a walk-through gets booked, so that is the kind when none is
+  // Offering a customer times is how an inspection gets booked, so that is the kind when none is
   // sent (it was 'quote', a kind nobody picks any more: W2-06).
   const typed = resolveType(formData, "inspection");
   if (typed.error) return { ok: false, error: typed.error };
@@ -526,9 +527,12 @@ export async function linkAppointmentTo(
     patch.location = address;
     if (parts) Object.assign(patch, parts);
   }
-  // The stock titles the create paths hand out, old spellings and new (W2-10's "Walk-Through"), so an
-  // old stock title still gets renamed. The new title follows the visit's kind (bookingTitle): a
-  // walk-through reads "Walk-Through: <name>"; a job, an Other visit, just the name.
+  // The stock titles the create paths hand out, old spellings and new (including the three days it
+  // was "Walk-Through": cn-v1034, 2026-09-30, to 2026-10-03), so an old stock title still gets
+  // renamed. The new title follows the visit's kind (bookingTitle): an inspection reads
+  // "Inspection: <name>"; a job, an Other visit, just the name. WHOLE-STRING on purpose: a stored
+  // "Walk-Through: Tom Goodman" already carries somebody's name, so it is not ours to replace with
+  // a different one — it is re-said where it is READ instead (lib/statuses visitTitle).
   const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   if (name && STOCK.includes(String(appt.title ?? "").trim().toLowerCase())) {
     patch.title = bookingTitle(workKind({ kind: "appointment", type: (appt as { type?: string | null }).type ?? null }), name);
@@ -582,8 +586,9 @@ export async function setAppointmentPlace(
     .eq("id", id)
     .maybeSingle();
 
-  // The stock titles the create paths hand out, old spellings and new (W2-10). A title a human
-  // chose is never touched.
+  // The stock titles the create paths hand out, old spellings and new (including the three days it
+  // was "Walk-Through": cn-v1034, 2026-09-30, to 2026-10-03). A title a human chose is never touched,
+  // and a stored "Walk-Through: <who>" counts as chosen — it is re-said on read (statuses visitTitle).
   const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   const isStock = STOCK.includes(String(existing?.title ?? "").trim().toLowerCase());
 
@@ -682,7 +687,7 @@ export async function addInspectionPhotos(id: string, paths: string[]): Promise<
 }
 
 /**
- * THE OFFICE TAKES ONE PHOTO OFF THE WALK-THROUGH, AND ITS FILE WITH IT (0356).
+ * THE OFFICE TAKES ONE PHOTO OFF THE INSPECTION, AND ITS FILE WITH IT (0356).
  *
  * "Taking one off is the office's, and so it STAYS off": 0356 refuses a crew lead's new photo unless
  * its file is one he uploaded himself. A photo HE took and the office took off still had its file in
@@ -697,7 +702,7 @@ export async function addInspectionPhotos(id: string, paths: string[]): Promise<
 export async function removeInspectionPhoto(id: string, path: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) {
-    if (ctx.error === STAFF_ONLY) return { ok: false, refused: true, error: "Only the office can take a photo off the walk-through." };
+    if (ctx.error === STAFF_ONLY) return { ok: false, refused: true, error: "Only the office can take a photo off the inspection." };
     return { ok: false, error: ctx.error };
   }
   const { data: existing } = await ctx.supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
@@ -813,9 +818,9 @@ async function cleanInspectionAnswers(
       (from) => from.select("schema, is_inspection, playbook").eq("id", templateId).maybeSingle(),
     );
     if (formErr) return { ok: false, error: dbError(formErr) };
-    if (!form) return { ok: false, error: "That walk-through sheet no longer exists." };
+    if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
     if (!(form as { is_inspection?: boolean }).is_inspection)
-      return { ok: false, error: "That form isn't a walk-through sheet." };
+      return { ok: false, error: "That form isn't an inspection sheet." };
     // Coerce, THEN drop anything the rules make inapplicable. Both halves matter and for different
     // reasons: coerce is the type contract, clearing is the truth contract. The client already
     // clears on change, but this row is writable through RLS directly — a payload could set
@@ -865,9 +870,9 @@ async function cleanInspectionAnswers(
   return { ok: true, clean };
 }
 
-// ── THE CREW LEAD'S WALK-THROUGH (0356) ─────────────────────────────────────────────────────────
+// ── THE CREW LEAD'S INSPECTION (0356) ─────────────────────────────────────────────────────────
 //
-// Erik (2026-09-26), on whether techs fill in walk-throughs: "crew leader yes tech no". A crew lead
+// Erik (2026-09-26), on whether techs fill in inspections: "crew leader yes tech no". A crew lead
 // (profiles.crew_lead, which only an owner or admin sets) who is ON the visit saves the sheet's
 // answers and the capture (notes, measurements, materials, photos) through ONE database door,
 // save_walkthrough_capture, which checks the same rule and holds his save to those columns: he never
@@ -878,7 +883,7 @@ async function cleanInspectionAnswers(
 /** requireStaff's refusal for a signed-in, non-staff member: the one refusal a crew lead may get
  *  past. Typed to its literal, so the comparison fails to compile if requireStaff's words change. */
 const STAFF_ONLY = "This action is staff-only.";
-const CREW_OR_OFFICE = "Only the office, or the crew lead on this visit, can fill in the walk-through.";
+const CREW_OR_OFFICE = "Only the office, or the crew lead on this visit, can fill in the inspection.";
 
 /** The crew lead ON this visit, or why not. The database asks all of it again; this is so the
  *  refusal is plain words before any write is attempted. */
@@ -886,7 +891,7 @@ async function crewLeadOnVisit(
   id: string,
 ): Promise<{ supabase: SupabaseClient; userId: string; orgId: string } | { error: string }> {
   const ctx = await requireMember();
-  if ("error" in ctx) return { error: ctx.error ?? "Sign in again to fill in the walk-through." };
+  if ("error" in ctx) return { error: ctx.error ?? "Sign in again to fill in the inspection." };
   const { data: me } = await ctx.supabase.from("profiles").select("crew_lead").eq("id", ctx.userId).maybeSingle();
   if (!(me as { crew_lead?: boolean | null } | null)?.crew_lead) return { error: CREW_OR_OFFICE };
   const { data: appt } = await ctx.supabase
@@ -900,19 +905,26 @@ async function crewLeadOnVisit(
 }
 
 /** The database's no, in the words a person reads. `refused` stops the autosave re-trying a save
- *  that will be refused again. */
-function walkthroughRefusal(error: { code?: string | null; message?: string | null }): Result {
+ *  that will be refused again.
+ *
+ *  EVERY WAY OUT OF HERE GOES THROUGH inspectionDbWords, because save_walkthrough_capture's own
+ *  sentences still say "walk-through" — they are literals in an applied migration (0356) and this is
+ *  the one place they reach a person. Without it a crew lead whose seat lapsed read "Sign in with an
+ *  active seat to fill in the walk-through." on a screen that says Inspection everywhere else.
+ *  lib/inspection/db-refusal has the why; inspection-word.test.ts reads the migration and proves
+ *  this covers every sentence it can raise. */
+function inspectionRefusal(error: { code?: string | null; message?: string | null }): Result {
   if (isMissingRpc(error))
     return {
       ok: false,
       refused: true,
-      error: "Crew leads can't save the walk-through until the office finishes an update. Nothing was saved.",
+      error: "Crew leads can't save the inspection until the office finishes an update. Nothing was saved.",
     };
-  if (error.code === "42501") return { ok: false, refused: true, error: error.message || CREW_OR_OFFICE };
-  return { ok: false, error: dbError(error) };
+  if (error.code === "42501") return { ok: false, refused: true, error: inspectionDbWords(error.message || CREW_OR_OFFICE) };
+  return { ok: false, error: inspectionDbWords(dbError(error)) };
 }
 
-function revalidateWalkthrough(id: string) {
+function revalidateInspection(id: string) {
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
@@ -947,10 +959,10 @@ async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<R
   if (!("failed" in r) && r.error?.code === "42501") r = await attempt();
   if ("failed" in r) return r.failed;
   const { data, error } = r;
-  if (error) return walkthroughRefusal(error);
+  if (error) return inspectionRefusal(error);
   // The function returns the id it wrote; nothing back means nothing was written.
   if (!data) return { ok: false, error: "That didn't save - reload and try again." };
-  revalidateWalkthrough(id);
+  revalidateInspection(id);
   return { ok: true, id };
 }
 
@@ -970,7 +982,7 @@ async function saveAnswersAsCrewLead(
       p_template_id: templateId,
       p_answers: c.clean,
     });
-    if (error) return walkthroughRefusal(error);
+    if (error) return inspectionRefusal(error);
     if (!data) return { ok: false, error: "That didn't save - reload and try again." };
     revalidatePath(`/appointments/${id}`);
     revalidatePath("/inspections");
@@ -1036,7 +1048,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
 }
 
 /**
- * HOW THE WALK-THROUGH ENDED (0205) — the missing exit.
+ * HOW THE INSPECTION ENDED (0205) — the missing exit.
  *
  * Erik lost the Donner Pass bid and had nowhere to say so: that visit has no customer, no
  * inquiry, no job, no capture and no estimate, so "mark the estimate Declined" had nothing to
@@ -1203,7 +1215,7 @@ export async function rescheduleAppointment(
   };
 }
 
-/** Turn an appointment (often a site-visit/estimate walk-through) into a job —
+/** Turn an appointment (often a site-visit/estimate inspection) into a job —
  *  idempotent: if it already spawned one, returns that job. Inherits the
  *  customer, the visit's words (never its tag) → name (lib/job-name), location → address, and start time. */
 export async function createJobFromAppointment(
@@ -1603,12 +1615,12 @@ export async function unscheduleAppointment(id: string): Promise<Result> {
  * The Inspector (field notes, photos, the typed sheet, the customer's intake answers) lives on an
  * appointment record — which was fine while every piece of work passed through an appointment, and
  * became a wall the day sold work started going straight to a job. The data is often already there
- * from an earlier entrance (the walk-through, the lead's intake); this finds it rather than
+ * from an earlier entrance (the inspection, the lead's intake); this finds it rather than
  * starting a blank one.
  *
  * Resolution order — most data first:
  *   1. a visit already linked to THIS job (newest, not cancelled)
- *   2. a visit on the job's LEAD — the walk-through that sold it, capture and all
+ *   2. a visit on the job's LEAD — the inspection that sold it, capture and all
  *   3. nothing anywhere → create one now, seeded from the lead when there is one (intake answers
  *      and plan brief carry, via the same one-tap door the lead row uses), linked to the job.
  */

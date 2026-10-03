@@ -123,7 +123,7 @@ for (const [path, before0371] of [
     it("set aside before the job finished: one row, Finished · Send", async () => {
       state.before0371 = before0371;
       state.doneJobs = [J011];
-      state.drafts = [draft({ hold_until: ahead, hold_reason: "Waiting on the walk-through" })];
+      state.drafts = [draft({ hold_until: ahead, hold_reason: "Waiting on the inspection" })];
       const rows = rowsFor(await build());
       expect(rows.map((i: any) => i.id)).toEqual(["inv-81"]);
       expect(rows[0].title).toBe("Honeysuckle · J-011 Finished · Send INV-081");
