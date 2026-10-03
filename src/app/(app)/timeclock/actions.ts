@@ -2273,10 +2273,16 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   // books. No bypass for any caller: Undo the period on /payroll first.
   const { data: locked } = await supabase
     .from("time_entries")
-    .select("paid_at, mileage_paid_at, job_id")
+    .select("paid_at, mileage_paid_at, job_id, profile_id, split_from")
     .eq("id", id)
     .maybeSingle();
-  const lock = locked as { paid_at: string | null; mileage_paid_at: string | null; job_id: string | null } | null;
+  const lock = locked as {
+    paid_at: string | null;
+    mileage_paid_at: string | null;
+    job_id: string | null;
+    profile_id: string | null;
+    split_from: string | null;
+  } | null;
   if (lock?.paid_at) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
   if (lock?.mileage_paid_at) return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
 
@@ -2296,16 +2302,80 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
     };
   }
 
+  /**
+   * A DESTRUCTIVE EDIT MAY NOT TAKE AWAY THE WAY BACK (Erik, 2026-10-02: he split a shift, deleted one
+   * half, and the surviving half could not be rejoined).
+   *
+   * A split family is "the FIRST entry, and every piece whose split_from points at it" (0288,
+   * lib/split-family). split_from is `on delete set null`, so deleting that first entry nulls every
+   * survivor's pointer at once: the pieces still touch to the second, but splitFamilies finds no family,
+   * splitNeighbors finds no neighbours, Timecards draws neither Move The Split nor Join Back Into One
+   * Shift, and join_time_entries itself refuses them ("those two entries were not split from one shift",
+   * 0320). The shift's own history is gone, with nothing deleted to explain it.
+   *
+   * So the family is RE-ROOTED on the earliest survivor. Read the pieces BEFORE the delete (afterwards
+   * their pointers are already null and nothing says who they belonged to), then point the rest at the
+   * first one. The new root needs no write of its own — the FK's SET NULL has already made it a root,
+   * which is exactly what a first entry is; its split_how is left alone on purpose, both because no
+   * reader looks at a root's split_how (familyWasConverted reads the children) and because 0319's
+   * carve-out for the FK's own null only holds while split_how is untouched.
+   *
+   * Nothing to do with one survivor: a lone entry is not a split shift, and null is the truth.
+   *
+   * A FAILED READ IS NOT AN ANSWER. If we cannot tell whether this shift has pieces we cannot tell what
+   * the delete will take away, so nothing is deleted — the same rule the invoice-claim read above obeys.
+   */
+  const kin: { id: string; clock_in: string }[] = [];
+  if (lock && !lock.split_from) {
+    const { data: pieces, error: kinErr } = await supabase
+      .from("time_entries")
+      .select("id, clock_in")
+      .eq("split_from", id)
+      .eq("profile_id", lock.profile_id ?? "")
+      .order("clock_in", { ascending: true });
+    if (kinErr) {
+      reportError("deleteTimeEntry.family", kinErr, { entryId: id });
+      return { ok: false, error: "Couldn't check whether this shift was split into parts — nothing was changed. Try again in a moment." };
+    }
+    // Sorted here as well as in the read: WHICH piece becomes the new first entry is the whole rule,
+    // so it is decided by the clock in front of us and not by the order a query happened to answer in.
+    kin.push(...((pieces ?? []) as { id: string; clock_in: string }[]));
+    kin.sort((a, b) => Date.parse(a.clock_in) - Date.parse(b.clock_in));
+  }
+
   // The silent-write law: a delete that hits zero rows (a cross-org or already-gone id) is a 204,
   // not a deleted entry.
   const { data: gone, error } = await supabase.from("time_entries").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length) return { ok: false, error: "That entry didn't delete — reload and try again." };
+
+  // THE RE-ROOT. Only the pieces this delete just orphaned (`split_from is null` on the write, so a
+  // piece somebody re-pointed in the meantime is left where it is), and checked: if it did not land,
+  // the survivors really have lost their bracket and the office is told so rather than finding out by
+  // the door being missing. Changing how a shift was split is office work in the database (0319), so a
+  // tech's own delete can land here — the entry is still deleted, and the sentence says the rest.
+  let said: string | null = null;
+  if (kin.length >= 2) {
+    const [first, ...rest] = kin;
+    const { data: rerooted, error: rerootErr } = await supabase
+      .from("time_entries")
+      .update({ split_from: first.id })
+      .in("id", rest.map((k) => k.id))
+      .eq("profile_id", lock!.profile_id ?? "")
+      .is("split_from", null)
+      .select("id");
+    if (rerootErr || (rerooted ?? []).length !== rest.length) {
+      if (rerootErr) reportError("deleteTimeEntry.reroot", rerootErr, { entryId: id, root: first.id });
+      said =
+        "That entry is deleted, but the other parts of that shift are no longer held together as one split shift, so Join Back isn't offered on them. Each part is still its own entry on Timecards.";
+    }
+  }
+
   if (lock?.job_id) revalidatePath(`/jobs/${lock.job_id}`); // the job's Time tab and its unbilled total
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // a deleted entry changes My Day's hours/clock state
-  return { ok: true };
+  return said ? { ok: true, warning: said } : { ok: true };
 }
 
 // ── the words a stopped clock is described in, always in the ORG's clock ──

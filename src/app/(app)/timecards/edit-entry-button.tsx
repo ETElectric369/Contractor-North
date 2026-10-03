@@ -17,6 +17,7 @@ import { hoursBetween } from "@/lib/utils";
 import { SplitShiftSheet, type SplitPrefill } from "./split-shift-sheet";
 import { StopClockSheet } from "./stop-clock-sheet";
 import { COPY_TO_SOMEONE_ELSE, DuplicateEntryButton } from "./duplicate-entry-button";
+import { deleteConfirmWords, type DeletingPiece } from "./delete-words";
 import { clockDoorWords } from "@/lib/long-shift";
 
 /**
@@ -371,8 +372,27 @@ export function EditEntryButton({
     });
   }
 
+  /**
+   * THE PIECE THIS DELETE WOULD TAKE, when the shift on screen is one part of a split (delete-words
+   * says it in words). Built from the SAME condition as `boundaries` below, which is what actually
+   * draws Join Back Into One Shift — a sentence may never name a door this screen is not showing.
+   */
+  function deletingPiece(): DeletingPiece | null {
+    const prev = neighbors?.prev ?? null;
+    const next = neighbors?.next ?? null;
+    if (!prev && !(next && entry.clock_out)) return null;
+    const mine = entry.job ? jobLabel(entry.job) : entry.job_code || "no job";
+    return {
+      hours: entry.clock_out ? hoursBetween(entry.clock_in, entry.clock_out, Number(entry.lunch_minutes) || 0) : null,
+      label: mine,
+      // Join Back keeps the FIRST part's job (join_time_entries, 0320): the part before this one, or
+      // this one when it IS the first — which is the case that bites, and the case Erik hit.
+      keepsJob: prev ? prev.label : mine,
+    };
+  }
+
   function remove() {
-    if (!confirm("Delete this time entry? This can't be undone.")) return;
+    if (!confirm(deleteConfirmWords(deletingPiece()))) return;
     setError(null);
     start(async () => {
       let res: { ok: boolean; error?: string; warning?: string };
@@ -385,6 +405,9 @@ export function EditEntryButton({
       if (!res.ok) return setError(res.error ?? "Could not delete.");
       close();
       router.refresh();
+      // The survivors lost their bracket and nobody chose that: said out loud, and it stays up until
+      // it has been read (deleteTimeEntry's re-root is the only thing that warns here).
+      if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
     });
   }
 
