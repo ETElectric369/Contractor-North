@@ -40,6 +40,7 @@ import { collectedByJob } from "@/lib/analytics/job-profitability";
 import { HEADERS, onHandList, toCsv, toolsBilledList, toolsList, type AccountantInputs, type Cell, type CsvTable } from "@/lib/accountant-lists";
 import { summarizeSalesTax } from "@/lib/sales-tax";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { isOwedInvoice } from "@/lib/open-counts";
 import { balanceForPerson, sumPayments, toPayPaymentRow, type PayPaymentRow } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
@@ -402,12 +403,41 @@ const bankWords = (l: any, showOwner: boolean): { description: string | null; la
   last4: showOwner ? String(l?.account_last4 ?? "").trim() || null : null,
 });
 
-/** A typed-in memo as a cell: trimmed, and never long enough to push a column off the screen. A MEMO
- *  column holds what a PERSON typed on the record; a Note column holds what North says about the row.
- *  Keeping them apart is the point: the app's own mark must never read as somebody's handwriting. */
+/**
+ * THE OWNER'S ACCOUNT DIGITS, OUT OF A NOTE BOUND FOR AN OFFICE FILE.
+ *
+ * bankWords above keeps the last 4 out of the bank-line COLUMNS, and its own comment says a later path
+ * to the same digits must not slip past it. This is that later path: the bank door writes its own
+ * sentence onto the money rows it files — "From the bank download (••4417) of May 1–May 31." onto a
+ * bill, onto a supplier payment and onto an invoice payment (bills/bank-core.ts) — and all three of
+ * those notes print in a Memo cell on Costs or Income, which every office viewer reads. The account the
+ * gate hid in one column was walking into the same file in another.
+ *
+ * The TAG comes out, not the sentence: "From the bank download of May 1–May 31." still tells the
+ * accountant the row came off a bank download, which is the whole use of it, and says nothing about
+ * which account. Dropping the sentence instead would leave a blank cell and no way to tell a
+ * bank-sorted row from a typed one.
+ */
+const ACCOUNT_TAG = /\s*\(?••\s*\d{3,4}\)?/g;
+const withoutAccountDigits = (s: string): string => s.replace(ACCOUNT_TAG, "").replace(/\s{2,}/g, " ").trim();
+
+/**
+ * THE NOTE SAVED ON A RECORD, as a cell: trimmed, never long enough to push a column off the screen,
+ * and without the owner's account digits when this reader may not see the owner's money.
+ *
+ * `showOwner` is REQUIRED and has no default: a Memo cell cannot be added without answering whose file
+ * it is, and the type checker is the only guard that still holds when the next column is written a year
+ * from now.
+ *
+ * A Memo column holds WHATEVER WAS SAVED on the record — a person's handwriting, or North's own filing
+ * sentence when the app filed the row itself (a card payment, a bank-sorted deposit, a recurring
+ * expense, a receipt out of the tray). This used to promise handwriting only, which is false for every
+ * row the app filed; the Note column beside it is the one that is always North's own mark about the row.
+ */
 const MEMO_CAP = 200;
-const memo = (v: unknown): string | null => {
-  const s = String(v ?? "").trim();
+const memo = (v: unknown, showOwner: boolean): string | null => {
+  const raw = String(v ?? "").trim();
+  const s = showOwner ? raw : withoutAccountDigits(raw);
   if (!s) return null;
   return s.length <= MEMO_CAP ? s : `${s.slice(0, MEMO_CAP - 1)}…`;
 };
@@ -726,10 +756,12 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     title(`Income, ${input.period.label}`),
     note("Cash basis: each payment on the day it came in. A payment on an invoice that was later voided is listed but not counted."),
     blank(),
-    // MEMO is the LAST column and is what a PERSON typed on the record (payments.note, a refund's
-    // note, a bank line's own description). Note beside it stays North's own words. Each payment used
-    // to carry neither: the memo was never read (projection law), so a payment noted "Check 4411" -
-    // the one string an accountant matches to a bank statement - printed as a blank cell.
+    // MEMO is the LAST column and is the note SAVED on the record (payments.note, a refund's note, a
+    // bank line's own description) - a person's handwriting, or North's own sentence when the app filed
+    // the row ("Online payment", "Deposit of 2026-04-10. From the bank download of Apr 1-Apr 30.").
+    // Note beside it stays North's own words. Each payment used to carry neither: the memo was never
+    // read (projection law), so a payment noted "Check 4411" - the one string an accountant matches to
+    // a bank statement - printed as a blank cell.
     head("Date", "Customer", "Invoice", "Job Number", "Job", "Method", "Amount", "Card Fee", "Note", "Memo"),
   ];
   type Dated = { at: string; row: Row };
@@ -750,7 +782,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
         money(cents(p.amount)),
         fee,
         inv.status === "void" ? "Invoice voided: not counted" : !fee && p.stripe_payment_intent ? "Card fee not reported yet" : null,
-        memo(p.note),
+        memo(p.note, input.showOwner),
       ),
     });
   }
@@ -759,13 +791,13 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     const j = jobOf(inv.job_id);
     dated.push({
       at: String(r.created_at),
-      row: line(date(recordDay(null, r.created_at, tz)), inv.customers?.name ?? null, inv.invoice_number ?? null, j?.job_number ?? null, j?.name ?? null, "Refund", money(-cents(r.amount)), null, null, memo(r.note)),
+      row: line(date(recordDay(null, r.created_at, tz)), inv.customers?.name ?? null, inv.invoice_number ?? null, j?.job_number ?? null, j?.name ?? null, "Refund", money(-cents(r.amount)), null, null, memo(r.note, input.showOwner)),
     });
   }
   for (const o of other) {
     // The bank's own description: without it one $800 deposit is indistinguishable from another, which
     // is the whole of what an accountant wants from a bank-sorted row.
-    dated.push({ at: `${o.posted_on}T12:00:00Z`, row: line(date(o.posted_on), null, null, null, null, "Other Income (Bank)", money(cents(o.amount)), null, null, memo(bankWords(o, input.showOwner).description)) });
+    dated.push({ at: `${o.posted_on}T12:00:00Z`, row: line(date(o.posted_on), null, null, null, null, "Other Income (Bank)", money(cents(o.amount)), null, null, memo(bankWords(o, input.showOwner).description, input.showOwner)) });
   }
   dated.sort((a, b) => a.at.localeCompare(b.at));
   if (!dated.length) rows.push(note("No money came in during this period."));
@@ -781,7 +813,11 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   // THE OWNER'S SWITCH: Revenue (all of it: payments, less refunds, plus Other Income) is the top of
   // the Summary's profit and loss, one subtraction from its bottom line; the lists' own sums stay.
   if (input.showOwner) rows.push(total(PNL_WORDS.revenue, null, null, null, null, null, money(cents(cur.totals.received))));
-  rows.push(note("Memo is what a person typed on the record: a payment's note, a refund's note, or a bank line's own description. Note beside it is North's own words about the row."));
+  rows.push(
+    note(
+      "Memo is the note saved on the record: a payment's note, a refund's note, or a bank line's own description. Somebody typed most of them; North writes its own when it files the row itself, such as a card payment or a deposit off a bank download. Note beside it is always North's own words about the row.",
+    ),
+  );
 
   // BY CUSTOMER (computeCustomerValue), BY JOB (job profit's cash rule), BY METHOD.
   const names = new Map<string, string>();
@@ -835,10 +871,18 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   rows.push(blank(), title("Invoices Made In This Period"));
   rows.push(
     note(
-      "Billed basis: each invoice on the day it was made, not the day it was paid — a different count from the payments above, which are cash. Drafts and voided invoices are listed and marked, and are in no Total. Paid To Date and Still Owed To Date are rolled up to the day this was downloaded, not to the end of the period.",
+      "Billed basis: each invoice on the day it was made, not the day it was paid — a different count from the payments above, which are cash. Drafts and voided invoices are listed and marked, are in no Total, and are owed nothing: a draft hasn't been sent and a void isn't a bill. Paid To Date and Still Owed To Date are rolled up to the day this was downloaded, not to the end of the period.",
     ),
   );
-  rows.push(head("Date Made", "Invoice", "Kind", "Customer", "Job Number", "Job", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid To Date", "Still Owed To Date", "Due Date", "Note"));
+  // DATE MADE, CUSTOMER, INVOICE, JOB NUMBER, JOB — the SAME first five columns, in the same order, as
+  // the payments list at the top of this tab. One sheet has one set of column widths (below), so a field
+  // that appears in both lists has to sit in the same column letter in both or one of the two gets the
+  // other's width: with Kind third, this list's Customer landed in a 14-wide column and its Job in an
+  // 18-wide one, so a property-management company's full name and a job named for its street were both
+  // cut off at the column edge — in the one list that exists to be filtered by customer and by job —
+  // while the same two names fitted in the list above. Nothing here wraps and the cell to the right is
+  // always filled. Kind and Status follow, where no column of the list above needs the room.
+  rows.push(head("Date Made", "Customer", "Invoice", "Job Number", "Job", "Kind", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid To Date", "Still Owed To Date", "Due Date", "Note"));
   const madeRows: { at: string; row: Row }[] = [];
   const made = { subtotal: 0, tax: 0, total: 0, paid: 0, owed: 0, counted: 0, uncounted: 0 };
   for (const i of periodInvoices) {
@@ -849,9 +893,22 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     const counts = status !== "draft" && status !== "void";
     const j = jobOf(i?.job_id);
     const rate = Number(i?.tax_rate ?? 0) * 100;
-    // THE ONE BALANCE (invoice-math.ts), never `total - amount_paid` typed out again: it floors at zero
-    // and rounds to the cent, which is why eighteen other places call it instead of subtracting.
-    const owedCents = cents(invoiceBalance(i?.total, i?.amount_paid));
+    // STILL OWED IS THE ONE RECEIVABLE RULE'S ANSWER (isOwedInvoice), and invoiceBalance is THE balance
+    // under it (invoice-math.ts: it floors at zero and rounds to the cent, which is why eighteen other
+    // places call it instead of subtracting).
+    //
+    // The cell used to be invoiceBalance for EVERY status, with only the Total row leaving a draft or a
+    // void out. A void keeps its stored total (setInvoiceStatus writes `status` alone), so a voided
+    // $5,000 invoice with nothing paid printed "Still Owed To Date $5,000.00" on a row the Total already
+    // excluded — one invoice with two answers in the one file whose job is to let an accountant
+    // reconcile them, and a filter on this column handing back receivables Open's Customers Owe You and
+    // the Summary's figure do not have. invoice-amount.ts fixed this same fault on screen already: "$X
+    // due of $X" beside a void badge told the office it was still owed.
+    //
+    // Nothing owed reads $0.00, the same as a paid invoice's does, so the column is numeric all the way
+    // down and sums to the Total row: owedCents is already zero for anything not owed, so the `counts`
+    // gate below adds exactly the figures printed above it.
+    const owedCents = isOwedInvoice(i ?? {}) ? cents(invoiceBalance(i?.total, i?.amount_paid)) : 0;
     if (counts) {
       made.counted += 1;
       made.subtotal += cents(i?.subtotal);
@@ -865,11 +922,11 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
       at: `${day ?? "9999-99-99"} ${String(i?.id ?? "")}`,
       row: line(
         date(day),
-        i?.invoice_number ?? null,
-        methodLabel(i?.invoice_kind ?? "standard"),
         i?.customers?.name ?? null,
+        i?.invoice_number ?? null,
         j?.job_number ?? null,
         j?.name ?? null,
+        methodLabel(i?.invoice_kind ?? "standard"),
         methodLabel(status),
         money(cents(i?.subtotal)),
         round3(rate),
@@ -914,7 +971,12 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     // Never expected (one read, one filter), and never silent if it happens.
     if (cents(s.totalTax) !== made.tax) rows.push(note("The tax here doesn't add up to the Tax column of Invoices Made In This Period, though both read the same invoices."));
   }
-  return { name: "Income", rows, widths: [13, 28, 14, 14, 28, 18, 14, 13, 30, 24, 13, 14, 16, 13, 24] };
+  // ONE WIDTH PER COLUMN FOR THE WHOLE SHEET, so every list on it has to agree about what each column
+  // letter holds. Nothing here wraps or auto-fits (xlsx-write.ts writes the widths literally), and a
+  // cell whose neighbour is filled is cut off at the column edge, so a column too narrow for the longest
+  // thing printed in it loses text. Column M is 19 rather than 16 because its own header, "Still Owed To
+  // Date", is 18 characters and was being clipped by Due Date beside it.
+  return { name: "Income", rows, widths: [13, 28, 14, 14, 28, 18, 14, 13, 30, 24, 13, 14, 19, 13, 24] };
 }
 
 // ── Costs ────────────────────────────────────────────────────────────────────
@@ -1006,7 +1068,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
         what,
         isBill ? yesNo(isOnAccountBill({ status: String(r.status ?? ""), settledBySupplier: costSettled.has(String(r.id)) })) : null,
         isBill ? accountOf(r.id) : null,
-        isBill ? memo(r.notes) : null,
+        isBill ? memo(r.notes, input.showOwner) : null,
       ),
     );
   }
@@ -1040,7 +1102,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   // sentence: a filter on Where groups a spelling, a filter on Supplier Account groups a company.
   rows.push(
     note(
-      "Marked Unpaid is what North's own books say about a ticket as of the download day — the same answer as Bills North Has Marked Unpaid on Open. Supplier Account is the company a ticket belongs to however it was spelled, so one supplier written several ways filters as one; Where is the spelling on the paper. Memo is what a person typed on the ticket.",
+      "Marked Unpaid is what North's own books say about a ticket as of the download day — the same answer as Bills North Has Marked Unpaid on Open. Supplier Account is the company a ticket belongs to however it was spelled, so one supplier written several ways filters as one; Where is the spelling on the paper. Memo is the note saved on the ticket: somebody typed most of them, and North writes its own when it files the ticket itself, off a bank download, a recurring expense or a receipt out of the tray.",
     ),
   );
 
@@ -1084,8 +1146,8 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
         methodLabel(p?.method),
         money(cents(p?.amount)),
         voided ? "Voided: not counted" : null,
-        memo(p?.reference),
-        memo(p?.note),
+        memo(p?.reference, input.showOwner),
+        memo(p?.note, input.showOwner),
       ),
     );
   }
@@ -1438,7 +1500,7 @@ function ownerEquityRows(input: AccountantWorkbookInput, cur: OwnerMoney, months
     if (direction === "Taken Out") sums.out += c;
     else sums.in += c;
     const words = bankWords(l, showOwner);
-    dated.push({ at: `${day} ${String(l?.id ?? "")}`, row: line(date(day), direction, money(c), memo(words.description), words.last4) });
+    dated.push({ at: `${day} ${String(l?.id ?? "")}`, row: line(date(day), direction, money(c), memo(words.description, showOwner), words.last4) });
   };
   for (const l of inp.ownerDraws ?? []) push(l, "Taken Out");
   for (const l of inp.ownerMoneyIn ?? []) push(l, "Put In");
@@ -1562,7 +1624,16 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   if (!open.customers.invoices.length) rows.push(note(`No customer owed anything on ${day}.`));
   rows.push(beforeTotals());
   rows.push(total("Total", null, null, null, money(open.customersCents)));
-  rows.push(note("Drafts aren't counted: they haven't been sent. When each invoice was made, what kind it is and what tax it carried are on Income, under Invoices Made In This Period."));
+  // WHERE THE REST OF AN OPEN INVOICE IS, said only of the invoices that are actually over there. This
+  // list is as of the download day, so most of it on any past-period download was made before the
+  // period; Income's register is filtered to the period (inPeriod on created_at, and the read's own
+  // window). The sentence used to send the reader to Income for every row on this list, and an invoice
+  // made in August is in no cell of a Q2 file.
+  rows.push(
+    note(
+      `Drafts aren't counted: they haven't been sent. For an invoice made inside ${input.period.label}, when it was made, what kind it is and what tax it carried are on Income, under Invoices Made In This Period; one made before or after the period isn't in that list, and this row is all the file has on it.`,
+    ),
+  );
   rows.push(blank(), title("Suppliers Say You Owe"), head("Supplier", "Owed", "How North Knows"));
   for (const s of open.suppliers) rows.push(line(s.name, money(s.cents), s.how));
   if (!open.suppliers.length) rows.push(note(`No supplier was owed anything on ${day}.`));

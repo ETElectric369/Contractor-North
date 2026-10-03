@@ -34,6 +34,7 @@ import {
   type AccountantWorkbookInput,
 } from "./accountant-workbook";
 import { computeOwnerMoney, supplierAccountRowsOf, type OwnerMoneyFigures, type OwnerMoneyInputs, type OwnerMoneyPerson } from "@/lib/analytics/owner-money";
+import { isOwedInvoice } from "@/lib/open-counts";
 import { supplierBalance } from "@/app/(app)/bills/supplier-balance";
 import { PNL_WORDS, pnlLines, pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
@@ -1146,6 +1147,79 @@ describe("a typed memo reaches the file: a payment's note, a refund's note and a
 });
 
 /**
+ * NORTH WRITES NOTES TOO, AND ITS OWN NOTE CARRIED THE OWNER'S ACCOUNT INTO AN OFFICE FILE (cn-v1056).
+ *
+ * Every fixture above holds a note somebody typed, which is why nothing caught either half of this: the
+ * sheets promised Memo was "what a person typed", and the bank door writes its own sentence — "From the
+ * bank download (••4417) of …" — onto a bill, onto a supplier payment and onto an invoice payment
+ * (bills/bank-core.ts), while Stripe writes "Online payment" and the tray writes a filing sentence.
+ * So the label was false on every row the app filed, and the account last 4 that bankWords withholds
+ * from an office viewer reached the same viewer's file through three Memo columns instead.
+ */
+describe("a note North wrote itself is labelled honestly and carries no account digits into an office file", () => {
+  const APR = "Deposit of 2026-04-10. From the bank download (••4417) of Apr 1–Apr 30.";
+  const MAY = "From the bank download (••4417) of May 1–May 31.";
+  /** The four writers, each landing in the exact column the sheet prints: payments.note, bills.notes,
+   *  supplier_payments.note, and Stripe's own words on a card payment. */
+  const systemWritten = (): OwnerMoneyInputs => {
+    const m = money();
+    m.payments = m.payments.map((p) => (p.id === "p1" ? { ...p, note: APR } : p.id === "p5" ? { ...p, note: "Online payment" } : p));
+    m.bills = m.bills.map((b) => (b.id === "b2" ? { ...b, notes: MAY } : b));
+    m.supplierPayments = (m.supplierPayments ?? []).map((p) => (p.id === "sp1" ? { ...p, note: MAY } : p));
+    return m;
+  };
+  const build = (showOwner: boolean) => buildAccountantWorkbook(input({ money: systemWritten(), showOwner }));
+  /** The three Memo cells those four writers land in. */
+  const memos = (wb: AccountantWorkbook) => {
+    const income = tab(wb, "Income");
+    const incomeAt = income.rows.findIndex((r) => r.cells[0] === "Date") + 1;
+    const paid = dataRows(income.rows.slice(incomeAt, income.rows.findIndex((r) => r.cells[0] === "Payments")));
+    const costs = tab(wb, "Costs");
+    const costList = dataRows(costs.rows.slice(0, costs.rows.findIndex((r) => r.cells[0] === "Totals By Where It Goes")));
+    const payAt = costs.rows.findIndex((r) => r.cells[0] === "Each Payment To A Supplier");
+    const toSuppliers = dataRows(costs.rows.slice(payAt + 3, costs.rows.findIndex((r, i) => i > payAt && r.cells[0] === "Total")));
+    return {
+      deposit: paid.find((r) => r.cells[2] === "INV-101")!.cells[9],
+      card: paid.find((r) => r.cells[2] === "INV-105")!.cells[9],
+      bill: costList.find((r) => r.cells[1] === "Corner Gas" && r.cells[2] === null)!.cells[10],
+      toSupplier: toSuppliers.find((r) => r.cells[5] === "4411")!.cells[6],
+    };
+  };
+
+  it("the owner's own file keeps the account on the note: it is his account", () => {
+    expect(memos(build(true))).toEqual({ deposit: APR, card: "Online payment", bill: MAY, toSupplier: MAY });
+  });
+
+  it("an office file loses the account digits and keeps the sentence, so the row is still a bank row", () => {
+    const office = build(false);
+    expect(memos(office)).toEqual({
+      deposit: "Deposit of 2026-04-10. From the bank download of Apr 1–Apr 30.",
+      card: "Online payment",
+      bill: "From the bank download of May 1–May 31.",
+      toSupplier: "From the bank download of May 1–May 31.",
+    });
+    // NOT ONE CELL OF THE WHOLE FILE: the same invariant the owner's-money test asserts, now against the
+    // money rows an office viewer reads rather than the bank lines he never gets.
+    for (const cell of everyText(office)) {
+      expect(cell, cell).not.toContain("4417");
+      expect(cell, cell).not.toContain("••");
+    }
+    // The check number a person typed is not an account and stays: it is what he matches to his bank.
+    expect(memos(office).toSupplier).toBeTruthy();
+    const costs = tab(office, "Costs");
+    const payAt = costs.rows.findIndex((r) => r.cells[0] === "Each Payment To A Supplier");
+    expect(dataRows(costs.rows.slice(payAt + 3)).some((r) => r.cells[5] === "4411")).toBe(true);
+  });
+
+  it("the sheets call the column the note saved on the record, never handwriting they can't promise", () => {
+    const said = everyText(build(true)).join("\n");
+    expect(said).toContain("Memo is the note saved on the record");
+    expect(said).toContain("Memo is the note saved on the ticket");
+    expect(said).not.toContain("Memo is what a person typed");
+  });
+});
+
+/**
  * ONE ANSWER FOR WHICH SUPPLIER A TICKET BELONGS TO (cn-v1055). Open's figure resolves a ticket by the
  * account it is filed on OR a filed spelling OR the account's own name; the list under it read the
  * stored column alone, so a ticket spelled exactly like an account but never filed was inside the
@@ -1203,28 +1277,65 @@ describe("the invoices made in the period are a list of their own, whether Sales
   const register = (wb: AccountantWorkbook) => {
     const income = tab(wb, "Income");
     const at = income.rows.findIndex((r) => r.cells[0] === "Invoices Made In This Period");
+    const head = income.rows[at + 2].cells;
+    /** A column by its HEADING, so a cell assertion says which column it means and a reordered list
+     *  breaks the pinned header below rather than silently reading the wrong cell. */
+    const col = (name: string) => {
+      const i = head.indexOf(name);
+      if (i < 0) throw new Error(`the register has no ${name} column: ${head.join(", ")}`);
+      return i;
+    };
+    const rows = dataRows(income.rows.slice(at + 3, income.rows.findIndex((r, i) => i > at && r.cells[0] === "Total")));
     return {
       income,
       at,
-      head: income.rows[at + 2].cells,
-      rows: dataRows(income.rows.slice(at + 3, income.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"))),
+      head,
+      col,
+      rows,
+      of: (invoiceNumber: string) => rows.find((x) => x.cells[col("Invoice")] === invoiceNumber)!,
       total: income.rows.slice(at).find((r) => r.cells[0] === "Total")!,
     };
   };
 
   it("names every invoice, its kind, its job and what is still owed on it, in the order they were made", () => {
     const r = register(buildAccountantWorkbook(input()));
-    expect(r.head).toEqual(["Date Made", "Invoice", "Kind", "Customer", "Job Number", "Job", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid To Date", "Still Owed To Date", "Due Date", "Note"]);
-    expect(r.rows.map((x) => [x.cells[1], x.cells[2], x.cells[4], x.cells[6], x.cells[14]])).toEqual([
+    // DATE MADE, CUSTOMER, INVOICE, JOB NUMBER, JOB: the payments list's own first five columns, in the
+    // same order, because one sheet has one set of column widths (pinned below).
+    expect(r.head).toEqual(["Date Made", "Customer", "Invoice", "Job Number", "Job", "Kind", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid To Date", "Still Owed To Date", "Due Date", "Note"]);
+    expect(r.rows.map((x) => [x.cells[r.col("Invoice")], x.cells[r.col("Kind")], x.cells[r.col("Job Number")], x.cells[r.col("Status")], x.cells[r.col("Note")]])).toEqual([
       ["INV-109", "Deposit", "J-201", "Paid", null],
       ["INV-102", "Standard", "J-202", "Sent", null],
       ["INV-106", "Progress", "J-201", "Draft", "Draft: not counted"],
       ["INV-104", "Standard", "J-202", "Void", "Voided: not counted"],
     ]);
     // Still Owed is invoiceBalance's answer: $1,072.50 billed less $400 taken.
-    const sent = r.rows.find((x) => x.cells[1] === "INV-102")!;
+    const sent = r.of("INV-102");
     expect([cents(sent.cells[7]), sent.cells[8], cents(sent.cells[9]), cents(sent.cells[10]), cents(sent.cells[11]), cents(sent.cells[12])]).toEqual([100000, 7.25, 7250, 107250, 40000, 67250]);
     expect(sent.cells[13]).toEqual({ date: "2026-06-01" });
+  });
+
+  /**
+   * NOTHING IS STILL OWED ON A DRAFT OR A VOID (cn-v1056). The cell was invoiceBalance for every status
+   * while only the Total row left the two out, so a voided $5,000 invoice with nothing paid printed
+   * "Still Owed To Date $5,000.00" — a receivable the Open tab, the Summary's Customers Owe You and
+   * isOwedInvoice all say does not exist, in the one file whose job is to let those be reconciled.
+   */
+  it("a draft and a void are owed nothing, so this column is the same receivable rule Open reads", () => {
+    // THE WORST SHAPE: a void keeps its stored total, because setInvoiceStatus writes `status` alone.
+    const neverPaid = { ...PERIOD_INVOICES[3], id: "iv5", invoice_number: "INV-110", amount_paid: 0 };
+    const all = [...PERIOD_INVOICES, neverPaid];
+    const r = register(buildAccountantWorkbook(input({ periodInvoices: all })));
+    const owed = (n: string) => cents(r.of(n).cells[r.col("Still Owed To Date")]);
+    expect(owed("INV-106")).toBe(0); // a draft hasn't been sent, so nobody has been asked for it
+    expect(owed("INV-104")).toBe(0); // a void isn't a bill
+    expect(owed("INV-110")).toBe(0); // and not its whole $321.75 total either
+    // Paid To Date stays a stored fact on a void: $300 did change hands.
+    expect(cents(r.of("INV-104").cells[r.col("Paid To Date")])).toBe(30000);
+    // ONE RULE: the cell carries a figure exactly when isOwedInvoice says the invoice is owed.
+    for (const i of all) expect(owed(i.invoice_number) !== 0, i.invoice_number).toBe(isOwedInvoice(i));
+    // And the column adds up to its own Total row, so a filter and a pivot agree with the sheet.
+    const sum = r.rows.reduce((n, x) => n + (cents(x.cells[r.col("Still Owed To Date")]) ?? 0), 0);
+    expect(sum).toBe(cents(r.total.cells[r.col("Still Owed To Date")]));
   });
 
   it("a draft and a void are listed and counted in nothing, and the Tax total is the Sales Tax total", () => {
@@ -1258,6 +1369,50 @@ describe("the invoices made in the period are a list of their own, whether Sales
     for (const col of ["invoice_number", "invoice_kind", "status", "subtotal", "tax_rate", "tax", "total", "amount_paid", "due_date", "created_at", "job_id", "customers(name)"]) {
       expect(ACCOUNTANT_PERIOD_INVOICE_COLS, col).toContain(col);
     }
+  });
+
+  /**
+   * A NAME WIDER THAN ITS COLUMN IS A NAME THE ACCOUNTANT CANNOT READ (cn-v1056). One sheet carries one
+   * set of column widths, nothing here wraps or auto-fits (xlsx-write.ts writes each width literally),
+   * and Excel cuts a cell off at the column edge as soon as its neighbour is filled. This register
+   * started with Kind third, which put its Customer in a 14-wide column and its Job in an 18-wide one
+   * while the payments list above gave the same two fields 28 each: a property-management company's full
+   * name was cut off in the one list that exists to be filtered by customer and by job.
+   */
+  it("every list on Income agrees about what each column holds, and no heading is wider than its column", () => {
+    const income = tab(buildAccountantWorkbook(input()), "Income");
+    const payments = income.rows.find((r) => r.cells[0] === "Date")!.cells;
+    const made = income.rows.find((r) => r.cells[0] === "Date Made")!.cells;
+    for (const field of ["Customer", "Invoice", "Job Number", "Job"]) {
+      expect(made.indexOf(field), field).toBe(payments.indexOf(field));
+    }
+    // A HEADING THAT DOESN'T FIT IS THE SAME DEFECT, one row up: "Still Owed To Date" is 18 characters
+    // and sat in a 16-wide column. A head row is the one bold row whose every cell is a word.
+    const widths = income.widths ?? [];
+    for (const row of income.rows) {
+      if (!row.bold || row.cells.length < 2 || !row.cells.every((c) => typeof c === "string" && c.length > 0)) continue;
+      row.cells.forEach((c, i) => expect(widths[i] ?? 0, `${String(c)} in column ${i} of Income`).toBeGreaterThanOrEqual(String(c).length));
+    }
+  });
+
+  /**
+   * OPEN SENDS THE READER TO A LIST THAT HOLDS WHAT IT SAYS IT HOLDS (cn-v1056). Open is as of the
+   * download day, so it lists an invoice whenever it was made; the register is this period's invoices
+   * only. The note under Customers Owe You said the date made, the kind and the tax of each of them were
+   * on Income — and on any past-period download most of Open was made after the period and is in no cell
+   * of the register.
+   */
+  it("Open points at the register only for the invoices the register has, and names the period", () => {
+    const wb = buildAccountantWorkbook(input());
+    const r = register(wb);
+    // The one invoice customers still owe was made in August: a Q2 file holds its balance and no more.
+    expect(r.rows.map((x) => x.cells[r.col("Invoice")])).not.toContain("INV-107");
+    const open = tab(wb, "Open");
+    const at = open.rows.findIndex((x) => x.cells[0] === "Customers Owe You");
+    expect(dataRows(open.rows.slice(at + 2)).some((x) => x.cells[0] === "INV-107")).toBe(true);
+    const said = open.rows.map((x) => String(x.cells[0])).find((s) => s.startsWith("Drafts aren't counted"))!;
+    expect(said).toContain("For an invoice made inside 2026 Q2");
+    expect(said).toContain("isn't in that list");
   });
 });
 
