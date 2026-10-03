@@ -172,6 +172,7 @@ export async function addOpenListCore(
       if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
       revalidatePath("/bills");
       revalidatePath("/organize");
+      revalidatePath("/reconcile");
       revalidatePath("/planner");
       return { ok: true, id: placed.id, line: withReport(bankLine(download), downloadReadFacts(download), download.readSaid) };
     }
@@ -232,5 +233,7 @@ export async function addOpenListCore(
   if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
   revalidatePath("/bills");
   revalidatePath("/organize");
+  // The card waits on /reconcile (lib/paperwork answeredOnReconcile), so that page is told as well.
+  revalidatePath("/reconcile");
   return { ok: true, id: placed.id, line: stored.list ? withReport(openListLine(stored), listReadFacts(stored.list)) : withPages(openListLine(stored)) };
 }

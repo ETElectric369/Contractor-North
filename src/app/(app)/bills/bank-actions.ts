@@ -19,6 +19,7 @@ type Result = { ok: boolean; error?: string; message?: string; stale?: boolean }
 
 function revalidateBank() {
   revalidatePath("/bills");
+  revalidatePath("/reconcile");
   revalidatePath("/organize");
   revalidatePath("/planner");
   revalidatePath("/analytics");

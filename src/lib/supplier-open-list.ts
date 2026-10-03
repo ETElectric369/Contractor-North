@@ -584,13 +584,15 @@ export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenL
    * THE FILE TIMESTAMP IS THE LAST RESORT, NEVER A CEILING OVERRIDDEN. A printed date LATER than the
    * day we already have is a misread, not a statement from the future: the file cannot have been
    * saved before the paper it holds was printed, and taking a later date would widen the cutoff — the
-   * exact harm this closes. So only an earlier (or equal) printed date is taken.
+   * exact harm this closes. So only an earlier (or equal) printed date is taken — and only when there
+   * IS a day to hold it against, because an unbounded date read off a paper could be any year at all,
+   * and a cutoff is only ever as safe as the day it is counted back from.
    *
    * A LIST THAT ALREADY SAYS "printed" IS LEFT ALONE: the text lane found the date in the whole text,
    * which is more than this heading block can see.
    */
   const printedDate = input.listDateFrom === "printed" ? null : tableStatementDate(table, headerRow);
-  const ownDate = printedDate && (!input.listDate || printedDate <= input.listDate) ? printedDate : null;
+  const ownDate = printedDate && input.listDate && printedDate <= input.listDate ? printedDate : null;
   if (!rows.length) return { ok: false, error: `No papers could be read from ${input.name}.${skipped.length ? ` ${skipped.slice(0, 3).map((s) => s.why).join(" ")}` : ""}` };
   return {
     ok: true,

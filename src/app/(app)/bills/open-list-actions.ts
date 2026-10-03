@@ -62,6 +62,7 @@ async function saveStored(supabase: any, orgId: string, id: string, p: PaperProp
   if (error) return { ok: false, error: dbError(error) };
   if (!back?.length) return { ok: false, error: "Nothing was saved. The list was applied or removed from another screen." };
   revalidatePath("/bills");
+  revalidatePath("/reconcile");
   revalidatePath("/organize");
   return { ok: true };
 }
@@ -150,6 +151,7 @@ export async function applyOpenList(id: string, opts: { fingerprint: string; who
     wholeList: opts?.wholeList === true,
   });
   revalidatePath("/bills");
+  revalidatePath("/reconcile");
   revalidatePath("/organize");
   revalidatePath("/planner"); // My Day's supplier cards and Pay By line read these same papers
   return res;

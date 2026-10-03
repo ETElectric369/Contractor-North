@@ -327,6 +327,9 @@ export async function keepPaperwork(id: string): Promise<PaperResult> {
   if (!back?.length) return { ok: false, error: "Nothing was kept. That paper isn't here any more, or this login can't change it." };
   revalidatePath("/bills");
   revalidatePath("/organize");
+  // A STATEMENT'S CARD IS ON /reconcile NOW (lib/paperwork answeredOnReconcile), so the page that drew
+  // it hears the write too — otherwise a card he just put away is still there on his next visit.
+  revalidatePath("/reconcile");
   return { ok: true, message: "Kept in files. Find it in Organize, under Archive." };
 }
 

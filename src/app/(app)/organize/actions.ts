@@ -1749,6 +1749,8 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
 
   revalidatePath("/organize");
   revalidatePath("/bills");
+  // A bank download's and a supplier list's card live on /reconcile (lib/paperwork answeredOnReconcile).
+  revalidatePath("/reconcile");
   if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
   const said =
     (jobsOwnFile && item.document_id ? " The receipt stays on the job." : "") +

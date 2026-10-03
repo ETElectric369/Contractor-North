@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseCSV } from "@/lib/csv";
 import { closeCutoff, readOpenListTable, reconcileOpenList, tableStatementDate, type OpenListPaper } from "@/lib/supplier-open-list";
 
@@ -140,10 +142,49 @@ describe("a list whose printed date cannot be found behaves exactly as it does t
     expect(read.list.listDateFrom).toBe("today");
   });
 
+  /**
+   * AND WITH NO DAY TO HOLD IT AGAINST, NOTHING IS TAKEN. A date read off a paper could be any year at
+   * all; a cutoff is only ever as safe as the day it is counted back from, so with no bound the list
+   * behaves as it did before this shipped. Every door in the app passes one (the file's save day, or the
+   * company's own today), so this is the belt, not the trousers.
+   */
+  it("takes no printed date when the caller gave no day to hold it against", () => {
+    const read = readOpenListTable({ table: STATEMENT_BESIDE, from: "file", name: "Statement.pdf", listDate: null, listDateFrom: "today" });
+    if (!read.ok) throw new Error("the statement did not read as a list");
+    expect(read.list.listDate).toBeNull();
+    expect(read.list.listDateFrom).toBe("today");
+  });
+
   /** The text lane already found the day in the WHOLE text, which is more than a heading block sees. */
   it("leaves a list that already says 'printed' alone", () => {
     const read = readOpenListTable({ table: STATEMENT_BESIDE, from: "statement", name: "Statement.pdf", listDate: "2026-09-20", listDateFrom: "printed" });
     if (!read.ok) throw new Error("the statement did not read as a list");
     expect(read.list.listDate).toBe("2026-09-20");
+  });
+});
+
+
+/**
+ * ── A LIST ALREADY STORED WITH A "file" DATE DOES NOT RE-DATE ITSELF UNDER A PERSON ────────────
+ *
+ * The card is drawn from the STORED list (open-list-core `viewOf` → `reconcileOpenList`), never by
+ * re-reading the file, so a list that was dropped before this shipped keeps the date it was stored
+ * with and the sentence that says where that date came from. It would be worse than a stale date for
+ * the figures on a card to move while he is looking at it: he reads the headline, goes to make a cup of
+ * tea, and Apply does something else.
+ *
+ * The ONE path that re-reads a stored table is the column picker (`pickOpenListColumns` /
+ * `rememberedFor`), which has no list yet — nothing has been applied from it, and it gets a better
+ * date, which is the point.
+ */
+describe("a list stored before this shipped", () => {
+  it("is read from the stored row, so its date and its sentence are whatever was stored", () => {
+    const core = readFileSync(join(process.cwd(), "src/app/(app)/bills/open-list-core.ts"), "utf8");
+    // viewOf takes the stored list as it is; nothing in it re-reads a table to re-date one.
+    expect(core).toContain("const list = stored.list;");
+    expect(core).toContain("const dateSaid = listDateSaid(list, ctx.today);");
+    // The only re-read is the one a person asks for, by picking columns on a list that has none.
+    const reread = core.split("readOpenListTable(").length - 1;
+    expect(reread, "readOpenListTable is called once in open-list-core: rememberedFor").toBe(1);
   });
 });
