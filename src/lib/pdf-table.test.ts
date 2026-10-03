@@ -467,6 +467,32 @@ describe("a bank statement's pages: the heading says which way the money went", 
     expect(dl.readSaid).toContain("$900.00");
     expect(dl.readSaid).toContain("Go and look at that line against the paper before you Apply.");
   });
+
+  /**
+   * AND A LINE LOST OFF THE TOP OR THE BOTTOM IS THE ONE THE CHAIN CANNOT SEE, so the report still asks for
+   * the five-second comparison that catches it (fixed 2026-10-02).
+   *
+   * A link needs a NEIGHBOURING balance, so dropping the FIRST or LAST transaction leaves every remaining
+   * link adding up to the cent. pdfReadSaid asked for the comparison — "Check that against the totals your
+   * statement prints" — and only when it had no `checked` sentence of its own. The moment every download
+   * started carrying a read report, that report BECAME the `checked` sentence and silently replaced the
+   * instruction, on the one door with no printed controls at all: a statement whose extractor dropped its
+   * tail page then read "proves every line" with nothing left anywhere asking him to look.
+   */
+  it("A LINE LOST OFF THE END keeps the one instruction that could catch it", () => {
+    for (const gone of ["09/22/26", "09/02/26"]) {
+      const short = table.filter((r) => !r.join(" ").includes(gone));
+      const dl = readBankTable(short, "Statement.pdf", (t) => `h${t.length}`, { source: "page" })!;
+      expect(dl.lines, gone).toHaveLength(4);
+      // The chain cannot tell: every link it still has adds up, so it passes and says so.
+      expect(dl.verified?.pass, gone).toBe(true);
+      expect(dl.readSaid, gone).toContain("proves every line");
+      // AND THE REPORT A PERSON ACTUALLY READS STILL NAMES THE FIGURE ON HIS OWN PAPER TO CLOSE THE ENDS.
+      const report = pdfReadSaid({ pages: 2, rows: short.length, checked: dl.readSaid }, downloadReadFacts(dl), "2026-09-30");
+      expect(report, gone).toContain("lost off the top or the bottom of the table");
+      expect(report, gone).toContain("the totals your statement prints");
+    }
+  });
 });
 
 /**

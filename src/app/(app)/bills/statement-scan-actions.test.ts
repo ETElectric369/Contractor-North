@@ -293,6 +293,69 @@ describe("the gate decides whether anything is proposed at all", () => {
     expect(said).toContain("Read from a picture of the page.");
   });
 
+  /**
+   * A COMBINED STATEMENT IS TWO RUNNING BALANCES, AND A PERFECT READ OF ONE MUST NOT BE REFUSED. A bank's
+   * combined statement prints the checking table and then the savings table, each with its own running
+   * balance, and the reader hands back one set of rows with one account number on all of them. Walked as a
+   * single chain, the JOIN between the two sections came out as "a line there is missing, in twice, or its
+   * amount or its sign was read wrong", this gate refused it, and Drop It Again bought a fresh Opus read and
+   * the identical refusal — a dead end wearing a sentence, on a paper with nothing wrong on it.
+   */
+  it("A COMBINED STATEMENT'S SECOND SECTION is not a missing line, and is not refused", async () => {
+    const combined = {
+      beginning_balance: null,
+      ending_balance: null,
+      deposits_total: null,
+      withdrawals_total: null,
+      account_last4: "4417",
+      lines: [
+        { date: "2026-09-01", description: "DEPOSIT INVOICE PAYMENT", money_out: null, money_in: 500.0, balance: 1500.0 },
+        { date: "2026-09-02", description: "CHECK 1042", money_out: 200.0, money_in: null, balance: 1300.0 },
+        { date: "2026-09-03", description: "ACH HARROWGATE ELECTRIC", money_out: 100.0, money_in: null, balance: 1200.0 },
+        { date: "2026-09-01", description: "INTEREST PAID", money_out: null, money_in: 2.5, balance: 8502.5 },
+        { date: "2026-09-02", description: "TRANSFER TO CHECKING", money_out: 1000.0, money_in: null, balance: 7502.5 },
+      ],
+    };
+    state.answers = [isBank(), answer(combined)];
+    const got = await drop();
+    expect(got.ok).toBe(true);
+    const said = items()[0].proposal.bankImport.download.readSaid as string;
+    expect(said).not.toContain("stops adding up");
+    // AND IT IS SAID OUT LOUD, never quietly forgiven: two balances on one paper is a thing to be told.
+    expect(said).toContain("2 separate running balances");
+  });
+
+  /**
+   * AND THE CHAIN NEVER VOUCHES FOR WHICH WAY THE MONEY WENT. A read with every column swapped walks the
+   * balance perfectly in the OTHER sense, so a scanned DEPOSIT statement read inside out came back "proves
+   * every line … its balance is what you owe" and Apply would have counted every deposit as a cost. The
+   * printed-totals check has refused that since cn-v1050 and says why — with no printed totals, accepting
+   * either direction launders exactly this — so the chain is held to the same policy.
+   */
+  it("AN INVERTED READ of a deposit statement is never vouched for by the running balance", async () => {
+    const walked = [1142.47, 1179.89, -70.11, 3329.89, 2517.56, 2505.56];
+    const inverted = {
+      beginning_balance: null,
+      ending_balance: null,
+      deposits_total: null,
+      withdrawals_total: null,
+      account_last4: "4417",
+      account_kind: "deposit",
+      lines: LINES.map((l, i) => ({ ...l, balance: walked[i], money_out: l.money_in, money_in: l.money_out })),
+    };
+    state.answers = [isBank(), answer(inverted)];
+    const got = await drop();
+    expect(got.ok).toBe(true);
+    const said = items()[0].proposal.bankImport.download.readSaid as string;
+    expect(said).not.toContain("proves every line");
+    expect(said).not.toContain("add up to the cent");
+    expect(said).toContain("NOTHING here checked it");
+    expect(said).toContain("against the paper before you Apply");
+    // AND THE CLUE IS KEPT: the one reading that DOES add up is the one the paper says this account is not,
+    // so the report names it as the thing to go and check rather than as the thing it proved.
+    expect(said).toContain("only adds up read as a card");
+  });
+
   it("a reader that came back with no lines at all is never a card", async () => {
     state.answers = [isBank(), answer({ ...CONTROLS, lines: [] })];
     const got = await drop();

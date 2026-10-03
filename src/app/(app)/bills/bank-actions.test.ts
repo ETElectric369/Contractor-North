@@ -1111,6 +1111,39 @@ describe("the read report on a scanned statement's card", () => {
   });
 
   /**
+   * AND THE VERDICT ITSELF GOES WITH IT, from EVERY viewer's props. `verified.controls` holds the
+   * statement's own beginning and ending balance in figures — the owner's account in two numbers, which no
+   * card ever shows — so a copy riding along in the props is owner money nobody checked the gate for.
+   *
+   * The strip was there and nothing pinned it: the only test injected `readSaid` alone, so deleting
+   * `verified: undefined` left the whole unit suite green. This asserts the figures, not the field, because
+   * the figures are what would leak.
+   */
+  it("and the verdict's own control figures never ride in the props, for any viewer", async () => {
+    const id = await drop();
+    const row = db.organized_items.find((i) => i.id === id)!;
+    row.proposal.bankImport.download.verified = {
+      source: "picture",
+      chain: { ran: true, links: 5, lines: 6, withBalance: 6, reversed: false, card: false, breaks: [], broke: 0, sameDay: 0, runs: 1, byAccount: false, unwalked: 0, unwalkedDay: null, why: null },
+      totals: { pass: true, agreed: ["the money going out"], unchecked: [], failed: [], pinned: 1 },
+      controls: { beginning: 128455, ending: 250556, deposits: 343742, withdrawals: 221641, account: "deposit" },
+      failed: [],
+      pass: true,
+    };
+    for (const role of ["owner", "office"] as const) {
+      db.profiles.find((p) => p.id === "user-1")!.role = role;
+      db.organizations[0].settings = role === "office" ? { timezone: "America/Los_Angeles", office_sees_owner_money: false } : { timezone: "America/Los_Angeles" };
+      const props = JSON.stringify(bankLinesStayHere(row, await view(id)));
+      // $1,284.55 to start and $2,505.56 to end, in cents, as the verdict stores them.
+      expect(props, role).not.toContain("128455");
+      expect(props, role).not.toContain("250556");
+      expect(props, role).not.toContain("verified");
+    }
+    // And the stored row still has them, because that is where a Swap gets them from.
+    expect(row.proposal.bankImport.download.verified.controls.beginning).toBe(128455);
+  });
+
+  /**
    * AND THE DOOR CANNOT BE HANDED ONE. `addOpenList` is a "use server" export, which is a PUBLIC POST
    * ENDPOINT (report-client-error.ts says so), so while the sentence was a field of its argument any
    * staffer who may sort the bank could post a table of their own making together with "agree to the

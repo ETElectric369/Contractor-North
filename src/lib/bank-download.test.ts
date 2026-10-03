@@ -4,6 +4,7 @@ import { parseCSV } from "@/lib/csv";
 // The cost guard's own sentence: the bank card's refusal must BE it, never a second wording.
 import { RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
 import {
+  balanceCentsOf,
   bankHeadline,
   bankViewOf,
   billPlacement,
@@ -20,6 +21,7 @@ import {
   jobRefusalFor,
   learnableAnswer,
   lookalikePayment,
+  lineKeyOf,
   lineNamesAccount,
   looksLikeBankTable,
   merchantKeyOf,
@@ -179,6 +181,34 @@ CHECK,09/05/2026,CHECK 2001,-300.00,CHECK_PAID,1700.00,2001
     expect(dl.skipped).toEqual([]);
   });
 
+  /**
+   * AND IT READS THEM WITH NO SPACE IN FRONT, which is how plenty of banks print them. There is no word
+   * boundary between a digit and a letter, so "100.00CR" matched nothing here and fell through to
+   * `readMoney` — the SUPPLIER's reader, where CR is a credit memo — and came back NEGATIVE, which is the
+   * exact meaning `balanceCentsOf` routes balance cells through this function to avoid. "400.00DR" has no
+   * readMoney rule at all and came back null, a hole in the column. A checking account in credit was then
+   * walked as a card and the report said "its balance is what you owe" on a deposit account.
+   */
+  it("reads CR and DR printed TIGHT against the figure, in an amount cell and a balance cell alike", () => {
+    expect(readBankMoney("100.00CR")).toBe(100);
+    expect(readBankMoney("400.00DR")).toBe(-400);
+    expect(readBankMoney("1,284.55CR")).toBe(1284.55);
+    expect(readBankMoney("300.00Dr.")).toBe(-300);
+    expect(balanceCentsOf("1,284.55CR")).toBe(128455);
+    expect(balanceCentsOf("300.00DR")).toBe(-30000);
+    // A correct deposit account printing its balances this way walks as a DEPOSIT account, and the card
+    // never tells him a balance he holds is a balance he owes.
+    const dl = readBankTable(
+      parseCSV(`Post Date,Description,Debit,Credit,Balance\n09/01/2026,CUSTOMER DEPOSIT,,500.00,1000.00CR\n09/02/2026,SHOP RENT,650.00,,350.00CR\n09/03/2026,CARD PURCHASE HARROWGATE FUEL,80.50,,269.50CR\n`),
+      "x.csv",
+      hash,
+    )!;
+    expect(dl.lines.map((l) => l.balanceAfterCents)).toEqual([100000, 35000, 26950]);
+    expect(dl.verified?.chain.card).toBe(false);
+    expect(dl.verified?.chain.breaks).toEqual([]);
+    expect(dl.readSaid).not.toContain("what you owe");
+  });
+
   it("reads the days banks print: a time after it, the year first with slashes, the month as a word", () => {
     for (const raw of ["9/3/2026 12:00:00 AM", "9/3/2026 0:00", "2026/09/03", "03-SEP-2026", "3 Sep 2026", "03-Sep-26", "2026-09-03T00:00:00Z", "09/03/2026"]) {
       expect(readBankDate(raw)).toBe("2026-09-03");
@@ -255,6 +285,32 @@ CHECK,09/05/2026,CHECK 2001,-300.00,CHECK_PAID,1700.00,2001
     expect(flipped.lines[0].key).not.toBe(dl.lines[0].key);
     // Swapped twice is the file as it was.
     expect(swapDownloadSigns(flipped, hash).lines.map((l) => l.key)).toEqual(dl.lines.map((l) => l.key));
+  });
+
+  /**
+   * AND A SWAP NEVER LEAVES A SENTENCE IT CANNOT VOUCH FOR (fixed 2026-10-02). THE SENTENCE BESIDE APPLY
+   * ALWAYS DESCRIBES THE LINES UNDER IT — and that has to hold for the only cards that ever carried a
+   * sentence before the verification existed.
+   *
+   * cn-v1050 stored `readSaid` on every SCANNED download and had no `verified` field at all, so a card in
+   * the tray today may carry "…the money going out, the money coming in and the balance from end to end
+   * agree to the cent" with nothing to rework it from. `reverified` returned {} for exactly that case, the
+   * spread carried the stored sentence straight through, and one tap on Swap left that assurance sitting
+   * above lines whose every sign had just been turned over.
+   */
+  it("A SWAP ON A DOWNLOAD STORED BEFORE THE VERIFICATION goes silent instead of keeping its old sentence", () => {
+    const born = readBankTable(parseCSV(`Date,Description,Amount\n09/02/2026,CARD PURCHASE HARROWGATE FUEL,-142.08\n09/05/2026,CHECK 1042,-1250.00\n`), "September.pdf", hash)!;
+    // The shape cn-v1050 stored: scanCheckSaid's pass sentence, and no verdict beside it.
+    const legacy = { ...born, readSaid: "Held against the statement's own printed figures: the money going out, the money coming in and the balance from end to end agree to the cent." };
+    delete (legacy as { verified?: unknown }).verified;
+    const flipped = swapDownloadSigns(legacy, hash);
+    expect(flipped.lines.map((l) => l.cents)).toEqual([14208, 125000]);
+    expect(flipped.verified).toBeUndefined();
+    expect(flipped.readSaid).toBeUndefined();
+    // And the card prints nothing where that sentence was, rather than printing the stale one.
+    expect(bankViewOf(flipped, planBankDownload(flipped, ORG_BOOKS()), ORG_BOOKS()).readSaid).toBeNull();
+    // A download this app made today still gets a NEW sentence, not silence.
+    expect(swapDownloadSigns(born, hash).readSaid).toContain("Read from the file's own rows.");
   });
 
   it("an unsigned Amount with a Debit/Credit type column reads the type", () => {
@@ -431,6 +487,28 @@ describe("the same line never twice", () => {
     const a = download();
     const b = download(CHECKING_CSV.replace("MONTHLY SERVICE FEE,12.00", "MONTHLY SERVICE FEE,12.00"), "Next.csv");
     expect(b.lines.map((l) => l.key).sort()).toEqual(a.lines.map((l) => l.key).sort());
+  });
+
+  /**
+   * THE BALANCE IS NOT PART OF THE KEY, and nothing pinned that until now. `balanceAfterCents` arrived with
+   * the running-balance walk; the same line in two downloads is the SAME LINE whether or not one of them
+   * printed a balance beside it. Put it in the hash and the September CSV (with a Balance column) and the
+   * October QFX (without one) stop recognising their overlapping week — and worse, `rekeyLines`, which a
+   * Swap and an account answer both call, hands back keys no fresh read of the file would ever produce,
+   * because it is given no balance to hash. The exact-key lookup then misses every line it should match and
+   * only the twin heuristic is left standing between the owner and the same cost counted twice.
+   */
+  it("the SAME lines keyed with and without a Balance column are the same keys", () => {
+    const rows = `09/02/2026,CARD PURCHASE HARROWGATE FUEL,-142.08\n09/05/2026,CHECK 1042,-1250.00\n09/08/2026,DEPOSIT INVOICE PAYMENT,3400.00\n`;
+    const withBalance = readBankTable(parseCSV(`Date,Description,Amount,Balance\n${rows.replace("-142.08", "-142.08,3857.92").replace("-1250.00", "-1250.00,2607.92").replace("3400.00", "3400.00,6007.92")}`), "Sept.csv", hash)!;
+    const without = readBankTable(parseCSV(`Date,Description,Amount\n${rows}`), "Sept.csv", hash)!;
+    expect(withBalance.lines.map((l) => l.balanceAfterCents)).toEqual([385792, 260792, 600792]);
+    expect(without.lines.every((l) => l.balanceAfterCents === null)).toBe(true);
+    expect(withBalance.lines.map((l) => l.key)).toEqual(without.lines.map((l) => l.key));
+    // And `lineKeyOf` itself is never handed one, so no later door can start hashing it.
+    expect(lineKeyOf(hash, { last4: null, fitid: null, postedOn: "2026-09-02", cents: -14208, description: "CARD PURCHASE HARROWGATE FUEL" }, 0)).toBe(withBalance.lines[0].key);
+    // Which is why a Swap there and back, on a file that DOES print a balance, lands on its own keys again.
+    expect(swapDownloadSigns(swapDownloadSigns(withBalance, hash), hash).lines.map((l) => l.key)).toEqual(withBalance.lines.map((l) => l.key));
   });
 
   it("the same line in a download of another format is counted once", () => {

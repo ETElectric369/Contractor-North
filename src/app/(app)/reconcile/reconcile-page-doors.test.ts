@@ -352,6 +352,21 @@ describe("the page reads; it does not re-rule", () => {
     expect(card).toContain("held against what came off them");
     expect(card).toContain("nothing is");
     expect(card).toContain("prints no totals");
+    /**
+     * AND THE PROMISE IS THE ONE THE CODE NOW KEEPS (onboarding-truth law, 2026-10-02). This paragraph was
+     * written when a statement's printed totals were the only arithmetic there was. Since the
+     * running-balance walk shipped, a paper that prints NO totals and whose balance walks says "its own
+     * running balance proves every line" — so "if your statement prints no totals at all … nothing but your
+     * own eyes has checked it" became a false claim at exactly the moment the app had just said otherwise.
+     * The page has to name the walk, and the silence has to be conditioned on BOTH checks being absent.
+     */
+    expect(card).toContain("running balance");
+    expect(card).not.toContain("prints no totals at all");
+    expect(card).toContain("no totals and no running balance");
+    // AND WHAT A BREAK DOES AT EACH DOOR, because a scan is refused on one and a file only warned: a person
+    // turned away for a reason the page never mentioned is how he finds out by being turned away.
+    expect(card).toContain("refused");
+    expect(card).toContain("names the line");
     for (const ext of [".csv", ".tsv", ".txt", ".xlsx", ".xls", ".ofx", ".qfx", ".qbo"]) expect(LIST_ACCEPT, ext).toContain(ext);
     expect(LIST_ACCEPT).not.toContain(".pdf");
     for (const ext of [".pdf", ".csv", ".xlsx", ".ofx", ".qbo"]) expect(STATEMENT_ACCEPT, ext).toContain(ext);

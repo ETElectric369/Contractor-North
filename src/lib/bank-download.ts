@@ -512,11 +512,18 @@ export function lineKeyOf(hash: Hasher, l: { last4: string | null; fitid: string
  * A BANK'S AMOUNT CELL. The supplier reader (readMoney) is for a supplier's statement, where "CR" is
  * a credit memo (money off what is owed). On a bank's own download CR is money IN and DR money OUT,
  * and a bank (or an OFX TRNAMT) may print a leading "+". Anything else reads as readMoney does.
+ *
+ * NO WORD BOUNDARY BEFORE THE SUFFIX (fixed 2026-10-02). There is no boundary between a digit and a
+ * letter, so "100.00CR" — printed with no space, which plenty of banks do — did not match here at all. It
+ * fell through to readMoney, whose CR means a supplier's credit memo, and came back NEGATIVE: the exact
+ * meaning balanceCentsOf routes through this function to avoid. "400.00DR" has no readMoney rule at all
+ * and came back null, a hole in the column. A checking account in credit was then walked as a card and the
+ * report said "its balance is what you owe" on a deposit account.
  */
 export function readBankMoney(raw: unknown): number | null {
   let s = String(raw ?? "").trim();
   if (!s) return null;
-  const tail = /\s*\b(CR|CREDIT|DR|DEBIT)\.?$/i.exec(s);
+  const tail = /\s*(CR|CREDIT|DR|DEBIT)\.?$/i.exec(s);
   if (tail) s = s.slice(0, tail.index).trim();
   if (s.startsWith("+")) s = s.slice(1).trim();
   const n = readMoney(s);
@@ -793,11 +800,16 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
  * which is the one thing this lane is built to prevent. The source and the paper's own control figures
  * come off the old verdict, because nothing else keeps them.
  *
- * A download stored before the verification existed has nothing to work from, and stays silent rather
- * than gaining a sentence nothing checked.
+ * A download stored before the verification existed has nothing to work from, and GOES silent rather
+ * than gaining a sentence nothing checked — or keeping one. It used to return nothing at all, so the spread
+ * above carried the stored sentence straight through, and cn-v1050 stored one on every SCANNED card with
+ * no `verified` beside it ("…the money going out, the money coming in and the balance from end to end agree
+ * to the cent"). One tap on Swap turned every sign over and left that sentence sitting above the inverted
+ * lines. The invariant this commit is for — THE SENTENCE BESIDE APPLY ALWAYS DESCRIBES THE LINES UNDER IT —
+ * has to hold for the only cards that ever carried a sentence before today.
  */
 function reverified(dl: BankDownload, lines: readonly BankLine[]): Pick<BankDownload, "verified" | "readSaid"> {
-  if (!dl.verified) return {};
+  if (!dl.verified) return { readSaid: undefined };
   const verified = verifyStatement({ lines, source: dl.verified.source, controls: dl.verified.controls });
   return { verified, readSaid: verifySaid(verified) };
 }
