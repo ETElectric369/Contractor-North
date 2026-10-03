@@ -581,10 +581,17 @@ export function MoreMenuRows({
  *  More chip low on the screen and the panel dropped under the bottom dock, its last rows out of
  *  reach. It is placed by the shared useGlassMenuPlacement, like the job's Manage and the team menus:
  *  it opens upward, or shrinks and scrolls, above the dock. The full list is the tall case — a new
- *  job's office More is nine rows and their headers, over the panel's own 24rem cap — so it opens
- *  upward and scrolls inside the room above the chip. Opened upward it sits OVER the job's sticky
- *  action dock (z-[90], the glass-menu layer, above the dock's z-40), so a tap on a row never lands
- *  on Call or Navigate underneath. */
+ *  job's office More is nine rows and their headers, 480px of them — so it opens upward and scrolls
+ *  inside the room above the chip. Opened upward it sits OVER the job's sticky action dock (z-[90],
+ *  the glass-menu layer, above the dock's z-40), so a tap on a row never lands on Call or Navigate
+ *  underneath.
+ *
+ *  AND THE ROOM IS THE ONLY CAP (2026-10-03, the other end of the same report). This panel used to
+ *  carry its own `max-h-[min(70vh,24rem)]` on top of the hook's measured cap, so 480px of rows were
+ *  cut to 384 even where there was room for all of them: at 1024x900 the menu stopped 138px short of
+ *  the window with the whole WORK cluster — Appointments, Work Orders — below the fold for no reason
+ *  at all. Two caps meant the tighter one won and it was the one that had not looked. The hook has
+ *  measured the room since c1dfab46; a second guess at it can only be wrong. */
 function MoreMenu({
   items,
   activeId,
@@ -687,7 +694,8 @@ function MoreMenu({
           ref={panelRef}
           role="menu"
           style={{ ...panelStyle, right: 0 }}
-          className="glass glass-gloss glass-menu z-[90] flex max-h-[min(70vh,24rem)] min-w-[180px] flex-col overflow-hidden rounded-xl py-1 shadow-xl"
+          // NO max-h HERE: the hook's measured cap is the only cap (see the header comment).
+          className="glass glass-gloss glass-menu z-[90] flex min-w-[180px] flex-col overflow-hidden rounded-xl py-1 shadow-xl"
         >
           {/* Opaque backing — the job-manage-menu.tsx pattern (cn-v315's "ghost Edit
               pill" root cause). glass-menu's 40% white let the page's cards/buttons
@@ -701,8 +709,20 @@ function MoreMenu({
               the bottom of the list", /jobs/<id>?tab=time). The cap lives on the panel (so the two
               backing layers still cover exactly what you see) and the scroll on the rows inside
               it, which is why this is a flex column with a min-h-0 child rather than one overflow
-              rule. */}
-          <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              rule.
+
+              AND IT SAYS SO. A capped list scrolls silently: iOS draws no scrollbar at rest, so on
+              a 375x667 phone the five rows that fit looked like the whole list and the last cluster
+              might as well not exist. `menu-scroll-cue` fades the bottom edge of the rows — the one
+              thing on screen that says "there is more below". It is drawn only when the hook
+              actually capped this panel, so a list that fits whole is never fringed with a hint
+              about rows that do not exist. */}
+          <div
+            className={cn(
+              "relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain",
+              panelStyle.maxHeight !== undefined && "menu-scroll-cue",
+            )}
+          >
             <MoreMenuRows items={items} activeId={activeId} onPick={pick} />
           </div>
         </div>

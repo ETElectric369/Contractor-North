@@ -719,6 +719,20 @@ dialog.portal-dialog::backdrop {
   backdrop-filter: blur(20px) saturate(1.6);
   border-color: rgba(255, 255, 255, 0.45);
 }
+/* A CAPPED MENU LIST SAYS IT CONTINUES (Erik, e03465b6: "Can't see the bottom of
+   the list"). A menu that the glass-menu hook had to cap scrolls inside itself, and
+   iOS draws no scrollbar at rest, so the rows that fit read as the whole list — on a
+   375x667 phone the job strip's More showed five of nine and the last cluster might
+   as well not have been there. Fading the bottom 18px of the rows is the one mark on
+   screen that says there is more below. A mask, not a gradient overlay: the panel's
+   backing is two stacked translucent layers plus the .glass-gloss sheen, and no flat
+   colour matches that, while a mask needs no colour at all. The class is applied only
+   when the hook actually capped the panel, so a list that fits whole is never fringed
+   with a hint about rows that do not exist. */
+.menu-scroll-cue {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+}
 .glass-tint {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12)),

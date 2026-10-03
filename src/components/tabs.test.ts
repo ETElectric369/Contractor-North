@@ -60,7 +60,16 @@ describe("every row is 44px (one list, so one row recipe for both looks)", () =>
   });
 });
 
-describe("the panel never hides under the bottom dock (bug triage 2026-09-27)", () => {
+/**
+ * THE WHOLE LIST IS REACHABLE, AT BOTH ENDS (Erik e03465b6, a job page: "Can't see the bottom of
+ * the list"). The bottom was answered in cn-v936 — the panel opens upward above the dock and the
+ * rows scroll inside it. The top was not: "room above" was measured to the top of the WINDOW, so
+ * on a 375x667 phone the nine-row office More opened to y 8 and lost its first rows above the
+ * scrolling <main>, which starts at 84. And the panel's own `max-h-[min(70vh,24rem)]` cut the
+ * 480px list to 384 even where the whole thing fit — on a 1024x900 screen it stopped 138px short
+ * of the window with Appointments and Work Orders below the fold for no reason at all.
+ */
+describe("the panel never hides under the bottom dock, nor above the top of the page", () => {
   const src = () => readFileSync(join(process.cwd(), "src/components/tabs.tsx"), "utf8");
 
   it("More is placed by the shared glass-menu placement, like Manage and the team menus", () => {
@@ -69,32 +78,46 @@ describe("the panel never hides under the bottom dock (bug triage 2026-09-27)", 
   });
 
   // A new job's office More on a 667px phone: the strip's More chip spans y 330-382, the bottom dock's
-  // top edge is at 595. The list is every unpinned tab now — nine rows and their cluster headers, which
-  // the panel's own CSS cap (max-h-[min(70vh,24rem)]) stops at 384px.
-  const chip = { anchorTop: 330, anchorBottom: 382, bottomLimit: 595 };
+  // top edge is at 595 and the scrolling <main> starts at 84, under the top bar. The list is every
+  // unpinned tab — nine rows and their three cluster headers, 480px of them, measured in a browser.
+  const chip = { anchorTop: 330, anchorBottom: 382, bottomLimit: 595, topLimit: 84 };
+  const LIST_H = 480;
 
   it("the full list opens upward above the chip instead of hanging under the dock", () => {
-    const p = placeGlassMenu({ panelH: 384, ...chip });
+    const p = placeGlassMenu({ panelH: LIST_H, ...chip });
     expect(p.dropUp).toBe(true);
-    // Room above the chip is 318px, so it also scrolls inside that room: every row can be reached.
-    expect(p.maxHeight).toBe(318);
+    // Room above the chip INSIDE main is 242px (330 − 4 gap − 84), so it scrolls inside that room.
+    // Measured from the window instead it was 318, which put the Money header and Invoices above
+    // main's edge, where nothing could scroll them back (e03465b6).
+    expect(p.maxHeight).toBe(242);
   });
 
-  it("wherever it lands, the panel's bottom stays above the dock's top edge", () => {
+  it("wherever it lands, the panel stays between main's top edge and the dock's top edge", () => {
     for (const top of [150, 250, 330, 420, 500]) {
-      const a = { anchorTop: top, anchorBottom: top + 52, bottomLimit: 595 };
-      const p = placeGlassMenu({ panelH: 384, ...a });
-      const h = p.maxHeight ?? 384;
+      const a = { anchorTop: top, anchorBottom: top + 52, bottomLimit: 595, topLimit: 84 };
+      const p = placeGlassMenu({ panelH: LIST_H, ...a });
+      const h = p.maxHeight ?? LIST_H;
       const bottom = p.dropUp ? a.anchorTop - 4 : a.anchorBottom + 4 + h;
       expect(bottom).toBeLessThanOrEqual(a.bottomLimit);
-      expect(bottom - h).toBeGreaterThanOrEqual(0);
+      // NOT `>= 0`: the window's top is not the limit, main's top is. This line read 0 until
+      // 2026-10-03 and that is exactly why the top of the list was unreachable.
+      expect(bottom - h).toBeGreaterThanOrEqual(a.topLimit);
     }
   });
 
-  it("the rows scroll inside the capped panel, so the bottom of a long list is reachable", () => {
+  it("the measured room is the ONLY cap: no max-h of its own to cut the list shorter than it fits", () => {
     const panel = src().match(/role="menu"[\s\S]*?className="([^"]+)"/)?.[1] ?? "";
-    expect(panel).toContain("max-h-[min(70vh,24rem)]");
+    expect(panel).not.toMatch(/max-h-/);
     expect(src()).toMatch(/min-h-0 flex-1 overflow-y-auto[\s\S]*?<MoreMenuRows/);
+  });
+
+  it("a capped list says it continues — the fade is drawn only when the hook actually capped it", () => {
+    const scroller = src().match(/"relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain",\s*([^\n]+)/)?.[1] ?? "";
+    expect(scroller).toContain('panelStyle.maxHeight !== undefined && "menu-scroll-cue"');
+    // The cue itself: one definition, in the stylesheet, fading the bottom edge of the rows.
+    // iOS draws no scrollbar at rest, so without it five rows of nine read as the whole list.
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toMatch(/\.menu-scroll-cue \{[^}]*mask-image: linear-gradient\(to bottom, #000 calc\(100% - 18px\), transparent\);/);
   });
 
   it("opened upward, it sits over the job's sticky action dock (z-40), so no tap lands on Call or Navigate", () => {
