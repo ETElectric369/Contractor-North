@@ -373,6 +373,64 @@ export function balanceForPerson(input: {
   };
 }
 
+/**
+ * ── ONE RULE FOR WHAT THE OWED FIGURE IS ALLOWED TO READ ──────────────────────────────────────
+ *
+ * THE FAILURE THIS PREVENTS. The board card has withheld the figure while a shift is running since
+ * the 48.50 lesson: a balance that is quietly short a day's work is worse than no balance at all.
+ * The person's statement under that card draws the same fact a second time, and two renderers of
+ * one money rule is the bug this codebase keeps paying for (balanceForPerson exists for the same
+ * reason). So neither surface decides for itself whether a figure may be drawn — both ask here.
+ *
+ * `amount` is NULL when no figure may be drawn, and `word` is what stands in its place. A caller
+ * that reads `amount` and formats it cannot accidentally print a withheld balance, because there
+ * is no number there to print.
+ */
+export type OwedReading = {
+  kind: "onClock" | "square" | "ahead" | "owed";
+  /** What stands where the figure goes: "On the clock", "Paid Up", "ahead", "Owed". */
+  word: string;
+  /** The figure, POSITIVE in every case (an "ahead" reading says the distance, not a minus), or
+   *  NULL when no figure may be drawn at all. */
+  amount: number | null;
+  /** The one line that goes with it, naming the person rather than saying "he". Empty for a plain
+   *  balance: the figure says it on its own. */
+  line: string;
+};
+
+export function owedReading(input: { name: string; owed: number; onClock: boolean }): OwedReading {
+  // A RUNNING SHIFT PAYS NOTHING INTO `earned` (balanceForPerson leaves it out on purpose, because
+  // hours with no clock_out are unknowable), so every figure built on it is short that shift until
+  // it closes. No figure at all, and the word says why.
+  if (input.onClock) {
+    return { kind: "onClock", word: "On the clock", amount: null, line: "A shift is still running, so the amount is not final." };
+  }
+  const v = r2(input.owed);
+  if (v > 0.005) return { kind: "owed", word: "Owed", amount: v, line: "" };
+  if (v < -0.005) {
+    return {
+      kind: "ahead",
+      word: "ahead",
+      amount: r2(-v),
+      line: `${firstName(input.name)} is ${sayMoney(-v)} ahead. It comes off the next hours.`,
+    };
+  }
+  return { kind: "square", word: "Paid Up", amount: null, line: `${firstName(input.name)} is paid up.` };
+}
+
+/**
+ * MONEY ALREADY HANDED OVER AGAINST THE OPEN PAY PERIODS — the gap between what those periods come
+ * to and what is still owed. Two numbers on one card that fail to add up is the thing this closes.
+ *
+ * ONE function because two surfaces say it now: the person's statement and the pay form's summary.
+ * A second copy of this subtraction would be free to drift, and the one it drifted from is the one
+ * he reads before typing a figure.
+ */
+export function alreadyAppliedTo(periods: { gross: number }[] | null | undefined, owed: number): number {
+  const sum = (periods ?? []).reduce((s, p) => s + fin(p?.gross), 0);
+  return r2(sum - fin(owed));
+}
+
 // ── WHO IS ON THE WAGES BOARD (0286) ─────────────────────────────────────────
 // Erik, 2026-09-23: "get rid of the owners wages". The owner is paid by owner's draw, so he has no
 // balance, no owed periods and no line on the accountant's wage file. The Pay board used to list
@@ -521,6 +579,20 @@ function balancePhrase(name: string, owed: number): string {
   if (v > 0) return `${sayMoney(v)} left.`;
   if (v < 0) return `${firstName(name)} is ${sayMoney(-v)} ahead now.`;
   return "Nothing left owing.";
+}
+
+/**
+ * WHAT TO SAY WHEN THE WRITE ITSELF NEVER CAME BACK — a dropped connection, a deploy mid-request, a
+ * thrown server action. recordPayment has no idempotency key, so a second call is a second row.
+ *
+ * THE FAILURE THIS PREVENTS, AND WHY THE SENTENCE LIVES HERE WHERE A TEST CAN HOLD IT: the insert
+ * may well have landed. "Nothing was saved" is therefore a guess, and it is the exact guess that
+ * gets the same money handed over twice. So it says what is true — nobody knows yet — and names the
+ * one place that can answer it, which is the person's own list of payments.
+ */
+export function noAnswerSentence(name: string | null | undefined): string {
+  const who = firstName(name);
+  return `Nothing came back about that payment to ${who}, so it may or may not have saved. Reload the page and look at ${who}'s payments before recording it again.`;
 }
 
 /** What recordPayment says back. Every clause is a fact the caller just wrote or read:
