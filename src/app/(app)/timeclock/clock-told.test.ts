@@ -554,13 +554,17 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
    * THE DOOR WITH NO BUTTON MUST NOT READ OUT THE BUTTON'S WORDS (Erik, 2026-10-01).
    *
    * Nort relayed the screens' sentence verbatim — "change it if you're somewhere else" — and could not
-   * change it. His only move on a running shift is switch_job, which CUTS after two minutes: it closes
-   * the part so far and opens a new one, so the minutes already billed to the wrong customer stay
-   * exactly where they are. An instruction is a dead end when the door it names is not where it is read.
+   * change it. His only move on a running shift is switch_job, and a switch CUT the shift: it closed the
+   * part so far and opened a new one, so the minutes already billed to the wrong customer stayed exactly
+   * where they were. An instruction is a dead end when the door it names is not where it is read.
    *
    * NO NEW WRITE VERB WAS REGISTERED FOR HIM, on purpose: moving a punch decides which customer gets
    * billed, the three doors that already do it are one tap away, and agent-write expansion stays frozen
-   * until multi-tenant is dialled. His sentence says WHERE, and says he cannot.
+   * until multi-tenant is dialled. His sentence says WHERE.
+   *
+   * AND SINCE THE YOUNG-PUNCH RULE (switch-window, 2026-10-02) it also says HIM — because this sentence
+   * is read out at the instant the punch lands, which is exactly when his own switch moves the whole
+   * punch. "I can't move it for you" was true when it was written and became false here first.
    */
   it("THE DEFECT: Nort's sentence never tells somebody to press a button he has not got", async () => {
     state.client = fakeSupabase(schedulePutsHimOnArr(), calls);
@@ -572,12 +576,15 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
     expect(warning).toContain("The app picked that from today's schedule");
     // But NOT the screens' instruction, which points at a button that is not in this conversation.
     expect(warning).not.toContain("change it if you're somewhere else");
-    // It names the doors that actually move a punch, and it says out loud that he cannot.
+    // It names the doors that actually move a punch, whatever the clock says...
     expect(warning).toContain("My Day");
     expect(warning).toContain("Timeclock");
     expect(warning).toContain("Timecards");
     expect(warning).toContain(CHANGE_JOB_LABEL);
-    expect(warning).toContain("I can't move it for you");
+    // ...and the one thing he can do himself, bounded by the only thing that bounds it: how fresh the
+    // punch is. It no longer claims nobody can move it, which at this instant was untrue.
+    expect(warning).toContain("move this whole punch while it's this fresh");
+    expect(warning).not.toContain("I can't move it for you");
   });
 
   it("and the screens keep their own words, because their button is right there", () => {
@@ -591,8 +598,9 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
 
   /**
    * AND HE CANNOT ANNOUNCE A CORRECTION THAT DID NOT HAPPEN. The move he DOES have on a running shift
-   * cuts it, so a "put me on the right job" answered with switch_job leaves the hours already worked
-   * exactly where they were.
+   * cuts it ONCE THE PUNCH IS NO LONGER FRESH (switch-window), so a "put me on the right job" answered
+   * with switch_job hours into the day leaves the hours already worked exactly where they were. Which
+   * one happened is never guessed from the clock in the words: `mode` comes back from the write.
    */
   it("THE DEFECT, second half: a switch that CUT says where the hours before it stayed", () => {
     const said = switchJobSpoken("cut", 2.32, "J-013 ARR 56 rough-in · 56 Alder Ridge Rd");
@@ -615,11 +623,15 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
     expect(said).toContain("the job you were on");
   });
 
+  // The description's OTHER half — the young punch it does move whole — is pinned where that rule
+  // lives (switch-whole-punch.test.ts). Here: once a shift has been running a while, it is still not
+  // the way to correct a wrong job, and the words still send the model to the door that is.
   it("the verb's own description tells the model it is not a way to correct a wrong job", () => {
     const d = timeActions["time.switchJob"].description ?? "";
-    expect(d).toContain("NEVER MOVES HOURS ALREADY WORKED");
+    expect(d).toMatch(/after that it CUTS/i);
+    expect(d).toMatch(/STAY on the job they were worked on/i);
     expect(d).toContain("Timecards");
-    expect(d).toMatch(/no verb that moves worked hours/i);
+    expect(d).toMatch(/not a way to correct a wrong job/i);
   });
 
   it("the projection carries every channel a write has to be heard on, and nothing else", () => {

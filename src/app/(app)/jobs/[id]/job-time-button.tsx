@@ -11,6 +11,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { LONG_SHIFT_PHRASE, isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
+import { switchMovesWholePunch } from "../../timeclock/switch-window";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
 import { SameDayShifts } from "../../timeclock/same-day-shifts";
 import type { GeoPoint } from "@/lib/types";
@@ -328,11 +329,15 @@ export function JobTimeButton({
           )}
 
           {state === "switch" && openEntry && (
-            // The same fork switch_job makes (0288): a punch with no job and no code is moved over
-            // whole; anything else is cut here and a new entry starts on this job.
-            !openEntry.job_id && !openEntry.job_code ? (
+            // THE SAME FORK THE SERVER MAKES. A punch with no job and no code moves over whole
+            // (switch_job, 0288), and so does one switched within SWITCH_MOVES_WHOLE_MS of starting
+            // (switch-window — the function switchJob decides the write with, asked here so this door
+            // cannot promise a cut that is not going to happen). Anything else is cut, and a new
+            // entry starts on this job.
+            (!openEntry.job_id && !openEntry.job_code) || switchMovesWholePunch(Date.parse(openEntry.clock_in), now) ? (
               <p className="text-sm text-slate-600">
-                You&apos;re on the clock with no job yet, since {fmtTime(openEntry.clock_in)}. Switching puts this whole shift on{" "}
+                You&apos;re on the clock since {fmtTime(openEntry.clock_in)}
+                {!openEntry.job_id && !openEntry.job_code ? " with no job yet" : ` on ${openEntry.jobLabel ?? openEntry.job_code ?? "another job"}`}. Switching puts this whole shift on{" "}
                 <span className="font-medium">{jobNumber}</span>, from the start.
               </p>
             ) : longShift ? (

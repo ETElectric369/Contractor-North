@@ -26,6 +26,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
+import { switchMovesWholePunch } from "./switch-window";
 import {
   clampCloseAtMs,
   durationSpan,
@@ -444,9 +445,15 @@ export type SwitchJobResult = ClockResult & {
  * Mid-shift job switch. A SWITCH IS A CUT (0288 switch_job): the running entry is closed right now
  * and a new entry opens at the same instant on the new job, so the day's split is two ordinary
  * timecard entries with their own clock times, captured as it happens instead of reconstructed at
- * clock-out. Two exceptions, decided by the database: a running entry with NO job (and no code), or
- * one opened under two minutes ago, is RE-POINTED whole instead, because a job-less morning has
- * always billed to the job you switch to and a 28-second piece helps nobody.
+ * clock-out. Two exceptions move the WHOLE running entry instead:
+ *   · a running entry with NO job and no code — the database's own carve-out, because a job-less
+ *     morning has always billed to the job you switch to;
+ *   · a punch SWITCHED SOON AFTER IT STARTED (switch-window: SWITCH_MOVES_WHOLE_MS, 15 minutes) —
+ *     Erik, 2026-10-02: "chances are if anyone clocks in and splits the shift quickly the first job
+ *     isnt actually getting any of that time." The database already did this for the first two
+ *     minutes; two minutes only catches a double-tap, and the sliver it left behind on the job
+ *     nobody worked is what Erik was deleting by hand. That decision is made HERE, not in SQL,
+ *     because the fix ships without a migration; switch_job is unchanged and still cuts.
  *
  * switch_job runs AS THE CALLER, so RLS and the tech guards judge the close and the open exactly as
  * they judge a clock-out and a clock-in. Self-scoped for a tech; the office may switch anyone in
@@ -485,34 +492,47 @@ export async function switchJob(input: {
    * labor import bills. So the switch asks the same question the clock-out does. A re-point (no job
    * and no code yet) closes nothing and moves the whole running shift, so it is left alone.
    */
-  // The SHIFT's start (audit v994 SW1): a second switch late in a forgotten day is the same
-  // one-tap close at now as the first.
-  const { shift: shiftSw, failed: shiftUnread } = await shiftOf(
-    supabase,
-    entry as { id: string; profile_id: string; clock_in: string; split_from?: string | null },
-  );
-  const wouldCut = !!entry.job_id || !!entry.job_code;
-  if (shiftUnread && wouldCut) {
-    return { ok: false, error: "I couldn't check how long this clock has been running. Nothing was switched; try again." };
-  }
-  const ciMs = shiftSw ? shiftSw.startMs : entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
-  if (wouldCut && isLongOpenShift(ciMs, Date.now())) {
-    const tz = await orgTz(supabase);
-    const since = dayClock(shiftSw ? shiftSw.startIso : String(entry.clock_in), tz);
-    if (entry.profile_id === user.id) {
+  /**
+   * WHICH OF THE TWO THINGS A SWITCH IS, DECIDED ONCE, BEFORE ANYTHING IS WRITTEN.
+   *
+   * `movesWhole` is the young-punch rule (switch-window), read off THIS entry's own clock-in — the
+   * second piece of a switched day is a fresh punch of its own. A punch with no job and no code is
+   * left to switch_job, which moves it whole on its own and always has.
+   */
+  const hasPlace = !!entry.job_id || !!entry.job_code;
+  const movesWhole = hasPlace && switchMovesWholePunch(Date.parse(String(entry.clock_in ?? "")), Date.now());
+  const wouldCut = hasPlace && !movesWhole;
+
+  if (wouldCut) {
+    // The SHIFT's start (audit v994 SW1): a second switch late in a forgotten day is the same
+    // one-tap close at now as the first. Only a CUT closes anything, so only a cut asks: a whole move
+    // leaves the clock running and can never write a 17-hour shift.
+    const { shift: shiftSw, failed: shiftUnread } = await shiftOf(
+      supabase,
+      entry as { id: string; profile_id: string; clock_in: string; split_from?: string | null },
+    );
+    if (shiftUnread) {
+      return { ok: false, error: "I couldn't check how long this clock has been running. Nothing was switched; try again." };
+    }
+    const ciMs = shiftSw ? shiftSw.startMs : entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
+    if (isLongOpenShift(ciMs, Date.now())) {
+      const tz = await orgTz(supabase);
+      const since = dayClock(shiftSw ? shiftSw.startIso : String(entry.clock_in), tz);
+      if (entry.profile_id === user.id) {
+        return {
+          ok: false,
+          needsTime: true,
+          error: `You've been on the clock since ${since}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock, then clock in on this job.`,
+        };
+      }
+      // The office's own door names whose clock it is: "Clock Out Brian" on Timecards.
+      const owner = (entry as { profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null }).profiles;
+      const ownerName = (Array.isArray(owner) ? owner[0] : owner)?.full_name ?? null;
       return {
         ok: false,
-        needsTime: true,
-        error: `You've been on the clock since ${since}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock, then clock in on this job.`,
+        error: `That clock has been running since ${since}, ${LONG_SHIFT_PHRASE}. ${clockedOutWords(ownerName, false).clockOutVerb} at the time the shift really ended (Timecards, ${clockDoorWords(ownerName).clockOut}), then clock in on this job.`,
       };
     }
-    // The office's own door names whose clock it is: "Clock Out Brian" on Timecards.
-    const owner = (entry as { profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null }).profiles;
-    const ownerName = (Array.isArray(owner) ? owner[0] : owner)?.full_name ?? null;
-    return {
-      ok: false,
-      error: `That clock has been running since ${since}, ${LONG_SHIFT_PHRASE}. ${clockedOutWords(ownerName, false).clockOutVerb} at the time the shift really ended (Timecards, ${clockDoorWords(ownerName).clockOut}), then clock in on this job.`,
-    };
   }
 
   // The new job must be visible to the caller (RLS-scoped): never point an entry at a foreign job.
@@ -521,9 +541,11 @@ export async function switchJob(input: {
   if (jobId === entry.job_id) return { ok: false, error: "You're already clocked into that job." };
 
   // The note typed so far belongs to the part being closed. Saved first, own open row, so the
-  // close below never strands unsaved typing on a finished entry nobody reopens.
+  // close below never strands unsaved typing on a finished entry nobody reopens. A WHOLE MOVE closes
+  // nothing, so there is nothing to strand: the breadcrumb write below carries the typed note with
+  // the row, in one write instead of two.
   const typed = (input.notes ?? "").trim();
-  if (typed && typed !== (entry.notes ?? "").trim()) {
+  if (typed && typed !== (entry.notes ?? "").trim() && !movesWhole) {
     await supabase.from("time_entries").update({ notes: typed }).eq("id", entry.id).eq("status", "open");
   }
 
@@ -538,14 +560,7 @@ export async function switchJob(input: {
   const nowIso = new Date().toISOString();
   const fix = usableFix ? { lat: gps!.lat, lng: gps!.lng, accuracy: gps!.accuracy ?? null, captured_at: nowIso } : null;
 
-  const { data: res, error } = await supabase.rpc("switch_job", {
-    p_entry: entry.id,
-    p_job_id: jobId,
-    p_job_code: input.job_code ?? null,
-    p_gps: fix,
-  });
-  if (error) return { ok: false, error: dbError(error) };
-  const r = (res ?? {}) as {
+  type SwitchOutcome = {
     mode?: "cut" | "repointed";
     entry_id?: string;
     closed_id?: string | null;
@@ -555,21 +570,61 @@ export async function switchJob(input: {
      *  moved whole to the new part (0288). */
     lunch_moved?: number;
   };
+  let r: SwitchOutcome;
+  if (movesWhole) {
+    /**
+     * THE WHOLE PUNCH MOVES (switch-window). One UPDATE on the running row: the job changes and
+     * nothing closes, so every minute since the punch lands on the job the person is standing on.
+     * switch_job is not called at all — its SQL cuts past two minutes and no migration ships here.
+     *
+     * The guards switch_job would have applied are all already made above, on the caller's own RLS
+     * client: the row is the caller's open entry (the read), the job is visible and in this org
+     * (visibleJobIdOrNull), and it is not the job the punch is already on.
+     *
+     * CHECKED (the silent-write law). The predicates repeat the job the punch was on, so a punch the
+     * office moved or closed between the read and the write is a zero-row UPDATE that says so —
+     * never a switch reported as landed while the hours sat somewhere else. `.is` for a code-only
+     * punch: `eq(job_id, null)` is not how PostgREST asks for null.
+     */
+    const move = supabase
+      .from("time_entries")
+      .update({ job_id: jobId, job_code: input.job_code ?? null })
+      .eq("id", entry.id)
+      .eq("profile_id", entry.profile_id)
+      .eq("status", "open");
+    const { data: moved, error: moveErr } = await (entry.job_id ? move.eq("job_id", entry.job_id) : move.is("job_id", null)).select("id");
+    if (moveErr) return { ok: false, error: dbError(moveErr) };
+    if (!moved?.length) {
+      return { ok: false, error: "Nothing moved: that shift closed or changed job in the meantime. Reload and try again." };
+    }
+    r = { mode: "repointed", entry_id: entry.id, closed_id: null, closed_hours: 0, rate_left_behind: false };
+  } else {
+    const { data: res, error } = await supabase.rpc("switch_job", {
+      p_entry: entry.id,
+      p_job_id: jobId,
+      p_job_code: input.job_code ?? null,
+      p_gps: fix,
+    });
+    if (error) return { ok: false, error: dbError(error) };
+    r = (res ?? {}) as SwitchOutcome;
+  }
   if (!r.entry_id) return { ok: false, error: "The switch did not save. Try again." };
 
   const { data: j } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
   const label = j ? jobLabel(j as any) : "another job";
   let notes = "";
   if (r.mode === "repointed") {
-    // The whole entry moved. A re-point with no usable fix must not keep the first site's anchor
-    // armed (switch_job keeps gps_in when it is handed none), and the breadcrumb is what re-opens
-    // adoptGeofenceAnchor's window from the switch rather than from clock-in.
+    // The whole entry moved. THE ANCHOR IS THIS SWITCH'S FIX OR NOTHING: a re-point with no usable fix
+    // must not keep the first site's centre armed (that is what auto-closed shifts at the moment the
+    // tech drove away), and the whole-move branch above deliberately writes no gps_in of its own, so
+    // the one anchor rule is written here, once, for both ways a punch can move. The breadcrumb is
+    // what re-opens adoptGeofenceAnchor's window from the switch rather than from clock-in.
     const base = typed || (entry.notes ?? "").trim();
     notes = base ? `${base}
 ${switchBreadcrumb(label, nowIso)}` : switchBreadcrumb(label, nowIso);
     await supabase
       .from("time_entries")
-      .update({ notes, ...(fix ? {} : { gps_in: null }) })
+      .update({ notes, gps_in: fix })
       .eq("id", r.entry_id)
       .eq("status", "open");
   }
@@ -613,6 +668,14 @@ ${switchBreadcrumb(label, nowIso)}` : switchBreadcrumb(label, nowIso);
   revalidatePath("/timeclock");
   revalidatePath("/timecards");
   revalidatePath("/planner"); // who's-on-which-job shows on My Day
+  // A WHOLE MOVE TAKES THE DAY'S HOURS OFF THE OLD JOB, and its worked day goes with them: a job's
+  // worked days are DERIVED from its time_entries on every read (workedDaysFrom), never stored, so
+  // the day a punch pinned frees up the moment the punch leaves — the calendar and the schedule just
+  // have to be told to re-read. (The same note putPunchOnJob carries, for the same reason.)
+  if (r.mode === "repointed" && entry.job_id) {
+    revalidatePath("/schedule");
+    revalidatePath("/calendar");
+  }
   return {
     ok: true,
     entry_id: r.entry_id,

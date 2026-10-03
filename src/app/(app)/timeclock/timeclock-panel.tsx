@@ -26,6 +26,7 @@ import { getPosition } from "@/lib/geo";
 import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { useToast } from "@/components/toast";
 import { clockIn, clockOut, switchJob, saveEntryNotes } from "./actions";
+import { switchMovesWholePunch } from "./switch-window";
 import { ClockStartPicker } from "./clock-start-picker";
 import { MAX_SHIFT_HOURS, isLongOpenShift, startedEarlierDay, stopProblem } from "@/lib/long-shift";
 import { NewJobInline, type CreatedJob } from "./new-job-inline";
@@ -313,8 +314,10 @@ export function TimeclockPanel({
   }
 
   // Mid-shift job switch (0288 switch_job): the running entry closes now and the next one opens on
-  // the new job at the same instant, so the day is two ordinary entries. A job-less start (or one
-  // under two minutes old) moves over whole instead. The page refreshes onto the new open entry.
+  // the new job at the same instant, so the day is two ordinary entries. A job-less start, or a punch
+  // switched within SWITCH_MOVES_WHOLE_MS of starting (switch-window), moves over whole instead — the
+  // server decides which, and the toast below says which one happened. The page refreshes onto the
+  // new open entry.
   function doSwitchJob() {
     if (!openEntry || !switchJobId) return;
     setError(null);
@@ -704,10 +707,16 @@ export function TimeclockPanel({
                           <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
                             <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
                           </Label>
+                          {/* WHAT THE SWITCH IS ABOUT TO DO, IN THE SERVER'S OWN RULE. The young-punch
+                              test is switchMovesWholePunch — the very function switchJob decides the
+                              write with — so this line cannot promise a cut that is not going to
+                              happen. `now` ticks every second, so it stays true while the sheet is open. */}
                           <p className="text-xs text-slate-500">
-                            {openEntry.job_id || openEntry.job_code
-                              ? `Your time on ${currentJobName} closes as its own entry now, and the clock keeps running on the new job.`
-                              : "This shift has no job yet, so the whole shift moves onto the job you pick."}
+                            {!openEntry.job_id && !openEntry.job_code
+                              ? "This shift has no job yet, so the whole shift moves onto the job you pick."
+                              : switchMovesWholePunch(Date.parse(openEntry.clock_in), now)
+                                ? `You clocked in on ${currentJobName} a few minutes ago, so the whole shift moves onto the job you pick — no time stays on ${currentJobName}.`
+                                : `Your time on ${currentJobName} closes as its own entry now, and the clock keeps running on the new job.`}
                           </p>
                           <Select
                             value={switchJobId}
