@@ -687,6 +687,27 @@ describe("Needs You holds Sort These (W1-32)", () => {
     expect(count(doors(card), "Undo This Download")).toBe(1);
   });
 
+  /**
+   * AND THE CARD IS DRAWN FOR THE POINTER ALONE. My Day's Papers To Sort still lands on #sort-these, so
+   * with a statement the only thing waiting, a card that did not render at all would be the dead end
+   * from the other end: he taps the row and arrives at nothing.
+   */
+  it("with only a statement waiting elsewhere, the card still draws, with the pointer and no count", async () => {
+    const { NeedsYou } = await import("./bills-drop");
+    const { createElement } = await import("react");
+    const card = renderToStaticMarkup(
+      createElement(NeedsYou, { items: [], jobs: [], matches: {}, emptyLine: "Nothing else waiting here.", statementsElsewhere: 1 }),
+    );
+    expect(card).toMatch(/^<div[^>]*id="needs-you"/);
+    expect(text(card)).toContain("A Statement Is Waiting On Reconcile");
+    expect(card).toContain('href="/reconcile#bring-in-a-statement"');
+    // NOT IN THE COUNT: it is somebody's work, but it is not this card's (badges show open, here).
+    expect(text(card)).toContain("Needs You");
+    expect(text(card)).not.toMatch(/Needs You \(\d+\)/);
+    // And the empty line does not claim every paper is in the books while one waits.
+    expect(text(card)).toContain("Nothing else waiting here.");
+  });
+
   it("the Waiting On A Credit lines stay on Needs You, and the page hands its papers to the one card", () => {
     const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
     expect(PAGE).toContain("{`Waiting On A Credit (${w.count}) · Under ${w.name}`}");
