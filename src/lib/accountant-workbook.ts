@@ -39,6 +39,7 @@ import { computeArAging, computeCollected, computeCustomerValue, monthKeyInTz } 
 import { collectedByJob } from "@/lib/analytics/job-profitability";
 import { HEADERS, onHandList, toCsv, toolsBilledList, toolsList, type AccountantInputs, type Cell, type CsvTable } from "@/lib/accountant-lists";
 import { summarizeSalesTax } from "@/lib/sales-tax";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { balanceForPerson, sumPayments, toPayPaymentRow, type PayPaymentRow } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
@@ -64,12 +65,15 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  *            row, in the half BUCKET_SECTION puts it in, so a new bucket shows up by itself.
  *   Income   every payment (computeCollected's rows: the same read), by customer
  *            (computeCustomerValue), by job (collectedByJob, job profit's cash rule) and by method;
- *            sales tax only when the company has it switched on, labeled billed basis.
+ *            EVERY INVOICE MADE IN THE PERIOD, every status, labeled billed basis, and the sales tax
+ *            summarized from those same rows when the company has it switched on.
  *   Costs    every cost line Money by Month adds up (ownerMoneyCostLines), their totals under the
  *            Summary's two headings, what was paid to each supplier (supplierBalance), and the tools
  *            lists (depreciation is the accountant's call).
  *   People   earned (the frozen-gross rule), paid, still owed (balanceForPerson), paid this calendar
- *            year; MILES AS MILES, never dollars; the owner's HOURS, never pay.
+ *            year; MILES AS MILES, never dollars; the owner's HOURS, never pay; and, for whoever may see
+ *            the owner's money, every bank line of his draw and his money in (the rows behind the
+ *            Summary's two equity figures).
  *   Open     what customers owe (computeArAging) and what suppliers say is owed (supplierBalance),
  *            AS OF THE DOWNLOAD DAY, with that date printed (Erik's answer 1).
  *   Stock    what was in stock on the period's last day, roll by roll (onHandList).
@@ -238,7 +242,7 @@ export const OWNER_HIDDEN_NOTE = "The totals are the owner's.";
 /** The page's line for that office viewer: why, what the file leaves out, and what it keeps (the
  *  lists the office already sees in the app, each with its own total). Never shown to the owner. */
 export const OWNER_HIDDEN_WHY =
-  "The owner hasn't shared the owner's money with the office, so Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit, the owner's own build time and his Owner's Draw are left out, here and in the file. The file still lists each payment, cost and crew member, with each list's own total, as the app shows them.";
+  "The owner hasn't shared the owner's money with the office, so Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit, the owner's own build time, his Owner's Draw and his Owner's Money In are left out, here and in the file. The file still lists each payment, cost and crew member, with each list's own total, as the app shows them.";
 /** Under the bottom line, for whoever sees it. */
 export const BEFORE_TAX_NOTE = `${PNL_WORDS.netProfit} is before income tax.`;
 /**
@@ -306,9 +310,23 @@ export type AccountantWorkbookInput = {
   /** Every invoice not paid, void or draft: id, customer_id, invoice_number, status, total,
    *  amount_paid, due_date, customers(name). */
   arInvoices: any[];
-  /** Null when Sales Tax is switched off. Invoices created in the period (SALES_TAX_INVOICE_COLS). */
-  salesTax: { invoices: any[]; taxRates: any[] } | null;
+  /** EVERY invoice made in the period, drafts and voids included (ACCOUNTANT_PERIOD_INVOICE_COLS).
+   *  ONE read: the Invoices Made In This Period list and the Sales Tax rows are both built from it, so
+   *  their tax figures cannot drift, and the list exists whether Sales Tax is switched on or off. */
+  periodInvoices: any[];
+  /** Null when Sales Tax is switched off; otherwise the company's named rates. The invoices the rows
+   *  are built from are `periodInvoices`. */
+  salesTax: { taxRates: any[] } | null;
 };
+
+/**
+ * THE INVOICE COLUMNS THE INCOME TAB'S REGISTER PRINTS, in one string so what is read and what is
+ * printed cannot come apart. It is a SUPERSET of SALES_TAX_INVOICE_COLS (sales-tax.ts): the Sales Tax
+ * rows below the register are summarized from these same rows, so a column dropped here would take the
+ * tax figures with it rather than just blanking a cell.
+ */
+export const ACCOUNTANT_PERIOD_INVOICE_COLS =
+  "id, invoice_number, invoice_kind, status, subtotal, tax_rate, tax, total, amount_paid, due_date, created_at, job_id, customers(name)";
 
 export type AccountantWorkbook = {
   tabs: XlsxSheet[];
@@ -354,21 +372,67 @@ const clockTime = (at: unknown, tz: string): string | null => {
 /** "Yes" / "No" — a flag an accountant reads, never a bare true/false in a cell. */
 const yesNo = (v: unknown, no: string | null = "No"): string | null => (v === true ? "Yes" : no);
 
+/**
+ * A BLANK ROW BETWEEN A LIST'S LAST DATA ROW AND ITS TOTALS.
+ *
+ * The totals used to sit flush under the rows they add up. Click one cell of such a list in Excel and
+ * press Sort or Filter: Excel takes the whole unbroken block, so the Total row is sorted into the
+ * middle of the data or hidden by a filter, and a reader adding the rows that are left gets a figure
+ * nothing in this file claims. One blank row is the break Excel reads as the end of a list.
+ *
+ * An autoFilter or an Excel Table would say it properly, and neither is written here: an autoFilter
+ * that opens with a repair prompt is worse than none, and nothing in this repo can prove how real
+ * Excel opens it.
+ */
+const beforeTotals = (): Row => blank();
+
+/**
+ * WHAT A PERSON TYPED ON A BANK LINE, AND WHICH ACCOUNT IT POSTED TO - for whoever may see the owner's
+ * money, and nobody else.
+ *
+ * A bank download is the owner's money line by line (bank-viewer.ts), so bank_lines' own row rules
+ * (viewer_sorts_bank, 0363) already hand an office viewer without the switch no rows at all - these
+ * cells would be empty for that reader anyway. The gate is written here too because the rule that keeps
+ * a bank memo out of an office file must be IN the file that prints it: a later read that reaches the
+ * table some other way would otherwise put the owner's bank description in an office download with
+ * nothing here to stop it. 0363's CHECK has already cut any run of 6+ digits down to its last 4.
+ */
+const bankWords = (l: any, showOwner: boolean): { description: string | null; last4: string | null } => ({
+  description: showOwner ? String(l?.description ?? "").trim() || null : null,
+  last4: showOwner ? String(l?.account_last4 ?? "").trim() || null : null,
+});
+
+/** A typed-in memo as a cell: trimmed, and never long enough to push a column off the screen. A MEMO
+ *  column holds what a PERSON typed on the record; a Note column holds what North says about the row.
+ *  Keeping them apart is the point: the app's own mark must never read as somebody's handwriting. */
+const MEMO_CAP = 200;
+const memo = (v: unknown): string | null => {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  return s.length <= MEMO_CAP ? s : `${s.slice(0, MEMO_CAP - 1)}…`;
+};
+
 /** A CsvTable (the stock and tools lists) as sheet rows: its header bold, its Total rows bold, the
  *  money columns as money and the date columns as dates. */
 function tableRows(t: CsvTable, moneyCols: number[], dateCols: number[]): Row[] {
   const firstTotal = t.rows.length - (t.summaryRows ?? 0);
   return [
     head(...t.header),
-    ...t.rows.map((r, i) => ({
-      cells: r.map((v, c) => {
-        if (v == null) return null;
-        if (moneyCols.includes(c) && typeof v === "number") return { money: v };
-        if (dateCols.includes(c) && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return { date: v };
-        return v;
-      }),
-      bold: i >= firstTotal,
-    })),
+    ...t.rows.flatMap((r, i) => {
+      const row: Row = {
+        cells: r.map((v, c) => {
+          if (v == null) return null;
+          if (moneyCols.includes(c) && typeof v === "number") return { money: v };
+          if (dateCols.includes(c) && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return { date: v };
+          return v;
+        }),
+        bold: i >= firstTotal,
+      };
+      // THE SAME BREAK EVERY OTHER LIST HERE GETS (beforeTotals): these tables carry their totals as the
+      // last rows of `rows`, so without it the stock and tools lists were the ones Excel's Sort and
+      // Filter could still sweep a Total into.
+      return i === firstTotal && i > 0 ? [beforeTotals(), row] : [row];
+    }),
   ];
 }
 
@@ -563,7 +627,11 @@ function summaryTab(
     for (const l of below) pushLine(l);
     // WHAT THE EQUITY LINE IS, AND WHAT ITS FIGURE CAN SEE - and, when the figure is empty, that an empty
     // one is not a claim that nothing was drawn. Same words as the Net Profit card, same predicate.
-    const drawn = hasOwnerDraw(cur.totals) ? "" : " Nothing this period that the app can see.";
+    //
+    // IT SAYS "NO DRAW", because that is the only thing it knows. It used to say "Nothing this period
+    // that the app can see" on a sheet whose Owner's Money In row was showing $800: one sentence
+    // describing one of the two lines above it, in words that read as describing both.
+    const drawn = hasOwnerDraw(cur.totals) ? "" : " No draw this period that the app can see.";
     rows.push(note([DRAW_NOTE, showOwner && hasOwnerIn ? OWNER_IN_NOTE : "", `${cur.ownerDrawSeen}${drawn}`].filter(Boolean).join(" ")));
   }
   if (showOwner) {
@@ -636,7 +704,11 @@ function summaryTab(
   // What the other tabs hold, named by what is itemized on them (80cbd6fa) — every claim here is a
   // section on one of them: each payment in, each cost and the lines of each ticket, each shift and
   // each payment handed to a person, each unpaid ticket.
-  rows.push(note("Tabs: Income, Costs, People, Open and Stock hold the rows behind these figures — each payment in, each cost and the lines of each ticket, each shift and each payment handed over, each ticket still unpaid."));
+  rows.push(
+    note(
+      `Tabs: Income, Costs, People, Open and Stock hold the rows behind these figures — each payment in and each invoice made, each cost and the lines of each ticket, each shift and each payment handed over, each ticket still unpaid${showOwner ? ", and each bank line of the owner's own money" : ""}.`,
+    ),
+  );
   return { name: "Summary", rows, widths: [46, ...(byMonth ? cur.months.map(() => 13) : []), 16, 22, 15] };
 }
 
@@ -654,7 +726,11 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     title(`Income, ${input.period.label}`),
     note("Cash basis: each payment on the day it came in. A payment on an invoice that was later voided is listed but not counted."),
     blank(),
-    head("Date", "Customer", "Invoice", "Job Number", "Job", "Method", "Amount", "Card Fee", "Note"),
+    // MEMO is the LAST column and is what a PERSON typed on the record (payments.note, a refund's
+    // note, a bank line's own description). Note beside it stays North's own words. Each payment used
+    // to carry neither: the memo was never read (projection law), so a payment noted "Check 4411" -
+    // the one string an accountant matches to a bank statement - printed as a blank cell.
+    head("Date", "Customer", "Invoice", "Job Number", "Job", "Method", "Amount", "Card Fee", "Note", "Memo"),
   ];
   type Dated = { at: string; row: Row };
   const dated: Dated[] = [];
@@ -674,6 +750,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
         money(cents(p.amount)),
         fee,
         inv.status === "void" ? "Invoice voided: not counted" : !fee && p.stripe_payment_intent ? "Card fee not reported yet" : null,
+        memo(p.note),
       ),
     });
   }
@@ -682,11 +759,13 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     const j = jobOf(inv.job_id);
     dated.push({
       at: String(r.created_at),
-      row: line(date(recordDay(null, r.created_at, tz)), inv.customers?.name ?? null, inv.invoice_number ?? null, j?.job_number ?? null, j?.name ?? null, "Refund", money(-cents(r.amount)), null, null),
+      row: line(date(recordDay(null, r.created_at, tz)), inv.customers?.name ?? null, inv.invoice_number ?? null, j?.job_number ?? null, j?.name ?? null, "Refund", money(-cents(r.amount)), null, null, memo(r.note)),
     });
   }
   for (const o of other) {
-    dated.push({ at: `${o.posted_on}T12:00:00Z`, row: line(date(o.posted_on), null, null, null, null, "Other Income (Bank)", money(cents(o.amount)), null, null) });
+    // The bank's own description: without it one $800 deposit is indistinguishable from another, which
+    // is the whole of what an accountant wants from a bank-sorted row.
+    dated.push({ at: `${o.posted_on}T12:00:00Z`, row: line(date(o.posted_on), null, null, null, null, "Other Income (Bank)", money(cents(o.amount)), null, null, memo(bankWords(o, input.showOwner).description)) });
   }
   dated.sort((a, b) => a.at.localeCompare(b.at));
   if (!dated.length) rows.push(note("No money came in during this period."));
@@ -695,12 +774,14 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   const paymentsCents = cents(computeCollected(pays, []));
   const refundCents = refunds.reduce((s, r) => s + cents(r.amount), 0);
   const otherCents = other.reduce((s, o) => s + cents(o.amount), 0);
+  rows.push(beforeTotals());
   rows.push(total("Payments", null, null, null, null, null, money(paymentsCents), money(cents(cur.totals.processorFees))));
   if (refundCents) rows.push(total("Refunds", null, null, null, null, null, money(-refundCents)));
   if (otherCents) rows.push(total("Other Income", null, null, null, null, null, money(otherCents)));
   // THE OWNER'S SWITCH: Revenue (all of it: payments, less refunds, plus Other Income) is the top of
   // the Summary's profit and loss, one subtraction from its bottom line; the lists' own sums stay.
   if (input.showOwner) rows.push(total(PNL_WORDS.revenue, null, null, null, null, null, money(cents(cur.totals.received))));
+  rows.push(note("Memo is what a person typed on the record: a payment's note, a refund's note, or a bank line's own description. Note beside it is North's own words about the row."));
 
   // BY CUSTOMER (computeCustomerValue), BY JOB (job profit's cash rule), BY METHOD.
   const names = new Map<string, string>();
@@ -712,6 +793,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     rows.push(line(c.customer, money(cents(c.collected))));
   }
   if (paymentsCents - byCustomer) rows.push(line("No Customer On The Invoice", money(paymentsCents - byCustomer)));
+  rows.push(beforeTotals());
   rows.push(total("Total", money(paymentsCents)));
 
   rows.push(blank(), title("Payments By Job"), head("Job Number", "Job", "Received"));
@@ -722,6 +804,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     rows.push(line(r.j?.job_number ?? null, r.j?.name ?? "A job", money(r.c)));
   }
   if (paymentsCents - byJob) rows.push(line(null, "No Job On The Invoice", money(paymentsCents - byJob)));
+  rows.push(beforeTotals());
   rows.push(total("Total", null, money(paymentsCents)));
 
   rows.push(blank(), title("Payments By Method"), head("Method", "Received"));
@@ -733,24 +816,105 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   for (const [k, list] of [...byMethod.entries()].filter(([, l]) => l.some((p) => p?.invoices?.status !== "void")).sort((a, b) => computeCollected(b[1], []) - computeCollected(a[1], []) || a[0].localeCompare(b[0]))) {
     rows.push(line(k, money(cents(computeCollected(list, [])))));
   }
+  rows.push(beforeTotals());
   rows.push(total("Total", money(paymentsCents)));
   if (refundCents || otherCents) {
     rows.push(note(`Refunds and Other Income are in the list above${input.showOwner ? ` and in ${PNL_WORDS.revenue}` : ""}, not in these three breakdowns.`));
   }
 
+  // EVERY INVOICE MADE IN THE PERIOD (80cbd6fa: the download "needs to have ALL the data available to
+  // be itemized"). The list at the top of this tab is cash: what came IN, on the day it came in. This
+  // is the other half of the question an accountant asks of a period, and until now it was nowhere in
+  // the file at all - the only invoices read were the ones still unpaid TODAY (Open, with no date made,
+  // no kind and no tax on them) and, when Sales Tax happened to be switched on, enough columns to add
+  // the tax up by rate and nothing to say which invoice each row came from.
+  //
+  // ONE READ FEEDS THIS LIST AND THE SALES TAX ROWS BELOW IT, so the two tie by construction rather
+  // than by two reads happening to agree - and the list is here whether Sales Tax is on or off.
+  const periodInvoices = (input.periodInvoices ?? []).filter((i) => i?.created_at && inPeriod(i.created_at));
+  rows.push(blank(), title("Invoices Made In This Period"));
+  rows.push(
+    note(
+      "Billed basis: each invoice on the day it was made, not the day it was paid — a different count from the payments above, which are cash. Drafts and voided invoices are listed and marked, and are in no Total. Paid To Date and Still Owed To Date are rolled up to the day this was downloaded, not to the end of the period.",
+    ),
+  );
+  rows.push(head("Date Made", "Invoice", "Kind", "Customer", "Job Number", "Job", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid To Date", "Still Owed To Date", "Due Date", "Note"));
+  const madeRows: { at: string; row: Row }[] = [];
+  const made = { subtotal: 0, tax: 0, total: 0, paid: 0, owed: 0, counted: 0, uncounted: 0 };
+  for (const i of periodInvoices) {
+    const status = String(i?.status ?? "");
+    // A draft or a void is LISTED and marked, exactly as Income marks a payment on a voided invoice,
+    // and counts in nothing: summarizeSalesTax leaves the same two out, which is why the Tax total
+    // below this list is the Sales Tax total.
+    const counts = status !== "draft" && status !== "void";
+    const j = jobOf(i?.job_id);
+    const rate = Number(i?.tax_rate ?? 0) * 100;
+    // THE ONE BALANCE (invoice-math.ts), never `total - amount_paid` typed out again: it floors at zero
+    // and rounds to the cent, which is why eighteen other places call it instead of subtracting.
+    const owedCents = cents(invoiceBalance(i?.total, i?.amount_paid));
+    if (counts) {
+      made.counted += 1;
+      made.subtotal += cents(i?.subtotal);
+      made.tax += cents(i?.tax);
+      made.total += cents(i?.total);
+      made.paid += cents(i?.amount_paid);
+      made.owed += owedCents;
+    } else made.uncounted += 1;
+    const day = recordDay(null, i?.created_at, tz);
+    madeRows.push({
+      at: `${day ?? "9999-99-99"} ${String(i?.id ?? "")}`,
+      row: line(
+        date(day),
+        i?.invoice_number ?? null,
+        methodLabel(i?.invoice_kind ?? "standard"),
+        i?.customers?.name ?? null,
+        j?.job_number ?? null,
+        j?.name ?? null,
+        methodLabel(status),
+        money(cents(i?.subtotal)),
+        round3(rate),
+        money(cents(i?.tax)),
+        money(cents(i?.total)),
+        money(cents(i?.amount_paid)),
+        money(owedCents),
+        date(String(i?.due_date ?? "").slice(0, 10)),
+        status === "draft" ? "Draft: not counted" : status === "void" ? "Voided: not counted" : null,
+      ),
+    });
+  }
+  madeRows.sort((a, b) => a.at.localeCompare(b.at));
+  if (!madeRows.length) rows.push(note(`No invoice was made in ${input.period.label}.`));
+  rows.push(...madeRows.map((d) => d.row));
+  rows.push(beforeTotals());
+  // MONEY ONLY IN THE MONEY COLUMNS. The count of invoices used to sit in this row under Status, where a
+  // bare "2" reads as neither a status nor a figure; how many are in the Total and how many are not is a
+  // sentence, said below, where a sentence belongs.
+  rows.push(total("Total", null, null, null, null, null, null, money(made.subtotal), null, money(made.tax), money(made.total), money(made.paid), money(made.owed)));
+  const says = (n: number) => (n === 1 ? "1 invoice" : `${n} invoices`);
+  rows.push(
+    note(
+      made.uncounted
+        ? `${says(made.counted)} ${made.counted === 1 ? "is" : "are"} in this Total; ${says(made.uncounted)} above ${made.uncounted === 1 ? "is a draft or voided and is" : "are drafts or voided and are"} in none.`
+        : `${says(made.counted)} ${made.counted === 1 ? "is" : "are"} in this Total; no invoice of this period is a draft or voided.`,
+    ),
+  );
+
   rows.push(blank(), title("Sales Tax"));
   if (!input.salesTax) {
-    rows.push(note("Sales Tax is switched off for this company, so none is listed."));
+    rows.push(note("Sales Tax is switched off for this company, so none is listed. The invoices above still carry what tax was billed on each."));
   } else {
-    const inv = input.salesTax.invoices.filter((i) => i?.created_at && inPeriod(i.created_at));
-    const s = summarizeSalesTax(inv, input.salesTax.taxRates);
-    rows.push(note("Billed basis: counted on the day the invoice was made, not the day it was paid (the Tax Report's rule). Drafts and voided invoices are left out."));
+    // THE SAME ROWS THE LIST ABOVE PRINTED, so the Tax total here and the Tax total there cannot drift.
+    const s = summarizeSalesTax(periodInvoices, input.salesTax.taxRates);
+    rows.push(note("Billed basis: counted on the day the invoice was made, not the day it was paid (the Tax Report's rule). Drafts and voided invoices are left out, as they are above."));
     rows.push(head("Jurisdiction", "Rate (%)", "Invoices", "Taxable", "Tax"));
     for (const r of s.rows) rows.push(line(r.name, Math.round(r.pct * 1000) / 1000, r.count, money(cents(r.taxable)), money(cents(r.tax))));
+    rows.push(beforeTotals());
     rows.push(total("Total", null, s.rows.reduce((n, r) => n + r.count, 0), money(cents(s.totalTaxable)), money(cents(s.totalTax))));
     rows.push(note("Taxable counts only invoices that carry a rate above 0%."));
+    // Never expected (one read, one filter), and never silent if it happens.
+    if (cents(s.totalTax) !== made.tax) rows.push(note("The tax here doesn't add up to the Tax column of Invoices Made In This Period, though both read the same invoices."));
   }
-  return { name: "Income", rows, widths: [12, 28, 12, 12, 28, 18, 13, 11, 34] };
+  return { name: "Income", rows, widths: [13, 28, 14, 14, 28, 18, 14, 13, 30, 24, 13, 14, 16, 13, 24] };
 }
 
 // ── Costs ────────────────────────────────────────────────────────────────────
@@ -763,11 +927,26 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   const itemOfLot = new Map(lists.lots.map((l) => [String(l.lot_id), l.item_id]));
   const itemName = new Map(lists.items.map((i) => [String(i.id), i.name]));
 
+  // WHICH ACCOUNT EACH TICKET BELONGS TO, AND WHETHER NORTH STILL CALLS IT UNPAID - the SAME two
+  // functions the Open tab's lists ask (supplierIdentityOf, isOnAccountBill with settledBySupplier), so
+  // a ticket cannot read one way here and another way there. "Where" beside them is the free-text
+  // SPELLING, which is why a supplier written five ways cannot be filtered as one company without this.
+  const { of: costIdentity } = supplierIdentityOf(inp);
+  const costSettled = supplierSettledOf(inp, costIdentity);
+  const costAcctName = new Map((inp.supplierAccounts ?? []).map((a: any) => [String(a?.id), String(a?.name ?? "").trim()]));
+  /** The supplier account a ticket belongs to, by IDENTITY (filed, alias or the account's own name) -
+   *  never `bills.supplier_account_id` alone, which is null on more than half a real book. */
+  const accountOf = (billId: unknown): string => {
+    const id = costIdentity.get(String(billId))?.accountId ?? null;
+    if (!id) return "No supplier account";
+    return costAcctName.get(String(id)) || "An account North can't name";
+  };
+
   const rows: Row[] = [
     title(`Costs, ${input.period.label}`),
     note("Cash basis: each cost on its own date (a bill's date, an order's date, the day of a card fee). Goes To is the Summary row it adds to. Crew Pay and Crew Mileage Paid are on People."),
     blank(),
-    head("Date", "Where", "Bill Number", "Job Number", "Job", "Goes To", "Amount", "What It Was"),
+    head("Date", "Where", "Bill Number", "Job Number", "Job", "Goes To", "Amount", "What It Was", "Marked Unpaid", "Supplier Account", "Memo"),
   ];
   const sums = new Map<PnlKey, number>();
   /** The period's tickets, by the SAME day and the same set the cost list above counts, so the lines
@@ -811,7 +990,25 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     }
     const key = pnlKeyOfCostTarget(l.to);
     sums.set(key, (sums.get(key) ?? 0) + l.cents);
-    rows.push(line(date(l.day), where, billNo, j?.job_number ?? null, j?.name ?? null, PNL_LABEL.get(key) ?? key, money(l.cents), what));
+    // Only a ticket has a supplier account, an unpaid mark or a memo: the other sources (an order, petty
+    // cash, a card fee, a stock move) leave those cells BLANK rather than answer "No" for a question
+    // that was never asked of them.
+    const isBill = l.source === "bill" && r.id != null;
+    rows.push(
+      line(
+        date(l.day),
+        where,
+        billNo,
+        j?.job_number ?? null,
+        j?.name ?? null,
+        PNL_LABEL.get(key) ?? key,
+        money(l.cents),
+        what,
+        isBill ? yesNo(isOnAccountBill({ status: String(r.status ?? ""), settledBySupplier: costSettled.has(String(r.id)) })) : null,
+        isBill ? accountOf(r.id) : null,
+        isBill ? memo(r.notes) : null,
+      ),
+    );
   }
   if (!lines.length) rows.push(note("No costs in this period."));
 
@@ -829,6 +1026,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     all += c;
     rows.push(under(l.label, money(c)));
   }
+  rows.push(beforeTotals());
   rows.push(total("Total", money(all)));
   // No figure here: an office file the owner hasn't shared carries no bottom line, so the note says
   // where the rest is rather than adding it up.
@@ -838,6 +1036,13 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     ),
   );
   if (cur.totals.processorFees) rows.push(note(`Fees includes ${formatCurrency(cur.totals.processorFees)} of card fees.`));
+  // WHAT THE THREE LAST COLUMNS OF THE LIST ARE, said once. Supplier Account is the one that earns the
+  // sentence: a filter on Where groups a spelling, a filter on Supplier Account groups a company.
+  rows.push(
+    note(
+      "Marked Unpaid is what North's own books say about a ticket as of the download day — the same answer as Bills North Has Marked Unpaid on Open. Supplier Account is the company a ticket belongs to however it was spelled, so one supplier written several ways filters as one; Where is the spelling on the paper. Memo is what a person typed on the ticket.",
+    ),
+  );
 
   // WHAT WAS SENT TO EACH SUPPLIER (supplierBalance over the period's payments).
   const periodPayments = (inp.supplierPayments ?? []).filter((p) => months.has(String(p?.paid_on ?? "").slice(0, 7)));
@@ -853,15 +1058,18 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     rows.push(line(acct.name, bal.livePayments, money(cents(bal.paid))));
   }
   if (!any) rows.push(note("No payments to supplier accounts in this period."));
+  rows.push(beforeTotals());
   rows.push(total("Total", null, money(paid)));
 
   // EACH PAYMENT, NOT JUST HOW MANY (Erik, report 80cbd6fa, 2026-09-30: the download "needs to have
   // ALL the data available to be itemized"). The rollup above says "Northline Supply · 1 · $500"; this
   // is the $500, on its day, by its method. A voided payment is listed and marked, as a payment on a
   // voided invoice is on Income, so the figure above can be checked and nothing is quietly dropped.
-  const acctName = new Map((inp.supplierAccounts ?? []).map((a: any) => [String(a?.id), String(a?.name ?? "").trim()]));
   rows.push(blank(), title("Each Payment To A Supplier"), note("Every payment that made up the figures above, voided ones marked. They add up to the same Total."));
-  rows.push(head("Date", "Supplier", "Method", "Amount", "Note"));
+  // CHECK OR REFERENCE, by the name People's Each Payment Handed Over already gives it: 0270 calls the
+  // column "Check number, confirmation code, whatever he can match to his bank". It was never read, so
+  // the one list an accountant reconciles a bank statement against was the one list without it.
+  rows.push(head("Date", "Supplier", "Method", "Amount", "Note", "Check Or Reference", "Memo"));
   let paidEach = 0;
   const payRows = [...periodPayments].sort(
     (a, b) => String(a?.paid_on).localeCompare(String(b?.paid_on)) || String(a?.id ?? "").localeCompare(String(b?.id ?? "")),
@@ -872,14 +1080,17 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     rows.push(
       line(
         date(String(p?.paid_on ?? "").slice(0, 10)),
-        acctName.get(String(p?.supplier_account_id)) || "A supplier account North can't name",
+        costAcctName.get(String(p?.supplier_account_id)) || "A supplier account North can't name",
         methodLabel(p?.method),
         money(cents(p?.amount)),
         voided ? "Voided: not counted" : null,
+        memo(p?.reference),
+        memo(p?.note),
       ),
     );
   }
   if (!payRows.length) rows.push(note("No payments to supplier accounts in this period."));
+  rows.push(beforeTotals());
   rows.push(total("Total", null, null, money(paidEach)));
   // Never expected (both are the same rows), and never silent if it happens.
   if (paidEach !== paid) rows.push(note("These payments don't add up to Paid To Suppliers above; the figure above is the one /bills shows."));
@@ -953,6 +1164,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     }
   }
   if (!listed) rows.push(note("No ticket in this period was entered line by line."));
+  rows.push(beforeTotals());
   rows.push(total("Total Of The Lines", null, null, null, null, null, money(lineCents)));
   rows.push(note("Part Billed is the dollars of a line this job took when only part of it was the customer's; blank means the whole line."));
   // THE GAP, SAID. A ticket is counted by its own total, so the lines are never added up instead of it
@@ -966,7 +1178,9 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
         " A ticket is always counted by its own total, never by adding its lines.",
     ),
   );
-  return { name: "Costs", rows, widths: [12, 30, 14, 12, 28, 26, 13, 44, 11, 12, 18, 13, 11] };
+  // Thirteen columns is the widest list on this tab (Every Line On Every Ticket); the cost list's three
+  // new ones share 9-11 with it, so each width is the wider of the two things that land in that column.
+  return { name: "Costs", rows, widths: [12, 30, 14, 12, 28, 26, 13, 44, 15, 26, 30, 13, 11] };
 }
 
 // ── People ───────────────────────────────────────────────────────────────────
@@ -1146,6 +1360,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   const byName = (a: Row, b: Row) => String(a.cells[0]).localeCompare(String(b.cells[0]));
   rows.push(...crewRows.sort(byName));
   if (!crewRows.length) rows.push(note("No crew hours, pay or miles in this period."));
+  rows.push(beforeTotals());
   rows.push(total("Crew Total", null, t.hours / 100, money(t.earned), money(t.paid), money(t.owed), money(t.year), t.miles / 10, t.business / 10, money(t.settled)));
   if (ownerRows.length) rows.push(blank(), ...ownerRows.sort(byName));
   if (!showOwner) rows.push(blank(), note(OWNER_ROWS_HIDDEN_NOTE));
@@ -1159,6 +1374,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   personPayRows.sort((a, b) => a.at.localeCompare(b.at));
   if (!personPayRows.length) rows.push(note("Nothing was handed over in this period."));
   rows.push(...personPayRows.map((d) => d.row));
+  rows.push(beforeTotals());
   rows.push(total("Total Pay", null, null, null, null, money(tHandedOver.pay)));
   rows.push(total("Total Mileage Settled", null, null, null, null, money(tHandedOver.mileage)));
   rows.push(note("Pay and mileage settle separately and are never added into one figure: a payable number North invented is how a wrong amount lands on a check."));
@@ -1169,6 +1385,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   shiftRows.sort((a, b) => a.at.localeCompare(b.at));
   if (!shiftRows.length) rows.push(note("No shifts in this period."));
   rows.push(...shiftRows.map((d) => d.row));
+  rows.push(beforeTotals());
   rows.push(total("Total Hours", null, null, null, null, round2(shiftRows.length ? sumHours(shiftRows) : 0)));
   rows.push(note("Total Hours counts every shift listed, the owner's among them when they are shown, so it is not Crew Total's Hours."));
 
@@ -1179,7 +1396,74 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   rows.push(...lockedRows.sort((a, b) => String(a.cells[0]).localeCompare(String(b.cells[0]))));
   // No total on purpose, said out loud: adding frozen grosses across the edge is not this period's pay.
   if (lockedRows.length) rows.push(note("No total here: a period that straddles this one's edge is only partly in it, so adding the frozen grosses would not be Earned."));
-  return { name: "People", rows, widths: [26, 20, 11, 14, 16, 16, 24, 14, 14, 14, 44] };
+
+  if (showOwner) rows.push(...ownerEquityRows(input, cur, months));
+  return { name: "People", rows, widths: [26, 20, 14, 30, 18, 16, 24, 14, 14, 14, 44] };
+}
+
+/**
+ * THE OWNER'S OWN MONEY, LINE BY LINE (80cbd6fa: the download "needs to have ALL the data available to
+ * be itemized"). The Summary has carried Owner's Draw and Owner's Money In as two equity figures below
+ * Net Profit since 0376, and NOTHING in the file said what either was made of: $2,400 drawn and $800 put
+ * in were two cells with no row anywhere behind them, which is the one shape an accountant cannot sign.
+ *
+ * ON THE PEOPLE TAB, where the owner's row already is, and INSIDE the owner's switch - the same gate the
+ * Summary's two rows sit behind, so an office viewer without it gains nothing here either.
+ *
+ * AMOUNTS ARE POSITIVE in both directions, because the engine's figures are (computeOwnerMoney takes
+ * Math.abs of a signed bank amount) and the Summary prints them that way. Direction is the column that
+ * says which way the money went; a sign would have been a second answer to the same question.
+ *
+ * ONE READ, THE SAME ONE: these are inp.ownerDraws and inp.ownerMoneyIn, the rows the figures above were
+ * added up from, filtered by the month of posted_on exactly as the Income tab filters Other Income.
+ * posted_on is a DATE on the row (0363), so the month is its first seven characters - never a timezone
+ * conversion, which is how a bank line on the first of a month lands in the one before.
+ */
+function ownerEquityRows(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<string>): Row[] {
+  const { money: inp, showOwner } = input;
+  const rows: Row[] = [blank(), title(`${DRAW_LABEL} And ${PNL_WORDS.ownerMoneyIn}`)];
+  rows.push(
+    note(
+      `Equity, not income and not a cost: these are the rows behind the two lines below ${PNL_WORDS.netProfit} on the Summary, and neither is added to or subtracted from it. Amounts are positive in both directions; Direction says which way the money went.`,
+    ),
+  );
+  rows.push(head("Date", "Direction", "Amount", "Bank Description", "Account (Last 4)"));
+  type Dated = { at: string; row: Row };
+  const dated: Dated[] = [];
+  const sums = { out: 0, in: 0 };
+  const push = (l: any, direction: "Taken Out" | "Put In") => {
+    const day = String(l?.posted_on ?? "").slice(0, 10);
+    if (!months.has(day.slice(0, 7))) return;
+    const c = Math.abs(cents(l?.amount));
+    if (direction === "Taken Out") sums.out += c;
+    else sums.in += c;
+    const words = bankWords(l, showOwner);
+    dated.push({ at: `${day} ${String(l?.id ?? "")}`, row: line(date(day), direction, money(c), memo(words.description), words.last4) });
+  };
+  for (const l of inp.ownerDraws ?? []) push(l, "Taken Out");
+  for (const l of inp.ownerMoneyIn ?? []) push(l, "Put In");
+  dated.sort((a, b) => a.at.localeCompare(b.at));
+  if (!dated.length) rows.push(note("No bank line in this period was sorted as the owner's money."));
+  rows.push(...dated.map((d) => d.row));
+  rows.push(beforeTotals());
+  rows.push(total("Total Taken Out", null, money(sums.out)));
+  rows.push(total("Total Put In", null, money(sums.in)));
+  rows.push(
+    note(
+      `Total Taken Out is the Summary's ${DRAW_LABEL} for this period, and Total Put In is its ${PNL_WORDS.ownerMoneyIn} — a row the Summary carries only when there is some.`,
+    ),
+  );
+  // WHICH DRAWS THE FIGURE CAN SEE AT ALL, in the engine's own words: both figures come from bank lines
+  // somebody sorted, so cash out of the till is in neither, and an empty list is not a claim that
+  // nothing was taken. Said here beside the rows, as the Summary says it beside the totals.
+  rows.push(note(`${cur.ownerDrawSeen}${dated.length ? "" : " Nothing this period that the app can see, in either direction."}`));
+  // Never expected (these are the rows the engine added up), and never silent if it happens.
+  const drawCents = cents(cur.totals.ownerDraw ?? 0);
+  const inCents = cents(cur.totals.ownerMoneyIn ?? 0);
+  if (sums.out !== drawCents || sums.in !== inCents) {
+    rows.push(note(`These rows don't add up to the Summary's ${DRAW_LABEL} and ${PNL_WORDS.ownerMoneyIn}; the Summary's figures are the ones Money by Month shows.`));
+  }
+  return rows;
 }
 
 /** The Hours column of the shift rows, added up (a null hour — a shift still on the clock — is 0). */
@@ -1276,11 +1560,13 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   ];
   for (const i of open.customers.invoices) rows.push(line(i.invoice_number, i.customer, money(cents(i.total)), money(cents(i.amountPaid)), money(cents(i.balance)), i.daysLate));
   if (!open.customers.invoices.length) rows.push(note(`No customer owed anything on ${day}.`));
+  rows.push(beforeTotals());
   rows.push(total("Total", null, null, null, money(open.customersCents)));
-  rows.push(note("Drafts aren't counted: they haven't been sent."));
+  rows.push(note("Drafts aren't counted: they haven't been sent. When each invoice was made, what kind it is and what tax it carried are on Income, under Invoices Made In This Period."));
   rows.push(blank(), title("Suppliers Say You Owe"), head("Supplier", "Owed", "How North Knows"));
   for (const s of open.suppliers) rows.push(line(s.name, money(s.cents), s.how));
   if (!open.suppliers.length) rows.push(note(`No supplier was owed anything on ${day}.`));
+  rows.push(beforeTotals());
   rows.push(total("Total", money(open.suppliersCents)));
   rows.push(note("A supplier that sends its own invoices is owed what those say is still open. Crew still owed is on People."));
 
@@ -1295,14 +1581,17 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   // debt - which is exactly what every screen reader got wrong (8a982483). It gains the one
   // exclusion it was missing: a ticket the supplier's own closed paper covers is counted inside
   // that paper already, so counting it here overstated what North had bought and not squared.
-  const settledHere = supplierSettledOf(inp, supplierIdentityOf(inp).of);
+  const { of: identityHere } = supplierIdentityOf(inp);
+  const settledHere = supplierSettledOf(inp, identityHere);
   rows.push(blank(), title("Bills North Has Marked Unpaid"));
   rows.push(
     note(
       `Every ticket on the books not marked paid, as of ${day}, except any the supplier's own closed paper already covers. For an account North tracks by its own bills, what is owed above is these less what was sent (each payment is on Costs). This is what North BOUGHT on account; what is owed above is what the suppliers say, and they are different figures.`,
     ),
   );
-  rows.push(head("Date", "Supplier", "Bill Number", "Amount", "Supplier Account", "Job"));
+  // NAME JOBS, NOT NUMBERS: the job's own number beside its name, the way every other list on this
+  // tab's neighbours prints a job.
+  rows.push(head("Date", "Supplier", "Bill Number", "Amount", "Supplier Account", "Job", "Job Number"));
   const unpaid: { at: string; row: Row }[] = [];
   let unpaidCents = 0;
   for (const b of inp.bills ?? []) {
@@ -1313,6 +1602,13 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
     unpaidCents += c;
     const at = recordDay(b.bill_date, b.created_at, input.tz);
     const j = b.job_id ? input.lists.jobs.find((x) => String(x.id) === String(b.job_id)) : undefined;
+    // THE ACCOUNT BY IDENTITY, NOT BY THE STORED COLUMN. This cell read `b.supplier_account_id` alone
+    // while the figure it explains (openFigures -> whatISupplierOwed) resolves a ticket by the account
+    // it is filed on OR a filed alias OR the account's own name. So a ticket spelled exactly like an
+    // existing account but never filed landed inside "Northline Supply $60.00, Bills minus payments" in
+    // the list above and read "No supplier account" in the list below it - one ticket, two answers, in
+    // the deliverable whose whole job is to let the two be reconciled.
+    const accountId = identityHere.get(String(b.id))?.accountId ?? null;
     unpaid.push({
       at: `${at ?? "9999-99-99"} ${String(b.id ?? "")}`,
       row: line(
@@ -1320,15 +1616,18 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
         String(b.supplier ?? "").trim() || "A bill with no supplier named",
         b.bill_number ?? b.supplier_invoice_number ?? null,
         money(c),
-        b.supplier_account_id ? acctName.get(String(b.supplier_account_id)) || "An account North can't name" : "No supplier account",
+        accountId ? acctName.get(String(accountId)) || "An account North can't name" : "No supplier account",
         j?.name ?? null,
+        j?.job_number ?? null,
       ),
     });
   }
   unpaid.sort((a, b) => a.at.localeCompare(b.at));
   if (!unpaid.length) rows.push(note("No ticket on the books is marked unpaid."));
   rows.push(...unpaid.map((u) => u.row));
+  rows.push(beforeTotals());
   rows.push(total("Total", null, null, money(unpaidCents)));
+  rows.push(note("Supplier Account is the company a ticket belongs to however it was spelled — filed on the account, a spelling somebody filed, or the account's own name — which is how the figure above reaches it. Costs answers the same way for every ticket of the period."));
 
   rows.push(blank(), title("What Each Supplier's Own Invoices Say Is Still Open"));
   rows.push(note("The supplier's own paper, not North's: a statement invoice, a credit memo or a service charge that isn't closed. Still Open is what that document says is left on it, read exactly as the balance above reads it (openBalanceOf, /bills), so this list adds up to the supplier-invoices figure."));
@@ -1369,6 +1668,7 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   docs.sort((a, b) => a.at.localeCompare(b.at));
   if (!docs.length) rows.push(note("No supplier has an open document of its own on the books."));
   rows.push(...docs.map((d) => d.row));
+  rows.push(beforeTotals());
   rows.push(total("Total", null, null, null, null, money(docCents)));
   if (unfigured) {
     rows.push(note("A row marked No Balance Recorded came from before North recorded one, so its Still Open is the paper's own Total. The supplier's balance above counts it the same way, in full — nothing here is left out of that figure."));
@@ -1381,7 +1681,7 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   }
   // Column 4 holds the longest thing on this tab now - a Kind carrying its No Balance Recorded mark -
   // and Still Open holds a credit memo's negative, so neither is cut off in the sheet.
-  return { name: "Open", rows, widths: [30, 26, 18, 28, 20, 16] };
+  return { name: "Open", rows, widths: [30, 26, 18, 28, 26, 28, 13] };
 }
 
 // ── Stock ────────────────────────────────────────────────────────────────────

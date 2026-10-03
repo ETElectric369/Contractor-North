@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { deflateRawSync } from "node:zlib";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import {
+  ACCOUNTANT_PERIOD_INVOICE_COLS,
   BEFORE_TAX_NOTE,
   NET_LABEL,
   OWNER_HIDDEN_NOTE,
@@ -156,8 +157,10 @@ const money = (): OwnerMoneyInputs => ({
   shelfMoves: [{ id: "m1", lot_id: "L1", kind: "write_off", cost: 20, created_at: "2026-06-10T15:00:00Z", undone_at: null }],
   supplierAccounts: [{ id: "a1", name: "Northline Supply", on_account: true }],
   supplierPayments: [
-    { id: "sp1", supplier_account_id: "a1", amount: 500, paid_on: "2026-05-30", method: "check", voided_at: null },
-    { id: "sp2", supplier_account_id: "a1", amount: 100, paid_on: "2026-06-01", method: "check", voided_at: "2026-06-02T00:00:00Z" },
+    // A check number and a memo somebody typed (0270's `reference` and `note`): the two strings an
+    // accountant matches to a bank statement, and neither was read before.
+    { id: "sp1", supplier_account_id: "a1", amount: 500, paid_on: "2026-05-30", method: "check", voided_at: null, reference: "4411", note: "May statement" },
+    { id: "sp2", supplier_account_id: "a1", amount: 100, paid_on: "2026-06-01", method: "check", voided_at: "2026-06-02T00:00:00Z", reference: null, note: null },
   ],
   supplierDocuments: [],
 });
@@ -180,6 +183,18 @@ const lists = (): AccountantInputs => ({
   claims: [{ source_ids: ["b5"], import_key: null, invoice_number: "INV-102" }],
 });
 
+/**
+ * EVERY INVOICE MADE IN Q2, as PostgREST hands them over: a taxed one part paid, a deposit at 0% paid in
+ * full, a draft and a void. The draft's absurd $99 of tax on $9 is deliberate — it proves a draft reaches
+ * no total. One read: the register prints all four and the Sales Tax rows summarize the same array.
+ */
+const PERIOD_INVOICES = [
+  { id: "iv1", invoice_number: "INV-102", invoice_kind: "standard", status: "sent", subtotal: 1000, tax_rate: 0.0725, tax: 72.5, total: 1072.5, amount_paid: 400, due_date: "2026-06-01", created_at: "2026-05-01T17:00:00Z", job_id: "j2", customers: { name: "Birch Street LLC" } },
+  { id: "iv2", invoice_number: "INV-109", invoice_kind: "deposit", status: "paid", subtotal: 250, tax_rate: 0, tax: 0, total: 250, amount_paid: 250, due_date: null, created_at: "2026-04-22T17:00:00Z", job_id: "j1", customers: { name: "Acme Homes" } },
+  { id: "iv3", invoice_number: "INV-106", invoice_kind: "progress", status: "draft", subtotal: 9, tax_rate: 0.0725, tax: 99, total: 108, amount_paid: 0, due_date: null, created_at: "2026-05-01T17:00:00Z", job_id: "j1", customers: { name: "Acme Homes" } },
+  { id: "iv4", invoice_number: "INV-104", invoice_kind: "standard", status: "void", subtotal: 300, tax_rate: 0.0725, tax: 21.75, total: 321.75, amount_paid: 300, due_date: "2026-07-20", created_at: "2026-06-20T17:00:00Z", job_id: "j2", customers: { name: "Birch Street LLC" } },
+];
+
 const Q2 = periodFromKey("2026-Q2")!;
 const input = (over: Partial<AccountantWorkbookInput> = {}): AccountantWorkbookInput => ({
   company: "Pinecrest Electric Co",
@@ -194,13 +209,10 @@ const input = (over: Partial<AccountantWorkbookInput> = {}): AccountantWorkbookI
     { id: "i7", customer_id: "cu-acme", invoice_number: "INV-107", status: "sent", total: 1500, amount_paid: 500, due_date: "2026-09-01", created_at: "2026-08-20T00:00:00Z", customers: { name: "Acme Homes" } },
     { id: "i8", customer_id: "cu-acme", invoice_number: "INV-108", status: "draft", total: 900, amount_paid: 0, due_date: null, created_at: "2026-09-20T00:00:00Z", customers: { name: "Acme Homes" } },
   ],
-  salesTax: {
-    invoices: [
-      { tax_rate: 0.0725, tax: 72.5, subtotal: 1000, total: 1072.5, status: "sent", created_at: "2026-05-01T17:00:00Z" },
-      { tax_rate: 0.0725, tax: 99, subtotal: 9, total: 108, status: "draft", created_at: "2026-05-01T17:00:00Z" },
-    ],
-    taxRates: [{ name: "Lakeside County", rate: 7.25 }],
-  },
+  // EVERY invoice made in the period, drafts and voids among them: ONE read feeds both the Invoices
+  // Made In This Period register and the Sales Tax rows, so the two tie by construction.
+  periodInvoices: PERIOD_INVOICES,
+  salesTax: { taxRates: [{ name: "Lakeside County", rate: 7.25 }] },
   ...over,
 });
 
@@ -208,6 +220,9 @@ const input = (over: Partial<AccountantWorkbookInput> = {}): AccountantWorkbookI
 
 const tab = (wb: AccountantWorkbook, name: string): XlsxSheet => wb.tabs.find((t) => t.name === name)!;
 const rowOf = (t: XlsxSheet, label: string) => t.rows.find((r) => r.cells[0] === label);
+/** A slice of a list without the blank row that stands between its last data row and its totals (so
+ *  Excel's Filter and Sort don't sweep the totals into the data). */
+const dataRows = (rows: XlsxSheet["rows"]) => rows.filter((r) => r.cells.length > 0);
 const cents = (v: XlsxValue): number | null => (v && typeof v === "object" && "money" in v ? Math.round(v.money * 100) : null);
 const toCents = (n: number) => Math.round(n * 100);
 const everyText = (wb: AccountantWorkbook) => wb.tabs.flatMap((t) => t.rows.flatMap((r) => r.cells.map((c) => (typeof c === "string" ? c : ""))));
@@ -295,7 +310,10 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
     const note = String(summary.rows[drawAt + 1].cells[0]);
     expect(note).toContain("is equity, not an expense");
     expect(note).toContain("Cash you took or put in without a bank line is not in it");
-    expect(note).toContain("Nothing this period that the app can see");
+    // IT SAYS "NO DRAW", not "nothing": the sentence describes the draw line and nothing else, and it
+    // used to read "Nothing this period that the app can see" on a sheet whose Owner's Money In row
+    // beside it was showing money.
+    expect(note).toContain("No draw this period that the app can see");
   });
 
   it("formatted the way an accountant lays one out: headings and totals bold, every line under its heading indented", () => {
@@ -410,7 +428,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     const income = tab(wb, "Income");
     const start = income.rows.findIndex((r) => r.cells[0] === "Date") + 1;
     const end = income.rows.findIndex((r) => r.cells[0] === "Payments");
-    const listed = income.rows.slice(start, end);
+    const listed = dataRows(income.rows.slice(start, end));
     expect(listed).toHaveLength(7); // 5 payments, 1 refund, 1 deposit
     const counted = listed.filter((r) => r.cells[8] !== "Invoice voided: not counted").reduce((s, r) => s + cents(r.cells[6])!, 0);
     expect(counted).toBe(toCents(cur.totals.received));
@@ -418,7 +436,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     expect(cents(rowOf(income, "Revenue")!.cells[6])).toBe(toCents(cur.totals.received));
     expect(rowOf(income, "Received")).toBeUndefined();
     expect(income.rows.map((r) => r.cells[0])).toContain("Refunds and Other Income are in the list above and in Revenue, not in these three breakdowns.");
-    expect(listed.find((r) => r.cells[2] === "INV-102")!.cells).toEqual([{ date: "2026-05-15" }, "Birch Street LLC", "INV-102", "J-202", "Birch Street Service", "Card", { money: 2500 }, { money: 72.8 }, null]);
+    expect(listed.find((r) => r.cells[2] === "INV-102")!.cells).toEqual([{ date: "2026-05-15" }, "Birch Street LLC", "INV-102", "J-202", "Birch Street Service", "Card", { money: 2500 }, { money: 72.8 }, null, null]);
     expect(listed.find((r) => r.cells[2] === "INV-105")!.cells[8]).toBe("Card fee not reported yet");
     // By customer, by job, by method: each adds up to the payments.
     for (const [title, col] of [["Payments By Customer", 1], ["Payments By Job", 2], ["Payments By Method", 1]] as const) {
@@ -434,15 +452,17 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     const on = tab(wb, "Income");
     expect(on.rows.some((r) => String(r.cells[0]).startsWith("Billed basis"))).toBe(true);
     const taxTotal = on.rows.slice(on.rows.findIndex((r) => r.cells[0] === "Sales Tax")).find((r) => r.cells[0] === "Total")!;
-    expect(taxTotal.cells.slice(2).map((c) => (typeof c === "number" ? c : cents(c)))).toEqual([1, 100000, 7250]); // the draft never counts
+    // Two issued invoices, only one of them taxable: the draft and the void never count, and the 0% deposit
+    // is counted as an invoice but is not part of Taxable.
+    expect(taxTotal.cells.slice(2).map((c) => (typeof c === "number" ? c : cents(c)))).toEqual([2, 100000, 7250]);
     const off = tab(buildAccountantWorkbook(input({ salesTax: null })), "Income");
-    expect(off.rows.map((r) => r.cells[0])).toContain("Sales Tax is switched off for this company, so none is listed.");
+    expect(off.rows.map((r) => r.cells[0])).toContain("Sales Tax is switched off for this company, so none is listed. The invoices above still carry what tax was billed on each.");
   });
 
   it("Costs: every cost line, and its totals by where it goes are the Summary's rows, under the same two headings", () => {
     const costs = tab(wb, "Costs");
     const at = costs.rows.findIndex((r) => r.cells[0] === "Totals By Where It Goes");
-    const totals = costs.rows.slice(at + 2, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"));
+    const totals = dataRows(costs.rows.slice(at + 2, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total")));
     // The Summary's headings and cost rows, in its order, less the two crew rows (they are on People).
     const want = (f: OwnerMoneyFigures) =>
       pnlLines()
@@ -485,8 +505,9 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
       [STOCK_BOUGHT_LABEL, -2000, "Written off: 12/2 NM-B"],
       [STOCK_LOST_LABEL, 2000, "Written off: 12/2 NM-B"],
     ]);
-    // A stored "Gas & Truck" goes to Auto, and never says Gas & Truck beside it.
-    expect(costList.find((r) => r.cells[1] === "Quick Lube")!.cells.slice(5)).toEqual(["Auto", { money: 60 }, null]);
+    // A stored "Gas & Truck" goes to Auto, and never says Gas & Truck beside it. It is a ticket on no
+    // supplier account, settled at the register, with nothing typed on it.
+    expect(costList.find((r) => r.cells[1] === "Quick Lube")!.cells.slice(5)).toEqual(["Auto", { money: 60 }, null, "No", "No supplier account", null]);
   });
 
   it("Costs: what was paid to each supplier (voided left out), and the tools, kept and billed to the customer", () => {
@@ -527,7 +548,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
   it("Costs: every line on every ticket, and the gap between the lines and the tickets' totals is said", () => {
     const costs = tab(wb, "Costs");
     const at = costs.rows.findIndex((r) => r.cells[0] === "Every Line On Every Ticket");
-    const lines = costs.rows.slice(at + 3, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total Of The Lines"));
+    const lines = dataRows(costs.rows.slice(at + 3, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total Of The Lines")));
     expect(costs.rows[at + 2].cells).toEqual([
       "Date", "Supplier", "Bill Number", "Job Number", "Job", "Filed As", "Amount", "What", "Quantity", "Unit Price", "Billable", "Part Billed", "Into Stock",
     ]);
@@ -558,11 +579,11 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
   it("Costs: each payment to a supplier, on its day, voided ones marked and not counted", () => {
     const costs = tab(wb, "Costs");
     const at = costs.rows.findIndex((r) => r.cells[0] === "Each Payment To A Supplier");
-    const rows = costs.rows.slice(at + 3, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"));
-    expect(costs.rows[at + 2].cells).toEqual(["Date", "Supplier", "Method", "Amount", "Note"]);
+    const rows = dataRows(costs.rows.slice(at + 3, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total")));
+    expect(costs.rows[at + 2].cells).toEqual(["Date", "Supplier", "Method", "Amount", "Note", "Check Or Reference", "Memo"]);
     expect(rows.map((r) => r.cells)).toEqual([
-      [{ date: "2026-05-30" }, "Northline Supply", "Check", { money: 500 }, null],
-      [{ date: "2026-06-01" }, "Northline Supply", "Check", { money: 100 }, "Voided: not counted"],
+      [{ date: "2026-05-30" }, "Northline Supply", "Check", { money: 500 }, null, "4411", "May statement"],
+      [{ date: "2026-06-01" }, "Northline Supply", "Check", { money: 100 }, "Voided: not counted", null, null],
     ]);
     // Its Total is the live payments only — the same $500 the rollup above counts.
     const sent = costs.rows.slice(at).find((r) => r.cells[0] === "Total")!;
@@ -573,7 +594,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     const ppl = tab(wb, "People");
     const handedAt = ppl.rows.findIndex((r) => r.cells[0] === "Each Payment Handed Over");
     expect(ppl.rows[handedAt + 2].cells).toEqual(["Date", "Person", "Kind", "Method", "Check Or Reference", "Amount", "Note"]);
-    const handed = ppl.rows.slice(handedAt + 3, ppl.rows.findIndex((r, i) => i > handedAt && r.cells[0] === "Total Pay"));
+    const handed = dataRows(ppl.rows.slice(handedAt + 3, ppl.rows.findIndex((r, i) => i > handedAt && r.cells[0] === "Total Pay")));
     expect(handed.map((r) => [r.cells[0], r.cells[2], cents(r.cells[5]), r.cells[6]])).toEqual([
       [{ date: "2026-04-20" }, "Pay", 32000, null],
       [{ date: "2026-06-25" }, "Pay", 20000, null],
@@ -587,7 +608,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
 
     const shiftAt = ppl.rows.findIndex((r) => r.cells[0] === "Every Shift");
     expect(ppl.rows[shiftAt + 2].cells).toEqual(["Person", "Date", "Clock In", "Clock Out", "Lunch (Minutes)", "Hours", "Miles Logged", "Note"]);
-    const shifts = ppl.rows.slice(shiftAt + 3, ppl.rows.findIndex((r, i) => i > shiftAt && r.cells[0] === "Total Hours"));
+    const shifts = dataRows(ppl.rows.slice(shiftAt + 3, ppl.rows.findIndex((r, i) => i > shiftAt && r.cells[0] === "Total Hours")));
     // Q2's shifts only, in day order, in the company's clock (10 AM Chicago), the owner's among them.
     expect(shifts.map((r) => [r.cells[0], (r.cells[1] as any).date, r.cells[2], r.cells[3], r.cells[5], r.cells[6]])).toEqual([
       ["Sam Rivera", "2026-04-06", "10:00 AM", "6:00 PM", 8, 0],
@@ -609,12 +630,13 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
   it("Open: the bills and the supplier's own invoices behind what suppliers say is owed", () => {
     const open = tab(wb, "Open");
     const at = open.rows.findIndex((r) => r.cells[0] === "Bills North Has Marked Unpaid");
-    expect(open.rows[at + 2].cells).toEqual(["Date", "Supplier", "Bill Number", "Amount", "Supplier Account", "Job"]);
-    const bills = open.rows.slice(at + 3, open.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"));
-    // The two unpaid Northline tickets — all time, as of the download day, not just this period.
-    expect(bills.map((r) => [r.cells[2], cents(r.cells[3]), r.cells[4], r.cells[5]])).toEqual([
-      ["NS-100", 60000, "Northline Supply", "Maple Court Remodel"],
-      ["NS-120", 120000, "Northline Supply", "Birch Street Service"],
+    expect(open.rows[at + 2].cells).toEqual(["Date", "Supplier", "Bill Number", "Amount", "Supplier Account", "Job", "Job Number"]);
+    const bills = dataRows(open.rows.slice(at + 3, open.rows.findIndex((r, i) => i > at && r.cells[0] === "Total")));
+    // The two unpaid Northline tickets — all time, as of the download day, not just this period. A job is
+    // its name AND its number, never a bare one of the two.
+    expect(bills.map((r) => [r.cells[2], cents(r.cells[3]), r.cells[4], r.cells[5], r.cells[6]])).toEqual([
+      ["NS-100", 60000, "Northline Supply", "Maple Court Remodel", "J-201"],
+      ["NS-120", 120000, "Northline Supply", "Birch Street Service", "J-202"],
     ]);
     // $1,800 of tickets less the $500 sent is the $1,300 the supplier figure above says.
     expect(cents(open.rows.slice(at).find((r) => r.cells[0] === "Total")!.cells[3])).toBe(180000);
@@ -718,8 +740,11 @@ describe("the owner's switch: an office download without Owner's Draw", () => {
   });
 
   it("the page's words say what the file leaves out and what it keeps, and the file keeps its word", () => {
+    // BOTH DIRECTIONS OF THE OWNER'S MONEY ARE NAMED. The clause used to stop at Owner's Draw while the
+    // office file was also leaving out Owner's Money In (0376) — a sentence listing what is missing, with
+    // something missing from it.
     expect(OWNER_HIDDEN_WHY).toContain(
-      "Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit, the owner's own build time and his Owner's Draw are left out, here and in the file",
+      "Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit, the owner's own build time, his Owner's Draw and his Owner's Money In are left out, here and in the file",
     );
     // The lists stay with their own totals: said, not promised away.
     expect(OWNER_HIDDEN_WHY).toContain("with each list's own total");
@@ -744,7 +769,7 @@ describe("what suppliers are owed is /bills' rule: an account paid ahead doesn't
     const owedAt = open.rows.findIndex((r) => r.cells[0] === "Suppliers Say You Owe");
     const owedTotal = open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!;
     expect(cents(owedTotal.cells[1])).toBe(130000);
-    const owedRows = open.rows.slice(owedAt + 2, open.rows.indexOf(owedTotal));
+    const owedRows = dataRows(open.rows.slice(owedAt + 2, open.rows.indexOf(owedTotal)));
     expect(owedRows.map((r) => r.cells[0])).toEqual(["Northline Supply"]);
     const aheadAt = open.rows.findIndex((r) => r.cells[0] === "Paid Ahead (Credit With The Supplier)");
     expect(aheadAt).toBeGreaterThan(owedAt);
@@ -785,7 +810,7 @@ describe("the supplier's own invoices list reconciles to the figure above it, to
   const open = tab(wb, "Open");
   const docsAt = open.rows.findIndex((r) => r.cells[0] === "What Each Supplier's Own Invoices Say Is Still Open");
   const docTotal = open.rows.slice(docsAt).find((r) => r.cells[0] === "Total")!;
-  const docRows = open.rows.slice(docsAt + 3, open.rows.indexOf(docTotal));
+  const docRows = dataRows(open.rows.slice(docsAt + 3, open.rows.indexOf(docTotal)));
 
   it("lists every open document, a credit memo as a negative, and totals exactly what supplierBalance says", () => {
     const acct = supplierAccountRowsOf(m, TZ).get("a1")!;
@@ -1000,6 +1025,311 @@ describe("periods: whole months only", () => {
   it("a month has no month-by-month columns (the total is the month)", () => {
     const s = tab(buildAccountantWorkbook(input({ period: periodFromKey("2026-06")! })), "Summary");
     expect(s.rows.find((r) => r.cells[0] === "" && r.bold)!.cells).toEqual(["", "Total June 2026", "May 2026", "Change"]);
+  });
+});
+
+/**
+ * THE OWNER'S OWN MONEY, LINE BY LINE (cn-v1055). The Summary has carried Owner's Draw and Owner's
+ * Money In as two equity figures since 0376 and nothing in the file said what either was made of.
+ */
+describe("the owner's draw and his money in are rows, not just two cells on the Summary", () => {
+  /** Two draws and one deposit of his own, each with the bank's own words and the account's last 4. */
+  const withOwnerBank = (): OwnerMoneyInputs => {
+    const m = money();
+    // Odd cents on purpose: the office test below proves not one of these amounts is anywhere in an
+    // office file, and a round figure collides with some other list's total by coincidence.
+    m.ownerDraws = [
+      { id: "bl-d1", amount: -1437.19, posted_on: "2026-04-18", description: "TRANSFER TO PERSONAL 8841", account_last4: "4417" },
+      { id: "bl-d2", amount: -962.53, posted_on: "2026-06-12", description: "ATM WITHDRAWAL", account_last4: "4417" },
+    ];
+    m.ownerMoneyIn = [{ id: "bl-i1", amount: 815.41, posted_on: "2026-05-09", description: "DEPOSIT FROM SAVINGS", account_last4: "4417" }];
+    return m;
+  };
+  const m = withOwnerBank();
+  const wb = buildAccountantWorkbook(input({ money: m }));
+  const ppl = tab(wb, "People");
+  const cur = computeOwnerMoney(m, periodWindow(Q2), TZ, TODAY);
+  const TITLE = `${PNL_WORDS.ownerDraw} And ${PNL_WORDS.ownerMoneyIn}`;
+  const at = ppl.rows.findIndex((r) => r.cells[0] === TITLE);
+
+  it("lists every bank line of the owner's money, both directions, with the bank's words and the account's last 4", () => {
+    expect(at).toBeGreaterThan(0);
+    expect(ppl.rows[at + 2].cells).toEqual(["Date", "Direction", "Amount", "Bank Description", "Account (Last 4)"]);
+    const rows = dataRows(ppl.rows.slice(at + 3, ppl.rows.findIndex((r, i) => i > at && r.cells[0] === "Total Taken Out")));
+    // In day order, whichever direction each is, and POSITIVE in both: Direction is what says which way.
+    expect(rows.map((r) => r.cells)).toEqual([
+      [{ date: "2026-04-18" }, "Taken Out", { money: 1437.19 }, "TRANSFER TO PERSONAL 8841", "4417"],
+      [{ date: "2026-05-09" }, "Put In", { money: 815.41 }, "DEPOSIT FROM SAVINGS", "4417"],
+      [{ date: "2026-06-12" }, "Taken Out", { money: 962.53 }, "ATM WITHDRAWAL", "4417"],
+    ]);
+  });
+
+  it("each direction's total is the Summary's own cell, to the cent, and nothing says they disagree", () => {
+    const summary = tab(wb, "Summary");
+    const periodCell = (label: string) => cents(rowOf(summary, label)!.cells[4]);
+    expect(cents(rowOf(ppl, "Total Taken Out")!.cells[2])).toBe(239972); // 1,437.19 + 962.53
+    expect(cents(rowOf(ppl, "Total Put In")!.cells[2])).toBe(81541);
+    expect(cents(rowOf(ppl, "Total Taken Out")!.cells[2])).toBe(periodCell(PNL_WORDS.ownerDraw));
+    expect(cents(rowOf(ppl, "Total Put In")!.cells[2])).toBe(periodCell(PNL_WORDS.ownerMoneyIn));
+    expect(toCents(cur.totals.ownerDraw)).toBe(239972);
+    expect(toCents(cur.totals.ownerMoneyIn)).toBe(81541);
+    expect(everyText(wb).some((s) => s.includes("don't add up to the Summary's"))).toBe(false);
+    // WHICH DRAWS THE FIGURE CAN SEE AT ALL, beside the rows as well as beside the total.
+    expect(everyText(wb).some((s) => s.includes(cur.ownerDrawSeen))).toBe(true);
+  });
+
+  it("a month outside the period is left out, and a period with none says so without claiming nothing was taken", () => {
+    const outside = buildAccountantWorkbook(input({ money: m, period: periodFromKey("2026-Q1")! }));
+    const q1 = tab(outside, "People");
+    expect(q1.rows.map((r) => r.cells[0])).toContain("No bank line in this period was sorted as the owner's money.");
+    expect(cents(rowOf(q1, "Total Taken Out")!.cells[2])).toBe(0);
+    expect(q1.rows.some((r) => String(r.cells[0]).includes("Nothing this period that the app can see, in either direction."))).toBe(true);
+  });
+
+  it("an office viewer the owner hasn't shared the owner's money with gets no list, no row and no bank words anywhere", () => {
+    const office = buildAccountantWorkbook(input({ money: m, showOwner: false }));
+    expect(tab(office, "People").rows.map((r) => r.cells[0])).not.toContain(TITLE);
+    const text = everyText(office);
+    for (const secret of ["TRANSFER TO PERSONAL 8841", "ATM WITHDRAWAL", "DEPOSIT FROM SAVINGS", "4417", "Taken Out", "Put In"]) {
+      expect(text, secret).not.toContain(secret);
+    }
+    // And not one of the three amounts, nor either direction's total, in any cell of any tab.
+    const moneyCells = office.tabs.flatMap((t) => t.rows.flatMap((r) => r.cells.map(cents))).filter((c): c is number => c != null);
+    for (const c of [143719, 96253, 81541, 239972]) expect(moneyCells, String(c)).not.toContain(c);
+  });
+});
+
+/**
+ * WHAT A PERSON TYPED ON A RECORD (cn-v1055): every memo in the file came from a column nothing was
+ * reading, so each of these cells used to print blank however carefully it had been filled in.
+ */
+describe("a typed memo reaches the file: a payment's note, a refund's note and a bank line's own description", () => {
+  const withMemos = (): OwnerMoneyInputs => {
+    const m = money();
+    m.payments = m.payments.map((p) => (p.id === "p1" ? { ...p, note: "Check 4411" } : p));
+    m.refunds = [{ ...m.refunds[0], note: "Returned the unused spool" }];
+    m.otherIncome = [{ id: "bl1", amount: 120, posted_on: "2026-05-02", description: "REBATE LAKESIDE UTILITY", account_last4: "4417" }];
+    return m;
+  };
+  const income = tab(buildAccountantWorkbook(input({ money: withMemos() })), "Income");
+  const start = income.rows.findIndex((r) => r.cells[0] === "Date") + 1;
+  const listed = dataRows(income.rows.slice(start, income.rows.findIndex((r) => r.cells[0] === "Payments")));
+
+  it("Memo is the last column of the payments list and holds what the person typed, not North's words", () => {
+    expect(income.rows[start - 1].cells).toEqual(["Date", "Customer", "Invoice", "Job Number", "Job", "Method", "Amount", "Card Fee", "Note", "Memo"]);
+    expect(listed.find((r) => r.cells[2] === "INV-101")!.cells[9]).toBe("Check 4411");
+    expect(listed.find((r) => r.cells[5] === "Refund")!.cells[9]).toBe("Returned the unused spool");
+    expect(listed.find((r) => r.cells[5] === "Other Income (Bank)")!.cells[9]).toBe("REBATE LAKESIDE UTILITY");
+    // North's own words stay in Note, where they were: a mark and a memo are never one cell.
+    expect(listed.find((r) => r.cells[2] === "INV-104")!.cells[8]).toBe("Invoice voided: not counted");
+  });
+
+  it("a bank line's description is the owner's money: an office file without the switch carries none of it", () => {
+    const office = tab(buildAccountantWorkbook(input({ money: withMemos(), showOwner: false })), "Income");
+    const officeList = dataRows(office.rows.slice(start, office.rows.findIndex((r) => r.cells[0] === "Payments")));
+    expect(officeList.find((r) => r.cells[5] === "Other Income (Bank)")!.cells[9]).toBe(null);
+    // A customer's own payment memo is not the owner's money and stays.
+    expect(officeList.find((r) => r.cells[2] === "INV-101")!.cells[9]).toBe("Check 4411");
+  });
+
+  it("a memo longer than the cap is cut and marked, never printed whole into a column", () => {
+    const long = (): OwnerMoneyInputs => {
+      const m = money();
+      m.payments = m.payments.map((p) => (p.id === "p1" ? { ...p, note: "x".repeat(400) } : p));
+      return m;
+    };
+    const t = tab(buildAccountantWorkbook(input({ money: long() })), "Income");
+    const cell = String(dataRows(t.rows.slice(start)).find((r) => r.cells[2] === "INV-101")!.cells[9]);
+    expect(cell).toHaveLength(200);
+    expect(cell.endsWith("…")).toBe(true);
+  });
+});
+
+/**
+ * ONE ANSWER FOR WHICH SUPPLIER A TICKET BELONGS TO (cn-v1055). Open's figure resolves a ticket by the
+ * account it is filed on OR a filed spelling OR the account's own name; the list under it read the
+ * stored column alone, so a ticket spelled exactly like an account but never filed was inside the
+ * figure above and read "No supplier account" below it.
+ */
+describe("a ticket spelled like an account but never filed reads its account on Open and on Costs", () => {
+  const withUnfiled = (): OwnerMoneyInputs => {
+    const m = money();
+    // Spelled exactly like the account, filed on nothing, unpaid, and in the period: the shape a
+    // recurring expense writes (recurring-engine.ts: free-text vendor, unpaid, no account id).
+    m.bills = [...m.bills, bill("b10", null, 60, "2026-06-18", "Receipt", "Northline Supply", { status: "unpaid", supplier_account_id: null, bill_number: "NS-131", notes: "Delivery to the shop" })];
+    return m;
+  };
+  const m = withUnfiled();
+  const wb = buildAccountantWorkbook(input({ money: m, lists: { ...lists(), bills: m.bills.filter((b) => !b.superseded_by_bill_id).map((b) => ({ ...b, amount: String(b.amount) })) as AccountantInputs["bills"] } }));
+  const open = tab(wb, "Open");
+  const costs = tab(wb, "Costs");
+
+  it("Open's list names the account the figure above it reached, not the empty stored column", () => {
+    const at = open.rows.findIndex((r) => r.cells[0] === "Bills North Has Marked Unpaid");
+    const bills = dataRows(open.rows.slice(at + 3, open.rows.findIndex((r, i) => i > at && r.cells[0] === "Total")));
+    const row = bills.find((r) => r.cells[2] === "NS-131")!;
+    expect(row.cells[4]).toBe("Northline Supply");
+    expect(bills.map((r) => r.cells[4])).not.toContain("No supplier account");
+    // The figure above counts it inside the account, which is why the row had to: $1,860 of tickets less
+    // the $500 sent is what Suppliers Say You Owe says.
+    const owedAt = open.rows.findIndex((r) => r.cells[0] === "Suppliers Say You Owe");
+    expect(cents(open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!.cells[1])).toBe(136000);
+  });
+
+  it("Costs answers with the same account, the same unpaid mark and the ticket's own memo", () => {
+    const at = costs.rows.findIndex((r) => r.cells[0] === "Totals By Where It Goes");
+    const costList = dataRows(costs.rows.slice(0, at));
+    const row = costList.find((r) => r.cells[2] === "NS-131")!;
+    expect([row.cells[8], row.cells[9], row.cells[10]]).toEqual(["Yes", "Northline Supply", "Delivery to the shop"]);
+    // ONE RULE: the tickets Costs marks unpaid are exactly the tickets Open lists, read by the same
+    // function over the same two inputs — never two walks that happen to agree.
+    const openAt = open.rows.findIndex((r) => r.cells[0] === "Bills North Has Marked Unpaid");
+    const openNumbers = new Set(
+      dataRows(open.rows.slice(openAt + 3, open.rows.findIndex((r, i) => i > openAt && r.cells[0] === "Total"))).map((r) => String(r.cells[2])),
+    );
+    const costNumbers = new Set(costList.filter((r) => r.cells[8] === "Yes").map((r) => String(r.cells[2])));
+    expect([...costNumbers].sort()).toEqual([...openNumbers].sort());
+    // And a ticket settled at the register says No rather than leaving the cell to be guessed at.
+    expect(costList.find((r) => r.cells[2] === "NS-114")!.cells[8]).toBe("No");
+  });
+});
+
+/**
+ * EVERY INVOICE MADE IN THE PERIOD (cn-v1055). Until now the only invoices in the file were the ones
+ * still unpaid TODAY, with no date made, no kind and no tax on them — and, when Sales Tax happened to be
+ * switched on, five columns with nothing saying which invoice each row came from.
+ */
+describe("the invoices made in the period are a list of their own, whether Sales Tax is on or off", () => {
+  const register = (wb: AccountantWorkbook) => {
+    const income = tab(wb, "Income");
+    const at = income.rows.findIndex((r) => r.cells[0] === "Invoices Made In This Period");
+    return {
+      income,
+      at,
+      head: income.rows[at + 2].cells,
+      rows: dataRows(income.rows.slice(at + 3, income.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"))),
+      total: income.rows.slice(at).find((r) => r.cells[0] === "Total")!,
+    };
+  };
+
+  it("names every invoice, its kind, its job and what is still owed on it, in the order they were made", () => {
+    const r = register(buildAccountantWorkbook(input()));
+    expect(r.head).toEqual(["Date Made", "Invoice", "Kind", "Customer", "Job Number", "Job", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid To Date", "Still Owed To Date", "Due Date", "Note"]);
+    expect(r.rows.map((x) => [x.cells[1], x.cells[2], x.cells[4], x.cells[6], x.cells[14]])).toEqual([
+      ["INV-109", "Deposit", "J-201", "Paid", null],
+      ["INV-102", "Standard", "J-202", "Sent", null],
+      ["INV-106", "Progress", "J-201", "Draft", "Draft: not counted"],
+      ["INV-104", "Standard", "J-202", "Void", "Voided: not counted"],
+    ]);
+    // Still Owed is invoiceBalance's answer: $1,072.50 billed less $400 taken.
+    const sent = r.rows.find((x) => x.cells[1] === "INV-102")!;
+    expect([cents(sent.cells[7]), sent.cells[8], cents(sent.cells[9]), cents(sent.cells[10]), cents(sent.cells[11]), cents(sent.cells[12])]).toEqual([100000, 7.25, 7250, 107250, 40000, 67250]);
+    expect(sent.cells[13]).toEqual({ date: "2026-06-01" });
+  });
+
+  it("a draft and a void are listed and counted in nothing, and the Tax total is the Sales Tax total", () => {
+    const wb = buildAccountantWorkbook(input());
+    const r = register(wb);
+    // Two issued invoices: $1,250 of subtotal, $72.50 of tax, $1,322.50 billed, $650 taken, $672.50 left.
+    // MONEY ONLY: no count in the Status column, where a bare number reads as neither.
+    expect(r.total.cells.slice(6).map((c) => (typeof c === "number" ? c : cents(c)))).toEqual([null, 125000, null, 7250, 132250, 65000, 67250]);
+    expect(r.income.rows.map((x) => x.cells[0])).toContain("2 invoices are in this Total; 2 invoices above are drafts or voided and are in none.");
+    // The register's Tax and the Sales Tax rows' Tax are one read, so they cannot drift.
+    const taxAt = r.income.rows.findIndex((x) => x.cells[0] === "Sales Tax");
+    expect(cents(r.income.rows.slice(taxAt).find((x) => x.cells[0] === "Total")!.cells[4])).toBe(cents(r.total.cells[9]));
+    expect(everyText(wb).some((s) => s.includes("doesn't add up to the Tax column"))).toBe(false);
+  });
+
+  it("with Sales Tax switched off the list is still there, with the tax each invoice carried", () => {
+    const r = register(buildAccountantWorkbook(input({ salesTax: null })));
+    expect(r.rows).toHaveLength(4);
+    expect(cents(r.total.cells[9])).toBe(7250);
+    expect(r.income.rows.map((x) => x.cells[0])).toContain("Sales Tax is switched off for this company, so none is listed. The invoices above still carry what tax was billed on each.");
+  });
+
+  it("a period with no invoices says so, and the register sits above Sales Tax, not below it", () => {
+    const wb = buildAccountantWorkbook(input({ periodInvoices: [] }));
+    const income = tab(wb, "Income");
+    expect(income.rows.map((r) => r.cells[0])).toContain("No invoice was made in 2026 Q2.");
+    expect(income.rows.findIndex((r) => r.cells[0] === "Invoices Made In This Period")).toBeLessThan(income.rows.findIndex((r) => r.cells[0] === "Sales Tax"));
+  });
+
+  it("the columns the register prints are the columns the route reads", () => {
+    for (const col of ["invoice_number", "invoice_kind", "status", "subtotal", "tax_rate", "tax", "total", "amount_paid", "due_date", "created_at", "job_id", "customers(name)"]) {
+      expect(ACCOUNTANT_PERIOD_INVOICE_COLS, col).toContain(col);
+    }
+  });
+});
+
+/**
+ * ONE BLANK ROW BETWEEN EVERY LIST'S DATA AND ITS TOTALS (cn-v1055, beforeTotals). Click a cell of a
+ * list in Excel and press Sort or Filter and Excel takes the whole unbroken block: a Total flush under
+ * the rows it adds up gets sorted into the middle of them, or hidden, and whoever adds up what is left
+ * gets a figure nothing in the file claims. The Summary is exempt and says why below.
+ */
+describe("no total row sits flush under the rows it adds up", () => {
+  const wb = buildAccountantWorkbook(input({ money: (() => {
+    const m = money();
+    m.ownerDraws = [{ id: "bl-d1", amount: -500, posted_on: "2026-04-18", description: "TRANSFER", account_last4: "4417" }];
+    return m;
+  })() }));
+
+  it("every itemised list on Income, Costs, People and Open has the break, the stock and tools tables too", () => {
+    const flush: string[] = [];
+    for (const t of wb.tabs) {
+      // THE SUMMARY IS A PROFIT AND LOSS, not a list: Total COGS belongs directly under the cost lines it
+      // adds, and a blank between them would break the one layout an accountant reads without being told.
+      if (t.name === "Summary") continue;
+      t.rows.forEach((r, i) => {
+        if (!r.bold || typeof r.cells[0] !== "string" || !/^Total\b|^Crew Total$/.test(r.cells[0])) return;
+        const before = t.rows[i - 1];
+        // A second total of the same block (Total Mileage Settled under Total Pay) needs no second break.
+        if (!before || before.cells.length === 0 || before.bold) return;
+        // A note under a list is a break of its own; a DATA row is not.
+        if (before.cells.length === 1) return;
+        flush.push(`${t.name}: ${r.cells[0]}`);
+      });
+    }
+    expect(flush).toEqual([]);
+  });
+
+  it("the Summary's own totals stay flush under their lines, so the profit and loss still reads as one", () => {
+    const summary = tab(wb, "Summary");
+    for (const label of [PNL_WORDS.totalCogs, PNL_WORDS.totalOverhead]) {
+      const at = summary.rows.findIndex((r) => r.cells[0] === label);
+      expect(at, label).toBeGreaterThan(0);
+      expect(summary.rows[at - 1].cells.length, label).toBeGreaterThan(1);
+    }
+  });
+});
+
+/**
+ * THE PROJECTION LAW, WITH TEETH: the failure is always a `select` list. Every cell above can be built
+ * from a fixture that simply has the column, so a sheet full of memos proves nothing about what the
+ * database was actually asked for — and every gap this lane closed was a column nothing was reading.
+ * These pins read the source of the one read, so dropping a column breaks a test rather than a cell.
+ */
+describe("the memos and references these lists print are columns somebody reads", () => {
+  const src = (p: string) => readFileSync(join(__dirname, p), "utf8");
+
+  it("readOwnerMoneyInputs asks for the bank's words, the typed notes and the check number", () => {
+    const money = src("analytics/owner-money.ts");
+    // One function reads all three bank choices, so this one select feeds Other Income, the draws and
+    // the money in (readBankChoice).
+    expect(money).toContain('.select("id, amount, posted_on, description, account_last4")');
+    expect(money).toContain("invoices(status, invoice_number, customer_id, job_id, customers(name)), note");
+    expect(money).toContain("invoices(invoice_number, job_id, customers(name)), note");
+    expect(money).toContain('.select("id, supplier_account_id, amount, paid_on, method, voided_at, reference, note")');
+  });
+
+  it("the route reads every invoice of the period through the one column list, and refuses in words if it can't", () => {
+    const route = src("../app/(app)/analytics/accountant/export/route.ts");
+    expect(route).toContain(".select(ACCOUNTANT_PERIOD_INVOICE_COLS)");
+    expect(route).toContain('.eq("org_id", orgId)');
+    // The read is no longer behind the Sales Tax switch, and the old narrow column list is gone from it.
+    expect(route).not.toContain("SALES_TAX_INVOICE_COLS");
+    expect(route).not.toMatch(/salesTaxOn\s*\n?\s*\?\s*readAllPages/);
+    expect(route).toContain("if (periodInvoices.error) return say(");
   });
 });
 
