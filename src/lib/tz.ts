@@ -211,6 +211,42 @@ export function payPeriodForOffset(
   return p;
 }
 
+/**
+ * THE INVERSE: which `?period=N` opens the pay period containing `ymd`.
+ *
+ * THE FAILURE THIS PREVENTS. /payroll's mileage block is period-scoped (a settlement covers one pay
+ * period), but a held-mileage figure is not — so a page that says "30 miles are held" has to be able
+ * to say WHICH period holds them and hand over a door that opens it. Naming a period with no way to
+ * reach it is the dead signpost the no-dead-ends rule exists to stop.
+ *
+ * It walks the SAME one-period-at-a-time path payPeriodForOffset walks, rather than dividing by a
+ * period length, because semimonthly and monthly periods are not all the same number of days: any
+ * arithmetic shortcut here drifts away from the pager and lands him on the wrong period.
+ *
+ * NULL means "no non-negative offset reaches it" — the day sits in a LATER period than today's (a
+ * forward-dated entry). The pager has no forward offsets, so a caller must draw no door rather than
+ * invent one.
+ */
+export function payPeriodOffsetOf(
+  schedule: "weekly" | "biweekly" | "semimonthly" | "monthly",
+  anchorYmd: string,
+  todayYmd: string,
+  ymd: string,
+  max = 520,
+): number | null {
+  const target = payPeriodBounds(schedule, anchorYmd, ymd).start;
+  const steps = Math.max(0, Math.min(520, Math.floor(Number(max) || 0)));
+  let p = payPeriodBounds(schedule, anchorYmd, todayYmd);
+  for (let i = 0; i <= steps; i++) {
+    if (p.start === target) return i;
+    // Walked back past the target without matching: it is ahead of today, not behind.
+    if (p.start < target) return null;
+    const prevDay = new Date(new Date(`${p.start}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+    p = payPeriodBounds(schedule, anchorYmd, prevDay);
+  }
+  return null;
+}
+
 /** Which day a company's week begins on — org settings `week_start`. */
 export type WeekStart = "sunday" | "monday";
 

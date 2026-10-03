@@ -1,21 +1,23 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Download, Undo2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, Download, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { NumberInput } from "@/components/ui/number-input";
-import { Input, Label } from "@/components/ui/input";
+import { InfoPopup } from "@/components/info-popup";
 import { formatCurrency } from "@/lib/utils";
 import {
   firstName,
+  noAnswerSentence,
+  owedReading,
+  paymentsToShow,
   payrollCsvRows,
   periodLabel,
   sayMoney,
-  type PayMethod,
   type PayPaymentRow,
   type PayrollRow,
   type PersonBalance,
@@ -23,6 +25,9 @@ import {
 import { ownerRegister } from "@/lib/owner-draw";
 import { clockDoorWords } from "@/lib/long-shift";
 import { confirmImportedPayment, recordPayment, settleMileage, unsettleMileage, voidPayment } from "./actions";
+import { fmtDay, PaymentLine, PersonStatement } from "./person-statement";
+import { PaySheet, type PayFields } from "./pay-sheet";
+import { BASE_PAY_FACTS } from "./payroll-facts";
 
 // Format a calendar date STRING without a timezone shift — date-only strings
 // parse as UTC midnight, so formatting in a Pacific browser would show the day
@@ -30,21 +35,11 @@ import { confirmImportedPayment, recordPayment, settleMileage, unsettleMileage, 
 const fmtYmd = (ymd: string) =>
   new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-/** "Sep 12" — the short form the balance board and the payment list read in. */
-const fmtDay = (ymd: string) =>
-  new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-const METHODS: { value: PayMethod; label: string }[] = [
-  { value: "cash", label: "Cash" },
-  { value: "check", label: "Check" },
-  { value: "transfer", label: "Transfer" },
-  { value: "other", label: "Other" },
-];
-
 /** How many payments the "Paid Recently" list shows before it says there are more.
- *  Recent means recent — the full history is the accountant's export, not this list. */
+ *  Recent means recent — and a man's OWN payments are now listed in full inside his statement, so
+ *  "showing 12 of 40" is no longer the only door to the other 28. */
 const RECENT_LIMIT = 12;
 
 export function PayrollView({
@@ -55,6 +50,7 @@ export function PayrollView({
   ownersOnFile,
   viewerId,
   owedPeriods,
+  heldMileage,
   openShifts,
   today,
   rows,
@@ -81,6 +77,11 @@ export function PayrollView({
   viewerId: string | null;
   /** What the owed figure is made of, per person: the UNLOCKED pay periods and their gross. */
   owedPeriods: Record<string, { start: string; end: string; gross: number }[]>;
+  /** WHICH PAY PERIODS HOLD EACH PERSON'S UNSETTLED MILES, oldest first, worked out by the same
+   *  function the Mileage block reads (page.tsx). Mileage settles one pay period at a time, so a
+   *  statement printing an all-window held figure needs this to say where those miles actually are.
+   *  A person with none has no key. */
+  heldMileage: Record<string, { start: string; end: string; miles: number; offset: number | null }[]>;
   /** People with a shift still running, and the entry to go fix. */
   openShifts: { profileId: string; name: string; entryId: string }[];
   /** The ORG's today (lib/tz) — the Paid On default. Never the browser's day. */
@@ -107,15 +108,54 @@ export function PayrollView({
    *  his thumb already is, never a toast that floats off before a man on a ladder has read it. */
   const [done, setDone] = useState<{ text: string; paymentId: string | null } | null>(null);
 
-  // THE PAY MODAL. Amount starts EMPTY (null) every open, ON PURPOSE — the same law the mileage
-  // modal below has carried since 0095: a pre-filled number here would be the app inventing a
-  // paycheck figure. Erik: "sometimes i need to throw his a few hundred or an off ammount."
+  /**
+   * ── THE ANSWER COMES TO HIS EYE ───────────────────────────────────────────────────────────────
+   *
+   * THE FAILURE THIS FIXES. The banner is at the TOP of the page and the only door to the pay form is
+   * at the FOOT of an open statement, past that person's payment list. Record a payment from there and
+   * the sheet closes, nothing scrolls, and the sentence that says what happened — "Aug 16 to Aug 31
+   * could not be locked yet… Close it on Timecards", or a refusal from Undo or That's Right — lands
+   * hundreds of pixels above the top of the screen. The tap looks like it did nothing, which is the
+   * nothing-silent rule broken by geometry rather than by a missing message.
+   *
+   * ONE BANNER, BROUGHT INTO VIEW — not a second copy drawn inside the statement. Two render sites
+   * for one sentence is two places for it to drift, and a sentence about mileage or about a payment
+   * made from the cross-person feed belongs to neither statement. bills/suppliers-card.tsx already
+   * cures the same failure the same way ("the red line would be below the fold and the door would look
+   * like it did nothing").
+   *
+   * THE COUNTER, not the text, is what the effect watches: `error` is a plain string, so pressing Undo
+   * twice and being refused the identical way twice would not re-fire on the second press — and the
+   * second press is exactly when he is already scrolled away and needs it brought back.
+   */
+  const [answerSeq, setAnswerSeq] = useState(0);
+  const answerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (answerSeq === 0) return; // nothing has been said yet: never move the page on first paint
+    answerRef.current?.scrollIntoView({ block: "center" });
+  }, [answerSeq]);
+
+  /** THE TWO WAYS THE PAGE SPEAKS, each one exclusive of the other and each one counted. Every
+   *  surface that has something to say goes through these, so none of them can say it silently. */
+  function sayDone(d: { text: string; paymentId: string | null }) {
+    setError(null);
+    setDone(d);
+    setAnswerSeq((n) => n + 1);
+  }
+  function sayError(message: string) {
+    setDone(null);
+    setError(message);
+    setAnswerSeq((n) => n + 1);
+  }
+
+  /** WHOSE STATEMENT IS OPEN. One at a time: an accordion, not a page and not a sheet over the
+   *  board, so the figures sit inside the card they belong to and the banner above still shows. */
+  const [openFor, setOpenFor] = useState<string | null>(null);
+
+  // THE PAY FORM. Its fields live on PaySheet, which the page mounts only while the form is open, so
+  // the empty amount is structural rather than five resets anybody could forget (pay-sheet.tsx says
+  // why). The WRITE stays here, with its refusal and its sentence.
   const [payFor, setPayFor] = useState<PersonBalance | null>(null);
-  const [amount, setAmount] = useState<number | null>(null);
-  const [paidOn, setPaidOn] = useState(today);
-  const [method, setMethod] = useState<PayMethod>("cash");
-  const [reference, setReference] = useState("");
-  const [note, setNote] = useState("");
   const [modalError, setModalError] = useState<string | null>(null);
 
   // Settle-mileage modal, UNCHANGED. The amount starts EMPTY (null) every open, ON PURPOSE:
@@ -139,10 +179,11 @@ export function PayrollView({
   const totalOwed = r2(crewOwing.reduce((s, b) => s + b.owed, 0));
   const ownerLine = ownersOnBoard.length > 0 ? ownerRegister(ownersOnBoard, viewerId).notOnPayBoard : null;
   const needsCheck = payments.filter((p) => p.needsCheck && !p.voided);
-  const newest = payments.slice(0, RECENT_LIMIT);
   // A payment still waiting to be checked never falls off the end of this list. The amber line at
-  // the top sends him down here to confirm it, and a banner pointing at nothing is a dead end.
-  const recent = [...newest, ...needsCheck.filter((p) => !newest.some((n) => n.id === p.id))];
+  // the top sends him down here to confirm it, and a banner pointing at nothing is a dead end. That
+  // promise used to be written out here by hand; it is now paymentsToShow, which the person's own
+  // statement reads too, because two hand-written copies of one rule is how one of them loses it.
+  const { shown: recent } = paymentsToShow(payments, RECENT_LIMIT);
   const periodHours = rows.reduce((s, r) => s + r.paidHours + r.unpaidHours, 0);
   // Only people who actually drove: this block is about miles now, so a row with nothing but a
   // name in it would be the fluff Erik asked to skim. The CSV below still exports every person.
@@ -166,70 +207,96 @@ export function PayrollView({
       const res = await fn();
       setBusy(null);
       if (!res.ok) {
-        setDone(null);
-        setError(res.error ?? "Something went wrong and nothing was saved.");
+        sayError(res.error ?? "Something went wrong and nothing was saved.");
         return;
       }
-      setDone({ text: res.message ?? fallback, paymentId: undoPaymentId ?? null });
+      sayDone({ text: res.message ?? fallback, paymentId: undoPaymentId ?? null });
       router.refresh();
     });
   }
 
   function openPay(b: PersonBalance) {
     // Clear the last sentence: its Undo belongs to the act that is finished, not to the one he is
-    // starting now. Every payment keeps an Undo of its own in Paid Recently either way.
+    // starting now. Every payment keeps an Undo of its own in his statement either way.
     setDone(null);
-    setAmount(null);
-    setPaidOn(today);
-    setMethod("cash");
-    setReference("");
-    setNote("");
+    setError(null);
     setModalError(null);
     setPayFor(b);
   }
 
   function closePay() {
     setPayFor(null);
-    setAmount(null);
-    setReference("");
-    setNote("");
     setModalError(null);
   }
 
-  function submitPay() {
-    if (!payFor || amount === null || amount <= 0) return;
+  /** A REFUSAL LANDS ON BOTH SURFACES, because only one of them is on screen and this page cannot
+   *  know which. The form holds itself open while the write is out (PaySheet holdOpen), but the
+   *  phone's Back still closes it — and a refusal drawn nowhere is how a second payment gets typed
+   *  for money that never moved. One sentence, two landing spots, never a figure of our own. */
+  function sayRefused(message: string) {
+    setModalError(message);
+    sayError(message);
+  }
+
+  /** ONE WRITE AT A TIME, AND THE REF IS WHAT ENFORCES IT. `pending` comes from useTransition and is
+   *  not set synchronously, so two presses dispatched inside one task — a scripted or assistive
+   *  double press, which the disabled footer does not stop — both read the old state and both wrote.
+   *  A ref flips before the await, so the second press sees it. */
+  const paying = useRef(false);
+
+  function submitPay(fields: PayFields) {
+    if (!payFor || fields.amount <= 0) return;
+    if (paying.current) return;
+    paying.current = true;
     const person = payFor;
-    const amt = amount;
-    const on = paidOn;
-    const how = method;
     setModalError(null);
+    setError(null);
     setBusy(`pay:${person.profileId}`);
     start(async () => {
-      const res = await recordPayment({
-        profileId: person.profileId,
-        amount: amt,
-        paidOn: on,
-        method: how,
-        reference: reference.trim() || undefined,
-        note: note.trim() || undefined,
-      });
-      setBusy(null);
-      // THE MODAL STAYS OPEN ON FAILURE. Closing first would eat the amount he just typed and
-      // leave him retyping an off number from memory — the opposite of what this page is for.
-      if (!res.ok) {
-        setModalError(res.error ?? "That payment was not saved. Nothing changed.");
-        return;
+      try {
+        const res = await recordPayment({ profileId: person.profileId, ...fields });
+        // THE FORM STAYS OPEN ON FAILURE. Closing first would eat the amount he just typed and
+        // leave him retyping an off number from memory — the opposite of what this page is for.
+        if (!res.ok) {
+          sayRefused(res.error ?? "That payment was not saved. Nothing changed.");
+          return;
+        }
+        // recordPayment hands back the row it wrote, so the Undo below voids exactly that payment
+        // and not the newest-looking one — and its own sentence, which names the pay periods the
+        // money just locked. If either ever stops coming, his statement still carries an Undo on
+        // every payment and the fallback sentence still says what was recorded.
+        closePay();
+        sayDone({
+          text:
+            res.message ??
+            `Recorded ${sayMoney(fields.amount)} paid to ${firstName(person.name)} on ${fmtDay(fields.paidOn)} by ${fields.method}.`,
+          paymentId: res.paymentId ?? null,
+        });
+        // His statement stays open underneath, so the payment he just recorded appears in his own
+        // list, with its own Undo, where he is already looking.
+        router.refresh();
+      } catch {
+        // THE ACTION ITSELF FAILED — a dropped connection, a deploy mid-request, a thrown action.
+        // Before this there was no catch here at all, so nothing was said and the next thing that
+        // happened was a second payment being typed. We do NOT know whether the row was written, so
+        // the sentence must not claim either way: noAnswerSentence says so, where a test holds it.
+        //
+        // AND THE FORM CLOSES, WHICH A REFUSAL ABOVE DOES NOT. A refusal is the server saying the row
+        // is NOT there, so the typed figure is worth keeping and retyping it would be pure loss. This
+        // is nobody knowing — the insert runs before applyLocks walks the pay periods, so a timeout or
+        // a dropped response leaves the money recorded — and recordPayment has no idempotency key
+        // (payroll-math noAnswerSentence says so), so a live Record button over that same figure is one
+        // tap from paying the man twice. Closing it is the guard, and it costs nothing: PaySheet mounts
+        // fresh with an empty amount every open, so he could not have reused the figure anyway without
+        // closing the form to go and read his payments, which is exactly what the sentence asks.
+        closePay();
+        sayError(noAnswerSentence(person.name));
+        // Re-read, so the list the sentence sends him to is the one the server has now.
+        router.refresh();
+      } finally {
+        setBusy(null);
+        paying.current = false;
       }
-      // recordPayment hands back the row it wrote, so the Undo below voids exactly that payment
-      // and not the newest-looking one — and its own sentence, which names the pay periods the
-      // money just locked. If either ever stops coming, the Paid Recently list still carries an
-      // Undo on every row and the fallback sentence still says what was recorded.
-      closePay();
-      setDone({
-        text: res.message ?? `Recorded ${sayMoney(amt)} paid to ${firstName(person.name)} on ${fmtDay(on)} by ${how}.`,
-        paymentId: res.paymentId ?? null,
-      });
-      router.refresh();
     });
   }
 
@@ -270,12 +337,16 @@ export function PayrollView({
     URL.revokeObjectURL(url);
   }
 
-  const payPeriods = payFor ? (owedPeriods[payFor.profileId] ?? []) : [];
-  const payPeriodsSum = r2(payPeriods.reduce((s, p) => s + p.gross, 0));
-  // The gap between the open periods and the owed figure is money already handed over against
-  // those same hours — say it, rather than letting two numbers on one card fail to add up.
-  const alreadyApplied = payFor ? r2(payPeriodsSum - payFor.owed) : 0;
-  const payDirty = amount !== null || reference !== "" || note !== "" || paidOn !== today || method !== "cash";
+  /** Undo and That's Right, worded once, so a payment says the same thing in a statement as it does
+   *  in the cross-person feed. */
+  const undoPayment = (p: PayPaymentRow) =>
+    run(() => voidPayment(p.id), `void:${p.id}`, `Undone. The ${sayMoney(p.amount)} from ${fmtDay(p.paidOn)} is back on his balance.`);
+  const confirmPayment = (p: PayPaymentRow) =>
+    run(
+      () => confirmImportedPayment(p.id),
+      `confirm:${p.id}`,
+      `Checked off the ${sayMoney(p.amount)} paid to ${firstName(nameById[p.profileId])}.`,
+    );
 
   return (
     <div className="space-y-4">
@@ -285,16 +356,36 @@ export function PayrollView({
         </div>
       )}
 
-      {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {/* THE SAME REF ON BOTH ANSWERS, and they are mutually exclusive by construction (sayDone and
+          sayError each clear the other), so one of them is on screen at a time and the effect above
+          has exactly one element to bring into view. role says it out loud for a screen reader as
+          well, because being announced and being visible are two different promises. */}
+      {error && (
+        <div ref={answerRef} role="alert" className="scroll-mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <div>
-        <div className="text-4xl font-bold tabular-nums tracking-tight text-slate-900">You Owe {formatCurrency(totalOwed)}</div>
-        <div className="mt-1 text-sm text-slate-600">
-          {crewOwing.length === 0
-            ? "Your crew is paid up."
-            : `across ${crewOwing.length} ${crewOwing.length === 1 ? "person" : "people"} on your crew`}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-4xl font-bold tabular-nums tracking-tight text-slate-900">You Owe {formatCurrency(totalOwed)}</div>
+            <div className="mt-1 text-sm text-slate-600">
+              {crewOwing.length === 0
+                ? "Your crew is paid up."
+                : `across ${crewOwing.length} ${crewOwing.length === 1 ? "person" : "people"} on your crew`}
+            </div>
+          </div>
+          {/* ONE LINE ON THE CARD; THE REST AS BULLETS. "Base pay only. Mileage settles separately
+              below." and the closing paragraph about rates, mileage and withholding were two blocks
+              of small print around this figure. Every fact is in BASE_PAY_FACTS. */}
+          <InfoPopup
+            title="What This Figure Is"
+            label="About What You Owe"
+            bullets={BASE_PAY_FACTS}
+            className="-mr-2 -mt-1"
+          />
         </div>
-        <div className="mt-0.5 text-xs text-slate-400">Base pay only. Mileage settles separately below.</div>
       </div>
 
       {openShifts.length > 0 && (
@@ -318,7 +409,11 @@ export function PayrollView({
       )}
 
       {done && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+        <div
+          ref={answerRef}
+          role="status"
+          className="flex scroll-mt-4 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5"
+        >
           <span className="min-w-0 text-sm text-slate-700">{done.text}</span>
           {done.paymentId && (
             <Button
@@ -335,8 +430,11 @@ export function PayrollView({
         </div>
       )}
 
-      {/* THE OWED BOARD. The WHOLE ROW is the tap target and there is not one button inside it —
-          one thumb, one target, no mis-taps on a ladder. */}
+      {/* THE OWED BOARD. The WHOLE ROW is still the tap target and there is still not one button
+          inside it — one thumb, one target, no mis-taps on a ladder. What it OPENS has changed: it
+          used to be the form that pays the man, which is why his detail could only be read from
+          inside it. Now it opens HIS STATEMENT, in place, and the form has a named door of its own
+          at the foot of that (Erik, dfe1f59b: separate the detail from the button to pay them). */}
       {balances.length === 0 ? (
         <p className="px-1 py-8 text-center text-sm text-slate-400">No hours and no payments on record yet.</p>
       ) : (
@@ -346,46 +444,69 @@ export function PayrollView({
             // it was handed, and the page also knows which people have an open shift because it
             // fetched the entry to link to. Either one says stop.
             const onClock = b.hasOpenShift || openShiftIds.has(b.profileId);
-            const ahead = b.owed < -0.005;
-            const square = !ahead && b.owed <= 0.005;
+            // ONE RULE for whether a figure may be drawn at all, shared with the statement below
+            // (payroll-math owedReading): a balance quietly short a running shift is worse than no
+            // balance, so a withheld reading carries no number to print.
+            const reading = owedReading({ name: b.name, owed: b.owed, onClock });
             const bits: string[] = [];
             if (b.unpaidHours > 0) bits.push(`${b.unpaidHours.toFixed(1)} h unpaid`);
             if (b.oldestUnpaid) bits.push(`oldest ${fmtDay(b.oldestUnpaid)}`);
             if (b.lastPayment) {
               bits.push(`last paid ${sayMoney(b.lastPayment.amount)} ${b.lastPayment.method} on ${fmtDay(b.lastPayment.paidOn)}`);
             }
+            const open = openFor === b.profileId;
             return (
               <Card key={b.profileId} className="overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => openPay(b)}
+                  aria-expanded={open}
+                  onClick={() => setOpenFor(open ? null : b.profileId)}
                   className="flex min-h-[72px] w-full items-center justify-between gap-3 px-5 py-3.5 text-left active:bg-slate-50"
                 >
                   <div className="min-w-0">
                     <div className="truncate text-base font-semibold text-slate-900">{b.name}</div>
                     <div className="mt-0.5 text-xs text-slate-500">
-                      {ahead ? "You have paid more than he has earned so far. It comes off his next hours." : bits.join(" · ") || "Nothing unpaid."}
+                      {reading.kind === "ahead" ? reading.line : bits.join(" · ") || "Nothing unpaid."}
                     </div>
-                    {onClock && (
-                      <div className="mt-0.5 text-xs text-amber-700">A shift is still running, so the amount is not final.</div>
-                    )}
+                    {onClock && <div className="mt-0.5 text-xs text-amber-700">{reading.line}</div>}
                   </div>
-                  <div className="shrink-0 text-right">
-                    {/* A balance that is quietly short a running shift is worse than no balance:
-                        the number is withheld until the hours are trustworthy. */}
-                    {onClock ? (
-                      <span className="text-sm font-semibold text-amber-700">On the clock</span>
-                    ) : square ? (
-                      <span className="text-sm font-semibold text-slate-500">Paid Up</span>
-                    ) : ahead ? (
-                      <span className="text-2xl font-bold tabular-nums text-slate-500">
-                        {formatCurrency(-b.owed)} <span className="text-sm font-semibold">ahead</span>
-                      </span>
-                    ) : (
-                      <span className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(b.owed)}</span>
-                    )}
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="text-right">
+                      {/* A balance that is quietly short a running shift is worse than no balance:
+                          the number is withheld until the hours are trustworthy. */}
+                      {reading.amount === null ? (
+                        <span className={`text-sm font-semibold ${reading.kind === "onClock" ? "text-amber-700" : "text-slate-500"}`}>
+                          {reading.word}
+                        </span>
+                      ) : reading.kind === "ahead" ? (
+                        <span className="text-2xl font-bold tabular-nums text-slate-500">
+                          {formatCurrency(reading.amount)} <span className="text-sm font-semibold">ahead</span>
+                        </span>
+                      ) : (
+                        <span className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(reading.amount)}</span>
+                      )}
+                    </div>
+                    {/* It says the row opens, so nobody has to tap one to find out. */}
+                    <ChevronRight
+                      aria-hidden
+                      className={`h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-90" : ""}`}
+                    />
                   </div>
                 </button>
+                {open && (
+                  <PersonStatement
+                    balance={b}
+                    periods={owedPeriods[b.profileId] ?? []}
+                    heldMileage={heldMileage[b.profileId] ?? []}
+                    period={period}
+                    payments={payments.filter((p) => p.profileId === b.profileId)}
+                    onClock={onClock}
+                    pending={pending}
+                    onRecord={() => openPay(b)}
+                    onUndo={undoPayment}
+                    onConfirm={confirmPayment}
+                  />
+                )}
               </Card>
             );
           })}
@@ -402,56 +523,21 @@ export function PayrollView({
           <h2 className="mb-2 px-1 text-sm font-semibold text-slate-900">Paid Recently</h2>
           <Card className="divide-y divide-slate-100">
             {recent.map((p) => (
-              <div key={p.id} className="flex items-start justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <div className={`text-sm ${p.voided ? "text-slate-400 line-through" : "text-slate-800"}`}>
-                    {fmtDay(p.paidOn)} · {nameById[p.profileId] ?? "—"} · {formatCurrency(p.amount)} · {p.method}
-                  </div>
-                  {p.voided && <div className="mt-0.5 text-xs font-medium text-slate-500">voided</div>}
-                  {p.reference && <div className="mt-0.5 text-xs text-slate-400">ref {p.reference}</div>}
-                  {p.note && (
-                    <div className={`mt-0.5 text-xs ${p.needsCheck && !p.voided ? "text-amber-700" : "text-slate-400"}`}>{p.note}</div>
-                  )}
-                </div>
-                {!p.voided && (
-                  <div className="flex shrink-0 flex-col items-end gap-1.5">
-                    {p.needsCheck && (
-                      <Button
-                        variant="outline"
-                        disabled={pending}
-                        onClick={() =>
-                          run(
-                            () => confirmImportedPayment(p.id),
-                            `confirm:${p.id}`,
-                            `Checked off the ${sayMoney(p.amount)} paid to ${firstName(nameById[p.profileId])}.`,
-                          )
-                        }
-                      >
-                        <Check className="h-4 w-4" /> That&apos;s Right
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      className="text-slate-500"
-                      disabled={pending}
-                      onClick={() =>
-                        run(
-                          () => voidPayment(p.id),
-                          `void:${p.id}`,
-                          `Undone. The ${sayMoney(p.amount)} from ${fmtDay(p.paidOn)} is back on his balance.`,
-                        )
-                      }
-                    >
-                      <Undo2 className="h-4 w-4" /> Undo
-                    </Button>
-                  </div>
-                )}
-              </div>
+              // THE SAME ROW the statement draws, with the name added — one renderer, so a voided
+              // payment and its remaining actions cannot look like two different things.
+              <PaymentLine
+                key={p.id}
+                payment={p}
+                who={nameById[p.profileId] ?? "—"}
+                pending={pending}
+                onUndo={() => undoPayment(p)}
+                onConfirm={() => confirmPayment(p)}
+              />
             ))}
           </Card>
           {payments.length > recent.length && (
             <p className="mt-1.5 px-1 text-xs text-slate-400">
-              Showing {recent.length} of {payments.length} payments.
+              Showing {recent.length} of {payments.length} payments. Open a person above for all of theirs.
             </p>
           )}
         </div>
@@ -577,112 +663,17 @@ export function PayrollView({
         </div>
       </details>
 
-      <p className="pt-1 text-xs text-slate-400">
-        Base pay is hours times pay rate. Mileage is never added into it. Your accountant handles
-        withholding from this export.
-      </p>
-
       {payFor && (
-        <Modal
-          open
-          onClose={closePay}
-          title={`Pay ${payFor.name}`}
-          size="sm"
-          dirty={payDirty}
-          footer={
-            <ModalActions
-              onCancel={closePay}
-              onSave={submitPay}
-              saveLabel={amount !== null && amount > 0 ? `Record ${formatCurrency(amount)} Paid` : "Record Payment"}
-              disabled={amount === null || amount <= 0}
-              saving={pending && busy === `pay:${payFor.profileId}`}
-            />
-          }
-        >
-          <div className="space-y-4">
-            <div className="rounded-lg bg-slate-50 px-3 py-2.5">
-              <div className="text-sm font-semibold text-slate-900">
-                {payFor.owed > 0.005
-                  ? `Owed ${formatCurrency(payFor.owed)}`
-                  : payFor.owed < -0.005
-                    ? `${formatCurrency(-payFor.owed)} ahead`
-                    : "Paid up"}
-              </div>
-              {payPeriods.length > 0 && (
-                <div className="mt-0.5 text-xs text-slate-500">
-                  {payPeriods.map((p) => `${periodLabel(p.start, p.end)} ${formatCurrency(p.gross)}`).join(" · ")}
-                </div>
-              )}
-              {alreadyApplied > 0.005 && payFor.owed > 0.005 && (
-                <div className="mt-0.5 text-xs text-slate-500">
-                  Less {formatCurrency(alreadyApplied)} you have already paid against these.
-                </div>
-              )}
-              {(payFor.hasOpenShift || openShiftIds.has(payFor.profileId)) && (
-                <div className="mt-1 text-xs text-amber-700">A shift is still on the clock, so this is not final yet.</div>
-              )}
-            </div>
-
-            {modalError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div>}
-
-            <div>
-              <Label htmlFor="pay-amount">Amount You Paid</Label>
-              {/* Starts EMPTY, required. No default, no suggested figure, not even the balance
-                  above — a pre-filled number here would be the app inventing a paycheck figure. */}
-              <NumberInput
-                id="pay-amount"
-                value={amount ?? 0}
-                onValueChange={(n) => setAmount(n)}
-                placeholder="0.00"
-                autoFocus
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="pay-on">Paid On</Label>
-              {/* Defaults to the org's today and stays editable: he pays early, and he pays for
-                  last Friday on a Monday. */}
-              <Input id="pay-on" type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
-            </div>
-
-            <div>
-              <Label htmlFor="pay-method-cash">How</Label>
-              <div className="grid grid-cols-4 gap-2">
-                {METHODS.map((m) => (
-                  <button
-                    key={m.value}
-                    id={`pay-method-${m.value}`}
-                    type="button"
-                    onClick={() => setMethod(m.value)}
-                    aria-pressed={method === m.value}
-                    className={`min-h-[44px] rounded-lg border px-2 text-sm font-medium transition-colors ${
-                      method === m.value
-                        ? "border-[rgb(var(--glass-ink))] bg-[rgb(var(--glass-ink))] text-white"
-                        : "border-slate-300 bg-white text-slate-700"
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="pay-ref">Check number or reference (optional)</Label>
-              <Input id="pay-ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="e.g. check #1042" />
-            </div>
-
-            <div>
-              <Label htmlFor="pay-note">Note (optional)</Label>
-              <Input id="pay-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. cash on the Wilson job" />
-            </div>
-
-            <p className="text-xs text-slate-400">
-              This records money you handed over. It pays off whole pay periods oldest first, so a
-              half paid week stays open until the rest of it is paid.
-            </p>
-          </div>
-        </Modal>
+        <PaySheet
+          person={payFor}
+          periods={owedPeriods[payFor.profileId] ?? []}
+          onClock={payFor.hasOpenShift || openShiftIds.has(payFor.profileId)}
+          today={today}
+          saving={pending && busy === `pay:${payFor.profileId}`}
+          error={modalError}
+          onCancel={closePay}
+          onSubmit={submitPay}
+        />
       )}
 
       {settleFor && (

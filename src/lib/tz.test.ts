@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { payPeriodBounds, payPeriodForOffset, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay, tzLocalInputValue, tzNaiveIsoToUtc, weekDayStrs } from "@/lib/tz";
+import { payPeriodBounds, payPeriodForOffset, payPeriodOffsetOf, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay, tzLocalInputValue, tzNaiveIsoToUtc, weekDayStrs } from "@/lib/tz";
 import { localToInstant } from "@/lib/org-local-time";
 
 const ANCHOR = "2026-01-05"; // a Monday
@@ -34,6 +34,50 @@ describe("payPeriodForOffset", () => {
     expect(payPeriodForOffset("biweekly", ANCHOR, "2026-01-20", 0)).toEqual({ start: "2026-01-19", end: "2026-02-02" });
     expect(payPeriodForOffset("biweekly", ANCHOR, "2026-01-20", 1)).toEqual({ start: "2026-01-05", end: "2026-01-19" });
     expect(payPeriodForOffset("biweekly", ANCHOR, "2026-01-20", 2)).toEqual({ start: "2025-12-22", end: "2026-01-05" });
+  });
+});
+
+/**
+ * THE INVERSE, because /payroll needs to hand over a DOOR to a pay period it names. Held mileage is
+ * settled one pay period at a time, so a statement saying "30 miles are held" has to be able to open
+ * the period that holds them (`/payroll?period=N`). Naming a period with no way to reach it is the
+ * dead signpost the no-dead-ends rule exists to stop.
+ */
+describe("payPeriodOffsetOf — which ?period=N opens the period holding a day", () => {
+  it("it is payPeriodForOffset read backwards, for every schedule", () => {
+    // THE PROPERTY THAT MATTERS: round-tripping cannot land him on a different period. A shortcut
+    // that divided elapsed days by a period length would pass biweekly and fail semimonthly.
+    for (const schedule of ["weekly", "biweekly", "semimonthly", "monthly"] as const) {
+      for (let want = 0; want <= 14; want++) {
+        const p = payPeriodForOffset(schedule, ANCHOR, "2026-10-03", want);
+        expect(payPeriodOffsetOf(schedule, ANCHOR, "2026-10-03", p.start)).toBe(want);
+        // Any day INSIDE the period answers the same offset, not just its first day.
+        const mid = new Date(new Date(`${p.start}T12:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
+        if (mid < p.end) expect(payPeriodOffsetOf(schedule, ANCHOR, "2026-10-03", mid)).toBe(want);
+      }
+    }
+  });
+
+  it("today's own day is offset 0", () => {
+    expect(payPeriodOffsetOf("semimonthly", ANCHOR, "2026-10-03", "2026-10-03")).toBe(0);
+    expect(payPeriodOffsetOf("biweekly", ANCHOR, "2026-01-20", "2026-01-19")).toBe(0);
+  });
+
+  it("semimonthly: the period before a 31-day month's second half is still one step back", () => {
+    // Sep 16-30 is 15 days and Oct 1-15 is 15, but Aug 16-31 is 16. One step at a time, so it holds.
+    expect(payPeriodOffsetOf("semimonthly", ANCHOR, "2026-10-03", "2026-09-20")).toBe(1);
+    expect(payPeriodOffsetOf("semimonthly", ANCHOR, "2026-10-03", "2026-09-05")).toBe(2);
+    expect(payPeriodOffsetOf("semimonthly", ANCHOR, "2026-10-03", "2026-08-31")).toBe(3);
+  });
+
+  it("a day in a LATER period has no offset at all: the pager has no forward offsets", () => {
+    // A forward-dated entry must draw no door rather than a door onto the wrong period.
+    expect(payPeriodOffsetOf("semimonthly", ANCHOR, "2026-10-03", "2026-10-20")).toBeNull();
+    expect(payPeriodOffsetOf("biweekly", ANCHOR, "2026-01-20", "2026-03-01")).toBeNull();
+  });
+
+  it("further back than it is allowed to walk is null, not a wrong number", () => {
+    expect(payPeriodOffsetOf("semimonthly", ANCHOR, "2026-10-03", "2026-07-05", 2)).toBeNull();
   });
 });
 

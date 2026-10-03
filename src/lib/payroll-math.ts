@@ -235,6 +235,39 @@ export function toPayPaymentRow(row: any): PayPaymentRow {
   };
 }
 
+/**
+ * ── HOW MANY PAYMENTS A LIST DRAWS, AND WHICH ONES ────────────────────────────────────────────
+ *
+ * TWO FAILURES, ONE RULE.
+ *
+ *  · A LIST THAT NEVER ENDS, WITH A DOOR BEHIND IT. A person's statement drew every payment he had
+ *    ever been handed and put the ONLY door to the pay form after the last of them. A year of weekly
+ *    pay is 52 rows at 69px, so the door sat ~3,500px down a field of one-tap Undo buttons, every one
+ *    of which voids a payment and can unlock a pay period with no confirm. Reaching the button that
+ *    pays a man should not mean scrolling past fifty ways to unpay him.
+ *  · A PAYMENT WAITING TO BE CHECKED FALLING OFF THE END. "Paid Recently" already had this rule
+ *    hand-written inside it: an imported payment carries the only "That's Right" there is, so a cap
+ *    that hid it would leave the amber banner at the top of the page pointing at nothing. The
+ *    statement needs the same promise, and two hand-written copies of one rule is how they drift.
+ *
+ * `shown` is the newest `limit`, PLUS any still-unchecked payment the cap would have hidden (those go
+ * at the end, where the hand-written version put them). `hidden` is what is left for the fold to name
+ * — never a lifetime total, only what is not on screen.
+ */
+export function paymentsToShow(
+  payments: PayPaymentRow[] | null | undefined,
+  limit: number,
+): { shown: PayPaymentRow[]; hidden: PayPaymentRow[] } {
+  const all = (payments ?? []).filter((p): p is PayPaymentRow => !!p);
+  // A non-finite or negative limit must not silently mean "none": it means "no cap at all", which is
+  // the behaviour that was there before this function and is never the wrong answer, only the long one.
+  const cap = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : all.length;
+  const newest = all.slice(0, cap);
+  const rest = all.slice(cap);
+  const stillToCheck = rest.filter((p) => p.needsCheck && !p.voided);
+  return { shown: [...newest, ...stillToCheck], hidden: rest.filter((p) => !stillToCheck.includes(p)) };
+}
+
 export type PersonBalance = {
   profileId: string;
   name: string;
@@ -371,6 +404,64 @@ export function balanceForPerson(input: {
     heldMiles: agg?.heldMiles ?? 0,
     loggedMiles: round1(unsettledLogged),
   };
+}
+
+/**
+ * ── ONE RULE FOR WHAT THE OWED FIGURE IS ALLOWED TO READ ──────────────────────────────────────
+ *
+ * THE FAILURE THIS PREVENTS. The board card has withheld the figure while a shift is running since
+ * the 48.50 lesson: a balance that is quietly short a day's work is worse than no balance at all.
+ * The person's statement under that card draws the same fact a second time, and two renderers of
+ * one money rule is the bug this codebase keeps paying for (balanceForPerson exists for the same
+ * reason). So neither surface decides for itself whether a figure may be drawn — both ask here.
+ *
+ * `amount` is NULL when no figure may be drawn, and `word` is what stands in its place. A caller
+ * that reads `amount` and formats it cannot accidentally print a withheld balance, because there
+ * is no number there to print.
+ */
+export type OwedReading = {
+  kind: "onClock" | "square" | "ahead" | "owed";
+  /** What stands where the figure goes: "On the clock", "Paid Up", "ahead", "Owed". */
+  word: string;
+  /** The figure, POSITIVE in every case (an "ahead" reading says the distance, not a minus), or
+   *  NULL when no figure may be drawn at all. */
+  amount: number | null;
+  /** The one line that goes with it, naming the person rather than saying "he". Empty for a plain
+   *  balance: the figure says it on its own. */
+  line: string;
+};
+
+export function owedReading(input: { name: string; owed: number; onClock: boolean }): OwedReading {
+  // A RUNNING SHIFT PAYS NOTHING INTO `earned` (balanceForPerson leaves it out on purpose, because
+  // hours with no clock_out are unknowable), so every figure built on it is short that shift until
+  // it closes. No figure at all, and the word says why.
+  if (input.onClock) {
+    return { kind: "onClock", word: "On the clock", amount: null, line: "A shift is still running, so the amount is not final." };
+  }
+  const v = r2(input.owed);
+  if (v > 0.005) return { kind: "owed", word: "Owed", amount: v, line: "" };
+  if (v < -0.005) {
+    return {
+      kind: "ahead",
+      word: "ahead",
+      amount: r2(-v),
+      line: `${firstName(input.name)} is ${sayMoney(-v)} ahead. It comes off the next hours.`,
+    };
+  }
+  return { kind: "square", word: "Paid Up", amount: null, line: `${firstName(input.name)} is paid up.` };
+}
+
+/**
+ * MONEY ALREADY HANDED OVER AGAINST THE OPEN PAY PERIODS — the gap between what those periods come
+ * to and what is still owed. Two numbers on one card that fail to add up is the thing this closes.
+ *
+ * ONE function because two surfaces say it now: the person's statement and the pay form's summary.
+ * A second copy of this subtraction would be free to drift, and the one it drifted from is the one
+ * he reads before typing a figure.
+ */
+export function alreadyAppliedTo(periods: { gross: number }[] | null | undefined, owed: number): number {
+  const sum = (periods ?? []).reduce((s, p) => s + fin(p?.gross), 0);
+  return r2(sum - fin(owed));
 }
 
 // ── WHO IS ON THE WAGES BOARD (0286) ─────────────────────────────────────────
@@ -521,6 +612,20 @@ function balancePhrase(name: string, owed: number): string {
   if (v > 0) return `${sayMoney(v)} left.`;
   if (v < 0) return `${firstName(name)} is ${sayMoney(-v)} ahead now.`;
   return "Nothing left owing.";
+}
+
+/**
+ * WHAT TO SAY WHEN THE WRITE ITSELF NEVER CAME BACK — a dropped connection, a deploy mid-request, a
+ * thrown server action. recordPayment has no idempotency key, so a second call is a second row.
+ *
+ * THE FAILURE THIS PREVENTS, AND WHY THE SENTENCE LIVES HERE WHERE A TEST CAN HOLD IT: the insert
+ * may well have landed. "Nothing was saved" is therefore a guess, and it is the exact guess that
+ * gets the same money handed over twice. So it says what is true — nobody knows yet — and names the
+ * one place that can answer it, which is the person's own list of payments.
+ */
+export function noAnswerSentence(name: string | null | undefined): string {
+  const who = firstName(name);
+  return `Nothing came back about that payment to ${who}, so it may or may not have saved. Reload the page and look at ${who}'s payments before recording it again.`;
 }
 
 /** What recordPayment says back. Every clause is a fact the caller just wrote or read:
