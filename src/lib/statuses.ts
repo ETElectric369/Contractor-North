@@ -106,8 +106,9 @@ export const isInspectionType = (t: string | null | undefined): boolean =>
 /* ONE WORD FOR THE SITE VISIT, AND IT IS THE STORED ONE. The visit before a price is an INSPECTION
    wherever staff or Nort read it, and this map is the only place that says so.
 
-   THE WORD WENT OUT AND CAME BACK, so do not "tidy" it again: W2-10 (2026-10-02) laid "Walk-Through"
-   over the stored type, and Erik reversed it on 2026-10-03 — "im still see walk-throughs as a bucket
+   THE WORD WENT OUT AND CAME BACK, so do not "tidy" it again: W2-10 (8c3e9bc5, written 2026-09-28,
+   live as cn-v1034 on the night of 2026-09-30) laid "Walk-Through" over the stored type, and Erik
+   reversed it on 2026-10-03 after about three days of it — "im still see walk-throughs as a bucket
    when everything is about inspections and to be called Inspections". Three reasons it is his to
    name and this is where it lands:
      · THE STORED VALUE IS ALREADY 'inspection' (44 rows in production). A display word laid over a
@@ -134,6 +135,35 @@ const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
  *  rather than crashing or lying. */
 export function appointmentTypeLabel(t: string | null | undefined): string {
   return APPOINTMENT_TYPE_LABELS[(t ?? "") as AppointmentType] ?? (t || "appointment");
+}
+
+/* A STORED TITLE FROM THE THREE DAYS THE VISIT WAS A "WALK-THROUGH", SAID IN TODAY'S WORD.
+   The label above fixes the TYPE everywhere. It does not fix a title, and titles were written too:
+   from cn-v1034 (2026-09-30) to 2026-10-03 every booking door stamped "Walk-Through: <who>" into
+   appointments.title (lib/schedule/work-shape bookingTitle, the lead doors, the public intake's
+   auto-book). Nothing rewrote those rows, so Activity printed BOTH words in one line —
+   "Inspection booked — Walk-Through: Tom Goodman" — on exactly the visits Erik made while testing
+   that change. Two words for one thing is the fault he reported, so the stock tag is re-said where
+   it is READ, which is the only fix that needs no edit to a row somebody may have retyped since.
+
+   ONLY THE STOCK TAG AT THE VERY FRONT MOVES, and only when a separator or the end follows it —
+   job-name.ts's LEADING_TAG rule, for the same reason: a title is the office's to type, so
+   "Walk the attic with Tom" and "Walkthrough video for Rita" come back byte for byte. Nothing is
+   written back: the edit form and the Google push keep the stored string, so re-saying it here can
+   never quietly rewrite a row.
+
+   The matcher below is a MATCHER, not a word anybody reads — which is why inspection-word.test.ts
+   (string literals, template chunks and JSX text) does not sweep it and this file needs no entry on
+   its allowlist. What this function RETURNS is the swept word. */
+const STORED_OLD_TAG = /^(\s*)(walk\s*-?\s*through(s)?)((?:\s*[:—–·|]\s*)|(?:\s+-\s+)|(?:\s*$))/i;
+
+/** A visit's stored title as a person should read it today: a stock "Walk-Through: Tom Goodman" row
+ *  reads "Inspection: Tom Goodman", a bare "Walk-Throughs" reads "Inspections", and a title a person
+ *  typed is returned unchanged. Every surface that PRINTS appointments.title reads it through here. */
+export function visitTitle(title: string | null | undefined): string {
+  return String(title ?? "").replace(STORED_OLD_TAG, (_m, lead: string, _word: string, plural: string | undefined, sep: string) =>
+    `${lead}${plural ? "Inspections" : "Inspection"}${sep}`,
+  );
 }
 
 /** Sort weights for the /quotes default view (mirrors JOB_STATUS_PRIORITY): the LIVE pipeline

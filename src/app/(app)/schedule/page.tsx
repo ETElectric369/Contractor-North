@@ -17,6 +17,7 @@ import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { crewChips } from "@/lib/schedule/block-info";
+import { visitTitle } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
 
@@ -277,7 +278,9 @@ export default async function SchedulePage({
       // convertInquiry — the one thing on this board that was already agreed was the one thing that
       // could not be placed. It is dated via rescheduleAppointment instead.
       kind: "appointment" as const,
-      name: String(r.title ?? "Site visit"),
+      // A dateless visit titled during the three days the visit was a "Walk-Through" reads today's
+      // word on the rail too (lib/statuses visitTitle); a name a person typed is untouched.
+      name: visitTitle(r.title) || "Site visit",
       address: r.location ?? null,
       city: null,
       // Who, and the one person going ([] draws a dashed Nobody).

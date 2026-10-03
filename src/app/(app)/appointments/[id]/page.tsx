@@ -302,8 +302,11 @@ export default async function AppointmentCapturePage({
   /**
    * WHAT THE CUSTOMER ALREADY TOLD US ONLINE — on the inspection, as answers, in their name.
    *
-   * Erik, three reports off the Andy Colar lead: "the inspection starts blank", "the intake
-   * answers don't carry over", "they aren't on the lead at all". The answers were never missing —
+   * Erik, three reports off the Andy Colar lead: "the walk-through starts blank", "the intake
+   * answers don't carry over", "they aren't on the lead at all". HIS WORDS ARE HIS, OLD WORD AND ALL
+   * — he filed these on 2026-09-09, while the app itself still said Inspection everywhere, so this
+   * is him calling it a walk-through of his own accord. Do not sweep a quote; it is the record.
+   * The answers were never missing —
    * they are on `inquiries.intake.intake_answers`, and this page has been SELECTING them all along
    * to sign the uploaded files. Nothing read the rest.
    *

@@ -35,7 +35,7 @@ function defaultSlots(): { date: string; time: string }[] {
 }
 
 /**
- * The lead's front-and-center next steps — no more "Convert ▾" grab-bag. A lead either needs a
+ * The lead's front-and-center next steps — no more "Convert ▾" grab-bag. A lead either needs an
  * inspection to gather scope, or it's ready to price:
  *   • Inspection — starts one now, when you're already there.
  *   • Schedule — books an inspection onto the Schedule; the lead STAYS a lead. Two ways:

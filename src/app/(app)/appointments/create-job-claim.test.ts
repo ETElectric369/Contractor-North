@@ -188,8 +188,10 @@ describe("createJobFromAppointment: the job's name is the street, never the visi
   });
 
   it("with a street, the street, whatever the visit's title says", async () => {
-    // An old stored stock title and the new one ("Inspection: …") both give the street.
-    for (const title of ["Site inspection: Rita Moss", "Inspection: Rita Moss", "Service call — Hot tub circuit", "RV Inspection", "Call Rita Moss", "Call box install", null]) {
+    // Every stock title this app has ever stored gives the street: the oldest ("Site inspection: …"),
+    // W2-10's, which rows written between 2026-09-30 and 2026-10-03 still carry ("Walk-Through: …"),
+    // and today's ("Inspection: …"). The matcher has to know all three, because all three are stored.
+    for (const title of ["Site inspection: Rita Moss", "Walk-Through: Rita Moss", "Inspection: Rita Moss", "Service call — Hot tub circuit", "RV Inspection", "Call Rita Moss", "Call box install", null]) {
       db.jobs = new Map();
       db.appt.job_id = null;
       db.appt.title = title;
@@ -219,11 +221,14 @@ describe("createJobFromAppointment: the job's name is the street, never the visi
     it("a tag and the customer is who, as written", async () => {
       db.appt.title = "Site inspection: Rita Moss";
       expect(await madeName()).toBe("Rita Moss");
-      // The new stock title is a tag too: never "Inspection: …" on a job.
-      db.jobs = new Map();
-      db.appt.job_id = null;
-      db.appt.title = "Inspection: Rita Moss";
-      expect(await madeName()).toBe("Rita Moss");
+      // Today's stock title is a tag too, and so is the one STORED on rows from 2026-09-30 to
+      // 2026-10-03: never "Inspection: …" or "Walk-Through: …" on a job.
+      for (const title of ["Inspection: Rita Moss", "Walk-Through: Rita Moss"]) {
+        db.jobs = new Map();
+        db.appt.job_id = null;
+        db.appt.title = title;
+        expect(await madeName(), title).toBe("Rita Moss");
+      }
     });
 
     it("the visit's own words follow who, with the tag taken off", async () => {

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
 import { bucketInspections } from "@/lib/inspections";
-import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
@@ -729,7 +729,9 @@ async function buildActionItems(ctx: {
         // estimate visit (ESTIMATE_VISIT_TYPES), so a literal printed "Inspection" over an untitled
         // quote visit and over the city's Final Inspection — and it would be the next place to be
         // left behind the day the owner names a different word, which is the fault he reported.
-        title: a.title || appointmentTypeLabel(a.type),
+        // And a STORED title from the three days the visit was a "Walk-Through" is re-said here too
+        // (visitTitle), so Needs You never prints a word no other screen uses.
+        title: visitTitle(a.title) || appointmentTypeLabel(a.type),
         subtitle: who,
         who: null,
         // The DAY IT HAPPENED, not a due date — how long this has been sitting is the pressure.
@@ -751,7 +753,7 @@ async function buildActionItems(ctx: {
     if (a.inquiry_id && leadIds.has(String(a.inquiry_id))) continue; // rides its lead's row
     // ONE WORD FOR THE SITE VISIT: read the type by the SAME label as every other surface.
     // Capitalising the stored value by hand made this front-screen row say "Inspection" while
-    // W2-10 (2026-10-02) had the planner, the calendar, the job page, the crew board and Google
+    // W2-10 (cn-v1034, 2026-09-30) had the planner, the calendar, the job page, the crew board and Google
     // all saying "Walk-Through" — two words for one thing, on the first screen he opens, which is
     // the split Erik reported. (The label went back to Inspection on 2026-10-03, so the two happen
     // to agree again for THIS type; they still would not for any other.) A computed string like
@@ -761,7 +763,10 @@ async function buildActionItems(ctx: {
     items.push({
       id: a.id,
       kind: "appointment",
-      title: a.title || type || "Appointment",
+      // And the STORED title is re-said too (visitTitle), for the same reason as the type's label:
+      // a row stamped "Walk-Through: <who>" between 2026-09-30 and 2026-10-03 would otherwise make
+      // THIS row the one that disagrees with every other screen.
+      title: visitTitle(a.title) || type || "Appointment",
       subtitle: [one(a.customers as any)?.name ?? null, type].filter(Boolean).join(" · ") || null,
       who: null,
       when: a.starts_at,

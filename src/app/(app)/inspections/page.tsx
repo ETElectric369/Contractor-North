@@ -10,7 +10,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { bucketInspections, inspectionRowTags } from "@/lib/inspections";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
@@ -218,7 +218,9 @@ function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; w
       <div className="min-w-0 flex-1">
         <Link href={`/appointments/${a.id}`} className="group block">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate font-medium text-slate-900 group-hover:text-brand">{a.title}</span>
+            {/* visitTitle: a row titled during the three days the visit was a Walk-Through still
+                SAYS that word, and this is the page Erik was reading when he reported the split. */}
+            <span className="truncate font-medium text-slate-900 group-hover:text-brand">{visitTitle(a.title)}</span>
             {/* ONE rule for the tags (lib/inspections inspectionRowTags) — this row draws the open
                 piles AND the filed pile, and a tag written inline here rode into the wrong one: a
                 green "Done" pill on every row of "To write up" (8592392b). No tag is written here. */}

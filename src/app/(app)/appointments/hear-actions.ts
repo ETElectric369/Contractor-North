@@ -24,7 +24,7 @@ export async function hearIntoPlaybook(
    *
    * This was dead on every fresh inspection. The inspector auto-selects the org's sheet in CLIENT
    * state, but `appointments.inspection_template_id` is not written until an answer saves — so the
-   * very first press of "Fill it in", which is the whole designed first action, came back "Pick a
+   * very first press of "Fill it in", which is the whole designed first action, came back "Pick an
    * inspection first." The one escape was to hand-tap an answer and wait out the 900ms debounce:
    * exactly the work the feature exists to replace.
    *
@@ -64,7 +64,7 @@ export async function hearIntoPlaybook(
   );
   if (formErr) return { ok: false, error: "Couldn't read the inspection just now. Try again." };
   if (!form) return { ok: false, error: "That inspection no longer exists." };
-  // Same bound saveInspectionAnswersInner applies: an id must name a INSPECTION, not any old form.
+  // Same bound saveInspectionAnswersInner applies: an id must name an INSPECTION, not any old form.
   if (!(form as { is_inspection?: boolean }).is_inspection)
     return { ok: false, error: "That form isn't an inspection." };
 

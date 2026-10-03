@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
  * THE SHEET IS THE INSPECTION SHEET (2026-10-03). The visit before a price is an Inspection, and the
  * playbook questions carried on it are its questions — the SECOND sense of the word Erik renamed,
  * and the one most likely to be left behind, because it lives in Settings rather than on the page he
- * was reading. W2-10 made this card say "walk-through" on 2026-10-02; it says Inspection again.
+ * was reading. W2-10 (cn-v1034, 2026-09-30) made this card say "walk-through"; it says Inspection again.
  */
 describe("Settings' inspection sheet", () => {
   const src = () => readFileSync(new URL("./playbook-manager.tsx", import.meta.url), "utf8");

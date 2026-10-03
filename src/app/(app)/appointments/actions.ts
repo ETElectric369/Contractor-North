@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
+import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
@@ -526,9 +527,12 @@ export async function linkAppointmentTo(
     patch.location = address;
     if (parts) Object.assign(patch, parts);
   }
-  // The stock titles the create paths hand out, old spellings and new (including the day it was "Walk-Through", 2026-10-02), so an
-  // old stock title still gets renamed. The new title follows the visit's kind (bookingTitle): a
-  // inspection reads "Inspection: <name>"; a job, an Other visit, just the name.
+  // The stock titles the create paths hand out, old spellings and new (including the three days it
+  // was "Walk-Through": cn-v1034, 2026-09-30, to 2026-10-03), so an old stock title still gets
+  // renamed. The new title follows the visit's kind (bookingTitle): an inspection reads
+  // "Inspection: <name>"; a job, an Other visit, just the name. WHOLE-STRING on purpose: a stored
+  // "Walk-Through: Tom Goodman" already carries somebody's name, so it is not ours to replace with
+  // a different one — it is re-said where it is READ instead (lib/statuses visitTitle).
   const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   if (name && STOCK.includes(String(appt.title ?? "").trim().toLowerCase())) {
     patch.title = bookingTitle(workKind({ kind: "appointment", type: (appt as { type?: string | null }).type ?? null }), name);
@@ -582,8 +586,9 @@ export async function setAppointmentPlace(
     .eq("id", id)
     .maybeSingle();
 
-  // The stock titles the create paths hand out, old spellings and new (including the day it was "Walk-Through", 2026-10-02). A title a human
-  // chose is never touched.
+  // The stock titles the create paths hand out, old spellings and new (including the three days it
+  // was "Walk-Through": cn-v1034, 2026-09-30, to 2026-10-03). A title a human chose is never touched,
+  // and a stored "Walk-Through: <who>" counts as chosen — it is re-said on read (statuses visitTitle).
   const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   const isStock = STOCK.includes(String(existing?.title ?? "").trim().toLowerCase());
 
@@ -900,7 +905,14 @@ async function crewLeadOnVisit(
 }
 
 /** The database's no, in the words a person reads. `refused` stops the autosave re-trying a save
- *  that will be refused again. */
+ *  that will be refused again.
+ *
+ *  EVERY WAY OUT OF HERE GOES THROUGH inspectionDbWords, because save_walkthrough_capture's own
+ *  sentences still say "walk-through" — they are literals in an applied migration (0356) and this is
+ *  the one place they reach a person. Without it a crew lead whose seat lapsed read "Sign in with an
+ *  active seat to fill in the walk-through." on a screen that says Inspection everywhere else.
+ *  lib/inspection/db-refusal has the why; inspection-word.test.ts reads the migration and proves
+ *  this covers every sentence it can raise. */
 function inspectionRefusal(error: { code?: string | null; message?: string | null }): Result {
   if (isMissingRpc(error))
     return {
@@ -908,8 +920,8 @@ function inspectionRefusal(error: { code?: string | null; message?: string | nul
       refused: true,
       error: "Crew leads can't save the inspection until the office finishes an update. Nothing was saved.",
     };
-  if (error.code === "42501") return { ok: false, refused: true, error: error.message || CREW_OR_OFFICE };
-  return { ok: false, error: dbError(error) };
+  if (error.code === "42501") return { ok: false, refused: true, error: inspectionDbWords(error.message || CREW_OR_OFFICE) };
+  return { ok: false, error: inspectionDbWords(dbError(error)) };
 }
 
 function revalidateInspection(id: string) {

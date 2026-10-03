@@ -489,7 +489,7 @@ export function QuoteBuilder({
     // Erik: "im creating an estimate for [Mayfern Rd] now and its pulling info from a sarah dale
     // inspection but i cant see anything i wrote for this job."
     //
-    // An estimate started from a INSPECTION is exactly the case that has none of the other three.
+    // An estimate started from an INSPECTION is exactly the case that has none of the other three.
     // Both of his live inspections — 13125 Mayfern Rd and Sarah Dale — carry customer_id, job_id
     // and inquiry_id all null, because an inspection can happen before any of those records exist.
     // So both collapsed to "quote-builder:new", the shared slot, and Sarah Dale's saved draft

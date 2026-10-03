@@ -8,7 +8,7 @@ import { leadNextStep, VISITS_UNREAD, type LeadStepInput } from "./next-step";
  * WHAT WAS WRONG. The board read every open lead's appointments in ONE request — `.in(inquiry_id,
  * <every open lead's uuid>)`, 500 rows — and threw the error away: `const { data: visitRows } = await
  * …`. A read that FAILED and a lead with NO visits came out of that identical (an empty Map), so the
- * one next-step chip fell through to its last rule and printed "New · Call Them" on a lead with a
+ * one next-step chip fell through to its last rule and printed "New · Call Them" on a lead with an
  * inspection booked for Tuesday. The two ways it fails are both ordinary: past ~200 open leads the
  * uuid list makes the request too long for the gateway, and a busy book overflows 500 rows.
  *

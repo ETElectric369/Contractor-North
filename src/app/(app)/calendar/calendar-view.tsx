@@ -35,7 +35,7 @@ import { AppointmentButton, type ApptValue } from "../appointments/appointment-b
 import { ApptQuickActions } from "../appointments/appointment-status";
 import { JobScheduleCard } from "../schedule/job-schedule-card";
 import { jobLabel } from "@/lib/schedule-options";
-import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
+import { appointmentTypeLabel, isInspectionType, visitTitle } from "@/lib/statuses";
 import { allDayEventDays } from "@/lib/gcal-map";
 import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
 import {
@@ -894,7 +894,7 @@ export function CalendarView({
         tray.push({
           id: `a-${a.id}`,
           dayStr: k,
-          label: a.title,
+          label: visitTitle(a.title),
           color: apptGridColor(a),
           href: opts?.openApptRecords ? `/appointments/${a.id}` : `/schedule?view=day&date=${k}`,
         });
@@ -919,7 +919,9 @@ export function CalendarView({
         dayStr: k,
         startMin,
         endMin,
-        label: a.title,
+        // A block titled during the three days the visit was a "Walk-Through" reads today's word
+        // here too (lib/statuses visitTitle); a title a person typed is untouched.
+        label: visitTitle(a.title),
         // A visit likewise: its street (or who, when the title is the street), its one person going.
         info: {
           place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
@@ -1605,7 +1607,7 @@ function monthPills(
     // Absorbed rows are filtered at byDay (0237); an inspection hides only beside its own job.
     if (a.job_id && data.jobs.some((x) => x.job.id === a.job_id)) continue;
 
-    const who = a.customers?.name || a.jobs?.name || a.title;
+    const who = a.customers?.name || a.jobs?.name || visitTitle(a.title);
     /* A SPAN'S START TIME BELONGS TO ITS FIRST DAY ONLY. A Mon-9am three-day booking used to read
        "9a Karen" on Wednesday too — asserting a 9am visit on a day the week view correctly draws
        as a full working day. Mid-span days carry the name alone and sort to the top like all-day
@@ -1891,6 +1893,9 @@ function ApptRow({
   const place = visitPlace(a);
   const going: CrewChip[] =
     crew ?? (a.assigned_to ? crewChips([a.assigned_to], [{ id: a.assigned_to, full_name: a.profiles?.full_name ?? null }]) : []);
+  // What a person READS; `appt.title` below stays the STORED string, because that one is the edit
+  // form's value and a display word must never be written back over a row (lib/statuses visitTitle).
+  const shownTitle = visitTitle(a.title);
   const appt: ApptValue = {
     id: a.id,
     type: a.type,
@@ -1921,7 +1926,7 @@ function ApptRow({
             {appointmentTypeLabel(a.type)}
           </Badge>
           <Link href={`/appointments/${a.id}`} className="truncate text-sm font-medium text-slate-900 hover:text-brand hover:underline">
-            {a.title}
+            {shownTitle}
           </Link>
           {a.status === "completed" && <Badge tone="green">done</Badge>}
           {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
@@ -1947,7 +1952,7 @@ function ApptRow({
             <button
               type="button"
               onClick={onOpenPerson}
-              aria-label={`${a.title}: day, time and who's going`}
+              aria-label={`${shownTitle}: day, time and who's going`}
               className="inline-flex min-h-11 items-center rounded-md px-1 hover:bg-slate-50"
             >
               <CrewInitials crew={going} />
@@ -1972,10 +1977,10 @@ function ApptRow({
             <ClipboardList className="h-4 w-4" />
           </Link>
         )}
-        <ApptQuickActions id={a.id} status={a.status} title={a.title} />
+        <ApptQuickActions id={a.id} status={a.status} title={shownTitle} />
         <AppointmentButton jobs={picker.jobs} customers={picker.customers} staff={picker.staff} appointment={appt} />
         <MoveToDay
-          label={`Move ${a.title}`}
+          label={`Move ${shownTitle}`}
           triggerClassName="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           onPick={async (iso) => {
             if (!iso) return { ok: false, error: "Pick a day." };

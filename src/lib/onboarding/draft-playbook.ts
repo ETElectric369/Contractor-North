@@ -85,8 +85,8 @@ export function draftRequest(pb: Playbook, about: string): string {
  *
  * AND A WHY SOMEBODY ALREADY WROTE IS NEVER OVERWRITTEN — enforced here, in code, not asked for in
  * the prompt. Same law as the provenance gate and as applyFills: FILL HOLES, NEVER OVERWRITE A
- * HAND. Erik's own playbook carries fifteen long why lines written from his own words; a
- * inspection that quietly reworded them would destroy the exact thing this whole build exists to
+ * HAND. Erik's own playbook carries fifteen long why lines written from his own words; a DRAFT
+ * that quietly reworded them would destroy the exact thing this whole build exists to
  * capture, and he'd have to read fifteen paragraphs closely to notice. Blank lines get drafted;
  * written ones get read, which is training enough.
  */

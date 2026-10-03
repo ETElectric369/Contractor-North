@@ -1152,7 +1152,11 @@ export async function setLeadContact(
 /**
  * RIDE-ALONG SLOTS — the calendar fills itself in, grouped by day and town.
  *
- * Erik: "if certain days are already set for inspection/inspections then the lead could be
+ * HIS WORDS ARE HIS, OLD WORD AND ALL (cn-v883, 2026-08-29 — a month before anything was renamed, so
+ * this is him using both words for one thing of his own accord, which is half the reason the rename
+ * was reversed). Do not sweep a quote.
+ *
+ * Erik: "if certain days are already set for walk-through/inspections then the lead could be
  * auto-prompted with the days set and time slots still available to choose from … potentially
  * even grouped somewhat by region."
  *

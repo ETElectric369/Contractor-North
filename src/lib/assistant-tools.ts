@@ -7,7 +7,7 @@ import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { LONG_SHIFT_HOURS, forgottenReason } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
-import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
@@ -1951,12 +1951,16 @@ export async function runDataTool(
           })),
           appointments: (apptRes.data ?? []).map((a: any) => ({
             id: a.id, // pass to appointment.update (reschedule) / appointment.setStatus
-            title: a.title,
+            // AND THE TITLE, for the same reason: a row stamped "Walk-Through: <who>" from cn-v1034
+            // (2026-09-30) to 2026-10-03 is still stored that way, and Nort reading it aloud would
+            // put the other word back in his mouth beside a type that says Inspection
+            // (lib/statuses visitTitle; nothing is written back).
+            title: visitTitle(a.title),
             // THE LABEL, not the stored value: this read handed Nort the raw `type`, so he spoke
             // the database's word ("inspection", "service_call") instead of the app's. It happened
-            // to be visible on 2026-10-02, when the product map reserved "inspection" for the
-            // city's and the site visit was called Walk-Through; the word went back to Inspection
-            // the next day, which fixes nothing here — "service_call" is still not a word anybody
+            // to be visible from cn-v1034 (2026-09-30) to 2026-10-03, when the product map reserved
+            // "inspection" for the city's and the site visit was called Walk-Through; the word went
+            // back to Inspection, which fixes nothing here — "service_call" is still not a word anybody
             // says. Nothing echoes this back: a reschedule takes the id, and appointment.create
             // takes its own type from PICKABLE_APPOINTMENT_TYPES.
             type: appointmentTypeLabel(a.type),

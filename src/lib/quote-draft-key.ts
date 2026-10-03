@@ -42,7 +42,7 @@ export function quoteDraftKey(ids: {
  * built by hand and never submitted, in the exact slot it orphaned. sessionStorage still had the
  * bytes; the app had simply stopped asking for them.
  *
- * The "new" slot is included on purpose, and it is the whole point: an estimate started from a
+ * The "new" slot is included on purpose, and it is the whole point: an estimate started from an
  * inspection had no job, no customer and no lead, so BOTH of his inspections wrote there. That
  * shared slot is precisely where the lost work is.
  */

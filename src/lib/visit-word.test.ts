@@ -8,7 +8,8 @@ import { describe, it, expect, vi } from "vitest";
  * COMPUTED string is invisible to that sweep, and two readers were still capitalising
  * appointments.type by hand instead of asking:
  *
- *   1. My Day → Needs You, the Not Closed Out row. On 2026-10-02 the label was Walk-Through, so this
+ *   1. My Day → Needs You, the Not Closed Out row. From cn-v1034 (2026-09-30) to 2026-10-03 the
+ *      label was Walk-Through, so this
  *      row printed "Marla Finch · Inspection" on the FIRST screen he opens while the planner, the
  *      calendar, the job page, the crew board and Google all said Walk-Through for that same visit.
  *      That split is exactly what Erik reported, and on 2026-10-03 the label went back to Inspection
@@ -201,11 +202,17 @@ describe("Nort reads the visit by its label, not the stored type", () => {
     const db = fakeScheduleDb([
       { id: "ap1", title: null, type: "inspection", starts_at: `${TODAY}T17:00:00.000Z`, ends_at: null, location: null, status: "scheduled", customers: { name: "Marla Finch" }, jobs: null },
       { id: "ap2", title: "Breaker swap", type: "service_call", starts_at: `${TODAY}T20:00:00.000Z`, ends_at: null, location: null, status: "scheduled", customers: { name: "Tess Zane" }, jobs: null },
+      // A TITLE STORED between cn-v1034 (2026-09-30) and 2026-10-03, which is what Erik's own test
+      // bookings carry. Handed over as stored, Nort says the other word back beside a type that says
+      // Inspection — the same split, in his mouth (lib/statuses visitTitle).
+      { id: "ap3", title: "Walk-Through: Tom Goodman", type: "inspection", starts_at: `${TODAY}T22:00:00.000Z`, ends_at: null, location: null, status: "scheduled", customers: { name: "Tom Goodman" }, jobs: null },
     ]);
     const out = JSON.parse(await runDataTool("schedule_overview", { date: TODAY }, db));
     const byId = Object.fromEntries(out.appointments.map((a: any) => [a.id, a]));
     expect(byId["ap1"].type).toBe(appointmentTypeLabel("inspection"));
     expect(byId["ap1"].type).toBe("Inspection");
+    expect(byId["ap3"].title).toBe("Inspection: Tom Goodman");
+    expect(byId["ap2"].title).toBe("Breaker swap"); // a title a person typed is his
     // The RAW value is lowercase; the label is the word. A reader handing over the stored string
     // would fail here, which is the defect this test exists for.
     expect(byId["ap1"].type).not.toBe("inspection");

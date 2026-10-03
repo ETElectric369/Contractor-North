@@ -247,14 +247,33 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     expect(await saveInspectionCapture("appt-1", { notes: "x" })).toMatchObject({ ok: false, error: expect.stringMatching(/didn't save/) });
   });
 
-  it("the database's refusal comes back in its own words, and stops the retry", async () => {
-    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office can fill in the inspection." } };
+  /**
+   * THE DATABASE'S REFUSAL COMES BACK IN ITS OWN WORDS — WITH THE VISIT'S NAME PUT RIGHT.
+   *
+   * The mock says what save_walkthrough_capture ACTUALLY raises (0356 line 222, still "walk-through":
+   * the migration is applied and is not edited for a word). A mock that already said "inspection" is
+   * how this gap hid — it tested a sentence the real function never speaks, so the unit project
+   * stayed green while a crew lead read the old word under his Save. inspectionRefusal re-says it
+   * (lib/inspection/db-refusal), and nothing else about the sentence moves.
+   */
+  it("the database's refusal comes back in its own words, with the visit's name put right, and stops the retry", async () => {
+    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office, or the crew lead on this visit, can fill in the walk-through." } };
     expect(await saveInspectionCapture("appt-1", { photos: [] })).toEqual({
       ok: false,
       refused: true,
-      error: "Only the office can fill in the inspection.",
+      error: "Only the office, or the crew lead on this visit, can fill in the inspection.",
     });
     expect(db.rpcCalls).toHaveLength(2); // read again once (see the race below), then said
+  });
+
+  it("a shape or size the database turns down is said in the one word too, and it is not a refusal", async () => {
+    // 22023, so it goes the dbError way out of inspectionRefusal rather than the 42501 way: raw text
+    // (db-error.ts hands an unrecognised sentence back on purpose), re-said all the same.
+    db.rpcResult = { data: null, error: { code: "22023", message: "The walk-through's notes are too long to save in one go." } };
+    expect(await saveInspectionCapture("appt-1", { notes: "x" })).toEqual({
+      ok: false,
+      error: "The inspection's notes are too long to save in one go.",
+    });
   });
 
   it("a photo the office put on between his read and his save is merged on a second read, not called his removal", async () => {
@@ -262,9 +281,10 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     db.rpcQueue = [
       {
         // The office's photo lands after his read; the database sees it missing from his list.
+        // 0356 line 255's own sentence, which still says the old word (see the refusal test above).
         before: () => db.appt.capture.photos.push(officeNew),
         data: null,
-        error: { code: "42501", message: "Only the office can take a photo off the inspection." },
+        error: { code: "42501", message: "Only the office can take a photo off the walk-through." },
       },
       { data: "appt-1", error: null },
     ];

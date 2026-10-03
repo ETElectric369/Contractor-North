@@ -96,8 +96,10 @@ export function answersFromIntake(
  * every answer. Vivian Builders' intake declares 26 questions; their inspection declares one, and
  * the two share nothing. So Andy Colar's lead arrived with the project, the room, the timeline, the
  * designer and the plans all answered, `carried` came back empty, and both of his inspections
- * were written with `inspection_answers: {}` — Erik's three reports ("the inspection starts
- * blank", "the intake answers don't carry over", "they aren't on the lead at all").
+ * were written with `inspection_answers: {}` — Erik's three reports ("the walk-through starts
+ * blank", "the intake answers don't carry over", "they aren't on the lead at all"). HIS WORDS ARE
+ * HIS, OLD WORD AND ALL: he filed these on 2026-09-09, while the app itself still said Inspection
+ * everywhere, so this is him calling it a walk-through of his own accord. Do not sweep a quote.
  *
  * Nothing here writes an answer. A question the contractor never put on his sheet has nowhere to be
  * pre-filled TO, and guessing a mapping — by label, by resemblance — is exactly the drift the

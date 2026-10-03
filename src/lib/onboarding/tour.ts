@@ -93,7 +93,7 @@ export const stepsOn = <S extends { feature?: FeatureGate }>(steps: readonly S[]
  * sign out and the language always, the estimate QR only with Leads on (it hands out the lead
  * link), Office always, and Tools only with Calculators on. With Nort off (the plain words) the
  * TOUR and the lessons sit there too, under Help (this tour, not the site visit — a different noun
- * that wore the same word until 2026-10-02). The settings-door step opens that menu
+ * that wore the same word from cn-v1034, 2026-09-30, until 2026-10-03). The settings-door step opens that menu
  * and then names it, so it names the one it opened.
  */
 function menuHolds(c: TourCtx, nortOff = false): string {

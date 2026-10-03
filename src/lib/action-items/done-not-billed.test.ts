@@ -169,8 +169,10 @@ describe("query.ts reads it once, on the same floors, and keeps the rest", () =>
   it("an untitled visit falls back to its TYPE'S LABEL, never to a word typed in here", () => {
     // Both feeders off this table: the write-up row and the not-closed-out row. A literal here is
     // what made My Day disagree with every other screen the day the word changed (visit-word.test).
-    expect(q).toContain("title: a.title || appointmentTypeLabel(a.type),");
-    expect(q).toContain('title: a.title || type || "Appointment",');
+    // The stored TITLE goes through visitTitle for the same reason — a row stamped "Walk-Through:
+    // <who>" between 2026-09-30 and 2026-10-03 would make this row the odd one out instead.
+    expect(q).toContain("title: visitTitle(a.title) || appointmentTypeLabel(a.type),");
+    expect(q).toContain('title: visitTitle(a.title) || type || "Appointment",');
     expect(q).not.toContain('"Site inspection"');
   });
 });

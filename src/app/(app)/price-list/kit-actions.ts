@@ -128,7 +128,7 @@ const sizingOfRow = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?
 /** The same rule reshaped for kit_items, which has NO sized_by/qty_per — 0241 put the
  *  per-measurement rule on price_list_items only. Sending those two keys in a kit_items UPDATE is a
  *  PGRST204, which made unlinking any sized item impossible (audit v921). The two built-in
- *  dimensions have kit-shaped twins so they follow the frozen line; a rule counted per a
+ *  dimensions have kit-shaped twins so they follow the frozen line; a rule counted per an
  *  inspection need has nowhere to land on kit_items and is dropped — the frozen line falls back
  *  to its flat quantity, which is what an unlinked line did before 0241 anyway. */
 const kitShapedSizing = (s: KitSizing): Record<string, unknown> => {

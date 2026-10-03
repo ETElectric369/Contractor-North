@@ -170,7 +170,7 @@ describe("Nort's product map after the shell wave", () => {
   /**
    * NORT CALLS THE SITE VISIT WHAT THE APP CALLS IT, AND BOTH HALVES OF THIS LINE HAD BEEN WRONG.
    *
-   * W2-10 (2026-10-02) made this line say "Walk-Throughs" and "inspection is kept for the city's".
+   * W2-10 (cn-v1034, 2026-09-30) made this line say "Walk-Throughs" and "inspection is kept for the city's".
    * Erik reversed the word on 2026-10-03, so the first half was wrong; and the second half was
    * never right — the city's is its OWN type, final_inspection, labelled Final Inspection, so
    * nothing had to be reserved for it. This test now forbids the OLD word in Nort's vocabulary.

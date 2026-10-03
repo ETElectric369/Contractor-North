@@ -134,7 +134,7 @@ describe("the inspection's declaration governs, but its RULES wait their turn", 
 });
 
 describe("what the inspection cannot ask is shown, not dropped (Andy Colar)", () => {
-  // Vivian Builders' real shape, trimmed: an intake form with its own auto-generated keys and a
+  // Vivian Builders' real shape, trimmed: an intake form with its own auto-generated keys and an
   // inspection that shares none of them. Before this, everything below reached the visit as one
   // unattributed paragraph in the appointment's notes.
   const intakePb = {

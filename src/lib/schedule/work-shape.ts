@@ -216,7 +216,7 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
     case "quote": return "quote";
     case "job": return "job";
     case "call": return "call";
-    // OTHER BOOKS AS OTHER (W2-06). It used to fall through to 'inspection': an Other lead booked a
+    // OTHER BOOKS AS OTHER (W2-06). It used to fall through to 'inspection': an Other lead booked an
     // inspection, and the write-up nag that follows every inspection came after it.
     case "other": return "other";
     default: return "inspection";
@@ -227,7 +227,7 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
  * What to call this booking on the calendar.
  *
  * "Site inspection: Matt Warren" on a day he booked as a full day of work is the app telling him
- * what he did, incorrectly, in the one place he goes to check. The label follows the kind, and a
+ * what he did, incorrectly, in the one place he goes to check. The label follows the kind, and an
  * inspection is called one: "Inspection: Matt Warren" (lib/statuses; stored titles keep their words).
  *
  * OTHER IS NO KIND (W2-06): a visit booked as Other is just who it's with. It used to fall through to

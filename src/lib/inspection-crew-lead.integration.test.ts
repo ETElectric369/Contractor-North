@@ -28,6 +28,20 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *     (docs_update / docs_delete); uploading, and every other folder, keep 0213's rule;
  *   · anon can't call it.
  *
+ * THE SENTENCES BELOW SAY "walk-through", AND THAT IS NOT A MISS. This is a boundary test: `tryAs`
+ * returns pg's own message, so what it compares has to be the literal 0356 actually raises. Editing
+ * 0356 is not an option — it is applied, and scripts/test-db/check-test-db.cjs fails CI when an
+ * applied migration changes — and recreating the function for a word is a migration nobody needs. So
+ * the database keeps its sentence and the APP re-says it on the way to the screen
+ * (lib/inspection/db-refusal inspectionDbWords, called from appointments/actions.ts
+ * inspectionRefusal). inspection-word.test.ts reads this migration and proves every sentence it can
+ * raise comes out in the new word; that test runs in the unit project, so it catches a drift here
+ * without the test database.
+ *
+ * This file went red once for exactly the opposite reason: these expectations were swept to the new
+ * word while 0356 kept raising the old one, and the unit project could not see it. If you change a
+ * sentence here, change the migration's or you have only moved the break.
+ *
  * Everything happens inside ONE transaction that is always rolled back, on throwaway companies
  * (lib/throwaway-org.db-fixture). People speak by planted request.jwt.claims under
  * `set local role authenticated`; refusals run inside savepoints so the transaction lives on, and
@@ -237,10 +251,10 @@ d("a crew lead fills in the inspection (0356)", () => {
     const before = await row(apptA);
     const off = await save(leadId, apptA, { notes: "x", photos: [] });
     expect(off.code).toBe("42501");
-    expect(off.error).toBe("Only the office can take a photo off the inspection.");
+    expect(off.error).toBe("Only the office can take a photo off the walk-through.");
     for (const bad of [`${orgId}/employees/pay.pdf`, `${prefixA}../../employees/pay.pdf`, `${orgId}/appointments/${apptB}/x.jpg`]) {
       const r = await save(leadId, apptA, { photos: [...before.capture.photos, bad] });
-      expect(r.error, bad).toBe("A photo you put on the inspection has to be one you took for this visit.");
+      expect(r.error, bad).toBe("A photo you put on the walk-through has to be one you took for this visit.");
     }
     expect((await row(apptA)).capture).toEqual(before.capture);
   });
@@ -257,10 +271,10 @@ d("a crew lead fills in the inspection (0356)", () => {
     const his = await plant(`${prefixA}3-lead-new.jpg`, leadId);
     const stale = await save(leadId, apptA, { photos: [...before.capture.photos, officeTook, his] });
     expect(stale.code).toBe("42501");
-    expect(stale.error).toBe("A photo you put on the inspection has to be one you took for this visit.");
+    expect(stale.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
     // A path in the folder that no one uploaded is no better.
     const ghost = await save(leadId, apptA, { photos: [...before.capture.photos, `${prefixA}9-never-uploaded.jpg`] });
-    expect(ghost.error).toBe("A photo you put on the inspection has to be one you took for this visit.");
+    expect(ghost.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
     expect((await row(apptA)).capture).toEqual(before.capture);
     // Only what he just took travels (addInspectionPhotos), and that lands.
     expect((await save(leadId, apptA, { photos: [...before.capture.photos, his] })).error).toBeNull();
@@ -280,7 +294,7 @@ d("a crew lead fills in the inspection (0356)", () => {
     // A crafted call naming it again finds no file of his: refused, and the list is as the office left it.
     const back = await save(leadId, apptA, { photos: [...on.capture.photos, mine] });
     expect(back.code).toBe("42501");
-    expect(back.error).toBe("A photo you put on the inspection has to be one you took for this visit.");
+    expect(back.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
     expect((await row(apptA)).capture.photos).toEqual(on.capture.photos);
   });
 
@@ -322,10 +336,10 @@ d("a crew lead fills in the inspection (0356)", () => {
   });
 
   it("the sheet: he sets the first one; switching or clearing a saved one, or naming a non-sheet, is refused", async () => {
-    expect((await save(leadId, apptA, null, sheet2Id, {})).error).toBe("Only the office can switch the inspection to a different sheet.");
-    expect((await save(leadId, apptA, null, null, {})).error).toBe("Only the office can switch the inspection to a different sheet.");
+    expect((await save(leadId, apptA, null, sheet2Id, {})).error).toBe("Only the office can switch the walk-through to a different sheet.");
+    expect((await save(leadId, apptA, null, null, {})).error).toBe("Only the office can switch the walk-through to a different sheet.");
     expect((await row(apptA)).sheet).toBe(sheetId);
-    expect((await save(leadId, apptE, null, notSheetId, {})).error).toBe("That sheet isn't one of this company's inspection sheets.");
+    expect((await save(leadId, apptE, null, notSheetId, {})).error).toBe("That sheet isn't one of this company's walk-through sheets.");
     expect((await save(leadId, apptE, null, sheet2Id, { a: "b" })).error).toBeNull();
     const e = await row(apptE);
     expect(e.sheet).toBe(sheet2Id);
@@ -336,11 +350,11 @@ d("a crew lead fills in the inspection (0356)", () => {
     const snap = async () => Promise.all([apptA, apptB, apptC, apptD, apptO].map(row));
     const before = await snap();
     const cases: [string, string, string][] = [
-      [leadId, apptB, "Only the office, or the crew lead on this visit, can fill in the inspection."],
-      [techId, apptC, "Only the office, or the crew lead on this visit, can fill in the inspection."],
-      [otherLeadId, apptA, "That inspection isn't one of this company's."],
-      [leadId, apptO, "That inspection isn't one of this company's."],
-      [goneId, apptD, "Sign in with an active seat to fill in the inspection."],
+      [leadId, apptB, "Only the office, or the crew lead on this visit, can fill in the walk-through."],
+      [techId, apptC, "Only the office, or the crew lead on this visit, can fill in the walk-through."],
+      [otherLeadId, apptA, "That walk-through isn't one of this company's."],
+      [leadId, apptO, "That walk-through isn't one of this company's."],
+      [goneId, apptD, "Sign in with an active seat to fill in the walk-through."],
     ];
     for (const [who, appt, words] of cases) {
       for (const r of [

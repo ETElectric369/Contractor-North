@@ -37,7 +37,14 @@ export type StarterTrade = "electrical" | "deck" | "plumbing" | "generic";
 
 interface Starter {
   /** The forms.name the tenant will see and can rename: "Inspection", the site visit's one word
-   *  (new companies only; a sheet already made keeps its name). */
+   *  (new companies only; a sheet already made keeps its name).
+   *
+   *  A COMPANY SET UP BETWEEN cn-v1034 (2026-09-30) AND 2026-10-03 HAS A SHEET STORED AS
+   *  "Walk-Through", and it is NOT re-said on read the way a visit's title is (lib/statuses
+   *  visitTitle). The difference is who owns the string: a sheet's name is the tenant's, renamed in
+   *  one tap on Settings → Inspection Sheet, and the rename box has to show the name it will save.
+   *  Showing "Inspection" over a box holding "Walk-Through" is the display-over-stored split this
+   *  whole rename exists to end. So it reads as stored until somebody renames it. */
   name: string;
   fields: unknown[];
 }

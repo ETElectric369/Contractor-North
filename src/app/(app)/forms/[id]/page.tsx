@@ -67,7 +67,7 @@ export default async function FormDetailPage({
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/forms" fallbackLabel="Back to Forms" />
-      {/* Safety Log's Off line (the switch board, 0352) belongs on a crew checklist only: a
+      {/* Safety Log's Off line (the switch board, 0352) belongs on a crew checklist only: an
           inspection sheet is Leads', and the website's intake form is a public door. */}
       {!(form as { is_inspection?: boolean | null }).is_inspection && !(form as { is_public_intake?: boolean | null }).is_public_intake && (
         <FeatureOffLineFor feature="safety_log" />

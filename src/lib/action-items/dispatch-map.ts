@@ -88,7 +88,7 @@ export function resolveRowVerb(
   }
 
   if (verb === "dismiss") {
-    // THE HONEST ENDINGS. Each writes a real domain fact (a lost lead, a declined estimate, a
+    // THE HONEST ENDINGS. Each writes a real domain fact (a lost lead, a declined estimate, an
     // inspection's outcome, a cancelled visit or job, a paper in the Archive), so Needs You stays a
     // projection of reality and never a list of things somebody clicked away.
     if (kind === "inquiry") return { name: "inquiry.markLost", input: { id } };

@@ -18,7 +18,8 @@ import type { Answers, AnswerValue, Need } from "@/lib/playbook/types";
 
 /**
  * THE SETUP INTERVIEW — an interview with training in it, and EVERYONE takes it. (It was called
- * a walk-through until 2026-10-02; it is SETUP, and the site visit is the Inspection.)
+ * a walk-through from cn-v1034 (2026-09-30) until 2026-10-03; it is SETUP, and the site visit is
+ * the Inspection.)
  *
  * Erik, correcting me twice:
  *   "His onboarding isn't complete if he hasn't been guided through the training and why lines"
