@@ -1108,10 +1108,22 @@ describe("the owner's money", () => {
     // Any other paper goes as it is.
     const plain = { id: "p", proposal: { picture: true } };
     expect(bankLinesStayHere(plain, undefined)).toBe(plain);
-    // Both pages that hand paper rows to the browser run every row through it.
+    // EVERY PLACE THAT HANDS A PAPER ROW TO THE BROWSER RUNS EVERY ROW THROUGH IT. The bank card moved
+    // off /bills to /reconcile on 2026-10-03 (lib/paperwork answeredOnReconcile), so the list of places
+    // moved with it rather than this tripwire being dropped: Reconcile's read, Organize's page, and
+    // Snap Or Note's sheet, which draws the same card for a file just dropped.
     const { readFileSync } = await import("node:fs");
-    for (const page of ["src/app/(app)/bills/page.tsx", "src/app/(app)/organize/page.tsx"])
-      expect(readFileSync(page, "utf8")).toContain("...bankLinesStayHere(i, bankCards[i.id]),");
+    for (const page of [
+      "src/app/(app)/reconcile/statement-cards.ts",
+      "src/app/(app)/organize/page.tsx",
+      "src/app/(app)/snap-or-note-actions.ts",
+    ])
+      expect(readFileSync(page, "utf8"), page).toContain("...bankLinesStayHere(i, bankCards[i.id]),");
+    // AND /bills HANDS NO BANK VIEW AT ALL ANY MORE, which is the stronger boundary: it does not read
+    // one, so it cannot leak one. A download there would carry `bank: null` and draw no card.
+    const bills = readFileSync("src/app/(app)/bills/page.tsx", "utf8");
+    expect(bills).not.toContain("bankViews(");
+    expect(bills).toContain("const papers = trayPapers.filter((i) => !answeredOnReconcile(i));");
   });
 });
 

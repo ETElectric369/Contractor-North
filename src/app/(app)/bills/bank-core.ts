@@ -534,7 +534,7 @@ export async function createBankPaper(
 /** What the drop line says the moment a download lands. */
 export function bankLine(dl: BankDownload): string {
   const n = dl.lines.length;
-  return `Read as a bank download: ${n} ${n === 1 ? "line" : "lines"}. Waiting below with how it sorts; nothing is written until you press Apply.`;
+  return `Read as a bank download: ${n} ${n === 1 ? "line" : "lines"}. Waiting on Reconcile with how it sorts; nothing is written until you press Apply.`;
 }
 
 // ── APPLY ──────────────────────────────────────────────────────────────────────────────────────

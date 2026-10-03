@@ -129,7 +129,7 @@ export function OrganizeManager({
     // A BANK DOWNLOAD's Back is its whole Undo: everything it wrote comes off. Asked first, as the
     // card's own Undo This Download is.
     const filedHow = proposalOf(item).filed?.how;
-    if (filedHow === "bank_download" && !confirm("Undo this whole bank download? Everything it wrote comes off, and every line waits under Needs You on Bills again.")) return;
+    if (filedHow === "bank_download" && !confirm("Undo this whole bank download? Everything it wrote comes off, and every line waits on Reconcile again.")) return;
     start(async () => {
       const res = await unarchiveItem(item.id);
       if (!res?.ok) { toast(res?.error ?? "Couldn't restore — try again.", "error"); return; }

@@ -279,11 +279,17 @@ describe("the page reads; it does not re-rule", () => {
    * rather than being copied: one door. What it may NOT carry is the Apply — a paper is answered on
    * its own card under Needs You, or this page becomes the only door to a queued paper.
    */
-  it("takes a statement in, says where it is answered, and carries no Apply", () => {
+  it("takes a statement in, answers it here, and shows no Apply while nothing is waiting", () => {
     expect(count(doors(html), "Drop A Bank Or Supplier Statement")).toBe(1);
     expect(text(html)).toContain("Bring In A Statement");
-    expect(text(html)).toContain("answered on its own card under Needs You on Bills");
-    expect(count(doors(html), "Open Bills")).toBe(1);
+    // ANSWERED WHERE IT IS DROPPED SINCE 2026-10-03. Erik: "so it still doesnt make sense to me that
+    // all this reconcile stuff is on the bills page." This used to say "answered on its own card under
+    // Needs You on Bills", and sending him to another page to finish what he had just started is the
+    // merry-go-round. The card is inside this one now, so the copy promises no other page — and with
+    // nothing waiting there is still no Apply anywhere on the page.
+    expect(text(html)).toContain("Whatever you drop waits here on its own card");
+    expect(text(html)).not.toContain("Needs You on Bills");
+    expect(count(doors(html), "Open Bills")).toBe(0);
     for (const gone of ["Apply", "Undo It", "Swap"]) expect(count(doors(html), gone), gone).toBe(0);
   });
 
@@ -441,7 +447,8 @@ describe("who may bring a bank download in", () => {
       // NOT A DEAD END: no control that could only refuse, and the door that IS theirs is named.
       expect(text(out)).toContain("The owner brings in bank downloads");
       expect(text(out)).toContain("Snap Or Note on Bills");
-      expect(count(doors(out), "Open Bills")).toBe(1);
+      // And no link off this page: a supplier's open list is answered right here now, whoever brings it in.
+      expect(count(doors(out), "Open Bills")).toBe(0);
     } finally {
       CURRENT = TABLES;
     }
@@ -502,12 +509,13 @@ describe("a new company sees words, not an error", () => {
       expect(text(fresh)).not.toContain("Couldn't");
       // No section of any kind, and no decision to press: nothing disagrees, so nothing is asked.
       for (const k of Object.values(RECONCILE_KINDS)) expect(fresh, k.anchor).not.toContain(`id="${k.anchor}"`);
-      // THE ONLY TWO DOORS ON A QUIET PAGE ARE THE STATEMENT INTAKE AND THE LINK TO BILLS, and the
-      // intake is drawn PRECISELY here: the book is quiet and the next download is in his hand. The
-      // card used to be hidden on this page, which left an all-clear with no way to put anything on
-      // it — a dead end. So the lead may not then print a flat "Nothing for you to do here" above a
-      // door, and it does not: it names the door instead.
-      expect(doors(fresh)).toEqual(["Drop A Bank Or Supplier Statement", "Open Bills"]);
+      // THE ONLY DOOR ON A QUIET PAGE IS THE STATEMENT INTAKE, and it is drawn PRECISELY here: the book
+      // is quiet and the next download is in his hand. The card used to be hidden on this page, which
+      // left an all-clear with no way to put anything on it — a dead end. So the lead may not then
+      // print a flat "Nothing for you to do here" above a door, and it does not: it names the door.
+      // (The link to Bills that used to sit beside it is gone: the statement is answered here, so there
+      // is nothing on Bills to send him to.)
+      expect(doors(fresh)).toEqual(["Drop A Bank Or Supplier Statement"]);
       expect(text(fresh)).toContain("drop it in below");
       expect(text(fresh)).not.toContain("Nothing for you to do here");
     } finally {

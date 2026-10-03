@@ -229,6 +229,40 @@ const TABLES: Record<string, unknown[]> = {
       file_url: null,
       jobs: null,
     },
+    // ── TWO PAPERS THAT ARE NOT THIS PAGE'S ANY MORE (2026-10-03) ─────────────────────────────
+    // Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills page."
+    // A bank download and a supplier's open list compare two records, so they are answered where they
+    // are dropped, on /reconcile (lib/paperwork answeredOnReconcile). They are in the tray here on
+    // purpose: the test below is that this page draws neither of them and points at the one that does.
+    {
+      id: "tray-bank",
+      kind: "job_document",
+      source: "bills_drop",
+      status: "needs_review",
+      doc_type: "statement",
+      category: "Bank Download",
+      vendor: "Bank \u2022\u20224417",
+      amount: null,
+      title: "checking-sep.csv",
+      created_at: "2026-09-25T12:00:00Z",
+      file_url: null,
+      jobs: null,
+      proposal: { bankImport: { download: { lines: [] } } },
+    },
+    {
+      id: "tray-list",
+      kind: "job_document",
+      source: "bills_drop",
+      status: "needs_review",
+      doc_type: "statement",
+      vendor: null,
+      amount: 600.54,
+      title: "Statement.pdf",
+      created_at: "2026-09-25T13:00:00Z",
+      file_url: null,
+      jobs: null,
+      proposal: { openList: { list: { v: 1, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "printed", accountNumber: null, printedTotal: null, printedCount: null, header: [], columns: {}, skipped: [], rows: [] }, needs: null } },
+    },
   ],
   stock_lot_balance: [
     { lot_id: "lot-1", bill_line_id: "line-coil", item_id: "item-1", pieces: 250, unit: "ft", cost: 180.17, pieces_left: 250, cost_left: 180.17, live_moves: 0, cost_stale: false },
@@ -551,8 +585,28 @@ describe("Needs You holds Sort These (W1-32)", () => {
     expect(count(doors(html), "Add More")).toBe(0);
   });
 
-  it("the bank card's Apply and Undo, and the open list's Apply, live on their cards in Needs You", async () => {
-    const { NeedsYou } = await import("./bills-drop");
+  /**
+   * A STATEMENT IS NOT SORTED HERE ANY MORE (2026-10-03). The tray fixture holds a bank download and a
+   * supplier's open list; neither becomes a cost on a job, so neither is drawn here, neither is in the
+   * count, and the empty line does not claim every paper is in the books. What IS here is a line
+   * pointing at the page that answers them — so My Day's Papers To Sort, which still lands on
+   * #sort-these, reaches the paper it came for instead of a card with nothing in it.
+   */
+  it("a bank download and a supplier's open list are answered on Reconcile, and this page points there", () => {
+    const ny = section("needs-you");
+    expect(textOf(ny)).toContain("2 Statements Are Waiting On Reconcile");
+    expect(doorsIn(ny)).toContain("2 Statements Are Waiting On Reconcile");
+    expect(ny).toContain('href="/reconcile#bring-in-a-statement"');
+    // Not drawn, not counted, and nothing of a download's own lines anywhere in the page's props.
+    expect(text(html)).not.toContain("checking-sep.csv");
+    expect(text(html)).not.toContain("Statement.pdf");
+    expect(count(doors(html), "Apply")).toBe(0);
+    expect(count(doors(html), "Undo This Download")).toBe(0);
+    expect(Number(/Needs You \((\d+)\)/.exec(text(ny))?.[1] ?? 0)).toBe(1 + (count(doors(ny), "Business Cost") - 1));
+  });
+
+  it("the bank card's Apply and Undo, and the open list's Apply, render on Reconcile's own list", async () => {
+    const { PaperworkList } = await import("@/components/paperwork-row");
     const { createElement } = await import("react");
     const bank = {
       id: "tray-bank",
@@ -625,12 +679,12 @@ describe("Needs You holds Sort These (W1-32)", () => {
         },
       },
     };
-    const card = renderToStaticMarkup(createElement(NeedsYou, { items: [bank, list] as any, jobs: [], matches: {}, emptyLine: "Nothing waiting." }));
-    expect(card).toMatch(/^<div[^>]*id="needs-you"/);
-    expect(text(card)).toMatch(/Needs You \(2\)/);
+    // THE SAME TWO CARDS, DRAWN BY THE LIST /reconcile USES. They were in Needs You until 2026-10-03;
+    // the cards themselves did not change, only the page they are on, and this is the proof that the
+    // doors came with them.
+    const card = renderToStaticMarkup(createElement(PaperworkList, { items: [bank, list] as any, jobs: [], matches: {} }));
     expect(count(doors(card), "Apply")).toBe(2);
     expect(count(doors(card), "Undo This Download")).toBe(1);
-    expect(text(card)).not.toContain("Nothing waiting.");
   });
 
   it("the Waiting On A Credit lines stay on Needs You, and the page hands its papers to the one card", () => {

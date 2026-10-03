@@ -28,6 +28,8 @@ import {
   unresolveDuplicateBill,
 } from "@/app/(app)/bills/supplier-actions";
 import { BankDropLine } from "./bank-drop-line";
+import { readStatementCards } from "./statement-cards";
+import { PaperworkList } from "@/components/paperwork-row";
 
 export const dynamic = "force-dynamic";
 /**
@@ -144,6 +146,18 @@ export default async function ReconcilePage() {
   const owed = owedRead.owed;
   const work = await readReconcileWork(supabase, orgId, figuresFrom(owed));
 
+  // ── THE STATEMENTS DROPPED HERE, ANSWERED HERE (2026-10-03) ──────────────────────────────────
+  // Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills page."
+  // A bank download and a supplier's open list compare two records, which is this page's whole
+  // sentence, so their cards live where they are dropped instead of sending him to /bills to press
+  // Apply. The rule is lib/paperwork's `answeredOnReconcile`, read by this page and by Bills.
+  //
+  // AND IT IS WHY THE ALL-CLEAR BELOW MAY NOW SPEAK OF THE QUEUE AT ALL: it used to say "Nothing
+  // here is waiting on you" precisely because this page did not read `organized_items`. It does now,
+  // so `statementsWaiting` is in `nothingAtAll` — the sentence counts what it claims.
+  const statements = await readStatementCards(supabase, orgId);
+  const statementsWaiting = statements.items.length;
+
   // ── THE SUPPLIER GAP: TWO RECORDS, BOTH HANDED IN ────────────────────────────────────────────
   // One row per supplier whose own papers we hold, built by the read rather than here. Why it is not
   // filtered off "what you owe your suppliers" is written at `supplierGapRows`: a supplier whose own
@@ -161,7 +175,7 @@ export default async function ReconcilePage() {
   // Two reads stand behind this page and either can lose a table. Whichever did, the sentence under
   // the one number may not claim an all-clear: with the supplier half unread "your papers line up" is
   // a sentence the app cannot stand behind, and he acts on the lead without scrolling.
-  const couldNotRead = [...new Set([...(owed?.failed ?? []), ...work.failed, ...(owedRead.threw ? [OWED_READ] : [])])];
+  const couldNotRead = [...new Set([...(owed?.failed ?? []), ...work.failed, ...(owedRead.threw ? [OWED_READ] : []), ...(statements.error ? ["the statements waiting on you"] : [])])];
   const allRead = couldNotRead.length === 0;
 
   // The papers on no supplier account. They are in NEITHER side of any gap, so this page says so in
@@ -190,7 +204,7 @@ export default async function ReconcilePage() {
   // Plain words, never an error, and never an empty heading. It must answer for EVERY pile the page
   // draws, including the papers on no account — /bills' own "File It" door lands here because of
   // them, and "Nothing for you to do here" printed directly above that pile is a dead end.
-  const nothingAtAll = allRead && !gaps.length && !open.length && !papersOnNoAccount;
+  const nothingAtAll = allRead && !gaps.length && !open.length && !papersOnNoAccount && !statementsWaiting;
 
   return (
     <div>
@@ -233,13 +247,13 @@ export default async function ReconcilePage() {
                 is drawn even on an all-clear page — that is the moment he brings the next download in
                 — and a flat "nothing to do" printed above it reads as a contradiction, so where the
                 door is drawn the sentence ends by naming it instead.
-                IT STILL SAYS "HERE", AND THE WORD IS LOAD-BEARING. A bare "nothing is waiting on you"
-                is a claim about the whole book, and the door directly below this sentence CREATES
-                waiting work: dropping a download puts a card under Needs You on Bills, which this
-                page never reads (it reads bills and supplier papers, not the paper queue). The
-                refresh after a drop would then print the all-clear over "Waiting under Needs You on
-                Bills." — the lead claiming what it did not check, which is the one thing it may not
-                do. Scoped to this page, both sentences are true at once. */}
+                IT STILL SAYS "HERE", AND THE WORD IS LOAD-BEARING — for a different reason since
+                2026-10-03. It used to be the scope: the door CREATED waiting work this page never read,
+                so a bare "nothing is waiting on you" would have been printed over "Waiting under Needs
+                You on Bills". The card is answered on this page now, so the page DOES read the queue
+                (`statementsWaiting`), and the all-clear is gated on it being empty — which is what
+                earned the right to say anything about it at all. "Here" stays because the claim is
+                still only about what this page counted: a receipt waiting on Bills is not in it. */}
             <p className="mt-1 text-sm text-slate-600">
               Your bills and your suppliers&apos; own papers line up, no supplier name is waiting to be put on an account,
               and no ticket is waiting on you to pick a job.{" "}
@@ -258,7 +272,9 @@ export default async function ReconcilePage() {
                   ? "Couldn't Check Everything Just Now"
                   : papersOnNoAccount > 0
                     ? `${papersOnNoAccount} ${papersOnNoAccount === 1 ? "Paper" : "Papers"} Not On A Supplier Account Yet`
-                    : "Nothing To Sort Out Right Now"}
+                    : statementsWaiting > 0
+                      ? `${statementsWaiting} ${statementsWaiting === 1 ? "Statement" : "Statements"} Waiting On You`
+                      : "Nothing To Sort Out Right Now"}
             </p>
             {/* "No money gap" is itself an all-clear, so it waits on every read landing. */}
             <p className="mt-1 text-sm text-slate-600">
@@ -269,6 +285,13 @@ export default async function ReconcilePage() {
                   names and tickets filed twice" whatever was actually drawn, which went stale the
                   moment the pile stopped being about names at all. */}
               {waiting > 0 ? ` What is below is ${open.map((k) => RECONCILE_KINDS[k].heading).join(", ")}.` : ""}
+              {/* A STATEMENT HE DROPPED IS WAITING ON HIM, ON THIS PAGE, and it is named here because
+                  this is where he stops reading. It is not one of the typed kinds (reconcile-kinds.ts):
+                  a paper waiting for Apply is the answer to the intake door at the bottom, not a
+                  disagreement between two records of ours, so it is a sentence and never a badge. */}
+              {statementsWaiting > 0
+                ? ` ${statementsWaiting === 1 ? "A statement you brought in is" : `${statementsWaiting} statements you brought in are`} waiting under Bring In A Statement below.`
+                : ""}
             </p>
           </>
         )}
@@ -458,13 +481,40 @@ export default async function ReconcilePage() {
             list of what is open goes in through Snap Or Note on Bills, the same as any other paper.
           </p>
         )}
-        <p className="mt-1 text-sm text-slate-600">
-          Either one is answered on its own card under Needs You on Bills, where every line either matches a paper you
-          already have or asks you what it was for, and nothing is written until you press Apply there.
-        </p>
-        <Link href="/bills" className="mt-1 flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-          Open Bills
-        </Link>
+        {/* ── AND IT IS ANSWERED RIGHT HERE (2026-10-03) ──────────────────────────────────────
+            Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills
+            page." He dropped a statement at the line above and then walked to /bills to press Apply —
+            a merry-go-round for one paper. The card that arrives is the ANSWER to this card, so it is
+            inside this one: no second section of its own, and no second place to answer the same paper.
+
+            THIS IS NOT THE APPLY THE LAW FORBIDS. The law is "reconcile is the bottom fold filling in
+            dots not controlling systems, a peace maker" — Reconcile must not RUN things. Answering a
+            statement IS the reconciliation: two records held against each other, line by line, with a
+            person pressing. What the law forbids is this page owning a record, and it still owns none
+            — every write goes through the same server action the card always called.
+
+            THE CARD, NOT A COPY OF IT. `PaperworkRow` returns the bank card or the open-list card and
+            nothing else for these two states, which is why it takes no jobs and no number matches
+            here: a statement is never filed onto a job. */}
+        {statements.error ? (
+          <p className="mt-2 text-sm text-amber-800" role="alert">
+            {statements.error} Reload the page to try again.
+          </p>
+        ) : statementsWaiting > 0 ? (
+          <div className="mt-3 space-y-3">
+            <p className="text-sm text-slate-600">
+              {statementsWaiting === 1 ? "This one is waiting on you" : `These ${statementsWaiting} are waiting on you`}: every
+              line either matches a paper you already have or asks you what it was for, and nothing is written until you
+              press Apply.
+            </p>
+            <PaperworkList items={statements.items} jobs={[]} matches={{}} />
+          </div>
+        ) : (
+          <p className="mt-1 text-sm text-slate-600">
+            Whatever you drop waits here on its own card: every line either matches a paper you already have or asks you
+            what it was for, and nothing is written until you press Apply.
+          </p>
+        )}
       </Card>
     </div>
   );

@@ -58,15 +58,22 @@ export function PaperworkDropZone({ children }: { children: React.ReactNode }) {
 /**
  * NEEDS YOU: ONE CARD FOR EVERYTHING WAITING ON A PERSON (W1-32). In order: what happened to each file
  * just dropped (with Clear Finished Lines), every dropped paper waiting for its answer (a receipt, a
- * bill, a bank download, a supplier's open list or statement: the paper card), then the supplier's
- * bills not in the books (`supplier`, drawn by the page: the cards and their Waiting On A Credit lines,
- * or the sentence saying they couldn't be checked).
+ * bill, a supplier invoice or a picture: the paper card), then the supplier's bills not in the books
+ * (`supplier`, drawn by the page: the cards and their Waiting On A Credit lines, or the sentence saying
+ * they couldn't be checked).
  *
- * The count is only what is open: the papers waiting plus the supplier cards. `#sort-these` stays as
- * an anchor inside it, where My Day's Papers To Sort and a bank download's line land.
+ * A BANK DOWNLOAD AND A SUPPLIER'S OPEN LIST ARE NOT HERE ANY MORE (2026-10-03, Erik: "so it still
+ * doesnt make sense to me that all this reconcile stuff is on the bills page"). They compare two
+ * records rather than becoming a cost, so they are answered on /reconcile, where they are dropped
+ * (lib/paperwork answeredOnReconcile). `statementsElsewhere` is how this card stays honest about it:
+ * one line pointing at them, so every door that lands on #sort-these — My Day's Papers To Sort, a
+ * download's own drop line — still reaches the paper it came for instead of an empty card.
  *
- * Drawn once there is something in it: a paper, a line, or supplier papers to speak for (`always`).
- * Once drawn it stays for the visit, so a card just answered keeps its Undo.
+ * The count is only what is open: the papers waiting HERE plus the supplier cards. A statement waiting
+ * on another page is somebody's work but it is not this count's, so it is a line, never a number.
+ *
+ * Drawn once there is something in it: a paper, a line, supplier papers to speak for (`always`), or a
+ * statement to point at. Once drawn it stays for the visit, so a card just answered keeps its Undo.
  */
 export function NeedsYou({
   items,
@@ -78,6 +85,7 @@ export function NeedsYou({
   supplier = null,
   emptyLine,
   trayUnread = false,
+  statementsElsewhere = 0,
 }: {
   items: PaperRowItem[];
   jobs: { id: string; job_number: string; name: string }[];
@@ -94,10 +102,12 @@ export function NeedsYou({
   emptyLine: string | null;
   /** The read of the papers waiting to be sorted failed: said in words, never an empty card. */
   trayUnread?: boolean;
+  /** Bank downloads and suppliers' open lists waiting on /reconcile: a line, never part of the count. */
+  statementsElsewhere?: number;
 }) {
   const lines = useSnapLines();
   const open = items.length + supplierCards;
-  const show = open > 0 || lines.length > 0 || always;
+  const show = open > 0 || lines.length > 0 || always || statementsElsewhere > 0;
   const [seen, setSeen] = useState(show);
   useEffect(() => {
     if (show) setSeen(true);
@@ -129,6 +139,17 @@ export function NeedsYou({
           </p>
         )}
         <PaperworkList items={items} jobs={jobs} matches={matches} shopStock={shopStock} />
+        {/* NOT A DEAD END. The paper is real and it is one tap away, on the page it is answered on. */}
+        {statementsElsewhere > 0 && (
+          <a
+            href="/reconcile#bring-in-a-statement"
+            className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
+          >
+            {statementsElsewhere === 1
+              ? "A Statement Is Waiting On Reconcile"
+              : `${statementsElsewhere} Statements Are Waiting On Reconcile`}
+          </a>
+        )}
         {supplier}
         {emptyLine && open === 0 && lines.length === 0 && <p className="text-sm text-slate-500">{emptyLine}</p>}
       </div>

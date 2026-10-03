@@ -22,7 +22,7 @@ import { isMissingColumnError } from "@/app/(app)/organize/paperwork-core";
  * A SUPPLIER'S OPEN LIST: THE DOORS (Erik, 2026-09-26: "we cant get too complicated for the user
  * so maybe we can fold all of these tools into the statement upload"). There is no button for this.
  * A list arrives through the doors paper already arrives through (Snap Or Note, Organize, the
- * paste box, a statement PDF) and waits under Needs You on Bills as ONE card. These are the card's buttons.
+ * paste box, a statement PDF) and waits on Reconcile as ONE card (lib/paperwork answeredOnReconcile). These are the card's buttons.
  */
 
 type Result = { ok: boolean; error?: string; message?: string };

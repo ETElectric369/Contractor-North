@@ -479,6 +479,26 @@ export function readinessOf(item: PaperItem): Readiness {
   return { state: "keep", sentence: t === "not_a_cost" ? "Not a cost. Keep it on a job or in files." : "Keep it on a job or in files." };
 }
 
+/**
+ * ── WHICH SCREEN ANSWERS THIS PAPER (2026-10-03) ──────────────────────────────────────────────
+ *
+ * Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills page." He
+ * dropped a statement on /reconcile and then had to walk to /bills to answer it.
+ *
+ * THE RULE, IN ONE FUNCTION BECAUSE BOTH PAGES READ IT: A DOCUMENT COMPARING TWO RECORDS IS ANSWERED
+ * ON RECONCILE. A PAPER THAT BECOMES A COST IS ANSWERED ON BILLS. A bank download compares the bank's
+ * lines against the books; a supplier's open list compares the supplier's papers against ours. A
+ * receipt, a supplier invoice, a bill to sort, a picture and a statement nothing could read all become
+ * costs on jobs, so they stay on Bills with the jobs and the buckets.
+ *
+ * Spelled once, here, so a page cannot hold a copy of the rule that drifts: Bills filters these OUT of
+ * Needs You with it, and Reconcile draws exactly the papers it lets through.
+ */
+export function answeredOnReconcile(item: PaperItem): boolean {
+  const state = readinessOf(item).state;
+  return state === "open_list" || state === "bank_download";
+}
+
 // ── WHERE IT GOES ───────────────────────────────────────────────────────────────────────────
 
 export type PaperDestination =

@@ -317,9 +317,9 @@ export async function createOpenListPaper(
 export function openListLine(stored: StoredOpenList): string {
   if (stored.list) {
     const n = stored.list.rows.length;
-    return `Read as a supplier's list of ${n} open ${n === 1 ? "paper" : "papers"}. Waiting below with what it changes; nothing changes until you press Apply.`;
+    return `Read as a supplier's list of ${n} open ${n === 1 ? "paper" : "papers"}. Waiting on Reconcile with what it changes; nothing changes until you press Apply.`;
   }
-  return "Read as a supplier's list, but its columns need a look. Waiting below.";
+  return "Read as a supplier's list, but its columns need a look. Waiting on Reconcile.";
 }
 
 // ── APPLY ──────────────────────────────────────────────────────────────────────────────────────

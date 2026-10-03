@@ -574,6 +574,23 @@ export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenL
     rows.push(next);
   }
   const printed = printedFigures([...table.slice(0, Math.max(headerRow, 0)).map((r) => r.join(" ")), ...trailer]);
+  /**
+   * THE DAY THE PAPER PRINTS BEATS THE DAY THE FILE WAS SAVED (tableStatementDate: $9,410.92).
+   *
+   * The caller hands in the file's save timestamp, or the day it came in. Neither is the statement's
+   * own date, and on his real statement the file was saved two months after the paper was printed —
+   * which moved `closeCutoff` two months forward and would have marked 24 unpaid bills paid.
+   *
+   * THE FILE TIMESTAMP IS THE LAST RESORT, NEVER A CEILING OVERRIDDEN. A printed date LATER than the
+   * day we already have is a misread, not a statement from the future: the file cannot have been
+   * saved before the paper it holds was printed, and taking a later date would widen the cutoff — the
+   * exact harm this closes. So only an earlier (or equal) printed date is taken.
+   *
+   * A LIST THAT ALREADY SAYS "printed" IS LEFT ALONE: the text lane found the date in the whole text,
+   * which is more than this heading block can see.
+   */
+  const printedDate = input.listDateFrom === "printed" ? null : tableStatementDate(table, headerRow);
+  const ownDate = printedDate && (!input.listDate || printedDate <= input.listDate) ? printedDate : null;
   if (!rows.length) return { ok: false, error: `No papers could be read from ${input.name}.${skipped.length ? ` ${skipped.slice(0, 3).map((s) => s.why).join(" ")}` : ""}` };
   return {
     ok: true,
@@ -581,8 +598,8 @@ export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenL
       v: 1,
       from: input.from,
       name: input.name,
-      listDate: input.listDate,
-      listDateFrom: input.listDateFrom,
+      listDate: ownDate ?? input.listDate,
+      listDateFrom: ownDate ? "printed" : input.listDateFrom,
       accountNumber,
       printedTotal: input.printedTotal ?? printed.total,
       printedCount: input.printedCount ?? printed.count,
@@ -765,6 +782,9 @@ function statementFromLines(lines: readonly string[]): { rows: string[][]; heade
   return { rows, header: ["Reference", "Type", "Invoice Date", "Due Date", "Amount", "Open Balance"] };
 }
 
+/** The words a statement prints over its own date, and nothing else: never a row's date column. */
+const OWN_DATE_LABEL = /^(?:statement\s*date|as\s*of|date)\s*:?$/i;
+
 /** "STATEMENT DATE 09/25/26", "Statement Date: Sep 25, 2026", "DATE\n09/25/26" near the top. */
 function statementDate(lines: readonly string[]): string | null {
   for (let i = 0; i < Math.min(lines.length, 60); i++) {
@@ -772,6 +792,46 @@ function statementDate(lines: readonly string[]): string | null {
     const m = /^\s*(?:statement\s*date|as\s*of|date)\b\s*:?\s*(.+)$/i.exec(line);
     if (m) {
       const d = readDate(m[1].trim()) ?? readDate(m[1].trim().split(/\s+/)[0]);
+      if (d) return d;
+    }
+  }
+  return null;
+}
+
+/**
+ * ── THE DATE A TABLE-BORNE STATEMENT CALLS ITS OWN (2026-10-03; it is worth $9,410.92) ────────
+ *
+ * Erik dropped a real supplier statement and it proposed marking 23 bills paid. Of the 26 unpaid
+ * bills on that account only 2 were dated on or before the day the statement was PRINTED; the other
+ * 24 — $9,410.92 of money he genuinely owes — were dated after it. `closeCutoff` was already right.
+ * The DATE was wrong: `readListFile` sets `listDate` from the file's save timestamp, which was the
+ * day he downloaded the file, two months after the paper was printed, so the cutoff moved two months
+ * forward and swallowed every bill that had arrived since.
+ *
+ * ONE RULE, ONE PLACE. `statementDate` already hunts for the printed day and was used ONLY on the
+ * pasted-text path. This asks the SAME function of a table, so a statement that arrives as a CSV, an
+ * .xlsx or a PDF whose columns came off as cells finds its own date exactly as pasted text does.
+ *
+ * IT LOOKS ONLY AT THE HEADING BLOCK — the rows ABOVE the column headings, which is where the paper
+ * speaks for itself and where `printedFigures` already reads its total. Every row further down
+ * carries a date of its own, so a naive first-date-you-find would take an invoice's date and call it
+ * the statement's; above the headings there are no rows.
+ *
+ * AND IT READS BOTH WAYS A HEADING BLOCK IS PRINTED. His own layout puts the labels DATE / ACCOUNT /
+ * PAGE down one column with their values in the next cell ACROSS, so the day sits beside the word.
+ * Other papers print the labels across one row and the values across the next, so the day sits
+ * UNDER the word, in the same column. Both are the paper naming its own date; neither is a guess.
+ */
+export function tableStatementDate(table: readonly (readonly string[])[], headerRow: number): string | null {
+  const rows = (table ?? []).slice(0, Math.max(headerRow, 0)).map((r) => (r ?? []).map((c) => String(c ?? "").trim()));
+  // THE DAY BESIDE THE WORD: blanks dropped, the row reads "DATE 09/25/26" — a line statementDate knows.
+  const beside = statementDate(rows.map((r) => r.filter(Boolean).join(" ")));
+  if (beside) return beside;
+  // THE DAY UNDER THE WORD: the cell below the label, in its own column (indices kept, not filtered).
+  for (let i = 0; i + 1 < rows.length; i++) {
+    for (let j = 0; j < rows[i].length; j++) {
+      if (!OWN_DATE_LABEL.test(rows[i][j])) continue;
+      const d = readDate(rows[i + 1][j] ?? "");
       if (d) return d;
     }
   }
