@@ -66,6 +66,18 @@ export type ChannelFate =
  * it down" and "somebody chose Other" are different facts about the books, and folding the first into
  * the second would hide, behind a word that looks deliberate, exactly the rows a person needs to go and
  * fix. So the raw column is looked at before it is normalized (channelKeyOf).
+ *
+ * DEFENSIVE ONLY, AND SAID SO HERE RATHER THAN IMPLIED: no payment reaches this module blank today, so
+ * this row cannot be drawn from stored data. payments.method is NOT NULL (0003) and 0287's BEFORE
+ * INSERT/UPDATE trigger maps '' to 'other', and the three app writers (recordPayment and updatePayment
+ * write "check" for a blank sheet, the Stripe writer "card", Apply a deposit's own word), so a blank is
+ * never stored either. It stays because a blank arriving from anywhere later - an import, a new door -
+ * must get its own row instead of being folded in silently, and because deleting it would make
+ * channelKeyOf("") answer "other", which is the one fold this module exists to refuse.
+ *
+ * THE FOLD THAT DOES HAPPEN IS UPSTREAM OF HERE and this module cannot see it: a sheet with no method
+ * chosen is STORED as "check" (billing/actions.ts), which reads "Expect all of it here" on a row that
+ * nobody actually said arrives. Fixing that means changing what those doors store, not what this reads.
  */
 export const NOT_SAID = "not_said";
 
@@ -92,12 +104,33 @@ const FATE_OF: Record<string, ChannelFate> = {
 
 /** The fate of one channel key. NOT_SAID and anything nobody has worked out are "unsaid". */
 export function fateOf(key: string): ChannelFate {
-  return FATE_OF[key] ?? "unsaid";
+  // OWN KEYS ONLY. This table is indexed by whatever somebody typed into Settings, and a plain object
+  // answers "constructor" and "__proto__" with Object.prototype's members - so `FATE_OF[key] ?? "unsaid"`
+  // handed back a function, the row's why rendered the word "undefined", and the money was counted as
+  // having arrived in full instead of landing in unsaidCents. The same hazard payment-method.ts guards
+  // (review 09-24), on the same Settings-typed keys.
+  return Object.hasOwn(FATE_OF, key) ? FATE_OF[key] : "unsaid";
 }
 
 /** The channel a payment belongs to: its method key, or NOT_SAID when the column is blank. */
 export function channelKeyOf(method: string | null | undefined): string {
   return String(method ?? "").trim() ? paymentMethodKey(method) : NOT_SAID;
+}
+
+/**
+ * THE CHANNEL ONE PAYMENT BELONGS TO. A payment STRIPE COLLECTED is a card payout whatever method the
+ * office stored against it, because that is how the money reaches the bank: days later, net of its fee,
+ * under a Stripe descriptor.
+ *
+ * Stripe's bank-debit checkout stores method 'ach' WITH a real processor_fee (record-invoice-payment.ts).
+ * Read by its method alone, such a payment was expected at its gross while paying out net, and its payout
+ * was filed on a Card row with nothing recorded against it - so an ordinary month printed a gap exactly
+ * the size of the fees, every month, with no reason given, and the Card row claimed the payout was money
+ * it had never been paid. bank-download.ts's matcher has always said `if (p.stripe) return "card"`; this
+ * is the same answer, so there is one.
+ */
+export function channelOfPayment(p: { method: string; stripe?: boolean }): string {
+  return p.stripe ? "card" : channelKeyOf(p.method);
 }
 
 /** The channel's name, Title Case, as a row reads it. */
@@ -118,9 +151,17 @@ export function channelLabel(key: string): string {
  * $7,714.09 deposit Erik was offered a bare "Already Counted Or Not Income" on. Such a line stays
  * UNNAMED and gets no reason at all, which is the honest answer and is why this list stays short.
  *
- * THESE WORDS ARE ALSO THE APP'S ONE PROCESSOR VOCABULARY (processorWordsRe below): bank-download.ts's
- * PROCESSOR_RE is built from this table, so "is this merchant a processor" and "which channel do its
- * words name" can never drift into two answers.
+ * THESE WORDS ARE ALSO THE APP'S ONE PROCESSOR WORD LIST (processorWordsRe below): bank-download.ts's
+ * PROCESSOR_RE is built from this table, so "is this merchant a processor" has one answer and a brand
+ * cannot be dropped from one reader and kept by the other.
+ *
+ * IT IS NOT THE APP'S ONLY DEPOSIT CLASSIFIER, and saying so here would be a claim this file cannot keep.
+ * bank-download.ts's depositKindOf answers a DIFFERENT question for the matcher - "could this line be the
+ * payout of a payment of this kind" - and reads wider words for it ("merchant", a bare "card", "wire").
+ * That is deliberate on both sides: a matcher may guess and be corrected by a tap, while this module puts
+ * a sentence on the card, so it reads only words that can mean one thing. The cost is that a line the
+ * matcher calls a card payout ("CARD SETTLEMENT 0612") names no channel here, which is why namedClause
+ * says what it CHECKED ("nothing on the statement names Card") rather than that no such money came in.
  *
  * First match wins, and the app brands are asked before the card processors: a line saying both is one
  * payout through one of them, and which one it is read as cannot change any total on the card.
@@ -161,9 +202,18 @@ export function processorWordsRe(): RegExp {
 
 // ── WHAT GOES IN, AND WHAT COMES BACK ────────────────────────────────────────────────────────────
 
-/** One payment recorded in the books: signed cents (a refund is negative), the day, the method as
- *  STORED (blank included - channelKeyOf needs to see a blank), and the processor fee if one was. */
-export type ChannelPayment = { cents: number; day: string; method: string; feeCents: number | null };
+/**
+ * One payment recorded in the books: cents, the day, the method as STORED (blank included - channelKeyOf
+ * needs to see a blank), the processor fee if one was recorded, and whether STRIPE collected it.
+ *
+ * A REFUND IS NOT HERE, and this type used to say it arrived as negative cents, which no door can produce:
+ * recordPayment, updatePayment and the Stripe writer all refuse an amount at or below zero, and a customer
+ * refund is a customer_credits row with disposition 'refund'. So the Paid column is what was taken in,
+ * gross of refunds, and it can stand above the app's own Received (computeCollected subtracts them) by
+ * exactly a refund. Netting them here would need a second read and a decision about what Paid means - a
+ * decision for the owner, not for a display block - so this says what it is instead of implying otherwise.
+ */
+export type ChannelPayment = { cents: number; day: string; method: string; feeCents: number | null; stripe?: boolean };
 
 /** One money-in line off the download. */
 export type MoneyInLine = { cents: number; description: string };
@@ -182,6 +232,10 @@ export type ChannelRow = {
   namedCents: number | null;
   /** The card's one clause for this row, at most WHY_LINE_MAX characters (the why-line law). */
   why: string;
+  /** The clauses `why` is made of, in order. Carried so a line that puts something in FRONT of them
+   *  (channelWhyFor's label and period total) can drop a clause whole instead of slicing the word that
+   *  says which way the statement is off. */
+  whyParts: readonly string[];
 };
 
 export type MoneyInChannels = {
@@ -220,17 +274,25 @@ function sayList(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** What the statement says about one channel, when its words can name it at all. */
-function namedClause(expected: number | null, named: number): string {
+/**
+ * What the statement says about one channel, when its words can name it at all.
+ *
+ * THE "NONE OF IT" ARM SAYS WHAT WAS CHECKED. It used to read "Nothing on the statement says this way of
+ * being paid", which is a claim about the statement this module is in no position to make: it reads brand
+ * names only (CHANNEL_WORDS), so a payout the bank printed "CARD SETTLEMENT 0612" or "MERCHANT BANKCD DEP"
+ * - which bank-download.ts's own matcher calls a card payout - names nothing HERE. Naming the label is the
+ * narrower, true statement, and it is the one a person can check against the lines in front of him.
+ */
+function namedClause(label: string, expected: number | null, named: number): string {
   if (expected == null) return `The statement names ${sayDollars(named / 100)} of it.`;
-  if (!named) return "Nothing on the statement says this way of being paid.";
+  if (!named) return `Nothing on the statement names ${label}.`;
   if (named === expected) return "The statement names exactly that much.";
   const off = Math.abs(named - expected);
   return `The statement names ${sayDollars(named / 100)} — ${sayDollars(off / 100)} ${named < expected ? "short" : "more"}.`;
 }
 
-/** The row's one clause: what becomes of this money, then what the statement said if it said anything. */
-function whyOf(key: string, fate: ChannelFate, expected: number | null, named: number | null, feesCents: number, feesUnsaid: number): string {
+/** The row's clauses: what becomes of this money, then what the statement said if it said anything. */
+function whyPartsOf(key: string, fate: ChannelFate, expected: number | null, named: number | null, feesCents: number, feesUnsaid: number): string[] {
   const label = channelLabel(key);
   const head = (() => {
     switch (fate) {
@@ -239,10 +301,19 @@ function whyOf(key: string, fate: ChannelFate, expected: number | null, named: n
       case "as_itself":
         return "Expect all of it here, a few days after it was paid.";
       case "when_swept":
-        return `Sits in ${label} until somebody moves it to the bank.`;
+        // THE ROW SAYS WHERE THE MONEY IS (see the top of this file), so it may not say money is waiting
+        // in Venmo over a statement that names the cashout in full: the very next clause ("the statement
+        // names exactly that much") then disproved the one before it, on the deposit this lane exists for.
+        // The module already treats named app money as moved when it works out the gap (sweptLeft below).
+        return named != null && named > 0 && named >= (expected ?? 0)
+          ? `Already moved to the bank, not sitting in ${label}.`
+          : `Sits in ${label} until somebody moves it to the bank.`;
       case "net_of_fee":
+        // SHORT ENOUGH TO LEAVE ROOM FOR ITS SECOND CLAUSE. At 105 characters this head crowded out what
+        // the statement named, so every card row with an unrecorded fee - a card payment taken outside
+        // the app's own Stripe flow, which is ordinary - lost it.
         return feesUnsaid
-          ? `A payout lands days later, less its fee — and ${feesUnsaid} of these have no fee recorded, so this figure reads high.`
+          ? `A payout lands days later, less its fee — ${feesUnsaid} with no fee recorded, so this reads high.`
           : `A payout lands days later: ${sayDollars((expected ?? 0) / 100)} after ${sayDollars(feesCents / 100)} of fees.`;
       case "unsaid":
         return key === NOT_SAID
@@ -250,15 +321,28 @@ function whyOf(key: string, fate: ChannelFate, expected: number | null, named: n
           : `Nothing says where a payment marked ${label} lands, so it is in neither total.`;
     }
   })();
-  const tail = named == null ? "" : ` ${namedClause(expected, named)}`;
-  return capped(`${head}${tail}`);
+  return named == null ? [head] : [head, namedClause(label, expected, named)];
 }
 
-/** The why-line law's length, and a VISIBLE cut when something overruns it: a company's own custom
- *  method name can be as long as whoever typed it, and a clause sliced off mid-word with no mark looks
- *  like a sentence that simply ended. */
-function capped(said: string): string {
-  return said.length <= WHY_LINE_MAX ? said : `${said.slice(0, WHY_LINE_MAX - 1).trimEnd()}\u2026`;
+/**
+ * THE WHY-LINE LAW'S LENGTH, MET BY LEAVING A CLAUSE OUT WHOLE RATHER THAN SLICING ONE.
+ *
+ * Cut at 140 characters by hand, the last clause lost the word that carried it. At ordinary five-figure
+ * sums a card's working ended "$1,228.55 sh\u2026", which no longer says WHICH WAY the channel is off, and
+ * that was the whole of what it was there to say. So a clause that will not fit is left out entirely, and
+ * only a single clause longer than the law on its own is sliced - which is a company's own custom method
+ * name, as long as whoever typed it into Settings - and then the cut is marked, so it cannot read as a
+ * sentence that simply ended.
+ */
+function capped(clauses: readonly string[]): string {
+  let said = "";
+  for (const c of clauses) {
+    if (!c) continue;
+    const next = said ? `${said} ${c}` : c;
+    if (next.length > WHY_LINE_MAX) break;
+    said = next;
+  }
+  return said || `${String(clauses[0] ?? "").slice(0, WHY_LINE_MAX - 1).trimEnd()}\u2026`;
 }
 
 /**
@@ -287,7 +371,7 @@ export function moneyInChannels(input: {
   };
 
   for (const p of inWindow) {
-    const t = at(channelKeyOf(p.method));
+    const t = at(channelOfPayment(p));
     t.recorded += p.cents;
     // A FEE NOBODY RECORDED IS NOT A FEE OF ZERO. Counting null as 0 would quietly say the whole charge
     // reached the bank, which is the one thing a card row must not say.
@@ -316,6 +400,7 @@ export function moneyInChannels(input: {
     // worked-out fate expects NOTHING SAYABLE, which is null and reaches no total.
     const expectedCents =
       fate === "never_banked" ? 0 : fate === "net_of_fee" ? t.recorded - t.fees : fate === "unsaid" ? null : t.recorded;
+    const whyParts = whyPartsOf(key, fate, expectedCents, t.named, t.fees, t.feesUnsaid);
     return {
       key,
       label: channelLabel(key),
@@ -323,7 +408,8 @@ export function moneyInChannels(input: {
       recordedCents: t.recorded,
       expectedCents,
       namedCents: t.named,
-      why: whyOf(key, fate, expectedCents, t.named, t.fees, t.feesUnsaid),
+      why: capped(whyParts),
+      whyParts,
     };
   });
   rows.sort((a, b) => Math.abs(b.recordedCents) - Math.abs(a.recordedCents) || a.label.localeCompare(b.label));
@@ -332,20 +418,47 @@ export function moneyInChannels(input: {
   const expectedCents = rows.reduce((s, r) => s + (r.expectedCents ?? 0), 0);
   const unsaidCents = rows.filter((r) => r.expectedCents == null).reduce((s, r) => s + r.recordedCents, 0);
 
-  // ── THE ONE SENTENCE ──────────────────────────────────────────────────────────────────────────
+  // ── THE ONE SENTENCE ────────────────────────────────────────────────────────
   const gap = expectedCents - reachedCents;
-  const swept = rows.filter((r) => r.fate === "when_swept");
-  const sweptCents = swept.reduce((s, r) => s + r.recordedCents - (r.namedCents ?? 0), 0);
+
+  // WHAT IS STILL WAITING IN AN APP, ROW BY ROW AND NEVER BELOW NOTHING. Added up across rows, a channel
+  // the statement named in FULL offset one it had not, so a Venmo balance the statement itself showed
+  // moved was named as unmoved - and a row with nothing recorded but a cashout named (recorded 0, named
+  // $1,000) subtracted from its neighbour and was still listed. Each row answers only for itself, and
+  // only a row with something actually left is named.
+  const sweptLeft = rows
+    .filter((r) => r.fate === "when_swept")
+    .map((r) => ({ label: r.label, cents: Math.max(0, r.recordedCents - (r.namedCents ?? 0)) }))
+    .filter((r) => r.cents > 0);
+  const sweptCents = sweptLeft.reduce((s, r) => s + r.cents, 0);
   // Money paid in the last few days of the window, on the channels that reach this account at all: the
   // plainest reason of all for a gap, and it needs no guessing about which deposit is which.
+  //
+  // NET, LIKE THE GAP IT EXPLAINS. Summed gross, two $1,000 card payments against a $970 payout printed
+  // "$970.00 hasn't reached this account. $1,000.00 of it was paid in the last 5 days" - a part larger
+  // than its whole, in the very case this clause is best at.
   const edgeCents = inWindow
-    .filter((p) => fateOf(channelKeyOf(p.method)) !== "never_banked" && fateOf(channelKeyOf(p.method)) !== "unsaid" && dayDiff(to, p.day) < FLOAT_DAYS)
-    .reduce((s, p) => s + p.cents, 0);
-  const feesUnsaid = inWindow.filter((p) => fateOf(channelKeyOf(p.method)) === "net_of_fee" && p.feeCents == null).length;
+    .filter((p) => {
+      const fate = fateOf(channelOfPayment(p));
+      return fate !== "never_banked" && fate !== "unsaid" && dayDiff(to, p.day) < FLOAT_DAYS;
+    })
+    .reduce((s, p) => s + p.cents - (fateOf(channelOfPayment(p)) === "net_of_fee" ? (p.feeCents ?? 0) : 0), 0);
+  const feesUnsaid = inWindow.filter((p) => fateOf(channelOfPayment(p)) === "net_of_fee" && p.feeCents == null).length;
 
+  // A PART CANNOT BE LARGER THAN ITS WHOLE. "$X of it" is a claim that the figure is part of the gap, so
+  // each reason is held to the gap: a $5,000 check paid on the 28th cannot explain more than the $44.09
+  // that is actually missing, and printing it whole said something impossible out loud.
+  const part = (cents: number) => Math.min(cents, gap);
   const reasons: { cents: number; said: string }[] = [
-    { cents: sweptCents, said: `${sayDollars(sweptCents / 100)} of it is ${sayList(swept.map((r) => r.label))} nobody has moved to the bank yet.` },
-    { cents: edgeCents, said: `${sayDollars(edgeCents / 100)} of it was paid in the last ${FLOAT_DAYS} days and may bank after this statement.` },
+    {
+      cents: sweptCents,
+      // NOT "NOBODY HAS MOVED IT", WHICH THIS CANNOT KNOW. An unnamed "ONLINE TRANSFER FROM …" names no
+      // channel (see CHANNEL_WORDS) and is equally the sweep itself - Erik's own $7,714.09 deposits were
+      // customers paying his Venmo. So this says what was CHECKED, the statement's own words, and hedges
+      // the conclusion the way the float clause below already does.
+      said: `${sayDollars(part(sweptCents) / 100)} of it may still be in ${sayList(sweptLeft.map((r) => r.label))} — the statement doesn't say it was moved to the bank.`,
+    },
+    { cents: edgeCents, said: `${sayDollars(part(edgeCents) / 100)} of it was paid in the last ${FLOAT_DAYS} days and may bank after this statement.` },
   ];
   // THE LIKELIEST PLAIN REASON: the biggest of the ones that are actually there. Fees only when no
   // bigger reason stands, because an unrecorded fee moves a figure by cents and a sweep by thousands.
@@ -357,13 +470,30 @@ export function moneyInChannels(input: {
       ? `${feesUnsaid} card ${feesUnsaid === 1 ? "payment has" : "payments have"} no fee recorded, so the expected figure reads high.`
       : null);
 
-  const say = !recordedCents && !reachedCents
-    ? "No payments recorded in these days, and nothing came in."
+  // MONEY NOBODY WORKED OUT A LANDING FOR IS NAMED BESIDE AN ALL-CLEAR, never left to the rows to
+  // disclose. "that should reach this account" is honest about what was compared, but read on its own,
+  // over a book with $5,000 nobody wrote the method of, "to the cent" is heard as a verification of the
+  // lot. Each sentence below is written out WHOLE for the same reason the equity note on the Net Profit
+  // card is: a clause spliced onto a branching head is how a sentence comes to say the opposite.
+  const unchecked = unsaidCents
+    ? ` Another ${sayDollars(unsaidCents / 100)} doesn't say how it was paid, so there was nothing to check it against.`
+    : "";
+
+  const say = !recordedCents
+    ? // NOTHING WAS RECORDED, so there is no "everything you were paid" to give an all-clear over: said
+      // whole, that sentence read as verification of a month nobody had entered a payment for.
+      reachedCents
+      ? `No payments recorded in these days, and ${sayDollars(reachedCents / 100)} came in.`
+      : "No payments recorded in these days, and nothing came in."
     : gap > 0
       ? [`${sayDollars(gap / 100)} of what you were paid hasn't reached this account.`, reason].filter(Boolean).join(" ")
-      : gap < 0
-        ? `Everything you were paid that should reach this account did, and ${sayDollars(-gap / 100)} more came in besides.`
-        : `Everything you were paid that should reach this account did: ${sayDollars(expectedCents / 100)}, to the cent.`;
+      : !expectedCents && unsaidCents
+        ? // NOT ONE PAYMENT HAD A WORKED-OUT LANDING, so there is nothing to tie and nothing to be short
+          // by: "$0.00, to the cent" over $5,000 marked Other claims a check nobody could make.
+          `${sayDollars(unsaidCents / 100)} of what you were paid doesn't say how it was paid, so there is no saying whether it reached this account.`
+        : gap < 0 && reachedCents > 0
+          ? `Everything you were paid that should reach this account did, and ${sayDollars(-gap / 100)} more came in besides.${unchecked}`
+          : `Everything you were paid that should reach this account did: ${sayDollars(expectedCents / 100)}, to the cent.${unchecked}`;
 
   return { rows, recordedCents, expectedCents, reachedCents, unsaidCents, unnamedCents, say };
 }
@@ -387,7 +517,13 @@ export function channelWhyFor(description: string, channels: Pick<MoneyInChannel
   // A channel the statement names but the books recorded nothing for has nothing worked out to say:
   // the row's own why would read as reassurance about money nobody wrote down.
   if (!row || !row.recordedCents) return null;
-  return capped(`${row.label}: ${sayDollars(row.recordedCents / 100)} paid this period. ${row.why}`);
+  // BUILT FROM THE ROW'S OWN CLAUSES, not from its finished sentence: prefixed to a why-line already at the
+  // law's length and then cut again by character, a card's working ended "$1,228.55 sh\u2026" and stopped saying
+  // which way the statement was off. capped leaves a clause out whole instead - and this opening is kept
+  // short ("$X this period", not "$X paid this period") so that at ordinary five-figure sums there is nothing
+  // to leave out. "this period" is the part that must not go: these are the CHANNEL's period totals, never
+  // this one deposit's.
+  return capped([`${row.label}: ${sayDollars(row.recordedCents / 100)} this period.`, ...row.whyParts]);
 }
 
 /** Every method key the app has a label for, with the fate it is read as: for a test that holds the

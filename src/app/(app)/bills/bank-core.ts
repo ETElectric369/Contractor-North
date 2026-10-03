@@ -194,7 +194,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     paged<any>((f, t) =>
       supabase
         .from("payments")
-        .select("amount, paid_at, method, processor_fee, invoices(status)")
+        .select("amount, paid_at, method, processor_fee, stripe_payment_intent, invoices(status)")
         .eq("org_id", orgId)
         .gte("paid_at", periodStartIso)
         .lt("paid_at", periodEndIso)
@@ -353,7 +353,13 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     // THE CHANNEL VIEW'S LEFT-HAND COLUMN. A payment on a VOIDED invoice is no revenue and is left out,
     // the same test the matching read above applies. The method goes through AS STORED, blank included:
     // "nobody wrote it down" is its own honest row on the card (bank-money-in.ts's NOT_SAID), and
-    // normalizing a blank to "other" here would hide it behind a word somebody chose.
+    // normalizing a blank to "other" here would hide it behind a word somebody chose. No blank is actually
+    // stored (0287's trigger maps '' to 'other'), so that row is defensive and bank-money-in.ts says so.
+    //
+    // WHETHER STRIPE COLLECTED IT COMES TOO, because that - not the stored method - decides how the money
+    // reaches a bank. Stripe's bank-debit checkout stores 'ach' WITH a real fee, and read by method alone
+    // such a payment was expected at its gross while paying out net under a Stripe descriptor: a gap the
+    // size of the fees, every month, with no reason given. The matcher's own read has always carried it.
     periodPayments: (periodPayR.rows as any[])
       .filter((p) => p.invoices?.status !== "void")
       .map((p) => ({
@@ -361,6 +367,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
         day: dayOf(String(p.paid_at)),
         method: String(p.method ?? ""),
         feeCents: p.processor_fee === null || p.processor_fee === undefined ? null : centsOf(p.processor_fee),
+        stripe: !!p.stripe_payment_intent,
       })),
     payPayments: (crewR.rows as any[]).map((p) => ({ id: String(p.id), profileId: String(p.profile_id), cents: centsOf(p.amount), day: String(p.paid_on), reference: p.reference ?? null })),
     supplierPayments: (supR.rows as any[]).map((p) => ({ id: String(p.id), accountId: String(p.supplier_account_id), cents: centsOf(p.amount), day: String(p.paid_on), reference: p.reference ?? null })),
@@ -549,11 +556,16 @@ const MATCH_TABLES: MatchTable[] = ["payments", "bills", "supplier_payments", "p
  *  says where it came from and nothing about the company's account. */
 export const CREW_NOTE = "Recorded from a bank download.";
 
-/** How a deposit put on an invoice was paid, from what the bank calls it. */
+/** How a deposit put on an invoice was paid, from what the bank calls it. A brand the app has a key for
+ *  is stored as that key: "CASH APP CASHOUT" and "PAYPAL TRANSFER" fell through to "check" here, which put
+ *  app money on a Check row (expected in full, as itself) and left the real channel reading as never paid
+ *  at all - the left-hand column of the channel view is this column. */
 export function depositMethod(description: string): string {
   const d = description.toLowerCase();
   if (/venmo/.test(d)) return "venmo";
   if (/zelle/.test(d)) return "zelle";
+  if (/cash\s*app/.test(d)) return "cashapp";
+  if (/paypal/.test(d)) return "paypal";
   if (/stripe|square|card/.test(d)) return "card";
   if (/\bach\b|transfer|wire/.test(d)) return "transfer";
   return "check";

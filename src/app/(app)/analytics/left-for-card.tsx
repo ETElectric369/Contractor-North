@@ -284,8 +284,16 @@ export function LeftForCard({
                     Reconcile now (Erik: "this should be in reconcile too i imagine"), and a sentence
                     pointing "below" at a door that is no longer there is a dead end. So it is a link,
                     and it lands on the card that holds the door. */}
+                {/* EACH SENTENCE WHOLE, because the negation is the whole of it. Built as a shared tail
+                    (" taken off Net Profit.") after a branching head, the one-row arm read "Equity, not a
+                    cost: it is taken off Net Profit." - the opposite of the law, on the owner's main money
+                    card, in the ordinary case where he put no money in. A negation must never be able to
+                    come apart from the clause it negates, so neither arm shares a word with the other. */}
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {belowTheLine.length === 1 ? "Equity, not a cost: it is" : "Equity, not costs: neither is"} taken off Net Profit. {money.ownerDrawSeen}
+                  {belowTheLine.length === 1
+                    ? "Equity, not a cost: it is not taken off Net Profit."
+                    : "Equity, not costs: neither is taken off Net Profit."}{" "}
+                  {money.ownerDrawSeen}
                   {drawUnseen ? " Nothing this period that the app can see: a bank download is what tells it." : ""}
                 </p>
                 {drawUnseen && (

@@ -178,6 +178,42 @@ describe("what else the card says, and how", () => {
     expect(html).toContain("text-red-600");
   });
 
+  /**
+   * THE EQUITY NOTE, BOTH WAYS ROUND. Built as a branching head plus a shared tail (" taken off Net
+   * Profit."), the one-row arm read "Equity, not a cost: it is taken off Net Profit." - the opposite of
+   * the law, on the owner's main money card, in the ordinary case where he put no money in. Each sentence
+   * is pinned whole here, because the word that was lost was a single "not".
+   */
+  it("says a draw is NOT taken off Net Profit, with or without money in from the owner", () => {
+    const draws = [{ posted_on: "2026-08-14", amount: -500 }];
+    const drawOnly = text(render(computeOwnerMoney({ ...inputs, ownerDraws: draws }, ownerMoneyWindow("2026-08", TODAY), TZ, TODAY)));
+    inOrder(drawOnly, ["Owner's Draw $500.00", "Equity, not a cost: it is not taken off Net Profit."]);
+    // The figure beside it proves the sentence: Net Profit is revenue less the bills, draw or no draw.
+    expect(drawOnly).toContain("Net Profit $749.75");
+    expect(drawOnly).not.toContain("Equity, not a cost: it is taken off");
+
+    // TWO ROWS, where "neither" carries the negation instead.
+    const both = text(
+      render(
+        computeOwnerMoney(
+          { ...inputs, ownerDraws: draws, ownerMoneyIn: [{ posted_on: "2026-08-16", amount: 700 }] },
+          ownerMoneyWindow("2026-08", TODAY),
+          TZ,
+          TODAY,
+        ),
+      ),
+    );
+    inOrder(both, ["Owner's Draw $500.00", "Owner's Money In $700.00", "Equity, not costs: neither is taken off Net Profit."]);
+    expect(both).toContain("Net Profit $749.75");
+  });
+
+  it("still says it when the app can see no draw at all - the default card", () => {
+    // ownerDraw is drawn unconditionally, so the one-row arm is what MOST cards print. It said the wrong
+    // thing there, at $0.00, and no test looked at the sentence.
+    const none = text(render(computeOwnerMoney(inputs, ownerMoneyWindow("2026-08", TODAY), TZ, TODAY)));
+    inOrder(none, ["Owner's Draw $0.00", "Equity, not a cost: it is not taken off Net Profit."]);
+  });
+
   it("the owner's hours are hours, said under the bottom line, never a cost line", () => {
     const money = computeOwnerMoney(
       {

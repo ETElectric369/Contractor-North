@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { BankView } from "@/lib/bank-download";
+import type { ChannelRow } from "@/lib/bank-money-in";
 import type { FuelTrend } from "@/lib/analytics/fuel-trend";
 
 /**
@@ -20,6 +21,9 @@ import { FuelTrendCard } from "@/app/(app)/analytics/fuel-trend-card";
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map((m) => ({ markup: m[0], text: textOf(m[0]) }));
 const titleCase = (s: string) => s.split(/\s+/).filter((w) => /^[a-z]/i.test(w)).every((w) => /^[A-Z]/.test(w));
+/** A channel row as the pure function returns one: a why is its CLAUSES, joined - carried apart so a line
+ *  that prefixes them can leave one out whole instead of slicing the word that carries it. */
+const chRow = (r: Omit<ChannelRow, "why">): ChannelRow => ({ ...r, why: r.whyParts.join(" ") });
 
 const VIEW: BankView = {
   headline: "Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 3 need you",
@@ -73,26 +77,26 @@ const VIEW: BankView = {
   // never reaches it at all, and payments nobody said the method of.
   channels: {
     rows: [
-      { key: "check", label: "Check", fate: "as_itself", recordedCents: 2_536_711, expectedCents: 2_536_711, namedCents: null, why: "Expect all of it here, a few days after it was paid." },
-      {
+      chRow({ key: "check", label: "Check", fate: "as_itself", recordedCents: 2_536_711, expectedCents: 2_536_711, namedCents: null, whyParts: ["Expect all of it here, a few days after it was paid."] }),
+      chRow({
         key: "card",
         label: "Card",
         fate: "net_of_fee",
         recordedCents: 1_775_163,
         expectedCents: 1_722_855,
         namedCents: 1_722_855,
-        why: "A payout lands days later: $17,228.55 after $523.08 of fees. The statement names exactly that much.",
-      },
-      { key: "venmo", label: "Venmo", fate: "when_swept", recordedCents: 1_638_411, expectedCents: 1_638_411, namedCents: 0, why: "Sits in Venmo until somebody moves it to the bank. Nothing on the statement says this way of being paid." },
-      { key: "cash", label: "Cash", fate: "never_banked", recordedCents: 645_135, expectedCents: 0, namedCents: null, why: "Cash never reaches the bank. Its receipts are already costs." },
-      { key: "not_said", label: "Not Said How It Was Paid", fate: "unsaid", recordedCents: 41_000, expectedCents: null, namedCents: null, why: "Nobody wrote down how these were paid, so there is no saying where they land." },
+        whyParts: ["A payout lands days later: $17,228.55 after $523.08 of fees.", "The statement names exactly that much."],
+      }),
+      chRow({ key: "venmo", label: "Venmo", fate: "when_swept", recordedCents: 1_638_411, expectedCents: 1_638_411, namedCents: 0, whyParts: ["Sits in Venmo until somebody moves it to the bank.", "Nothing on the statement names Venmo."] }),
+      chRow({ key: "cash", label: "Cash", fate: "never_banked", recordedCents: 645_135, expectedCents: 0, namedCents: null, whyParts: ["Cash never reaches the bank. Its receipts are already costs."] }),
+      chRow({ key: "not_said", label: "Not Said How It Was Paid", fate: "unsaid", recordedCents: 41_000, expectedCents: null, namedCents: null, whyParts: ["Nobody wrote down how these were paid, so there is no saying where they land."] }),
     ],
     recordedCents: 6_636_420,
     expectedCents: 5_897_977,
     reachedCents: 3_423_956,
     unsaidCents: 41_000,
     unnamedCents: 1_701_101,
-    say: "$24,740.21 of what you were paid hasn't reached this account. $16,384.11 of it is Venmo nobody has moved to the bank yet.",
+    say: "$24,740.21 of what you were paid hasn't reached this account. $16,384.11 of it may still be in Venmo \u2014 the statement doesn't say it was moved to the bank.",
   },
   inCents: 1200000,
   outCents: 368500,
@@ -118,6 +122,10 @@ describe("the bank card", () => {
   it("says how he was paid and what should reach this account, above the rows", () => {
     const text = textOf(render(VIEW));
     expect(text).toContain("How You Were Paid");
+    // AND BOTH COLUMNS ARE NAMED. The rows drew two bare dollar figures - "Check $25,367.11 $25,367.11" -
+    // with nothing saying which was paid and which should reach here, and the darker of the two could be
+    // read as Reached It. The headings the block's own sketch has always shown are now drawn.
+    expect(text).toContain("How You Were Paid Paid Should Reach Here");
     expect(text).toContain("Check $25,367.11 $25,367.11");
     // A CARD IS ITSELF LESS ITS FEE, and the row says so where he reads the figure.
     expect(text).toContain("Card $17,751.63 $17,228.55");

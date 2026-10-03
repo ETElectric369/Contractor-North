@@ -1338,7 +1338,11 @@ describe("where your money came in", () => {
     expect(ch.reachedCents).toBe(48_540 + 30_000 + 127_500);
     // The one deposit whose words name no way of being paid is said on its own.
     expect(ch.unnamedCents).toBe(127_500);
-    expect(ch.say).toBe("Everything you were paid that should reach this account did, and $1,275.00 more came in besides.");
+    // AND THE $127.50 NOBODY WROTE THE METHOD OF IS NAMED BESIDE THE ALL-CLEAR, not left to the rows: read
+    // alone, "everything you were paid ... did" is heard as a verification of the lot.
+    expect(ch.say).toBe(
+      "Everything you were paid that should reach this account did, and $1,275.00 more came in besides. Another $127.50 doesn't say how it was paid, so there was nothing to check it against.",
+    );
   });
 
   it("does not move when a line is applied, because it reads EVERY payment of the period", () => {
@@ -1361,12 +1365,42 @@ describe("where your money came in", () => {
     expect(bankViewOf({ ...dl, lines: [] }, planBankDownload({ ...dl, lines: [] }, ORG_BOOKS()), ORG_BOOKS()).channels).toBeNull();
   });
 
+  it("draws no block at all on a CREDIT CARD'S own statement", () => {
+    // This reader takes card downloads, and the only money IN on one is the company paying its own card
+    // off - which guessFor already calls not income. Compared with what customers paid in those days, the
+    // block announced the whole month's takings as missing from an account none of it was ever going to
+    // reach: "$8,000.00 of what you were paid hasn't reached this account", about a credit card.
+    const cardDl = download(
+      `Transaction Date,Posted Date,Card No.,Description,Category,Debit,Credit
+2026-09-02,2026-09-03,5678,GAS AND GO 12,Gas/Automotive,62.10,
+2026-09-20,2026-09-21,5678,AUTOPAY PAYMENT THANK YOU,Payment/Credit,,2000.00
+`,
+      "card.csv",
+    );
+    const cardBooks = ORG_BOOKS({ periodPayments: [{ cents: 1_000_000, day: "2026-09-10", method: "check", feeCents: null }] });
+    expect(channelViewOf(cardDl, cardBooks)).toBeNull();
+    expect(bankViewOf(cardDl, planBankDownload(cardDl, cardBooks), cardBooks).channels).toBeNull();
+    // A PAYOUT OF CUSTOMERS' MONEY KEEPS THE BLOCK, because a processor's words are customers' money
+    // arriving - the same pair of tests guessFor asks, so there is one rule.
+    const payoutDl = download(
+      `Date,Description,Amount
+09/20/2026,STRIPE TRANSFER 0920,2000.00
+`,
+      "Checking2.csv",
+    );
+    expect(channelViewOf(payoutDl, cardBooks)).not.toBeNull();
+  });
+
   it("A GUESS SHOWS ITS WORKING: a deposit the statement names gets the channel's own figures", () => {
     const rows = cardOf().rows;
     const stripe = rows.find((r) => r.title.includes("STRIPE"))!;
-    expect(stripe.hint).toBe("Card: $500.00 paid this period. A payout lands days later: $485.40 after $14.60 of fees. The statement names exactly that much.");
+    expect(stripe.hint).toBe("Card: $500.00 this period. A payout lands days later: $485.40 after $14.60 of fees. The statement names exactly that much.");
     const venmo = rows.find((r) => r.title.includes("VENMO"))!;
-    expect(venmo.hint).toContain("Venmo: $300.00 paid this period.");
+    expect(venmo.hint).toContain("Venmo: $300.00 this period.");
+    // AND IT DOES NOT SAY THE MONEY IS STILL IN VENMO over a statement that names the cashout in full: the
+    // clause after it proves the one before it, which is the whole of what a shown working is for.
+    expect(venmo.hint).toContain("Already moved to the bank, not sitting in Venmo. The statement names exactly that much.");
+    expect(venmo.hint).not.toContain("until somebody moves it");
   });
 
   it("and says NOTHING on a deposit whose words name no channel", () => {

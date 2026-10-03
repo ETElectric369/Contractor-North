@@ -102,7 +102,15 @@ function MoneyInBlock({ channels }: { channels: MoneyInChannels }) {
   const dash = <span className="text-slate-400">—</span>;
   return (
     <div className="space-y-1.5 rounded-lg border border-slate-200 px-3 py-2">
-      <p className="text-xs font-medium text-slate-600">How You Were Paid</p>
+      {/* THE TWO COLUMNS, NAMED - the headings the sketch above has always shown and the markup never
+          drew. Two bare figures a row read "Check $25,367.11 $25,367.11" with nothing saying which was
+          paid and which should reach here, and only the footer total let a reader work the second one out.
+          A heading row, not per-row labels: the figures stay in their columns. */}
+      <div className="flex flex-wrap items-baseline gap-x-3 text-xs font-medium text-slate-600">
+        <span>How You Were Paid</span>
+        <span className="ml-auto font-normal text-slate-500">Paid</span>
+        <span className="w-28 text-right font-normal text-slate-500">Should Reach Here</span>
+      </div>
       <ul className="space-y-1">
         {channels.rows.map((r) => (
           <li key={r.key} className="space-y-0.5">

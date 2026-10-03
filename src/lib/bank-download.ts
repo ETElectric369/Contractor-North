@@ -1952,6 +1952,14 @@ export function channelViewOf(dl: Pick<BankDownload, "from" | "to" | "lines">, b
   if (!dl.from || !dl.to) return null;
   const payments = books.periodPayments ?? [];
   const moneyIn = dl.lines.filter((l) => l.cents > 0).map((l) => ({ cents: l.cents, description: l.description }));
+  // A CREDIT CARD'S OWN STATEMENT IS NOT AN ACCOUNT CUSTOMERS PAY INTO. This reader takes card downloads
+  // (CARD_THANKS_RE, chargesPrintedPositive, the card's Swap), and the only money IN on one is the company
+  // paying its own card off - which guessFor already calls not income, by this very pair of tests. Nothing
+  // on a download says WHICH account it is, so its own money in is the honest signal: where every line of
+  // it is the card's own payment, there is nothing here that customers' money was ever going to land in,
+  // and comparing the month's takings against it announced the whole lot as missing. A line naming a
+  // processor is a payout of customers' money, so it keeps the block.
+  if (moneyIn.length && moneyIn.every((l) => CARD_THANKS_RE.test(l.description) && !PROCESSOR_RE.test(l.description))) return null;
   if (!payments.length && !moneyIn.length) return null;
   const view = moneyInChannels({ payments, moneyIn, window: { from: dl.from, to: dl.to } });
   return view.rows.length ? view : null;

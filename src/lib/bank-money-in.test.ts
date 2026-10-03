@@ -142,7 +142,10 @@ describe("what the statement's own words name - and what they do not", () => {
     expect(row(v, "cash").namedCents).toBeNull();
     // One it CAN name, that it did not: zero named, and the row says which it is.
     expect(row(v, "venmo").namedCents).toBe(0);
-    expect(row(v, "venmo").why).toContain("Nothing on the statement says this way of being paid");
+    // AND IT SAYS WHAT IT CHECKED. "Nothing says this way of being paid" is a claim about the statement
+    // this module cannot make: it reads brand names only, so a payout printed "CARD SETTLEMENT 0612" -
+    // which the matcher in bank-download.ts calls a card payout - names nothing HERE.
+    expect(row(v, "venmo").why).toContain("Nothing on the statement names Venmo.");
   });
 
   it("a channel that ties says exactly that; one that does not says BY HOW MUCH", () => {
@@ -168,7 +171,7 @@ describe("the one sentence", () => {
     const v = view();
     expect(v.expectedCents - v.reachedCents).toBe(900_000);
     expect(v.say).toBe(
-      "$9,000.00 of what you were paid hasn't reached this account. $8,000.00 of it is Venmo and Zelle nobody has moved to the bank yet.",
+      "$9,000.00 of what you were paid hasn't reached this account. $8,000.00 of it may still be in Venmo and Zelle \u2014 the statement doesn't say it was moved to the bank.",
     );
   });
 
@@ -236,7 +239,7 @@ describe("why the app thinks a deposit is already in the books", () => {
 
   it("gives the CHANNEL'S own working for a deposit the statement names", () => {
     const why = channelWhyFor("STRIPE TRANSFER 0612", v);
-    expect(why).toBe("Card: $8,000.00 paid this period. A payout lands days later: $7,760.00 after $240.00 of fees. The statement names exactly that much.");
+    expect(why).toBe("Card: $8,000.00 this period. A payout lands days later: $7,760.00 after $240.00 of fees. The statement names exactly that much.");
     expect(why!.length).toBeLessThanOrEqual(WHY_LINE_MAX);
   });
 
@@ -291,5 +294,196 @@ describe("the arithmetic is integer cents", () => {
     // The check has not landed, and NO reason is invented for it: nothing is waiting in an app, nothing
     // was paid near the window's edge, every fee was recorded. The gap alone is the honest answer.
     expect(v.say).toBe("$44.09 of what you were paid hasn't reached this account.");
+  });
+});
+
+/**
+ * EVERY ONE OF THESE FAILED BEFORE THE FIX IT NAMES. They are here because the suite was green while the
+ * card said, out loud, things the figures beside them disproved.
+ */
+describe("the one sentence never says more than it worked out", () => {
+  it("never names a reason LARGER than the gap it explains", () => {
+    // A part cannot be larger than its whole. Two $1,000 card payments, one inside the float, against a
+    // $970 payout: the edge figure was summed GROSS while the gap is net of the fee, so the card read
+    // "$970.00 hasn't reached this account. $1,000.00 of it was paid in the last 5 days".
+    const a = view({
+      payments: [pay(100_000, "2026-06-05", "card", 3_000), pay(100_000, "2026-06-29", "card", 3_000)],
+      moneyIn: [{ cents: 97_000, description: "STRIPE TRANSFER" }],
+    });
+    expect(a.say).toBe(
+      "$970.00 of what you were paid hasn't reached this account. $970.00 of it was paid in the last 5 days and may bank after this statement.",
+    );
+    // And a reason bigger than the gap for any other reason is held to the gap: a $5,000 check paid on the
+    // 28th cannot explain more than the $44.09 that is actually missing.
+    const b = view({ payments: [pay(500_000, "2026-06-28", "check")], moneyIn: [{ cents: 495_591, description: "DEPOSIT" }] });
+    expect(b.say).toContain("$44.09 of what you were paid hasn't reached this account. $44.09 of it was paid in the last 5 days");
+  });
+
+  it("does not say nobody moved app money the statement might have carried", () => {
+    // "ONLINE TRANSFER FROM …" names no channel and is equally the sweep itself - Erik's own $7,714.09
+    // deposits were customers paying his Venmo. The clause used to assert "nobody has moved" as a fact.
+    const v = view({
+      payments: [pay(1_000_000, "2026-06-05", "check"), pay(300_000, "2026-06-06", "venmo")],
+      moneyIn: [{ cents: 300_000, description: "ONLINE TRANSFER FROM CHK XXXXXX9876" }],
+    });
+    expect(v.say).toContain("$3,000.00 of it may still be in Venmo — the statement doesn't say it was moved to the bank.");
+    expect(v.say).not.toContain("nobody has moved");
+  });
+
+  it("names only a channel with something actually left, row by row", () => {
+    // Venmo swept IN FULL and $500 of Zelle waiting: added across rows, Venmo's nothing-left offset
+    // Zelle's, and the sentence still named Venmo - a channel its own namedCents proves was moved.
+    const moved = view({
+      payments: [pay(100_000, "2026-06-05", "venmo"), pay(50_000, "2026-06-06", "zelle")],
+      moneyIn: [{ cents: 100_000, description: "VENMO CASHOUT" }],
+    });
+    expect(moved.say).toContain("$500.00 of it may still be in Zelle —");
+    expect(moved.say).not.toContain("Venmo");
+    // And a row with a cashout named but NOTHING recorded is below nothing, never a negative to net off.
+    const nothingRecorded = view({
+      payments: [pay(200_000, "2026-06-05", "zelle")],
+      moneyIn: [{ cents: 100_000, description: "VENMO CASHOUT" }],
+    });
+    expect(nothingRecorded.say).toContain("$1,000.00 of it may still be in Zelle —");
+    expect(nothingRecorded.say).not.toContain("Venmo");
+  });
+
+  it("gives no all-clear where NOT ONE payment had a worked-out landing", () => {
+    // $5,000 marked Other and no deposits used to read "Everything you were paid that should reach this
+    // account did: $0.00, to the cent." - a check nobody could make, said as a verification.
+    const v = view({ payments: [pay(500_000, "2026-06-05", "other")], moneyIn: [] });
+    expect(v.say).toBe(
+      "$5,000.00 of what you were paid doesn't say how it was paid, so there is no saying whether it reached this account.",
+    );
+    expect(v.say).not.toContain("Everything you were paid");
+  });
+
+  it("names the money it could NOT check beside a tie or a surplus", () => {
+    const tie = view({
+      payments: [pay(100_000, "2026-06-05", "check"), pay(500_000, "2026-06-06", "other")],
+      moneyIn: [{ cents: 100_000, description: "DEPOSIT" }],
+    });
+    expect(tie.say).toBe(
+      "Everything you were paid that should reach this account did: $1,000.00, to the cent. Another $5,000.00 doesn't say how it was paid, so there was nothing to check it against.",
+    );
+    // And it is left off entirely when there was nothing of the sort: no clause for a fact with no figure.
+    const clean = view({ payments: [pay(700_000, "2026-06-03", "check")], moneyIn: [{ cents: 700_000, description: "DEPOSIT" }] });
+    expect(clean.say).not.toContain("doesn't say how it was paid");
+  });
+
+  it("says nothing was recorded when nothing was, whatever came in", () => {
+    // No payment at all plus two deposits used to read "Everything you were paid that should reach this
+    // account did, and $12,000.00 more came in besides." - an all-clear over a month nobody had entered.
+    const v = view({ payments: [], moneyIn: [{ cents: 500_000, description: "STRIPE TRANSFER" }, { cents: 700_000, description: "DEPOSIT" }] });
+    expect(v.say).toBe("No payments recorded in these days, and $12,000.00 came in.");
+  });
+
+  it("never says money came in besides when none came in at all", () => {
+    // A guard, not a path a door can reach: every payment writer refuses an amount at or below zero (see
+    // ChannelPayment). Fed one anyway, the surplus wording announced $500.00 arriving on a statement with
+    // no money in at all, because it read the difference of two totals and never what reached the account.
+    const v = view({ payments: [pay(-50_000, "2026-06-05", "check")], moneyIn: [] });
+    expect(v.say).not.toContain("more came in besides");
+  });
+});
+
+describe("how the money reaches the bank is what decides its fate", () => {
+  it("reads a payment STRIPE collected as a card payout, whatever method was stored", () => {
+    // Stripe's bank-debit checkout stores 'ach' WITH a real fee. Read by its method alone it was expected
+    // at its gross while paying out net under a Stripe descriptor, so an ordinary month printed a gap
+    // exactly the size of the fees, with no reason, and the Card row claimed a payout it was never paid.
+    const v = moneyInChannels({
+      payments: [{ cents: 100_000, day: "2026-06-05", method: "ach", feeCents: 800, stripe: true }],
+      moneyIn: [{ cents: 99_200, description: "STRIPE TRANSFER" }],
+      window: WINDOW,
+    });
+    expect(v.rows.map((r) => r.key)).toEqual(["card"]);
+    expect(row(v, "card").recordedCents).toBe(100_000);
+    expect(row(v, "card").expectedCents).toBe(99_200);
+    expect(v.say).toBe("Everything you were paid that should reach this account did: $992.00, to the cent.");
+  });
+
+  it("leaves an ACH nobody collected through Stripe as itself", () => {
+    const v = view({ payments: [pay(100_000, "2026-06-05", "ach")], moneyIn: [] });
+    expect(row(v, "ach").expectedCents).toBe(100_000);
+    expect(row(v, "ach").why).toContain("Expect all of it here");
+  });
+
+  it("gives a method named like a member of Object.prototype no fate at all", () => {
+    // A plain object answers "constructor" with Object itself, so `FATE_OF[key] ?? "unsaid"` handed back a
+    // function: the row's why rendered the word "undefined" and the money was counted as having ARRIVED IN
+    // FULL instead of landing in unsaidCents. Settings takes any text, so this is reachable (review 09-24).
+    for (const key of ["constructor", "__proto__"]) {
+      expect(fateOf(key)).toBe("unsaid");
+      const v = view({ payments: [pay(500_000, "2026-06-05", key)], moneyIn: [] });
+      expect(row(v, key).expectedCents).toBeNull();
+      expect(v.unsaidCents).toBe(500_000);
+      expect(v.expectedCents).toBe(0);
+      expect(v.rows[0].why).not.toContain("undefined");
+    }
+  });
+});
+
+describe("a row says where the money IS, and a working is never sliced mid-word", () => {
+  it("does not say app money is waiting when the statement names the cashout in full", () => {
+    const v = view({ payments: [pay(300_000, "2026-06-05", "venmo")], moneyIn: [{ cents: 300_000, description: "VENMO CASHOUT" }] });
+    expect(row(v, "venmo").why).toBe("Already moved to the bank, not sitting in Venmo. The statement names exactly that much.");
+    expect(channelWhyFor("VENMO CASHOUT", v)).toBe(
+      "Venmo: $3,000.00 this period. Already moved to the bank, not sitting in Venmo. The statement names exactly that much.",
+    );
+    // A PART sweep still reads as waiting, because part of it is.
+    const part = view({ payments: [pay(300_000, "2026-06-05", "venmo")], moneyIn: [{ cents: 100_000, description: "VENMO CASHOUT" }] });
+    expect(row(part, "venmo").why).toContain("Sits in Venmo until somebody moves it to the bank.");
+  });
+
+  it("keeps the word that says WHICH WAY the statement is off, at ordinary five-figure sums", () => {
+    // Card $17,751.63, fees $523.08, a $16,000.00 payout. The hint used to be cut by character at 140 and
+    // ended "$1,228.55 sh…", which no longer says short or more - the whole of what it was there to say.
+    const v = view({ payments: [pay(1_775_163, "2026-06-05", "card", 52_308)], moneyIn: [{ cents: 1_600_000, description: "STRIPE TRANSFER" }] });
+    const hint = channelWhyFor("STRIPE TRANSFER", v)!;
+    expect(hint).toBe(
+      "Card: $17,751.63 this period. A payout lands days later: $17,228.55 after $523.08 of fees. The statement names $16,000.00 — $1,228.55 short.",
+    );
+    expect(hint.length).toBeLessThanOrEqual(WHY_LINE_MAX);
+  });
+
+  it("leaves a clause out WHOLE when it cannot fit, rather than slicing the word that carries it", () => {
+    // Six figures on a card: the statement clause will not fit behind the channel's own figures, so it is
+    // left out and every sentence that IS said is complete. Nothing ends mid-word.
+    const v = view({ payments: [pay(11_775_163, "2026-06-05", "card", 352_308)], moneyIn: [{ cents: 10_600_000, description: "STRIPE TRANSFER" }] });
+    const hint = channelWhyFor("STRIPE TRANSFER", v)!;
+    expect(hint.length).toBeLessThanOrEqual(WHY_LINE_MAX);
+    expect(hint.endsWith("of fees.")).toBe(true);
+    expect(hint).not.toContain("…");
+    // The row's own why still carries it in full, on the same card.
+    expect(row(v, "card").why).toContain("$8,228.55 short.");
+  });
+
+  it("keeps a card row's statement clause when a fee was never recorded", () => {
+    // The unrecorded-fee head was 105 characters, so every card row with a fee nobody recorded - a card
+    // payment taken outside the app's own Stripe flow, which is ordinary - lost what the statement named.
+    const v = view({ payments: [pay(1_775_163, "2026-06-05", "card", null)], moneyIn: [{ cents: 1_775_163, description: "STRIPE TRANSFER" }] });
+    const why = row(v, "card").why;
+    expect(why).toContain("1 with no fee recorded, so this reads high.");
+    expect(why).toContain("The statement names exactly that much.");
+    expect(why.length).toBeLessThanOrEqual(WHY_LINE_MAX);
+    expect(why).not.toContain("…");
+  });
+});
+
+describe("what the module says about itself is true of the database", () => {
+  it("counts the method nobody CHOSE under Other, which is where the database actually puts a blank", () => {
+    // 0287's trigger maps '' to 'other' and payments.method is NOT NULL, so NOT_SAID cannot be drawn from
+    // stored data and every test of it feeds an input the table cannot hold. What a company that never
+    // records a method ACTUALLY gets is this row, and the arithmetic has to be right for it: no worked-out
+    // landing, in no total, and said on its own rather than folded into a channel.
+    const v = view({ payments: [pay(500_000, "2026-06-05", "other")], moneyIn: [] });
+    expect(row(v, "other").expectedCents).toBeNull();
+    expect(row(v, "other").why).toContain("Nothing says where a payment marked Other lands");
+    expect(v.unsaidCents).toBe(500_000);
+    expect(v.expectedCents).toBe(0);
+    // The blank row stays DEFENSIVE, and keeps its own key so a blank arriving later is never folded in.
+    expect(channelKeyOf("")).toBe(NOT_SAID);
+    expect(channelKeyOf("other")).toBe("other");
   });
 });
