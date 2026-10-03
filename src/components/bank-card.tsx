@@ -249,6 +249,16 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
   return (
     <div className="mt-2 space-y-3">
       <p className="text-sm font-medium text-slate-900">{view.headline}</p>
+      {/* WHAT CHECKED THIS READ, IN FRONT OF HIM WHERE APPLY IS. A scanned statement's lines are a
+          model's transcription: either the statement's own printed figures agreed with them to the cent
+          or the paper printed none, and which of those it was decides how hard he has to look before he
+          presses Apply. The line under the drop button says it at the moment of the drop; this says it
+          at the moment of the decision, which may be tomorrow. A download has nothing here. */}
+      {view.readSaid && (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700" role="status">
+          {view.readSaid}
+        </p>
+      )}
       <FlowBar flow={view.flow} outCents={view.outCents} />
       {view.appliedSaid && <p className="text-xs text-slate-600">{view.appliedSaid}</p>}
       {view.rows.length > 0 && <p className="text-xs text-slate-500">A button marked Guess is the app&apos;s guess. Nothing counts until you tap one.</p>}

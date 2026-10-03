@@ -1075,6 +1075,56 @@ describe("the owner's money", () => {
   });
 });
 
+/**
+ * A SCANNED STATEMENT'S READ REPORT IS OWNER MONEY TOO (2026-10-02). It says what the month adds to,
+ * out and in, in one sentence — so it belongs behind the same switch as the lines it describes, in the
+ * card the viewer is allowed and nowhere else in the props.
+ */
+describe("the read report on a scanned statement's card", () => {
+  const SAID = "Held against the statement's own printed figures: the money going out and the money coming in agree to the cent. $4,210.00 out and $9,900.00 in.";
+
+  it("reaches the owner's card, and never a viewer the owner keeps owner money from", async () => {
+    const id = await drop();
+    const row = db.organized_items.find((i) => i.id === id)!;
+    row.proposal.bankImport.download.readSaid = SAID;
+    expect((await view(id)).readSaid).toContain("agree to the cent");
+
+    db.organizations[0].settings = { timezone: "America/Los_Angeles", office_sees_owner_money: false };
+    db.profiles.find((p) => p.id === "user-1")!.role = "office";
+    const hidden = await view(id);
+    expect(hidden.readSaid ?? null).toBeNull();
+    expect(JSON.stringify(hidden)).not.toContain("$4,210.00");
+    expect(JSON.stringify(bankLinesStayHere(row, hidden))).not.toContain("$4,210.00");
+
+    // AND THE OWNER'S OWN PROPS DROP IT AS WELL: the card renders it from the view, so a second copy
+    // riding on the proposal would only be a copy nobody checked the gate for.
+    db.profiles.find((p) => p.id === "user-1")!.role = "owner";
+    db.organizations[0].settings = { timezone: "America/Los_Angeles" };
+    const owner = bankLinesStayHere(row, await view(id));
+    expect(owner.proposal.bankImport.download.readSaid).toBeUndefined();
+    expect(row.proposal.bankImport.download.readSaid).toBe(SAID); // the stored row is untouched
+  });
+
+  /**
+   * AND THE DOOR CANNOT BE HANDED ONE. `addOpenList` is a "use server" export, which is a PUBLIC POST
+   * ENDPOINT (report-client-error.ts says so), so while the sentence was a field of its argument any
+   * staffer who may sort the bank could post a table of their own making together with "agree to the
+   * cent" and get a bank card claiming arithmetic that never ran. The card prints no totals to hold it
+   * against and Apply never reads it, so nobody downstream could tell. The sentence is now the CORE's
+   * second argument (open-list-add-core.ts) and the action has no field for it at all.
+   */
+  it("a sentence posted at the door is never stored as what checked the read", async () => {
+    const forged = { pages: 3, rows: 9, checked: SAID };
+    const res = await addOpenList({ name: "Checking.csv", sha256: null, table: parseCSV(CHECKING_CSV), listDate: "2026-09-26", source: "bills_drop", pdf: forged } as never);
+    expect(res.ok).toBe(true);
+    const row = db.organized_items.find((i) => i.id === res.id)!;
+    expect(row.proposal.bankImport.download.readSaid).toBeUndefined();
+    expect(JSON.stringify(row)).not.toContain("agree to the cent");
+    // The pages it DID say are still facts about the paper, so the read report still has them.
+    expect(res.line).toContain("3 pages");
+  });
+});
+
 describe("before 0363 is applied", () => {
   it("the download still lands, the card says it needs an update, and Apply writes nothing", async () => {
     const id = await drop();

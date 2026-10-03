@@ -1251,8 +1251,18 @@ export function planHeadline(plan: OpenListPlan, list: Pick<OpenList, "from">, s
 
 // ── WHAT A PDF'S PAGES ACTUALLY GAVE UP ────────────────────────────────────────────────────────
 
-/** The paper a table was lifted off: its pages, and the rows the table had before any were read. */
-export type PdfPaper = { pages: number; rows: number };
+/**
+ * The paper a table was lifted off: its pages, and the rows the table had before any were read.
+ *
+ * `checked` IS WHAT ARITHMETIC ALREADY DID TO IT, and only a read that could be checked carries one.
+ * A table lifted off a PDF's text is read by code, so the proof is the person's to do: the report
+ * names the figure on his own paper to hold the total against. A SCAN is read by a model, and code
+ * holds that read against the statement's own printed figures before it is ever proposed
+ * (statement-scan.ts) — so the sentence that says "check this yourself" would be telling him to redo
+ * a check that has already run, or worse, implying one ran when the paper printed nothing to run it
+ * against. Whichever is true goes in the ONE read report, never in a second summary of its own.
+ */
+export type PdfPaper = { pages: number; rows: number; checked?: string };
 
 /**
  * What a reader made of those rows. Each reader fills this in from its OWN rows — a supplier's open
@@ -1307,7 +1317,10 @@ export function pdfReadSaid(pdf: PdfPaper | null | undefined, f: ReadFacts, toda
   const skipped = f.skipped.length
     ? ` ${plural(f.skipped.length, "row", "rows")} didn't read: ${shown.map((s) => `line ${s.line}, ${s.why.replace(/\.$/, "")}`).join("; ")}.${more > 0 ? ` And ${more} more.` : ""}`
     : "";
-  return `Read off the PDF: ${plural(pdf.pages, "page", "pages")}, ${plural(pdf.rows, "row", "rows")} on them, ${plural(f.read, f.one, f.many)}${range} adding to ${f.adds}. Check that against ${f.against}; if the two don't match, this missed something on the paper.${skipped}`;
+  // A READ THAT WAS ALREADY CHECKED SAYS WHAT THE CHECK FOUND, in place of asking him to do it: see
+  // PdfPaper.checked. Everything else still names the figure on his own paper to hold this against.
+  const held = pdf.checked ? ` ${pdf.checked}` : ` Check that against ${f.against}; if the two don't match, this missed something on the paper.`;
+  return `Read off the PDF: ${plural(pdf.pages, "page", "pages")}, ${plural(pdf.rows, "row", "rows")} on them, ${plural(f.read, f.one, f.many)}${range} adding to ${f.adds}.${held}${skipped}`;
 }
 
 /**

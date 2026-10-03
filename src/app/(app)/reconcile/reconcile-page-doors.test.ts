@@ -318,19 +318,40 @@ describe("the page reads; it does not re-rule", () => {
    * something they should never have to learn. So the law is inverted here, and the test with it —
    * the card may name NO format, because the reader works out what the file is.
    *
-   * THE ONE EXCEPTION IS A DOOR THAT GENUINELY CANNOT DO IT. A scanned statement has no text on its
-   * pages, so this door really cannot read it, and saying so names ONE other door. That is the only
-   * sentence of its kind allowed on the card, and it goes the day the scan reads here too.
+   * AND THE SCAN READS HERE NOW (2026-10-02), so the sentence that sent it to the + button is gone, as
+   * it said it would be. What replaces it is not a format or a door: it is the PROMISE that makes a
+   * model read safe to look at — the statement's own figures are held against what came off its pages,
+   * and when the paper prints no figures the card says that out loud. This test pins the promise rather
+   * than the wording, because copy that promises or refuses the wrong thing is how he finds out by
+   * being turned away.
    *
    * The accept lists are still pinned, because they are what the browser filters on: .pdf must be in
    * STATEMENT_ACCEPT and must NOT be in LIST_ACCEPT, where isListFile would send every PDF to
    * readListFile, a reader that cannot open one.
    */
-  it("the card names no file formats, and names the one kind this door cannot read", () => {
+  it("the card names no file formats, takes a scan too, and says what checks it", () => {
     const card = text(html.slice(html.indexOf("Bring In A Statement")));
     for (const lecture of ["CSV", "TSV", "Excel", "OFX", "QFX", "QBO", ".xlsx"]) expect(card, lecture).not.toContain(lecture);
     expect(card).toContain("whatever your bank or supplier gave you");
-    expect(card).toContain("SCANNED");
+    // A SCAN IS READ HERE, and it is no longer sent anywhere else.
+    expect(card).toContain("PICTURES");
+    expect(card).not.toContain("+ button");
+    /**
+     * AND THE CLAIM TRACES TO THE CODE. "with no text on its pages at all" was narrower than the
+     * routing: open-list-file.ts sends EVERY PDF the text lane cannot tabulate to the reader, and the
+     * file this lane exists for — his September statement — has 125 text marks on it and a table that
+     * is an image. A promise that doesn't trace to the code is how he finds out by being turned away.
+     */
+    expect(card).not.toContain("no text on its pages");
+    expect(card).toContain("scanned, photographed");
+    // A CARD'S BALANCE RUNS THE OTHER WAY, and the gate walks it that way, so the card may say so.
+    expect(card).toContain("what you owe goes up with a purchase");
+    // AND THE TIME IS THE READ'S REAL TIME. "A few seconds" is an Opus transcription's worst lie.
+    expect(card).toContain("takes a minute");
+    // AND THE PROMISE THAT MAKES IT SAFE: arithmetic first, and a word when there is none to do.
+    expect(card).toContain("held against what came off them");
+    expect(card).toContain("nothing is");
+    expect(card).toContain("prints no totals");
     for (const ext of [".csv", ".tsv", ".txt", ".xlsx", ".xls", ".ofx", ".qfx", ".qbo"]) expect(LIST_ACCEPT, ext).toContain(ext);
     expect(LIST_ACCEPT).not.toContain(".pdf");
     for (const ext of [".pdf", ".csv", ".xlsx", ".ofx", ".qbo"]) expect(STATEMENT_ACCEPT, ext).toContain(ext);

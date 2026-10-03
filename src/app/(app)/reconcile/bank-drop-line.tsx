@@ -7,6 +7,7 @@ import { AlertCircle, Check, Landmark, Loader2 } from "lucide-react";
 import { sha256Hex } from "@/lib/content-hash";
 import { STATEMENT_ACCEPT, readStatementFile } from "@/lib/open-list-file";
 import { addOpenList } from "@/app/(app)/bills/open-list-actions";
+import { readStatementScan } from "@/app/(app)/bills/statement-scan-actions";
 
 /**
  * DROP A BANK OR SUPPLIER STATEMENT (Erik, 2026-09-27; moved to Reconcile 2026-10-02; the PDF
@@ -16,10 +17,14 @@ import { addOpenList } from "@/app/(app)/bills/open-list-actions";
  * that: "i want to upload my bank statement and supplier statement, every item will either match or
  * need a category."
  *
- * THE ONE PDF THIS STILL CANNOT DO ANYTHING WITH IS A SCAN — no text on its pages at all — and the
- * copy beside the button names it and names the door that can, so nobody finds that out by being
- * turned away. A PDF that is ONE paper is not turned away into nowhere either: the refusal names the
- * + button, which reads a paper.
+ * AND A SCAN READS NOW TOO (2026-10-02). His own bank prints a statement whose transaction table is an
+ * IMAGE: 125 text marks over three pages, every one of them the back-page legal notice, and July's
+ * file has no text at all. A text reader can never get those lines, so a PDF the text lane cannot
+ * tabulate goes to the reader that can SEE it (statement-scan-actions.ts) — and code holds what it
+ * read against the statement's own printed beginning balance, ending balance and totals before a
+ * single line is proposed. A read those figures disagree with is not shown at all; a paper that prints
+ * no figures says so on the card. A PDF that is ONE paper is still not turned away into nowhere: the
+ * refusal names the + button, which reads a paper.
  *
  * It is the same door as Snap Or Note (addOpenList reads a bank's columns as a bank download and
  * anything else as a supplier's open list); the file is read on this device and only its rows go to
@@ -47,12 +52,39 @@ export function BankDropLine() {
     setSaid(null);
     try {
       const read = await readStatementFile(file);
-      if (!read.ok) return setSaid({ text: `Not added: ${read.error}`, ok: false });
+      if (!read.ok && !("scan" in read)) return setSaid({ text: `Not added: ${read.error}`, ok: false });
       let sha: string | null = null;
       try {
         sha = await sha256Hex(await file.arrayBuffer());
       } catch {
         sha = null;
+      }
+      // THE PAGES ARE PICTURES, SO A READER LOOKS AT THEM (2026-10-02). The text lane has already had
+      // its go, which is the cheap, deterministic, no-model answer and still the first one tried. What
+      // comes back is the same bank card a CSV makes: every line with its proposed answer, nothing
+      // written until a person presses Apply there — and the server holds the read against the
+      // statement's own printed totals before it proposes anything at all.
+      if (!read.ok) {
+        // NOTHING SILENT, AND NOTHING THAT FEELS BROKEN: a spinner with no words beside it is how a
+        // person decides the button doesn't work.
+        //
+        // AND NOTHING UNTRUE EITHER. This said "There is no text on these pages" for EVERY scan, and
+        // the file this lane was built for — his September statement, 125 text marks of back-page
+        // legal notice — has text on it; it is the TABLE that is a picture. A claim on screen has to
+        // trace to the code (the onboarding-truth law), so `noText` decides which clause is shown.
+        // "A few seconds" was untrue too: the careful look is an Opus transcription of a whole
+        // statement, which is tens of seconds and more. A wrong duration reads as a hung button.
+        setSaid({
+          text: read.scan.noText
+            ? "There is no text on these pages, so they are being read as pictures. That takes a minute, and a long statement takes a few."
+            : "These pages don't read as a table of text, so they are being read as pictures. That takes a minute, and a long statement takes a few.",
+          ok: true,
+        });
+        const got = await readStatementScan({ name: file.name || "Statement", base64: read.scan.base64, pages: read.scan.pages, sha256: sha, listDate: read.scan.listDate });
+        if (!got.ok) return setSaid({ text: got.already ? `${got.already} Nothing was added twice.` : (got.error ?? "Not added."), ok: !!got.already });
+        setSaid({ text: (got.line ?? "Waiting under Needs You on Bills.").replace("Waiting below", "Waiting under Needs You on Bills"), ok: true, waiting: true });
+        router.refresh();
+        return;
       }
       // NO `expect` HERE, AND THAT IS THE POINT. `expect: "bank"` turned a supplier's own open list
       // away at this door, and the two statements Erik names in one breath are what this page is

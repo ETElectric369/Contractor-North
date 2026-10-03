@@ -762,3 +762,45 @@ describe("the header words a real statement prints are words the reader already 
     expect(columns.amount).toBeUndefined();
   });
 });
+
+/**
+ * THE REAL SHAPE OF A SCANNED STATEMENT'S PAGES (2026-10-02, measured on his own September file).
+ *
+ * The transaction table on it is an IMAGE. The PDF still carries 125 text marks over three pages, and
+ * every one of them is the back-of-statement legal notice — and a HEADER-SHAPED ROW sits inside that
+ * notice. So the text lane really does find a bank heading on a scanned statement, and the one thing
+ * standing between that and a bank card of nothing is `bankTableProof`: a heading alone is not a
+ * statement. This pins that refusal, because the scanned-statement lane is built on top of it — a
+ * confident empty answer is the worst outcome this path has, and it would arrive exactly here.
+ */
+describe("a scan whose only text is the legal notice does not read as a list", () => {
+  /** The notice as it sits on the page: left-aligned small print, with a label row inside it. */
+  function legalNotice(): string[][] {
+    const items: PositionedItem[] = [];
+    const small = [
+      "In Case of Errors or Questions About Your Electronic Transfers",
+      "Telephone us at the number on the front of this statement, or write to us at",
+      "Riverbend Community Bank, PO Box 00000, Riverbend CA 95605, as soon as you can.",
+      "Tell us your name and account number, and describe the error or the transfer you",
+      "are unsure about, and explain as clearly as you can why you believe it is an error",
+      "or why you need more information. Tell us the dollar amount of the suspected error.",
+    ];
+    small.forEach((text, i) => items.push(run(40, 700 - i * 12, text, 0)));
+    // The label row the notice prints over its own worked example: a day, a type, words, an amount.
+    for (const [x, word] of [[40, "DATE"], [150, "TYPE"], [240, "DESCRIPTION"], [470, "AMOUNT"]] as [number, string][]) {
+      items.push(run(x, 610, word, 0));
+    }
+    items.push(run(40, 598, "09/02/26", 0), run(150, 598, "DEBIT", 0), run(240, 598, "EXAMPLE ONLY", 0), money(520, 598, "0.00", 0));
+    return tableFromPositionedItems(items);
+  }
+
+  it("a bank heading IS found inside it, and the proof a statement carries refuses it anyway", async () => {
+    const { bankTableProof, findBankHeader } = await import("./bank-download");
+    const table = legalNotice();
+    // The heading is really there — this is not a test of the heading finder being too clever.
+    expect(findBankHeader(table)).not.toBeNull();
+    // And it is not a statement: no running balance, no debit/credit pair, no money that went out.
+    expect(bankTableProof(table)).toBe(false);
+    expect(tableReadsAsList(table)).toBeNull();
+  });
+});

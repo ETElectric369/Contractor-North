@@ -5,6 +5,7 @@ import { isCompoundFile, readXls } from "@/lib/xls-read";
 import { looksLikeOfx, readOfx } from "@/lib/ofx-read";
 import { readPdf } from "@/lib/pdf-text";
 import { tableReadsAsList } from "@/lib/pdf-table";
+import { SCAN_MAX_BYTES } from "@/lib/statement-scan";
 
 /**
  * A LIST FILE, READ IN THE BROWSER (2026-09-26; bank downloads 2026-09-27). Snap Or Note and
@@ -133,7 +134,46 @@ function namedPdf(file: { name?: string; type?: string }): boolean {
 /** A statement PDF is pages, not a line of CSV: the same 15 MB cap Snap Or Note gives a paper. */
 const STATEMENT_MAX = 15 * 1024 * 1024;
 
-export type StatementFileRead = { ok: true; table: string[][]; listDate: string | null; pdf: { pages: number; rows: number } | null } | { ok: false; error: string };
+/**
+ * THE PAGES ARE PICTURES. His September statement's only text is the back-page legal notice and
+ * July's has none at all, so nothing a text reader can do will ever get those lines: they have to be
+ * LOOKED at. This branch carries the file's own bytes up for that read (statement-scan-actions.ts),
+ * and it is not an error — it is the second half of the one door.
+ */
+export type StatementScan = {
+  base64: string;
+  pages: number;
+  listDate: string | null;
+  /**
+   * TRUE ONLY WHEN THE PAGES REALLY CARRY NO TEXT (July's file). A statement whose text is there but
+   * tabulates into nothing — his September file, whose 125 text marks are all the back-page legal
+   * notice — is a scan too, and the drop line used to tell him "There is no text on these pages" about
+   * the very file this lane was built for. A claim on screen has to trace to the code, so the two cases
+   * are told apart here, where the difference is actually known.
+   */
+  noText: boolean;
+};
+
+export type StatementFileRead =
+  | { ok: true; table: string[][]; listDate: string | null; pdf: { pages: number; rows: number } | null }
+  | { ok: false; scan: StatementScan }
+  | { ok: false; error: string };
+
+/**
+ * A statement has pages, not a library. Anthropic's own PDF limit is 100 pages; a hundred-page file
+ * dropped here is a catalogue or a whole year's filing, and reading it as one statement would cost
+ * real money to produce one wrong answer. The sentence names the one thing to do about it.
+ */
+const SCAN_MAX_PAGES = 40;
+
+/** Base64 in the browser, in chunks: a megabyte of bytes spread into one call's arguments blows the
+ *  stack, and this runs on an 8 MB file. */
+function base64Of(bytes: ArrayBuffer): string {
+  const view = new Uint8Array(bytes);
+  let s = "";
+  for (let i = 0; i < view.length; i += 0x8000) s += String.fromCharCode(...view.subarray(i, i + 0x8000));
+  return btoa(s);
+}
 
 /**
  * ONE STATEMENT, WHATEVER IT ARRIVED AS (2026-10-02). Erik: "i want to upload my bank statement and
@@ -142,8 +182,11 @@ export type StatementFileRead = { ok: true; table: string[][]; listDate: string 
  * and only a table one of the existing readers RECOGNISES comes back — `tableReadsAsList` asks
  * bank-download.ts and supplier-open-list.ts, and invents no test of its own.
  *
- * A PDF THAT IS ONE PAPER IS NOT A DEAD END: the refusal names the door that does take it. This
- * door's job is a statement, and the + button's job is a paper.
+ * AND A PDF THE TEXT LANE CANNOT READ IS NOT A DEAD END EITHER (2026-10-02, the scanned statement).
+ * It comes back as a `scan`: the bytes, for the one reader that can see a picture. The text lane is
+ * untouched — cheaper, deterministic, no model — and still answers first for every PDF that carries a
+ * table. What the paper IS is then the reader's question, not this file's guess, and a receipt or a
+ * plan is sent back to the + button by name, the door whose job a single paper is.
  */
 export async function readStatementFile(file: File): Promise<StatementFileRead> {
   const name = file.name || "That file";
@@ -154,14 +197,35 @@ export async function readStatementFile(file: File): Promise<StatementFileRead> 
   if (file.size > STATEMENT_MAX) return { ok: false, error: `${name} is over 15 MB. Save just the statement pages as their own PDF and drop that.` };
   const bytes = await file.arrayBuffer();
   const got = await readPdf(bytes, name);
-  if (!got.ok) return { ok: false, error: got.error };
+  /**
+   * EVERY PDF THAT FALLS THROUGH THE TEXT LANE GOES TO THE READER, and the reader's first question is
+   * what the paper is. There is no honest way to decide that here: a text sniff works on his September
+   * statement (its small print carries "STATEMENT OF ACCOUNT") and CANNOT work on July, which has no
+   * text at all, and a PDF whose columns simply didn't tabulate is no less a statement for it. So the
+   * routing stops guessing — the cheap look answers, and an ordinary receipt, invoice or plan is sent
+   * back to the + button by name, the same door the old refusal here named.
+   *
+   * A PDF THAT WOULD NOT OPEN IS STILL A REFUSAL. Of readPdf's own failures, only `noText` — it opened,
+   * the pages are blank of text — is a scan. "It isn't a PDF inside" is not something a reader can fix.
+   * (A PDF that opened and whose table doesn't read is the OTHER scan, below, with noText false.)
+   */
+  const scan = (pages: number, noText: boolean): StatementFileRead => {
+    if (pages > SCAN_MAX_PAGES) return { ok: false, error: `${name} is ${pages} pages — more than a statement. Save just the statement pages as their own PDF and drop that.` };
+    // SAID HERE, BEFORE ANY OF IT GOES ANYWHERE. base64 makes a file a third bigger and it rides up as
+    // an argument, so a file over SCAN_MAX_BYTES is one a server function will not accept whole — the
+    // old 8 MB let a 4 MB phone scan through to a platform 413 with no sentence on it at all. Asking
+    // here answers instantly and sends nothing. One constant, both sides (statement-scan-actions.ts).
+    if (bytes.byteLength > SCAN_MAX_BYTES) {
+      const mb = (bytes.byteLength / (1024 * 1024)).toFixed(1).replace(/\.0$/, "");
+      return { ok: false, error: `${name} is ${mb} MB, which is more than can be sent up in one go. Scan it again at a smaller size, or add it with the + button at the top, which keeps it as a paper.` };
+    }
+    return { ok: false, scan: { base64: base64Of(bytes), pages, listDate: savedOn(file.lastModified), noText } };
+  };
+  if (!got.ok) return got.noText ? scan(Math.max(1, Math.trunc(Number(got.pages) || 1)), true) : { ok: false, error: got.error };
   const list = tableReadsAsList(got.table);
-  if (!list) {
-    return {
-      ok: false,
-      error: `${name} has pages this can read, but nothing on them reads as a statement: a supplier's list needs a column of paper numbers and a column of amounts, and a bank's needs a date, a description and an amount on every line. If it is ONE paper — an invoice, a bill, a receipt — add it with the + button at the top and it will be read as a paper.`,
-    };
-  }
+  // TEXT IS THERE, AND IT TABULATES INTO NOTHING A READER KNOWS (his September file). Still a scan, and
+  // `noText: false` is what stops the drop line claiming the pages have no text on them.
+  if (!list) return scan(got.pages, false);
   // THE ROWS THE QUESTION WAS ANSWERED ABOUT, never `got.table`: a statement whose letterhead pushed
   // the heading row past the readers' 15-row reach comes back cropped to that heading, and handing the
   // uncropped table on would ask the readers the question this door just answered and get "no heading".

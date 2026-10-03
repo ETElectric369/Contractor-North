@@ -103,13 +103,25 @@ describe("no door writes the condition out a second time", () => {
     expect(rule).toContain("viewerSeesOwnerMoney(me.role");
     for (const f of [
       "src/app/(app)/bills/bank-actions.ts",
-      "src/app/(app)/bills/open-list-actions.ts",
+      "src/app/(app)/bills/open-list-add-core.ts",
       "src/app/(app)/bills/bank-core.ts",
       "src/app/(app)/organize/actions.ts",
       "src/lib/action-items/query.ts",
     ]) {
       expect(read(f), f).toContain("viewerSortsBank");
     }
+  });
+
+  /**
+   * AND IT IS A SCAN, NOT A LIST SOMEBODY HAS TO REMEMBER TO ADD TO. The list above went stale the
+   * moment `addOpenList`'s body moved into a core of its own (2026-10-02) — the check travelled with
+   * the body, as it had to, and the list still named the file it left. So the law is asked of the code:
+   * whatever file puts a bank download in the tray asks the one function first, wherever it lives.
+   */
+  it("every file that creates a bank paper asks viewerSortsBank in the same file", () => {
+    const makers = FILES.filter((f) => f !== "src/app/(app)/bills/bank-core.ts" && /\bcreateBankPaper\(/.test(read(f)));
+    expect(makers.length).toBeGreaterThan(0);
+    for (const f of makers) expect(read(f), f).toContain("viewerSortsBank(");
   });
 });
 

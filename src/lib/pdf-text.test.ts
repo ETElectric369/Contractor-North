@@ -89,7 +89,11 @@ describe("a PDF with no text on its pages", () => {
     const src = readFileSync(join(process.cwd(), "src/lib/pdf-text.ts"), "utf8");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     expect(code.match(/had no text in it/g) ?? []).toHaveLength(1);
-    expect(src).toContain("return { ok: false, error: noTextSaid(name) }");
+    // AND THE FACT IS READABLE IN CODE, not only in the sentence (2026-10-02): the statement door now
+    // sends a PDF with no text to a reader that can SEE it, and "it opened but the pages carry no text"
+    // has to be told from "it wouldn't open" without matching on prose. The page count rides along,
+    // because a scan's read report still says how many pages it had.
+    expect(src).toContain("return { ok: false, error: noTextSaid(name), noText: true, pages: pdf.numPages }");
     // readPdfText is the same read, narrowed: a second pdfjs open would parse a statement twice.
     expect(src).toContain("const got = await readPdf(data, name, { table: false });");
   });

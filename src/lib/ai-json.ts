@@ -42,8 +42,14 @@ export function extractJsonObject(text: string): string {
  * it is invisible in normal operation and arrives in bursts. hear.test's guard caught this the
  * moment the function moved into a file of its own; it was unmetered inside organize/actions.ts
  * too, hidden behind that file's other meters.
+ *
+ * `maxTokens` SIZES THE REPAIR TO THE ANSWER IT IS REPAIRING. A repair has to re-emit the whole
+ * document, so 4,096 — a receipt's budget — cannot hold a statement transcription, and the caller
+ * then got "too large to repair", which reads as a LENGTH problem the paper may not have: one
+ * unescaped inch mark on line 90 of 100 landed on the same sentence. A caller whose own answer is
+ * bigger than a receipt passes its own budget. It is still the cheap model: this is mechanics.
  */
-export async function parseAiJson(client: Anthropic, raw: string, orgId?: string | null): Promise<unknown> {
+export async function parseAiJson(client: Anthropic, raw: string, orgId?: string | null, maxTokens = 4096): Promise<unknown> {
   try {
     return JSON.parse(extractJsonObject(raw));
   } catch {
@@ -52,7 +58,7 @@ export async function parseAiJson(client: Anthropic, raw: string, orgId?: string
   const model = modelFor("classify");
   const fix = await client.messages.create({
     model,
-    max_tokens: 4096,
+    max_tokens: Math.max(4096, Math.trunc(Number(maxTokens) || 0)),
     system:
       "You repair malformed JSON. Output ONLY one valid, complete JSON object — no prose, no code fences. " +
       'Escape every double-quote that appears INSIDE a string value (inch marks: write 6\\" not 6"). ' +
