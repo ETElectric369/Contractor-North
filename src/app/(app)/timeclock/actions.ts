@@ -2268,23 +2268,41 @@ async function claimsOnSources(supabase: SupabaseClient, ids: string[]): Promise
 
 export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   const supabase = await createClient();
-  // Payroll locks: a base-paid or mileage-settled entry backs a payroll_runs
-  // snapshot the accountant exports — deleting it would silently diverge the
-  // books. No bypass for any caller: Undo the period on /payroll first.
-  const { data: locked } = await supabase
+  /**
+   * Payroll locks: a base-paid or mileage-settled entry backs a payroll_runs snapshot the accountant
+   * exports — deleting it would silently diverge the books. No bypass for any caller: Undo the period
+   * on /payroll first.
+   *
+   * A FAILED READ IS NOT AN ANSWER, and this is the read EVERYTHING below hangs on. Its error used to
+   * be dropped, so a statement timeout or a 5xx on this one select left `lock` null — and a null lock
+   * reads as "not paid, not settled, and not a split shift": the payroll guards passed, the pieces
+   * read never ran, and the delete went through. Exactly Erik's orphaned-family defect, caused by the
+   * outage rather than by the code, and said to nobody. A read that did not come back refuses.
+   *
+   * A null row with NO error is an id this caller cannot see (another org, or already gone). Deleting
+   * it could only hit zero rows, so it is said here, before anything is attempted.
+   */
+  const { data: locked, error: lockErr } = await supabase
     .from("time_entries")
     .select("paid_at, mileage_paid_at, job_id, profile_id, split_from")
     .eq("id", id)
     .maybeSingle();
+  if (lockErr) {
+    reportError("deleteTimeEntry.read", lockErr, { entryId: id });
+    return { ok: false, error: "Couldn't check this entry — nothing was changed. Try again in a moment." };
+  }
+  if (!locked) return { ok: false, error: "That entry is no longer there — reload and try again." };
+  // NOT nullable: the two refusals above are what makes that true, and the type is what keeps the
+  // guards below from going quiet again if either one is ever moved.
   const lock = locked as {
     paid_at: string | null;
     mileage_paid_at: string | null;
     job_id: string | null;
     profile_id: string | null;
     split_from: string | null;
-  } | null;
-  if (lock?.paid_at) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
-  if (lock?.mileage_paid_at) return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
+  };
+  if (lock.paid_at) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
+  if (lock.mileage_paid_at) return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
 
   // AN INVOICE THAT BILLED THIS SHIFT HOLDS IT (0255). A labor line's claim (invoice_items.source_ids)
   // names the entry: with the row gone the invoice would bill hours that no longer exist on the
@@ -2326,7 +2344,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
    * the delete will take away, so nothing is deleted — the same rule the invoice-claim read above obeys.
    */
   const kin: { id: string; clock_in: string }[] = [];
-  if (lock && !lock.split_from) {
+  if (!lock.split_from) {
     const { data: pieces, error: kinErr } = await supabase
       .from("time_entries")
       .select("id, clock_in")
@@ -2361,7 +2379,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
       .from("time_entries")
       .update({ split_from: first.id })
       .in("id", rest.map((k) => k.id))
-      .eq("profile_id", lock!.profile_id ?? "")
+      .eq("profile_id", lock.profile_id ?? "")
       .is("split_from", null)
       .select("id");
     if (rerootErr || (rerooted ?? []).length !== rest.length) {
@@ -2371,7 +2389,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
     }
   }
 
-  if (lock?.job_id) revalidatePath(`/jobs/${lock.job_id}`); // the job's Time tab and its unbilled total
+  if (lock.job_id) revalidatePath(`/jobs/${lock.job_id}`); // the job's Time tab and its unbilled total
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // a deleted entry changes My Day's hours/clock state

@@ -39,13 +39,17 @@ import type { ActionDef } from "../types";
  * billing the wrong customer. It now names the job those hours stayed on and the one door that moves
  * them.
  *
- * A WHOLE MOVE (a job-less shift, or a punch switched within SWITCH_MOVES_WHOLE_MS of starting —
- * switch-window) really did move the whole shift, so it keeps its own words. WHICH ONE HAPPENED IS
- * NEVER GUESSED FROM THE CLOCK HERE: `mode` comes back from switchJob, which made the decision. The
- * hours are never dropped from the sentence either way: nothing silent.
+ * A WHOLE MOVE (a job-less punch, or one switched within SWITCH_MOVES_WHOLE_MS of starting —
+ * switch-window) really did move the whole PUNCH, so it keeps its own words. It says "punch" and not
+ * "shift" because the re-point moves ONE row: on a day already cut by an earlier Switch Job the
+ * running row is only the part since that switch (lib/shift-chain), and "this whole shift is on the
+ * new job now" — read out loud, word for word, with no screen to correct it — would tell a man his
+ * morning followed him onto the new customer. WHICH ONE HAPPENED IS NEVER GUESSED FROM THE CLOCK
+ * HERE: `mode` comes back from switchJob, which made the decision. The hours are never dropped from
+ * the sentence either way: nothing silent.
  */
 export function switchJobSpoken(mode: "cut" | "repointed" | undefined, closedHours: number | undefined, stayedOn: string | null): string {
-  if (mode === "repointed") return "Done — this whole shift is on the new job now.";
+  if (mode === "repointed") return "Done — this whole punch is on the new job now. Any earlier part of the day stays where it was.";
   const hours = Number(closedHours ?? 0).toFixed(2);
   return (
     `Switched — the clock is running on the new job now. The ${hours} hours before the switch stayed on ` +

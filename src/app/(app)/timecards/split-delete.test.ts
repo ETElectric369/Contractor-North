@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * ERIK'S FIRST TIMECLOCK RULE, FOUND BY USING IT (2026-10-02): he split a shift, deleted one half, and
@@ -34,9 +36,15 @@ vi.mock("@/lib/notifications", () => ({
 }));
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}), orgStaffIds: vi.fn(async () => ["office-1"]) }));
 vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: true })) }));
+// The editor is rendered below (the dead-door lesson: run the component, count the doors).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 import { deleteTimeEntry } from "../timeclock/actions";
 import { PLAIN_DELETE_CONFIRM, deleteConfirmWords } from "./delete-words";
+import { EditEntryButton } from "./edit-entry-button";
 
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete" | "rpc"; cols: string; payload?: any; filters: any[] };
 type Reply = { data?: any; error?: any } | undefined;
@@ -181,6 +189,42 @@ describe("deleteTimeEntry on one part of a split shift", () => {
     });
     expect(calls.some((c) => c.verb === "delete")).toBe(false);
   });
+
+  /**
+   * THE DEFECT the rule above was written for, on the read that gates it (review, 2026-10-03). The
+   * FIRST select — the payroll locks, the job, the person and split_from — threw its error away, so a
+   * statement timeout or a 5xx on it left `lock` null. Null reads as "not paid, not settled, not a
+   * split shift": both payroll guards passed, the pieces read never ran, and a root with pieces was
+   * deleted and orphaned anyway. The outage caused Erik's own defect, and nothing said a word.
+   */
+  it("THE DEFECT: a failed FIRST read deletes nothing — not the payroll guards, not the family, skipped", async () => {
+    state.client = fakeSupabase(
+      (q) => (q.table === "time_entries" && q.cols.includes("paid_at") ? { error: { message: "statement timeout" } } : routes({})(q)),
+      calls,
+    );
+    expect(await deleteTimeEntry(A)).toEqual({
+      ok: false,
+      error: "Couldn't check this entry — nothing was changed. Try again in a moment.",
+    });
+    expect(calls.some((c) => c.verb === "delete")).toBe(false);
+    expect(calls.some((c) => c.verb === "update")).toBe(false);
+  });
+
+  it("and a PAID entry is still refused when that read is the one that fails — the lock is never assumed open", async () => {
+    // The same outage on a paid row used to delete it with its payroll lock unchecked.
+    state.client = fakeSupabase(
+      (q) => (q.table === "time_entries" && q.cols.includes("paid_at") ? { error: { message: "502" } } : routes({})(q)),
+      calls,
+    );
+    expect((await deleteTimeEntry(A)).ok).toBe(false);
+    expect(calls.some((c) => c.verb === "delete")).toBe(false);
+  });
+
+  it("an id this caller cannot see is said out loud, not attempted", async () => {
+    state.client = fakeSupabase((q) => (q.table === "time_entries" && q.cols.includes("paid_at") ? { data: null } : routes({})(q)), calls);
+    expect(await deleteTimeEntry(A)).toEqual({ ok: false, error: "That entry is no longer there — reload and try again." });
+    expect(calls.some((c) => c.verb === "delete")).toBe(false);
+  });
 });
 
 describe("what the delete door says", () => {
@@ -213,9 +257,111 @@ describe("what the delete door says", () => {
     expect(said).not.toMatch(/\d h\b/);
   });
 
+  /**
+   * THE DEFECT: the words named a door the screen was not showing (review, 2026-10-03). A RUNNING piece
+   * — which is every second piece a Switch Job leaves behind — opens the clock-out sheet, and that sheet
+   * has Delete and no Join Back at all; join_time_entries refuses a running shift outright ("Clock out
+   * first", 0322). So "cancel and tap Join Back Into One Shift" sent the office to cancel and hunt for
+   * a button that was not there, on a delete with no Undo. The way back is real and it is on that very
+   * sheet: clock out, then join.
+   */
+  it("THE DEFECT: on a RUNNING piece it names clocking out first, never a button that is not on the sheet", () => {
+    const said = deleteConfirmWords({ hours: null, label: "J-011 Honeysuckle", keepsJob: "J-013 ARR 56", running: true });
+    expect(said).toContain("Delete this part of the split shift?");
+    expect(said).toContain("Its time on J-011 Honeysuckle goes with it");
+    expect(said).not.toContain("cancel and tap Join Back Into One Shift");
+    expect(said).toContain("cancel and clock this shift out first");
+    // The way back still names the job the joined day would keep, which is the fact that bites.
+    expect(said).toContain("all of it on J-013 ARR 56");
+  });
+
+  it("a CLOSED piece still names the button, because that is the one its sheet draws", () => {
+    const said = deleteConfirmWords({ hours: 2.5, label: "J-011 Honeysuckle", keepsJob: "J-013 ARR 56", running: false });
+    expect(said).toContain("cancel and tap Join Back Into One Shift");
+    expect(said).not.toContain("clock this shift out first");
+  });
+
   it("and the editor asks through that one function, never its own copy of the sentence", () => {
     const code = readFileSync(new URL("./edit-entry-button.tsx", import.meta.url), "utf8");
     expect(code).toContain("confirm(deleteConfirmWords(");
     expect(code).not.toContain('confirm("Delete this time entry?');
+    // The words and the door come off the SAME pieces, so they cannot drift apart again.
+    expect(code).toContain("if (!prevKin && !nextKin) return null;");
+    expect(code).toContain("running: isOpen,");
+  });
+});
+
+/**
+ * A BOUNDARY IS TWO CLOSED PIECES THAT TOUCH — the other half of the same hole.
+ *
+ * splitNeighbors only asks that `next` STARTS where this piece ends, so the `next` of a closed first
+ * piece is the RUNNING clock a Switch Job opened. Timecards packed its clock_out with String(null) —
+ * the string "null", which is truthy — so the editor drew Join Back Into One Shift on a boundary
+ * join_time_entries can only refuse (0322), and Move The Split on a piece with no end to slide to.
+ */
+describe("the split tools are only drawn where they can work", () => {
+  const prev = {
+    id: "0c7fae89-0000-4000-8000-00000000000p",
+    clock_in: "2026-09-22T14:00:00Z",
+    clock_out: "2026-09-22T17:00:00Z",
+    label: "J-013 ARR 56",
+    job_id: "a0000000-0000-4000-8000-00000000033a",
+    job_code: null,
+    lunch_minutes: 0,
+    miles: 0,
+  };
+  /** The piece on screen: 10:00 to 1:00, cut from the one before it. */
+  const middle = {
+    id: B,
+    profile_id: BRIAN,
+    clock_in: "2026-09-22T17:00:00Z",
+    clock_out: "2026-09-22T20:00:00Z",
+    lunch_minutes: 0,
+    job_id: JOB,
+    job_code: null,
+    notes: null,
+    miles: 0,
+    status: "closed",
+    split_from: prev.id,
+    profiles: { full_name: "Brian Taylor" },
+    job: { job_number: "J-011", name: "Honeysuckle" },
+  };
+  const renderEditor = (neighbors: unknown) =>
+    renderToStaticMarkup(
+      createElement(EditEntryButton, {
+        entry: middle as any,
+        jobCodes: [],
+        jobs: [],
+        members: [{ id: BRIAN, full_name: "Brian Taylor" }],
+        isStaff: true,
+        initialOpen: true,
+        hideTrigger: true,
+        tz: "America/Los_Angeles",
+        neighbors: neighbors as any,
+        viewerId: BRIAN,
+      }),
+    );
+
+  it("THE DEFECT: the next piece is the running clock, so neither door is drawn on that boundary", () => {
+    const html = renderEditor({ prev: null, next: { ...prev, id: C, clock_in: "2026-09-22T20:00:00Z", clock_out: null, label: "J-012 Larkspur" } });
+    expect(html).not.toContain("Join Back Into One Shift");
+    expect(html).not.toContain("Move The Split");
+    expect(html).not.toContain("Split from the part after");
+    // The shift itself still opens and can still be split: nothing else was taken away.
+    expect(html).toContain("Split This Shift");
+  });
+
+  it("two closed pieces that touch still get both doors, on both sides", () => {
+    const after = { ...prev, id: C, clock_in: "2026-09-22T20:00:00Z", clock_out: "2026-09-22T22:00:00Z", label: "J-012 Larkspur" };
+    const html = renderEditor({ prev, next: after });
+    expect(html).toContain("Split from the part before");
+    expect(html).toContain("Split from the part after");
+    expect(html.split("Join Back Into One Shift").length - 1).toBe(2);
+  });
+
+  it("and Timecards stops telling the editor a running neighbour is closed", () => {
+    const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    expect(page).not.toContain("clock_out: String(r.clock_out),");
+    expect(page).toContain("clock_out: r.clock_out ? String(r.clock_out) : null,");
   });
 });

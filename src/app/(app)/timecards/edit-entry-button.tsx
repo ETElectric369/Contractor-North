@@ -72,7 +72,8 @@ interface Entry {
 export interface SplitNeighbor {
   id: string;
   clock_in: string;
-  clock_out: string;
+  /** Null while that piece's own clock is still running: it can be neither joined nor slid. */
+  clock_out: string | null;
   label: string;
   job_id?: string | null;
   job_code?: string | null;
@@ -216,6 +217,19 @@ export function EditEntryButton({
    *  in the body's tools box and in the footer (one tap, no scroll); both open the same sheet, and its
    *  Cancel comes back to this form with what was typed still in it. */
   const canSplit = !!entry.clock_out && (entry.status ?? "closed") === "closed";
+  /**
+   * WHICH TOUCHING PIECES ARE A REAL BOUNDARY — one rule, read by the split tools below AND by the
+   * delete words, so a sentence can never name a door this screen is not showing.
+   *
+   * BOTH PIECES HAVE TO BE CLOSED. join_time_entries refuses a running shift outright ("Clock out
+   * first", 0322) and sliding a cut needs an end to slide between. The `next` neighbour of a closed
+   * piece IS the running clock after a Switch Job (splitNeighbors only asks that it starts where this
+   * one ends), and Join Back Into One Shift was drawn on that boundary — a button the database could
+   * never say yes to.
+   */
+  const closedKin = (n?: SplitNeighbor | null) => (n && n.clock_out ? { ...n, clock_out: n.clock_out } : null);
+  const prevKin = closedKin(neighbors?.prev);
+  const nextKin = entry.clock_out ? closedKin(neighbors?.next) : null;
   const openSplit = () => {
     setOpen(false);
     setSplitFromForm(true);
@@ -374,20 +388,21 @@ export function EditEntryButton({
 
   /**
    * THE PIECE THIS DELETE WOULD TAKE, when the shift on screen is one part of a split (delete-words
-   * says it in words). Built from the SAME condition as `boundaries` below, which is what actually
-   * draws Join Back Into One Shift — a sentence may never name a door this screen is not showing.
+   * says it in words). Built from the SAME pieces as `boundaries`, which is what actually draws Join
+   * Back Into One Shift — a sentence may never name a door this screen is not showing.
    */
   function deletingPiece(): DeletingPiece | null {
-    const prev = neighbors?.prev ?? null;
-    const next = neighbors?.next ?? null;
-    if (!prev && !(next && entry.clock_out)) return null;
+    if (!prevKin && !nextKin) return null;
     const mine = entry.job ? jobLabel(entry.job) : entry.job_code || "no job";
     return {
       hours: entry.clock_out ? hoursBetween(entry.clock_in, entry.clock_out, Number(entry.lunch_minutes) || 0) : null,
       label: mine,
       // Join Back keeps the FIRST part's job (join_time_entries, 0320): the part before this one, or
       // this one when it IS the first — which is the case that bites, and the case Erik hit.
-      keepsJob: prev ? prev.label : mine,
+      keepsJob: prevKin ? prevKin.label : mine,
+      // A RUNNING piece gets the clock-out sheet, which draws no split tools at all, and 0322 refuses
+      // a join on it: the words name clocking out first instead of a button that is not there.
+      running: isOpen,
     };
   }
 
@@ -442,14 +457,13 @@ export function EditEntryButton({
     if (r.warning) toast(r.warning, "info", undefined, { sticky: true });
   }
 
-  // MOVE THE SPLIT (slide the time between two touching pieces; never reorders) and JOIN BACK.
+  // MOVE THE SPLIT (slide the time between two touching pieces; never reorders) and JOIN BACK — one
+  // row per real boundary (closedKin above).
   const [moveHm, setMoveHm] = useState<Record<string, string>>({});
   const boundaries = [
-    neighbors?.prev ? { key: "prev", left: neighbors.prev.id, right: entry.id, at: entry.clock_in, other: neighbors.prev } : null,
-    neighbors?.next && entry.clock_out
-      ? { key: "next", left: entry.id, right: neighbors.next.id, at: entry.clock_out, other: neighbors.next }
-      : null,
-  ].filter(Boolean) as { key: string; left: string; right: string; at: string; other: SplitNeighbor }[];
+    prevKin ? { key: "prev", left: prevKin.id, right: entry.id, at: entry.clock_in, other: prevKin } : null,
+    nextKin && entry.clock_out ? { key: "next", left: entry.id, right: nextKin.id, at: entry.clock_out, other: nextKin } : null,
+  ].filter(Boolean) as { key: string; left: string; right: string; at: string; other: SplitNeighbor & { clock_out: string } }[];
 
   function moveCut(b: (typeof boundaries)[number]) {
     setError(null);

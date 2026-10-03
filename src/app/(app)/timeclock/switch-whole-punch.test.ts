@@ -17,6 +17,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * Pinned without a database. switch_job's SQL is unchanged and still cuts past two minutes; the fake
  * below throws by name on any statement it was not told about, so "the cut is not even asked for" is
  * enforced by construction rather than asserted.
+ *
+ * THREE DOORS DESCRIBE A SWITCH BEFORE IT HAPPENS, not two (review, 2026-10-03): the Timeclock panel,
+ * the job page's switch sheet and the visit card. The first pass reached the first two, and it read the
+ * rule on a clock that had stopped ticking. Both halves are pinned at the bottom of this file.
  */
 
 const state = vi.hoisted(() => ({ client: null as any }));
@@ -37,10 +41,17 @@ vi.mock("@/lib/notifications", () => ({
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}), orgStaffIds: vi.fn(async () => ["office-1"]) }));
 vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: true })) }));
 
+import { readFileSync } from "node:fs";
 import { switchJob } from "./actions";
-import { SWITCH_MOVES_WHOLE_MS, switchMovesWholePunch } from "./switch-window";
-import { timeActions } from "@/lib/actions/entities/time";
+import { SWITCH_MOVES_WHOLE_MS, switchMovesWholeNow, switchMovesWholePunch } from "./switch-window";
+import { switchJobSpoken, timeActions } from "@/lib/actions/entities/time";
 import { appChoseSentenceToSay } from "./clock-told";
+import { dict } from "@/lib/i18n";
+
+const en = dict("en");
+const es = dict("es");
+/** A client effect cannot be driven in a node suite, so the doors' clocks are read from source. */
+const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete" | "rpc"; cols: string; payload?: any; filters: any[] };
 type Reply = { data?: any; error?: any } | undefined;
@@ -140,6 +151,32 @@ describe("switchMovesWholePunch: the rule itself", () => {
   it("an unreadable clock-in cuts: never move a shift whose length nobody knows", () => {
     expect(switchMovesWholePunch(NaN, now)).toBe(false);
     expect(switchMovesWholePunch(Date.parse("not a time"), now)).toBe(false);
+  });
+
+  /** What a DOOR asks: both ways a punch moves whole, in one answer, so no screen reads half of it. */
+  describe("switchMovesWholeNow: the outcome a screen is allowed to promise", () => {
+    it("a punch with no job and no code moves whole at any age — switch_job's own carve-out", () => {
+      expect(switchMovesWholeNow(false, now - 10, now)).toBe(true);
+      expect(switchMovesWholeNow(false, now - 8 * 60 * MIN, now)).toBe(true);
+      // Even an unreadable clock-in: a job-less punch has nowhere for a cut to leave hours.
+      expect(switchMovesWholeNow(false, NaN, now)).toBe(true);
+    });
+
+    it("a punch that HAS a place is judged by the clock, which is the half the visit card was missing", () => {
+      expect(switchMovesWholeNow(true, now - 6 * MIN, now)).toBe(true);
+      expect(switchMovesWholeNow(true, now - (SWITCH_MOVES_WHOLE_MS - 1), now)).toBe(true);
+      expect(switchMovesWholeNow(true, now - SWITCH_MOVES_WHOLE_MS, now)).toBe(false);
+      expect(switchMovesWholeNow(true, now - 4 * 60 * MIN, now)).toBe(false);
+    });
+
+    it("it is the same answer switchJob reaches, written the way the server's fork is written", () => {
+      for (const age of [0, 6 * MIN, SWITCH_MOVES_WHOLE_MS, 4 * 60 * MIN]) {
+        const ci = now - age;
+        // switchJob: hasPlace && young, with the job-less case handed to switch_job, which moves whole.
+        const server = (hasPlace: boolean) => (hasPlace ? switchMovesWholePunch(ci, now) : true);
+        for (const hasPlace of [true, false]) expect(switchMovesWholeNow(hasPlace, ci, now)).toBe(server(hasPlace));
+      }
+    });
   });
 });
 
@@ -251,5 +288,76 @@ describe("what a switch is said to do", () => {
     expect(say).toContain("My Day");
     expect(say).toContain("Timeclock");
     expect(say).toContain("Timecards");
+  });
+
+  /**
+   * A RE-POINT MOVES ONE ROW, so "the whole SHIFT moved over" was false for the second piece of a day
+   * already cut by a Switch Job: his 3 hours from the morning stayed on the first job while the words
+   * said everything followed him. "This whole PUNCH" is what the write actually does, and it is the
+   * word clock-told already used. The spoken line matters most — Nort says it word for word, with no
+   * screen beside it to correct it.
+   */
+  it("every whole-move sentence says PUNCH, because the write moves one row and the morning stays put", () => {
+    expect(en.tc_switchedWhole).toBe("Now on {job}. This whole punch moved over.");
+    expect(en.tc_switchedWhole).not.toContain("shift");
+    expect(es.tc_switchedWhole).not.toContain("turno");
+    expect(switchJobSpoken("repointed", 0, "J-011 Honeysuckle")).toContain("this whole punch is on the new job now");
+    expect(switchJobSpoken("repointed", 0, "J-011 Honeysuckle")).toContain("Any earlier part of the day stays where it was");
+    // The panel and the job page, where the sentence is shown BEFORE the tap.
+    expect(src("./timeclock-panel.tsx")).toContain("so this whole punch moves onto the job you pick: none of it stays on ${currentJobName}.");
+    expect(src("./timeclock-panel.tsx")).not.toContain("the whole shift moves onto the job you pick");
+    expect(src("../jobs/[id]/job-time-button.tsx")).toContain("Switching puts this whole punch on");
+    expect(src("../jobs/[id]/job-time-button.tsx")).not.toContain("puts this whole shift on");
+  });
+});
+
+/**
+ * THE DOOR'S CLOCK HAS TO BE RUNNING (review, 2026-10-03).
+ *
+ * The job page's switch sheet fed the rule a `now` that only ticked in state "here", so in state
+ * "switch" it was whatever the clock read when the component mounted. Punch on job A at 7:00, open job
+ * B's page at 7:05 on the drive and leave it open (nothing remounts this button), tap Switch Here at
+ * 7:40: the sheet still read five minutes and promised "this whole punch", and the server, on its own
+ * clock, cut and left 40 minutes on A. A stale clock can only understate the age, so the error always
+ * runs that one way — promise whole, deliver cut. This is the tech's only switch door: the panel's
+ * Switch Job is staff-only.
+ *
+ * There is no DOM in this suite, so a client effect cannot be driven here. These read the doors.
+ */
+describe("the doors read the one rule, on a clock that is still running", () => {
+  const panel = src("./timeclock-panel.tsx");
+  const jobDoor = src("../jobs/[id]/job-time-button.tsx");
+  const card = src("../appointments/[id]/visit-start-card.tsx");
+
+  it("all THREE doors ask switch-window, so none can promise a cut the server will not make", () => {
+    expect(panel).toContain('from "./switch-window"');
+    expect(jobDoor).toContain('from "../../timeclock/switch-window"');
+    expect(card).toContain('from "../../timeclock/switch-window"');
+    // switchJob's other callers describe nothing BEFORE the tap, so they need no clock of their own:
+    // they read the mode the server answers with.
+    expect(src("../appointments/start-job-actions.ts")).toContain('sw.mode === "repointed"');
+    expect(src("../../../lib/actions/entities/time.ts")).toContain("switchJobSpoken(res.mode");
+  });
+
+  it("THE DEFECT: the job page's clock ticks whenever a clock is running, not only in state 'here'", () => {
+    expect(jobDoor).toMatch(/useEffect\(\(\) => \{\s*if \(!openEntry\) return;\s*setNow\(Date\.now\(\)\);\s*const t = setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\);/);
+    // The guard that froze it: state "switch" is exactly where the sentence is drawn.
+    expect(jobDoor).not.toContain('if (state !== "here") return;');
+    // And the fork reads that ticking value, from the shared rule.
+    expect(jobDoor).toContain("switchMovesWholeNow(!!openEntry.job_id || !!openEntry.job_code, Date.parse(openEntry.clock_in), now)");
+    // ONE clock in the file: the hours in the cut sentence can no longer come from a different moment.
+    expect(jobDoor).not.toContain("Date.now() - new Date(openEntry.clock_in)");
+  });
+
+  it("and it says which of the two things happened AFTER the tap, as the other two doors do", () => {
+    // On the fifteen-minute line the sheet's clock and the server's can still disagree by a second, so
+    // the outcome is read off the server's own answer and said out loud. Nothing silent.
+    expect(jobDoor).toContain("res.mode === \"repointed\"");
+    expect(jobDoor).toContain("`Now on ${jobNumber}. This whole punch moved over.`");
+    expect(jobDoor).toContain("h before the switch stayed on ${was}.`");
+  });
+
+  it("the panel's own clock is still unconditional, which is what its comment rests on", () => {
+    expect(panel).toMatch(/useEffect\(\(\) => \{\s*if \(!openEntry\) return;\s*const t = setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\);/);
   });
 });

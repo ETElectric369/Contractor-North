@@ -613,8 +613,13 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
     expect(said).not.toMatch(/^Done/);
   });
 
-  it("a switch that RE-POINTED really did move the whole shift, and keeps its own words", () => {
-    expect(switchJobSpoken("repointed", 0, "J-013 ARR 56")).toBe("Done — this whole shift is on the new job now.");
+  it("a switch that RE-POINTED really did move the whole PUNCH, and says only that much", () => {
+    // Not "this whole shift": the write moves ONE row, so on a day already cut by an earlier Switch Job
+    // the morning's parts stay on the job they were worked on. Nort reads this out word for word, with
+    // no screen beside it to correct it.
+    expect(switchJobSpoken("repointed", 0, "J-013 ARR 56")).toBe(
+      "Done — this whole punch is on the new job now. Any earlier part of the day stays where it was.",
+    );
   });
 
   it("the hours are never dropped, even when the job they stayed on could not be read", () => {

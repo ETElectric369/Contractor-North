@@ -47,7 +47,10 @@ const en: Dict = {
   tc_putOnThis: "Put It On This Part Instead",
   tc_putOnPrev: "Put It On {job} Instead",
   tc_switchedCut: "Switched to {job}. The first part is its own entry ({hours}).",
-  tc_switchedWhole: "Now on {job}. This whole shift moved over.",
+  // "THIS PUNCH", not "this shift": a re-point moves ONE row. On a day already cut by an earlier
+  // Switch Job the running row is the part since that switch, so "the whole shift moved over" would
+  // tell a man his morning followed him onto the new customer when it did not.
+  tc_switchedWhole: "Now on {job}. This whole punch moved over.",
   // A clock running LONG_SHIFT_HOURS (twelve) or more (lib/long-shift): the card asks when he stopped instead of
   // closing at now. {when} fills from the panel.
   tc_longShiftTitle: "You're still clocked in from {when}.",
@@ -89,7 +92,7 @@ const es: Dict = {
   tc_putOnThis: "Ponerlo En Esta Parte",
   tc_putOnPrev: "Ponerlo En {job}",
   tc_switchedCut: "Cambiaste a {job}. La primera parte es su propia entrada ({hours}).",
-  tc_switchedWhole: "Ahora en {job}. Todo este turno se movió.",
+  tc_switchedWhole: "Ahora en {job}. Todo el tiempo de esta entrada se movió.",
   tc_longShiftTitle: "Sigues con entrada marcada desde {when}.",
   tc_longShiftBody: "¿A qué hora terminaste?",
   tc_whenStopped: "La hora en que terminaste de trabajar en este turno.",

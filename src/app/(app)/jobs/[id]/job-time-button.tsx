@@ -11,7 +11,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { LONG_SHIFT_PHRASE, isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
-import { switchMovesWholePunch } from "../../timeclock/switch-window";
+import { switchMovesWholeNow } from "../../timeclock/switch-window";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
 import { SameDayShifts } from "../../timeclock/same-day-shifts";
 import type { GeoPoint } from "@/lib/types";
@@ -94,21 +94,29 @@ export function JobTimeButton({
 
   const state: "in" | "switch" | "here" = !openEntry ? "in" : openEntry.job_id === jobId ? "here" : "switch";
 
-  // Tick once a second only while on the clock HERE (the DayClock pattern).
+  /**
+   * TICK ONCE A SECOND WHENEVER THERE IS A RUNNING CLOCK — not only in state "here" (the DayClock
+   * pattern), because state "switch" DECIDES A SENTENCE FROM THE PUNCH'S AGE.
+   *
+   * The failure this prevents: punch on job A at 7:00, open job B's page at 7:05 on the drive and
+   * leave it open (nothing remounts this button — the dock passes no key, and a router refresh keeps
+   * the tree). Tap Switch Here at 7:40 and a `now` frozen at 7:05 still read five minutes, so the
+   * sheet promised "this whole punch" while the server, on its own clock, cut and left 40 minutes on
+   * A. A stale clock can only err that one way. The Timeclock panel ticks for exactly this reason.
+   */
   useEffect(() => {
-    if (state !== "here") return;
+    if (!openEntry) return;
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [state, openEntry?.id]);
+  }, [openEntry]);
 
   // C: the running entry from its clock_in. B: the same figure, because a switch closes the running
   // entry right now and opens a new one here (0288 switch_job), so the confirm can honestly say what
-  // the closed part will read.
+  // the closed part will read. ONE CLOCK for both, the ticking `now`: the hours in the cut sentence
+  // and the fork that chooses between the two sentences can never come off two different moments.
   const elapsedMs = openEntry ? Math.max(0, now - new Date(openEntry.clock_in).getTime()) : 0;
-  const segmentHours = openEntry
-    ? Math.max(0, Math.round(((Date.now() - new Date(openEntry.clock_in).getTime()) / 3_600_000) * 100) / 100)
-    : 0;
+  const segmentHours = Math.round((elapsedMs / 3_600_000) * 100) / 100;
 
   function openModal() {
     setErr(null);
@@ -116,7 +124,7 @@ export function JobTimeButton({
     setOpen(true);
   }
 
-  function run(fn: () => Promise<{ ok: boolean; error?: string; warning?: string }>, after?: () => void) {
+  function run<T extends { ok: boolean; error?: string; warning?: string }>(fn: () => Promise<T>, after?: (res: T) => void) {
     setErr(null);
     start(async () => {
       // THE 60MPH LAW (v800 audit). A server action that REJECTS — no signal in a dead zone, a
@@ -124,7 +132,7 @@ export function JobTimeButton({
       // the whole job page down to the error boundary. A tech standing in a Chilcoot canyon
       // taps "Clock in", the page vanishes, and the start of his day is gone. The failure has
       // to land in this little red line instead, with the punch still there to retry.
-      let res: { ok: boolean; error?: string; warning?: string };
+      let res: T;
       try {
         res = await fn();
       } catch {
@@ -139,7 +147,7 @@ export function JobTimeButton({
       // A pay rate left on the part before a switch, or a lunch that moved: money, so it is said and
       // kept on screen until read (the Timeclock panel says the same thing the same way).
       if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
-      if (after) after();
+      if (after) after(res);
       else router.refresh();
     });
   }
@@ -155,10 +163,26 @@ export function JobTimeButton({
   // the OLD site's centre — that's what auto-closed shifts at the moment the tech drove
   // away from the first job) and the monitor re-adopts at the new site.
   const doSwitch = () =>
-    run(async () => {
-      const gps = await gpsBestEffort();
-      return switchJob({ entry_id: openEntry!.id, job_id: jobId, job_code: null, gps });
-    });
+    run(
+      async () => {
+        const gps = await gpsBestEffort();
+        return switchJob({ entry_id: openEntry!.id, job_id: jobId, job_code: null, gps });
+      },
+      // WHICH OF THE TWO THINGS HAPPENED, SAID AFTER THE TAP (the Timeclock panel and the visit card
+      // say it the same way). The sheet reads the rule on a live clock, but the server reads its own
+      // clock a second later, so on the fifteen-minute line the two can still disagree — and a man
+      // who was promised a whole move must not have to go to Timecards to find out it was cut.
+      (res) => {
+        const was = openEntry ? openEntry.jobLabel ?? openEntry.job_code ?? "the other job" : "the other job";
+        toast(
+          res.mode === "repointed"
+            ? `Now on ${jobNumber}. This whole punch moved over.`
+            : `Switched to ${jobNumber}. The ${Math.round((res.closed_hours ?? 0) * 100) / 100} h before the switch stayed on ${was}.`,
+          "success",
+        );
+        router.refresh();
+      },
+    );
 
   const doClockOut = () => run(() => clockOutCurrent({}));
   /** The running clock has gone LONG_SHIFT_HOURS: the out door goes to Timeclock's stop picker. So
@@ -329,16 +353,15 @@ export function JobTimeButton({
           )}
 
           {state === "switch" && openEntry && (
-            // THE SAME FORK THE SERVER MAKES. A punch with no job and no code moves over whole
-            // (switch_job, 0288), and so does one switched within SWITCH_MOVES_WHOLE_MS of starting
-            // (switch-window — the function switchJob decides the write with, asked here so this door
-            // cannot promise a cut that is not going to happen). Anything else is cut, and a new
-            // entry starts on this job.
-            (!openEntry.job_id && !openEntry.job_code) || switchMovesWholePunch(Date.parse(openEntry.clock_in), now) ? (
+            // THE SAME FORK THE SERVER MAKES, in the one function it makes it with (switch-window),
+            // asked on the ticking `now` so this door cannot promise a cut that is not going to
+            // happen. "PUNCH", never "shift": after a Switch Job the running row is only the latest
+            // part of the day (lib/shift-chain), and the morning's closed parts stay where they are.
+            switchMovesWholeNow(!!openEntry.job_id || !!openEntry.job_code, Date.parse(openEntry.clock_in), now) ? (
               <p className="text-sm text-slate-600">
                 You&apos;re on the clock since {fmtTime(openEntry.clock_in)}
-                {!openEntry.job_id && !openEntry.job_code ? " with no job yet" : ` on ${openEntry.jobLabel ?? openEntry.job_code ?? "another job"}`}. Switching puts this whole shift on{" "}
-                <span className="font-medium">{jobNumber}</span>, from the start.
+                {!openEntry.job_id && !openEntry.job_code ? " with no job yet" : ` on ${openEntry.jobLabel ?? openEntry.job_code ?? "another job"}`}. Switching puts this whole punch on{" "}
+                <span className="font-medium">{jobNumber}</span> — none of it stays behind.
               </p>
             ) : longShift ? (
               <p className="text-sm text-amber-800">

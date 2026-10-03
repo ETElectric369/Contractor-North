@@ -710,12 +710,17 @@ export function TimeclockPanel({
                           {/* WHAT THE SWITCH IS ABOUT TO DO, IN THE SERVER'S OWN RULE. The young-punch
                               test is switchMovesWholePunch — the very function switchJob decides the
                               write with — so this line cannot promise a cut that is not going to
-                              happen. `now` ticks every second, so it stays true while the sheet is open. */}
+                              happen. `now` ticks every second, so it stays true while the sheet is open.
+                              "THIS PUNCH", NEVER "THE WHOLE SHIFT": the write moves ONE row, and after
+                              an earlier Switch Job the running row is only the latest part of the day
+                              (lib/shift-chain — the card says "This shift so far" right above this).
+                              A second piece switched at 10:08 moves its eight minutes; the morning's
+                              three hours stay on the job they were worked on. */}
                           <p className="text-xs text-slate-500">
                             {!openEntry.job_id && !openEntry.job_code
-                              ? "This shift has no job yet, so the whole shift moves onto the job you pick."
+                              ? "This punch has no job yet, so all of it moves onto the job you pick."
                               : switchMovesWholePunch(Date.parse(openEntry.clock_in), now)
-                                ? `You clocked in on ${currentJobName} a few minutes ago, so the whole shift moves onto the job you pick — no time stays on ${currentJobName}.`
+                                ? `You clocked in on ${currentJobName} a few minutes ago, so this whole punch moves onto the job you pick: none of it stays on ${currentJobName}.`
                                 : `Your time on ${currentJobName} closes as its own entry now, and the clock keeps running on the new job.`}
                           </p>
                           <Select

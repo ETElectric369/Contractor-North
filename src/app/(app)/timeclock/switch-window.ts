@@ -27,9 +27,10 @@
  * adopt-window.ts), it is long enough for the drive-and-tap, and it is short enough that no billable
  * stretch of work fits inside it.
  *
- * ONE COPY, and every door reads it: switchJob decides the write with it, and the Timeclock panel and
- * the job page's own switch door word their warning with it — so no screen can promise a cut the
- * server is not going to make.
+ * ONE COPY, and every door reads it: switchJob decides the write with it, and every screen that
+ * describes a switch BEFORE it happens — the Timeclock panel, the job page's switch sheet and the
+ * visit card (with its Start The Job And Clock In sheet) — words its warning with it, so no screen
+ * can promise a cut the server is not going to make.
  *
  * A plain module, never "use server": a client door imports it.
  */
@@ -57,4 +58,26 @@ export const SWITCH_MOVES_WHOLE_MS = 15 * 60_000;
 export function switchMovesWholePunch(clockInMs: number, nowMs: number): boolean {
   if (!Number.isFinite(clockInMs) || !Number.isFinite(nowMs)) return false;
   return nowMs - clockInMs < SWITCH_MOVES_WHOLE_MS;
+}
+
+/**
+ * WHAT A DOOR PROMISES: does a switch right now move the WHOLE punch, or cut it?
+ *
+ * TWO WAYS A PUNCH MOVES WHOLE, and a screen that reads only one of them promises the wrong thing.
+ * A punch with NO job and no code moves whole at any age (switch_job's own carve-out: a job-less
+ * morning has always billed to the job you switch to). A punch that HAS a place moves whole only
+ * inside the window above. The visit card read the first half alone, so it told a man five minutes
+ * into J-050 that "switching ends that part now" while the server moved his whole punch and left
+ * J-050 with nothing.
+ *
+ * switchJob's own fork is written the other way round (hasPlace && young) because it hands the
+ * job-less case to switch_job's SQL rather than to its own one-row UPDATE. The OUTCOME both describe
+ * is this one, and the outcome is the only thing a screen can honestly promise.
+ *
+ * ASK IT WITH A LIVE CLOCK. A `nowMs` from a render half an hour ago answers for that moment and not
+ * for the tap, and a stale clock can only make a punch look YOUNGER — so it always errs towards
+ * promising a whole move that the server is about to cut.
+ */
+export function switchMovesWholeNow(hasPlace: boolean, clockInMs: number, nowMs: number): boolean {
+  return !hasPlace || switchMovesWholePunch(clockInMs, nowMs);
 }
