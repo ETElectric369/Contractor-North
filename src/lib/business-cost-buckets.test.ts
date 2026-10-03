@@ -15,7 +15,7 @@ import {
 } from "./business-cost-buckets";
 
 describe("the business-cost bucket list", () => {
-  it("is the names Erik approved, in order: Fuel its own, Gas & Truck renamed Auto (2026-09-27)", () => {
+  it("is the names Erik approved, in order: Fuel its own, Gas & Truck renamed Auto, Rent its own (0376)", () => {
     expect([...BUSINESS_COST_BUCKETS]).toEqual([
       "Fuel",
       "Auto",
@@ -23,8 +23,12 @@ describe("the business-cost bucket list", () => {
       "Phone & Office",
       "Insurance & Licenses",
       "Fees",
+      "Rent",
       "Other",
     ]);
+    // OTHER IS LAST, ALWAYS: it is the bucket for what none of the named ones hold, so a name added
+    // after it would read as more specific than the catch-all sitting above it.
+    expect(BUSINESS_COST_BUCKETS[BUSINESS_COST_BUCKETS.length - 1]).toBe("Other");
     expect(BUSINESS_COST_BUCKETS).not.toContain(LEGACY_GAS_AND_TRUCK);
   });
 
@@ -73,6 +77,7 @@ describe("which half of the profit and loss each bucket is in (Erik, 2026-09-30:
       "Phone & Office": "overhead",
       "Insurance & Licenses": "overhead",
       Fees: "overhead",
+      Rent: "overhead",
       Other: "overhead",
     });
     expect(bucketsIn("cogs")).toEqual([]);
@@ -135,7 +140,6 @@ describe("bucketOf: an old category word to its bucket", () => {
     // Job-cost words and free text from the old Recurring box are not business-cost buckets.
     expect(bucketOf("Materials")).toBe("Other");
     expect(bucketOf("Receipt")).toBe("Other");
-    expect(bucketOf("Rent")).toBe("Other");
     expect(bucketOf("Software")).toBe("Other");
   });
 
@@ -167,6 +171,13 @@ describe("the 0285 and 0362 migrations and bucketOf say the same thing", () => {
   const sql = read("0285_business_cost_buckets.sql");
   const sql0362 = read("0362_fuel_is_its_own_bucket.sql");
   const pairs = [...sql.matchAll(/when '([^']+)' then '([^']+)'/g)].map((m) => [m[1], m[2]] as const);
+  /**
+   * BUCKETS 0285 NEVER HEARD OF. It renamed the old Organize words onto the six buckets of
+   * 2026-09-24, so a bucket added after it has no WHEN line of its own and cannot be expected to:
+   * Fuel split off Gas & Truck in 0362, and Rent was added in 0376. Named here rather than skipped by
+   * a loose rule, so the next bucket added has to be named too instead of quietly going unchecked.
+   */
+  const AFTER_0285 = new Set(["Fuel", "Rent"]);
   /** 0362: every stored Gas & Truck is Auto. */
   const after0362 = (bucket: string) => (bucket === LEGACY_GAS_AND_TRUCK ? "Auto" : bucket);
   // Words 0285 put in Gas & Truck before Fuel had a bucket of its own: those ROWS are Auto after
@@ -178,7 +189,7 @@ describe("the 0285 and 0362 migrations and bucketOf say the same thing", () => {
     const olds = new Set(pairs.map(([old]) => old));
     for (const w of ["fuel", "vehicle", "shop supplies", "tools", "office", "insurance"]) expect(olds.has(w)).toBe(true);
     for (const b of BUSINESS_COST_BUCKETS) {
-      if (b === "Other" || b === "Fuel") continue;
+      if (b === "Other" || AFTER_0285.has(b)) continue;
       expect(olds.has(b === "Auto" ? LEGACY_GAS_AND_TRUCK.toLowerCase() : b.toLowerCase())).toBe(true);
     }
   });
@@ -209,6 +220,44 @@ describe("the 0285 and 0362 migrations and bucketOf say the same thing", () => {
     const code = sql0362.replace(/--[^\n]*/g, "");
     expect(code).not.toMatch(/alter table|create table|add column/i);
     expect(code).not.toMatch(/cost_kind/);
+  });
+});
+
+/**
+ * THE DATABASE'S BUCKET LIST AND THIS FILE'S ARE ONE LIST (0376). The CHECK on bank_lines.bucket and
+ * bank_rules.bucket names the words a row may hold; BUSINESS_COST_BUCKETS names the words the app
+ * offers. A bucket in one and not the other is the defect this repo keeps paying for in both
+ * directions: a word the app offers that the database refuses is a raw error in front of a person
+ * mid-Apply, and a word the database holds that the app has never heard of reads as "Other" on every
+ * money surface. So the two are checked against each other here, word for word, in order.
+ */
+describe("the bucket list the database allows (0376) and the app's are the same list", () => {
+  const sql = readFileSync(fileURLToPath(new URL("../../supabase/migrations/0376_rent_is_a_bucket_and_money_can_come_from_the_owner.sql", import.meta.url)), "utf8");
+
+  /** The words inside one of 0376's `bucket in (...)` lists, in the order it writes them. */
+  const listsInSql = (): string[][] =>
+    [...sql.matchAll(/bucket\s+in\s*\(([^)]*)\)/g)].map((m) => [...m[1].matchAll(/'([^']+)'/g)].map((w) => w[1]));
+
+  it("writes the same words, in the same order, on both tables", () => {
+    const lists = listsInSql();
+    // bank_lines and bank_rules each get one, plus the two the verification block checks for.
+    expect(lists.length).toBeGreaterThanOrEqual(2);
+    for (const list of lists) expect(list).toEqual([...BUSINESS_COST_BUCKETS]);
+  });
+
+  it("names Rent, so the $1,120 rent cheque has a word on both sides", () => {
+    expect(BUSINESS_COST_BUCKETS).toContain("Rent");
+    for (const list of listsInSql()) expect(list).toContain("Rent");
+    expect(bucketOf("Rent")).toBe("Rent");
+    expect(bucketOf(" rent ")).toBe("Rent");
+    expect(BUCKET_SECTION.Rent).toBe("overhead");
+  });
+
+  it("leaves a cost already filed as Other exactly where it is (bills.category has no CHECK)", () => {
+    // 0376 adds a word; it moves no stored row, and neither does bucketOf. A rent bill somebody
+    // filed as "Other" before today stays Other until a person moves it.
+    expect(bucketOf("Other")).toBe("Other");
+    expect(sql.replace(/--[^\n]*/g, "")).not.toMatch(/update\s+public\./i);
   });
 });
 

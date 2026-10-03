@@ -303,6 +303,17 @@ export type OwnerMoneyFigures = {
    * no figure at all.
    */
   ownerDraw: number;
+  /**
+   * 0376: WHAT THE OWNER PUT IN - the mirror of ownerDraw, and equity in the same way: a line below
+   * the bottom line, never added to Revenue and never subtracted from anything. Before the word
+   * existed the only money-in answers were an invoice, Other Income and Already Counted, so his own
+   * money could only be filed as Other Income - which overstates Revenue, Gross Margin % and Net
+   * Profit by every cent of it.
+   *
+   * Sourced from bank_lines placed as Owner's Money In, the same ONE source as ownerDraw, so
+   * `ownerDrawSeen` says what both figures can and cannot see.
+   */
+  ownerMoneyIn: number;
 };
 
 export type OwnerMoneyMonth = OwnerMoneyFigures & { month: string };
@@ -443,6 +454,9 @@ export type OwnerMoneyInputs = {
   supplierDocuments?: any[];
   /** bank_lines a person placed as Other Income (0363): amount, posted_on. Absent = none. */
   otherIncome?: any[];
+  /** bank_lines a person placed as Owner's Money In (0376's choice='owner_in'): amount (signed,
+   *  positive for money in), posted_on. Absent = none. */
+  ownerMoneyIn?: any[];
   /** bank_lines a person placed as Owner's Draw (0363's choice='draw'): amount (signed, negative for
    *  money out), posted_on. EQUITY, below the bottom line, never a cost. Absent = none counted, which
    *  is also every database before 0363. */
@@ -518,6 +532,7 @@ type Acc = {
   ownerUncosted: number; // hundredths: on-site hours with no cost rate behind them
   ownerBuildTime: number; // cents: ownerOnSite at the cost rate. NEVER inside `left`: it has a contra.
   draw: number; // cents the owner took out (bank_lines placed as Owner's Draw). EQUITY, never a cost.
+  ownerIn: number; // cents the owner put in (bank_lines placed as Owner's Money In, 0376). EQUITY too.
 };
 const newAcc = (): Acc => ({
   received: 0,
@@ -535,6 +550,7 @@ const newAcc = (): Acc => ({
   ownerUncosted: 0,
   ownerBuildTime: 0,
   draw: 0,
+  ownerIn: 0,
 });
 
 // ── THE FROZEN-GROSS RULE ────────────────────────────────────────────────────
@@ -1052,6 +1068,13 @@ export function computeOwnerMoney(
     const a = at(monthOfDay(l?.posted_on ?? null));
     if (a) a.draw += Math.abs(toCents(l.amount));
   }
+  // AND WHAT HE PUT IN (0376): bank lines sorted as Owner's Money In. The same shape, the other way -
+  // equity, said below the bottom line, and nothing adds it to Revenue. It is NOT income: counting the
+  // owner's own money as Other Income is exactly the overstatement 0376 exists to end.
+  for (const l of inp.ownerMoneyIn ?? []) {
+    const a = at(monthOfDay(l?.posted_on ?? null));
+    if (a) a.ownerIn += Math.abs(toCents(l.amount));
+  }
 
   // ── Figures ──
   const figures = (a: Acc): OwnerMoneyFigures => {
@@ -1087,6 +1110,7 @@ export function computeOwnerMoney(
       ownerOfficeHours: Math.round(a.ownerHours - a.ownerOnSite) / 100,
       ownerUncostedBuildTimeHours: a.ownerUncosted / 100,
       ownerDraw: fromCents(a.draw),
+      ownerMoneyIn: fromCents(a.ownerIn),
     };
   };
   const total = newAcc();
@@ -1105,6 +1129,7 @@ export function computeOwnerMoney(
     total.ownerUncosted += a.ownerUncosted;
     total.ownerBuildTime += a.ownerBuildTime;
     total.draw += a.draw;
+    total.ownerIn += a.ownerIn;
     for (const b of BUSINESS_COST_BUCKETS) total.buckets[b] += a.buckets[b];
   }
 
@@ -1486,7 +1511,7 @@ export function hasUnratedHours(m: OwnerMoney): boolean {
  * can trust the shape of and a total that is quietly short.
  */
 export const OWNER_DRAW_SEEN =
-  "Counts money out of a bank account you downloaded and sorted as Owner's Draw. Cash you took without a bank line is not in it.";
+  "Counts money out of a bank account you downloaded and sorted as Owner's Draw, and money in you sorted as Owner's Money In. Cash you took or put in without a bank line is not in it.";
 
 /** The window's uncosted owner build time, or null when every on-site hour has a cost rate behind it.
  *  The one place a surface asks whether to say the sentence (nothing silent, and no second predicate). */
@@ -1496,7 +1521,7 @@ export function uncostedBuildTime(m: OwnerMoney): { hours: number; people: strin
 }
 
 /** A figure set holding one of the owner's optional lines. Any OwnerMoneyFigures is one. */
-type OwnerLineFigures = { ownerDraw?: number | null; ownerBuildTimeOnJobs?: number | null };
+type OwnerLineFigures = { ownerDraw?: number | null; ownerMoneyIn?: number | null; ownerBuildTimeOnJobs?: number | null };
 
 const hasMoney = (n: number | null | undefined) => Math.abs(Number(n) || 0) >= 0.005;
 
@@ -1526,6 +1551,20 @@ export function hasOwnerBuildTime(...figures: (OwnerLineFigures | null | undefin
  */
 export function hasOwnerDraw(...figures: (OwnerLineFigures | null | undefined)[]): boolean {
   return figures.some((f) => hasMoney(f?.ownerDraw));
+}
+
+/**
+ * WHETHER THE OWNER PUT MONEY IN THIS PERIOD (0376) - the ONE predicate, asked by every surface.
+ *
+ * AND WHY THIS LINE IS DRAWN ONLY WHEN THERE IS SOME, where the draw is always drawn. Erik asked for a
+ * line "stating what Ive taken out this month", and a draw of $0.00 is a fact he wants stated; money in
+ * from the owner is the unusual direction, and a $0.00 row for it every month on every company's card
+ * states nothing anyone asked for. Nothing goes silent either way: the draw's row is always there and
+ * its note (`ownerDrawSeen`) names the ONE source BOTH figures come from, so a reader is never left
+ * guessing whether money he put in would have been seen.
+ */
+export function hasOwnerMoneyIn(...figures: (OwnerLineFigures | null | undefined)[]): boolean {
+  return figures.some((f) => hasMoney(f?.ownerMoneyIn));
 }
 
 /**
@@ -1767,7 +1806,7 @@ export async function readOwnerMoneyInputs(
   const hoursFrom = ownerMoneyHoursFrom(span.start, todayYmd);
   const entriesFrom = tzDayStartUtc(hoursFrom.from, tz).toISOString();
 
-  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome, ownerDraws] = await Promise.all([
+  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome, ownerDraws, ownerMoneyIn] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
@@ -1876,10 +1915,12 @@ export async function readOwnerMoneyInputs(
     // WHAT THE OWNER TOOK OUT (0373): the same bank lines, sorted as Owner's Draw. Equity, below the
     // bottom line. Nothing read it until now - 0363 has written the answer since it shipped.
     readBankChoice(supabase, span, "draw"),
+    // AND WHAT HE PUT IN (0376): equity the other way, read by the same function.
+    readBankChoice(supabase, span, "owner_in"),
   ]);
 
   const problem =
-    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome, ownerDraws]
+    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome, ownerDraws, ownerMoneyIn]
       .map((r) => r.problem)
       .find(Boolean) ??
     ratesRead.problem ??
@@ -1941,6 +1982,7 @@ export async function readOwnerMoneyInputs(
       supplierDocuments: memos.rows,
       otherIncome: otherIncome.rows,
       ownerDraws: ownerDraws.rows,
+      ownerMoneyIn: ownerMoneyIn.rows,
       balanceFrom: hoursFrom.balanceFrom,
     },
     problem: null,
@@ -1950,9 +1992,10 @@ export async function readOwnerMoneyInputs(
 /**
  * bank_lines a person placed as one ANSWER in the span. No table yet (before 0363) = none.
  *
- * Two choices are read: 'other_income' (money in that no invoice holds) and 'draw' (what the owner
- * took out - equity, below the bottom line). ONE function for both, so the page-and-tolerate shape
- * that handles a database without the table is written once rather than twice.
+ * Three choices are read: 'other_income' (money in that no invoice holds), 'draw' (what the owner took
+ * out) and 'owner_in' (what he put in, 0376) - the last two equity, below the bottom line. ONE function
+ * for all of them, so the page-and-tolerate shape that handles a database without the table is written
+ * once rather than three times.
  */
 async function readBankChoice(supabase: any, span: { start: string; end: string }, choice: string): Promise<{ rows: any[]; problem: string | null }> {
   const out: any[] = [];

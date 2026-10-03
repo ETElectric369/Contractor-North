@@ -7,6 +7,7 @@ import {
   balanceEntries,
   hasOwnerBuildTime,
   hasOwnerDraw,
+  hasOwnerMoneyIn,
   ownerMoneyCostLines,
   ownerMoneyReadSpan,
   recordDay,
@@ -250,6 +251,10 @@ export const BEFORE_TAX_NOTE = `${PNL_WORDS.netProfit} is before income tax.`;
 export const OWNER_BUILD_TIME_NOTE = `${PNL_WORDS.ownerBuildTime} charges the owner's on-site hours to the jobs at his cost rate, so each job's margin is honest. ${PNL_WORDS.ownerBuildTimeContra} books the same amount straight back, because a sole proprietor cannot deduct his own labour: the two net to zero, so ${PNL_WORDS.totalCogs}, ${PNL_WORDS.grossProfit} and ${PNL_WORDS.netProfit} are the same figures without them. His office hours are in ${PNL_WORDS.overhead}, never on a job.`;
 /** Under the equity line: what it is, and which draws the figure can see. */
 export const DRAW_NOTE = `${PNL_WORDS.ownerDraw} is equity, not an expense: it is what the owner took out and it is never subtracted to reach ${PNL_WORDS.netProfit}.`;
+/** 0376: the same note for the line the other way, appended only when that line is on the sheet. Money
+ *  the owner put in is equity too - never Revenue, which is what it had to be filed as before 0376 and
+ *  is why a Revenue figure of a company with one of these used to read high by the whole amount. */
+export const OWNER_IN_NOTE = `${PNL_WORDS.ownerMoneyIn} is equity the other way: money the owner put in, never ${PNL_WORDS.revenue} and never added to ${PNL_WORDS.netProfit}.`;
 /** What the two halves of the costs are, in the accounting industry's own test (Erik, 2026-09-28),
  *  with the lines from the data (profit-and-loss.ts), so the sentence moves when a line does. */
 export function cogsOverheadNote(): string {
@@ -465,13 +470,14 @@ export function beforeRecordsLine(
  * Revenue when either column has some, and Gross Margin % (a spreadsheet has room for a percent).
  * An office viewer the owner hasn't shared the owner's money with gets the headings and the cost rows.
  */
-export function summaryLines(opts: { hasOtherIncome: boolean; showOwner: boolean; ownerBuildTime?: boolean; ownerDraw?: boolean }): PnlLine[] {
+export function summaryLines(opts: { hasOtherIncome: boolean; showOwner: boolean; ownerBuildTime?: boolean; ownerDraw?: boolean; ownerMoneyIn?: boolean }): PnlLine[] {
   return pnlLines({
     otherIncome: opts.hasOtherIncome,
     margin: true,
     showOwner: opts.showOwner,
     ownerBuildTime: opts.ownerBuildTime,
     ownerDraw: opts.ownerDraw,
+    ownerMoneyIn: opts.ownerMoneyIn,
   });
 }
 
@@ -501,7 +507,11 @@ function summaryTab(
   // and nothing else - so a company that has not sorted a bank download got a Summary with no equity
   // line, no zero and no disclosure, and an accountant could not tell a draw of nothing from a draw the
   // app cannot see. The note below the line says which it is.
-  const lines = summaryLines({ hasOtherIncome: hasOther, showOwner, ownerBuildTime: hasBuildTime, ownerDraw: showOwner });
+  // MONEY IN FROM THE OWNER (0376) is a row only when either column has some: the draw is the figure an
+  // accountant looks for every period, money in is the unusual direction, and hasOwnerMoneyIn is where
+  // that difference is written down. The note under the block says which lines are there.
+  const hasOwnerIn = hasOwnerMoneyIn(cur.totals, prev.totals);
+  const lines = summaryLines({ hasOtherIncome: hasOther, showOwner, ownerBuildTime: hasBuildTime, ownerDraw: showOwner, ownerMoneyIn: showOwner && hasOwnerIn });
   const moneyCols = (l: PnlLine): XlsxValue[] => {
     const now = l.cents(cur.totals) ?? 0;
     const before = l.cents(prev.totals) ?? 0;
@@ -554,7 +564,7 @@ function summaryTab(
     // WHAT THE EQUITY LINE IS, AND WHAT ITS FIGURE CAN SEE - and, when the figure is empty, that an empty
     // one is not a claim that nothing was drawn. Same words as the Net Profit card, same predicate.
     const drawn = hasOwnerDraw(cur.totals) ? "" : " Nothing this period that the app can see.";
-    rows.push(note(`${DRAW_NOTE} ${cur.ownerDrawSeen}${drawn}`));
+    rows.push(note([DRAW_NOTE, showOwner && hasOwnerIn ? OWNER_IN_NOTE : "", `${cur.ownerDrawSeen}${drawn}`].filter(Boolean).join(" ")));
   }
   if (showOwner) {
     // THE OWNER'S HOURS, AND WHICH OF THEM ARE BUILD TIME. His hours are never PAY - he is not on

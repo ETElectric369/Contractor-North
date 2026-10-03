@@ -36,8 +36,8 @@ const figures = (over: Partial<OwnerMoneyFigures> = {}): OwnerMoneyFigures => {
     crewPay: 1500,
     crewMileagePaid: 40,
     fuel: 300,
-    businessCosts: { Auto: 120, "Tools & Supplies": 80, "Phone & Office": 60, "Insurance & Licenses": 200, Fees: 45.5, Other: 10 },
-    businessCostsTotal: 515.5,
+    businessCosts: { Auto: 120, "Tools & Supplies": 80, "Phone & Office": 60, "Insurance & Licenses": 200, Fees: 45.5, Rent: 1120, Other: 10 },
+    businessCostsTotal: 1635.5,
     processorFees: 25,
     putOnShelf: 150,
     shopStockLost: 20,
@@ -52,6 +52,7 @@ const figures = (over: Partial<OwnerMoneyFigures> = {}): OwnerMoneyFigures => {
     ownerOfficeHours: 0,
     ownerUncostedBuildTimeHours: 0,
     ownerDraw: 0,
+    ownerMoneyIn: 0,
     ...over,
   };
   // The engine's own subtraction, so `left` is always what computeOwnerMoney would say for these lines.
@@ -85,6 +86,7 @@ describe("the layout: the accounting industry's words, in its order", () => {
       "Phone & Office",
       "Insurance & Licenses",
       "Fees",
+      "Rent",
       "Other",
       "Total Overhead",
       "Net Profit",
@@ -108,6 +110,7 @@ describe("the layout: the accounting industry's words, in its order", () => {
       "cost", // Phone & Office
       "cost", // Insurance & Licenses
       "cost", // Fees
+      "cost", // Rent
       "cost", // Other
       "total",
       "profit",
@@ -152,12 +155,12 @@ describe("the same dollars, in new places", () => {
     // 2,000 + 150 + 20 + 1,500 + 40: the job-side lines, and no bucket (Fuel moved out, 2026-09-30)
     expect(at(rows, "total_cogs").cents).toBe(371_000);
     expect(at(rows, "gross_profit").cents).toBe(1_000_000 - 371_000);
-    // 300 (Fuel) + 120 + 80 + 60 + 200 + 45.50 + 10: every bucket
-    expect(at(rows, "total_overhead").cents).toBe(81_550);
+    // 300 (Fuel) + 120 + 80 + 60 + 200 + 45.50 + 1,120 (Rent, 0376) + 10: every bucket
+    expect(at(rows, "total_overhead").cents).toBe(193_550);
     expect(at(rows, "net_profit").cents).toBe(Math.round(f.left * 100));
     // THE PARITY: Gross Profit less Total Overhead lands on the engine's net, to the cent.
     expect(at(rows, "gross_profit").cents! - at(rows, "total_overhead").cents!).toBe(at(rows, "net_profit").cents);
-    expect(at(rows, "net_profit").amount).toBe(5474.5);
+    expect(at(rows, "net_profit").amount).toBe(4354.5);
   });
 
   it("each cost line is the engine's own figure, and Fuel is the engine's Fuel line", () => {
@@ -239,6 +242,7 @@ describe("the owner's switch: an office viewer the owner hasn't shared Owner's D
       "Phone & Office",
       "Insurance & Licenses",
       "Fees",
+      "Rent",
       "Other",
     ]);
     expect(lines.every((l) => !l.ownerOnly)).toBe(true);
@@ -261,7 +265,7 @@ describe("the COGS/Overhead split is data (BUCKET_SECTION), not an if", () => {
   it("every bucket is Overhead (Erik moved Fuel there on 2026-09-30); each bucket is on the profit and loss exactly once", () => {
     expect(BUCKET_SECTION.Fuel).toBe("overhead");
     expect(bucketsIn("cogs")).toEqual([]);
-    expect(bucketsIn("overhead")).toEqual(["Fuel", "Auto", "Tools & Supplies", "Phone & Office", "Insurance & Licenses", "Fees", "Other"]);
+    expect(bucketsIn("overhead")).toEqual(["Fuel", "Auto", "Tools & Supplies", "Phone & Office", "Insurance & Licenses", "Fees", "Rent", "Other"]);
     const lines = pnlLines();
     for (const b of BUSINESS_COST_BUCKETS) {
       const mine = lines.filter((l) => l.key === `bucket:${b}`);
@@ -293,7 +297,7 @@ describe("the COGS/Overhead split is data (BUCKET_SECTION), not an if", () => {
   it("the sentences name the lines from the data", () => {
     expect(cogsWords()).toBe("Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099) and Crew Mileage Paid");
     expect(cogsWords({ stockInMaterials: true })).toBe("Materials & Bills, Stock Lost, Crew Pay (1099) and Crew Mileage Paid");
-    expect(overheadWords()).toBe("Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other");
+    expect(overheadWords()).toBe("Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees, Rent and Other");
   });
 
   /**
@@ -362,6 +366,9 @@ describe("on the engine's own figures, month by month: Net Profit is computeOwne
       noJob("p1", 95, "2026-09-01", "Phone & Office"),
       noJob("i1", 640, "2026-07-01", "Insurance & Licenses"),
       noJob("fe1", 35, "2026-09-02", "Fees"),
+      // RENT (0376): the storage unit. Without a row here the Rent line reads $0 and the parity check
+      // below would pass on a zero.
+      noJob("r1", 1120, "2026-08-05", "Rent"),
       noJob("o1", 19.5, "2026-09-09", ""),
     ],
     pos: [{ id: "po1", job_id: "j2", total: 240, status: "sent", ordered_at: "2026-09-10T18:00:00Z", created_at: "2026-09-10T18:00:00Z" }],
@@ -446,6 +453,8 @@ describe("the owner's build time: charged inside COGS, booked straight back, Net
   // which is the exact defect 0286 was written to fix.
   const on = figures({ ownerBuildTimeOnJobs: 2665, ownerOnSiteHours: 41 });
   const OPTS = { otherIncome: true, margin: true, ownerBuildTime: true, ownerDraw: true } as const;
+  /** 0376: with money in from the owner switched on as well - the equity section both ways. */
+  const BOTH = { ...OPTS, ownerMoneyIn: true } as const;
 
   it("NET PROFIT IS IDENTICAL, before he sets a rate and after", () => {
     const before = profitAndLoss(off, OPTS);
@@ -528,11 +537,47 @@ describe("the owner's build time: charged inside COGS, booked straight back, Net
     expect(at(huge, "total_overhead").cents).toBe(at(rows, "total_overhead").cents);
   });
 
+  /**
+   * 0376: MONEY IN FROM THE OWNER, the same section the other way.
+   *
+   * It had no word at all before, so the only place his own money could go was Other Income - which is
+   * INSIDE Revenue. That is the whole defect: Revenue, Gross Margin % and Net Profit each read high by
+   * every cent he put in. A positive line in the equity section is the fix, and it has to move nothing.
+   */
+  it("OWNER'S MONEY IN is below the line too, and adds nothing to Revenue or any total", () => {
+    const f = figures({ ownerMoneyIn: 7500, ownerDraw: 4000 });
+    const rows = profitAndLoss(f, BOTH);
+    const put = at(rows, "owner_money_in");
+    expect(put.label).toBe("Owner's Money In");
+    expect(put.cents).toBe(750_000);
+    expect(put.kind).toBe("equity");
+    expect(isBelowNetProfit(put.kind)).toBe(true);
+    expect(PNL_SECTION_SHAPE[put.section!].subtracted).toBe(false);
+    // BELOW THE BOTTOM LINE, and after the draw: the pair reads as one idea, the money out first.
+    const keys = rows.map((r) => r.key);
+    expect(keys.indexOf("owner_money_in")).toBeGreaterThan(keys.indexOf("net_profit"));
+    expect(keys.indexOf("owner_money_in")).toBeGreaterThan(keys.indexOf("owner_draw"));
+    // NOT REVENUE, and in no total: every figure above the line is the same as with the line switched off.
+    const off = profitAndLoss(f, OPTS);
+    for (const k of ["revenue", "other_income", "total_cogs", "gross_profit", "total_overhead", "net_profit"] as const) {
+      expect(at(rows, k).cents, k).toBe(at(off, k).cents);
+    }
+    expect(at(rows, "gross_margin").pct).toBe(at(off, "gross_margin").pct);
+    // And money in bigger than the whole of Revenue still adds nothing to it.
+    const huge = profitAndLoss(figures({ ownerMoneyIn: 999_999 }), BOTH);
+    expect(at(huge, "revenue").cents).toBe(at(off, "revenue").cents);
+    expect(at(huge, "net_profit").cents).toBe(at(off, "net_profit").cents);
+  });
+
   it("the office never sees the owner's build time, its contra, or his draw", () => {
     // profit-and-loss promises an office viewer nothing that is a subtraction away from a bottom line
     // they cannot see. A contra with no total to net it against would break that promise exactly.
     const office = pnlLines({ ...OPTS, showOwner: false }).map((l) => l.key);
-    for (const key of ["owner_build_time", "owner_build_time_contra", "owner_draw"]) expect(office, key).not.toContain(key);
+    const office2 = pnlLines({ ...BOTH, showOwner: false }).map((l) => l.key);
+    for (const key of ["owner_build_time", "owner_build_time_contra", "owner_draw", "owner_money_in"]) {
+      expect(office, key).not.toContain(key);
+      expect(office2, key).not.toContain(key);
+    }
   });
 
   it("the shape is typed: a section says where it sits and whether it is subtracted", () => {

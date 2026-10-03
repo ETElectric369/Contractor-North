@@ -28,6 +28,10 @@ export const BUSINESS_COST_BUCKETS = [
   "Phone & Office",
   "Insurance & Licenses",
   "Fees",
+  // RENT (0376): the shop, the yard, the storage unit. Erik's $1,120 rent cheque could only be filed
+  // as "Other" until now, so his profit and loss could not say the word — and for most trade
+  // businesses the place the van and the material live is one of the biggest overhead lines there is.
+  "Rent",
   "Other",
 ] as const;
 
@@ -65,6 +69,9 @@ export const BUCKET_SECTION: Record<BusinessCostBucket, BucketSection> = {
   "Phone & Office": "overhead",
   "Insurance & Licenses": "overhead",
   Fees: "overhead",
+  // RENT KEEPS RUNNING WHETHER THERE IS WORK ON OR NOT (0376), which is this file's own test, so
+  // Overhead. The unit is rented in a week with no jobs in the book exactly as in a full one.
+  Rent: "overhead",
   Other: "overhead",
 };
 

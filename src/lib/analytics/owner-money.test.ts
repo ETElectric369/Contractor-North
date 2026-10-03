@@ -1436,9 +1436,9 @@ describe("the owner's build time: on-site hours are a cost, office hours are ove
     profiles: withRate(pid, m),
   });
 
-  const run = (m: Map<string, OwnerMoneyPerson>, entries: any[], ownerDraws: any[] = []) =>
+  const run = (m: Map<string, OwnerMoneyPerson>, entries: any[], ownerDraws: any[] = [], ownerMoneyIn: any[] = []) =>
     computeOwnerMoney(
-      { ...base(), people: m, payments: [{ amount: 10_000, paid_at: "2026-08-10T18:00:00.000Z", invoices: { status: "paid" } }], entries, ownerDraws },
+      { ...base(), people: m, payments: [{ amount: 10_000, paid_at: "2026-08-10T18:00:00.000Z", invoices: { status: "paid" } }], entries, ownerDraws, ownerMoneyIn },
       YEAR,
       TZ,
       TODAY,
@@ -1511,10 +1511,52 @@ describe("the owner's build time: on-site hours are a cost, office hours are ove
     expect(withDraw.businessCostsTotal).toBe(without.businessCostsTotal);
   });
 
+  /**
+   * 0376: MONEY IN FROM THE OWNER. Before the word existed his own money could only be filed as Other
+   * Income, which is inside Revenue - so Revenue, Gross Margin % and the bottom line all read high by
+   * every cent of it. These are the three things that must be true of the new figure: it is counted, it
+   * is NOT Revenue, and it changes nothing above the bottom line.
+   */
+  it("MONEY IN FROM THE OWNER is counted, is not Revenue, and moves no total", () => {
+    const moneyIn = [
+      { id: "o1", amount: 4000, posted_on: "2026-08-20" },
+      { id: "o2", amount: 1250.25, posted_on: "2026-09-04" },
+    ];
+    const withIn = run(erikCosted, bothHalves(erikCosted), [], moneyIn).totals;
+    const without = run(erikCosted, bothHalves(erikCosted)).totals;
+    expect(withIn.ownerMoneyIn).toBe(5250.25);
+    expect(without.ownerMoneyIn).toBe(0);
+    // NOT REVENUE, and not a cost either: every figure above the bottom line is identical to the cent.
+    expect(withIn.received).toBe(without.received);
+    expect(withIn.otherIncome ?? 0).toBe(without.otherIncome ?? 0);
+    expect(withIn.left).toBe(without.left);
+    expect(withIn.materialsAndBills).toBe(without.materialsAndBills);
+    expect(withIn.businessCostsTotal).toBe(without.businessCostsTotal);
+    // And it does not borrow the draw's figure, nor the draw his.
+    expect(withIn.ownerDraw).toBe(0);
+    const both = run(erikCosted, bothHalves(erikCosted), [{ id: "d1", amount: -2000, posted_on: "2026-08-15" }], moneyIn).totals;
+    expect([both.ownerDraw, both.ownerMoneyIn]).toEqual([2000, 5250.25]);
+  });
+
+  it("the owner's money in lands in the month it posted, so the months add to the total", () => {
+    const m = run(erikCosted, bothHalves(erikCosted), [], [
+      { id: "o1", amount: 4000, posted_on: "2026-08-20" },
+      { id: "o2", amount: 1250.25, posted_on: "2026-09-04" },
+    ]);
+    const aug = m.months.find((x) => x.month === "2026-08")!;
+    const sep = m.months.find((x) => x.month === "2026-09")!;
+    expect([aug.ownerMoneyIn, sep.ownerMoneyIn]).toEqual([4000, 1250.25]);
+    expect(m.months.reduce((t, x) => t + Math.round(x.ownerMoneyIn * 100), 0)).toBe(Math.round(m.totals.ownerMoneyIn * 100));
+  });
+
   it("it says which draws it can see, because it cannot see cash", () => {
     const m = run(erikCosted, bothHalves(erikCosted), [{ id: "d1", amount: -2000, posted_on: "2026-08-15" }]);
     expect(m.ownerDrawSeen).toBe(OWNER_DRAW_SEEN);
-    expect(m.ownerDrawSeen).toMatch(/Cash you took without a bank line is not in it/);
+    expect(m.ownerDrawSeen).toMatch(/Cash you took or put in without a bank line is not in it/);
+    // ONE SOURCE, BOTH DIRECTIONS (0376): the sentence has to name money in from the owner too, or the
+    // new line's figure would carry no disclosure at all while sitting under the same rule.
+    expect(m.ownerDrawSeen).toMatch(/Owner's Draw/);
+    expect(m.ownerDrawSeen).toMatch(/Owner's Money In/);
   });
 
   /**

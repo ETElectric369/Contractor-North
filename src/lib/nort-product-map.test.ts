@@ -101,7 +101,7 @@ describe("Nort's product map after the shell wave", () => {
       "Cost of Goods Sold (COGS): Materials & Bills, Stock Lost, Crew Pay (1099) and Crew Mileage Paid",
       "Total COGS",
       "Gross Profit and Gross Margin %",
-      "Overhead: Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other",
+      "Overhead: Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees, Rent and Other",
       "Total Overhead",
       "Net Profit, before income tax",
     ]) {
