@@ -31,6 +31,7 @@ import {
   type BillFingerprint,
 } from "@/lib/supplier-identity";
 import { paperDisagrees } from "@/lib/supplier-owed";
+import { jobSaidLabel } from "@/lib/job-pick-label";
 import {
   candidateMoving,
   supplierCandidateQuestions,
@@ -108,7 +109,10 @@ export interface NameWorkBill {
   supplier_invoice_number?: string | null;
   superseded_by_bill_id?: string | null;
   notes?: string | null;
-  jobs?: { name?: string | null } | null;
+  /** The job's own row. `job_number` and `customers(name)` are read ONLY to name a job in full
+   *  (jobSaidLabel) for a sentence read away from the job; a read that does not select them gets a
+   *  shorter name, never a wrong one. */
+  jobs?: { name?: string | null; job_number?: string | null; customers?: { name?: string | null } | { name?: string | null }[] | null } | null;
   /** `bills.category`: what the expense is filed as. Blank is the only "unclear" a bill can carry. */
   category?: string | null;
   /** Sorted or not, it is only ever counted and read for descriptions here. */
@@ -475,10 +479,16 @@ export function duplicateTicketGroups(input: {
     const ids = d.bills.map((b) => String(b.id));
     const copies = ids.map((id) => {
       const row = billById.get(id);
+      const j = row?.jobs ?? null;
+      const who = Array.isArray(j?.customers) ? (j?.customers[0]?.name ?? null) : (j?.customers?.name ?? null);
       return {
         billId: id,
         jobId: row?.job_id ?? null,
-        jobName: row?.jobs?.name ?? null,
+        jobName: j?.name ?? null,
+        // THE JOB SAID IN FULL, by the one function that decides how a job is named (jobSaidLabel):
+        // the place, the number and who. Null on a paper with no job, so a caller says "no job" in its
+        // own words rather than printing an empty name.
+        jobSaid: row?.job_id ? jobSaidLabel({ job_number: j?.job_number ?? null, name: j?.name ?? null, customer: who }) : null,
         billDate: row?.bill_date ?? null,
         supplier: String(row?.supplier ?? ""),
         // Where it came from, in the importer's own words: the portal filename, or whatever he

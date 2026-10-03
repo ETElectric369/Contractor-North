@@ -365,6 +365,9 @@ export type BringInOutcome = {
     skipped_claimed?: number;
     claimed_on?: string[];
     warnings?: string[];
+    /** Tickets on this invoice also filed on another job (2026-10-03): the count that arms the door to
+     *  the picker. The sentences themselves are in `warnings`, like everything else to look at. */
+    same_ticket_two_jobs?: number;
   };
 };
 

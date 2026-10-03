@@ -131,7 +131,7 @@ function isMissingColumn(err: unknown): boolean {
  */
 async function readBillsWithLines(supabase: any, orgId: string) {
   const columns = (supersede: boolean) =>
-    `id, supplier, supplier_account_id, amount, status, bill_date, job_id, category, notes, supplier_invoice_number${supersede ? ", superseded_by_bill_id" : ""}, jobs(name), bill_line_items(description)`;
+    `id, supplier, supplier_account_id, amount, status, bill_date, job_id, category, notes, supplier_invoice_number${supersede ? ", superseded_by_bill_id" : ""}, jobs(job_number, name, customers(name)), bill_line_items(description)`;
   const read = (supersede: boolean) =>
     supabase.from("bills").select(columns(supersede)).eq("org_id", orgId).order("created_at", { ascending: false }).limit(5000);
   const first = await read(true);

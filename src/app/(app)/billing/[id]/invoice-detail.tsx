@@ -489,6 +489,13 @@ export function InvoiceDetail({
   const [importMsg, setImportMsg] = useState<string | null>(null);
   /** Money the last import left for a person to decide (an edited tax row behind its parts). */
   const [importWarn, setImportWarn] = useState<string | null>(null);
+  /**
+   * A TICKET ON THIS INVOICE THAT IS ALSO FILED ON ANOTHER JOB (2026-10-03). The sentence rides in
+   * `importWarn` with everything else to look at before sending; this arms the DOOR beside it, because a
+   * question asked with nowhere to answer it is the dead end. The pick happens on Reconcile, which owns
+   * that record — a link, not a second copy of the control (nav doctrine).
+   */
+  const [twoJobTickets, setTwoJobTickets] = useState(0);
   /** Imports that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
    *  Naming each source arms its "Start It Over" beside the message (0204). */
   const [stuckSources, setStuckSources] = useState<("labor" | "costs" | "quote" | "change_orders")[]>([]);
@@ -558,6 +565,7 @@ export function InvoiceDetail({
     }
     setImportMsg(null);
     setImportWarn(null);
+    setTwoJobTickets(0);
     setStuckSources([]);
     start(async () => {
       const res = await fn(invoice.id);
@@ -601,6 +609,7 @@ export function InvoiceDetail({
       // import, because a toast is gone before a sentence with two dollar figures can be read.
       const warn = (st?.warnings ?? []).join(". ");
       setImportWarn(warn || null);
+      setTwoJobTickets(st?.same_ticket_two_jobs ?? 0);
       // A money warning is not good news: it rides an info toast, never the green one.
       toast(`${said ? `${label}: ${said}` : `${label} imported`}${warn ? `. ${warn}` : ""}`, warn ? "info" : "success");
       setTimeout(() => setImportMsg(null), 5000);
@@ -644,6 +653,7 @@ export function InvoiceDetail({
     }
     setImportMsg(null);
     setImportWarn(null);
+    setTwoJobTickets(0);
     setStuckSources([]);
     start(async () => {
       const outcomes: BringInOutcome[] = [];
@@ -667,6 +677,7 @@ export function InvoiceDetail({
       // old markup. The warning rides in the toast, and stays under the button until the next run.
       const warn = said.warnings.join(". ");
       setImportWarn(warn || null);
+      setTwoJobTickets(outcomes.reduce((n, o) => n + (o.stats?.same_ticket_two_jobs ?? 0), 0));
       toast(`${said.sentence}${warn ? ` ${warn}.` : ""}`, said.partial ? "info" : "success");
       setTimeout(() => setImportMsg(null), 8000);
       refresh();
@@ -1102,6 +1113,14 @@ export function InvoiceDetail({
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
             {importWarn && <span className="text-xs text-amber-700">{importWarn}.</span>}
+            {/* THE DOOR THE QUESTION NEEDS. The sentence names the other job; the pick is made where that
+                record lives, so this is a LINK and not a second copy of the picker. Without it the
+                warning would be a question with nowhere to answer it. */}
+            {twoJobTickets > 0 && (
+              <Link href="/reconcile#same-ticket-two-jobs" className="inline-flex min-h-11 items-center text-xs font-medium text-brand underline">
+                {twoJobTickets === 1 ? "Pick Which Job The Ticket Is On" : "Pick Which Job Each Ticket Is On"}
+              </Link>
+            )}
             {/* START IT OVER IS STILL DRAFT-ONLY, AND THAT ONE IS NOT OURS TO OPEN. Its refusal
                 lives inside the SECURITY DEFINER function reset_import_source (migrations
                 0204/0212/0223), which still raises on a non-draft invoice in a Postgres voice no
