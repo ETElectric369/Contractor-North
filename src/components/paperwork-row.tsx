@@ -548,7 +548,8 @@ export function PaperworkRow({
     );
   }
 
-  // A SUPPLIER'S OPEN LIST is one sentence and Apply / Not Now; nothing else on this row applies.
+  // A SUPPLIER'S OPEN LIST is one sentence and the card's own doors (Apply, and Not Now / Delete from
+  // NotNowOrDelete); nothing else on this row applies, which is why it draws no ⋯ menu.
   if (r.state === "open_list") {
     return (
       <Card className="border-brand/30">

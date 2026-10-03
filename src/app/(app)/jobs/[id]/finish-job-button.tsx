@@ -100,11 +100,16 @@ export function FinishJobButton({
         router.push(`/billing/${res.id}`);
         return;
       }
-      // Finished, but the email did NOT go out (no customer email, nothing billable, or sending
-      // isn't enabled yet). Said, never pretended.
+      // Finished, but the email did NOT go out. Said, never pretended — and said for the right reason:
+      // this line used to blame a missing customer email for every case, including the one where the
+      // SERVER held the send back because a money question is waiting on the draft (finishJob skips the
+      // email on a partial import). `res.warning` IS that question, so when it is there the sentence
+      // names it instead of sending him to check an email address that is perfectly fine.
       const notSent =
         wantSend && !res.sent
-          ? "The invoice wasn't emailed — the customer may have no email on file, or there was nothing billable to send. It's saved as a draft for you to review and send."
+          ? res.warning
+            ? "It wasn't emailed: there's a question above waiting on the draft. Answer that, then send it from the invoice."
+            : "The invoice wasn't emailed — the customer may have no email on file, or there was nothing billable to send. It's saved as a draft for you to review and send."
           : undefined;
       setDone({ id: res.id, speak: res.speak ?? "Job finished.", warning: [res.warning, notSent].filter(Boolean).join(" ") || undefined });
       router.refresh();

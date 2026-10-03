@@ -266,7 +266,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // One downloaded PDF is routinely several invoices - his 07-11 file holds four - so every source
   // is read for ALL the documents in it.
   const parsed = new Map<string, { invoice: CedInvoice; sourceFile: string | null; source: number }>();
-  /** Sources that were a supplier's statement or open list, sent to Needs You instead. */
+  /** Sources that were a supplier's statement or open list: they wait on Reconcile instead. */
   const lists: string[] = [];
   for (const [sourceIndex, source] of sources.entries()) {
     const results = parseCedDocuments(source.text);

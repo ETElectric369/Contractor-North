@@ -165,6 +165,9 @@ export function rememberedFor(
     if (!columns) return null;
     const read = readOpenListTable({
       table: needs.raw,
+      // The block a PDF's crop took off rides along here too, or a remembered column set would re-read
+      // the table and lose the paper's own date all over again.
+      heading: needs.heading ?? [],
       from: needs.from,
       name: needs.name,
       listDate: needs.listDate,
@@ -191,7 +194,10 @@ export type ViewContext = { accounts: SupplierAccountLite[]; papers: OpenListPap
 
 export function viewOf(stored: StoredOpenList, ctx: ViewContext, suggestedAccountId: string | null = null): OpenListView {
   const accounts = ctx.accounts.map((a) => ({ id: a.id, name: a.name }));
-  const base = { accounts, needs: null, plan: null, suggestedAccountId } as const;
+  // WHAT AN APPLY ON THIS LIST ALREADY WROTE, for the card's Delete confirm: Delete runs the Undo first,
+  // so on a card left on screen from before an Apply in another tab it takes those papers back.
+  const appliedPapers = (stored.applied?.added?.length ?? 0) + (stored.applied?.changed?.length ?? 0);
+  const base = { accounts, needs: null, plan: null, suggestedAccountId, appliedPapers } as const;
   if (!stored.list && stored.needs) {
     const n = stored.needs;
     const width = Math.max(0, ...n.raw.map((r) => r.length));

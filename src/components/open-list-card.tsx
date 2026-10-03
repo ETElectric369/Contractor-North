@@ -68,7 +68,25 @@ export function OpenListCard({
   // PUT IT AWAY OR BIN IT, with where it goes said on the card (NotNowOrDelete, 2026-10-03). Erik
   // dropped a statement, wanted to bin it, and could not: this row offered Apply and Not Now and no
   // menu at all, and Not Now archived it without a word about where it went.
-  const notNow = <NotNowOrDelete itemId={itemId} what="supplier's list" label="Not Now" run={run} working={working} />;
+  //
+  // AND DELETE SAYS WHAT COMES OFF THE BOOKS (review, 2026-10-03). `deleteOrganizedItem` runs the Undo
+  // first, so on a card left on screen from before an Apply in another tab Delete takes those papers
+  // back — while the one fixed confirm said "nothing it would have changed is written".
+  const appliedPapers = view?.appliedPapers ?? 0;
+  const notNow = (
+    <NotNowOrDelete
+      itemId={itemId}
+      what="supplier's list"
+      label="Not Now"
+      alsoTakesBack={
+        appliedPapers > 0
+          ? `the ${appliedPapers === 1 ? "1 paper" : `${appliedPapers} papers`} an Apply on this list already wrote or marked paid go back as they were`
+          : null
+      }
+      run={run}
+      working={working}
+    />
+  );
 
   if (!view) {
     return (

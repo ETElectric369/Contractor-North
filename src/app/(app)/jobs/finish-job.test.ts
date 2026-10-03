@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * FINISH JOB SAYS THE TRUTH, AND ON A T&M JOB IT BUILDS THE FINAL.
@@ -26,6 +28,8 @@ const state = vi.hoisted(() => ({
   drawDoor: vi.fn(),
   blankInvoice: vi.fn(),
   emailInvoice: vi.fn(),
+  /** The materials import, so a test can hand back the money warning a real one raises. */
+  importCosts: vi.fn(),
 }));
 
 vi.mock("@/lib/staff-guard", () => ({
@@ -54,7 +58,7 @@ vi.mock("../billing/actions", () => ({
   createInvoiceFromQuote: vi.fn(),
   createBlankInvoice: state.blankInvoice,
   importLaborIntoInvoice: vi.fn(async () => ({ ok: false, empty: true })),
-  importCostsIntoInvoice: vi.fn(async () => ({ ok: false, empty: true })),
+  importCostsIntoInvoice: state.importCosts,
   importChangeOrdersIntoInvoice: vi.fn(async () => ({ ok: false, empty: true })),
   createProgressReportInvoice: state.drawDoor,
   emailInvoice: state.emailInvoice,
@@ -118,6 +122,8 @@ beforeEach(() => {
   state.drawDoor.mockReset();
   state.blankInvoice.mockReset();
   state.emailInvoice.mockReset();
+  state.importCosts.mockReset();
+  state.importCosts.mockResolvedValue({ ok: false, empty: true });
 });
 
 describe("finishJob on a FIXED-PRICE job billed with progress payments (unchanged)", () => {
@@ -288,6 +294,67 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     expect(res).toMatchObject({ ok: true, id: "inv-083", sent: false, final: true });
     expect(res.speak).toBe("Job finished. Started INV-083 for $2,437.50 of work not yet billed. Review it, then Send.");
     expect(state.emailInvoice).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ── FINISH & SEND DOES NOT SEND OVER A MONEY QUESTION (review, 2026-10-03) ────────────────────
+ *
+ * The press emailed the invoice in the SAME server call that built it, and `inv.partial` — every money
+ * warning the import raised — was first read AFTER the email had gone. So "pick which job it belongs
+ * to on Reconcile before you send this" landed in the done panel about a bill already in the customer's
+ * inbox. Do it on J-046 and again on J-102 and that is $221.43 collected for one $95.27 purchase, with
+ * the new check computed and thrown away. This is the standard-invoice path: a T&M Final is never sent.
+ */
+describe("Finish & Send Invoice on a plain fixed-price job", () => {
+  beforeEach(() => {
+    state.billingType = "fixed";
+    state.draws = []; // no progress payments: finishing bills a standard invoice
+    state.blankInvoice.mockResolvedValue({ ok: true, id: "inv-091" });
+  });
+
+  const TICKET_ON_TWO_JOBS =
+    "The same $95.27 Halverson Electric Supply ticket is also on 4 Bramble Lane · J-102 — Remy Dunsmore. " +
+    "If that was one trip, pick which job it belongs to on Reconcile before you send this";
+
+  it("a ticket on two jobs: the draft is built, the job is finished, and NOTHING is emailed", async () => {
+    state.importCosts.mockResolvedValue({ ok: true, stats: { pulled_in: 1, warnings: [TICKET_ON_TWO_JOBS] } });
+    const res = await finishJob(JOB, { sendInvoice: true });
+    expect(res.ok).toBe(true);
+    expect(res.id).toBe("inv-091");
+    // THE WHOLE POINT: the question is asked while it is still free to answer.
+    expect(state.emailInvoice).not.toHaveBeenCalled();
+    expect(res.sent).toBe(false);
+    expect(res.warning).toContain("pick which job it belongs to on Reconcile before you send this");
+    // The job is still finished and the draft still exists: nothing is lost, Send is one press away.
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
+  });
+
+  it("an import that could not be pulled in is not sent either — every money warning holds the send", async () => {
+    state.importCosts.mockResolvedValue({ ok: false, error: "bills read failed" });
+    const res = await finishJob(JOB, { sendInvoice: true });
+    expect(res.ok).toBe(true);
+    expect(state.emailInvoice).not.toHaveBeenCalled();
+    expect(res.sent).toBe(false);
+    expect(res.warning).toMatch(/review the line items before sending/);
+  });
+
+  it("nothing to look at: the press still sends, exactly as it always did", async () => {
+    state.importCosts.mockResolvedValue({ ok: true, stats: { pulled_in: 2 } });
+    state.emailInvoice.mockResolvedValue({ ok: true });
+    const res = await finishJob(JOB, { sendInvoice: true });
+    expect(res.ok).toBe(true);
+    expect(state.emailInvoice).toHaveBeenCalledWith("inv-091");
+    expect(res.sent).toBe(true);
+    expect(res.warning).toBeUndefined();
+  });
+
+  it("the button blames the question, not the customer's email address", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/finish-job-button.tsx"), "utf8");
+    expect(src).toContain("there's a question above waiting on the draft");
+    // The old copy is kept for the case it is actually about, and only then.
+    expect(src).toContain("the customer may have no email on file");
+    expect(src).toContain("res.warning\n            ?");
   });
 });
 

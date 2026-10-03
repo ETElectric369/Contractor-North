@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { countDoors, doorsIn, sectionOf, textOf } from "@/test/rendered-page";
 import { answeredOnReconcile } from "@/lib/paperwork";
@@ -172,6 +174,45 @@ describe("which screen answers a paper is one rule", () => {
   it("a paper already filed is answered nowhere", () => {
     expect(answeredOnReconcile(item({ openList: STORED_LIST }, { status: "filed" }))).toBe(false);
   });
+
+  /**
+   * ── AND BOTH PAGES READ THE SAME WINDOW OF THE TRAY (review, 2026-10-03) ────────────────────
+   *
+   * The rule was shared and the window was not: Bills read the 200 newest waiting papers and counted
+   * every statement among them as "A Statement Is Waiting On Reconcile", while this page read the 100
+   * newest papers of EVERY kind and only then filtered. With more than a hundred newer notes, receipts
+   * and pictures in the tray, a statement at rank 101–200 was pointed at by Bills and drawn by neither
+   * page — answerable nowhere, where before this release Bills answered it itself.
+   */
+  it("the Bills pointer can never outrun the page it points at", () => {
+    const here = readFileSync(join(process.cwd(), "src/app/(app)/reconcile/statement-cards.ts"), "utf8");
+    const bills = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
+    // ONE NUMBER, in the file that holds the rule, read by both — never a literal on either page.
+    expect(here).toContain(".limit(TRAY_WINDOW)");
+    expect(bills).toContain(".limit(TRAY_WINDOW)");
+    expect(here).toMatch(/import \{[^}]*TRAY_WINDOW[^}]*\} from "@\/lib\/paperwork"/);
+    expect(bills).toMatch(/import \{[^}]*TRAY_WINDOW[^}]*\} from "@\/lib\/paperwork"/);
+    expect(here).not.toMatch(/\.limit\(\d+\)/);
+    // And Bills' own count of what is "elsewhere" comes off that same read.
+    expect(bills).toContain("const statementsElsewhere = trayPapers.length - papers.length;");
+  });
+
+  /**
+   * ── AND MY DAY'S OWN ROW OPENS THE PAGE THAT ANSWERS IT (review, 2026-10-03) ─────────────────
+   *
+   * "Bank Download To Sort" still opened /bills#sort-these — a Needs You card whose only content about a
+   * download is a pointer line — so Open landed him one tap short of the thing he tapped for. Erik, in
+   * this repo's own comments: "i dont want people to have to jump on a merry go round to do shit." Every
+   * viewer who sees the row can open Reconcile: both gates are `isStaffRole`, and the row needs
+   * `viewerSortsBank` on top of that.
+   */
+  it("My Day's Bank Download row lands on Reconcile, not on the pointer", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
+    expect(src).toContain('href: bank ? "/reconcile#bring-in-a-statement" : tray ? "/bills#sort-these" : "/organize",');
+    expect(src).not.toContain('href: bank || tray ? "/bills#sort-these" : "/organize",');
+    // The anchor it lands on really is drawn on the page, for every staff viewer.
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8")).toContain('id="bring-in-a-statement"');
+  });
 });
 
 describe("the statement he dropped is answered on the page he dropped it on", () => {
@@ -210,6 +251,37 @@ describe("the statement he dropped is answered on the page he dropped it on", ()
       expect(textOf(sectionOf(quiet, "reconcile-lead"))).toContain("Nothing here is waiting on you");
       expect(countDoors(doorsIn(quiet), "Apply")).toBe(0);
       expect(textOf(sectionOf(quiet, "bring-in-a-statement"))).toContain("Whatever you drop waits here on its own card");
+    } finally {
+      CURRENT = TABLES;
+    }
+  });
+
+  /**
+   * ── THE DONE TRAIL SURVIVES THE LAST STATEMENT (review, 2026-10-03) ─────────────────────────
+   *
+   * PaperworkList keeps the done trail — the green sentence and its Undo — in its OWN useState, and the
+   * page used to swap the whole list out for a quiet paragraph the moment the last statement was
+   * answered. He presses Apply, `router.refresh()` returns no statements, the arm flips, the list
+   * unmounts and the trail goes with it: an Apply that marked 23 papers paid lost its in-page Undo after
+   * ten seconds of toast, and Not Now "vanished" with no lasting word on the page — the very complaint
+   * this release answers. NeedsYou on Bills already solved this and says so in its own comment ("a card
+   * just answered keeps its Undo"); this page reused the list without the keep-alive.
+   *
+   * THE CURE IS THE LIST'S OWN `empty` PROP, so there is one mount in one place and no state to lose.
+   */
+  it("the list is mounted even with nothing waiting, so a card just answered keeps its Undo", async () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8");
+    // The quiet sentence is the list's `empty`, never a sibling branch that replaces the list.
+    expect(src).toContain("empty={<p className=\"text-sm text-slate-600\">Whatever you drop waits here on its own card.</p>}");
+    expect(src).not.toMatch(/statementsWaiting > 0 \?/);
+    // Only the "waiting on you" intro is conditional.
+    expect(src).toContain("{statementsWaiting > 0 && (");
+    CURRENT = { ...TABLES, organized_items: [] };
+    try {
+      const quiet = await render();
+      // The list really renders with nothing in it: its own empty text, inside the card.
+      expect(textOf(sectionOf(quiet, "bring-in-a-statement"))).toContain("Whatever you drop waits here on its own card");
+      expect(textOf(sectionOf(quiet, "bring-in-a-statement"))).not.toContain("waiting on you");
     } finally {
       CURRENT = TABLES;
     }

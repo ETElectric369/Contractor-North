@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { parseCSV } from "@/lib/csv";
+import { buildXlsx } from "@/lib/xlsx-write";
+import { readXlsx } from "@/lib/xlsx-read";
 import { closeCutoff, readOpenListTable, reconcileOpenList, tableStatementDate, type OpenListPaper } from "@/lib/supplier-open-list";
 
 /**
@@ -80,6 +83,58 @@ describe("the date a statement calls its own", () => {
   it("never takes a date from a row below the headings: a download with no heading block prints no date", () => {
     expect(tableStatementDate(parseCSV(PLAIN_DOWNLOAD), 0)).toBeNull();
   });
+
+  /**
+   * ── THE LABEL IS RARELY THE FIRST CELL OF ITS ROW (review, 2026-10-03) ──────────────────────
+   *
+   * This read each heading row with its blanks dropped and JOINED, against a pattern anchored at the
+   * start of the line, so any cell to the LEFT of the label hid it. On a PDF every mark on one y-line
+   * is one row (pdf-table rowsOf), so the letterhead or the bill-to address sitting on the same line as
+   * the DATE box is the ordinary case — and the date fell back to the file's save day, which is the
+   * whole $9,410.92 harm. Every shape below returned null before the cells were scanned.
+   */
+  it("finds the day when the letterhead sits to the LEFT of the DATE box", () => {
+    expect(tableStatementDate([["ET ELECTRIC 123 MAIN ST", "DATE", "09/25/26"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
+  });
+
+  it("finds the day when two label/value pairs share one row", () => {
+    expect(tableStatementDate([["Account No: 55012", "Statement Date: 09/25/26"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
+  });
+
+  it("finds the day in a labels row whose values sit under it, with a cell to the left of the labels", () => {
+    const rows = [
+      ["4120 HARROW ROAD", "ACCOUNT", "DATE", "PAGE"],
+      ["SPRINGVALE", "AC-55012", "09/25/26", "1"],
+      ["Reference", "Amount", "Open Balance"],
+    ];
+    expect(tableStatementDate(rows, 2)).toBe("2026-09-25");
+  });
+
+  it("reads an 'as of' title cell, wherever the words sit in it", () => {
+    expect(tableStatementDate([["Statement as of 09/25/26"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
+    expect(tableStatementDate([["Open Items As Of 09/25/26"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
+  });
+
+  /** A paper that prints both gives the one it calls its OWN, never the other date box beside it. */
+  it("prefers STATEMENT DATE over a bare DATE printed in the same block", () => {
+    const rows = [
+      ["DATE PRINTED", "11/02/26", "Statement Date", "09/25/26"],
+      ["Reference", "Amount", "Open Balance"],
+    ];
+    expect(tableStatementDate(rows, 1)).toBe("2026-09-25");
+  });
+
+  /**
+   * ── AN .xlsx DATE CELL IS A NUMBER (review, 2026-10-03) ────────────────────────────────────
+   *
+   * `readXlsx` reads no styles.xml, so a cell Excel holds as a real date comes up as its serial day
+   * count ("46290"). The row date columns already pass `serialOk`; these heading reads did not, so an
+   * .xlsx statement whose DATE cell is a genuine date behaved exactly as it did before this shipped.
+   */
+  it("reads an Excel date serial beside, and under, the word DATE", () => {
+    expect(tableStatementDate([["DATE", "46290"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
+    expect(tableStatementDate([["DATE", "ACCOUNT", "PAGE"], ["46290", "1234567", "1"], ["Reference", "Amount", "Open Balance"]], 2)).toBe("2026-09-25");
+  });
 });
 
 describe("the printed date beats the file's save timestamp", () => {
@@ -123,6 +178,51 @@ describe("the printed date beats the file's save timestamp", () => {
     if (!read.ok) throw new Error("the statement did not read as a list");
     expect(read.list.listDate).toBe("2026-10-01");
     expect(read.list.listDateFrom).toBe("file");
+  });
+});
+
+/**
+ * ── A REAL .xlsx, BUILT AND READ BY THIS REPO'S OWN TWO HALVES ─────────────────────────────────
+ *
+ * Not a hand-typed table of strings: the workbook is written with `buildXlsx` (its DATE cell a genuine
+ * Excel date) and read back with `readXlsx`, which is what the browser does at the drop. The reader
+ * loads no styles.xml, so the cell arrives as "46290" — and that is the shape the heading reads were
+ * blind to, with the file's November save day left standing on a statement printed in September.
+ */
+describe("an .xlsx statement whose DATE cell is a real Excel date", () => {
+  const deflate = (b: Uint8Array) => new Uint8Array(deflateRawSync(b));
+  const inflate = (b: Uint8Array, maxBytes: number) => new Uint8Array(inflateRawSync(b, { maxOutputLength: maxBytes + 1 }));
+  const cells = (c: (string | number | { date: string })[]) => ({ cells: c });
+
+  const workbook = () =>
+    buildXlsx(
+      [
+        {
+          name: "Statement",
+          rows: [
+            cells(["HALVERSON ELECTRIC SUPPLY"]),
+            cells(["DATE", { date: "2026-09-25" }]),
+            cells(["ACCOUNT", "AC-55012"]),
+            cells(["Reference", "Type", "Inv Date", "Amount", "Open Balance"]),
+            cells(["7701-220114", "Invoice", "09/08/26", 412.5, 412.5]),
+            cells(["7701-220486", "Invoice", "09/19/26", 188.04, 188.04]),
+          ],
+        },
+      ],
+      { deflate },
+    );
+
+  it("hands the date cell up as its serial, and the statement still dates itself September", async () => {
+    const read = await readXlsx(workbook(), inflate, "Statement.xlsx");
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    // The reader really does hand up a number: this is the fact the heading reads have to cope with.
+    expect(read.rows[1]).toEqual(["DATE", "46290"]);
+    const list = readOpenListTable({ table: read.rows, from: "file", name: "Statement.xlsx", listDate: FILE_SAVED, listDateFrom: "file" });
+    if (!list.ok) throw new Error("the workbook did not read as a list");
+    expect(list.list.listDate).toBe("2026-09-25");
+    expect(list.list.listDateFrom).toBe("printed");
+    expect(closeCutoff(list.list)).toBe("2026-09-19");
   });
 });
 

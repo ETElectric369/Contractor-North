@@ -101,7 +101,7 @@ export function BankDropLine() {
       // may read, with four of its lines sampled onto the card — so `expect: "bank"` had been the
       // only thing refusing it here. The refusal is now `unreadBankTable` inside addOpenList, where
       // every door gets it, because this door cannot tell the two files apart and nor could the next.
-      const added = await addOpenList({ name: file.name || "Statement", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop", pdf: read.pdf });
+      const added = await addOpenList({ name: file.name || "Statement", sha256: sha, table: read.table, heading: read.heading, listDate: read.listDate, source: "bills_drop", pdf: read.pdf });
       if (!added.ok) return setSaid({ text: added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), ok: !!added.already });
       setSaid({ text: added.line ?? "Waiting below.", ok: true, waiting: true });
       router.refresh();

@@ -381,7 +381,11 @@ function useBillIt(jobId: string) {
       // what's new since INV-061…") goes in front of the person BEFORE the redirect; it knows
       // the count, this card doesn't. `partial` = something did NOT happen (an import failed) —
       // that is a heads-up, not a receipt, and its tone says so.
-      if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info");
+      //
+      // AND A HEADS-UP IS STICKY (review, 2026-10-03): this raised the sentence and then changed the
+      // route under it, so a money question with two dollar figures in it had five seconds while the
+      // draft was still loading. Nothing is lost by making him dismiss it.
+      if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info", undefined, res.partial ? { sticky: true } : undefined);
       router.push(`/billing/${res.id}`);
     });
   }

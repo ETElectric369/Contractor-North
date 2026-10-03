@@ -9,7 +9,8 @@ import { sayDollars } from "@/lib/supplier-open-list";
 import type { BankRowView, BankView, FlowSegment } from "@/lib/bank-download";
 import type { MoneyInChannels } from "@/lib/bank-money-in";
 import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
-import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
+// Putting the paper away goes through NotNowOrDelete, which owns both that write and Delete's confirm:
+// this card no longer calls keepPaperwork itself, so there is one put-away door per state and not two.
 import { NotNowOrDelete } from "@/components/not-now-or-delete";
 
 /**
@@ -248,7 +249,33 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
 
   // PUT IT AWAY OR BIN IT, with where it goes said on the card (NotNowOrDelete, 2026-10-03): the same
   // pair, the same words and the same destination as a supplier's open list, from one place.
-  const notNow = <NotNowOrDelete itemId={itemId} what="bank download" label="Set Aside" run={run} working={working} />;
+  //
+  // AND DELETE SAYS WHAT COMES OFF THE BOOKS (review, 2026-10-03). Delete runs `undoBankCore` first, so
+  // on a PART-APPLIED download it deletes the bills and the invoice payments Apply wrote and voids the
+  // supplier and crew payments — while the one fixed confirm said "nothing it would have changed is
+  // written". Apply 30 of 40 lines, tap Delete to bin the leftovers, and the customer's payments came
+  // off with nothing said until the toast afterwards. The card knows the count, so the card says it, in
+  // the words its own Undo confirm already uses.
+  const alreadyCounted = view?.appliedLines ?? 0;
+  // EVERY LINE ALREADY IN NORTH (the same month downloaded again): there is nothing to write, so the one
+  // put-away door says exactly that and the pair below is otherwise unchanged. Never two buttons that
+  // archive the same paper in different words.
+  const nothingNew = !!view && !view.problem && view.rows.length === 0 && view.counts.matched + view.counts.ruled === 0;
+  const notNow = (
+    <NotNowOrDelete
+      itemId={itemId}
+      what="bank download"
+      label={nothingNew ? "Done: Nothing New" : "Set Aside"}
+      keptSaid={nothingNew ? "Nothing new in it. Kept in files." : undefined}
+      alsoTakesBack={
+        alreadyCounted > 0
+          ? `everything it already wrote comes off: the ${alreadyCounted === 1 ? "1 line" : `${alreadyCounted} lines`} it counted, with their bills and payments`
+          : null
+      }
+      run={run}
+      working={working}
+    />
+  );
   const undo = view?.canUndo ? (
     <Button
       variant="outline"
@@ -357,15 +384,12 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
             {busy === "apply" ? <Loader2 className="animate-spin" /> : <Check />} Apply
           </Button>
         )}
-        {/* EVERY LINE ALREADY IN NORTH (the same month downloaded again): nothing to write, one tap
-            puts the card away. */}
-        {!canApply && view.rows.length === 0 ? (
-          <Button onClick={() => run("keep", () => keepPaperwork(itemId), "Nothing new in it. Kept in files.")} disabled={working}>
-            {busy === "keep" ? <Loader2 className="animate-spin" /> : <Check />} Done: Nothing New
-          </Button>
-        ) : (
-          notNow
-        )}
+        {/* DELETE IS DRAWN IN EVERY STATE, THIS ONE INCLUDED (review, 2026-10-03). A lone "Done: Nothing
+            New" button used to REPLACE NotNowOrDelete here, so in the one state a second download of an
+            overlapping month lands in there was no Delete and no sentence saying where the paper goes —
+            the very thing Erik could not find, in the shape it most often arrives. The put-away button
+            still says "Done: Nothing New" (see `nothingNew` above), so there is one door, not two. */}
+        {notNow}
         {undo}
       </div>
       {view.swapped && <p className="text-xs text-slate-600">Read as a card&apos;s download: its charges are money out, its payments and credits money in.</p>}

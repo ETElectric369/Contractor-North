@@ -25,6 +25,7 @@ const BASE: OpenListView = {
   accountFrom: "number",
   accounts: [{ id: "a1", name: "Consolidated Electrical Distributors" }],
   needs: null,
+  appliedPapers: 0,
   dateSaid: "Sep 26, the day the file was saved",
   problem: null,
   plan: {

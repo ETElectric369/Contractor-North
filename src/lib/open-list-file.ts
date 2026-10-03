@@ -155,7 +155,15 @@ export type StatementScan = {
 };
 
 export type StatementFileRead =
-  | { ok: true; table: string[][]; listDate: string | null; pdf: { pages: number; rows: number } | null }
+  | {
+      ok: true;
+      table: string[][];
+      /** The heading block a PDF's crop took off (pdf-table `fromHeading`), so the SERVER can still read
+       *  the paper's own date and its printed total out of cells the table no longer carries. */
+      heading?: string[][];
+      listDate: string | null;
+      pdf: { pages: number; rows: number } | null;
+    }
   | { ok: false; scan: StatementScan }
   | { ok: false; error: string };
 
@@ -230,5 +238,8 @@ export async function readStatementFile(file: File): Promise<StatementFileRead> 
   // the heading row past the readers' 15-row reach comes back cropped to that heading, and handing the
   // uncropped table on would ask the readers the question this door just answered and get "no heading".
   // The PDF's own row count is still every row that came off the pages, which is what the report says.
-  return { ok: true, table: list.rows, listDate: savedOn(file.lastModified), pdf: { pages: got.pages, rows: got.table.length } };
+  // AND THE ROWS THE CROP TOOK OFF RIDE WITH THEM: the paper's own date box and its printed total sit
+  // in that block, and a tall letterhead is exactly when it gets cut. Untrusted cells, read on the
+  // server (readOpenListTable's `heading`) — never a date or a total this browser worked out itself.
+  return { ok: true, table: list.rows, heading: list.heading, listDate: savedOn(file.lastModified), pdf: { pages: got.pages, rows: got.table.length } };
 }

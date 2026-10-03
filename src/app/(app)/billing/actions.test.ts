@@ -75,6 +75,10 @@ type Q = {
   cols: string;
   payload?: any;
   single?: boolean;
+  /** The window a paged read asked for, when it asked for one (`.range(from, to)`). */
+  range?: { from: number; to: number };
+  /** The ceiling a read asked for (`.limit(n)`), honoured so a CUT is a cut here as it is in Postgres. */
+  limit?: number;
 };
 type Reply = { data?: any; error?: any } | undefined;
 
@@ -94,6 +98,15 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
       r = { data: { invoice_number: null, status: "draft", created_at: "", job_id: null, invoice_items: [] } };
     }
     if (r === undefined) throw new Error(`unrouted: ${q.table}.${q.verb} [${q.cols}] ${JSON.stringify(q.payload ?? null)}`);
+    // `range` AND `limit` ARE HONOURED, because PostgREST cuts a read and says nothing about it: status
+    // 200, no error, the rest simply missing. A fake that handed every row back whatever was asked for
+    // could not tell a whole read from a cut one — which is the bug the same-ticket question had — and a
+    // paged read (readAllPages) would never see an empty page and would stop itself with "more than
+    // 50000 rows to read at once".
+    if (Array.isArray(r.data)) {
+      if (q.range) return { data: r.data.slice(q.range.from, q.range.to + 1), error: r.error ?? null };
+      if (q.limit !== undefined) return { data: r.data.slice(0, q.limit), error: r.error ?? null };
+    }
     return { data: r.data ?? null, error: r.error ?? null };
   };
   const client: any = {
@@ -117,7 +130,9 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
           try { resolve(answer(q)); } catch (e) { reject?.(e); }
         },
       };
-      for (const m of ["eq", "neq", "in", "is", "not", "gt", "gte", "lt", "lte", "or", "ilike", "overlaps", "order", "limit", "range", "filter", "contains"]) {
+      chain.range = (from: number, to: number) => { q.range = { from, to }; return chain; };
+      chain.limit = (n: number) => { q.limit = n; return chain; };
+      for (const m of ["eq", "neq", "in", "is", "not", "gt", "gte", "lt", "lte", "or", "ilike", "overlaps", "order", "filter", "contains"]) {
         chain[m] = () => chain;
       }
       return chain;
@@ -1646,13 +1661,110 @@ describe("importCostsIntoInvoice — the same ticket on two jobs, asked before i
     // A QUESTION, NOT A REFUSAL: two identical runs a month apart are normal, and only he was there.
     expect(res.ok).toBe(true);
     const warn = (res.stats?.warnings ?? []).join(" ");
-    expect(warn).toContain("the same $95.27 Halverson Electric Supply ticket is also on");
+    expect(warn).toContain("The same $95.27 Halverson Electric Supply ticket is also on");
     expect(warn).toContain("4 Bramble Lane · J-102 — Remy Dunsmore");
     expect(warn).not.toMatch(/also on J-102\b/); // never a bare number
     expect(warn).toContain("pick which job it belongs to on Reconcile before you send this");
     // And the count that arms the door to the picker, so the question has somewhere to be answered.
     expect(res.stats?.same_ticket_two_jobs).toBe(1);
   });
+
+  /**
+   * IT READS AS A SENTENCE WHERE IT IS PRINTED (review, 2026-10-03). invoice-detail joins the warnings
+   * with ". " and prints them under the import row, and every other import warning starts a sentence
+   * ("Removed …", "Merged …"). A lowercase clause read as a sentence cut in half — and the job's own
+   * label ends in an em dash, so a second one straight after it put two dashes in a row.
+   */
+  it("starts with a capital and never runs two em dashes together", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillOfTheseAmounts: [HERE_ROW, THERE_BILL],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    const warn: string = (res.stats?.warnings ?? []).join(" ");
+    expect(warn.startsWith("The same $95.27")).toBe(true);
+    expect(warn).not.toMatch(/^[a-z]/);
+    // "— Remy Dunsmore — if that was one trip" was the pair of dashes. A full stop separates them now.
+    expect(warn).not.toMatch(/—[^—]{0,30}—/);
+    expect(warn).toContain("Remy Dunsmore. If that was one trip");
+  });
+
+  /**
+   * TWO PHOTOGRAPHS OF ONE TICKET, BOTH ON THIS JOB, BOTH ON THIS INVOICE (review, 2026-10-03).
+   * `findDuplicateBills` has no job term, so this is the very pair Reconcile lists — but the gate wanted
+   * a copy on ANOTHER job and skipped the group, and the customer was charged $95.27 twice, with markup,
+   * on one invoice with nothing asked. The marks name the two lines: the amount and the job cannot.
+   */
+  it("asks about two copies of one ticket on THIS job, both on this invoice", async () => {
+    const SECOND = {
+      ...HERE_ROW,
+      id: "aa11bb22-0000-4000-8000-000000000033",
+      notes: "portal-20260729-2.pdf",
+      bill_line_items: ticketLines("aa11bb22-0000-4000-8000-000000000033"),
+    };
+    const secondBill = { ...HERE_BILL, id: SECOND.id };
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL, secondBill],
+        lines: [...ticketLines(HERE_BILL.id), ...ticketLines(SECOND.id)],
+        landedAfter: [HERE_BILL.id, SECOND.id],
+        everyBillOfTheseAmounts: [HERE_ROW, SECOND],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    const warn: string = (res.stats?.warnings ?? []).join(" ");
+    expect(warn).toContain("The same $95.27 Halverson Electric Supply ticket is on this invoice twice");
+    expect(warn).toContain("portal-20260729-1.pdf, portal-20260729-2.pdf");
+    expect(warn).toContain("pick which copy counts on Reconcile before you send this");
+    // And the door is armed, because a question with nowhere to answer it is the dead end.
+    expect(res.stats?.same_ticket_two_jobs).toBe(1);
+  });
+
+  /**
+   * THE READ IS WHOLE OR IT IS A FAILURE (read-all-pages.ts). It was one unordered `.limit(500)`:
+   * PostgREST cuts a select with status 200 and no error, so with enough bills of these amounts the
+   * other copy of the ticket could sit outside the cut and the invoice went out with nothing said.
+   */
+  it("pages the whole book, so a copy past the first page is still found", async () => {
+    // A LONG-LIVED BOOK. The read asks for every bill at any of the invoice's distinct amounts, which on
+    // a big invoice is hundreds of amounts, so a thousand other papers genuinely come back with the pair.
+    // The ticket's partner is ordered LAST, past the first page's 1,000 rows.
+    const filler = Array.from({ length: 1000 }, (_, i) => ({
+      ...HERE_ROW,
+      id: `bb11bb22-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      job_id: `job-filler-${i}`,
+      supplier: `Other Supply ${i}`,
+      amount: String(100 + i) + ".55",
+      notes: `filler-${i}.pdf`,
+      supplier_invoice_number: null,
+      jobs: { job_number: `J-${i}`, name: `Filler ${i}`, customers: { name: `Someone ${i}` } },
+      bill_line_items: [],
+    }));
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillOfTheseAmounts: [HERE_ROW, ...filler, THERE_BILL],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    expect((res.stats?.warnings ?? []).join(" ")).toContain("4 Bramble Lane · J-102 — Remy Dunsmore");
+    expect(res.stats?.same_ticket_two_jobs).toBe(1);
+    // It really paged: more than one window of this table was asked for.
+    const windows = calls.filter((q) => q.table === "bills" && q.cols.includes("superseded_by_bill_id") && q.range);
+    expect(windows.length).toBeGreaterThan(1);
+    // A thousand rows through the real matcher: generous, because the point is the WINDOW, not the clock.
+  }, 20_000);
 
   it("says nothing when the ticket is on one job only", async () => {
     state.client = fakeSupabase(
@@ -1731,5 +1843,44 @@ describe("importCostsIntoInvoice — the same ticket on two jobs, asked before i
     expect(src).toContain("{twoJobTickets > 0 && (");
     const anchors = readFileSync(join(process.cwd(), "src/lib/reconcile-kinds.ts"), "utf8");
     expect(anchors).toContain('anchor: "same-ticket-two-jobs"');
+  });
+
+  /**
+   * ── AND THE QUESTION SURVIVES THE WALK TO THE SEND BUTTON (review, 2026-10-03) ──────────────
+   *
+   * The sentence existed only at the moment of an import. The four job-level doors toasted it and then
+   * changed the route under it — five seconds for a sentence with two dollar figures in it, while the
+   * draft was still loading — and the draft itself started with the count at 0, so it opened with no
+   * sentence and no "Pick Which Job" link, and Send had no check. Two teeth: the toast now sticks, and
+   * the page asks the server itself on every load.
+   */
+  it("every job-level door makes a money warning stick instead of flashing it", () => {
+    for (const door of [
+      "src/app/(app)/jobs/[id]/new-invoice-button.tsx",
+      "src/app/(app)/jobs/[id]/unbilled-card.tsx",
+      "src/app/(app)/billing/new-invoice-button.tsx",
+      "src/app/(app)/billing/invoice-job-button.tsx",
+    ]) {
+      const src = readFileSync(join(process.cwd(), door), "utf8");
+      expect(src, door).toContain('toast(res.importWarning, res.partial ? "error" : "info", undefined, res.partial ? { sticky: true } : undefined)');
+    }
+  });
+
+  it("the invoice page asks the question itself on every load, by the same one matcher", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/page.tsx"), "utf8");
+    // One function, so the page and the import cannot disagree about what a duplicate is.
+    expect(page).toContain("twoJobTicketsOnInvoice(");
+    expect(page).toContain('.filter((i) => i.import_source === "costs")');
+    expect(page).toContain("twoJobTickets={twoJobTickets.said}");
+    const detail = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
+    // The count and the sentence both START at what the server found, not at nothing.
+    expect(detail).toContain("useState(twoJobSeed.length)");
+    expect(detail).toContain('useState<string | null>(twoJobSeed.join(". ") || null)');
+    expect(detail).toContain("{!importWarn && twoJobSaid && <span className=\"text-xs text-amber-700\">{twoJobSaid}.</span>}");
+    const check = readFileSync(join(process.cwd(), "src/app/(app)/billing/ticket-on-two-jobs.ts"), "utf8");
+    // It reads only; a read is a proposal, and a lost read says nothing rather than an all-clear.
+    expect(check).toContain("return ticketsAlsoOnAnotherJob(supabase, orgId, String(jobId), bills, new Set(bills.map((b) => b.id)));");
+    expect(check).toContain('reportError("invoicePage.ticketOnTwoJobs"');
+    expect(check).not.toMatch(/\.(?:insert|update|delete|upsert)\(/);
   });
 });

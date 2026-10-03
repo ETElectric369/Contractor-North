@@ -87,7 +87,10 @@ export async function pickOpenListColumns(id: string, picked: OpenListColumns): 
   }
   if (columns.reference === undefined) return { ok: false, error: "Pick the column that holds the paper numbers." };
   if (columns.openBalance === undefined && columns.amount === undefined) return { ok: false, error: "Pick the column that holds what is still owed." };
-  const read = readOpenListTable({ table: needs.raw, from: needs.from, name: needs.name, listDate: needs.listDate, listDateFrom: needs.listDateFrom, columns, headerRow: needs.headerRow });
+  // `heading` rides along for the same reason `pdf` does: a PDF whose letterhead pushed the headings out
+  // of the readers' reach came here with its own date box and printed total cropped off the table, and
+  // this re-read is the ONE path that can still take them (the list it builds has not been applied).
+  const read = readOpenListTable({ table: needs.raw, heading: needs.heading ?? [], from: needs.from, name: needs.name, listDate: needs.listDate, listDateFrom: needs.listDateFrom, columns, headerRow: needs.headerRow });
   if (!read.ok) return { ok: false, error: "error" in read ? read.error : "Those columns still don't read as a list. Check the paper number and amount columns." };
   const list = { ...read.list, columnsBy: "person" as const, accountId: needs.accountId ?? null, accountFrom: needs.accountFrom ?? null };
   const saved = await saveStored(ctx.supabase, ctx.orgId, id, got.p, { list, needs: null });

@@ -118,7 +118,9 @@ export function NeedsYou({
     <Card className="mb-6 scroll-mt-20 p-4" id="needs-you">
       <h2 className="text-base font-semibold text-slate-900">Needs You{open ? ` (${open})` : ""}</h2>
       <p className="mt-0.5 text-xs text-slate-500">Paper to sort and supplier bills not in your books yet.</p>
-      {/* Where My Day's Papers To Sort and a bank download's Open Needs You land. */}
+      {/* Where My Day's Papers To Sort lands. (A bank download is answered on Reconcile since
+          2026-10-03, and the link that used to say "Open Needs You" is gone: this card draws the
+          pointer line to that page, never the download's own card.) */}
       <span id="sort-these" className="block scroll-mt-20" />
       {lines.length > 0 && (
         <div className="mt-3">

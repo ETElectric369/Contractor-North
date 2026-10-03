@@ -2178,6 +2178,10 @@ export type BankView = {
   skipped: { line: number; why: string }[];
   appliedSaid: string | null;
   canUndo: boolean;
+  /** HOW MANY LINES APPLY HAS ALREADY COUNTED on this download. 0 when none has. The card's Delete
+   *  confirm names it, because Delete runs the Undo first and those lines' bills and payments come off
+   *  the books with it — which the one fixed confirm sentence used to deny outright. */
+  appliedLines: number;
   /** Money in and out were read the other way round from how the file prints them. */
   swapped: boolean;
   /** Nothing applied yet: a person may still swap money in and out. */
@@ -2305,6 +2309,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     skipped: dl.skipped,
     appliedSaid,
     canUndo: passes.length > 0,
+    appliedLines: passes.reduce((n, p) => n + p.lines, 0),
     swapped: !!dl.swapped,
     canSwap: passes.length === 0 && dl.lines.length > 0,
     askAccount: passes.length === 0 && dl.lines.length > 0 && !dl.last4,

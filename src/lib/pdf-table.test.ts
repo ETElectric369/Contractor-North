@@ -371,6 +371,66 @@ describe("a statement under a tall letterhead", () => {
     if (!read.ok) return;
     expect(read.list.printedTotal).toBe(1981.11);
   });
+
+  /**
+   * ── THE CROP HANDS BACK WHAT IT TOOK OFF (review, 2026-10-03) ───────────────────────────────
+   *
+   * The crop THREW the heading block away, and that is the block where the paper names its own date and
+   * prints its own total. So a statement with an ordinary tall letterhead — sixteen rows, which the
+   * tests above call exactly that — silently fell back to the day the FILE was saved: the $9,410.92
+   * harm statement-own-date.test.ts exists to stop, reopened for every PDF with a letterhead.
+   */
+  describe("the cropped heading block comes back with the rows", () => {
+    /** A letterhead tall enough to crop, with the paper's own DATE box and printed total inside it. */
+    function withOwnDateBox(lines: number): string[][] {
+      const items: PositionedItem[] = [];
+      for (let i = 0; i < lines; i++) items.push(run(25, 780 - i * 12, `REMIT TO BOX ${1000 + i} RIVERBEND CA`, 0));
+      // The date box on the SAME y-line as an address cell, which is how a PDF prints it: one row.
+      items.push(run(25, 780 - lines * 12, "4120 HARROW ROAD", 0), run(440, 780 - lines * 12, "DATE", 0), run(520, 780 - lines * 12, "09/25/26", 0));
+      items.push(run(380, 780 - (lines + 1) * 12, "AMOUNT DUE: $1,981.11", 0));
+      const top = 780 - (lines + 2) * 12;
+      for (const [x, word] of HEADINGS) items.push(run(x, top, word, 0));
+      PAPERS.slice(0, 4).forEach((p, i) => {
+        const y = top - 12 - i * 12;
+        items.push(run(29, y, p.age, 0), run(51, y, p.date, 0), run(105, y, p.code, 0), run(127, y, p.reference, 0), run(212, y, p.po, 0));
+        items.push(money(496, y, p.open, 0), money(577, y, p.orig, 0));
+      });
+      return tableFromPositionedItems(items);
+    }
+
+    it("a 16-row letterhead: the rows start at the heading AND the block it cropped rides back", () => {
+      const got = tableReadsAsList(withOwnDateBox(16));
+      expect(got?.as).toBe("supplier");
+      // The rows really are cropped — that is what puts the heading inside the readers' reach…
+      expect(got!.rows[0]).toContain("REFERENCE");
+      expect(got!.rows.some((r) => r.join(" ").includes("4120 HARROW ROAD"))).toBe(false);
+      // …and the block is handed back whole, cells and all, for the server to read.
+      expect(got!.heading.some((r) => r.includes("DATE") && r.includes("09/25/26"))).toBe(true);
+      expect(got!.heading.some((r) => r.join(" ").includes("AMOUNT DUE: $1,981.11"))).toBe(true);
+    });
+
+    it("the statement dates itself September and keeps its printed total, downloaded in November", () => {
+      const got = tableReadsAsList(withOwnDateBox(16))!;
+      const read = readOpenListTable({ table: got.rows, heading: got.heading, from: "file", name: "Statement.pdf", listDate: "2026-11-28", listDateFrom: "file" });
+      expect(read.ok).toBe(true);
+      if (!read.ok) return;
+      expect(read.list.listDate).toBe("2026-09-25");
+      expect(read.list.listDateFrom).toBe("printed");
+      // The printed total is the one cross-check the completeness question has, and the crop ate it too.
+      expect(read.list.printedTotal).toBe(1981.11);
+      expect(read.list.rows.map((r) => r.reference)).toEqual(PAPERS.slice(0, 4).map((p) => p.reference));
+    });
+
+    it("a letterhead inside the readers' reach crops nothing, so the block is empty and the rows are whole", () => {
+      const got = tableReadsAsList(withOwnDateBox(4))!;
+      expect(got.heading).toEqual([]);
+      const read = readOpenListTable({ table: got.rows, heading: got.heading, from: "file", name: "Statement.pdf", listDate: "2026-11-28", listDateFrom: "file" });
+      expect(read.ok).toBe(true);
+      if (!read.ok) return;
+      expect(read.list.listDate).toBe("2026-09-25");
+      expect(read.list.printedTotal).toBe(1981.11);
+    });
+  });
 });
 
 describe("three pages of one statement", () => {

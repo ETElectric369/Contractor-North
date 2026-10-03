@@ -499,6 +499,21 @@ export function answeredOnReconcile(item: PaperItem): boolean {
   return state === "open_list" || state === "bank_download";
 }
 
+/**
+ * ── AND BOTH PAGES READ THE SAME WINDOW OF IT (review, 2026-10-03) ─────────────────────────────
+ *
+ * The rule was shared and the WINDOW was not: Bills read the 200 newest waiting papers and counted every
+ * statement among them as "waiting on Reconcile" (the pointer line in Needs You), while Reconcile read
+ * the 100 newest papers of every kind and only then filtered. With more than a hundred newer notes,
+ * receipts and pictures in the tray, a statement at rank 101–200 was POINTED AT by Bills and drawn by
+ * neither page: the link landed on a page that said nothing was waiting, and the paper was answerable
+ * nowhere — the dead end this release exists to remove, and on Bills alone it had been answerable
+ * before.
+ *
+ * ONE NUMBER, IN THE SAME FILE AS THE RULE, so a pointer can never outrun the page it points at.
+ */
+export const TRAY_WINDOW = 200;
+
 // ── WHERE IT GOES ───────────────────────────────────────────────────────────────────────────
 
 export type PaperDestination =

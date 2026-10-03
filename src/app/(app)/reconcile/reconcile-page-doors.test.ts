@@ -279,8 +279,12 @@ describe("the page reads; it does not re-rule", () => {
    * THE STATEMENT DOOR IS AN INTAKE, NOT A CONTROL. Erik asked for it here twice ("i want to upload
    * my bank statement and supplier statement, every item will either match or need a category", and
    * of the line on Money: "this should be in reconcile too i imagine"), and it moved off /analytics
-   * rather than being copied: one door. What it may NOT carry is the Apply — a paper is answered on
-   * its own card under Needs You, or this page becomes the only door to a queued paper.
+   * rather than being copied: one door. It DOES carry the Apply, since 2026-10-03: answering a statement
+   * IS the reconciliation, and this page still owns no record — every write goes through the server
+   * action the card always called, and the same card is drawn in the Organize tray and on Snap Or Note's
+   * own sheet, so no screen is the only door to it. (This docblock used to say the opposite, which is the
+   * sentence a maintainer would have cited to move the cards back.) With nothing waiting there is no
+   * Apply on the page, because there is nothing to apply.
    */
   it("takes a statement in, answers it here, and shows no Apply while nothing is waiting", () => {
     expect(count(doors(html), "Drop A Bank Or Supplier Statement")).toBe(1);
@@ -357,6 +361,13 @@ describe("the page reads; it does not re-rule", () => {
     // ONE LINE: the wall of prose is not on the card any more, in any of its clauses.
     for (const moved of ["PICTURES", "scanned, photographed", "running balance", "takes a minute"])
       expect(card, moved).not.toContain(moved);
+    // AND NOT THE SECOND PARAGRAPH EITHER (review, 2026-10-03). It survived the move, under the drop
+    // button, in both the waiting and the empty state — about four more lines of 14px prose at 375px, in
+    // the space he asked for back, while the card's own comment claimed every crowding clause was already
+    // in the box. It is a bullet in STATEMENT_FACTS now.
+    for (const moved of ["either matches a paper you already have", "nothing is written until you press Apply"])
+      expect(card, moved).not.toContain(moved);
+    expect(STATEMENT_FACTS.join(" ")).toContain("Every line either matches a paper you already have or asks you what it was for, and nothing is written until you press Apply.");
     // THE ICON IS A 44px TARGET, KEYBOARD REACHABLE, AND HAS A NAME A SCREEN READER CAN SAY.
     const icon = /<button[^>]*aria-label="How A Statement Is Read"[^>]*>/.exec(sectionOf(html, "bring-in-a-statement"))?.[0];
     expect(icon, "the info icon").toBeTruthy();

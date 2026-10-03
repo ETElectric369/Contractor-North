@@ -80,12 +80,13 @@ const OWED_READ = "what your suppliers say you owe";
  *     here goes through a server action /bills already had, writing supplier_aliases,
  *     supplier_accounts or bills.superseded_by_bill_id — nothing of this page's own. There is no
  *     reconcile table and there must never be one.
- *  2. IT IS NEVER THE ONLY DOOR. A bank download and a supplier's open list arrive in the one paper
- *     queue and are ANSWERED on their own card under Needs You, which is where that stays. The
- *     supplier gap is read-only here and links to the card that owns those figures. Bringing one IN
- *     is a different thing and it does live here (Bring In A Statement, at the bottom): an intake is
- *     not a control, and Snap Or Note on Bills still takes the same files, so this is not the only
- *     way in either.
+ *  2. IT IS NEVER THE ONLY DOOR. A bank download and a supplier's open list are answered on their own
+ *     card, and that card is drawn wherever the paper is — inside Bring In A Statement here, in the
+ *     Organize tray, and on Snap Or Note's own sheet — so no screen is the only way to an answer. (It
+ *     used to say the answer "stays under Needs You on Bills". It does not: a statement compares two
+ *     records, so `answeredOnReconcile` draws its card here, where it was dropped, instead of sending a
+ *     person to another page to press Apply. The old sentence is the behaviour this release replaced.)
+ *     The supplier gap is read-only here and links to the card that owns those figures.
  *  3. IT READS THE SAME FUNCTIONS THE OWNING SCREENS READ. Every supplier figure comes out of
  *     `readSupplierOwed` — the one read behind Nort, the Suppliers card, the workbook and the P&L —
  *     and no amount is added up on this page.
@@ -406,11 +407,12 @@ export default async function ReconcilePage() {
           should be in reconcile too i imagine". So it moved here and left /analytics — one door, on
           the page named for the job.
 
-          AND IT HOLDS NO APPLY, WHICH IS THE LAW: "reconcile is the bottom fold filling in dots not
-          controlling systems, a peace maker". Bringing a paper IN is an intake, not a control.
-          ANSWERING it stays on the paper's own card under Needs You, the one place every paper is
-          answered — carrying that Apply here would make Reconcile the only door to a queued paper,
-          the one thing the law forbids outright.
+          AND IT CARRIES THE PAPER'S OWN CARD, APPLY AND ALL. This block used to say the opposite —
+          "it holds no Apply, which is the law" — and the law it cited is about this page OWNING a
+          record, which it still does not: every write goes through the same server action the card
+          always called. Answering a statement IS the reconciliation, so the card is drawn where the
+          paper was dropped (see THE APPLY THE LAW DOES NOT FORBID, below). The card is drawn in the
+          Organize tray and on Snap Or Note's sheet as well, so this is not the only door to it.
 
           IT IS DRAWN EVEN WHEN NOTHING DISAGREES. It used to sit inside {!nothingAtAll}, which hid
           it at precisely the moment a person opens this page: the book is quiet and he has the next
@@ -450,7 +452,14 @@ export default async function ReconcilePage() {
 
             The paragraph below was eleven facts in eleven lines of prose. It was three sentences when
             it shipped and grew by one explanation per release. The heading keeps the icon; the card
-            keeps ONE line; every fact is a bullet in the box, and NOTHING IS CUT. */}
+            keeps ONE line; every fact is a bullet in the box, and NOTHING IS CUT.
+
+            AND IT REALLY IS ONE LINE NOW (review, 2026-10-03). A SECOND paragraph survived the move,
+            under the drop button, in both the waiting and the empty state — "every line either matches a
+            paper you already have or asks you what it was for, and nothing is written until you press
+            Apply" — about four more lines of 14px prose at 375px, in the space he asked for back, while
+            the comment below claimed every crowding clause was already in the box. It is a bullet in
+            STATEMENT_FACTS now, and reconcile-page-doors.test.ts keeps it off the card. */}
         <div className="flex items-center gap-1">
           <h2 className="text-base font-semibold text-slate-900">Bring In A Statement</h2>
           <InfoPopup title="How A Statement Is Read" label="How A Statement Is Read" bullets={STATEMENT_FACTS} />
@@ -481,33 +490,42 @@ export default async function ReconcilePage() {
             a merry-go-round for one paper. The card that arrives is the ANSWER to this card, so it is
             inside this one: no second section of its own, and no second place to answer the same paper.
 
-            THIS IS NOT THE APPLY THE LAW FORBIDS. The law is "reconcile is the bottom fold filling in
-            dots not controlling systems, a peace maker" — Reconcile must not RUN things. Answering a
+            THE APPLY THE LAW DOES NOT FORBID. The law is "reconcile is the bottom fold filling in dots
+            not controlling systems, a peace maker" — Reconcile must not RUN things. Answering a
             statement IS the reconciliation: two records held against each other, line by line, with a
             person pressing. What the law forbids is this page owning a record, and it still owns none
             — every write goes through the same server action the card always called.
 
             THE CARD, NOT A COPY OF IT. `PaperworkRow` returns the bank card or the open-list card and
             nothing else for these two states, which is why it takes no jobs and no number matches
-            here: a statement is never filed onto a job. */}
+            here: a statement is never filed onto a job.
+
+            AND THE LIST STAYS MOUNTED PAST ZERO (review, 2026-10-03). PaperworkList keeps the done
+            trail — the green sentence and its Undo — in its OWN state, and this used to swap the whole
+            list out for a quiet paragraph the moment the last statement was answered. Apply, and
+            `router.refresh()` returned no statements, the list unmounted and the trail went with it: an
+            Apply that marked 23 papers paid lost its in-page Undo, and Not Now "vanished" with no
+            lasting word, the exact complaint this release exists to answer. So the list is always drawn
+            and the quiet paragraph is its `empty` — the same keep-alive NeedsYou on Bills has, where the
+            comment already says "a card just answered keeps its Undo". */}
         {statements.error ? (
           <p className="mt-2 text-sm text-amber-800" role="alert">
             {statements.error} Reload the page to try again.
           </p>
-        ) : statementsWaiting > 0 ? (
-          <div className="mt-3 space-y-3">
-            <p className="text-sm text-slate-600">
-              {statementsWaiting === 1 ? "This one is waiting on you" : `These ${statementsWaiting} are waiting on you`}: every
-              line either matches a paper you already have or asks you what it was for, and nothing is written until you
-              press Apply.
-            </p>
-            <PaperworkList items={statements.items} jobs={[]} matches={{}} />
-          </div>
         ) : (
-          <p className="mt-1 text-sm text-slate-600">
-            Whatever you drop waits here on its own card: every line either matches a paper you already have or asks you
-            what it was for, and nothing is written until you press Apply.
-          </p>
+          <div className="mt-3 space-y-3">
+            {statementsWaiting > 0 && (
+              <p className="text-sm text-slate-600">
+                {statementsWaiting === 1 ? "This one is waiting on you." : `These ${statementsWaiting} are waiting on you.`}
+              </p>
+            )}
+            <PaperworkList
+              items={statements.items}
+              jobs={[]}
+              matches={{}}
+              empty={<p className="text-sm text-slate-600">Whatever you drop waits here on its own card.</p>}
+            />
+          </div>
         )}
       </Card>
     </div>

@@ -163,6 +163,7 @@ export function InvoiceDetail({
   salesTax = true,
   netDays = 30,
   estimateIsContract,
+  twoJobTickets: twoJobSeed = [],
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
@@ -211,6 +212,13 @@ export function InvoiceDetail({
   /** The invoice's job bills its estimate as the contract (estimateIsTheContract), for what Bring In
    *  New Work runs. undefined = not asked; null = the job couldn't be read (lib/actuals-draw). */
   estimateIsContract?: boolean | null;
+  /**
+   * TICKETS ON THIS INVOICE THAT ALSO SIT SOMEWHERE ELSE, read by the server on every load
+   * (ticket-on-two-jobs.ts `twoJobTicketsOnInvoice`), one sentence each. Empty when there are none, and
+   * empty when the read was lost — never an invented all-clear. This is what makes the question survive
+   * the walk from the door that built the invoice to the Send button on it.
+   */
+  twoJobTickets?: string[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -494,8 +502,16 @@ export function InvoiceDetail({
    * `importWarn` with everything else to look at before sending; this arms the DOOR beside it, because a
    * question asked with nowhere to answer it is the dead end. The pick happens on Reconcile, which owns
    * that record — a link, not a second copy of the control (nav doctrine).
+   *
+   * AND IT STARTS AT WHAT THE SERVER FOUND (review, 2026-10-03). It used to start at 0 and only a button
+   * press on THIS page could arm it: so every invoice built from a job-level door (New Invoice, the
+   * Overview card's Create Invoice, Billing's New Invoice, Invoice Job) opened with the question gone —
+   * it had flashed in a toast while the route was still changing — and Send had no check. The page asks
+   * the server itself now, on every load, so the question is there whenever the invoice is open.
    */
-  const [twoJobTickets, setTwoJobTickets] = useState(0);
+  const [twoJobTickets, setTwoJobTickets] = useState(twoJobSeed.length);
+  /** The server's own sentences, shown until an import on this page raises its own. */
+  const [twoJobSaid, setTwoJobSaid] = useState<string | null>(twoJobSeed.join(". ") || null);
   /** Imports that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
    *  Naming each source arms its "Start It Over" beside the message (0204). */
   const [stuckSources, setStuckSources] = useState<("labor" | "costs" | "quote" | "change_orders")[]>([]);
@@ -566,6 +582,9 @@ export function InvoiceDetail({
     setImportMsg(null);
     setImportWarn(null);
     setTwoJobTickets(0);
+    // The run that follows re-asks the question itself (its own warnings carry the sentence), so the
+    // server's standing one steps aside rather than being shown twice in different words.
+    setTwoJobSaid(null);
     setStuckSources([]);
     start(async () => {
       const res = await fn(invoice.id);
@@ -654,6 +673,9 @@ export function InvoiceDetail({
     setImportMsg(null);
     setImportWarn(null);
     setTwoJobTickets(0);
+    // The run that follows re-asks the question itself (its own warnings carry the sentence), so the
+    // server's standing one steps aside rather than being shown twice in different words.
+    setTwoJobSaid(null);
     setStuckSources([]);
     start(async () => {
       const outcomes: BringInOutcome[] = [];
@@ -1113,6 +1135,12 @@ export function InvoiceDetail({
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
             {importWarn && <span className="text-xs text-amber-700">{importWarn}.</span>}
+            {/* THE QUESTION THE PAGE ITSELF ASKED, on this load, about the tickets these cost lines
+                charge (page.tsx `twoJobTicketsOnInvoice`). It stands until an import on this page raises
+                its own warnings, which carry the same sentence — never both at once. Without it an
+                invoice built at a job-level door opened with nothing said and Send had no check: the
+                sentence had flashed in a toast while the route was still changing. */}
+            {!importWarn && twoJobSaid && <span className="text-xs text-amber-700">{twoJobSaid}.</span>}
             {/* THE DOOR THE QUESTION NEEDS. The sentence names the other job; the pick is made where that
                 record lives, so this is a LINK and not a second copy of the picker. Without it the
                 warning would be a question with nowhere to answer it. */}

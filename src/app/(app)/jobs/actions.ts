@@ -986,8 +986,21 @@ export async function finishJob(
   // Auto-invoice: when asked, email the draft to the customer now. Best-effort —
   // if they have no email (emailInvoice returns an error), the invoice simply stays
   // a draft and surfaces in the "To be invoiced" queue for manual review/send.
+  //
+  // ── A QUESTION ABOUT THE MONEY STOPS THE SEND (review, 2026-10-03) ──────────────────────────
+  //
+  // Finish & Send Invoice emailed the bill in the SAME server call that built it, and `inv.partial`
+  // — every money warning the import raised — was first read on the line below, AFTER the email had
+  // gone. So the sentence "pick which job it belongs to on Reconcile before you send this" arrived in
+  // the done panel about an invoice already in the customer's inbox: the $221.43-collected-for-$95.27
+  // incident with the new check computed and thrown away. The older warnings ("review the line items
+  // before sending") went out through the same hole.
+  //
+  // SO A PARTIAL IMPORT IS NOT SENT, and `sent: false` says so rather than the press pretending. The
+  // draft is built, the job is finished, and the warning is in front of him with the draft to open.
+  // Nothing is lost: Send is one press away on the invoice once he has answered the question.
   let sent = false;
-  if (opts.sendInvoice) {
+  if (opts.sendInvoice && !inv.partial) {
     const mailed = await emailInvoice(inv.id);
     sent = mailed.ok;
   }

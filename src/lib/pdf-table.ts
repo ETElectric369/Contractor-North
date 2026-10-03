@@ -557,8 +557,16 @@ function readsAsHeading(cells: readonly string[]): boolean {
  * it stays where it is, because readOpenListTable reads the supplier's own printed total off the rows
  * ABOVE the heading (printedFigures) — and that total is the one cross-check the completeness question
  * has. Cropping a paper that did not need cropping would buy a heading and sell the proof.
+ *
+ * AND THE ROWS IT CROPS OFF COME BACK WITH IT (review, 2026-10-03). The crop THREW the heading block
+ * away, which is the block the paper names its own date and prints its own total in — so a statement
+ * with an ordinary tall letterhead (this file's own tests call sixteen rows exactly that) silently fell
+ * back to the day the FILE was saved, which is the $9,410.92 harm statement-own-date exists to stop,
+ * and lost its printed total in the same cut. They are handed back separately so the readers still see
+ * a table that starts at its heading, and the SERVER reads the cells of both (readOpenListTable's
+ * `heading`): nothing a browser claims about a date or a total is trusted, only cells it passes on.
  */
-function fromHeading(table: readonly (readonly string[])[]): string[][] {
+function fromHeading(table: readonly (readonly string[])[]): { rows: string[][]; heading: string[][] } {
   const rows = (table ?? []).map((r) => (r ?? []).map((c) => String(c ?? "")));
   let at = -1;
   for (let i = 0; i < Math.min(rows.length, HEADING_SCAN); i++) {
@@ -567,7 +575,7 @@ function fromHeading(table: readonly (readonly string[])[]): string[][] {
       break;
     }
   }
-  return at < READER_REACH ? rows : rows.slice(at);
+  return at < READER_REACH ? { rows, heading: [] } : { rows: rows.slice(at), heading: rows.slice(0, at) };
 }
 
 /**
@@ -612,16 +620,17 @@ function mostlyPapers(table: readonly (readonly string[])[], at: number, columns
  * statement line ask this one question, so a PDF that reads as a list at one door reads as a list at
  * the other; and because the answer carries the rows (cropped to the heading row when the letterhead
  * put it out of the readers' reach), a door cannot ask the question of one table and then read a
- * different one.
+ * different one. `heading` is whatever that crop took off — the paper's own date box and printed total
+ * — so the server can read those cells too (see fromHeading). Empty when nothing was cropped.
  *
  * THE INVOICE GUARD IS ASKED BEFORE EITHER ANSWER. It used to sit under the bank answer, where it
  * could never run: a date, a description and an amount is the shape of a card statement AND of a
  * subcontractor's time-and-materials invoice, so `looksLikeBankTable` said "bank" and returned before
  * the guard whose whole job was to say "that is an invoice's own item table".
  */
-export function tableReadsAsList(table: readonly (readonly string[])[]): { as: "bank" | "supplier"; rows: string[][] } | null {
+export function tableReadsAsList(table: readonly (readonly string[])[]): { as: "bank" | "supplier"; rows: string[][]; heading: string[][] } | null {
   if (!table?.length) return null;
-  const rows = fromHeading(table);
+  const { rows, heading } = fromHeading(table);
   if (!rows.length) return null;
   // AN INVOICE'S OWN ITEM TABLE IS NEVER A LIST OF OPEN PAPERS, whatever its columns say: "ITEM" is
   // one of the words a paper number goes by, "AMOUNT" is money, and HOURS and RATE over three dated
@@ -634,7 +643,7 @@ export function tableReadsAsList(table: readonly (readonly string[])[]): { as: "
   // bank prints, a running balance, or money that went out. Without it an invoice's three labour lines
   // became three DEPOSITS on a bank card — the owner's own money, invented — and an office hand who
   // does not sort the bank was refused in the owner's name and could not file a vendor's invoice at all.
-  if (looksLikeBankTable(rows, header.reference !== undefined) && bankTableProof(rows)) return { as: "bank", rows };
+  if (looksLikeBankTable(rows, header.reference !== undefined) && bankTableProof(rows)) return { as: "bank", rows, heading };
   if (at < 0) return null;
   // The same two columns readOpenListTable requires before it will read a list at all. Anything
   // short of them would land on the column picker, and a person pointing at the columns of an
@@ -642,5 +651,5 @@ export function tableReadsAsList(table: readonly (readonly string[])[]): { as: "
   if (header.reference === undefined) return null;
   if (header.openBalance === undefined && header.amount === undefined) return null;
   if (!mostlyPapers(rows, at, header)) return null;
-  return { as: "supplier", rows };
+  return { as: "supplier", rows, heading };
 }

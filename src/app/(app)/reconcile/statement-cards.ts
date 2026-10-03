@@ -2,7 +2,7 @@ import "server-only";
 
 import { dbError } from "@/lib/db-error";
 import { signDocumentUrls } from "@/lib/signed-docs";
-import { answeredOnReconcile } from "@/lib/paperwork";
+import { answeredOnReconcile, TRAY_WINDOW } from "@/lib/paperwork";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import { bankLinesStayHere, bankViews } from "@/app/(app)/bills/bank-core";
 import { openListViews } from "@/app/(app)/bills/open-list-core";
@@ -33,7 +33,9 @@ export async function readStatementCards(supabase: any, orgId: string): Promise<
     .eq("org_id", orgId)
     .eq("status", "needs_review")
     .order("created_at", { ascending: false })
-    .limit(100);
+    // THE SAME WINDOW BILLS READS (TRAY_WINDOW). This was 100 while Bills read 200 and pointed here for
+    // every statement it found, so a statement at rank 101–200 was pointed at and drawn by neither page.
+    .limit(TRAY_WINDOW);
   if (error) return { items: [], error: `Couldn't read the statements waiting on you just now. ${dbError(error)}` };
   const rows = ((data ?? []) as any[]).filter((i) => answeredOnReconcile(i));
   if (!rows.length) return { items: [], error: null };

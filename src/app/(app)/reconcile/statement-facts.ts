@@ -3,7 +3,7 @@
  *
  * This was one paragraph of eleven facts on the Bring In A Statement card, and he could not read it:
  * "this huge box of text in front of me is hard for me to read and takes up a lot of space on the
- * screen, valuable space for reconciling". It is the same eleven facts, as bullets, behind an info
+ * screen, valuable space for reconciling". It is the same facts, as bullets, behind an info
  * icon. NOTHING IS CUT, and every clause still names something the code does — the walk
  * (statement-verify.ts balanceChain), the refusal on a scan (statement-scan-actions.ts), the warning
  * on a file (open-list-add-core.ts has no pass gate, on purpose) and the silence when a paper prints
@@ -15,6 +15,11 @@
  */
 export const STATEMENT_FACTS = [
   "Whatever your bank or supplier gave you: a download off their website, or the PDF a supplier emails. North works out what it is.",
+  // MOVED OFF THE CARD (review, 2026-10-03). This was a second paragraph of prose on the card itself —
+  // about four more lines at 375px, under the drop button, in both the waiting and the empty state —
+  // while the card's own comment claimed every crowding clause was already in here. It is a fact about
+  // the read like all the others, so here is where it belongs. NOTHING IS CUT.
+  "Every line either matches a paper you already have or asks you what it was for, and nothing is written until you press Apply.",
   "Every line has to add up against the running balance printed beside it, so each line proves the one before it to the cent.",
   "The line underneath says how many lines it held, and where it stopped if it stopped.",
   "A statement that also prints a beginning balance, an ending balance or totals is held against those as well.",

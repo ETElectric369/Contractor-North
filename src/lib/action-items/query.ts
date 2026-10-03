@@ -765,7 +765,7 @@ async function buildActionItems(ctx: {
   // ── PAPERS AND NOTES. A paper the /bills tray sorts (isTrayPaper) is Sort It on /bills; a note, or
   // a paper Organize files (a plan read as not a cost, a picture asking "What is this?"), is File It
   // in Organize. A BANK DOWNLOAD is the owner's money: only a viewer who sorts them sees one, on its
-  // own card, never in a pile.
+  // own card, never in a pile — and that card is on Reconcile, which is where its row opens.
   {
     const bankOk = ((orgR.data ?? []) as any[]).some((o) => o.category === "Bank Download") ? await viewerSortsBank(supabase, userId) : false;
     for (const o of (orgR.data ?? []) as any[]) {
@@ -785,7 +785,14 @@ async function buildActionItems(ctx: {
         since: o.created_at ?? null,
         urgency: 0,
         done: false,
-        href: bank || tray ? "/bills#sort-these" : "/organize",
+        // STRAIGHT TO THE PAGE THAT ANSWERS IT (review, 2026-10-03). A bank download's card moved to
+        // Reconcile, and this row still opened /bills#sort-these — a Needs You card whose only content
+        // about it is a pointer line, so Open landed him one tap short of the thing he tapped for. Erik,
+        // in this repo's own comments: "i dont want people to have to jump on a merry go round to do
+        // shit." Every viewer who sees this row can open Reconcile (both gates are isStaffRole, and the
+        // row needs viewerSortsBank on top), so there is nothing to protect by the extra hop. A paper the
+        // /bills tray sorts still lands on /bills, because that IS where it is answered.
+        href: bank ? "/reconcile#bring-in-a-statement" : tray ? "/bills#sort-these" : "/organize",
         // A bank download only opens: Set Aside archived it, and Back in Archive is its whole Undo,
         // so a tap here could take every line it counted back without a question.
         affordances: bank ? ["open"] : AFFORDANCES.organize,

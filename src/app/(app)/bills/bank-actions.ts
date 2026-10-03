@@ -137,7 +137,11 @@ export async function undoBankDownload(id: string): Promise<Result> {
   if (error || !back?.length) {
     return {
       ok: true,
-      message: `Undone: ${down.undone} ${down.undone === 1 ? "line" : "lines"} came off. The card didn't go back under Needs You${error ? ` (${dbError(error)})` : ""}; refresh the page.`,
+      // WHERE THE CARD ACTUALLY IS (review, 2026-10-03). This named the queue card on Bills, and a bank
+      // download has not been drawn there since 6b7f553d — it is answered on Reconcile. A sentence that
+      // sends him to a card that is not on that page is the onboarding-truth law broken, on the one path
+      // where he is already being told something went wrong.
+      message: `Undone: ${down.undone} ${down.undone === 1 ? "line" : "lines"} came off. The card didn't reset on Reconcile${error ? ` (${dbError(error)})` : ""}; refresh the page.`,
     };
   }
   return {

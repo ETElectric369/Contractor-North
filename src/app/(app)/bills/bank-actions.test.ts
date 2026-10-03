@@ -1125,6 +1125,30 @@ describe("the owner's money", () => {
     expect(bills).not.toContain("bankViews(");
     expect(bills).toContain("const papers = trayPapers.filter((i) => !answeredOnReconcile(i));");
   });
+
+  /**
+   * ── AND NO SENTENCE SENDS HIM TO A CARD THAT IS NOT THERE (review, 2026-10-03) ──────────────
+   *
+   * The Undo's failure line still sent him to the queue card on Bills, where a bank download has not been
+   * drawn since the cards moved. It shows in the card's OWN status line (ok:true with a message), so he
+   * would have gone looking on a page that holds only a pointer. The sweep of these sentences greps the
+   * words "Needs You on Bills" — and this one never said Bills, so it slipped straight through.
+   */
+  it("the Undo's failure line names Reconcile, the page the card is actually on", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/app/(app)/bills/bank-actions.ts", "utf8");
+    expect(src).toContain("The card didn't reset on Reconcile");
+    // THE TRIPWIRE IS THE WORDS, however they are phrased: no sentence and no comment in the files these
+    // two cards are drawn from may put the answer "under Needs You" again.
+    for (const f of [
+      "src/app/(app)/bills/bank-actions.ts",
+      "src/app/(app)/bills/bank-core.ts",
+      "src/app/(app)/bills/supplier-import-actions.ts",
+      "src/components/paperwork-row.tsx",
+    ]) {
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/under Needs You|to Needs You/);
+    }
+  });
 });
 
 /**

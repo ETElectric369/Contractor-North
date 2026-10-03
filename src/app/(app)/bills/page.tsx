@@ -54,7 +54,7 @@ import { BooksBeginLine } from "./books-begin-line";
 import { NeedsYou, PaperworkDropZone } from "./bills-drop";
 import { SnapOrNoteButton } from "@/components/snap-or-note";
 import type { PaperRowItem } from "@/components/paperwork-row";
-import { answeredOnReconcile, readinessOf, type NumberMatch } from "@/lib/paperwork";
+import { answeredOnReconcile, readinessOf, TRAY_WINDOW, type NumberMatch } from "@/lib/paperwork";
 import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { billOfTie, billPapers, type PaperTie } from "@/lib/job-photos";
@@ -278,7 +278,10 @@ export default async function BillsPage({
       .select("*, jobs(job_number, name)")
       .eq("status", "needs_review")
       .order("created_at", { ascending: false })
-      .limit(200),
+      // ONE WINDOW, SHARED WITH RECONCILE (TRAY_WINDOW, beside `answeredOnReconcile`): this page counts
+      // every statement it finds as "waiting on Reconcile" and links there, so a wider window here than
+      // there would point at a paper that page never reads.
+      .limit(TRAY_WINDOW),
     // Every printed number already on the books, for "Same Purchase: Tie Them".
     loadBooks(supabase, orgId),
     // What a waiting paper names, matched again by today's rules (rematchTray: no model, no write).
