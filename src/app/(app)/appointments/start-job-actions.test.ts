@@ -277,7 +277,18 @@ describe("already on the clock elsewhere: Switch To This Job, never a second ope
     state.open = [running];
     const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in" });
     expect(res.ok).toBe(false);
-    expect(res.onClock).toEqual({ entryId: "entry-50", jobId: "job-50", label: "J-050", since: "8:00 AM", whole: false });
+    // THE FACTS, NOT THE DECISION. Whether a switch moves the whole punch turns on its AGE
+    // (switch-window), and this answer is built minutes before the person taps — so a boolean settled
+    // here would be a promise about the past. The card asks the rule itself, on its own live clock.
+    expect(res.onClock).toEqual({
+      entryId: "entry-50",
+      jobId: "job-50",
+      jobCode: null,
+      label: "J-050",
+      clockIn: "2026-09-25T15:00:00.000Z",
+      since: "8:00 AM",
+    });
+    expect(res.onClock).not.toHaveProperty("whole");
     expect(res.error).toContain("Switch To This Job");
     expect(spies.createJob).not.toHaveBeenCalled();
     expect(spies.clockIn).not.toHaveBeenCalled();
@@ -300,12 +311,14 @@ describe("already on the clock elsewhere: Switch To This Job, never a second ope
     const jobless = { ...running, job_id: null, job: null };
     state.open = [jobless];
     const refused = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in" });
-    expect(refused.onClock).toMatchObject({ label: "no job", whole: true, jobId: null });
+    expect(refused.onClock).toMatchObject({ label: "no job", jobId: null, jobCode: null, clockIn: "2026-09-25T15:00:00.000Z" });
 
     state.open = [jobless];
     spies.switchJob.mockResolvedValue({ ok: true, entry_id: "entry-50", mode: "repointed" });
     const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "switch" });
-    expect(res.message).toBe("Started J-056 for Tom Goodman and moved your shift since 8:00 AM onto it.");
+    // "PUNCH", not "shift": a re-point moves ONE row, so an earlier part of a day already cut by a
+    // Switch Job stays on the job it was worked on.
+    expect(res.message).toBe("Started J-056 for Tom Goodman and moved your whole punch since 8:00 AM onto it.");
     expect(res.message).not.toContain("switched");
   });
 

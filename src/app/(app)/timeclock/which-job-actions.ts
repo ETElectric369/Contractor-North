@@ -132,9 +132,9 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
  *
  * Sets job_id on the caller's OWN, still job-less time entry, so every hour of the punch lands on
  * the job. Why this is its own small action and not one of the two that already exist:
- *   · switchJob (0288 switch_job) re-points a job-less punch whole, exactly as this does, but it
- *     is the office's More Options door, only for a running clock, and needs a job the caller is
- *     not already on.
+ *   · switchJob (0288 switch_job) moves a job-less punch — and a punch still inside
+ *     SWITCH_MOVES_WHOLE_MS of its clock-in — whole, exactly as this does, but it is the office's
+ *     More Options door, only for a running clock, and needs a job the caller is not already on.
  *   · updateTimeEntry is the Timecards edit path — it demands clock_out and writes status
  *     'closed', so on an OPEN punch it would clock the person out to name the job.
  * Self-scoped (own entry), job visible to the caller's RLS client and still going. ONLY a punch
@@ -156,12 +156,13 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
  * job at ARR 56 this morning"). The clock now says which job it picked when nobody picked it, and
  * that sentence's Change door opens this same sheet and lands on this same write — a punch whose job
  * nobody chose is not an after-the-fact edit, it is the person finally being asked. The whole punch
- * moves, every hour since the tap, which is why Switch Job is not the door: switch_job (0288) only
- * re-points whole for the first two minutes and CUTS after that, leaving the hours before the tap on
- * the job nobody picked — the exact 2h19m this defect is about.
+ * moves, every hour since the tap, WHATEVER THE CLOCK SAYS, which is why this is still its own door:
+ * Switch Job moves a punch whole only while it is fresh (switch-window) and CUTS after that, leaving
+ * the hours before the tap on the job nobody picked — the exact 2h19m this defect is about. Brian's
+ * punch had been running 2h19m, far past any freshness window, and this is the door that moves it.
  *
  * NO NEW AUTHORITY. A TECH has no job picker anywhere, so every job on a tech's punch is the app's
- * pick, and a tech could already move a job-less punch whole (above) and re-point inside two minutes
+ * pick, and a tech could already move a job-less punch whole (above) and move a fresh one whole
  * (switchJob). The OFFICE can already move any entry from Timecards. What is new is only that the
  * person is told, and that the move is not limited to the first two minutes. Bounded the same way as
  * every other pick: the caller's OWN punch, still open or closed within the day (closedPickable), a

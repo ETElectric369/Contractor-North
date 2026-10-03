@@ -336,7 +336,10 @@ export default async function TimecardsPage({
         ? {
             id: String(r.id),
             clock_in: String(r.clock_in),
-            clock_out: String(r.clock_out),
+            // NULL STAYS NULL. String(null) is "null", a truthy string, so a RUNNING neighbour — which
+            // is what a Switch Job leaves after the piece before it — read as closed, and the editor
+            // drew Join Back Into One Shift on a boundary join_time_entries refuses outright (0322).
+            clock_out: r.clock_out ? String(r.clock_out) : null,
             label: neighborLabel(r),
             // Join Back names whose job the hours land on, and its Undo cuts the shift back the way it was.
             job_id: r.job_id ?? null,

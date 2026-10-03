@@ -167,8 +167,10 @@ export function jobShort(j: { job_number?: string | null; name?: string | null }
  * What happened to the tapper's clock:
  *   in      a fresh clock-in at `at`;
  *   switch  the running entry was CUT at `at` and a new one opened on the job (0288's cut);
- *   move    the running entry had no job (or had just opened), so switch_job RE-POINTED it whole:
- *           the shift since `since` now sits on the job. Nothing was cut.
+ *   move    the punch had no job, or was still young enough to move whole (switch-window), so it was
+ *           RE-POINTED: the time since `since` now sits on the job. Nothing was cut. The words say
+ *           PUNCH and not shift because the re-point moves ONE row — on a day already cut by an
+ *           earlier Switch Job, the morning's closed parts stay on the job they were worked on.
  */
 export type StartedClock =
   | { kind: "in"; at: string }
@@ -179,7 +181,7 @@ export type StartedClock =
  * What the app says after the tap, in one sentence:
  *   "Started J-056 for Tom Goodman and clocked you in at 12:00 PM."
  *   "Started J-056 for Tom Goodman and switched your clock here from J-050 at 3:32 PM."
- *   "Started J-056 for Tom Goodman and moved your shift since 12:00 PM onto it."
+ *   "Started J-056 for Tom Goodman and moved your whole punch since 12:00 PM onto it."
  *   "Started J-056 for Tom Goodman."
  */
 export function startedWords(input: {
@@ -198,12 +200,12 @@ export function startedWords(input: {
     const head = `This visit already had ${input.jobNumber}${who}.`;
     if (!c) return head;
     if (c.kind === "in") return `${head} Clocked you in on it at ${at}.`;
-    if (c.kind === "move") return `${head} Moved your shift since ${at} onto it.`;
+    if (c.kind === "move") return `${head} Moved your whole punch since ${at} onto it.`;
     return `${head} Switched your clock to it${c.from ? ` from ${c.from}` : ""} at ${at}.`;
   }
   const head = `Started ${input.jobNumber}${who}`;
   if (!c) return `${head}.`;
   if (c.kind === "in") return `${head} and clocked you in at ${at}.`;
-  if (c.kind === "move") return `${head} and moved your shift since ${at} onto it.`;
+  if (c.kind === "move") return `${head} and moved your whole punch since ${at} onto it.`;
   return `${head} and switched your clock here${c.from ? ` from ${c.from}` : ""} at ${at}.`;
 }

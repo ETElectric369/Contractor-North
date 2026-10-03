@@ -91,21 +91,25 @@ export function appChoseSentence(label: string, from: AppPickSource): string {
  *
  * Every screen ends the sentence with "change it if you're somewhere else" because Change The Job is
  * right there. Nort relayed those words verbatim — and could not do it. His only move on a running
- * shift is switch_job, which CUTS after two minutes: it closes the part so far and opens a new one, so
- * the minutes already billed to the wrong customer stay exactly where they are. An instruction is a
+ * shift is switch_job, and a switch CUT the shift: it closed the part so far and opened a new one, so
+ * the minutes already billed to the wrong customer stayed exactly where they were. An instruction is a
  * dead end when the door it names does not exist at the place it is read.
  *
- * So the spoken sentence says WHERE instead. No new write verb was registered for him: a punch is a
- * money decision about which customer gets billed, the three doors that already move it are one tap
- * away, and agent-write expansion stays frozen until multi-tenant is dialled (agent-security
- * framework). Nort's job with a surface is to REDIRECT — his own product map says so.
+ * SO THE SPOKEN SENTENCE SAYS WHERE — and now it can also say HIM, for the one case he really does
+ * handle. This sentence is said at the instant the punch lands, and a switch that soon after the punch
+ * MOVES THE WHOLE SHIFT (switch-window, SWITCH_MOVES_WHOLE_MS), so "I can't move it for you" became
+ * false exactly where it is read out. He is offered as what he is: good while the punch is fresh, and
+ * the three doors after that. No new write verb was registered for him — time.switchJob already
+ * existed and only got honest — because a punch is a money decision about which customer gets billed
+ * and agent-write expansion stays frozen until multi-tenant is dialled (agent-security framework).
  *
  * Both sentences are built HERE, from the same label and the same source, so they cannot drift.
  */
 export function appChoseSentenceToSay(label: string, from: AppPickSource): string {
   return (
     `Your punch is on ${label}. The app picked that${pickedBecause(from)}. If you were somewhere else, ` +
-    `move it yourself on My Day's Now card or on Timeclock — tap ${CHANGE_JOB_LABEL} — or the office moves it on Timecards. I can't move it for you.`
+    `tell me the right job and I'll move this whole punch while it's this fresh — or move it yourself on ` +
+    `My Day's Now card or on Timeclock (tap ${CHANGE_JOB_LABEL}), or the office moves it on Timecards.`
   );
 }
 
@@ -146,9 +150,9 @@ export function tellAppChose(res: ToldResult | null | undefined): AppChoseNotice
 /**
  * IS THE SENTENCE STILL TRUE OF THE PUNCH ON SCREEN? (Erik, 2026-10-01 — the other half of the same
  * law.) The notice is remembered in client state, and the punch underneath it moves: a Switch Job
- * CUTS after two minutes (0288) so the running entry is a NEW row, re-points whole inside them so the
- * same row carries a different job, a clock-out closes the shift, and the office can move the punch
- * from Timecards while the page sits open. In every one of those the person HAS chosen the job — and
+ * CUTS once the punch is no longer fresh (0288) so the running entry is a NEW row, moves that same row
+ * onto a different job while it still is (switch-window), a clock-out closes the shift, and the office
+ * can move the punch from Timecards while the page sits open. In every one of those the person HAS chosen the job — and
  * a line still reading "Your punch is on <the old job>. The app picked that" is then the page lying
  * about where the money is, with a Change door pointed at the wrong piece.
  *

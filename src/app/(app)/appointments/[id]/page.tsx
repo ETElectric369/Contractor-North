@@ -223,8 +223,11 @@ export default async function AppointmentCapturePage({
         job_id: oe.job_id,
         label: oeJob ? jobShort(oeJob) : (oe.job_code ?? "").trim() || "no job",
         clock_in: oe.clock_in,
-        // No job and no code: a switch re-points the whole shift (0288), and the card says so.
-        whole: !oe.job_id && !(oe.job_code ?? "").trim(),
+        // The two facts a switch's outcome is decided from, never the decision itself: whether the
+        // punch has a PLACE (a job or a code) and when it started. Whether it moves whole or gets cut
+        // turns on the punch's age (switch-window), so the card asks that on its own live clock — a
+        // boolean settled here would still be promising "moves whole" half an hour after this render.
+        job_code: (oe.job_code ?? "").trim() || null,
       }
     : null;
   /* WHO FILLS IN THE WALK-THROUGH (0356; Erik, 2026-09-26: "crew leader yes tech no"). The office, as

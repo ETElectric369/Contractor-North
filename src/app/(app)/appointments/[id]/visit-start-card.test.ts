@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 
 /**
  * THE TOP OF THE VISIT, RENDERED: each face of the card, counted on the real component (the
@@ -46,6 +47,9 @@ const render = (p: Partial<Props>) =>
       ...p,
     }),
   );
+
+/** A client effect cannot run in this suite (no DOM), so the ticker and the one derivation are read. */
+const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
 const count = (html: string, s: string) => html.split(s).length - 1;
 /** Every <button> and <a> on the card, as its opening tag. */
@@ -128,11 +132,12 @@ describe("office, no job yet", () => {
     phoneSafe(h);
   });
 
-  it("a clock on no job says the whole shift moves, not that a part ends", () => {
-    const h = render({ openEntry: { id: "e-0", job_id: null, label: "no job", clock_in: onJ55.clock_in, whole: true } });
-    expect(h).toContain("Starting this job moves that whole shift onto it.");
-    const linked = render({ job: j55, openEntry: { id: "e-0", job_id: null, label: "no job", clock_in: onJ55.clock_in, whole: true } });
-    expect(linked).toContain("Switching moves that whole shift onto J-055.");
+  it("a clock on no job says the whole punch moves, not that a part ends", () => {
+    const jobless = { id: "e-0", job_id: null, job_code: null, label: "no job", clock_in: onJ55.clock_in };
+    const h = render({ openEntry: jobless });
+    expect(h).toContain("Starting this job moves this whole punch onto it — none of it stays behind.");
+    const linked = render({ job: j55, openEntry: jobless });
+    expect(linked).toContain("Switching moves this whole punch onto J-055 — none of it stays behind.");
     expect(linked).not.toContain("ends that part now");
   });
 
@@ -277,5 +282,79 @@ describe("a linked job, for the office and the crew alike", () => {
     expect(html).not.toContain("Clock In On");
     expect(html).toContain("Open J-055");
     phoneSafe(html);
+  });
+});
+
+/**
+ * THE CARD MAY NOT PROMISE A CUT THE SERVER IS GOING TO MOVE WHOLE (review, 2026-10-03).
+ *
+ * The visit card is the THIRD door onto switchJob, and the young-punch rule (switch-window) reached
+ * only the other two. Its sentences hung on a `whole` flag that still meant "no job and no code", so a
+ * man five minutes into J-050 was told "Switching ends that part now" while the server moved his whole
+ * punch and left J-050 with nothing. The sentence is about which customer gets the hours.
+ *
+ * The rule is the punch's AGE, so these render the real card against a fixed clock.
+ */
+describe("whole or cut, decided by the punch's age and not by a flag", () => {
+  const CLOCK_IN = "2026-09-25T15:00:00.000Z"; // 8:00 AM on the org's clock
+  const youngOnJ50 = { ...onJ50, job_code: null, clock_in: CLOCK_IN };
+  /** Render with the clock at a fixed moment: whole-or-cut turns on what time it is NOW. */
+  const atClock = (iso: string, p: Partial<Props>) => {
+    vi.useFakeTimers({ now: Date.parse(iso) });
+    try {
+      return render(p);
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  it("THE DEFECT: five minutes into J-050, the switch face says the whole punch moves — never that a part ends", () => {
+    const h = atClock("2026-09-25T15:05:00.000Z", { job: j55, openEntry: youngOnJ50 });
+    expect(h).toContain("on the clock on J-050 since 8:00 AM");
+    expect(h).toContain("Switching moves this whole punch onto J-055 — none of it stays behind.");
+    expect(h).not.toContain("ends that part now");
+  });
+
+  it("and the start face, where the same tap makes the job first, says the same thing", () => {
+    const h = atClock("2026-09-25T15:05:00.000Z", { openEntry: youngOnJ50 });
+    expect(h).toContain("Starting this job moves this whole punch onto it — none of it stays behind.");
+    expect(h).not.toContain("switches your clock here");
+  });
+
+  it("a tech on the switch face reads it too: visitStartState has no staff gate once a job is linked", () => {
+    const h = atClock("2026-09-25T15:05:00.000Z", { isStaff: false, job: j55, openEntry: youngOnJ50 });
+    expect(h).toContain("Switching moves this whole punch onto J-055 — none of it stays behind.");
+  });
+
+  it("the window still has an end: twenty minutes in, the cut is named as the cut", () => {
+    const h = atClock("2026-09-25T15:20:00.000Z", { job: j55, openEntry: youngOnJ50 });
+    expect(h).toContain("Switching ends that part now and starts this one.");
+    expect(h).not.toContain("whole punch");
+    const started = atClock("2026-09-25T15:20:00.000Z", { openEntry: youngOnJ50 });
+    expect(started).toContain("Starting this job switches your clock here.");
+  });
+
+  it("a punch with a TIME CODE and no job is placed too, so it is judged by the clock like any other", () => {
+    const onDrive = { id: "e-dr", job_id: null, job_code: "DRIVE", label: "DRIVE", clock_in: CLOCK_IN };
+    expect(atClock("2026-09-25T15:05:00.000Z", { job: j55, openEntry: onDrive })).toContain("Switching moves this whole punch onto J-055");
+    expect(atClock("2026-09-25T15:20:00.000Z", { job: j55, openEntry: onDrive })).toContain("Switching ends that part now");
+  });
+
+  it("the card carries no baked answer: the two facts travel, the rule is asked here", () => {
+    const card = src("./visit-start-card.tsx");
+    // ONE derivation, the shared function, for both faces and the sheet.
+    expect(card).toContain('import { switchMovesWholeNow } from "../../timeclock/switch-window";');
+    expect(card).toMatch(/const movesWhole = \(oc: \{ jobId: string \| null; jobCode: string \| null; clockIn: string \}\) =>\s*switchMovesWholeNow\(!!oc\.jobId \|\| !!oc\.jobCode, Date\.parse\(oc\.clockIn\), nowMs\);/);
+    expect(card).toContain("{movesWhole(onClock)");
+    // The sheet's whole branch no longer claims the punch has no job — it names the job it is on.
+    expect(card).not.toContain("with no job. This moves that whole shift");
+    expect(card).toContain("This moves this whole punch onto the new job");
+    // A render-time answer goes stale on a card left open in a truck, so the card re-renders while
+    // somebody is on the clock (the Timeclock panel's ticker, for the same reason).
+    expect(card).toMatch(/useEffect\(\(\) => \{\s*if \(!onClock && !sheet\) return;\s*setNowMs\(Date\.now\(\)\);\s*const t = setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\);/);
+    // And the page hands over the facts, never the decision.
+    const page = src("./page.tsx");
+    expect(page).not.toContain("whole: !oe.job_id");
+    expect(page).toContain('job_code: (oe.job_code ?? "").trim() || null,');
   });
 });

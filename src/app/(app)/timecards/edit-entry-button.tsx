@@ -17,6 +17,7 @@ import { hoursBetween } from "@/lib/utils";
 import { SplitShiftSheet, type SplitPrefill } from "./split-shift-sheet";
 import { StopClockSheet } from "./stop-clock-sheet";
 import { COPY_TO_SOMEONE_ELSE, DuplicateEntryButton } from "./duplicate-entry-button";
+import { deleteConfirmWords, type DeletingPiece } from "./delete-words";
 import { clockDoorWords } from "@/lib/long-shift";
 
 /**
@@ -71,7 +72,8 @@ interface Entry {
 export interface SplitNeighbor {
   id: string;
   clock_in: string;
-  clock_out: string;
+  /** Null while that piece's own clock is still running: it can be neither joined nor slid. */
+  clock_out: string | null;
   label: string;
   job_id?: string | null;
   job_code?: string | null;
@@ -215,6 +217,19 @@ export function EditEntryButton({
    *  in the body's tools box and in the footer (one tap, no scroll); both open the same sheet, and its
    *  Cancel comes back to this form with what was typed still in it. */
   const canSplit = !!entry.clock_out && (entry.status ?? "closed") === "closed";
+  /**
+   * WHICH TOUCHING PIECES ARE A REAL BOUNDARY — one rule, read by the split tools below AND by the
+   * delete words, so a sentence can never name a door this screen is not showing.
+   *
+   * BOTH PIECES HAVE TO BE CLOSED. join_time_entries refuses a running shift outright ("Clock out
+   * first", 0322) and sliding a cut needs an end to slide between. The `next` neighbour of a closed
+   * piece IS the running clock after a Switch Job (splitNeighbors only asks that it starts where this
+   * one ends), and Join Back Into One Shift was drawn on that boundary — a button the database could
+   * never say yes to.
+   */
+  const closedKin = (n?: SplitNeighbor | null) => (n && n.clock_out ? { ...n, clock_out: n.clock_out } : null);
+  const prevKin = closedKin(neighbors?.prev);
+  const nextKin = entry.clock_out ? closedKin(neighbors?.next) : null;
   const openSplit = () => {
     setOpen(false);
     setSplitFromForm(true);
@@ -371,8 +386,28 @@ export function EditEntryButton({
     });
   }
 
+  /**
+   * THE PIECE THIS DELETE WOULD TAKE, when the shift on screen is one part of a split (delete-words
+   * says it in words). Built from the SAME pieces as `boundaries`, which is what actually draws Join
+   * Back Into One Shift — a sentence may never name a door this screen is not showing.
+   */
+  function deletingPiece(): DeletingPiece | null {
+    if (!prevKin && !nextKin) return null;
+    const mine = entry.job ? jobLabel(entry.job) : entry.job_code || "no job";
+    return {
+      hours: entry.clock_out ? hoursBetween(entry.clock_in, entry.clock_out, Number(entry.lunch_minutes) || 0) : null,
+      label: mine,
+      // Join Back keeps the FIRST part's job (join_time_entries, 0320): the part before this one, or
+      // this one when it IS the first — which is the case that bites, and the case Erik hit.
+      keepsJob: prevKin ? prevKin.label : mine,
+      // A RUNNING piece gets the clock-out sheet, which draws no split tools at all, and 0322 refuses
+      // a join on it: the words name clocking out first instead of a button that is not there.
+      running: isOpen,
+    };
+  }
+
   function remove() {
-    if (!confirm("Delete this time entry? This can't be undone.")) return;
+    if (!confirm(deleteConfirmWords(deletingPiece()))) return;
     setError(null);
     start(async () => {
       let res: { ok: boolean; error?: string; warning?: string };
@@ -385,6 +420,9 @@ export function EditEntryButton({
       if (!res.ok) return setError(res.error ?? "Could not delete.");
       close();
       router.refresh();
+      // The survivors lost their bracket and nobody chose that: said out loud, and it stays up until
+      // it has been read (deleteTimeEntry's re-root is the only thing that warns here).
+      if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
     });
   }
 
@@ -419,14 +457,13 @@ export function EditEntryButton({
     if (r.warning) toast(r.warning, "info", undefined, { sticky: true });
   }
 
-  // MOVE THE SPLIT (slide the time between two touching pieces; never reorders) and JOIN BACK.
+  // MOVE THE SPLIT (slide the time between two touching pieces; never reorders) and JOIN BACK — one
+  // row per real boundary (closedKin above).
   const [moveHm, setMoveHm] = useState<Record<string, string>>({});
   const boundaries = [
-    neighbors?.prev ? { key: "prev", left: neighbors.prev.id, right: entry.id, at: entry.clock_in, other: neighbors.prev } : null,
-    neighbors?.next && entry.clock_out
-      ? { key: "next", left: entry.id, right: neighbors.next.id, at: entry.clock_out, other: neighbors.next }
-      : null,
-  ].filter(Boolean) as { key: string; left: string; right: string; at: string; other: SplitNeighbor }[];
+    prevKin ? { key: "prev", left: prevKin.id, right: entry.id, at: entry.clock_in, other: prevKin } : null,
+    nextKin && entry.clock_out ? { key: "next", left: entry.id, right: nextKin.id, at: entry.clock_out, other: nextKin } : null,
+  ].filter(Boolean) as { key: string; left: string; right: string; at: string; other: SplitNeighbor & { clock_out: string } }[];
 
   function moveCut(b: (typeof boundaries)[number]) {
     setError(null);

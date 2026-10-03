@@ -32,17 +32,24 @@ import type { ActionDef } from "../types";
 /**
  * WHAT NORT SAYS A SWITCH DID — and it may not sound like a correction it was not (Erik, 2026-10-01).
  *
- * A SWITCH IS A CUT (0288). After the first two minutes switch_job closes the part so far and opens a
- * new one, so the hours already worked STAY on the job they were worked on. The old announcement —
- * "Done — the part so far closed at 2.32 hours, and you're on the new job" — let Nort answer "the app
- * put me on the wrong job, fix it" with what reads as a fix, while 2.32 hours went on billing the
- * wrong customer. It now names the job those hours stayed on and the one door that moves them.
+ * A SWITCH IS A CUT (0288) once the punch is no longer fresh: switch_job closes the part so far and
+ * opens a new one, so the hours already worked STAY on the job they were worked on. The old
+ * announcement — "Done — the part so far closed at 2.32 hours, and you're on the new job" — let Nort
+ * answer "the app put me on the wrong job, fix it" with what reads as a fix, while 2.32 hours went on
+ * billing the wrong customer. It now names the job those hours stayed on and the one door that moves
+ * them.
  *
- * A RE-POINT (a job-less shift, or one under two minutes old) really did move the whole shift, so it
- * keeps its own words. The hours are never dropped from the sentence either way: nothing silent.
+ * A WHOLE MOVE (a job-less punch, or one switched within SWITCH_MOVES_WHOLE_MS of starting —
+ * switch-window) really did move the whole PUNCH, so it keeps its own words. It says "punch" and not
+ * "shift" because the re-point moves ONE row: on a day already cut by an earlier Switch Job the
+ * running row is only the part since that switch (lib/shift-chain), and "this whole shift is on the
+ * new job now" — read out loud, word for word, with no screen to correct it — would tell a man his
+ * morning followed him onto the new customer. WHICH ONE HAPPENED IS NEVER GUESSED FROM THE CLOCK
+ * HERE: `mode` comes back from switchJob, which made the decision. The hours are never dropped from
+ * the sentence either way: nothing silent.
  */
 export function switchJobSpoken(mode: "cut" | "repointed" | undefined, closedHours: number | undefined, stayedOn: string | null): string {
-  if (mode === "repointed") return "Done — this whole shift is on the new job now.";
+  if (mode === "repointed") return "Done — this whole punch is on the new job now. Any earlier part of the day stays where it was.";
   const hours = Number(closedHours ?? 0).toFixed(2);
   return (
     `Switched — the clock is running on the new job now. The ${hours} hours before the switch stayed on ` +
@@ -357,16 +364,17 @@ export const timeActions: Record<string, ActionDef> = {
     },
   },
   /**
-   * SWITCH JOB, BY VOICE (0288). The same door the timeclock's Switch Job button uses: the running
-   * entry closes now and a new one opens on the new job at the same instant (a job-less start moves
-   * over whole). The caller's OWN open shift only; reversible by the office (Join Back).
+   * SWITCH JOB, BY VOICE (0288). The same door the timeclock's Switch Job button uses, and it makes the
+   * same fork: a punch still inside SWITCH_MOVES_WHOLE_MS of its clock-in (or with no job yet) moves
+   * over whole, anything older closes now and a new entry opens on the new job at the same instant.
+   * The caller's OWN open shift only; a cut is reversible by the office (Join Back).
    */
   "time.switchJob": {
     name: "time.switchJob",
     group: "time",
     label: "Switch job",
     description:
-      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). The part so far closes as its own timecard entry and the clock keeps running on the new job (a shift with no job yet just moves over whole). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. THIS NEVER MOVES HOURS ALREADY WORKED: after the first two minutes it CUTS, so the time before the switch stays on the job it was on. It is therefore NOT a way to correct a punch that is on the wrong job — for that, say where it is done (My Day's Now card, Timeclock, or the office on Timecards); you have no verb that moves worked hours. Announce what the result's `speak` says, word for word, including where the hours before the switch stayed.",
+      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. IT DOES ONE OF TWO THINGS AND THE RESULT SAYS WHICH. A punch that STARTED IN THE LAST FIFTEEN MINUTES (or has no job yet) MOVES OVER WHOLE: every minute of it lands on the new job, which is how a punch the app put on the wrong job gets fixed while it is fresh. After that it CUTS: the part so far closes as its own timecard entry, the clock keeps running on the new job, and the hours already worked STAY on the job they were worked on — so once a shift has been running a while this is NOT a way to correct a wrong job, and you say where that is done instead (My Day's Now card, Timeclock, or the office on Timecards). Never promise which one it will do before you call it. Announce what the result's `speak` says, word for word, including where any hours before a cut stayed.",
     input: z.object({
       job_id: z.string(),
       job_code: z.string().nullable().optional(),

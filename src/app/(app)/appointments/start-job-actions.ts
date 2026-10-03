@@ -45,9 +45,25 @@ export type StartJobResult = {
   onClock?: OnClock;
 };
 
-/** The tapper's running clock, as the card needs it. `whole`: it has no job and no code, so a
- *  switch RE-POINTS the whole shift onto the new job instead of cutting it (0288). */
-export type OnClock = { entryId: string; jobId: string | null; label: string; since: string; whole: boolean };
+/**
+ * The tapper's running clock, as the card needs it.
+ *
+ * `clockIn` and `jobCode` are here, and no `whole` flag is, because whether a switch moves the whole
+ * punch or cuts it turns on the punch's AGE (switch-window) — and this answer is built on the server,
+ * minutes before the person taps. A boolean decided here would be a promise about the past: the card
+ * asks the one rule itself, on its own ticking clock, from these two facts, which no clock can change.
+ */
+export type OnClock = {
+  entryId: string;
+  jobId: string | null;
+  /** A time code with no job (Drive, Shop) is a PLACE too: switch_job cuts it like a job. */
+  jobCode: string | null;
+  label: string;
+  /** The punch's own clock-in, ISO — what the age is measured from. */
+  clockIn: string;
+  /** The same instant in the org's words, for the sentence. */
+  since: string;
+};
 
 type VisitRow = {
   id: string;
@@ -105,9 +121,10 @@ function onClockOf(o: OpenRow, tz: string): OnClock {
   return {
     entryId: o.id,
     jobId: o.job_id,
+    jobCode: (o.job_code ?? "").trim() || null,
     label: openLabel(o),
+    clockIn: o.clock_in,
     since: clockWords(o.clock_in, tz),
-    whole: !o.job_id && !(o.job_code ?? "").trim(),
   };
 }
 
@@ -224,8 +241,10 @@ export async function startJobFromVisit(input: {
     if (!sw.ok) {
       warnings.push(`Your clock is still on ${from}: ${sw.error ?? "the switch did not go through."}`);
     } else {
-      // A job-less clock is RE-POINTED whole (0288), not cut: the shift since its clock-in is now
-      // on this job, and the sentence has to say that rather than "switched at 3:32 PM".
+      // A job-less clock — or one still inside the young-punch window (switch-window) — is RE-POINTED
+      // whole, not cut: the time since its clock-in is now on this job, and the sentence has to say
+      // that rather than "switched at 3:32 PM". Read off the mode switchJob answers with, never
+      // guessed from the clock here.
       clock = sw.mode === "repointed" ? { kind: "move", since: running.clock_in } : { kind: "switch", at, from };
       if (sw.warning) warnings.push(sw.warning);
     }

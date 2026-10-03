@@ -29,7 +29,7 @@
  *
  * Every time shown or picked is the ORG's clock.
  */
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Play, ArrowLeftRight, Clock, Link2, Phone, MessageSquare, Bell, Briefcase } from "lucide-react";
@@ -42,12 +42,20 @@ import { formatDateTimeTz } from "@/lib/tz";
 import { clockOffered, clockWords, jobIsFinished, jobShort, startedAtProblem } from "@/lib/appointments/visit-start";
 import { ClockStartPicker, pickerInstant, pickerParts } from "../../timeclock/clock-start-picker";
 import { clockIn, switchJob, deleteTimeEntry } from "../../timeclock/actions";
+import { switchMovesWholeNow } from "../../timeclock/switch-window";
 import { askOfficeToStartJob, linkVisitInstead, startJobFromVisit, type OnClock, type StartJobResult } from "../start-job-actions";
 
 export type VisitStartJob = { id: string; job_number: string | null; name: string | null; status?: string | null };
-/** `whole`: the running entry has no job and no code, so a switch moves the WHOLE shift onto the
- *  new job (0288 re-points it) rather than ending a part now. */
-export type VisitStartOpenEntry = { id: string; job_id: string | null; label: string; clock_in: string; whole?: boolean };
+/** The running entry. `job_id` and `job_code` say whether the punch has a PLACE and `clock_in` says
+ *  how old it is — the two facts a switch's outcome is decided from (switch-window). The card asks that
+ *  rule itself, on a live clock, rather than being handed a boolean settled when the page rendered. */
+export type VisitStartOpenEntry = {
+  id: string;
+  job_id: string | null;
+  job_code?: string | null;
+  label: string;
+  clock_in: string;
+};
 
 export type VisitStartState = "start" | "ask" | "linked" | "switch" | "closed" | "here";
 
@@ -139,9 +147,10 @@ export function VisitStartCard({
       ? {
           entryId: openEntry.id,
           jobId: openEntry.job_id,
+          jobCode: (openEntry.job_code ?? "").trim() || null,
           label: openEntry.label,
+          clockIn: openEntry.clock_in,
           since: clockWords(openEntry.clock_in, tz),
-          whole: !!openEntry.whole,
         }
       : null,
   );
@@ -155,7 +164,31 @@ export function VisitStartCard({
   const over = visitOver;
   const linkFinished = !!linkInstead && jobIsFinished(linkInstead.status);
 
-  const nowMs = Date.now();
+  /**
+   * ONE CLOCK, AND IT TICKS WHILE SOMEBODY IS ON IT. Every sentence and chip below turns on what time
+   * it is now — whether a switch moves the whole punch or cuts it, and whether a picked start is still
+   * a real one — and nothing else makes this card re-render.
+   *
+   * The failure this prevents: punch on J-050 at 7:00, open this visit at 7:05 on the drive, leave it
+   * on screen. At 7:40 the card was still showing the words it rendered with, which promised the whole
+   * punch moves; the server reads its own clock at the tap and CUTS, leaving 40 minutes on a job nobody
+   * worked. The Timeclock panel ticks for exactly this reason. It also ticks while the sheet is open,
+   * which is the only place the picked-start words are read.
+   */
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!onClock && !sheet) return;
+    setNowMs(Date.now());
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [onClock, sheet]);
+  /**
+   * DOES A SWITCH MOVE THE WHOLE PUNCH, OR CUT IT — the server's own rule (switch-window), asked here
+   * on the clock as it is NOW rather than read off a flag the page baked in. Both faces and the sheet
+   * ask this one question, so they cannot disagree with each other or with the write.
+   */
+  const movesWhole = (oc: { jobId: string | null; jobCode: string | null; clockIn: string }) =>
+    switchMovesWholeNow(!!oc.jobId || !!oc.jobCode, Date.parse(oc.clockIn), nowMs);
   // Visit Time is offered only when it is a real start: in the window, and not inside hours already
   // recorded (the server refuses those too, with the Timecards' words; this keeps the one-tap chip
   // from being the trap).
@@ -253,7 +286,8 @@ export function VisitStartCard({
         toast(
           state === "switch"
             ? res.mode === "repointed" && openEntry
-              ? `Moved your shift since ${clockWords(openEntry.clock_in, tz)} onto ${jobNo}.`
+              ? // "Punch", not "shift": the move is one row, and an earlier part of a cut day stays put.
+                `Moved your whole punch since ${clockWords(openEntry.clock_in, tz)} onto ${jobNo}.`
               : `Switched your clock to ${jobNo} from ${openEntry?.label ?? "the other job"} at ${at}.`
             : `Clocked you in on ${jobNo} at ${at}.`,
           "success",
@@ -309,10 +343,12 @@ export function VisitStartCard({
             </p>
           )}
           {onClock && !onLinkJob && !over && (
-            <p className="mt-1 text-sm text-amber-700">
+            // suppressHydrationWarning: the fork is the punch's age, so the server's HTML and the
+            // first client render can land either side of the fifteen-minute line.
+            <p className="mt-1 text-sm text-amber-700" suppressHydrationWarning>
               You&rsquo;re on the clock on {onClock.label} since {onClock.since}.{" "}
-              {onClock.whole
-                ? "Starting this job moves that whole shift onto it."
+              {movesWhole(onClock)
+                ? "Starting this job moves this whole punch onto it — none of it stays behind."
                 : "Starting this job switches your clock here."}
             </p>
           )}
@@ -387,10 +423,17 @@ export function VisitStartCard({
             {job.name && job.job_number ? <span className="font-normal text-slate-600"> · {job.name}</span> : null}
           </h2>
           {state === "switch" && openEntry && (
-            <p className="mt-0.5 text-sm text-amber-700">
+            // THE CUT MAY NOT BE PROMISED WHERE THE SERVER MOVES THE PUNCH WHOLE. This sentence is
+            // about which customer gets the hours, and a tech reaches this face too (visitStartState
+            // has no staff gate once a job is linked). suppressHydrationWarning: see the start face.
+            <p className="mt-0.5 text-sm text-amber-700" suppressHydrationWarning>
               You&rsquo;re on the clock on {openEntry.label} since {clockWords(openEntry.clock_in, tz)}.{" "}
-              {openEntry.whole
-                ? `Switching moves that whole shift onto ${jobNo}.`
+              {movesWhole({
+                jobId: openEntry.job_id,
+                jobCode: (openEntry.job_code ?? "").trim() || null,
+                clockIn: openEntry.clock_in,
+              })
+                ? `Switching moves this whole punch onto ${jobNo} — none of it stays behind.`
                 : "Switching ends that part now and starts this one."}
             </p>
           )}
@@ -497,8 +540,10 @@ export function VisitStartCard({
               </p>
             ) : onClock ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                {onClock.whole
-                  ? `You're on the clock since ${onClock.since} with no job. This moves that whole shift onto the new job, from ${onClock.since}. No second clock is opened.`
+                {movesWhole(onClock)
+                  ? // Said with the label, not "with no job": a punch that HAS a job moves whole too
+                    // while it is this young, and the old wording was false for exactly that case.
+                    `You're on the clock on ${onClock.label} since ${onClock.since}. This moves this whole punch onto the new job, from ${onClock.since} — none of it stays behind. No second clock is opened.`
                   : `You're on the clock on ${onClock.label} since ${onClock.since}. This switches your clock to the new job now: the part on ${onClock.label} ends at this moment. No second clock is opened.`}
               </p>
             ) : (
