@@ -10,7 +10,7 @@ import type { TradeKey } from "@/lib/features";
 
 /** Said to the model once, after the trade line: examples are the company's own, or shapes. */
 export const NORT_EXAMPLES_RULE =
-  "EXAMPLES: any example you give comes from THIS company: its own jobs, people, walk-through " +
+  "EXAMPLES: any example you give comes from THIS company: its own jobs, people, inspection " +
   "questions, price list and trade. The examples in these instructions are shapes (<job>, <name>, " +
   "<item>), never words to repeat. With nothing of theirs to draw on yet, show the shape and ask; " +
   "never borrow another company's names, places, part numbers or prices, and never make a number up.";

@@ -1011,7 +1011,7 @@ export default async function JobDetailPage({
   // is signed, so a receipt's picture, its signed URL and its name never reach a tech's page data.
   const visibleDocRows = documentsForViewer((docRows ?? []) as any[], viewerIsStaff);
   // The task photos ride the same one signing call (a task photo is almost always one of these
-  // job photos already; a walk-through photo is not, and gets signed here too). Never a paper the
+  // job photos already; an inspection photo is not, and gets signed here too). Never a paper the
   // allow-list above kept from this viewer: a task pointing at one gets no URL (HB-2 holds).
   const keptFromViewer = new Set(
     ((docRows ?? []) as any[]).map((d: any) => d.file_url).filter((p: string | null) => p && !visibleDocRows.some((v: any) => v.file_url === p)),
@@ -2198,7 +2198,7 @@ export default async function JobDetailPage({
           )}
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap
               away. An access point, not a wall. */}
-          {/* Leads & Walk-Throughs off (the switch board): no blank walk-through is started from here,
+          {/* Leads & Inspections off (the switch board): no blank inspection is started from here,
               but a job that has a visit keeps the door to its notes and photos (openJobInspector
               opens that visit first and creates nothing). */}
           {viewerIsStaff && (on("leads") || (jobAppts ?? []).some((a: any) => a.status !== "cancelled")) && <OpenInspectorButton jobId={j.id} />}

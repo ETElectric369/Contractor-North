@@ -85,7 +85,7 @@ describe("the board", () => {
       return t.slice(i, t.indexOf("Estimates", i));
     };
     const staff = referralsRow(render({ isOwner: false, features: m, counts: { referrals: 2 } }));
-    expect(staff).toContain("Off while Leads & Walk-Throughs is off.");
+    expect(staff).toContain("Off while Leads & Inspections is off.");
     expect(staff).toContain("Off · 2 saved · Ask The Owner");
     expect(staff.split("\n")).not.toContain("On");
     // The owner's switch is the stored value, so turning Leads back on brings Referrals back as it was.

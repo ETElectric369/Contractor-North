@@ -10,8 +10,8 @@ import {
 } from "./statuses";
 
 describe("the five kinds a person picks (W2-06)", () => {
-  it("are Walk-Through, Job, Service Call, Phone Call and Other, each a type the table allows, each with a real label", () => {
-    expect(PICKABLE_APPOINTMENT_TYPES.map(appointmentTypeLabel)).toEqual(["Walk-Through", "Job", "Service Call", "Phone Call", "Other"]);
+  it("are Inspection, Job, Service Call, Phone Call and Other, each a type the table allows, each with a real label", () => {
+    expect(PICKABLE_APPOINTMENT_TYPES.map(appointmentTypeLabel)).toEqual(["Inspection", "Job", "Service Call", "Phone Call", "Other"]);
     for (const t of PICKABLE_APPOINTMENT_TYPES) {
       expect(APPOINTMENT_TYPES as readonly string[]).toContain(t);
       expect(appointmentTypeLabel(t)).not.toBe(t); // a raw enum value is not a label

@@ -17,7 +17,8 @@ import { draftMyPlaybook, finishOnboarding, hearSetup, saveSetup } from "@/app/(
 import type { Answers, AnswerValue, Need } from "@/lib/playbook/types";
 
 /**
- * THE WALK-THROUGH — an interview with training in it, and EVERYONE takes it.
+ * THE SETUP INTERVIEW — an interview with training in it, and EVERYONE takes it. (It was called
+ * a walk-through until 2026-10-02; it is SETUP, and the site visit is the Inspection.)
  *
  * Erik, correcting me twice:
  *   "His onboarding isn't complete if he hasn't been guided through the training and why lines"
@@ -32,7 +33,7 @@ import type { Answers, AnswerValue, Need } from "@/lib/playbook/types";
  *
  *   1. YOUR COMPANY   the five facts. Prefilled when known — seeing them already answered IS the
  *                     lesson ("this is where that lives"), and it is where they meet Tell Nort.
- *   2. YOUR QUESTIONS  Nort drafts the ask and the WHY for every question their walk-through will
+ *   2. YOUR QUESTIONS  Nort drafts the ask and the WHY for every question their inspection will
  *                     put in front of them, in their trade's terms, from what they just said. They
  *                     correct it. THE CORRECTION IS THE TRAINING — nobody writes a good why from a
  *                     blank box; you find out you have one by reading a version that's wrong.
@@ -84,7 +85,7 @@ export function SetupInterview({
     if (startAt !== 2 || needs || drafting.current) return;
     // NO TRADE, NO DRAFT — GO ASK. Erik: "the tour shouldn't assume a trade exists." Answering is
     // optional on every tour step, so somebody can land here having skipped the trade — and
-    // draftMyPlaybook needs a walk-through sheet, which it seeds only when a trade is on file. Rather
+    // draftMyPlaybook needs an inspection sheet, which it seeds only when a trade is on file. Rather
     // than fetch a failure and explain it, drop to the questions step: trade is the second box on
     // it, and the step-1→2 transition saves (which seeds the sheet) and then drafts, in order.
     if (!String(answers.trade ?? "").trim()) {
@@ -165,7 +166,7 @@ export function SetupInterview({
 
   return (
     <div>
-      {/* Three dots, not a percentage. Somebody mid-walkthrough wants to know how much is left,
+      {/* Three dots, not a percentage. Somebody mid-setup wants to know how much is left,
           not how much they've done. */}
       <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
         {([1, 2, 3] as Step[]).map((s) => (
@@ -273,7 +274,7 @@ export function SetupInterview({
               definition of "taught" that matters here. */}
           {!needs?.length ? (
             /* A SPINNER IS NOT AN ERROR MESSAGE. draftMyPlaybook fails outright when the company has
-               no walk-through sheet — the ordinary state for anybody who reached this card without a
+               no inspection sheet — the ordinary state for anybody who reached this card without a
                trade, because saveSetup only seeds one when a trade is set. `err` was being written
                and then rendered UNDERNEATH a spinner that kept turning forever, so an honest failure
                read as a slow one and people sat waiting on it. */
@@ -373,7 +374,7 @@ export function SetupInterview({
             <li className="flex gap-3">
               <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
               <span>
-                <strong className="font-medium text-slate-900">{nortOn ? "Just tell Nort" : "Just Say It"}</strong> — on a walk-through, say the whole job
+                <strong className="font-medium text-slate-900">{nortOn ? "Just tell Nort" : "Just Say It"}</strong> — on an inspection, say the whole job
                 the way you&rsquo;d say it to a person. The boxes fill in. Check them before you price it; {nortOn ? "Nort" : "it"} won&rsquo;t work out a
                 measurement you didn&rsquo;t say.
               </span>

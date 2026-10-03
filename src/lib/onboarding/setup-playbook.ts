@@ -17,7 +17,7 @@ import type { Playbook } from "@/lib/playbook/types";
  * already know how the inspector works, because it is the same thing.
  *
  * WHY THIS ORDER. Trade first, and it is not close: one answer seeds the job codes they clock time
- * against, the walk-through questions the inspector asks on site, AND what the estimator thinks it
+ * against, the inspection questions the inspector asks on site, AND what the estimator thinks it
  * is pricing. Andrew Crake signed up, left it blank, and got a generic six-question sheet — three
  * dead surfaces from one unanswered question.
  *
@@ -45,7 +45,7 @@ export const SETUP_PLAYBOOK: Playbook = {
       // picked at sign-up chooses the starter; these words choose only when none was picked, and
       // a "general contractor" who subs out electrical is read as a general contractor.
       why:
-        "Two things: the questions your walk-through starts with, and what an estimate thinks " +
+        "Two things: the questions your inspection starts with, and what an estimate thinks " +
         "it's pricing. (Your job codes came from the dropdown at sign-up — this doesn't change " +
         "them.) Electrical, deck and plumbing each have their own starter questions; every other " +
         "trade starts on a general set you make your own. If you picked a trade at sign-up, that chooses it.",

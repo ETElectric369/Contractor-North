@@ -79,25 +79,25 @@ describe("the Off line on every record page", () => {
     expect(src).toContain('templates={on("job_codes") ? ((codeTemplates ?? []) as { id: string; name: string }[]) : []}');
   });
 
-  it("an appointment: Leads off hides only a blank walk-through; a service visit keeps its notes and photos, with no Off line", () => {
+  it("an appointment: Leads off hides only a blank inspection; a service visit keeps its notes and photos, with no Off line", () => {
     const src = readFileSync(join(ROOT, "appointments/[id]/page.tsx"), "utf8");
-    expect(src).toContain("const walkThrough = isInspectionType(");
-    expect(src).toMatch(/const showInspector =\s*featureOn\(orgSettings\.features, "leads"\) \|\|\s*!walkThrough \|\|/);
-    expect(src).toMatch(/\{walkThrough && \(\s*<FeatureOffLine feature="leads"/);
+    expect(src).toContain("const isInspection = isInspectionType(");
+    expect(src).toMatch(/const showInspector =\s*featureOn\(orgSettings\.features, "leads"\) \|\|\s*!isInspection \|\|/);
+    expect(src).toMatch(/\{isInspection && \(\s*<FeatureOffLine feature="leads"/);
   });
 
-  it("the walk-throughs list with Leads off names no button it doesn't draw", () => {
-    // NewInspectionButton (Start A Walk-Through) renders only with Leads on, so the empty state's
-    // words follow it (W2-10: the site visit's one word).
+  it("the inspections list with Leads off names no button it doesn't draw", () => {
+    // NewInspectionButton (Start An Inspection) renders only with Leads on, so the empty state's
+    // words follow it (the site visit's one word, lib/statuses).
     const src = readFileSync(join(ROOT, "inspections/page.tsx"), "utf8");
-    const at = src.indexOf('title="No open walk-throughs"');
+    const at = src.indexOf('title="No open inspections"');
     expect(at).toBeGreaterThan(-1);
     const block = src.slice(at, src.indexOf("</EmptyState>", at));
-    expect(block).toMatch(/description=\{leadsOn \? "[^"]*Start A Walk-Through[^"]*" : "Nothing open right now\."\}/);
+    expect(block).toMatch(/description=\{leadsOn \? "[^"]*Start An Inspection[^"]*" : "Nothing open right now\."\}/);
     expect(block).toContain("{leadsOn && <NewInspectionButton");
   });
 
-  it("a safety form carries Safety Log's line; a walk-through sheet or the website's form does not", () => {
+  it("a safety form carries Safety Log's line; an inspection sheet or the website's form does not", () => {
     const src = readFileSync(join(ROOT, "forms/[id]/page.tsx"), "utf8");
     const at = src.indexOf('<FeatureOffLineFor feature="safety_log"');
     const guard = src.slice(Math.max(0, at - 300), at);

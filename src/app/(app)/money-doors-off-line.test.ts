@@ -33,7 +33,7 @@ describe("record pages keep opening, under the Off line", () => {
     expect(read(file)).not.toMatch(/if \(!featureOn\([^)]*\)\) (return|notFound|redirect)/);
   });
 
-  it("a form is the Safety Log's only when it is a crew checklist, never the walk-through or the intake form", () => {
+  it("a form is the Safety Log's only when it is a crew checklist, never the inspection or the intake form", () => {
     expect(featureForPath("/forms/abc")).toBeNull();
     const src = read("forms/[id]/page.tsx");
     const at = src.indexOf('<FeatureOffLineFor feature="safety_log"');
@@ -98,7 +98,7 @@ describe("doors outside the job page", () => {
   it("the price list's Add to Kit and sizing fields follow Kits", () => {
     expect(read("price-list/page.tsx")).toContain("kitDoors={kitsOn}");
   });
-  it("Forms: Safety Log takes only the crew checklists (and New Form); the walk-through and intake forms stay", () => {
+  it("Forms: Safety Log takes only the crew checklists (and New Form); the inspection and intake forms stay", () => {
     const src = read("forms/page.tsx");
     expect(src).toContain("!f.is_inspection && !f.is_public_intake");
     expect(src).toContain("const list = (forms ?? []).filter((f) => safetyOn || !isChecklist(f));");
@@ -112,9 +112,9 @@ describe("doors outside the job page", () => {
     expect(src).not.toContain('? [{\n          id: "playbook"');
     expect(src).toContain('const playbookOff = !on("leads") && !on("estimates") && !playbookForms.some((f) => f.isWebsite);');
     expect(src).toContain('if (id === "playbook") return playbookOff;');
-    expect(src).toContain('{walkThroughOff && <FeatureOffLine feature="leads" features={settings.features} isOwner={isOwner} />}');
+    expect(src).toContain('{inspectionSheetOff && <FeatureOffLine feature="leads" features={settings.features} isOwner={isOwner} />}');
     expect(src).toContain('{playbookOff && <FeatureOffLine feature="estimates" features={settings.features} isOwner={isOwner} />}');
-    // A link that names a walk-through (the form page's banner) still opens it with Leads off.
+    // A link that names an inspection (the form page's banner) still opens it with Leads off.
     expect(src).toContain("playbookForms.filter((f) => f.isWebsite || f.id === linkedForm)");
   });
   it("Licenses / Safety Log off: the record pages keep edit and delete, but draw no Add or Import under the Off line", () => {

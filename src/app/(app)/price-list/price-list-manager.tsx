@@ -96,7 +96,7 @@ export function PriceListManager({
   kitsByItem?: Record<string, string[]>;
   /** The org's kits — targets for "Add to Kit" from the checkboxes. */
   kits?: { id: string; name: string }[];
-  /** 0241: what this org can count an item by (built-ins + its measured walk-through needs). */
+  /** 0241: what this org can count an item by (built-ins + its measured inspection needs). */
   measurements?: MeasurementOption[];
   /** True when the 0240 sizing columns came back from the DB — gates the sizing fields. */
   sizingAvailable?: boolean;

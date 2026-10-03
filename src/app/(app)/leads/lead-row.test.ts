@@ -124,7 +124,7 @@ describe("A. no silent contact", () => {
 });
 
 describe("B. one next-step chip on the row", () => {
-  it("replaces the badges: no status word, no walk-through counts, no follow-up or web badges", () => {
+  it("replaces the badges: no status word, no inspection counts, no follow-up or web badges", () => {
     // 'intake' is a real stored source that lib/types' Inquiry union doesn't list (next-step reads its own type).
     const html = row(lead({ status: "contacted", source: "intake" as Inquiry["source"], lead_bucket: "A", site_inspection_required: true }), {
       visits: { done: 1, upcoming: 0, nextAt: null },
@@ -138,7 +138,7 @@ describe("B. one next-step chip on the row", () => {
   it("says what to do next", () => {
     expect(row(lead())).toContain("New · Call Them");
     expect(row(lead({ next_follow_up_at: "2026-09-20" }))).toContain("Call Back · Sep 20");
-    expect(row(lead(), { visits: { done: 0, upcoming: 1, nextAt: "2026-10-01T17:00:00.000Z" } })).toContain("Walk-Through · Thu Oct 1");
+    expect(row(lead(), { visits: { done: 0, upcoming: 1, nextAt: "2026-10-01T17:00:00.000Z" } })).toContain("Inspection · Thu Oct 1");
   });
 
   it("Referred By lives in the ⋯ panel, and only with Track Referrals on", () => {

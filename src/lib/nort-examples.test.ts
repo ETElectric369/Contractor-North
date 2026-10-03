@@ -11,7 +11,7 @@ import { DATA_TOOLS } from "@/lib/assistant-tools";
  *
  * Erik: "Nort cant be giving examples that dont make sense like in the tour." Every company's Nort
  * was taught with ET's crew and jobs ("have Brian install the ground rod", "2 4S boxes at Acacia",
- * "30 feet of 10/3 romex"), every company's walk-through showed "roughly 200' of 12-2", and every
+ * "30 feet of 10/3 romex"), every company's inspection showed "roughly 200' of 12-2", and every
  * why box offered a deck builder's board count or an electrician's subpanel fork. An example comes
  * from THIS company's own data and trade; with none, it shows the shape (<job>, <item>) or asks.
  *

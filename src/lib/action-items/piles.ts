@@ -20,7 +20,7 @@ import { sortActionItems } from "./types";
  *     paper, a contract, a stock short). It can be more than the rows read; then See All opens the
  *     list page instead of unfolding.
  *   · `capped`: the read hit its cap and the feeder also drops rows in code (an estimate draft, a
- *     finished visit, a walk-through, a receipt): the pile says "N+" (at least the N here) and See
+ *     finished visit, an inspection, a receipt): the pile says "N+" (at least the N here) and See
  *     All opens the list page.
  *   · neither: the rows here are all there are.
  * Money subtitles ("$2,340 across 4") are staff only, and never on a capped pile (a short sum).
@@ -59,7 +59,7 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
     listLabel: "See All On Leads",
   },
   visits_to_close_out: { label: "Visits To Close Out", verb: "Close Out", listHref: null, listLabel: null },
-  walkthroughs_to_write_up: { label: "Walk-Throughs To Write Up", verb: "Write It Up", listHref: "/inspections", listLabel: "See All Walk-Throughs" },
+  inspections_to_write_up: { label: "Inspections To Write Up", verb: "Write It Up", listHref: "/inspections", listLabel: "See All Inspections" },
   jobs_needing_a_day: { label: "Jobs Needing A Day", verb: "Pick A Day", listHref: "/schedule", listLabel: "See All On Schedule" },
   holds_back: { label: "Holds Back", verb: "Snooze", listHref: "/jobs?status=on_hold", listLabel: "See All On Jobs" },
   papers_to_sort: { label: "Papers To Sort", verb: "Sort It", listHref: "/bills#sort-these", listLabel: "See All On Bills" },
@@ -123,7 +123,7 @@ export function pileOf(item: Pick<ActionItem, "kind" | "id" | "paper" | "pile">)
     case "appointment":
       return "visits_to_close_out";
     case "inspection_writeup":
-      return "walkthroughs_to_write_up";
+      return "inspections_to_write_up";
     case "job_to_schedule":
       return "jobs_needing_a_day";
     case "job_on_hold":

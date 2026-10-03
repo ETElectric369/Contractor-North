@@ -14,7 +14,7 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *                database doesn't have 0368 yet; unscheduleAppointment turns that code into words);
  *   after 0368   the same write lands (one row, the silent-write law's id back); the schedule rail's own
  *                read (no start, not cancelled or completed) lists the visit; the range readers (My
- *                Day, the calendar, the crew board) never draw it; the walk-throughs list, descending
+ *                Day, the calendar, the crew board) never draw it; the inspections list, descending
  *                with nulls last, puts it after every dated visit; placing it again (the rail's
  *                rescheduleAppointment write) takes it off the rail; a completed visit's date is
  *                history and the door's status filter leaves it alone; a tech reads his own waiting
@@ -173,7 +173,7 @@ d("a visit can wait for a day (0368)", () => {
     expect(inRange).not.toContain(waiting);
   });
 
-  it("the walk-throughs list, newest first, puts a waiting visit after every dated one", async () => {
+  it("the inspections list, newest first, puts a waiting visit after every dated one", async () => {
     const waiting = await visit("2026-10-08T16:00:00Z", { title: "TEST 0368 waiting" });
     await clearTheDate(waiting);
     await visit("2026-10-09T16:00:00Z", { title: "TEST 0368 dated" });

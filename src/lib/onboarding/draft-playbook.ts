@@ -33,7 +33,7 @@ import type { Need, Playbook } from "@/lib/playbook/types";
  * and the trade comes only from ABOUT THEM, the company's own words.
  */
 export const DRAFT_SYSTEM =
-  "You are helping a contractor write the walk-through questions their own app will ask them on a job " +
+  "You are helping a contractor write the inspection questions their own app will ask them on a job " +
   "site, and — more importantly — WHERE EACH ANSWER ENDS UP IN THEIR PRICE.\n\n" +
   "For each question, return two things:\n\n" +
   "  ask — the question as a person would SAY it out loud, on site, to another human. Not a form " +
@@ -86,7 +86,7 @@ export function draftRequest(pb: Playbook, about: string): string {
  * AND A WHY SOMEBODY ALREADY WROTE IS NEVER OVERWRITTEN — enforced here, in code, not asked for in
  * the prompt. Same law as the provenance gate and as applyFills: FILL HOLES, NEVER OVERWRITE A
  * HAND. Erik's own playbook carries fifteen long why lines written from his own words; a
- * walk-through that quietly reworded them would destroy the exact thing this whole build exists to
+ * inspection that quietly reworded them would destroy the exact thing this whole build exists to
  * capture, and he'd have to read fifteen paragraphs closely to notice. Blank lines get drafted;
  * written ones get read, which is training enough.
  */
@@ -117,7 +117,8 @@ export function applyDraft(pb: Playbook, raw: unknown): Playbook {
         // through. Leave the whole thing alone.
         // …and now the code actually TESTS "mechanical" (audit 8): it replaced any ask whose
         // need had no why, so a contractor who reworded three questions in his own voice and
-        // wrote no why lines lost that wording the next time he re-took the walk-through.
+        // wrote no why lines lost that wording the next time he re-took SETUP (the interview,
+        // not the site visit).
         ...(d?.ask && !mine && n.ask.trim() === askFromLabel(n.label).trim() ? { ask: d.ask } : {}),
         ...(d?.why && !mine ? { why: d.why } : {}),
       };

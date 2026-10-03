@@ -314,7 +314,7 @@ export function PlacementProvider({
         /* UNDO ON THE PLACE (W2-05). The tray that was cut had the only Undo on putting a floater on a
            day; the rail's place carries it now, on the toast that names the day. Only when every job and
            visit placed landed, and only for work an Undo can truly put back: a job the place took off
-           hold (its reason and its day went with the hold) and a lead booked as a walk-through (a visit
+           hold (its reason and its day went with the hold) and a lead booked as an inspection (a visit
            was made) get none; their blocks' sheets carry Move and Clear The Date. */
         const undoable =
           !leads.length &&

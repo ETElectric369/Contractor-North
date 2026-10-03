@@ -166,8 +166,11 @@ describe("query.ts reads it once, on the same floors, and keeps the rest", () =>
     expect(q).toContain('const doneVisitIds = doneR.mode === "legacy" ?');
   });
 
-  it("a walk-through with no title is a Walk-Through (W2-10)", () => {
-    expect(q).toContain('title: a.title || "Walk-Through",');
+  it("an untitled visit falls back to its TYPE'S LABEL, never to a word typed in here", () => {
+    // Both feeders off this table: the write-up row and the not-closed-out row. A literal here is
+    // what made My Day disagree with every other screen the day the word changed (visit-word.test).
+    expect(q).toContain("title: a.title || appointmentTypeLabel(a.type),");
+    expect(q).toContain('title: a.title || type || "Appointment",');
     expect(q).not.toContain('"Site inspection"');
   });
 });

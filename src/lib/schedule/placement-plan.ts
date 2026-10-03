@@ -56,7 +56,7 @@ export function armedInstruction(armedCount: number): string {
 }
 
 export type PlaceOutcome = {
-  /** Leads that became booked walk-throughs. */
+  /** Leads that became booked inspections. */
   leadsBooked: number;
   /** Leads that didn't. */
   leadsFailed: number;

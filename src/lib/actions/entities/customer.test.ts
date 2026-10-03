@@ -51,7 +51,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => fakeCl
 import { customerActions } from "./customer";
 
 const ctx = { userId: "u1", orgId: "o1", role: "owner" };
-const TOM_VISIT = { id: "78fa75b1-8384-4148-8895-242846abcce5", title: "Walk-Through: Tom Goodman", location: "3245 W. Garnet Blvd, Homewood, CA 96141", starts_at: "2026-09-25T17:00:00.000Z" };
+const TOM_VISIT = { id: "78fa75b1-8384-4148-8895-242846abcce5", title: "Inspection: Tom Goodman", location: "3245 W. Garnet Blvd, Homewood, CA 96141", starts_at: "2026-09-25T17:00:00.000Z" };
 const create = (input: Record<string, unknown>) => customerActions["customer.create"].handler(customerActions["customer.create"].input.parse(input), ctx);
 const update = (input: Record<string, unknown>) => customerActions["customer.update"].handler(customerActions["customer.update"].input.parse(input), ctx);
 
@@ -70,10 +70,10 @@ describe("customer.create — the yes to adding him is the yes to his booking", 
     const r = await create({ name: "Tom Goodman" });
     expect(r.ok).toBe(true);
     expect(linkAppointmentTo).toHaveBeenCalledWith(TOM_VISIT.id, "customer", "cust-tom");
-    expect(r.recorded).toBe('Saved: "Tom Goodman". Linked to the visit "Walk-Through: Tom Goodman", Fri Sep 25 at 10:00 AM PDT.');
+    expect(r.recorded).toBe('Saved: "Tom Goodman". Linked to the visit "Inspection: Tom Goodman", Fri Sep 25 at 10:00 AM PDT.');
     expect(r.data).toMatchObject({
       id: "cust-tom",
-      linked: { appointment_id: TOM_VISIT.id, title: '"Walk-Through: Tom Goodman"', when: "Fri Sep 25 at 10:00 AM PDT" },
+      linked: { appointment_id: TOM_VISIT.id, title: '"Inspection: Tom Goodman"', when: "Fri Sep 25 at 10:00 AM PDT" },
     });
     expect((r.data as Record<string, unknown>).link_offer).toBeUndefined();
     expect(String((r.data as Record<string, unknown>).next_step)).toContain("ALREADY linked");
@@ -104,7 +104,7 @@ describe("customer.create — the yes to adding him is the yes to his booking", 
     linkAppointmentTo.mockResolvedValue({ ok: false, error: "Appointment not found." });
     const r = await create({ name: "Tom Goodman" });
     expect(r.ok).toBe(true);
-    expect(r.recorded).toContain("Couldn't link the visit \"Walk-Through: Tom Goodman\" yet (Appointment not found.)");
+    expect(r.recorded).toContain("Couldn't link the visit \"Inspection: Tom Goodman\" yet (Appointment not found.)");
     expect(r.data).toMatchObject({ link_failed: "Appointment not found." });
     expect((r.data as { link_offer: unknown[] }).link_offer).toHaveLength(1);
   });

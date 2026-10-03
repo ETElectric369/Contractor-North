@@ -55,7 +55,7 @@ export async function setPublicIntake(on: boolean): Promise<{ ok: true } | { ok:
     // …else seed the starter that matches the TRADE. The neutral five are the right thing to hand
     // a contractor we know nothing about and the wrong thing for a deck company, whose front door
     // should ask wood-or-composite rather than leave it in a paragraph for somebody to read back
-    // out. The trade intakes reuse the walk-through's keys, so what a customer answers here is
+    // out. The trade intakes reuse the inspection's keys, so what a customer answers here is
     // already answered when the inspector opens on site (lib/inquiries/carry-intake-answers).
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const playbook = intakeStarterForTrade(orgTrade(getOrgSettings((org as { settings?: unknown } | null)?.settings)).key, INTAKE_STARTER);

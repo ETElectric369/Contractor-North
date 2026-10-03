@@ -511,7 +511,7 @@ export function sourceWords(c: Pick<JobCircuit, "source" | "source_row">): strin
     case "nort":
       return "From Nort";
     case "inspector":
-      return "From The Walk-Through";
+      return "From The Inspection";
     default:
       return null;
   }

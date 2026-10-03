@@ -1550,7 +1550,7 @@ export async function sizeJob(jobId: string, plannedMinutes: number | null): Pro
 }
 
 /**
- * PUT AN ALREADY-BOOKED WALK-THROUGH ON A DAY.
+ * PUT AN ALREADY-BOOKED INSPECTION ON A DAY.
  *
  * Found while wiring the calendar as the day picker, and it was a live dead end. The rail carries
  * three things: leads, dateless jobs, and appointments that exist but have no start — Erik's "i
@@ -1651,7 +1651,7 @@ export async function sizeAppointment(
   /* A KIND THAT ISN'T ONE IS REFUSED (W2-06), in words and with nothing written: the same rule sizeLead
      keeps. Any known kind is taken (the pickers narrow what's offered; a guard never refuses a row's own
      old kind, so an old Quote or Office can be picked again), and "other". Junk used to fall through
-     appointmentTypeFor's default and land as a walk-through nobody chose. */
+     appointmentTypeFor's default and land as an inspection nobody chose. */
   if (patch?.workKind && !isWorkKind(patch.workKind) && patch.workKind !== "other") {
     return { ok: false, error: "That isn't a kind of work." };
   }
@@ -1747,7 +1747,7 @@ export async function planDayTimes(
   // costs the route nothing, so it must not push a real visit later.
   /* OVERLAP, NOT A POINT TEST. A three-day service call booked Monday OCCUPIES Tuesday, but a
      starts_at-within-the-day filter could not see it — so the fitter read Tuesday as empty and
-     booked a walk-through at 9am inside a day the calendar draws as full. Anything that STARTS
+     booked an inspection at 9am inside a day the calendar draws as full. Anything that STARTS
      before the day ends and ENDS after it starts is busy here; rows with no end are caught by the
      second arm (they start within the day and occupy their drawn hour). */
   const { data: appts } = await ctx.supabase

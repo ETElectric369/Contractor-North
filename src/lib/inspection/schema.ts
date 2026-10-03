@@ -201,7 +201,7 @@ export async function tolerateMissingColumns<T>(
   // This swallowed EVERY error, including a timeout, an RLS refusal, a dropped connection. On the
   // appointment page that is the silent-write law's read-side twin with teeth: a failed answers
   // read returned null, the page rendered `?? {}`, and the inspector opened showing an EMPTY
-  // walk-through of a job somebody had already finished. The first keystroke then autosaved that
+  // inspection of a job somebody had already finished. The first keystroke then autosaved that
   // emptiness over eighteen real answers.
   //
   // The narrow case is worth keeping — a push to main deploys before its migration, and a select
@@ -299,7 +299,7 @@ export function answersForEstimator(fields: InspectionField[], answers: Inspecti
 /**
  * THE MEASUREMENTS A KIT CAN SIZE ITSELF FROM.
  *
- * Pulls square feet and linear feet out of a walk-through's typed answers so the estimate's kit
+ * Pulls square feet and linear feet out of an inspection's typed answers so the estimate's kit
  * picker opens with the real numbers already in it. This is the join that makes the whole typed
  * sheet worth filling in: the inspector measures once, on site, and nobody retypes it later from
  * a paragraph — which is exactly where two copies of one number start to disagree.
@@ -343,7 +343,7 @@ export function measurementsFromAnswers(
   const linearFt = explicitLf ?? (length !== null && width !== null ? 2 * (length + width) : null);
 
   // 0241: EVERY measured number by its own key, so an item can be counted per conduit run,
-  // device count, ceiling height — whatever this org's walk-through asks — not just the
+  // device count, ceiling height — whatever this org's inspection asks — not just the
   // deck's two dimensions. The built-ins ride along under their fixed keys.
   const byKey: Record<string, number | null> = { area_sqft: sqft, length_lf: linearFt };
   for (const f of fields) if (f.type === "number") byKey[f.key] = num(f.key);

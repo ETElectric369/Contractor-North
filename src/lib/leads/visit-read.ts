@@ -6,7 +6,7 @@ import { VISITS_UNREAD, type LeadVisits, type LeadVisitsAnswer } from "./next-st
  * The board asked for every open lead's appointments in ONE request and threw the error away
  * (`const { data: visitRows } = await …`). A read that FAILED then looked exactly like a book with no
  * visits in it, and the one next-step chip fell through to its last rule: "New · Call Them" on a lead
- * with a walk-through booked for Tuesday. Both ways it fails are ordinary — past roughly two hundred
+ * with an inspection booked for Tuesday. Both ways it fails are ordinary — past roughly two hundred
  * open leads the uuid list makes the request too long for the gateway, and a busy book overflows the
  * five hundred rows it asked for.
  *

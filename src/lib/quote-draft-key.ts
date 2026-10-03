@@ -9,13 +9,13 @@
  * "would otherwise collapse to the shared 'new' slot — two prospects' drafts bleeding into each
  * other." The list was still one short.
  *
- * AN ESTIMATE STARTED FROM A WALK-THROUGH HAS NONE OF THE THREE. An inspection happens before the
+ * AN ESTIMATE STARTED FROM AN INSPECTION HAS NONE OF THE THREE. An inspection happens before the
  * job exists, often before the customer exists, and outside the lead funnel entirely: both of his
  * live inspections — 13125 Mayfern Rd and Sarah Dale — carry job_id, customer_id AND inquiry_id all
  * null. So both resolved to "new", and the Sarah Dale draft restored straight over the Mayfern Rd
  * prefill. Nothing was deleted; somebody else's job was painted on top of his.
  *
- * The appointment is the most specific identity available (one job can hold several walk-throughs),
+ * The appointment is the most specific identity available (one job can hold several inspections),
  * so it wins. Extracted from the component purely so the precedence is testable — a shared-slot
  * collision is invisible until it costs somebody an hour on a real estimate.
  */
@@ -43,7 +43,7 @@ export function quoteDraftKey(ids: {
  * bytes; the app had simply stopped asking for them.
  *
  * The "new" slot is included on purpose, and it is the whole point: an estimate started from a
- * walk-through had no job, no customer and no lead, so BOTH of his inspections wrote there. That
+ * inspection had no job, no customer and no lead, so BOTH of his inspections wrote there. That
  * shared slot is precisely where the lost work is.
  */
 export function quoteDraftLegacyKeys(ids: {
@@ -58,7 +58,7 @@ export function quoteDraftLegacyKeys(ids: {
   // draft lives there; evicting it to gain the namespace would eat the very work being rescued.
   const v2own = ids.captureId || ids.jobId || ids.customerId || ids.inquiryId || "new";
   const keys = [`quote-builder:v2:${v2own}`, `quote-builder:${preV2}`];
-  // A walk-through-sourced estimate wrote to the shared slot under the old key even when it had a
+  // An inspection-sourced estimate wrote to the shared slot under the old key even when it had a
   // capture id, because the old key never looked at one.
   if (ids.captureId && preV2 !== "new") keys.push("quote-builder:new");
   return keys;

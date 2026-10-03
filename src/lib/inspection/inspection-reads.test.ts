@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { isMissingView, readViaView, WALKTHROUGH_VIEWS } from "./walkthrough-access";
+import { isMissingView, readViaView, INSPECTION_VIEWS } from "./inspection-access";
 
 /**
- * WALK-THROUGH PRICES STAY IN THE OFFICE (LEAK-0227, 0366), in the code.
+ * INSPECTION PRICES STAY IN THE OFFICE (LEAK-0227, 0366), in the code.
  *
  * 0366 revokes appointments.inspection_answers from the signed-in role (every signed-in person, the
  * office included, is that one role), and keeps a non-office reader off a playbook form (forms_read).
@@ -82,10 +82,10 @@ describe("nobody reads appointments.inspection_answers from the table", () => {
   });
 });
 
-describe("the tech-facing walk-through reads a sheet's playbook only through form_playbooks", () => {
+describe("the tech-facing inspection reads a sheet's playbook only through form_playbooks", () => {
   const forms = chains("forms");
 
-  it("the visit page, the walk-through's save and the voice fill never select a playbook from forms", () => {
+  it("the visit page, the inspection's save and the voice fill never select a playbook from forms", () => {
     for (const f of ["app/(app)/appointments/[id]/page.tsx", "app/(app)/appointments/actions.ts", "app/(app)/appointments/hear-actions.ts"]) {
       const direct = forms.filter((c) => c.file === f && /playbook/.test(c.chain));
       expect(direct, f).toEqual([]);
@@ -99,10 +99,10 @@ describe("the tech-facing walk-through reads a sheet's playbook only through for
     expect(page).toMatch(/viewerIsStaff\s*\?\s*\(inspection\?\.inspection_answers \?\? \{\}\)\s*:\s*answersWithoutPrices\(/);
   });
 
-  it("a walk-through it couldn't read is said, and no sheet is drawn to save over it", () => {
+  it("an inspection it couldn't read is said, and no sheet is drawn to save over it", () => {
     const page = read("app/(app)/appointments/[id]/page.tsx");
-    expect(page).toContain("const walkthroughUnread = unread(sheetsRead) || unread(answersRead);");
-    expect(page).toMatch(/\{walkthroughUnread \? \(\s*<p[^>]*>\{WALKTHROUGH_UNREAD\}<\/p>\s*\) : \(\s*<Inspector/);
+    expect(page).toContain("const inspectionUnread = unread(sheetsRead) || unread(answersRead);");
+    expect(page).toMatch(/\{inspectionUnread \? \(\s*<p[^>]*>\{INSPECTION_UNREAD\}<\/p>\s*\) : \(\s*<Inspector/);
   });
 });
 
@@ -147,7 +147,7 @@ describe("readViaView: the view, or the table only while the view is missing", (
   });
 
   it("names the two views 0366 made, for the tables they stand in for", () => {
-    expect(WALKTHROUGH_VIEWS).toEqual({
+    expect(INSPECTION_VIEWS).toEqual({
       answers: { view: "appointment_answers", table: "appointments" },
       sheets: { view: "form_playbooks", table: "forms" },
     });

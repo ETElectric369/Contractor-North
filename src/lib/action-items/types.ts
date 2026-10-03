@@ -37,7 +37,7 @@ export type ActionKind =
   | "job_to_schedule" // a job with nothing ahead of it: no day, no segment, no visit, nobody on it (Jobs Needing A Day)
   | "inquiry" // a new/uncontacted lead
   | "appointment" // a scheduled appt awaiting completion
-  | "inspection_writeup" // a walk-through that HAPPENED and has no estimate yet — the visit is spent, the money is not
+  | "inspection_writeup" // an inspection that HAPPENED and has no estimate yet — the visit is spent, the money is not
   | "organize" // a capture (receipt/note/doc) needing a filing decision
   | "invoice_overdue" // a sent/partial invoice past its due date (A/R)
   | "quote_awaiting" // a sent quote/estimate gone quiet or nearing its valid-until
@@ -190,7 +190,7 @@ export type PileName =
   | "done_not_billed"
   | "leads_to_call"
   | "visits_to_close_out"
-  | "walkthroughs_to_write_up"
+  | "inspections_to_write_up"
   | "jobs_needing_a_day"
   | "holds_back"
   | "papers_to_sort"
@@ -323,9 +323,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   inquiry: ["do", "snooze", "dismiss", "open"],
   // Close Out (do), ⋯ Didn't Happen (dismiss). A tech's row only opens (appointmentAffordances).
   appointment: ["do", "dismiss", "open"],
-  // The href opens the estimate builder prefilled with the walk-through — still the main road.
+  // The href opens the estimate builder prefilled with the inspection — still the main road.
   // "dismiss" is the OTHER honest ending (0205): most bids lose, and until this verb existed
-  // a lost walk-through could never leave the inbox at all (Erik's Donner Pass). It writes a real
+  // a lost inspection could never leave the inbox at all (Erik's Donner Pass). It writes a real
   // field — appointments.outcome — never a hidden "I clicked this away" flag.
   inspection_writeup: ["dismiss", "open"],
   // Sort It / File It open their page; ⋯ Set Aside puts it in the Archive (Back undoes it there).

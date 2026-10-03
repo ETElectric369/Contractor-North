@@ -9,7 +9,7 @@
  *    they already happened and need to be actioned for estimates"        — Aug 02
  *
  * The cause was one line. Everything that wasn't in the next two items fell into a
- * single bucket rendered under the heading "Later" — so a 9am walk-through sat under
+ * single bucket rendered under the heading "Later" — so a 9am inspection sat under
  * the word "Later" at 5pm. And an EARLIER fix had made it worse in a subtle way: past
  * items used to be dropped from the day entirely, so somebody added them back into
  * that bucket without touching the label. Both readings were wrong, in opposite

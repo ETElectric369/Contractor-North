@@ -104,8 +104,8 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
         </p>
       )}
       {/* THE DOOR (Erik: "open the inspector right there with the data all filled in"). Opens the
-          lead's existing walk-through, or starts one now — either way the answers are seeded.
-          Named with the site visit's one word (W2-10), Title Case, 44px. */}
+          lead's existing inspection, or starts one now — either way the answers are seeded.
+          Named with the site visit's one word (lib/statuses), Title Case, 44px. */}
       <div className="flex flex-wrap items-center gap-2 pt-0.5">
         <button
           type="button"
@@ -114,7 +114,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
             start(async () => {
               const r = await openLeadInspection(inquiryId);
               if (!r.ok || !r.id) {
-                toast(r.error ?? "Couldn't open the walk-through.", "error");
+                toast(r.error ?? "Couldn't open the inspection.", "error");
                 return;
               }
               router.push(`/appointments/${r.id}`);
@@ -123,7 +123,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
           className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
         >
           {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="h-3.5 w-3.5" />}
-          Open The Walk-Through
+          Open The Inspection
           {!!Object.keys(brief.answers ?? {}).length && ` (${Object.keys(brief.answers ?? {}).length} answers ready)`}
         </button>
         {runButton("Read Again")}

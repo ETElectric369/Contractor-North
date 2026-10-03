@@ -8,12 +8,12 @@ import { useToast } from "@/components/toast";
 import { setAppointmentStatus } from "../actions";
 import { useStatusUndo } from "./visit-header-actions";
 
-/** The visit page's main button on a walk-through that is booked (W2-11): flips it to `completed`
- *  so the Walk-Throughs tab's buckets stay truthful (a walked-through visit stops reading as
+/** The visit page's main button on an inspection that is booked (W2-11): flips it to `completed`
+ *  so the Inspections tab's buckets stay truthful (a visit that happened stops reading as
  *  "upcoming" and lands in "To write up" until its estimate exists). 44px, primary: at most one main
- *  button sits in the header, and on a booked walk-through this is it. Said in a toast, with Undo:
+ *  button sits in the header, and on a booked inspection this is it. Said in a toast, with Undo:
  *  the page has no other way back from Done. */
-export function MarkCompleteButton({ id, label = "Mark Walk-Through Done" }: { id: string; label?: string }) {
+export function MarkCompleteButton({ id, label = "Mark Inspection Done" }: { id: string; label?: string }) {
   const router = useRouter();
   const toast = useToast();
   const undo = useStatusUndo(id);

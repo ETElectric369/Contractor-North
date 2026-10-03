@@ -76,8 +76,8 @@ export default async function InquiriesPage({
    * exempt from converting, so an inspected lead can still go on to become an estimate. What was
    * wrong is that her row looked IDENTICAL to a lead nobody had touched. So: how many visits are
    * done, how many are still booked, and the earliest booked start (with its type), so the chip
-   * can say "Walk-Through · Tue Oct 1" or "Walked · Estimate Next". EVERY kind of visit counts,
-   * not just walk-throughs; cancelled ones never do.
+   * can say "Inspection · Tue Oct 1" or "Walked · Estimate Next". EVERY kind of visit counts,
+   * not just inspections; cancelled ones never do.
    *
    * THE READ'S ERROR IS KEPT, and the batching with it (lib/leads/visit-read): one request carrying
    * every open lead's uuid outgrows the gateway past a couple of hundred leads, and five hundred rows

@@ -25,7 +25,7 @@ const stored: Answers = {
   ],
 };
 
-describe("the scopes the estimate seeds from a walk-through", () => {
+describe("the scopes the estimate seeds from an inspection", () => {
   it("a scopes question the answers turned off seeds nothing, though its picks are still stored", () => {
     const live = clearInapplicable(pb, stored);
     const scopes = applicableNeeds(pb, live).filter((n) => n.slot?.type === "scopes");

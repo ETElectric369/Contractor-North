@@ -6,12 +6,12 @@
  * "Cancel" and left the row on his screen; a Delete that looked like the same verb destroyed the
  * capture, cut an invoice's link to its visit (invoices.appointment_id is ON DELETE SET NULL), killed
  * the customer's pick-a-time link silently (schedule_proposals cascade) and lost the estimate the
- * walk-through was written up into (capture.quote_id).
+ * inspection was written up into (capture.quote_id).
  *
  * So there is one door, and the rule behind it: the visit is DELETED only when there is nothing to
  * lose, all four at once —
  *   1. nothing captured: no notes, measurements, materials or photos, no items or measures, and no
- *      answer on the walk-through sheet;
+ *      answer on the inspection sheet;
  *   2. no estimate was written from it (capture.quote_id);
  *   3. no invoice points at it;
  *   4. no pick-a-time link is waiting on the customer.
@@ -38,7 +38,7 @@ export type WontHappenFacts = {
 /** An answer that says something: not null, not blank, not an empty list. */
 const said = (v: unknown) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0);
 
-/** True when the walk-through sheet holds at least one real answer. */
+/** True when the inspection sheet holds at least one real answer. */
 export function hasAnswers(answers: unknown): boolean {
   if (!answers || typeof answers !== "object") return false;
   return Object.values(answers as Record<string, unknown>).some(said);

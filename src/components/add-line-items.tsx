@@ -91,7 +91,7 @@ export function AddLineItems({
    *  $115 for a Local customer while a vendor under the same code sold at its $100 net cost. Two
    *  inputs for one rule is how a page hands over one and forgets the other. */
   pricing,
-  /** Measurements from the walk-through, so a self-sizing kit opens with real numbers. */
+  /** Measurements from the inspection, so a self-sizing kit opens with real numbers. */
   measured,
   onAdd,
   className = "",

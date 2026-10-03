@@ -9,7 +9,7 @@ import {
   matchRead,
   readerSuggestions,
   readerSummary,
-  walkthroughSaid,
+  inspectionSaid,
   type ReadRow,
 } from "./readers";
 import { sourceWords } from "./model";
@@ -245,9 +245,9 @@ describe("review fixes: which circuit a row is, and which field its words are", 
     expect(labelCheckApplied(null, { panel_label: "Mini Fridge" })).toBe(false);
   });
 
-  it("the walk-through keeps the Square D family when it names one", () => {
-    expect(walkthroughSaid([{ panel_condition: "Homeline 200A, full" }]).said.brand).toBe("Square D Homeline");
-    expect(walkthroughSaid([{ panel_condition: "Square D QO 100 amp" }]).said.brand).toBe("Square D QO");
+  it("the inspection keeps the Square D family when it names one", () => {
+    expect(inspectionSaid([{ panel_condition: "Homeline 200A, full" }]).said.brand).toBe("Square D Homeline");
+    expect(inspectionSaid([{ panel_condition: "Square D QO 100 amp" }]).said.brand).toBe("Square D QO");
   });
 });
 
@@ -264,10 +264,10 @@ describe("the panel itself", () => {
     expect(h.map((x) => x.words)).toEqual(["Brand: Siemens", "Main: 125A", "Spaces: 32"]);
   });
 
-  it("the walk-through's one box is read for a brand and an amps figure, and shown whole", () => {
-    const w = walkthroughSaid([{ panel_condition: "Siemens, 200A, two slots open" }]);
+  it("the inspection's one box is read for a brand and an amps figure, and shown whole", () => {
+    const w = inspectionSaid([{ panel_condition: "Siemens, 200A, two slots open" }]);
     expect(w).toEqual({ said: { brand: "Siemens", main_amps: 200 }, words: "Siemens, 200A, two slots open" });
-    expect(walkthroughSaid([{ panel_brand: null, panel_amps: null, panel_condition: null }])).toEqual({ said: {}, words: null });
-    expect(walkthroughSaid([{ panel_brand: "Square D", panel_amps: 100 }]).said).toEqual({ brand: "Square D", main_amps: 100 });
+    expect(inspectionSaid([{ panel_brand: null, panel_amps: null, panel_condition: null }])).toEqual({ said: {}, words: null });
+    expect(inspectionSaid([{ panel_brand: "Square D", panel_amps: 100 }]).said).toEqual({ brand: "Square D", main_amps: 100 });
   });
 });

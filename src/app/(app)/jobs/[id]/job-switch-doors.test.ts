@@ -109,7 +109,7 @@ describe("Estimates on a lead's row", () => {
 
 describe("Nort off: the surfaces that stay say it without the name", () => {
   const hear = vi.fn();
-  it("the voice fill on a walk-through keeps working, as Just Say It", () => {
+  it("the voice fill on an inspection keeps working, as Just Say It", () => {
     expect(r(TellNort, { hear, answers: {}, onFilled: () => {} })).toContain("Just tell Nort");
     const html = r(TellNort, { hear, answers: {}, onFilled: () => {}, nortOn: false });
     expect(html).toContain("Just Say It");

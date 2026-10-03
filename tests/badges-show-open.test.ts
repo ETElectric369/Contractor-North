@@ -183,7 +183,7 @@ describe("every tab count in the app is an open count", () => {
  * said it was finished. The tags now come from ONE rule (lib/inspections inspectionRowTags) and the
  * page writes none of its own, which is what stops the next one riding into the wrong pile.
  */
-describe("the open Walk-Throughs pile wears no Done pill", () => {
+describe("the open Inspections pile wears no Done pill", () => {
   it("every tag on a row comes from the one rule — the page writes none itself", () => {
     const page = read("app/(app)/inspections/page.tsx");
     expect(page).toContain("{inspectionRowTags(a, writeUp).map((t) => (");

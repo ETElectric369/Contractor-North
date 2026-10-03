@@ -393,7 +393,7 @@ function EditItemModal({ item, orgDefaultPct, measurements = [], onClose }: { it
           )}
         </div>
 
-        {/* SIZE THIS LINE FROM THE JOB (0166) — the link between a walk-through and an estimate.
+        {/* SIZE THIS LINE FROM THE JOB (0166) — the link between an inspection and an estimate.
             A line that knows it needs so-much per square foot fills its own quantity in from the
             measurements, instead of somebody working it out on a phone. Left blank, the line keeps
             its flat quantity, which is how every existing kit already behaves. On a LINKED line the
@@ -406,7 +406,7 @@ function EditItemModal({ item, orgDefaultPct, measurements = [], onClose }: { it
           <p className="mt-2 text-xs text-slate-500">
             {view.linked
               ? "This rule is saved on the price-list item, so every kit that uses it sizes the same way."
-              : "Leave blank for a fixed quantity. Fill one in and this line works out its own quantity from the measurements taken on the walk-through."}
+              : "Leave blank for a fixed quantity. Fill one in and this line works out its own quantity from the measurements taken on the inspection."}
           </p>
           <SizingFields sizing={sizing} onChange={setSizing} idPrefix="ei" measurements={measurements} />
         </details>

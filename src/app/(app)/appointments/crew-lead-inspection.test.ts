@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * THE WALK-THROUGH'S TWO WRITERS, AND WHO GETS WHICH (0356; Erik, 2026-09-26: "crew leader yes tech
+ * THE INSPECTION'S TWO WRITERS, AND WHO GETS WHICH (0356; Erik, 2026-09-26: "crew leader yes tech
  * no").
  *
  *   · the office: saveInspectionCapture / saveInspectionAnswers exactly as before, an UPDATE under
@@ -13,9 +13,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *   · before 0356 is applied: a plain sentence, nothing saved, never a raw PGRST202.
  *
  * The fake client holds one appointment row, one sheet and the caller's profile; the database's own
- * half of the rule is walkthrough-crew-lead.integration.test.ts.
+ * half of the rule is inspection-crew-lead.integration.test.ts.
  *
- * AFTER 0366 (LEAK-0227) the walk-through's reads go through the two views, as the database does:
+ * AFTER 0366 (LEAK-0227) the inspection's reads go through the two views, as the database does:
  * appointment_answers (the office reads the answers as stored, anyone else without a price) and
  * form_playbooks (a crew lead can no longer read a playbook sheet from forms itself). `views: false`
  * is a database before 0366: the views answer PGRST205 and the table is read as before. `viewError`
@@ -55,7 +55,7 @@ vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: vi.fn(async () => {}),
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 
 import { addInspectionPhotos, removeInspectionPhoto, saveInspectionAnswers, saveInspectionCapture } from "./actions";
-import { answersWithoutPrices } from "@/lib/inspection/walkthrough-access";
+import { answersWithoutPrices } from "@/lib/inspection/inspection-access";
 
 const MISSING_VIEW = (name: string) => ({ code: "PGRST205", message: `Could not find the table 'public.${name}' in the schema cache` });
 
@@ -248,11 +248,11 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
   });
 
   it("the database's refusal comes back in its own words, and stops the retry", async () => {
-    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office can fill in the walk-through." } };
+    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office can fill in the inspection." } };
     expect(await saveInspectionCapture("appt-1", { photos: [] })).toEqual({
       ok: false,
       refused: true,
-      error: "Only the office can fill in the walk-through.",
+      error: "Only the office can fill in the inspection.",
     });
     expect(db.rpcCalls).toHaveLength(2); // read again once (see the race below), then said
   });
@@ -264,7 +264,7 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
         // The office's photo lands after his read; the database sees it missing from his list.
         before: () => db.appt.capture.photos.push(officeNew),
         data: null,
-        error: { code: "42501", message: "Only the office can take a photo off the walk-through." },
+        error: { code: "42501", message: "Only the office can take a photo off the inspection." },
       },
       { data: "appt-1", error: null },
     ];
@@ -297,12 +297,12 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     db.rpcResult = { data: null, error: { code: "PGRST202", message: "Could not find the function public.save_walkthrough_capture" } };
     const r = await saveInspectionAnswers("appt-1", "sheet-1", { work: "Remodel" });
     expect(r).toMatchObject({ ok: false, refused: true });
-    expect(r.error).toMatch(/Crew leads can't save the walk-through until the office finishes an update/);
+    expect(r.error).toMatch(/Crew leads can't save the inspection until the office finishes an update/);
     expect(r.error).not.toMatch(/PGRST|function/);
   });
 });
 
-describe("the walk-through's reads go through the views (0366, LEAK-0227)", () => {
+describe("the inspection's reads go through the views (0366, LEAK-0227)", () => {
   it("the office's save reads the sheet and the stored answers through the views, prices and all", async () => {
     db.staff = true;
     db.appt.inspection_answers = { work: "Deck", scope: [{ code: "R1", qty: 1, price: 500 }], retired_q: "kept" };

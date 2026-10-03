@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { leadNextStep, monthDay, weekdayMonthDay, type LeadStepInput, type LeadVisits } from "./next-step";
+import { KIND_LABEL } from "@/lib/schedule/work-shape";
 
 /**
  * ONE NEXT-STEP CHIP (W2-07): every rule, in its order, and the show-and-hide rules around it.
@@ -39,12 +40,19 @@ describe("each rule", () => {
 
   it("4. a booked visit: its earliest day on the company's clock, blue; one waiting for a day says so", () => {
     // 2026-10-01T05:30Z is still Sep 30 in California: the company's day, never UTC's.
-    expect(step({}, booked("2026-10-01T05:30:00.000Z"))).toMatchObject({ label: "Walk-Through · Wed Sep 30", tone: "blue" });
-    expect(step({}, booked("2026-10-01T17:00:00.000Z"))).toMatchObject({ label: "Walk-Through · Thu Oct 1", tone: "blue" });
-    expect(step({}, booked(null))).toMatchObject({ label: "Walk-Through · No Day Yet", tone: "blue" });
-    // A booked visit that isn't a walk-through says its own kind.
+    expect(step({}, booked("2026-10-01T05:30:00.000Z"))).toMatchObject({ label: "Inspection · Wed Sep 30", tone: "blue" });
+    expect(step({}, booked("2026-10-01T17:00:00.000Z"))).toMatchObject({ label: "Inspection · Thu Oct 1", tone: "blue" });
+    expect(step({}, booked(null))).toMatchObject({ label: "Inspection · No Day Yet", tone: "blue" });
+    // A booked visit that isn't an inspection says its own kind.
     expect(step({}, booked("2026-10-01T17:00:00.000Z", { nextType: "service_call" })).label).toBe("Service Call · Thu Oct 1");
     expect(step({}, booked("2026-10-01T17:00:00.000Z", { nextType: "call" })).label).toBe("Phone Call · Thu Oct 1");
+    // AND THE WORD IS THE SCHEDULE'S, NOT THIS FILE'S. This chip used to type its own "Inspection",
+    // which is how one screen came to disagree with the rest the day the word changed. Only the two
+    // shortenings this chip owns ("Meeting", "Visit") are its own.
+    for (const [type, kind] of [["inspection", "walkthrough"], ["service_call", "service"], ["call", "call"], ["job", "job"]] as const) {
+      expect(step({}, booked(null, { nextType: type })).label, type).toBe(`${KIND_LABEL[kind]} · No Day Yet`);
+    }
+    expect(step({}, booked(null, { nextType: "other" })).label).toBe("Visit · No Day Yet");
   });
 
   it("5. a visit done: Walked · Estimate Next, or Walked with Estimates off, green", () => {
@@ -78,7 +86,7 @@ describe("the order: the first rule that matches wins", () => {
 
   it("a passed follow-up beats a booked visit; a booked visit beats a done one and a coming follow-up", () => {
     expect(step({ next_follow_up_at: "2026-09-20" }, booked("2026-10-01T17:00:00.000Z")).label).toBe("Call Back · Sep 20");
-    expect(step({ next_follow_up_at: "2026-10-03" }, booked("2026-10-01T17:00:00.000Z", { done: 2 })).label).toBe("Walk-Through · Thu Oct 1");
+    expect(step({ next_follow_up_at: "2026-10-03" }, booked("2026-10-01T17:00:00.000Z", { done: 2 })).label).toBe("Inspection · Thu Oct 1");
   });
 
   it("a done visit beats a coming follow-up; a coming follow-up beats contacted and quoted", () => {
@@ -101,7 +109,7 @@ describe("what shows around the chip", () => {
   it("· Needs A Visit follows when a site visit is required and nothing is booked", () => {
     expect(step({ site_inspection_required: true }).label).toBe("New · Call Them · Needs A Visit");
     expect(step({ site_inspection_required: true, lead_bucket: "B" }).label).toBe("B · New · Call Them · Needs A Visit");
-    expect(step({ site_inspection_required: true }, booked(null)).label).toBe("Walk-Through · No Day Yet");
+    expect(step({ site_inspection_required: true }, booked(null)).label).toBe("Inspection · No Day Yet");
     expect(step({ site_inspection_required: true }, { done: 1, upcoming: 0, nextAt: null }).label).toBe("Walked · Estimate Next");
   });
 

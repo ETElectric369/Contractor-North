@@ -27,7 +27,7 @@ import type { DraftLineItem } from "@/lib/estimate/line-map";
  * as another `src/lib/estimate/<trade>.ts` module — is what stops the next contractor needing a
  * hand-written pricing file. The picks come from THEIR price list, by their codes, in their words.
  *
- * A pick maps 1:1 onto a DraftLineItem, so an estimate built from a walk-through is line items the
+ * A pick maps 1:1 onto a DraftLineItem, so an estimate built from an inspection is line items the
  * office recognises rather than prose somebody re-types.
  */
 

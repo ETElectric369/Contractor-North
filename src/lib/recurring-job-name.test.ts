@@ -4,7 +4,7 @@ import { runTemplate } from "@/lib/recurring-engine";
 /**
  * A RECURRING TEMPLATE'S TITLE IS A NAME A PERSON TYPED (Erik 2026-09-28): every job it makes keeps
  * it exactly as typed ("Service call — Unit 4B", "Monthly maintenance — Acme"), unless it is ONLY a
- * source tag, or a tag and the customer ("Inspection", "Walk-through", "Site visit: Rita Moss"):
+ * source tag, or a tag and the customer ("Inspection", "Inspection", "Site visit: Rita Moss"):
  * that is no name, and the job is named for who, as written ("Rita Moss"), else "New Job · Sep 26"
  * on the company's today. Synthetic people.
  */
@@ -75,7 +75,7 @@ describe("recurring jobs keep the template's title as typed", () => {
     });
   }
 
-  for (const title of ["Inspection", "Walk-through", "Site visit: Rita Moss", "  "]) {
+  for (const title of ["Inspection", "Inspection", "Site visit: Rita Moss", "  "]) {
     it(`"${title}" is only a tag (or nothing): the job is named for the customer as written`, async () => {
       const { client, inserts } = fakeDb(rita);
       await runTemplate(client, tpl(title), null, LA);

@@ -75,7 +75,7 @@ export const sayOf = (l: Line, c: TourCtx): string => (typeof l === "function" ?
 
 /**
  * THE TOUR READS THE SWITCHES. A step or a lesson can belong to a switch: one key, or several
- * meaning ANY of them (the why-lines lesson is Leads' walk-through questions or Estimates'). A gated
+ * meaning ANY of them (the why-lines lesson is Leads' inspection questions or Estimates'). A gated
  * step whose switch is off is skipped, and a gated lesson isn't offered, so nobody is walked to a
  * page the company switched off. A switch only hides; the words for everything else don't move.
  */
@@ -92,7 +92,8 @@ export const stepsOn = <S extends { feature?: FeatureGate }>(steps: readonly S[]
  * WHAT THE AVATAR MENU HOLDS FOR THIS COMPANY (account-menu.tsx), in the order it draws them:
  * sign out and the language always, the estimate QR only with Leads on (it hands out the lead
  * link), Office always, and Tools only with Calculators on. With Nort off (the plain words) the
- * walk-through and the lessons sit there too, under Help. The settings-door step opens that menu
+ * TOUR and the lessons sit there too, under Help (this tour, not the site visit — a different noun
+ * that wore the same word until 2026-10-02). The settings-door step opens that menu
  * and then names it, so it names the one it opened.
  */
 function menuHolds(c: TourCtx, nortOff = false): string {
@@ -107,7 +108,7 @@ function menuHolds(c: TourCtx, nortOff = false): string {
 
 /**
  * THE RUN READS THE SWITCHES TOO (How a Job Runs). A company with Leads off has no lead and no
- * walk-through; one with Estimates off has no estimate to accept. The steps that remain for them say
+ * inspection; one with Estimates off has no estimate to accept. The steps that remain for them say
  * only what their screens hold: where the job starts (New Estimate, or New Job, under Plus), and where
  * an address was first typed. Everything on reads exactly as before.
  */
@@ -126,7 +127,7 @@ const jobStarts = (c: TourCtx): string =>
 /** run-win up to its last sentence (which is the only part that names Nort). */
 const winSaved = (c: TourCtx): string =>
   `You typed that address once, ${typedOnce(c)}, and it was still with you at the invoice — ` +
-  (leadsOn(c) ? "same with the numbers off the walk-through and the hours off the clock. " : "same with the hours off the clock. ") +
+  (leadsOn(c) ? "same with the numbers off the inspection and the hours off the clock. " : "same with the hours off the clock. ") +
   (leadsOn(c) ? "So you're not typing it four times, " : "So you're not typing it again at every step, ") +
   "you're not carrying the job round in your head between the yard and the desk, " +
   "and your customer gets a price off your real numbers instead of a guess made in a truck. " +
@@ -325,7 +326,7 @@ export const TOUR: TourStep[] = [
     anchor: "ask",
     title: "That's it",
     // TRUE TO THE ROWS UNDER SEARCH OR ASK (command-bar.tsx, lib/onboarding/help-rows): Take The
-    // Setup Again is what replays THIS walk-through (it asks the questions again, so it is also
+    // Setup Again is what replays THIS TOUR (it asks the questions again, so it is also
     // how an answer changes), and Show Me How holds the lessons. Show Me How does not replay the
     // setup, so the line doesn't say it does.
     say:
@@ -358,9 +359,9 @@ export const lessonOn = (l: Lesson, features: FeatureMap | null | undefined): bo
  * your why line is what tells me where that answer lands in the price", and nothing on the estimate
  * path reads one: Start The Estimate hands the estimator "label: answer" only
  * (lib/playbook/answers factsForEstimatorByProvenance), and Generate Line Items reads the separate
- * "How Nort writes an estimate" text. Where a why line IS read today: the walk-through fill
+ * "How Nort writes an estimate" text. Where a why line IS read today: the inspection fill
  * (lib/playbook/hear, "where the answer lands") and the grey line under each question on the
- * walk-through.
+ * inspection.
  *
  * ONE SWITCH, so the lesson stays true whichever way the estimate goes (Erik is deciding whether it
  * should read them). Flip it in the same change that makes the estimator read why lines;
@@ -376,20 +377,20 @@ const WHY_USES = WHY_LINE_FEEDS_ESTIMATE
         "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
         "number you didn't give me.",
       plain:
-        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
+        "Two reasons. If something's already been answered, the inspection doesn't ask it twice. " +
         "And when an estimate gets written, your why line is what says where that answer lands in the " +
         "price. It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
     }
   : {
       nort:
         "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
-        "And when you say a job out loud on the walk-through, your why line helps me put each answer in " +
+        "And when you say a job out loud on the inspection, your why line helps me put each answer in " +
         "the right box, and it sits under the question so whoever's asking can see where it lands. " +
         "It's for reading, mine and yours. I don't run the sum in it, and I never work out a number " +
         "you didn't give me.",
       plain:
-        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
-        "And when a job gets said out loud on the walk-through, your why line helps put each answer in " +
+        "Two reasons. If something's already been answered, the inspection doesn't ask it twice. " +
+        "And when a job gets said out loud on the inspection, your why line helps put each answer in " +
         "the right box, and it sits under the question so whoever's asking can see where it lands. " +
         "It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
     };
@@ -400,7 +401,7 @@ export const LESSONS: Lesson[] = [
     // Lesson titles are rows under Show Me How now, so they are Title Case (clickables).
     title: "Why Lines",
     blurb: "What a why line is, the three shapes it takes, how to write yours — the part nobody guesses.",
-    // The Playbook's questions and their why lines are Leads' walk-through and Estimates' business:
+    // The Playbook's questions and their why lines are Leads' inspection and Estimates' business:
     // with both switched off, Show Me How doesn't offer this one.
     feature: ["leads", "estimates"],
     steps: [
@@ -416,7 +417,7 @@ export const LESSONS: Lesson[] = [
     plain: {
       say:
         "Here's the thing that makes this different from every other app you've tried. " +
-        "When you walk a job, the walk-through asks you questions — and every question has a WHY LINE attached. " +
+        "When you walk a job, the inspection asks you questions — and every question has a WHY LINE attached. " +
         "One line, in your words, saying WHERE THAT ANSWER ENDS UP IN YOUR PRICE. " +
         "Not why it matters. Where it lands.",
     },
@@ -560,7 +561,7 @@ export const LESSONS: Lesson[] = [
     key: "how-a-job-runs",
     title: "How a Job Runs",
     // No list of stages here: the blurb is one string for every company, and a company with Leads
-    // or Estimates off has no lead, walk-through or estimate in its run (the steps read the switches).
+    // or Estimates off has no lead, inspection or estimate in its run (the steps read the switches).
     blurb: "Phone call to paid — one job, every step, and what Nort does at each one.",
     plainBlurb: "Phone call to paid — one job, every step, and what the app does at each one.",
     steps: [
@@ -578,13 +579,13 @@ export const LESSONS: Lesson[] = [
   // EVERY LINE IN HERE WAS TRUTH-CHECKED AGAINST THE CODE, and eleven claims were cut for being
   // false — including "they book themselves" (the app builds an sms: link, HE presses send),
   // "the hours land on their own" (he picks the job at clock-in), and the 70-80% figure itself,
-  // which is honest at the walk-through fill and near zero at getting a lead in. What replaced it
+  // which is honest at the inspection fill and near zero at getting a lead in. What replaced it
   // is the version true at every stage: a fact typed once rides all the way through. A man who
   // thinks his estimate priced itself is a man who sends one without reading it.
-  // THE SWITCHES WALK THE RUN TOO: with Leads off there is no lead and no walk-through to walk to
-  // (run-lead, run-walk, and trust, which is welded to the walk-through), and with Estimates off
+  // THE SWITCHES WALK THE RUN TOO: with Leads off there is no lead and no inspection to walk to
+  // (run-lead, run-walk, and trust, which is welded to the inspection), and with Estimates off
   // no estimate (run-estimate). The driver skips a gated step, and the steps that remain read the
-  // switches themselves (leadsOn / estimatesOn above): no lead, walk-through or accepted estimate is
+  // switches themselves (leadsOn / estimatesOn above): no lead, inspection or accepted estimate is
   // named to a company that switched it off. tour.test pins the words, not only the keys.
   {
     key: "run-lead",
@@ -611,12 +612,12 @@ export const LESSONS: Lesson[] = [
     feature: "leads",
     title: "Then you're stood in the yard",
     say:
-      "Day of, you're on site with your phone. Open the walk-through, press Talk, and say the whole " +
+      "Day of, you're on site with your phone. Open the inspection, press Talk, and say the whole " +
       "job in one breath the way you'd say it to a person. I put what you said into the right boxes " +
       "and only ask about what's left over.",
     plain: {
       say:
-        "Day of, you're on site with your phone. Open the walk-through, press Just Say It, and say the " +
+        "Day of, you're on site with your phone. Open the inspection, press Just Say It, and say the " +
         "whole job in one breath the way you'd say it to a person. What you said goes into the right " +
         "boxes, and you're only asked about what's left over.",
     },
@@ -648,7 +649,7 @@ export const LESSONS: Lesson[] = [
     title: "Writing it up",
     say: (c) =>
       (leadsOn(c)
-        ? "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
+        ? "Back in the truck you press Start The Estimate, and the answers from that inspection are " +
           "already in it, in your own words, taken as given rather than read back to you. Anything you " +
           "priced standing on site is already a line. "
         : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +
@@ -659,7 +660,7 @@ export const LESSONS: Lesson[] = [
     plain: {
       say: (c) =>
         (leadsOn(c)
-          ? "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
+          ? "Back in the truck you press Start The Estimate, and the answers from that inspection are " +
             "already in it, in your own words, taken as given rather than read back to you. Anything you " +
             "priced standing on site is already a line. "
           : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +

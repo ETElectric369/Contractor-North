@@ -8,14 +8,14 @@ import { dayLoad, durationLabel, fillsTheDay, KIND_LABEL, workKind } from "./wor
  */
 describe("workKind — the tag, from what already exists", () => {
   it("maps the appointment types he named to his words", () => {
-    expect(KIND_LABEL[workKind({ type: "inspection" })]).toBe("Walk-Through");
-    expect(KIND_LABEL[workKind({ type: "final_inspection" })]).toBe("Walk-Through");
+    expect(KIND_LABEL[workKind({ type: "inspection" })]).toBe("Inspection");
+    expect(KIND_LABEL[workKind({ type: "final_inspection" })]).toBe("Inspection");
     expect(KIND_LABEL[workKind({ type: "service_call" })]).toBe("Service Call");
     expect(KIND_LABEL[workKind({ type: "meeting" })]).toBe("Office");
     expect(KIND_LABEL[workKind({ kind: "job" })]).toBe("Job");
   });
 
-  it("a LEAD is a walk-through — the only thing a lead can be scheduled as", () => {
+  it("a LEAD is an inspection — the only thing a lead can be scheduled as", () => {
     expect(workKind({ kind: "lead" })).toBe("walkthrough");
   });
 
@@ -58,7 +58,7 @@ describe("fillsTheDay — does it OWN the day or share it", () => {
   it("a 6h job owns the day", () => {
     expect(fillsTheDay(360)).toBe(true);
   });
-  it("a 1h walk-through shares it — the 'visit is on the way' case", () => {
+  it("a 1h inspection shares it — the 'visit is on the way' case", () => {
     expect(fillsTheDay(60)).toBe(false);
   });
   it("unsized never claims the day", () => {

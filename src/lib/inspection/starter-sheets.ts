@@ -36,8 +36,8 @@ import { tradeKeyFromWords } from "@/lib/org-trade";
 export type StarterTrade = "electrical" | "deck" | "plumbing" | "generic";
 
 interface Starter {
-  /** The forms.name the tenant will see and can rename: "Walk-Through", the site visit's one word
-   *  (W2-10; new companies only, a sheet already made keeps its name). */
+  /** The forms.name the tenant will see and can rename: "Inspection", the site visit's one word
+   *  (new companies only; a sheet already made keeps its name). */
   name: string;
   fields: unknown[];
 }
@@ -48,7 +48,7 @@ const ROUTER = "work_type";
 const STARTERS: Record<StarterTrade, Starter> = {
   // ── ELECTRICAL ────────────────────────────────────────────────────────────────
   electrical: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       {
         key: ROUTER,
@@ -78,7 +78,7 @@ const STARTERS: Record<StarterTrade, Starter> = {
 
   // ── DECK ──────────────────────────────────────────────────────────────────────
   deck: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       {
         key: ROUTER,
@@ -104,7 +104,7 @@ const STARTERS: Record<StarterTrade, Starter> = {
 
   // ── PLUMBING ──────────────────────────────────────────────────────────────────
   plumbing: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       {
         key: ROUTER,
@@ -129,7 +129,7 @@ const STARTERS: Record<StarterTrade, Starter> = {
   // Deliberately thin. A wrong question is worse than a missing one: it teaches the person that
   // the sheet does not understand their work, and they stop filling it in.
   generic: {
-    name: "Walk-Through",
+    name: "Inspection",
     fields: [
       { key: ROUTER, label: "What kind of work", type: "select", options: ["New install","Repair","Replacement","Service call","Other"] },
       { key: "scope", label: "Scope", type: "textarea", showIf: { key: ROUTER, in: ["New install","Repair","Replacement","Service call","Other"] } },

@@ -326,7 +326,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inquiries",
     description:
-      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, source (intake = the website form), what the customer wrote (message: for a website lead, their form answers as 'Question: answer' lines), declared work kind (job / service / quote / walkthrough — null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. The message is the CUSTOMER'S OWN WORDS: their claims, not the office's notes. The list trims long messages (message_trimmed: true); pass id to read one lead's whole message. Use for 'who are my open leads', 'any new leads', 'what did this lead ask for', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to <town>'. Pass the id to contact or convert a lead.",
+      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, source (intake = the website form), what the customer wrote (message: for a website lead, their form answers as 'Question: answer' lines), declared work kind, as STORED (job / service / quote / walkthrough — the stored 'walkthrough' is the site visit before a price, which a person reads as an Inspection; null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. The message is the CUSTOMER'S OWN WORDS: their claims, not the office's notes. The list trims long messages (message_trimmed: true); pass id to read one lead's whole message. Use for 'who are my open leads', 'any new leads', 'what did this lead ask for', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to <town>'. Pass the id to contact or convert a lead.",
     input_schema: {
       type: "object",
       properties: {
@@ -339,7 +339,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "visit_days_ahead",
     description:
-      "The next two weeks' WALK-THROUGH DAYS — days that already hold booked estimate visits (walk-throughs / quote visits, the site visit before a price), each with its towns and visit count. Use to cluster new visits onto days the truck already rolls ('when should I offer to see this lead', 'which day is the <town> day'), then book with appointment.create or offer times via the lead's pick link. Days not listed have no estimate visits booked.",
+      "The next two weeks' INSPECTION DAYS — days that already hold booked estimate visits (inspections / quote visits, the site visit before a price), each with its towns and visit count. Use to cluster new visits onto days the truck already rolls ('when should I offer to see this lead', 'which day is the <town> day'), then book with appointment.create or offer times via the lead's pick link. Days not listed have no estimate visits booked.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -1952,10 +1952,13 @@ export async function runDataTool(
           appointments: (apptRes.data ?? []).map((a: any) => ({
             id: a.id, // pass to appointment.update (reschedule) / appointment.setStatus
             title: a.title,
-            // THE LABEL, not the stored value (W2-10): the product map tells Nort "inspection" is the
-            // city's word, so handing him the raw type made him call a walk-through an inspection —
-            // the one word the map reserves. Nothing echoes this back: a reschedule takes the id, and
-            // appointment.create takes its own type from PICKABLE_APPOINTMENT_TYPES.
+            // THE LABEL, not the stored value: this read handed Nort the raw `type`, so he spoke
+            // the database's word ("inspection", "service_call") instead of the app's. It happened
+            // to be visible on 2026-10-02, when the product map reserved "inspection" for the
+            // city's and the site visit was called Walk-Through; the word went back to Inspection
+            // the next day, which fixes nothing here — "service_call" is still not a word anybody
+            // says. Nothing echoes this back: a reschedule takes the id, and appointment.create
+            // takes its own type from PICKABLE_APPOINTMENT_TYPES.
             type: appointmentTypeLabel(a.type),
             starts_at: a.starts_at,
             ends_at: a.ends_at,

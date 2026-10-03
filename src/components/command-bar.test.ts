@@ -152,7 +152,7 @@ describe("commandNavItems", () => {
  * EVERY DOCKED SCREEN IS REACHABLE BY THE WORDS A PERSON WOULD TYPE — INCLUDING THE WORD IT USED TO
  * BE CALLED. (Erik, 2026-10-01.)
  *
- * cn-v1034 renamed the dock row "Inspections" to "Walk-Throughs" and nobody touched the nickname list
+ * cn-v1034 renamed the dock row "Inspections" to "Inspections" and nobody touched the nickname list
  * here. So typing "inspection" found NOTHING — while the route is still /inspections, the stored
  * appointment type is still "inspection", and Nort's own description of the page still uses the word.
  * The man who had called it that for years got an empty palette. Reconcile had the gap the other way
@@ -167,8 +167,10 @@ const TYPED_WORDS: Record<string, readonly string[]> = {
   "/schedule": ["schedule", "calendar", "dispatch"],
   "/timeclock": ["timeclock", "clock in", "punch"],
   "/leads": ["leads", "prospects", "inquiries", "pipeline"],
-  // The word it was called before cn-v1034, and the one-word spelling nobody hyphenates.
-  "/inspections": ["walk-through", "walkthrough", "walk through", "inspection", "inspections", "site visit"],
+  // Both words it has worn — Inspections again since 2026-10-03, Walk-Throughs for the one day
+  // before that — and the one-word spelling nobody hyphenates. Whichever one a person learned, it
+  // still opens the page.
+  "/inspections": ["walk-through", "walk-throughs", "walkthrough", "walk through", "inspection", "inspections", "site visit"],
   "/quotes": ["estimates", "estimate", "quote", "proposal", "bid"],
   "/crm": ["customers", "clients", "contacts"],
   "/jobs": ["jobs", "work", "projects"],

@@ -44,7 +44,7 @@
 export type Placeable = {
   id: string;
   /**
-   * A lead needs a walk-through; a job is work already sold and waiting for a date; an appointment
+   * A lead needs an inspection; a job is work already sold and waiting for a date; an appointment
    * is a visit already agreed that nobody has put on a day. All three want the same thing — a day —
    * which is why one rail holds them: Erik doesn't think of them as three piles.
    *
@@ -76,7 +76,7 @@ export type Placeable = {
   hasDay?: boolean;
   /** A job's status (the spine), so the card's status control shows where it stands. */
   status?: string | null;
-  /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */
+  /** appointments.type, when this item IS one — drives the Inspection / Service call / Office tag. */
   type?: string | null;
   /** A LEAD's own work_kind (0230), chosen on the lead where the caller already knew. Preferred
    *  over any inference: what he told the app beats what the app worked out. */
@@ -213,7 +213,7 @@ export function townsOnDay(dayItems: { city: string | null; address?: string | n
 /**
  * Sequential times for several visits on one day.
  *
- * Erik: "i want to be able to schedule them together". Four walk-throughs on Tuesday are four
+ * Erik: "i want to be able to schedule them together". Four inspections on Tuesday are four
  * appointments, not one — a customer expects "Tuesday around 10", and one blob at 9am would put
  * every visit at the same instant and tell nobody anything.
  *

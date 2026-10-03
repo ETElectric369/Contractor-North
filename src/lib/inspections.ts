@@ -1,5 +1,5 @@
 /**
- * Bucket logic for the Sales → Walk-Throughs tab (/inspections) — pure and unit-tested, because the tab's
+ * Bucket logic for the Sales → Inspections tab (/inspections) — pure and unit-tested, because the tab's
  * whole promise is TRUTHFUL buckets (Erik's design 2026-07-14: open work first, settled
  * paperwork files away like estimates do).
  *
@@ -49,7 +49,7 @@ export function hasCaptureData(capture: unknown): boolean {
   );
 }
 
-/** One tag on a Walk-Throughs row: what it says, and the Badge tone it says it in. The tone names
+/** One tag on an Inspections row: what it says, and the Badge tone it says it in. The tone names
  *  are components/ui/badge's `Tone`, spelled out here so this module stays pure (no component
  *  import); the page's `<Badge tone={t.tone}>` is what checks the two against each other. */
 export interface InspectionRowTag {
@@ -58,7 +58,7 @@ export interface InspectionRowTag {
 }
 
 /**
- * EVERY TAG A WALK-THROUGHS ROW WEARS, in ONE place. /inspections draws one row component for the
+ * EVERY TAG AN INSPECTIONS ROW WEARS, in ONE place. /inspections draws one row component for the
  * open piles AND the filed pile, so a tag written inline on that row rides into the pile it was
  * never meant for.
  *
@@ -75,7 +75,8 @@ export function inspectionRowTags(
   writeUp = false,
 ): InspectionRowTag[] {
   const tags: InspectionRowTag[] = [];
-  // The city's inspection on a permit is a different animal from the walk-through, and this list
+  // The CITY'S inspection on a permit (type final_inspection) is a different animal from the site
+  // visit before a price (type inspection), and this list
   // holds both (ESTIMATE_VISIT_TYPES), so the row says which one it is.
   if (row.type === "final_inspection") tags.push({ tone: "indigo", label: appointmentTypeLabel(row.type) });
   if (row.status === "proposed") tags.push({ tone: "amber", label: "pending pick" });
@@ -114,7 +115,7 @@ export function bucketInspections<T extends InspectionBucketRow>(
     /**
      * FOUR WAYS A VISIT ENDS, not one (0205).
      *
-     * This asked only "does an estimate exist?", so a walk-through that turned into billed,
+     * This asked only "does an estimate exist?", so an inspection that turned into billed,
      * paid work still nagged (Mallow Springs: job complete, invoice paid, no estimate ever
      * written) and a lost bid could never leave at all (Donner Pass, which has no customer,
      * inquiry, job or estimate to hang anything on). Money is an outcome; so is a decision.

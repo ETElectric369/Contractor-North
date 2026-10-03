@@ -168,7 +168,7 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
 
           {/* SIZED BY THE JOB (0240) — the kit magic, living on the item. An item that knows it
               needs so-much per square foot fills its own quantity in wherever a kit uses it,
-              from the walk-through measurements. Blank = a flat quantity, as today. */}
+              from the inspection measurements. Blank = a flat quantity, as today. */}
           {sizingAvailable && (
             <details className="rounded-lg border border-slate-200 p-3" open={sized}>
               <summary className="cursor-pointer text-sm font-medium text-slate-700">
@@ -176,7 +176,7 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
                 {sized && <span className="ml-2 text-xs font-normal text-brand">on</span>}
               </summary>
               <p className="mt-2 text-xs text-slate-500">
-                How many of this item a job needs, worked out from the walk-through measurements. Leave it all
+                How many of this item a job needs, worked out from the inspection measurements. Leave it all
                 blank and you type the quantity yourself.
               </p>
               <p className="mt-1 text-xs font-medium text-slate-700">{formulaSentence({ perSqft, perLf, qtyMin, rounding, sizedBy, qtyPer, measurementLabel: measurementLabel(sizedBy, measurements) })}</p>

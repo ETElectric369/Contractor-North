@@ -52,7 +52,7 @@ export function applicableNeeds(pb: Playbook, answers: Answers): Need[] {
  * A Set was not enough, and the audit caught why. cn-v699 made a held key count as still-MISSING,
  * which is right for a need being answered for the first time and wrong for one that was ALREADY
  * answered: tapping into Erik's scope — an open need, pinned in the spine precisely because it is
- * the working document of the whole walk-through — forced it to "missing", so it left the spine
+ * the working document of the whole inspection — forced it to "missing", so it left the spine
  * and re-rendered somewhere else. That is bug 48fbfd6e rebuilt by the fix for bug 48fbfd6e.
  *
  * A hold must freeze the classification at whatever it WAS, in either direction.

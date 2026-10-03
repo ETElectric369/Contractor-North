@@ -148,7 +148,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   // every one still status='scheduled', the oldest from Jul 20.
   //
   // Worse, it is indistinguishable from real work. Erik created ONE lead and did ONE
-  // walk-through for Sarah Dale, and the system showed him three appointment rows — his
+  // inspection for Sarah Dale, and the system showed him three appointment rows — his
   // cancelled phone attempt, his completed one, and this phantom — all looking alike:
   // "i had a lead sarah dale and started an inspection and theres only one string and all this
   // other stuff is recorded and im completely confused by it."
@@ -404,7 +404,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
     .eq("inquiry_id", id)
     .eq("status", "proposed");
   if (aErr) return { ok: false, error: dbError(aErr) };
-  // AND ITS EMPTY WALK-THROUGHS (Erik: "we shouldnt hold onto old orphaned data anyway").
+  // AND ITS EMPTY INSPECTIONS (Erik: "we shouldnt hold onto old orphaned data anyway").
   // Andrew's first test lead left a blank "Site inspection: andrew crake" behind — inquiry_id
   // nulled by the FK, no answers, no capture — a duplicate that later read as "the inspector
   // is empty". An inspection with FIELD DATA (photos, notes, measurements — hasCaptureData) or
@@ -455,7 +455,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
 }
 
 /**
- * WHAT THE CUSTOMER ALREADY ANSWERED, READY TO GO ONTO THE WALK-THROUGH.
+ * WHAT THE CUSTOMER ALREADY ANSWERED, READY TO GO ONTO THE INSPECTION.
  *
  * Booking an inspection copied the lead's `message` — a flattened "Label: answer" summary — into
  * the appointment's notes and stopped there. The customer's structured answers, sitting in
@@ -466,7 +466,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
  *
  * Returns nulls when there is nothing to carry, so both booking paths can spread it unconditionally.
  */
-// The lead → walk-through carry (intake answers + plan brief, person outranks machine) lives in
+// The lead → inspection carry (intake answers + plan brief, person outranks machine) lives in
 // lib/inquiries/carry-intake-answers so the one-tap Inspect-now door inherits the identical seed.
 
 /**
@@ -487,7 +487,7 @@ export async function convertInquiry(
     /** Optional arrival-window note shown on the pick page ("8–10 AM"). */
     timeNote?: string | null;
     /** Firm booking only: the org-local time, default 09:00. Several visits placed on ONE day
-     *  need different times — a customer expects "Tuesday around 10", and four walk-throughs all
+     *  need different times — a customer expects "Tuesday around 10", and four inspections all
      *  stamped 9:00 tells nobody anything. See scheduleLeadsOnDay. */
     startTime?: string;
   } = {},
@@ -605,7 +605,7 @@ export async function convertInquiry(
     // landing the inspection at 2 AM Pacific).
     const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
     const startsAtIso = tzDateTimeUtc(startDate, /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00", tz);
-    if (!startsAtIso) return { ok: false, error: "Pick a valid day for the walk-through." };
+    if (!startsAtIso) return { ok: false, error: "Pick a valid day for the inspection." };
     const carry = await carryForInquiry(supabase, inq);
     const kindChosen = workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind });
 
@@ -651,7 +651,7 @@ export async function convertInquiry(
         [inq.message ?? inq.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
           .filter(Boolean)
           .join("\n\n") || null,
-      // The customer's own answers, on the walk-through, so the inspector CONFIRMS rather than
+      // The customer's own answers, on the inspection, so the inspector CONFIRMS rather than
       // re-asks — which is what the Tahoe Deck starter has claimed since it was written.
       inspection_template_id: carry.inspectionTemplateId,
       inspection_answers: carry.inspectionAnswers,
@@ -1010,7 +1010,7 @@ export async function scheduleLeadsOnDay(
   /* ── ONE VISIT PER LEAD, ON THIS PATH ──────────────────────────────────────────────────────
      convertInquiry's inspection branch is deliberately exempt from the already-converted guard —
      an inspected lead can still become an estimate — and it has no existence check, so calling it
-     twice mints a second walk-through. That is correct for the single "Inspect" button, where a
+     twice mints a second inspection. That is correct for the single "Inspect" button, where a
      person deliberately asks for another visit. It is NOT correct here: this is the BATCH path
      behind "put these on Thursday", where a repeat is a slip (a stale tab, a double tap, a page
      that hadn't refreshed) and never an intention.
@@ -1023,7 +1023,7 @@ export async function scheduleLeadsOnDay(
       .select("inquiry_id")
       .in("inquiry_id", ids)
       // Any non-cancelled booking counts — a lead placed as a job (0231) is just as booked as one
-      // placed as a walk-through.
+      // placed as an inspection.
       .neq("status", "cancelled")
       .limit(500),
     // …and the job fork writes NO appointment (it mints a jobs row + segments), so a stale
@@ -1152,12 +1152,12 @@ export async function setLeadContact(
 /**
  * RIDE-ALONG SLOTS — the calendar fills itself in, grouped by day and town.
  *
- * Erik: "if certain days are already set for walk-through/inspections then the lead could be
+ * Erik: "if certain days are already set for inspection/inspections then the lead could be
  * auto-prompted with the days set and time slots still available to choose from … potentially
  * even grouped somewhat by region."
  *
  * "Let them pick" used to offer three blind next-weekdays at 9 AM — a fresh trip minted per lead,
- * scattering walk-throughs across the week. These suggestions come FROM the calendar instead:
+ * scattering inspections across the week. These suggestions come FROM the calendar instead:
  * days in the next two weeks that already hold an estimate visit, each offered at a time
  * planDayTimes actually fits around what the day holds (jobs included), days in the lead's own
  * town first. The customer still chooses; the office still edits; this only changes which three
@@ -1183,7 +1183,7 @@ export async function suggestVisitSlots(
   const minutes = Number((inq as { planned_minutes?: number | null }).planned_minutes ?? 0) || 90;
 
   // The window: tomorrow through two weeks out. Existing estimate visits mark the days that are
-  // already "walk-through days" — absorbed rows are jobs now and don't count as visit days.
+  // already "inspection days" — absorbed rows are jobs now and don't count as visit days.
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
   const from = new Date(Date.now() + 12 * 3600_000).toISOString();

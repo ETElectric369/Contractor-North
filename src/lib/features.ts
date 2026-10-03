@@ -42,7 +42,7 @@ export type FeatureDef = { key: FeatureKey; label: string; line: string; parent?
 // Labels are Title Case (they sit on clickable rows). Every line is traced to what the app does
 // today (the onboarding truth law): Licenses promises no renewal alerts, because none exist yet.
 export const FEATURES: readonly FeatureDef[] = [
-  { key: "leads", label: "Leads & Walk-Throughs", line: "Leads, walk-throughs, your lead link and QR. Requests from your website still reach you when this is off." },
+  { key: "leads", label: "Leads & Inspections", line: "Leads, inspections, your lead link and QR. Requests from your website still reach you when this is off." },
   { key: "referrals", parent: "leads", label: "Track Referrals", line: "Ask who sent each lead and keep a tally." },
   { key: "estimates", label: "Estimates", line: "Estimates, change orders and work orders." },
   { key: "kits", parent: "estimates", label: "Kits & Sizing By Sq Ft", line: "Price whole assemblies and size jobs by the square or linear foot." },

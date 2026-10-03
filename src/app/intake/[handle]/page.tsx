@@ -18,8 +18,8 @@ export const maxDuration = 300;
  *
  * Erik: "the inspector will be doing the job of collecting information — we need a playbook for
  * that or is it built in?" The engine is built in; this page is the door. It renders the org's
- * CUSTOMER-FACING intake playbook — a separate, small question set, never the walk-through,
- * because the walk-through is the contractor's own question set and its why lines are his pricing
+ * CUSTOMER-FACING intake playbook — a separate, small question set, never the inspection,
+ * because the inspection is the contractor's own question set and its why lines are his pricing
  * logic. `publicIntakeNeeds` is an allowlist projection: `why` and `note` never leave the server.
  *
  * Reads through the service client by handle (the getPublicOrgByHandle pattern) — no anon RLS on

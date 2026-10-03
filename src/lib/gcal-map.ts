@@ -172,7 +172,8 @@ export function apptEventBody(appt: ApptForEvent, opts?: { linkUrl?: string | nu
   if (!(end.getTime() > start.getTime())) end = new Date(start.getTime() + 3600_000);
   // Label from the statuses.ts spine (pure/import-safe, so the file's no-server-imports
   // rule holds) — an inline replace(/_/g," ") pushed "[final inspection]" while the app
-  // says "Final inspection". A site visit reads "[Walk-Through] …" (W2-10). 'appointment' and
+  // says "Final inspection". A site visit reads "[Inspection] …"; the CITY'S reads
+  // "[Final Inspection] …", because that is its own type. 'appointment' and
   // 'other' both mean NO kind, so neither gets a prefix: 'other' is the new default booking, and
   // "[Other] Dentist" on his phone's calendar would be a tag that says nothing.
   const typeLabel = appt.type && !NO_KIND_TYPES.has(appt.type) ? `[${appointmentTypeLabel(appt.type)}] ` : "";

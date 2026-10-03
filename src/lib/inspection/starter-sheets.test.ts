@@ -150,8 +150,8 @@ describe("the trade KEY picks the starter, and never to nothing", () => {
     for (const t of STARTER_TRADES) {
       const s = starterSheet(t);
       expect(s.name.trim()).not.toBe("");
-      // The site visit's one word (W2-10), for a new company's first sheet.
-      expect(s.name).toBe("Walk-Through");
+      // The site visit's one word (lib/statuses), for a new company's first sheet.
+      expect(s.name).toBe("Inspection");
       expect(s.fields.length).toBeGreaterThan(2);
     }
   });

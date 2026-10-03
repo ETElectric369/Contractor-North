@@ -37,7 +37,7 @@ const code = readFileSync(join(process.cwd(), "src/app/(app)/planner/page.tsx"),
 const appt = {
   id: "a1",
   type: "inspection",
-  title: "Smith walk-through",
+  title: "Smith inspection",
   starts_at: "2026-09-28T16:00:00.000Z", // 9:00 AM Pacific
   ends_at: "2026-09-28T17:00:00.000Z",
   job_id: null,
@@ -50,8 +50,8 @@ const opts = { jobs: [], customers: [], staff: [] };
 
 describe("the row's ⋯", () => {
   it("is 44px, and a row with nothing to act on gets none", () => {
-    const html = renderToStaticMarkup(createElement(AgendaRowMenu, { title: "Smith walk-through", appt, fromDate: "2026-09-28", ...opts }));
-    expect(html).toMatch(/<button type="button" aria-label="More For Smith walk-through"[^>]*class="[^"]*h-11 w-11[^"]*"/);
+    const html = renderToStaticMarkup(createElement(AgendaRowMenu, { title: "Smith inspection", appt, fromDate: "2026-09-28", ...opts }));
+    expect(html).toMatch(/<button type="button" aria-label="More For Smith inspection"[^>]*class="[^"]*h-11 w-11[^"]*"/);
     // A week-view visit carries no record: no ⋯ rather than an empty sheet.
     expect(renderToStaticMarkup(createElement(AgendaRowMenu, { title: "Visit", fromDate: "2026-09-28", ...opts }))).toBe("");
   });

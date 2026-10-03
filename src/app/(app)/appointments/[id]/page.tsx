@@ -34,13 +34,13 @@ import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
 import {
-  WALKTHROUGH_UNREAD,
+  INSPECTION_UNREAD,
   answersWithoutPrices,
   isMissingRpc,
   readViaView,
   sheetsWithoutMoney,
-  walkthroughAccess,
-} from "@/lib/inspection/walkthrough-access";
+  inspectionAccess,
+} from "@/lib/inspection/inspection-access";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +55,7 @@ function tolerableBefore0165(e: unknown): boolean {
 }
 
 /**
- * The appointment CAPTURE surface — where an inspection walk-through gets its
+ * The appointment CAPTURE surface — where an inspection gets its
  * field notes, measurements, materials list, and photos, saved onto
  * appointments.capture and read by /quotes/new?capture=<id> to prefill the
  * estimator scope (like importing labor into an invoice). Linked from the
@@ -99,7 +99,7 @@ export default async function AppointmentCapturePage({
     // without a price) and the sheets from form_playbooks (anyone but the office gets no note and no
     // dollar figure). readViaView asks the table as before only while a view isn't on the database
     // yet, and returns any other failure as a failure: the page then says it couldn't read the
-    // walk-through instead of drawing an empty one (whose first keystroke would save the emptiness).
+    // inspection instead of drawing an empty one (whose first keystroke would save the emptiness).
     // Per-trade questions are DATA (deck questions for the deck company, panel questions for the
     // electrician), which is what keeps a typed inspection from needing a code module per trade.
     readViaView<InspectionTemplate[]>(supabase, "sheets", (from) =>
@@ -129,7 +129,7 @@ export default async function AppointmentCapturePage({
     ),
     // WHO IS LOOKING, and whether they are on the clock: the top card's four faces (start / ask the
     // office / clock in / you're on the clock here) and its Switch To This Job depend on both.
-    // crew_lead: whether they fill in the walk-through on a visit they are on (0356).
+    // crew_lead: whether they fill in the inspection on a visit they are on (0356).
     supabase.from("profiles").select("role, crew_lead").eq("id", viewerId ?? "").maybeSingle(),
     supabase
       .from("time_entries")
@@ -154,7 +154,7 @@ export default async function AppointmentCapturePage({
   // "no sheet" is the table's own pre-0165 shape (no such column), exactly as before.
   const unread = (r: { error: unknown; via: "view" | "table" }) =>
     !!r.error && !(r.via === "table" && tolerableBefore0165(r.error));
-  const walkthroughUnread = unread(sheetsRead) || unread(answersRead);
+  const inspectionUnread = unread(sheetsRead) || unread(answersRead);
   const sheets = sheetsRead.error ? null : sheetsRead.data;
   const inspection = answersRead.error ? null : answersRead.data;
   const intakeForm = intakeRead.error ? null : intakeRead.data;
@@ -162,14 +162,14 @@ export default async function AppointmentCapturePage({
 
   const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const tz = orgSettings.timezone;
-  // THE SWITCH BOARD (0352). On a walk-through the Inspector below is Leads & Walk-Throughs': off, it
+  // THE SWITCH BOARD (0352). On an inspection the Inspector below is Leads & Inspections': off, it
   // shows only on a visit that already captured something, never as a blank sheet to start. Every
   // other visit (service, consult) keeps it: it is that page's only notes, photos and sheet surface.
   const estimatesOn = featureOn(orgSettings.features, "estimates");
-  const walkThrough = isInspectionType((appt as { type?: string | null }).type);
+  const isInspection = isInspectionType((appt as { type?: string | null }).type);
   const showInspector =
     featureOn(orgSettings.features, "leads") ||
-    !walkThrough ||
+    !isInspection ||
     hasCaptureData((appt as { capture?: unknown }).capture) ||
     Object.keys((inspection?.inspection_answers ?? {}) as Record<string, unknown>).length > 0;
   const a = appt as any;
@@ -230,10 +230,10 @@ export default async function AppointmentCapturePage({
         job_code: (oe.job_code ?? "").trim() || null,
       }
     : null;
-  /* WHO FILLS IN THE WALK-THROUGH (0356; Erik, 2026-09-26: "crew leader yes tech no"). The office, as
+  /* WHO FILLS IN THE INSPECTION (0356; Erik, 2026-09-26: "crew leader yes tech no"). The office, as
      before; a crew lead who is ON this visit, through save_walkthrough_capture; everyone else reads.
      The probe is that function called with nothing to save: it writes nothing and answers whether
-     they may. Before 0356 is applied it isn't there, so a crew lead gets the read-only walk-through
+     they may. Before 0356 is applied it isn't there, so a crew lead gets the read-only inspection
      and a plain line, never a Save that can't work. */
   const viewerIsCrewLead = !!(meRow as { crew_lead?: boolean | null } | null)?.crew_lead;
   const onThisVisit = !!viewerId && a.assigned_to === viewerId;
@@ -241,7 +241,7 @@ export default async function AppointmentCapturePage({
     showInspector && !viewerIsStaff && viewerIsCrewLead && onThisVisit
       ? await supabase.rpc("save_walkthrough_capture", { p_appointment: a.id })
       : null;
-  const access = walkthroughAccess({
+  const access = inspectionAccess({
     isStaff: viewerIsStaff,
     crewLead: viewerIsCrewLead,
     onThisVisit,
@@ -300,16 +300,16 @@ export default async function AppointmentCapturePage({
   });
 
   /**
-   * WHAT THE CUSTOMER ALREADY TOLD US ONLINE — on the walk-through, as answers, in their name.
+   * WHAT THE CUSTOMER ALREADY TOLD US ONLINE — on the inspection, as answers, in their name.
    *
-   * Erik, three reports off the Andy Colar lead: "the walk-through starts blank", "the intake
+   * Erik, three reports off the Andy Colar lead: "the inspection starts blank", "the intake
    * answers don't carry over", "they aren't on the lead at all". The answers were never missing —
    * they are on `inquiries.intake.intake_answers`, and this page has been SELECTING them all along
    * to sign the uploaded files. Nothing read the rest.
    *
    * The pre-fill (carryForInquiry) matches by key, and only a question that exists on BOTH the
-   * intake form and the walk-through can match. Vivian Builders' intake asks 26 questions and their
-   * walk-through asks one, so his lead carried nothing at all — and the only trace of what the
+   * intake form and the inspection can match. Vivian Builders' intake asks 26 questions and their
+   * inspection asks one, so his lead carried nothing at all — and the only trace of what the
    * customer said was the flattened paragraph pasted into the appointment's notes, sitting there
    * unattributed as if the office had typed it.
    *
@@ -332,7 +332,7 @@ export default async function AppointmentCapturePage({
   const customerSaid = intakePlaybook
     ? intakeAnswerLines(intakePlaybook, lead?.intake?.intake_answers, prefilled)
     : [];
-  // NOTHING SILENT: when the walk-through asks none of what the customer answered, the pre-fill did
+  // NOTHING SILENT: when the inspection asks none of what the customer answered, the pre-fill did
   // not fail quietly — it had nowhere to put anything, and the card says so rather than leaving him
   // to conclude the answers were lost.
   const sheetKeys = new Set((sheets ?? []).flatMap((s) => playbookForForm(s).needs.map((n) => n.key)));
@@ -387,12 +387,12 @@ export default async function AppointmentCapturePage({
               (Get Paid, a small "mark complete", Delete, a bare ✓ and ✗, Clear The Date, Edit
               Details). THE OFFICE'S VERBS all save through requireStaff, and Get Paid puts money
               in front of a tech: a tech gets the badges and the page, not the doors (Wave 0). */}
-          {/* THE MONEY DOOR — a work visit that is still on. Not on a walk-through: Erik, "i dont
-              need a pay now button on the inspection page." A walk-through's money path IS the
+          {/* THE MONEY DOOR — a work visit that is still on. Not on an inspection: Erik, "i dont
+              need a pay now button on the inspection page." An inspection's money path IS the
               estimate. It stays on the visit types where work happens and money changes hands on
               the spot (a legacy service_call/job appointment — new ones become real jobs at
               booking, and pay from the job page). */}
-          {viewerIsStaff && a.status !== "cancelled" && !walkThrough && (
+          {viewerIsStaff && a.status !== "cancelled" && !isInspection && (
             <SettleUpButton
               source="appointment"
               id={a.id}
@@ -402,11 +402,11 @@ export default async function AppointmentCapturePage({
               textReady={smsReadiness(org as { settings?: unknown } | null).ready}
             />
           )}
-          {/* A booked walk-through's main button: done, so the Walk-Throughs tab moves it to
-              To write up. A completed walk-through has none: the Inspector's Start The Estimate
+          {/* A booked inspection's main button: done, so the Inspections tab moves it to
+              To write up. A completed inspection has none: the Inspector's Start The Estimate
               is its next step. A cancelled visit has none either. */}
-          {viewerIsStaff && walkThrough && booked && (
-            <MarkCompleteButton id={a.id} label="Mark Walk-Through Done" />
+          {viewerIsStaff && isInspection && booked && (
+            <MarkCompleteButton id={a.id} label="Mark Inspection Done" />
           )}
           {/* ⋯ ACTIONS, last on the row. Edit Details… is never rendered conditionally inside the
               open panel (its modal would unmount mid-edit); its footer Delete stays the deliberate
@@ -415,7 +415,7 @@ export default async function AppointmentCapturePage({
               it Cancelled with an Undo (lib/appointments/wont-happen). */}
           {viewerIsStaff && (
             <SectionActionsMenu tree={VISIT_ACTIONS_MENU}>
-              {!walkThrough && booked && <MarkDoneRow id={a.id} />}
+              {!isInspection && booked && <MarkDoneRow id={a.id} />}
               <AppointmentButton
                 jobs={picker.jobOpts}
                 customers={picker.custOpts}
@@ -508,7 +508,7 @@ export default async function AppointmentCapturePage({
             <p className="mt-2 text-xs text-slate-400">
               Their words, not a finding — confirm on site.
               {sheetAsksNone
-                ? " None of these matched a question on your walk-through sheet, so none of them could fill it in."
+                ? " None of these matched a question on your inspection sheet, so none of them could fill it in."
                 : ""}
             </p>
           </div>
@@ -517,7 +517,7 @@ export default async function AppointmentCapturePage({
         {a.inquiry_id && lead?.intake && intakeUnread && (
           <p className="mt-2 text-xs text-slate-500">Couldn&apos;t read the website form&apos;s questions just now, so the customer&apos;s answers aren&apos;t shown. Reload to try again.</p>
         )}
-        {/* What the customer attached at intake — the plans this walk-through prices from. The
+        {/* What the customer attached at intake — the plans this inspection prices from. The
             lead leaves the inbox once it converts, so every linked surface carries its files. */}
         {a.inquiry_id && (
           <IntakeFiles inquiryId={a.inquiry_id} paths={intakePaths((a.inquiries as { intake?: unknown } | null)?.intake)} />
@@ -530,20 +530,20 @@ export default async function AppointmentCapturePage({
           one smart thing that starts with the appointed questions and fragments from those first".
           Nothing was dropped in the merge: the prose boxes, the photos and the typed sheet are all
           still here, reordered so the ask comes first and everything captured reads as one list. */}
-      {/* The walk-through and the estimate, for the visits that need them. Under their own heading
+      {/* The inspection and the estimate, for the visits that need them. Under their own heading
           so the page reads: start the work (above), or walk it through and price it (here).
-          THE SWITCH BOARD (0352): the walk-through is Leads', so with Leads off it shows only on a
+          THE SWITCH BOARD (0352): the inspection is Leads', so with Leads off it shows only on a
           visit that already holds one (under the Off line); Estimates off drops Start The Estimate. */}
       {showInspector && (
         <>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? "Walk-Through Or Estimate" : "Walk-Through"}</h2>
-          {walkThrough && (
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? "Inspection Or Estimate" : "Inspection"}</h2>
+          {isInspection && (
             <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
           )}
-          {/* A walk-through read that failed is SAID, and nothing is drawn that could save over it:
+          {/* An inspection read that failed is SAID, and nothing is drawn that could save over it:
               an empty sheet's first keystroke would autosave the emptiness over the real answers. */}
-          {walkthroughUnread ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{WALKTHROUGH_UNREAD}</p>
+          {inspectionUnread ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{INSPECTION_UNREAD}</p>
           ) : (
           <Inspector
             appointmentId={a.id}

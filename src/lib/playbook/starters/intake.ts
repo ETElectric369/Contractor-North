@@ -13,15 +13,15 @@ import { tradeKeyFromWords } from "@/lib/org-trade";
  *
  * ── THE KEYS ARE THE WHOLE POINT ────────────────────────────────────────────────────────────
  *
- * Every question here that also exists on the trade's walk-through USES THE SAME KEY, with the
+ * Every question here that also exists on the trade's inspection USES THE SAME KEY, with the
  * same slot and the same option strings. That is not tidiness. `answersFromIntake` coerces the
- * customer's answers against the WALK-THROUGH playbook and keeps what matches, so a shared key is
+ * customer's answers against the INSPECTION playbook and keeps what matches, so a shared key is
  * the difference between Chris confirming "composite, wraps the corner, in the basin" on site and
  * asking a homeowner all three again with the answers sitting in the lead behind him. A key that
  * drifts here silently stops carrying, which is why `intake.test.ts` asserts the match rather than
  * trusting anybody to remember.
  *
- * The Tahoe Deck walk-through's own note already says this out loud on `project_type`: "Same words
+ * The Tahoe Deck inspection's own note already says this out loud on `project_type`: "Same words
  * as the public configurator on purpose, so a customer's answer carries in."
  *
  * ── WHAT A CUSTOMER IS NOT ASKED ────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ import { tradeKeyFromWords } from "@/lib/org-trade";
  * all — an open question here is an invisible one.
  */
 
-/** The four every trade wants and no walk-through asks: when, money, plans, pictures. */
+/** The four every trade wants and no inspection asks: when, money, plans, pictures. */
 const COMMON: Need[] = [
   {
     key: "timeline",
@@ -78,13 +78,13 @@ const COMMON: Need[] = [
  * DECKS — TAHOE DECK.
  *
  * project_type, material, shape and wrap_around are lifted key-for-key and option-for-option
- * from TAHOE_DECK, so all four carry onto Chris's walk-through. Between them they pick the base
+ * from TAHOE_DECK, so all four carry onto Chris's inspection. Between them they pick the base
  * rate (D1 vs DS8), the composite upgrade (DS2), the cutting-and-waste rate (DS6C) and the corner
  * framing (DS6D) — which is to say a customer filling this in has already answered most of what
- * moves the number, without being asked to hold a tape. The walk-through's `trpa` (a region) is
+ * moves the number, without being asked to hold a tape. The inspection's `trpa` (a region) is
  * deliberately not asked here: see below.
  *
- * The dimensions are deliberately absent. They are `measured` on the walk-through and would be
+ * The dimensions are deliberately absent. They are `measured` on the inspection and would be
  * refused on arrival; asking a homeowner to guess at a depth only to throw it away is worse than
  * not asking.
  */
@@ -142,7 +142,7 @@ export const DECK_INTAKE: Playbook = {
       key: "site_notes",
       label: "Anything else",
       ask: "Anything else we should know? Hot tub, awkward access, a deadline — anything.",
-      // A slot where the walk-through leaves this OPEN. An open need renders nothing on the public
+      // A slot where the inspection leaves this OPEN. An open need renders nothing on the public
       // page, and a string still coerces cleanly into an open need on the way back.
       slot: { type: "text", long: true },
     },
@@ -153,7 +153,7 @@ export const DECK_INTAKE: Playbook = {
 /**
  * ELECTRICAL — ET ELECTRIC.
  *
- * work_kind and work carry onto Erik's walk-through and are the two that decide the shape of
+ * work_kind and work carry onto Erik's inspection and are the two that decide the shape of
  * everything after them: a service call prices off the trip and the hour, a contract job off the
  * takeoff, and `work` is what every later question hangs off. `walls` and `access` carry too —
  * both are things a homeowner can see and neither needs a tape.
@@ -201,7 +201,7 @@ export const ELECTRICAL_INTAKE: Playbook = {
       key: "gotcha",
       label: "Anything that'll bite us",
       ask: "Anything else we should know before we come out?",
-      // OPEN on Erik's walk-through; a box here for the same reason as the deck's site_notes.
+      // OPEN on Erik's inspection; a box here for the same reason as the deck's site_notes.
       slot: { type: "text", long: true },
     },
     ...COMMON,

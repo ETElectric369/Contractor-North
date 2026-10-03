@@ -640,7 +640,7 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
         photoReadsLeft={initial.photoReadsLeft}
         planReadsLeft={initial.planReadsLeft}
         panel={activePanel}
-        walkthrough={initial.walkthrough}
+        inspectionSays={initial.inspectionSays}
         onRows={upsert}
         onPanel={panelSaved}
       />

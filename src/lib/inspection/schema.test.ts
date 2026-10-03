@@ -112,7 +112,7 @@ describe("the estimator receives labelled facts, not prose to re-parse", () => {
 });
 
 /**
- * THE JOIN between a walk-through and a priced line. If this returns a wrong number, every
+ * THE JOIN between an inspection and a priced line. If this returns a wrong number, every
  * coefficient line in the kit is wrong by the same factor and the estimate looks perfectly
  * plausible — which is the failure mode that actually reaches a customer.
  */
@@ -176,7 +176,7 @@ describe("measurements a kit can size itself from", () => {
  * It existed for one narrow case — a deploy landing before its migration, where a select naming a
  * column that doesn't exist yet fails the WHOLE query instead of degrading. But it caught every
  * error, so on the appointment page a timeout or an RLS refusal returned null, the page rendered
- * `?? {}`, and the inspector opened showing an EMPTY walk-through of a finished job. The first
+ * `?? {}`, and the inspector opened showing an EMPTY inspection of a finished job. The first
  * keystroke then autosaved that emptiness over eighteen real answers.
  *
  * Loud beats silent: an error page is recoverable by reloading, an empty sheet that overwrites the
@@ -206,7 +206,7 @@ describe("tolerateMissingColumns — narrow on purpose", () => {
     ["an RLS refusal", { code: "42501", message: "permission denied for table appointments" }],
     ["a dropped connection", { message: "fetch failed" }],
     ["a deadlock", { code: "40P01", message: "deadlock detected" }],
-  ])("RETHROWS %s — the class that used to render an empty walk-through", async (_label, error) => {
+  ])("RETHROWS %s — the class that used to render an empty inspection", async (_label, error) => {
     await expect(tolerateMissingColumns(run({ error }))).rejects.toBeTruthy();
   });
 

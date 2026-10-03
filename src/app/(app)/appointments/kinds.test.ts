@@ -5,8 +5,8 @@ import { join } from "node:path";
 /**
  * FIVE KINDS TO PICK, AND AN OLD ROW'S OWN KIND ALWAYS SAVES (W2-06).
  *
- *   create / Propose Times  take only Walk-Through, Job, Service Call, Phone Call or Other; no kind
- *                           sent is Other (a new visit) or a walk-through (offering times).
+ *   create / Propose Times  take only Inspection, Job, Service Call, Phone Call or Other; no kind
+ *                           sent is Other (a new visit) or an inspection (offering times).
  *   edit                    takes one of the five, or the row's own stored kind unchanged: a Client
  *                           Meeting whose time moves stays a Client Meeting.
  *   sizeLead                a write guard, not a picker: any known kind saves, so an old lead's
@@ -74,7 +74,7 @@ const { WorkShapeControls } = await import("@/components/work-shape-controls");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 
-const PICK = "Pick a kind: Walk-Through, Job, Service Call, Phone Call or Other.";
+const PICK = "Pick a kind: Inspection, Job, Service Call, Phone Call or Other.";
 function form(fields: Record<string, string>): FormData {
   const fd = new FormData();
   fd.set("title", "Visit");
@@ -99,7 +99,7 @@ describe("a new visit is one of the five", () => {
     }
   });
 
-  it("no kind sent books Other (today's plain appointment, no write-up nag), never a walk-through", async () => {
+  it("no kind sent books Other (today's plain appointment, no write-up nag), never an inspection", async () => {
     const fd = form({});
     fd.delete("type");
     expect(await createAppointment(fd)).toMatchObject({ ok: true });
@@ -144,7 +144,7 @@ describe("an edit keeps the row's own kind", () => {
 describe("offering times", () => {
   const slots = JSON.stringify([{ date: "2026-10-02", time: "09:00" }]);
 
-  it("no kind sent offers a walk-through (it was 'quote', a kind nobody picks now)", async () => {
+  it("no kind sent offers an inspection (it was 'quote', a kind nobody picks now)", async () => {
     const fd = form({ slots_json: slots });
     fd.delete("type");
     expect(await createAppointmentProposal(fd)).toEqual({ ok: true, token: "tok-1" });
@@ -178,8 +178,8 @@ describe("the pickers offer the five (and a row's own old kind)", () => {
   };
 
   it("the kind select (lead row and rail) offers Kind? and the five; an old Quote lead keeps Quote, never reads Kind?", () => {
-    expect(kindSelect(null)).toEqual(["Kind?", "Walk-Through", "Job", "Service Call", "Phone Call", "Other"]);
-    expect(kindSelect("quote")).toEqual(["Kind?", "Walk-Through", "Job", "Service Call", "Phone Call", "Other", "Quote"]);
+    expect(kindSelect(null)).toEqual(["Kind?", "Inspection", "Job", "Service Call", "Phone Call", "Other"]);
+    expect(kindSelect("quote")).toEqual(["Kind?", "Inspection", "Job", "Service Call", "Phone Call", "Other", "Quote"]);
     expect(kindSelect("office")).toContain("Office");
     // Its selects are 44px targets.
     const html = renderToStaticMarkup(createElement(WorkShapeControls, { workKind: null, plannedMinutes: null, onPatch: () => {} }));
@@ -190,7 +190,7 @@ describe("the pickers offer the five (and a row's own old kind)", () => {
     expect(btn).toContain("const typeOptions = appointmentTypeOptions(appointment?.type ?? defaultType ?? null);");
     expect(btn).toContain("{typeOptions.map((t) => (");
     expect(btn).not.toContain("APPOINTMENT_TYPES.map(");
-    // The create default: Job from a job, Other anywhere else (the Walk-Throughs tab passes its own).
+    // The create default: Job from a job, Other anywhere else (the Inspections tab passes its own).
     expect(btn).toContain('type: appointment?.type ?? defaultType ?? (defaultJobId ? "job" : "other"),');
   });
 

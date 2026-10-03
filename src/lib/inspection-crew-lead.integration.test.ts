@@ -6,7 +6,7 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
 
 /**
- * A CREW LEAD FILLS IN THE WALK-THROUGH (0356), where the boundary lives: the database.
+ * A CREW LEAD FILLS IN THE INSPECTION (0356), where the boundary lives: the database.
  *
  * Erik (2026-09-26): "crew leader yes tech no". The page and the server actions decide who gets the
  * editable Inspector; this proves the database says the same thing when somebody skips both and
@@ -17,7 +17,7 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *   · he cannot take a photo off, add one from another folder or one he didn't upload himself (so a
  *     photo the office took off stays off, though its file is still in the folder), touch a priced answer (add, change or
  *     clear), take a file off a file question (he adds only his own uploads), switch or clear a
- *     saved sheet, or name a form that isn't a walk-through sheet;
+ *     saved sheet, or name a form that isn't an inspection sheet;
  *   · a crew lead NOT on the visit, a plain tech (who can READ his visit under 0227), another
  *     company's crew lead and a deactivated crew lead are all refused, and nothing moves;
  *   · the function writes only the capture columns, and a crew lead has no UPDATE on appointments;
@@ -45,7 +45,7 @@ const M0356 = readFileSync(join(migrations, readdirSync(migrations).find((n) => 
 const M0366 = readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith("0366_"))!), "utf8");
 const FN = "public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb)";
 
-d("a crew lead fills in the walk-through (0356)", () => {
+d("a crew lead fills in the inspection (0356)", () => {
   let c: pg.Client;
   let waiting = false;
   let orgId = "";
@@ -132,12 +132,12 @@ d("a crew lead fills in the walk-through (0356)", () => {
     const have = await one(`select to_regprocedure('${FN}') is not null as ok`);
     if (!have.ok && CREWLEAD_APPLY_0356 === "1") {
       await c.query(M0356);
-      console.warn("[walkthrough-crew-lead] 0356 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
+      console.warn("[inspection-crew-lead] 0356 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
     } else if (!have.ok) {
-      waiting = !notOnThisDatabase("[walkthrough-crew-lead] 0356 is not on this database yet: run node scripts/test-db/rebuild.cjs.");
+      waiting = !notOnThisDatabase("[inspection-crew-lead] 0356 is not on this database yet: run node scripts/test-db/rebuild.cjs.");
       if (waiting) return;
     }
-    // AND WITH 0366 (LEAK-0227): the walk-through's answers column is revoked from the signed-in role
+    // AND WITH 0366 (LEAK-0227): the inspection's answers column is revoked from the signed-in role
     // and a playbook sheet is the office's to read from forms. Every case below must hold with it, so
     // it runs inside this transaction too (safe to run twice: a database that has it runs it again).
     await c.query(M0366);
@@ -145,7 +145,7 @@ d("a crew lead fills in the walk-through (0356)", () => {
 
     // A TEST company: the owner (office), a crew lead, a second crew lead, a plain tech, and a crew
     // lead whose seat is cut. And a stranger company with its own crew lead.
-    const org = await mintThrowawayOrg(c, { label: "0356 walk-through", techs: 4 });
+    const org = await mintThrowawayOrg(c, { label: "0356 inspection", techs: 4 });
     orgId = org.orgId;
     ownerId = org.owner.id;
     [leadId, lead2Id, techId, goneId] = org.techs.map((t) => t.id);
@@ -237,10 +237,10 @@ d("a crew lead fills in the walk-through (0356)", () => {
     const before = await row(apptA);
     const off = await save(leadId, apptA, { notes: "x", photos: [] });
     expect(off.code).toBe("42501");
-    expect(off.error).toBe("Only the office can take a photo off the walk-through.");
+    expect(off.error).toBe("Only the office can take a photo off the inspection.");
     for (const bad of [`${orgId}/employees/pay.pdf`, `${prefixA}../../employees/pay.pdf`, `${orgId}/appointments/${apptB}/x.jpg`]) {
       const r = await save(leadId, apptA, { photos: [...before.capture.photos, bad] });
-      expect(r.error, bad).toBe("A photo you put on the walk-through has to be one you took for this visit.");
+      expect(r.error, bad).toBe("A photo you put on the inspection has to be one you took for this visit.");
     }
     expect((await row(apptA)).capture).toEqual(before.capture);
   });
@@ -257,10 +257,10 @@ d("a crew lead fills in the walk-through (0356)", () => {
     const his = await plant(`${prefixA}3-lead-new.jpg`, leadId);
     const stale = await save(leadId, apptA, { photos: [...before.capture.photos, officeTook, his] });
     expect(stale.code).toBe("42501");
-    expect(stale.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
+    expect(stale.error).toBe("A photo you put on the inspection has to be one you took for this visit.");
     // A path in the folder that no one uploaded is no better.
     const ghost = await save(leadId, apptA, { photos: [...before.capture.photos, `${prefixA}9-never-uploaded.jpg`] });
-    expect(ghost.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
+    expect(ghost.error).toBe("A photo you put on the inspection has to be one you took for this visit.");
     expect((await row(apptA)).capture).toEqual(before.capture);
     // Only what he just took travels (addInspectionPhotos), and that lands.
     expect((await save(leadId, apptA, { photos: [...before.capture.photos, his] })).error).toBeNull();
@@ -280,7 +280,7 @@ d("a crew lead fills in the walk-through (0356)", () => {
     // A crafted call naming it again finds no file of his: refused, and the list is as the office left it.
     const back = await save(leadId, apptA, { photos: [...on.capture.photos, mine] });
     expect(back.code).toBe("42501");
-    expect(back.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
+    expect(back.error).toBe("A photo you put on the inspection has to be one you took for this visit.");
     expect((await row(apptA)).capture.photos).toEqual(on.capture.photos);
   });
 
@@ -322,10 +322,10 @@ d("a crew lead fills in the walk-through (0356)", () => {
   });
 
   it("the sheet: he sets the first one; switching or clearing a saved one, or naming a non-sheet, is refused", async () => {
-    expect((await save(leadId, apptA, null, sheet2Id, {})).error).toBe("Only the office can switch the walk-through to a different sheet.");
-    expect((await save(leadId, apptA, null, null, {})).error).toBe("Only the office can switch the walk-through to a different sheet.");
+    expect((await save(leadId, apptA, null, sheet2Id, {})).error).toBe("Only the office can switch the inspection to a different sheet.");
+    expect((await save(leadId, apptA, null, null, {})).error).toBe("Only the office can switch the inspection to a different sheet.");
     expect((await row(apptA)).sheet).toBe(sheetId);
-    expect((await save(leadId, apptE, null, notSheetId, {})).error).toBe("That sheet isn't one of this company's walk-through sheets.");
+    expect((await save(leadId, apptE, null, notSheetId, {})).error).toBe("That sheet isn't one of this company's inspection sheets.");
     expect((await save(leadId, apptE, null, sheet2Id, { a: "b" })).error).toBeNull();
     const e = await row(apptE);
     expect(e.sheet).toBe(sheet2Id);
@@ -336,11 +336,11 @@ d("a crew lead fills in the walk-through (0356)", () => {
     const snap = async () => Promise.all([apptA, apptB, apptC, apptD, apptO].map(row));
     const before = await snap();
     const cases: [string, string, string][] = [
-      [leadId, apptB, "Only the office, or the crew lead on this visit, can fill in the walk-through."],
-      [techId, apptC, "Only the office, or the crew lead on this visit, can fill in the walk-through."],
-      [otherLeadId, apptA, "That walk-through isn't one of this company's."],
-      [leadId, apptO, "That walk-through isn't one of this company's."],
-      [goneId, apptD, "Sign in with an active seat to fill in the walk-through."],
+      [leadId, apptB, "Only the office, or the crew lead on this visit, can fill in the inspection."],
+      [techId, apptC, "Only the office, or the crew lead on this visit, can fill in the inspection."],
+      [otherLeadId, apptA, "That inspection isn't one of this company's."],
+      [leadId, apptO, "That inspection isn't one of this company's."],
+      [goneId, apptD, "Sign in with an active seat to fill in the inspection."],
     ];
     for (const [who, appt, words] of cases) {
       for (const r of [

@@ -114,7 +114,7 @@ function client() {
 beforeEach(() => {
   db.appt = {
     id: "appt-tom",
-    title: "Walk-Through: Tom Goodman",
+    title: "Inspection: Tom Goodman",
     customer_id: "cust-tom",
     location: "3245 W. Garnet Blvd",
     city: null,
@@ -188,8 +188,8 @@ describe("createJobFromAppointment: the job's name is the street, never the visi
   });
 
   it("with a street, the street, whatever the visit's title says", async () => {
-    // An old stored stock title and the new one (W2-10's "Walk-Through: …") both give the street.
-    for (const title of ["Site inspection: Rita Moss", "Walk-Through: Rita Moss", "Service call — Hot tub circuit", "RV Inspection", "Call Rita Moss", "Call box install", null]) {
+    // An old stored stock title and the new one ("Inspection: …") both give the street.
+    for (const title of ["Site inspection: Rita Moss", "Inspection: Rita Moss", "Service call — Hot tub circuit", "RV Inspection", "Call Rita Moss", "Call box install", null]) {
       db.jobs = new Map();
       db.appt.job_id = null;
       db.appt.title = title;
@@ -219,10 +219,10 @@ describe("createJobFromAppointment: the job's name is the street, never the visi
     it("a tag and the customer is who, as written", async () => {
       db.appt.title = "Site inspection: Rita Moss";
       expect(await madeName()).toBe("Rita Moss");
-      // The new stock title (W2-10) is a tag too: never "Walk-Through: …" on a job.
+      // The new stock title is a tag too: never "Inspection: …" on a job.
       db.jobs = new Map();
       db.appt.job_id = null;
-      db.appt.title = "Walk-Through: Rita Moss";
+      db.appt.title = "Inspection: Rita Moss";
       expect(await madeName()).toBe("Rita Moss");
     });
 

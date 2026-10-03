@@ -1,24 +1,31 @@
 import { describe, it, expect, vi } from "vitest";
 
 /**
- * THE STORED WORD NEVER REACHES A READER (W2-10 follow-up, 2026-10-03).
+ * THE STORED TYPE NEVER REACHES A READER AS ITS OWN WORD (2026-10-03).
  *
- * The rename gave the site visit ONE word — Walk-Through — and walk-through-word.test.ts sweeps every
- * string literal in src so the old one cannot come back. A COMPUTED string is invisible to that sweep,
- * and two readers were still building their own word out of the stored type:
+ * Every screen reads the visit's word from ONE function, appointmentTypeLabel, and
+ * inspection-word.test.ts sweeps every string literal in src so no second word can be typed in. A
+ * COMPUTED string is invisible to that sweep, and two readers were still capitalising
+ * appointments.type by hand instead of asking:
  *
- *   1. My Day → Needs You, the Not Closed Out row, which capitalised appointments.type by hand and so
- *      printed "Marla Finch · Inspection" on the FIRST screen he opens, while the planner, the
+ *   1. My Day → Needs You, the Not Closed Out row. On 2026-10-02 the label was Walk-Through, so this
+ *      row printed "Marla Finch · Inspection" on the FIRST screen he opens while the planner, the
  *      calendar, the job page, the crew board and Google all said Walk-Through for that same visit.
- *      Production is mostly type 'inspection' (statuses.ts: 44 rows), so that was the dominant case.
- *   2. Nort's schedule_overview, handed the raw type — while nort-product-map.ts tells him "inspection"
- *      is kept for the CITY'S inspection. So he called a walk-through the one thing the map reserves.
+ *      That split is exactly what Erik reported, and on 2026-10-03 the label went back to Inspection
+ *      so the shown word and the stored word are the same word again.
+ *   2. Nort's schedule_overview, handed the raw type.
  *
- * These tests DRIVE both readers instead of reading literals: the output itself has to say the word.
- * One rule, one place — appointmentTypeLabel — and these are its teeth.
+ * THE LABEL AND THE RAW VALUE NOW LOOK ALIKE FOR 'inspection', which is the point — and also why
+ * these tests still matter: a hand-capitalised reader would pass on that one type and go on failing
+ * on every other ("Service call", "Final inspection", "Client meeting"). So the second test below
+ * drives all of them, and both tests compare against appointmentTypeLabel itself rather than a typed
+ * literal, so there is nothing here to "update" the next time the owner names a different word.
  */
 
-import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+
+/** The word that must never come back on a screen (Erik, 2026-10-03). */
+const OLD_WORD = /walk.?through/i;
 
 const TODAY = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 const daysAgo = (n: number) => new Date(Date.parse(`${TODAY}T20:00:00Z`) - n * 86_400_000).toISOString();
@@ -94,28 +101,32 @@ const visit = (id: string, type: string, title: string | null, who: string) => (
   inquiries: null,
 });
 
-async function closeOutRows() {
+async function rowsInPile(pile: string) {
   const r = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" });
-  const pile = r.now.find((i) => i.id === "pile:visits_to_close_out");
-  expect(pile, "the visits roll into the Visits To Close Out pile").toBeTruthy();
-  return Object.fromEntries(pile!.children!.map((c) => [c.id, c]));
+  const p = r.now.find((i) => i.id === `pile:${pile}`);
+  expect(p, `the visits roll into ${pile}`).toBeTruthy();
+  return Object.fromEntries(p!.children!.map((c) => [c.id, c]));
 }
 
-describe("Needs You's Not Closed Out row says Walk-Through", () => {
+const closeOutRows = () => rowsInPile("visits_to_close_out");
+
+describe("Needs You's Not Closed Out row says Inspection", () => {
   it("the subtitle and the untitled row's title both read the type by its label", async () => {
     state.visits = [visit("ap1", "inspection", null, "Marla Finch"), visit("ap2", "inspection", "Kitchen hood outlet", "Tess Zane")];
     const rows = await closeOutRows();
 
-    // An untitled visit falls back to the type — the word, not the stored value.
-    expect(rows["ap1"].title).toBe("Walk-Through");
-    expect(rows["ap1"].subtitle).toBe("Marla Finch · Walk-Through");
+    // An untitled visit falls back to the type — and to the ONE function that words it.
+    const word = appointmentTypeLabel("inspection");
+    expect(word).toBe("Inspection");
+    expect(rows["ap1"].title).toBe(word);
+    expect(rows["ap1"].subtitle).toBe(`Marla Finch · ${word}`);
     // A titled visit keeps its title; the type still rides the subtitle.
     expect(rows["ap2"].title).toBe("Kitchen hood outlet");
-    expect(rows["ap2"].subtitle).toBe("Tess Zane · Walk-Through");
+    expect(rows["ap2"].subtitle).toBe(`Tess Zane · ${word}`);
 
-    // And the old word is nowhere on the row a person reads.
+    // And the word he threw out is nowhere on the row a person reads.
     for (const row of Object.values(rows)) {
-      expect(`${row.title} ${row.subtitle ?? ""}`, row.id).not.toMatch(/inspect/i);
+      expect(`${row.title} ${row.subtitle ?? ""}`, row.id).not.toMatch(OLD_WORD);
     }
   });
 
@@ -128,12 +139,41 @@ describe("Needs You's Not Closed Out row says Walk-Through", () => {
       visit("me", "meeting", null, "Marla Finch"),
     ];
     const rows = await closeOutRows();
-    // Hand-capitalising gave "Service call", "Call", "Final inspection", "Quote", "Meeting".
+    // Hand-capitalising gave "Service call", "Call", "Final inspection", "Quote", "Meeting" — so
+    // these are the types that still catch a reader inventing its own word.
     expect(rows["sc"].title).toBe("Service Call");
     expect(rows["ca"].title).toBe("Phone Call");
-    expect(rows["fi"].title).toBe("Final Inspection"); // the CITY'S inspection keeps its word
+    expect(rows["fi"].title).toBe("Final Inspection"); // the CITY'S, its own type, its own name
     expect(rows["qu"].title).toBe("Quote / Estimate");
     expect(rows["me"].title).toBe("Client Meeting");
+    // Said once more against the one rule, so a renamed label cannot leave this row behind.
+    for (const [id, type] of [["sc", "service_call"], ["ca", "call"], ["fi", "final_inspection"], ["qu", "quote"], ["me", "meeting"]] as const) {
+      expect(rows[id].title, id).toBe(appointmentTypeLabel(type));
+    }
+  });
+});
+
+/**
+ * THE OTHER FEEDER OFF THE SAME TABLE, which had the word typed into it: Inspections To Write Up
+ * read `a.title || "Inspection"`. It carries every ESTIMATE_VISIT_TYPE, so that literal printed
+ * "Inspection" over an untitled QUOTE visit and over the city's Final Inspection — two rows calling
+ * themselves something they are not, on the first screen he opens.
+ */
+describe("Needs You's To Write Up row reads the type by its label too", () => {
+  it("an untitled quote visit is a Quote / Estimate, and the city's stays Final Inspection", async () => {
+    // Completed, nothing settling it (no job, no inquiry, no outcome) — the write-up shape.
+    const done = (id: string, type: string, title: string | null) => ({ ...visit(id, type, title, "Marla Finch"), status: "completed" });
+    state.visits = [done("w1", "inspection", null), done("w2", "quote", null), done("w3", "final_inspection", null), done("w4", "inspection", "Kitchen hood outlet")];
+    const rows = await rowsInPile("inspections_to_write_up");
+
+    expect(rows["w1"].title).toBe(appointmentTypeLabel("inspection"));
+    expect(rows["w1"].title).toBe("Inspection");
+    expect(rows["w2"].title).toBe("Quote / Estimate");
+    expect(rows["w3"].title).toBe("Final Inspection");
+    expect(rows["w4"].title).toBe("Kitchen hood outlet");
+    for (const row of Object.values(rows)) {
+      expect(`${row.title} ${row.subtitle ?? ""}`, row.id).not.toMatch(OLD_WORD);
+    }
   });
 });
 
@@ -157,16 +197,20 @@ function fakeScheduleDb(appts: any[]) {
 }
 
 describe("Nort reads the visit by its label, not the stored type", () => {
-  it("schedule_overview hands him Walk-Through, never the word the product map reserves for the city", async () => {
+  it("schedule_overview hands him the label, never the raw stored type and never the old word", async () => {
     const db = fakeScheduleDb([
       { id: "ap1", title: null, type: "inspection", starts_at: `${TODAY}T17:00:00.000Z`, ends_at: null, location: null, status: "scheduled", customers: { name: "Marla Finch" }, jobs: null },
       { id: "ap2", title: "Breaker swap", type: "service_call", starts_at: `${TODAY}T20:00:00.000Z`, ends_at: null, location: null, status: "scheduled", customers: { name: "Tess Zane" }, jobs: null },
     ]);
     const out = JSON.parse(await runDataTool("schedule_overview", { date: TODAY }, db));
     const byId = Object.fromEntries(out.appointments.map((a: any) => [a.id, a]));
-    expect(byId["ap1"].type).toBe("Walk-Through");
+    expect(byId["ap1"].type).toBe(appointmentTypeLabel("inspection"));
+    expect(byId["ap1"].type).toBe("Inspection");
+    // The RAW value is lowercase; the label is the word. A reader handing over the stored string
+    // would fail here, which is the defect this test exists for.
+    expect(byId["ap1"].type).not.toBe("inspection");
     expect(byId["ap2"].type).toBe("Service Call");
-    expect(JSON.stringify(out.appointments)).not.toMatch(/inspect/i);
+    expect(JSON.stringify(out.appointments)).not.toMatch(OLD_WORD);
     // The id is still the handle a reschedule takes, so labelling the word costs him nothing.
     expect(byId["ap1"].id).toBe("ap1");
   });

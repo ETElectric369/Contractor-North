@@ -7,7 +7,7 @@ import { coerceByPlaybook } from "@/lib/playbook/answers";
 /**
  * ANDREW CRAKE's actual state on 2026-08-04, read out of production: trade null, city null,
  * service area "", rate null, zero customers. He signed up, landed on an empty My Day, got a
- * generic six-question walk-through, and pressed "generate questions" without finding what it
+ * generic six-question SETUP interview, and pressed "generate questions" without finding what it
  * made. Every one of those failures traces to the first unanswered question here.
  */
 
@@ -69,7 +69,7 @@ describe("ONE BREATH, and it is Andrew's — a GC who subs it all out", () => {
 
   it("the trade is a SENTENCE, not a category — that is the point for a GC", () => {
     // Andrew's "what" isn't one trade off a list; he subs most of it out. A text slot can hold
-    // that, and it's what the estimator and the walk-through seed read.
+    // that, and it's what the estimator and the inspection seed read.
     expect(String(out.answers.trade)).toContain("subs out");
   });
 

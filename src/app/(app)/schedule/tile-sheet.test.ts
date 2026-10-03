@@ -147,7 +147,7 @@ describe("a visit's sheet", () => {
     const span: TileTarget = {
       kind: "visit",
       day: "2026-09-28",
-      visit: { id: "v3", title: "Walk-through: Rich Siskin", status: "scheduled", starts_at: at("2026-09-28", "10:00")!, ends_at: at("2026-09-30", "18:00"), assigned_to: null },
+      visit: { id: "v3", title: "Inspection: Rich Siskin", status: "scheduled", starts_at: at("2026-09-28", "10:00")!, ends_at: at("2026-09-30", "18:00"), assigned_to: null },
     };
     const office = render(span);
     expect(text(office)).toContain("Starts 10:00 AM · ends 6:00 PM Wed, Sep 30. One visit over several days; Open The Visit changes its end.");

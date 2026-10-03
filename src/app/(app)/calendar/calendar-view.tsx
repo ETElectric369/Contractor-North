@@ -191,7 +191,7 @@ export interface SchedulePicker {
  * Truckee", and that answer is almost never inside the current seven days, so you page forward and
  * lose the week you were looking at. A month is the wrong shape: thirty cells are too small to
  * hold a stop, so it degrades to a density map that shows THAT a day is busy but never WHERE, and
- * where is the whole question. Two weeks is the horizon a walk-through actually gets booked in,
+ * where is the whole question. Two weeks is the horizon an inspection actually gets booked in,
  * and his Sept 12 trip sits eighteen days out — invisible in a week view, which is how you book
  * work into a week you are in Sunnyvale.
  */
@@ -982,7 +982,7 @@ export function CalendarView({
    * Two fixed weeks meant paging the moment he looked past them — and paging is a decision, you
    * commit to leaving what you were reading. `back`/`fwd` grow as he reaches either end, so the
    * span extends under him and the week he was looking at stays where it was. Starts at exactly
-   * two weeks from today, which is the planning horizon a walk-through gets booked in.
+   * two weeks from today, which is the planning horizon an inspection gets booked in.
    */
   /* ONE HOOK, TWO STACKS — the week's and the month's — so a fix to the scroll can only be made
      once. Keyed on the anchor, so pressing Today collapses the span back to where he is. */
@@ -1037,7 +1037,7 @@ export function CalendarView({
   // object each render would defeat TimeGrid's memo on every mounted week.
   const gridNow = useMemo(() => ({ dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) }), [now, tz]);
 
-  /** WHERE the day's committed work is. Jobs carry a town; a walk-through's `location` is a bare
+  /** WHERE the day's committed work is. Jobs carry a town; an inspection's `location` is a bare
    *  street with no city, and inventing one would be worse than saying nothing. Jobs are the right
    *  anchor anyway — his ride-along case is "a walk through near a JOB that day".
    *  THE SAME PLACEMENT RULE AS THE PILLS: segments-first, person-filtered. This used to read only
@@ -1966,8 +1966,8 @@ function ApptRow({
           <Link
             href={`/appointments/${a.id}`}
             className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-teal-50 hover:text-teal-700"
-            title="Walk-through — notes, measurements, photos"
-            aria-label="Walk-through — notes, measurements, photos"
+            title="Inspection — notes, measurements, photos"
+            aria-label="Inspection — notes, measurements, photos"
           >
             <ClipboardList className="h-4 w-4" />
           </Link>

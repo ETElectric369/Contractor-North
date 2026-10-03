@@ -19,9 +19,9 @@ import { featureOn } from "@/lib/features";
 export const dynamic = "force-dynamic";
 
 /**
- * Sales → Walk-Throughs (the route stays /inspections; W2-10 gave the site visit one word):
- * appointments of the walk-through types, bucketed as OPEN WORK FIRST
- * (Erik's design 2026-07-14 — a walk-through IS an appointment type, one platform):
+ * Sales → Inspections (the route never moved; lib/statuses holds the one word):
+ * appointments of the inspection types, bucketed as OPEN WORK FIRST
+ * (Erik's design 2026-07-14 — an inspection IS an appointment type, one platform):
  *   • "To write up" — the visit happened but its inquiry/job has no estimate yet; each row's
  *     next step is one button: Create estimate (capture prefills the estimator scope).
  *   • "Upcoming & proposed" — the calendar-shaped rest, by date/status.
@@ -68,7 +68,7 @@ export default async function InspectionsPage({
 
   const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const tz = orgS.timezone;
-  // THE SWITCH BOARD (0352), from the settings and role already read. Walk-throughs are part of
+  // THE SWITCH BOARD (0352), from the settings and role already read. Inspections are part of
   // Leads: off, this list still opens from a link, under the Off line, with no new-inspection doors.
   // Estimates off: no Create Estimate on a row.
   const sw = { features: orgS.features, isOwner: me.role === "owner" };
@@ -115,18 +115,18 @@ export default async function InspectionsPage({
       customers={pickers.custOpts}
       staff={pickers.staffOpts}
       defaultType="inspection"
-      buttonLabel="Book A Walk-Through"
+      buttonLabel="Book An Inspection"
     />
   );
 
   return (
     <div>
       <PageHeader
-        title="Walk-Throughs"
-        description="Site visits before you price the work — fill in the walk-through, then write it up into an estimate."
+        title="Inspections"
+        description="Site visits before you price the work — fill in the inspection, then write it up into an estimate."
       >
-        {/* The shared two-mode affordance: Start A Walk-Through (one tap → capture) or the EXISTING
-            appointment flow (Set a Time | Propose Times), preset to the walk-through type. */}
+        {/* The shared two-mode affordance: Start An Inspection (one tap → capture) or the EXISTING
+            appointment flow (Set a Time | Propose Times), preset to the inspection type. */}
         {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
       </PageHeader>
 
@@ -145,12 +145,12 @@ export default async function InspectionsPage({
           <EmptyState
             icon={ClipboardCheck}
             title="Nothing filed away yet"
-            description="Walk-throughs land here once they're written up into an estimate (or called off)."
+            description="Inspections land here once they're written up into an estimate (or called off)."
           />
         ) : (
           // A CANCELLED VISIT IS NOT COMPLETED WORK. Both land in `filed` (correctly — they are
           // both settled), but rendering them under one heading reading "Completed & written up"
-          // told Erik a walk-through he cancelled had been written up into an estimate. Same
+          // told Erik an inspection he cancelled had been written up into an estimate. Same
           // rows, two honest headings.
           <>
             {filed.some((r) => r.status !== "cancelled") && (
@@ -164,8 +164,8 @@ export default async function InspectionsPage({
       ) : toWriteUp.length === 0 && upcoming.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
-          title="No open walk-throughs"
-          description={leadsOn ? "Start one from a lead, book one, or tap Start A Walk-Through when you're already there." : "Nothing open right now."}
+          title="No open inspections"
+          description={leadsOn ? "Start one from a lead, book one, or tap Start An Inspection when you're already there." : "Nothing open right now."}
         >
           {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
         </EmptyState>

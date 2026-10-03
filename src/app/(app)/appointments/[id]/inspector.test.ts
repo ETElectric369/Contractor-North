@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * THE WALK-THROUGH, RENDERED, FOR EACH OF ITS THREE READERS (0356; Erik, 2026-09-26: "crew leader
+ * THE INSPECTION, RENDERED, FOR EACH OF ITS THREE READERS (0356; Erik, 2026-09-26: "crew leader
  * yes tech no"). Counted on the real component (the dead-door lesson: run the selector, count the
  * doors):
  *
@@ -33,7 +33,7 @@ vi.mock("@/components/address-autocomplete", () => ({
 }));
 
 import { Inspector } from "./inspector";
-import { sheetsWithoutMoney, type WalkthroughAccess } from "@/lib/inspection/walkthrough-access";
+import { sheetsWithoutMoney, type InspectionAccess } from "@/lib/inspection/inspection-access";
 
 const SHEET = {
   id: "sheet-1",
@@ -47,7 +47,7 @@ const SHEET = {
     ],
   },
 };
-// A price, handed in as if it leaked: the crew's and the tech's walk-through must not draw it.
+// A price, handed in as if it leaked: the crew's and the tech's inspection must not draw it.
 const ANSWERS = { work: "Remodel", scope: [{ code: "R1", qty: 2, price: 517.25 }] };
 const BOOK = [
   { code: "R1", description: "Remodel scope", unit: "EA", price: 517.25 },
@@ -55,7 +55,7 @@ const BOOK = [
 ];
 const PHOTO = { path: "org-1/appointments/appt-1/1-panel.jpg", url: "https://example.invalid/1-panel.jpg" };
 
-const render = (access: WalkthroughAccess, over: Record<string, unknown> = {}) =>
+const render = (access: InspectionAccess, over: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
     createElement(Inspector, {
       appointmentId: "appt-1",
@@ -177,7 +177,7 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
 
   it("with no questions set up, he is told it's the office's, and notes and photos still save", () => {
     const none = textOf(render("crewLead", { templates: [], initialTemplateId: null, initialAnswers: {} }));
-    expect(none).toContain("The office hasn't set up walk-through questions yet. Notes, measurements and photos below still save.");
+    expect(none).toContain("The office hasn't set up inspection questions yet. Notes, measurements and photos below still save.");
     expect(none).not.toMatch(/Set Up My Questions/i);
   });
 });
@@ -211,7 +211,7 @@ describe("a plain tech: reads it", () => {
   const html = render("view");
   const t = textOf(html);
   it("one disabled fieldset, and none of the doors that would only fail", () => {
-    expect(t).toContain("Only the office can change the walk-through.");
+    expect(t).toContain("Only the office can change the inspection.");
     expect(html).toMatch(/<fieldset[^>]*disabled/);
     const doors = buttons(html).map((b) => b.text);
     for (const d of ["Save", "Take", "Add", "Start The Estimate"]) expect(doors, d).not.toContain(d);
@@ -225,6 +225,6 @@ describe("a plain tech: reads it", () => {
   it("a crew lead before 0356 gets the same read-only sheet, with the page's line", () => {
     const before = textOf(render("view", { viewNote: "Crew leads can fill this in once the office finishes an update. Until then only the office can change it." }));
     expect(before).toContain("Crew leads can fill this in once the office finishes an update.");
-    expect(before).not.toContain("Only the office can change the walk-through.");
+    expect(before).not.toContain("Only the office can change the inspection.");
   });
 });

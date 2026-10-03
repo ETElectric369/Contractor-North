@@ -143,8 +143,8 @@ describe("apptEventBody", () => {
 
   it("prefixes non-generic types, defaults end to +1h, tags cn", () => {
     const b = apptEventBody(appt, { linkUrl: "https://app/appointments/a1" });
-    // The site visit's one word (W2-10), the same label the app draws.
-    expect(b.summary).toBe("[Walk-Through] Rough-in walk");
+    // The site visit's one word (lib/statuses), the same label the app draws.
+    expect(b.summary).toBe("[Inspection] Rough-in walk");
     expect(b.end.dateTime).toBe("2026-07-21T17:00:00.000Z");
     expect(b.description).toContain("bring ladder");
     expect(b.description).toContain("https://app/appointments/a1");

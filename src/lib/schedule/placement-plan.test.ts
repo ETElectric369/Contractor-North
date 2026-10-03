@@ -121,7 +121,7 @@ describe("an undated appointment is its own kind", () => {
     expect(whatsMissing({ ...appt, address: null })).toBe("place");
   });
 
-  it("reads as a walk-through when nobody typed a type", () => {
+  it("reads as an inspection when nobody typed a type", () => {
     expect(workKind(appt)).toBe("walkthrough");
   });
 
@@ -203,7 +203,7 @@ describe("the tag he chose is the tag that lands", () => {
   // Erik: "i just scheduled Matt warren for monday for a whole day as a job and it showed up as an
   // inspection for an hour." Five of six kinds survived to the calendar; 'job' was folded into
   // 'inspection' because appointments.type had no word for it (0231 adds one).
-  it("books a job as a job, not a walk-through", () => {
+  it("books a job as a job, not an inspection", () => {
     expect(appointmentTypeFor("job")).toBe("job");
     expect(workKind({ kind: "appointment", type: "job" })).toBe("job");
   });
@@ -212,7 +212,7 @@ describe("the tag he chose is the tag that lands", () => {
     for (const k of ["job", "service", "office", "quote"] as const) {
       expect(workKind({ kind: "appointment", type: appointmentTypeFor(k) })).toBe(k);
     }
-    // a walk-through is the fallback and stays one
+    // an inspection is the fallback and stays one
     expect(appointmentTypeFor("walkthrough")).toBe("inspection");
     expect(workKind({ kind: "appointment", type: "inspection" })).toBe("walkthrough");
   });
@@ -220,11 +220,11 @@ describe("the tag he chose is the tag that lands", () => {
   it("stops calling a full day of work a site inspection", () => {
     expect(bookingTitle("job", "Matt Warren")).toBe("Matt Warren");
     expect(bookingTitle("service", "Matt Warren")).toBe("Service call: Matt Warren");
-    // The site visit's one word (W2-10): a new walk-through is titled as one.
-    expect(bookingTitle("walkthrough", "Matt Warren")).toBe("Walk-Through: Matt Warren");
+    // The site visit's one word (lib/statuses): a new inspection is titled as one.
+    expect(bookingTitle("walkthrough", "Matt Warren")).toBe("Inspection: Matt Warren");
   });
 
   it("never renders a nameless booking as a bare colon", () => {
-    expect(bookingTitle("walkthrough", "  ")).toBe("Walk-Through: Visit");
+    expect(bookingTitle("walkthrough", "  ")).toBe("Inspection: Visit");
   });
 });

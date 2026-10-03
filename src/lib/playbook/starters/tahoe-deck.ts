@@ -1,7 +1,7 @@
 import type { Playbook } from "../types";
 
 /**
- * THE DECK WALK-THROUGH — Chris's questions, and where each answer lands in his price.
+ * THE DECK INSPECTION — Chris's questions, and where each answer lands in his price.
  *
  * Erik: "for tahoe deck we started with something that kinda worked but i dont know how accurate
  * it was then i thought we were making it more accurate then we changed everything completely so
@@ -17,7 +17,7 @@ import type { Playbook } from "../types";
  *   SIZE      length · width/depth · height AS A BAND · decking material · shape · wraps around
  *   DETAILS   sets of stairs · total steps · stair railing · doors · slider doors · TRPA basin
  *
- * The walk-through must ASK THE SAME QUESTIONS IN THE SAME WORDS, because the customer's answers
+ * The inspection must ASK THE SAME QUESTIONS IN THE SAME WORDS, because the customer's answers
  * ride in with the lead and the inspector's job is to CONFIRM them, not to re-interview from
  * zero. Where the two differ, they differ on purpose, and there are exactly four differences —
  * this is the "what does the inspector need that the customer doesn't" answer:
@@ -220,7 +220,7 @@ export const TAHOE_DECK: Playbook = {
       note:
         "The R codes sit at $0.00 in the price list on purpose: a remodel is priced by choosing the " +
         "optional line items that apply and putting a value on each, standing on site, so it gets " +
-        "built with the walk-through. A remodel has no square-foot rate — the scope is chosen standing " +
+        "built with the inspection. A remodel has no square-foot rate — the scope is chosen standing " +
         "there and priced standing there, and these picks arrive at the estimate as real lines.",
     },
     {

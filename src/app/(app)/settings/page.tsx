@@ -297,7 +297,7 @@ export default async function SettingsPage({
   // THE WEBSITE'S QUESTIONS BELONG IN HERE TOO. This query said `.eq("is_inspection", true)` and
   // nothing else, so the PUBLIC INTAKE form — is_inspection false, is_public_intake true — was not
   // in the editor at all. Andrew (Vivian Builders, beta) spent a day writing eleven customer-facing
-  // questions, could only find the walk-through to put them in, put them there, and then asked
+  // questions, could only find the inspection to put them in, put them there, and then asked
   // whether his Wix embed code was broken. It wasn't: his questions were in the internal form and
   // the door was faithfully serving the other one. Meanwhile the Intake card told him in plain
   // English that "the questions live in the Customer intake form under Playbook" — a sentence this
@@ -326,19 +326,19 @@ export default async function SettingsPage({
     /** True for the one form the public door serves — the picker says so out loud. */
     isWebsite: !!f.is_public_intake,
   }));
-  // THE WALK-THROUGH'S QUESTIONS ARE LEADS'. With Leads off only the website's intake form stays in
+  // THE INSPECTION'S QUESTIONS ARE LEADS'. With Leads off only the website's intake form stays in
   // the editor: that door keeps working (rule d), and this is the one place its questions live.
-  // A link that names a walk-through (the form page's "Edit it in Settings → Playbook") still opens
+  // A link that names an inspection (the form page's "Edit it in Settings → Playbook") still opens
   // it, under the Leads Off line: a record opened by a link always opens (rule a).
   const shownPlaybookForms = on("leads") ? playbookForms : playbookForms.filter((f) => f.isWebsite || f.id === linkedForm);
   // Leads and Estimates both off, with no website form: nothing in the group is on, so it leaves the
   // side nav. ?tab=playbook (the tour, the setup questions, an old link) still opens it, each card
   // under its own Off line, never a silent fall back to Company.
   const playbookOff = !on("leads") && !on("estimates") && !playbookForms.some((f) => f.isWebsite);
-  const walkThroughForms = playbookOff ? playbookForms : shownPlaybookForms;
-  const showWalkThrough = on("leads") || walkThroughForms.length > 0 || playbookOff;
-  // The walk-through (not only the website form) is in the editor while Leads is off.
-  const walkThroughOff = !on("leads") && (playbookOff || walkThroughForms.some((f) => !f.isWebsite));
+  const inspectionSheetForms = playbookOff ? playbookForms : shownPlaybookForms;
+  const showInspectionSheet = on("leads") || inspectionSheetForms.length > 0 || playbookOff;
+  // The inspection (not only the website form) is in the editor while Leads is off.
+  const inspectionSheetOff = !on("leads") && (playbookOff || inspectionSheetForms.some((f) => !f.isWebsite));
 
   // ── "You" — everything personal (profile, notifications, language, security). ─────────
   const youTab = {
@@ -437,7 +437,7 @@ export default async function SettingsPage({
             </div>
           ),
         },
-        // "Playbook" — the questions this company's own walk-through asks, and WHY each one is
+        // "Playbook" — the questions this company's own inspection asks, and WHY each one is
         // worth asking. Second in the list on purpose: it is the one thing here that changes what
         // happens on a job site, and there has never been anywhere in this app to read it.
         // Leads and Estimates both off with no website form to edit (playbookOff): the group leaves
@@ -452,10 +452,10 @@ export default async function SettingsPage({
             // phone that column is hidden at zero size and the spotlight falls through to this,
             // the panel itself — which is what he's actually looking at there anyway.
             <div data-tour="settings-playbook" className="space-y-6">
-              {showWalkThrough && (
+              {showInspectionSheet && (
                 <div>
-                  {walkThroughOff && <FeatureOffLine feature="leads" features={settings.features} isOwner={isOwner} />}
-                  <Section title={on("leads") || walkThroughOff ? "What your walk-through asks" : "What your website asks"}>
+                  {inspectionSheetOff && <FeatureOffLine feature="leads" features={settings.features} isOwner={isOwner} />}
+                  <Section title={on("leads") || inspectionSheetOff ? "What your inspection asks" : "What your website asks"}>
                     {/* THE WHY-LINES LESSON, offered where why lines live (cn-v726 split). Erik's
                         brief for the tour was that nobody works this out unaided; teaching it on day
                         one, seventeen steps from this screen, is how it drifted. Offered once —
@@ -470,14 +470,14 @@ export default async function SettingsPage({
                       features={settings.features}
                     />
                     <p className="mb-4 text-sm text-slate-500">
-                      {on("leads") || walkThroughOff
-                        ? <>These are the questions your walk-through asks on site, in order, and the reason each one exists.
+                      {on("leads") || inspectionSheetOff
+                        ? <>These are the questions your inspection asks on site, in order, and the reason each one exists.
                           A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
                           from the lead, never gets asked at all.</>
                         : <>These are the questions your website asks a customer, in order, and the reason each one exists.</>}
                     </p>
                     <PlaybookManager
-                      forms={walkThroughForms}
+                      forms={inspectionSheetForms}
                       starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
                     />
                   </Section>
@@ -550,7 +550,7 @@ export default async function SettingsPage({
                     </div>
                     <p className="mt-1 text-sm text-slate-500">
                       Build the lists you pick from when you write an estimate — and set which lines size
-                      themselves from the measurements taken on a walk-through.
+                      themselves from the measurements taken on an inspection.
                     </p>
                   </Link>
                 </Section>

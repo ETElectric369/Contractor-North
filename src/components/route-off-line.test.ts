@@ -33,7 +33,7 @@ describe("RouteOffLine", () => {
   it("a lead opened by link with Leads off: the Off line on top, Turn On for the owner", () => {
     pathname = "/leads";
     const html = render(off("leads"));
-    expect(html).toContain("Leads &amp; Walk-Throughs");
+    expect(html).toContain("Leads &amp; Inspections");
     expect(html).toContain(">Turn On<");
   });
 
