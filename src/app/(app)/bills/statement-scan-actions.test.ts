@@ -254,6 +254,45 @@ describe("the gate decides whether anything is proposed at all", () => {
     expect(items()[0].proposal.bankImport.download.readSaid).toContain("NOTHING here checked it");
   });
 
+  /**
+   * THE RUNNING BALANCE THE PAPER PRINTS, WALKED LINE BY LINE (2026-10-02). It is the check Erik
+   * described, and the better of the two: a totals check passes when two errors cancel, and this one
+   * names a LINE. On THIS path a break is a refusal, because every line here is a model's word for what
+   * is on a photograph and nothing else vouches for it.
+   */
+  it("TWO MISREADS THAT CANCEL pass every printed total and are still refused, by line", async () => {
+    // $100 off the check and $100 onto the card payment: money out, money in and the balance from end
+    // to end all still agree to the cent. The paper's own running balance does not.
+    const walked = [1142.47, 1179.89, -70.11, 3329.89, 2517.56, 2505.56];
+    const lines = LINES.map((l, i) => ({
+      ...l,
+      balance: walked[i],
+      ...(i === 2 ? { money_out: 1150.0 } : i === 4 ? { money_out: 912.33 } : {}),
+    }));
+    state.answers = [isBank(), answer({ ...GOOD, lines })];
+    const got = await drop();
+    expect(got.ok).toBe(false);
+    expect(got.error).toContain("The running balance doesn't add up");
+    expect(got.error).toContain("line 4 (Sep 5)");
+    expect(got.error).toContain("$100.00");
+    // ONE NEXT ACTION, then the door that keeps the paper whatever the reader does.
+    expect(got.error).toContain("Drop it again");
+    expect(got.error).toContain("+ button");
+    expect(items()).toEqual([]);
+  });
+
+  it("a read whose balance DOES walk says both checks on the card, and how it was read", async () => {
+    const walked = [1142.47, 1179.89, -70.11, 3329.89, 2517.56, 2505.56];
+    state.answers = [isBank(), answer({ ...GOOD, lines: LINES.map((l, i) => ({ ...l, balance: walked[i] })) })];
+    const got = await drop();
+    expect(got.ok).toBe(true);
+    const said = items()[0].proposal.bankImport.download.readSaid as string;
+    expect(said).toContain("agree to the cent");
+    expect(said).toContain("proves every line");
+    expect(said).toContain("5 links across 6 lines");
+    expect(said).toContain("Read from a picture of the page.");
+  });
+
   it("a reader that came back with no lines at all is never a card", async () => {
     state.answers = [isBank(), answer({ ...CONTROLS, lines: [] })];
     const got = await drop();

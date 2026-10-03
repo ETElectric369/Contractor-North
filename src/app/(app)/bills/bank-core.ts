@@ -39,6 +39,7 @@ import {
   validPicks,
   type BankAppliedPass,
   type BankBooks,
+  type BankRead,
   type BankChoice,
   type BankDownload,
   type BankLine,
@@ -118,9 +119,15 @@ export function bankTableTooLong(table: readonly (readonly unknown[])[], name: s
   return rows > BANK_MAX_ROWS ? `${name} has more than ${BANK_MAX_ROWS.toLocaleString("en-US")} rows. Download a shorter date range and drop that.` : null;
 }
 
-/** A table into a bank download (redacted), or null when it isn't one. */
-export function readBankDownload(table: readonly (readonly unknown[])[], name: string): BankDownload | null {
-  return readBankTable(capBankTable(table), name, sha256Hex);
+/**
+ * A table into a bank download (redacted), or null when it isn't one.
+ *
+ * `read` SAYS HOW THE ROWS WERE GOT, and the printed figures (if any) that judge them — and the reader
+ * hands both to the ONE verification before it gives the download back, so the sentence beside Apply is
+ * never a door's own word about a read it did not check (statement-verify.ts). Every caller names it.
+ */
+export function readBankDownload(table: readonly (readonly unknown[])[], name: string, read: BankRead): BankDownload | null {
+  return readBankTable(capBankTable(table), name, sha256Hex, read);
 }
 
 async function orgTz(supabase: Db, orgId: string): Promise<string> {
@@ -399,7 +406,7 @@ function hiddenView(dl: BankDownload): BankView {
   // THE READ REPORT GOES TOO, not just the lines: it says what the month adds to, out and in, which is
   // the owner's money in one sentence (0286). A card with no figures on it must not carry them in its
   // props either.
-  const bare = { ...dl, lines: [], skipped: [], readSaid: undefined };
+  const bare = { ...dl, lines: [], skipped: [], readSaid: undefined, verified: undefined };
   const v = problemView(bare, OWNER_SORTS_BANK);
   return { ...v, canUndo: false, canSwap: false, askAccount: false };
 }
@@ -452,8 +459,10 @@ export function bankLinesStayHere<T extends { proposal?: unknown }>(item: T, vie
   const sees = !!view && view.problem !== OWNER_SORTS_BANK;
   // THE READ REPORT COMES OFF THE PROPOSAL TOO: the card shows it from `view`, which is the copy this
   // viewer is allowed (hiddenView drops it), so carrying a second copy in the props would hand the
-  // month's figures to a viewer whose card deliberately has none.
-  const bare: StoredBank = { ...stored, download: { ...dl, lines: [], skipped: [], header: [], readSaid: undefined }, lineCount: sees ? (dl.lines?.length ?? 0) : null };
+  // month's figures to a viewer whose card deliberately has none. `verified` goes with it, and from
+  // EVERY viewer's props, not only that one: it holds the statement's beginning and ending balances in
+  // figures, which is the owner's account in two numbers and no card ever shows it.
+  const bare: StoredBank = { ...stored, download: { ...dl, lines: [], skipped: [], header: [], readSaid: undefined, verified: undefined }, lineCount: sees ? (dl.lines?.length ?? 0) : null };
   return { ...item, proposal: { ...p, bankImport: bare } };
 }
 

@@ -167,24 +167,29 @@ function fakeDb() {
 }
 
 // A MADE-UP checking download (Sep 2 - Sep 25, 2026).
+// NEWEST FIRST, AND ITS RUNNING BALANCE WALKS, the way a bank's own month does: every balance is the
+// one above it less that line's money. The figures were invented before anything checked them and did
+// not add up; the one verification walks this column now, and a fixture that doesn't walk teaches
+// whoever reads it next the wrong shape.
 const CHECKING_CSV = `Account Number,Post Date,Check,Description,Debit,Credit,Status,Balance
-XXXXX1234,09/24/2026,,DENTAL CARE LLC,150.00,,Posted,9012.00
-XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9907.10
-XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9421.70
-XXXXX1234,09/12/2026,,1111-ACME INSURANCE CO,31.90,,Posted,9721.70
-XXXXX1234,09/10/2026,,ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB0123456789,2000.00,,Posted,9746.07
-XXXXX1234,09/09/2026,,1111-SHELL 456 OTHERTOWN,100.00,,Posted,11746.07
-XXXXX1234,09/05/2026,1043,CHECK,640.00,,Posted,11846.07
-XXXXX1234,09/04/2026,,DEPOSIT,,1275.00,Posted,12441.07
+XXXXX1234,09/24/2026,,DENTAL CARE LLC,150.00,,Posted,9829.57
+XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9979.57
+XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9494.17
+XXXXX1234,09/12/2026,,1111-ACME INSURANCE CO,31.90,,Posted,9594.17
+XXXXX1234,09/10/2026,,ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB0123456789,2000.00,,Posted,9626.07
+XXXXX1234,09/09/2026,,1111-SHELL 456 OTHERTOWN,100.00,,Posted,11626.07
+XXXXX1234,09/05/2026,1043,CHECK,640.00,,Posted,11726.07
+XXXXX1234,09/04/2026,,DEPOSIT,,1275.00,Posted,12366.07
 XXXXX1234,09/02/2026,,1111-SHELL 123 ANYTOWN ST,88.45,,Posted,11091.07
 `;
-// The next month's download overlaps it by a week and adds two new SHELL fills.
+// The next month's download overlaps it by a week and adds two new SHELL fills. Its balances carry on
+// from the shared lines, because it is the same account.
 const NEXT_CSV = `Account Number,Post Date,Check,Description,Debit,Credit,Status,Balance
-XXXXX1234,10/02/2026,,1111-SHELL 789 ANYTOWN,88.10,,Posted,8000.00
-XXXXX1234,09/28/2026,,1111-SHELL 123 ANYTOWN ST,60.00,,Posted,8088.10
-XXXXX1234,09/24/2026,,DENTAL CARE LLC,150.00,,Posted,9012.00
-XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9907.10
-XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9421.70
+XXXXX1234,10/02/2026,,1111-SHELL 789 ANYTOWN,88.10,,Posted,9681.47
+XXXXX1234,09/28/2026,,1111-SHELL 123 ANYTOWN ST,60.00,,Posted,9769.57
+XXXXX1234,09/24/2026,,DENTAL CARE LLC,150.00,,Posted,9829.57
+XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9979.57
+XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9494.17
 `;
 
 function seed() {
@@ -1110,16 +1115,23 @@ describe("the read report on a scanned statement's card", () => {
    * ENDPOINT (report-client-error.ts says so), so while the sentence was a field of its argument any
    * staffer who may sort the bank could post a table of their own making together with "agree to the
    * cent" and get a bank card claiming arithmetic that never ran. The card prints no totals to hold it
-   * against and Apply never reads it, so nobody downstream could tell. The sentence is now the CORE's
-   * second argument (open-list-add-core.ts) and the action has no field for it at all.
+   * against and Apply never reads it, so nobody downstream could tell.
+   *
+   * NOW NOBODY HANDS A SENTENCE AT ALL. The one verification writes it from the lines that landed
+   * (statement-verify.ts, called inside the reader), so a posted one is not refused — it has nowhere to
+   * go. What the card says here is what the chain actually found in this file.
    */
   it("a sentence posted at the door is never stored as what checked the read", async () => {
     const forged = { pages: 3, rows: 9, checked: SAID };
     const res = await addOpenList({ name: "Checking.csv", sha256: null, table: parseCSV(CHECKING_CSV), listDate: "2026-09-26", source: "bills_drop", pdf: forged } as never);
     expect(res.ok).toBe(true);
     const row = db.organized_items.find((i) => i.id === res.id)!;
-    expect(row.proposal.bankImport.download.readSaid).toBeUndefined();
     expect(JSON.stringify(row)).not.toContain("agree to the cent");
+    expect(JSON.stringify(row)).not.toContain("$9,900.00");
+    // What IS stored is this file's own arithmetic: a running balance that walks, and how it was read.
+    const said = row.proposal.bankImport.download.readSaid as string;
+    expect(said).toContain("proves every line");
+    expect(said).toContain("Read off the page itself.");
     // The pages it DID say are still facts about the paper, so the read report still has them.
     expect(res.line).toContain("3 pages");
   });

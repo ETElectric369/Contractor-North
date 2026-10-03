@@ -61,20 +61,27 @@ const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 
 // A checking download in the shape a community bank's "Download to Excel" gives: account, post
 // date, check, description, debit, credit, status, balance. Aug 26 - Sep 25, 2026.
+//
+// ITS RUNNING BALANCE WALKS, because a real one does (2026-10-02). These figures were invented before
+// anything looked at them and did not add up line to line; the chain says so of any such column, and a
+// fixture that lies about the shape of a bank download is a trap for whoever reads it next. The file
+// lists its lines NEWEST FIRST, which is how most banks hand a month over, so the walk runs up the
+// page: every balance is the one above it less that line's money. The pending line's balance is blank,
+// which is what a bank prints for money it has not posted.
 const CHECKING_CSV = `Account Number,Post Date,Check,Description,Debit,Credit,Status,Balance
-XXXXX1234,09/25/2026,,MONTHLY SERVICE FEE,12.00,,Posted,9000.00
-XXXXX1234,09/24/2026,,DENTAL CARE LLC,150.00,,Posted,9012.00
-XXXXX1234,09/23/2026,,1111-HOME HARDWARE #55 ANYTOWN,45.10,,Posted,9162.00
-XXXXX1234,09/22/2026,,CONTRACTOR SUPPLY CO PMT CS-12345,1000.00,,Posted,9207.10
-XXXXX1234,09/20/2026,,VENMO CASHOUT,,300.00,Posted,10207.10
-XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9907.10
-XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9421.70
-XXXXX1234,09/15/2026,,ATM WITHDRAWAL 000123 MAIN ST,200.00,,Posted,9521.70
-XXXXX1234,09/12/2026,,1111-ACME INSURANCE CO,31.90,,Posted,9721.70
-XXXXX1234,09/10/2026,,ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB0123456789,2000.00,,Posted,9746.07
-XXXXX1234,09/09/2026,,1111-SHELL 456 OTHERTOWN,100.00,,Posted,11746.07
-XXXXX1234,09/05/2026,1043,CHECK,640.00,,Posted,11846.07
-XXXXX1234,09/04/2026,,DEPOSIT,,1275.00,Posted,12441.07
+XXXXX1234,09/25/2026,,MONTHLY SERVICE FEE,12.00,,Posted,8872.47
+XXXXX1234,09/24/2026,,DENTAL CARE LLC,150.00,,Posted,8884.47
+XXXXX1234,09/23/2026,,1111-HOME HARDWARE #55 ANYTOWN,45.10,,Posted,9034.47
+XXXXX1234,09/22/2026,,CONTRACTOR SUPPLY CO PMT CS-12345,1000.00,,Posted,9079.57
+XXXXX1234,09/20/2026,,VENMO CASHOUT,,300.00,Posted,10079.57
+XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9779.57
+XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9294.17
+XXXXX1234,09/15/2026,,ATM WITHDRAWAL 000123 MAIN ST,200.00,,Posted,9394.17
+XXXXX1234,09/12/2026,,1111-ACME INSURANCE CO,31.90,,Posted,9594.17
+XXXXX1234,09/10/2026,,ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB0123456789,2000.00,,Posted,9626.07
+XXXXX1234,09/09/2026,,1111-SHELL 456 OTHERTOWN,100.00,,Posted,11626.07
+XXXXX1234,09/05/2026,1043,CHECK,640.00,,Posted,11726.07
+XXXXX1234,09/04/2026,,DEPOSIT,,1275.00,Posted,12366.07
 XXXXX1234,09/02/2026,,1111-SHELL 123 ANYTOWN ST,88.45,,Posted,11091.07
 XXXXX1234,09/26/2026,,1111-COFFEE CART,4.50,,Pending,
 Total,,,,4367.45,2060.40,,
@@ -861,7 +868,7 @@ describe("what needs a person: one row per merchant, the guess first and never p
   });
 
   it("a bare Withdrawal is never an ATM, and Point Of Sale never a merchant", () => {
-    const line = (description: string, cents = -6210) => ({ row: 2, postedOn: "2026-09-10", cents, description, check: null, last4: null, merchantKey: merchantKeyOf(description), key: "k" });
+    const line = (description: string, cents = -6210) => ({ row: 2, postedOn: "2026-09-10", cents, description, check: null, last4: null, merchantKey: merchantKeyOf(description), key: "k", balanceAfterCents: null });
     const books = ORG_BOOKS();
     expect(guessFor(line("POINT OF SALE WITHDRAWAL SHELL OIL 57444 ANYTOWN CA"), books)).toEqual({ choice: "cost", bucket: "Fuel" });
     expect(guessFor(line("Withdrawal POS #123456 SHELL OIL"), books)).toEqual({ choice: "cost", bucket: "Fuel" });

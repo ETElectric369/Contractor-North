@@ -443,6 +443,30 @@ describe("a bank statement's pages: the heading says which way the money went", 
     const dl = readBankTable(table, "Statement.pdf", (t) => `h${t.length}`);
     for (const l of dl!.lines) expect(l.description).not.toContain("000199884412");
   });
+
+  /**
+   * THE RUNNING BALANCE DOWN THE SIDE OF THE PAGE WALKS ITS OWN LINES (2026-10-02). A statement's pages
+   * print one, and a text PDF has no printed totals the app can hold the lines to — so this is the only
+   * check this path has, and it catches a line the table extractor dropped or doubled.
+   */
+  it("the balance column off the page walks line by line, and the report says how it was read", () => {
+    const dl = readBankTable(table, "Statement.pdf", (t) => `h${t.length}`, { source: "page" })!;
+    expect(dl.lines.map((l) => l.balanceAfterCents)).toEqual([820144, 1160144, 1070144, 949678, 1137228]);
+    expect(dl.verified?.chain.ran).toBe(true);
+    expect(dl.verified?.chain.links).toBe(4);
+    expect(dl.verified?.chain.breaks).toEqual([]);
+    expect(dl.readSaid).toContain("proves every line");
+    expect(dl.readSaid).toContain("Read off the page itself.");
+  });
+
+  it("A LINE THE EXTRACTOR LOST off a page is named, which is the one thing a text PDF has no totals for", () => {
+    const short = table.filter((r) => !r.join(" ").includes("CHECK 1182"));
+    const dl = readBankTable(short, "Statement.pdf", (t) => `h${t.length}`, { source: "page" })!;
+    expect(dl.lines).toHaveLength(4);
+    expect(dl.verified?.pass).toBe(false);
+    expect(dl.readSaid).toContain("$900.00");
+    expect(dl.readSaid).toContain("Go and look at that line against the paper before you Apply.");
+  });
 });
 
 /**

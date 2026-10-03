@@ -15,12 +15,9 @@ import {
   SCAN_MAX_TOKENS,
   SCAN_MORE_CALLS,
   SCAN_READ_MS,
-  checkScanTotals,
   closeCutJson,
-  landedScanLines,
   notABankScanSaid,
   readScannedBank,
-  scanCheckSaid,
   scanKindFrom,
   scanMoreAsked,
   scanRefusalSaid,
@@ -258,21 +255,33 @@ export async function readStatementScan(input: {
   /**
    * ── THE GATE, OVER THE LINES THAT ACTUALLY LAND ──────────────────────────────────────────────
    *
-   * The sums are taken from the ONE reader that turns this table into lines — the same
-   * `readBankDownload` call `addOpenListCore` makes of the same rows — so the gate cannot judge a
-   * different set from the one the card carries. It used to judge its own parallel reading of the
-   * reader's answer, and the two drifted on dates: a day printed "2026/09/03" or "3 Sep 2026" lands
-   * through readBankDate and was invisible to the gate, so a correct read was refused "$37.42 short"
-   * while a duplicated row in one of those forms rode onto a card that said the read agreed. ONE RULE
-   * IN ONE PLACE is not a style here; it is the only way this gate means anything.
+   * The verdict is taken from the ONE reader that turns this table into lines — the same
+   * `readBankDownload` call `addOpenListCore` makes of the same rows, which verifies what it read
+   * before it hands it back — so the gate cannot judge a different set from the one the card carries.
+   * It used to judge its own parallel reading of the reader's answer, and the two drifted on dates: a
+   * day printed "2026/09/03" or "3 Sep 2026" lands through readBankDate and was invisible to the gate,
+   * so a correct read was refused "$37.42 short" while a duplicated row in one of those forms rode onto
+   * a card that said the read agreed. ONE RULE IN ONE PLACE is not a style here; it is the only way
+   * this gate means anything.
+   *
+   * TWO CHECKS NOW, NOT ONE. The statement's printed totals, as before — and the running balance it
+   * prints beside its lines, walked line by line. The second is what catches two errors that CANCEL out
+   * of the totals, and it is the only one that names a LINE, which is the difference between a person
+   * finding the trouble and giving up.
    */
-  const landed = landedScanLines(readBankDownload(table, name)?.lines ?? []);
-  if (!landed.length) {
+  const dl = readBankDownload(table, name, { source: "picture", controls: read.controls });
+  if (!dl?.lines.length) {
     // A CONFIDENT EMPTY ANSWER IS THE WORST OUTCOME HERE, so it is never a card.
     return { ok: false, error: `${name} reads as a bank statement, but the reader got no transaction lines off it. Nothing was added — drop it again, or add it with the + button at the top to keep it as a paper.` };
   }
-  const check = checkScanTotals(landed, read.controls);
-  if (!check.pass) return { ok: false, error: scanRefusalSaid(name, check) };
+  /**
+   * A FAILED CHECK IS A REFUSAL ON THIS PATH, AND ONLY ON THIS PATH. These lines are a model's word for
+   * what is on a photograph; nothing else vouches for them, so a read its own paper disagrees with does
+   * not become a card. A CSV off the bank with a broken chain is a different thing — those rows ARE the
+   * bank's, the break is telling him something real about his file, and the card is where it is
+   * confirmed — so that door warns in the read report and goes on (open-list-add-core.ts).
+   */
+  if (!dl.verified?.pass) return { ok: false, error: scanRefusalSaid(name, { failed: dl.verified?.failed ?? [] }) };
 
   /**
    * ONE DESTINATION, THE ONE THE CSV USES. The rows go through `addOpenListCore`, which recognises
@@ -282,9 +291,10 @@ export async function readStatementScan(input: {
    * card. `expect: "bank"` is the belt: a read this action vouched for as a bank statement can never
    * become a supplier's list, which is a class of paper the whole office may read.
    *
-   * THE CORE, NOT THE ACTION, because the sentence saying what was checked is the second argument and
-   * only server code may pass it: through the exported action any staffer who may sort the bank could
-   * have handed the card "agree to the cent" over a table of their own making (open-list-add-core.ts).
+   * THE CORE, NOT THE ACTION, because only server code may say how a file was read: through the exported
+   * action any staffer who may sort the bank could have claimed a careful read of a table of their own
+   * making (open-list-add-core.ts). What is passed is FACTS — a model looked at it, and these are the
+   * figures it copied off the paper — never a sentence; the verification writes the sentence itself.
    *
    * `rows` IS WHAT THE READER HANDED BACK, not the lines that survived: the read report then says "43
    * rows on them, 41 lines", and the two rows that didn't read are named by line with their reason.
@@ -299,6 +309,6 @@ export async function readStatementScan(input: {
       expect: "bank",
       pdf: { pages, rows: returned },
     },
-    { checked: scanCheckSaid(check) },
+    { scanned: true, controls: read.controls },
   );
 }

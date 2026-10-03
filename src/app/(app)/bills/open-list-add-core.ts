@@ -19,6 +19,9 @@ import {
 } from "@/lib/supplier-open-list";
 import { downloadReadFacts, looksLikeBankTable, mayBeBankTable, noLinesSaid, notABankDownloadSaid, redactDigits, redactWordCells, unreadBankTable } from "@/lib/bank-download";
 import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
+// THE STATEMENT'S OWN PRINTED FIGURES, as the one verification takes them. Only server code hands
+// them over, and only ever as FIGURES: the sentence about them is composed where they are checked.
+import { type ScanControls } from "@/lib/statement-verify";
 import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { createOpenListPaper, openListLine, orgToday } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
@@ -26,22 +29,23 @@ import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
 /**
  * BRINGING A LIST OR A DOWNLOAD IN, ON THE SERVER AND NOT AS A DOOR (2026-10-02).
  *
- * This is the body of `addOpenList`, moved out of open-list-actions.ts for ONE reason: the sentence
- * that says what arithmetic checked a read.
+ * This is the body of `addOpenList`, moved out of open-list-actions.ts for ONE reason: nothing a
+ * browser sends may become the sentence that says what arithmetic checked a read.
  *
  * A "use server" EXPORT IS A PUBLIC POST ENDPOINT (report-client-error.ts says so in as many words;
- * schedule/actions.ts keeps a function unexported for exactly this reason). While `checked` was a
- * field of the exported action's own argument, any signed-in staffer who may sort the bank could hand
- * it a table of their own making along with "Held against the statement's own printed figures: the
- * money going out, the money coming in and the balance from end to end agree to the cent" — and the
- * bank card prints that beside Apply as the product's own word on the read. The card shows no totals
- * to hold it against, Apply never reads it, and nothing downstream could tell. That is a false
- * assurance about money, on the one path whose whole contract is that it NEVER CLAIMS WHAT IT DID NOT
- * CHECK (statement-scan.ts).
+ * schedule/actions.ts keeps a function unexported for exactly this reason). While the read report's
+ * "checked" sentence was a field of the exported action's own argument, any signed-in staffer who may
+ * sort the bank could hand it a table of their own making along with "Held against the statement's own
+ * printed figures: the money going out, the money coming in and the balance from end to end agree to
+ * the cent" — and the bank card prints that beside Apply as the product's own word on the read. The
+ * card shows no totals to hold it against, Apply never reads it, and nothing downstream could tell.
+ * That is a false assurance about money, on the one path whose whole contract is that it NEVER CLAIMS
+ * WHAT IT DID NOT CHECK (statement-verify.ts).
  *
- * So the sentence is a SECOND argument, here, where nothing from a browser reaches it, and the one
- * caller that may pass it is the one that ran the arithmetic (statement-scan-actions.ts). The exported
- * action has no field for it at all.
+ * NOW NO CALLER HANDS A SENTENCE AT ALL. The second argument carries only FACTS a caller is entitled to
+ * know — how it read the file, and the control figures it copied off the paper — and the one
+ * verification composes the sentence itself, from the lines that landed (bank-download.ts
+ * `readBankTable`). A caller cannot assert anything; it can only say what it read and be judged.
  *
  * Not a "use server" module: `import "server-only"` is what keeps it off a client bundle.
  */
@@ -74,17 +78,24 @@ export type AddOpenListInput = {
 };
 
 /**
+ * WHAT ONLY SERVER CODE MAY SAY ABOUT A READ. Facts, never an assurance: the sentence is composed by
+ * the one verification from the lines that actually landed.
+ */
+export type AddOpenListRead = {
+  /** A model looked at the pages (statement-scan-actions.ts), so the report says so in plain words and
+   *  a read its own arithmetic disagrees with never became a card at all. */
+  scanned?: boolean;
+  /** The statement's own printed control figures, copied off the paper by whoever read it. */
+  controls?: ScanControls | null;
+};
+
+/**
  * A LIST FILE (CSV, XLSX, a text table) the browser already read into rows, or pasted text. It
  * becomes a tray row and nothing else: no paper is changed until Apply.
- *
- * `trusted.checked`: what arithmetic already did to a read that needed it — a scanned statement is
- * read by a model and held against the statement's own printed totals before it ever gets here
- * (statement-scan.ts), so the report says what that check found instead of asking for it again. It can
- * only come from server code, never from a caller on the far side of an action.
  */
 export async function addOpenListCore(
   input: AddOpenListInput,
-  trusted?: { checked?: string | null } | null,
+  trusted?: AddOpenListRead | null,
 ): Promise<Result & { id?: string; already?: string; line?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -97,12 +108,23 @@ export async function addOpenListCore(
   const listDateFrom = given ? ("file" as const) : ("today" as const);
   const pages = Math.trunc(Number(input?.pdf?.pages));
   const rawRows = Math.trunc(Number(input?.pdf?.rows));
-  // A CHECK IS ONLY EVER REPORTED AS A SENTENCE SOMEBODY WROTE, never as a flag this file interprets:
-  // the one place that knows what was checked is the one place that says so (statement-scan.ts).
-  const checked = typeof trusted?.checked === "string" && trusted.checked.trim() ? trusted.checked.trim().slice(0, 600) : undefined;
-  const pdf = pages > 0 && rawRows >= 0 ? { pages, rows: rawRows, ...(checked ? { checked } : {}) } : null;
+  /**
+   * HOW THIS FILE WAS READ, and it is this file that decides, from what it was handed rather than from
+   * anybody's word for it: a model looked at it, a PDF's own text gave it up, or it is the file's own
+   * rows. The one verification names it in the read report so a person knows how hard to look — one
+   * short clause, after the fact, with nothing to decide (NO MERRY-GO-ROUND).
+   */
+  const bankRead = { source: trusted?.scanned ? ("picture" as const) : pages > 0 ? ("page" as const) : ("rows" as const), controls: trusted?.controls ?? null };
+  const pdf = pages > 0 && rawRows >= 0 ? { pages, rows: rawRows } : null;
   /** THE READ REPORT, where every door reaches it, for whichever card this becomes. */
-  const withReport = (line: string, facts: ReadFacts) => (pdf ? `${line} ${pdfReadSaid(pdf, facts, today)}` : line);
+  const withReport = (line: string, facts: ReadFacts, checked?: string | null) => {
+    // A VERIFIED READ SAYS WHAT THE ARITHMETIC FOUND, in place of asking a person to do it himself.
+    // On a PDF it goes INSIDE the one read report (pdfReadSaid), beside the pages and rows it is about;
+    // with no PDF there is no such report, so the sentence is the line's own tail. Never both: one
+    // summary, which is the whole rule about this sentence.
+    const report = pdf ? pdfReadSaid({ ...pdf, ...(checked ? { checked } : {}) }, facts, today) : checked;
+    return report ? `${line} ${report}` : line;
+  };
   /** A PDF whose columns go to the picker has no reader's figures yet, and the pages are still facts. */
   const withPages = (line: string) => (pdf ? `${line} ${pdfPagesSaid(pdf)}` : line);
 
@@ -123,13 +145,14 @@ export async function addOpenListCore(
       if (tooLong) return { ok: false, error: tooLong };
       // THE FILE'S NAME IS KEPT REDACTED like every line ("Export_000123456789.csv" keeps ••6789):
       // it is the card's title. The reader sees it whole only to take an account's last 4 from it.
-      const read = readBankDownload(bankTable, name);
+      const read = readBankDownload(bankTable, name, bankRead);
       if (!read) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
-      // THE READ REPORT RIDES ON THE DOWNLOAD when something had to check the read: a scanned statement
-      // is a model's transcription held against the paper's own printed figures, and the sentence that
-      // says so (or says nothing could) belongs on the card where Apply is, not only in the line under
-      // the button he dropped it at. A download carries none — it is arithmetic from end to end.
-      const download = { ...read, name: redactDigits(name), ...(checked ? { readSaid: checked } : {}) };
+      // THE READ REPORT RIDES ON THE DOWNLOAD, for every source and not just a scan: the reader itself
+      // walked the running balance the file prints and held the lines to whatever figures came with
+      // them, and the sentence that says what it found (or says nothing could) belongs on the card where
+      // Apply is, not only in the line under the button he dropped it at. `readBankTable` put it there;
+      // nothing here composes one, so no door can print an assurance of its own making.
+      const download = { ...read, name: redactDigits(name) };
       if (!download.lines.length) return { ok: false, error: noLinesSaid(download, name) };
       if (sha) {
         const seen = await fingerprintSeen(sha);
@@ -150,7 +173,7 @@ export async function addOpenListCore(
       revalidatePath("/bills");
       revalidatePath("/organize");
       revalidatePath("/planner");
-      return { ok: true, id: placed.id, line: withReport(bankLine(download), downloadReadFacts(download)) };
+      return { ok: true, id: placed.id, line: withReport(bankLine(download), downloadReadFacts(download), download.readSaid) };
     }
     // A BANK'S TABLE THAT DIDN'T READ AS ONE IS REFUSED HERE, AT EVERY DOOR, rather than kept as a
     // supplier's list waiting for its columns. That class of paper is the whole office's to read
