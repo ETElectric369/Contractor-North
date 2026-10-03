@@ -96,6 +96,13 @@ describe("Permits & Inspections on the job's Permits tab", () => {
     expect(off).not.toContain("Say How It Went");
   });
 
+  it("a lost read says so, and claims nothing about who has been", () => {
+    const html = r(JobPermits, { jobId: "j1", permits, inspections: [], inspectionsUnread: true, todayStr: "2026-10-14" });
+    expect(html).toContain("Couldn’t read this permit’s inspections just now");
+    expect(html).not.toContain("No inspections on this permit yet");
+    expect(html).not.toContain("Waiting on");
+  });
+
   it("every inspection passed: the card says the meter is on", () => {
     const done = booked.map((b) => ({ ...b, result: "passed", result_on: "2026-10-15" }));
     expect(r(JobPermits, { jobId: "j1", permits, inspections: done, todayStr: "2026-10-16" })).toContain("Every inspection passed — the meter is on");

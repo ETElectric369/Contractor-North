@@ -753,6 +753,10 @@ export default async function JobDetailPage({
       : Promise.resolve({ data: [] as any[], error: null }),
   ]);
   const jobInspections = ((inspectionsR as any).data ?? []) as PermitInspection[];
+  // A LOST READ CLAIMS NOTHING. With no rows the card would read "no inspections on this permit yet"
+  // about a permit that may be waiting on the utility — so it says the read failed instead, and the
+  // job's own line stays quiet rather than guessing.
+  const inspectionsUnread = !!(inspectionsR as any).error;
   const inspectionAuthorities = authoritySuggestions(((authoritiesR as any).data ?? []) as { authority: string }[]);
   // THE JOB'S ONE LINE — "Waiting on Liberty Utilities", the state it had no way to express. The most
   // pressing of its permits' verdicts, worked out from the rows on every read: never a second copy
@@ -1547,6 +1551,7 @@ export default async function JobDetailPage({
                 permits={(permits ?? []) as any}
                 canAdd={on("permits")}
                 inspections={jobInspections}
+                inspectionsUnread={inspectionsUnread}
                 todayStr={todayStrInTz(tz)}
                 authorities={inspectionAuthorities}
               />
@@ -1587,6 +1592,9 @@ export default async function JobDetailPage({
                                 (lib/permit-inspections inspectionLine), so the crew on site knows the
                                 town has to tag it before the utility will come. Nothing to press. */}
                             {(() => {
+                              if (inspectionsUnread) {
+                                return <p className="mt-1 text-xs text-amber-700">Couldn&rsquo;t read this permit&rsquo;s inspections just now.</p>;
+                              }
                               const mine = jobInspections.filter((r) => String(r.permit_id) === String(p.id));
                               if (!mine.length) return null;
                               return (

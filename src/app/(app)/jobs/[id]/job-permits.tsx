@@ -45,6 +45,7 @@ export function JobPermits({
   permits,
   canAdd = true,
   inspections = [],
+  inspectionsUnread = false,
   todayStr = "",
   authorities = [],
 }: {
@@ -53,6 +54,8 @@ export function JobPermits({
   canAdd?: boolean;
   /** Every inspection on this job's permits (0378) in one list; each card takes its own. */
   inspections?: PermitInspection[];
+  /** The read failed: each card says so rather than reading as a permit with no inspections. */
+  inspectionsUnread?: boolean;
   /** The COMPANY's today, from the server: the gate is read against it, never the browser's clock. */
   todayStr?: string;
   /** The authorities this company has called before, suggested under the free text box. */
@@ -157,6 +160,7 @@ export function JobPermits({
                     todayStr={todayStr}
                     suggestions={authorities}
                     canWrite={canAdd}
+                    unread={inspectionsUnread}
                   />
                 </div>
                 <div className="flex flex-col items-end gap-1">

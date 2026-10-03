@@ -59,6 +59,7 @@ export function PermitInspections({
   todayStr,
   suggestions = [],
   canWrite = false,
+  unread = false,
 }: {
   permitId: string;
   rows: PermitInspection[];
@@ -68,6 +69,9 @@ export function PermitInspections({
   suggestions?: string[];
   /** Staff, with the Permits & Inspections switch on. Off: the list still reads, nothing is written. */
   canWrite?: boolean;
+  /** The read of the inspections failed. Then the card CLAIMS NOTHING — "no inspections yet" would be
+   *  a lie about a permit that may well be waiting on the utility. It says so in one line instead. */
+  unread?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -117,8 +121,9 @@ export function PermitInspections({
         )}
       </div>
 
-      {/* WHERE IT STANDS, in one line: who still has to come, or that the meter is on. */}
-      {line && (
+      {/* WHERE IT STANDS, in one line: who still has to come, or that the meter is on. Never while the
+          read is lost: a verdict worked out from rows nobody could read is a guess. */}
+      {!unread && line && (
         <div className="mt-1">
           <Badge tone={standTone(stand)}>{line}</Badge>
         </div>
@@ -141,7 +146,9 @@ export function PermitInspections({
         </div>
       )}
 
-      {ordered.length === 0 ? (
+      {unread ? (
+        <p className="py-2 text-xs text-amber-700">Couldn&rsquo;t read this permit&rsquo;s inspections just now. Reload to try again.</p>
+      ) : ordered.length === 0 ? (
         <p className="py-2 text-xs text-slate-400">
           No inspections on this permit yet.{canWrite ? " Add the ones that have to come before it closes." : ""}
         </p>
