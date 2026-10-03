@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { looksLikeOfx, ofxDate, OFX_HEADER, readOfx } from "./ofx-read";
+import { looksLikeOfx, ofxDate, ofxDescription, OFX_HEADER, readOfx } from "./ofx-read";
 import { isListFile, tableFromHtml } from "./open-list-file";
 
 /**
@@ -48,5 +48,39 @@ describe("tableFromHtml", () => {
       ["09/02/2026", "SHELL 123 & CO", "-88.45"],
     ]);
     expect(tableFromHtml("<p>no table</p>")).toBeNull();
+  });
+});
+
+/**
+ * A MERCHANT SAID ONCE. Erik, 2026-10-02, on his own download: every line printed the merchant
+ * twice, because <NAME> is capped at 32 characters by the OFX spec and arrives truncated while
+ * <MEMO> carries the same words in full. The old guard only asked whether NAME contained MEMO,
+ * which with a truncated NAME can never be true. These are the real shapes off his bank.
+ */
+describe("one description out of NAME and MEMO", () => {
+  it("keeps the fuller one when MEMO is NAME plus a reference (the truncated-NAME case)", () => {
+    expect(ofxDescription("NORTHGATE SUPPLY ERIK T H S", "NORTHGATE SUPPLY ERIK T H ST-S9K8B2")).toBe(
+      "NORTHGATE SUPPLY ERIK T H ST-S9K8B2",
+    );
+    expect(ofxDescription("Transfer from DDA *****46", "Transfer from DDA *****4625")).toBe("Transfer from DDA *****4625");
+  });
+
+  it("says it once when the two fields are the same words", () => {
+    expect(ofxDescription("Transfer to DDA *****4625", "Transfer to DDA *****4625")).toBe("Transfer to DDA *****4625");
+    expect(ofxDescription("ACME FUEL  TRUCKEE CA", "acme fuel truckee ca")).toBe("ACME FUEL  TRUCKEE CA");
+  });
+
+  it("keeps NAME when it already holds MEMO", () => {
+    expect(ofxDescription("ACME FUEL TRUCKEE CA CARD 7946", "ACME FUEL")).toBe("ACME FUEL TRUCKEE CA CARD 7946");
+  });
+
+  it("still joins two genuinely different things", () => {
+    expect(ofxDescription("CHECK", "Deposited item returned")).toBe("CHECK Deposited item returned");
+  });
+
+  it("answers with whichever one it has when the other is empty", () => {
+    expect(ofxDescription("", "ACME FUEL")).toBe("ACME FUEL");
+    expect(ofxDescription("ACME FUEL", "")).toBe("ACME FUEL");
+    expect(ofxDescription("", "")).toBe("");
   });
 });

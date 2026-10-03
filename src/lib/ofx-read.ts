@@ -48,6 +48,36 @@ export function ofxDate(raw: string | null): string | null {
 }
 
 /** Read an OFX/QFX/QBO file's transactions. Never throws. */
+/**
+ * ONE DESCRIPTION OUT OF <NAME> AND <MEMO>, SAID ONCE.
+ *
+ * Erik, 2026-10-02, looking at his own download: every line read
+ * "CONTRACTOR NORTH ERIK TAYLOR H S CONTRACTOR NORTH ERIK TAYLOR H ST-S9K8B2" and
+ * "Transfer from DDA *****46 Transfer from DDA *****4625" — the merchant printed twice, so a row was
+ * double the length it needed to be and on a phone the amount and the day were pushed off the end.
+ *
+ * WHY THE OLD GUARD MISSED IT. It joined the two unless NAME already CONTAINED MEMO. Real banks do
+ * it the other way round: <NAME> is the field with a length limit (32 characters in the OFX spec),
+ * so it arrives TRUNCATED, and <MEMO> carries the same words in full plus a reference. NAME can
+ * never contain the longer MEMO, so the guard never fired and every line doubled.
+ *
+ * SO IT ASKS BOTH WAYS, and keeps the longer one when either holds the other — that is the same
+ * words, said once, with nothing dropped. Only genuinely different words are joined. Case and run of
+ * spaces are ignored, because the two fields are often one string typed twice by different systems.
+ */
+export function ofxDescription(nameText: string, memo: string): string {
+  const name = String(nameText ?? "").trim();
+  const m = String(memo ?? "").trim();
+  if (!m) return name;
+  if (!name) return m;
+  const flat = (s: string) => s.toLowerCase().replace(/\s+/g, " ");
+  const a = flat(name);
+  const b = flat(m);
+  if (a === b || a.includes(b)) return name;
+  if (b.includes(a)) return m;
+  return `${name} ${m}`.trim();
+}
+
 export function readOfx(text: string, name = "That file"): OfxResult {
   const src = String(text ?? "");
   if (!looksLikeOfx(src)) return { ok: false, error: `${name} isn't a bank download (OFX, QFX or QBO) inside. Download it again as CSV and drop that.` };
@@ -67,7 +97,7 @@ export function readOfx(text: string, name = "That file"): OfxResult {
       if (!date || !amount) continue;
       const nameText = tag(block, "NAME") ?? tag(block, "PAYEEID") ?? "";
       const memo = tag(block, "MEMO") ?? "";
-      const description = memo && !nameText.toLowerCase().includes(memo.toLowerCase()) ? `${nameText} ${memo}`.trim() : nameText || memo;
+      const description = ofxDescription(nameText, memo);
       rows.push([
         account ?? "",
         date,
