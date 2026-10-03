@@ -6,6 +6,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
+import { InfoPopup } from "@/components/info-popup";
 import { computeOwnerMoney, notCountedLine, readOwnerMoneyInputs, type OwnerMoney } from "@/lib/analytics/owner-money";
 import { pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import {
@@ -31,6 +32,26 @@ import { accountantPageViewer } from "./viewer";
 export const dynamic = "force-dynamic";
 
 const isKind = (v: unknown): v is AccountantPeriodKind => v === "month" || v === "quarter" || v === "year";
+
+/** A day as he reads one: "Sep 27, 2026". */
+const dayWords = (ymd: string) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/**
+ * WHAT IS IN THE FILE, ONE FACT EACH (card law: a card says one line, the long explanation goes behind
+ * an info icon as bullets). Every bullet is a section of the workbook — accountant-workbook.ts — so a
+ * list that grows there grows here, and nothing on this card claims a section the file hasn't got.
+ */
+function fileBullets(todayYmd: string, through: string): string[] {
+  return [
+    "Summary is the profit and loss for the period, month by month, beside the period before it.",
+    "Income lists each payment that came in, each refund, each bank deposit, and every invoice made in the period with its kind, its tax and what is still owed on it.",
+    "Costs lists each cost on its own date and every line of every supplier ticket, with the supplier account each ticket belongs to.",
+    "People lists each person's hours, pay and miles, every shift, every payment handed over, and the pay periods that locked.",
+    `Open is what customers owe and what suppliers say you owe, as of the day you download it (${dayWords(todayYmd)}), not the end of the period.`,
+    `Stock is what was in stock on ${dayWords(through)}, roll by roll, at cost.`,
+    "Depreciation is your accountant's call: tools are listed, never depreciated here.",
+  ];
+}
 
 /**
  * FOR YOUR ACCOUNTANT: one download (approved 2026-09-27; accountant-workbook.ts).
@@ -87,7 +108,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
   const notCounted = cur ? notCountedLine(cur) : null;
   const through = lastDayShown(period, todayYmd);
   const unfinished = period.end > todayYmd;
-  const day = (ymd: string) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const day = dayWords;
 
   const href = (as: "xlsx" | "csv") => `/analytics/accountant/export?${new URLSearchParams({ period: period.key, as }).toString()}`;
   const segment = "inline-flex min-h-[44px] flex-1 items-center justify-center rounded-lg border px-3 text-sm font-medium";
@@ -180,14 +201,16 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             xlsxName={accountantFileName(org?.name, period, "xlsx")}
             csvName={accountantFileName(org?.name, period, "csv")}
           />
-          {/* What is in the file, said before the tap (Erik, report 80cbd6fa: it "needs to have ALL
-              the data available to be itemized"). Every claim in this line is a section of the
-              workbook — see accountant-workbook.ts. */}
-          <p className="mt-3 text-xs text-slate-500">
-            {TAB_NAMES.length} tabs: {TAB_NAMES.join(", ")}. Summary is the profit and loss; the rest are the rows behind it, itemized — each payment in, each cost and the lines of
-            each ticket, each shift and each payment handed to a person, each ticket still unpaid. Open is as of the day you download it ({day(todayYmd)}). Stock is what was in
-            stock on {day(through)}. Depreciation is your accountant&apos;s call.
-          </p>
+          {/* ONE LINE ON THE CARD; THE REST BEHIND THE INFO ICON, AS BULLETS (card law, 2026-10-03).
+              This was a seven-line paragraph of everything the file holds, sitting under the button he
+              came here to press. Nothing is cut: every claim is a bullet, and every bullet is a section
+              of the workbook — see accountant-workbook.ts. */}
+          <div className="mt-3 flex items-start gap-1">
+            <p className="flex-1 text-xs text-slate-500">
+              {TAB_NAMES.length} tabs: {TAB_NAMES.join(", ")}. Summary is the profit and loss; the rest are the rows behind it, itemized.
+            </p>
+            <InfoPopup title="What Is In The File" label="About What Is In The File" bullets={fileBullets(todayYmd, through)} className="-mt-3 -mr-2" />
+          </div>
         </Card>
       </div>
     </AccountantPeriodScope>

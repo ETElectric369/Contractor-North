@@ -383,9 +383,10 @@ export type OwnerMoneyPerson = {
 };
 
 export type OwnerMoneyInputs = {
-  /** payments: amount, paid_at, processor_fee, stripe_payment_intent, invoices { status }. */
+  /** payments: amount, paid_at, processor_fee, stripe_payment_intent, method, note (the memo a person
+   *  typed), invoices { status, invoice_number, customer_id, job_id, customers(name) }. */
   payments: any[];
-  /** customer_credits with disposition 'refund': amount, created_at. */
+  /** customer_credits with disposition 'refund': amount, created_at, note, invoices { ... }. */
   refunds: any[];
   /** bills: id, job_id, amount, bill_date, created_at, category, status, po_id, superseded_by_bill_id.
    *  ALL of them, not just the window's: a PO is superseded by its bill whenever the bill is dated. */
@@ -430,7 +431,8 @@ export type OwnerMoneyInputs = {
   /** supplier_accounts (0270): id, name, on_account. With the two below, what each supplier is
    *  still owed, by the /bills rule (supplierBalance). Absent = no accounts. */
   supplierAccounts?: any[];
-  /** supplier_payments (0270), voided ones included: supplier_account_id, amount, paid_on, voided_at. */
+  /** supplier_payments (0270), voided ones included: supplier_account_id, amount, paid_on, method,
+   *  voided_at, reference (the check number or confirmation code) and note. */
   supplierPayments?: any[];
   /**
    * supplier_aliases (0270): alias, supplier_account_id. The spellings somebody has already filed
@@ -452,14 +454,15 @@ export type OwnerMoneyInputs = {
    *  still open (model B), and which bills cover each (supplierDocCoverage), so only a document a
    *  counted bill carries is ever in the "counted" figure. */
   supplierDocuments?: any[];
-  /** bank_lines a person placed as Other Income (0363): amount, posted_on. Absent = none. */
+  /** bank_lines a person placed as Other Income (0363): amount, posted_on, description,
+   *  account_last4. Absent = none. */
   otherIncome?: any[];
   /** bank_lines a person placed as Owner's Money In (0376's choice='owner_in'): amount (signed,
-   *  positive for money in), posted_on. Absent = none. */
+   *  positive for money in), posted_on, description, account_last4. Absent = none. */
   ownerMoneyIn?: any[];
   /** bank_lines a person placed as Owner's Draw (0363's choice='draw'): amount (signed, negative for
-   *  money out), posted_on. EQUITY, below the bottom line, never a cost. Absent = none counted, which
-   *  is also every database before 0363. */
+   *  money out), posted_on, description, account_last4. EQUITY, below the bottom line, never a cost.
+   *  Absent = none counted, which is also every database before 0363. */
   ownerDraws?: any[];
   /** The Pay board's own first day of hours (today less BALANCE_MONTHS, org-local). What a person is
    *  still owed is balanceForPerson over the shifts from this day on ONLY, whatever span was read, so
@@ -1811,8 +1814,11 @@ export async function readOwnerMoneyInputs(
       supabase
         .from("payments")
         // method and the invoice's customer and job ride along for the accountant's Income list
-        // (the same rows, so its totals are these totals).
-        .select("id, amount, paid_at, processor_fee, stripe_payment_intent, method, invoice_id, invoices(status, invoice_number, customer_id, job_id, customers(name))")
+        // (the same rows, so its totals are these totals). `note` is the MEMO A PERSON TYPED on the
+        // payment - "Check 4411", the thing he matches to his bank statement. It was not in this list,
+        // so the accountant's Income Note column could only ever hold the app's own words and the
+        // typed one was dropped on the floor (projection law: the failure is always a `select` list).
+        .select("id, amount, paid_at, processor_fee, stripe_payment_intent, method, invoice_id, invoices(status, invoice_number, customer_id, job_id, customers(name)), note")
         .gte("paid_at", startIso)
         .lt("paid_at", endIso)
         .order("id")
@@ -1821,7 +1827,8 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("refunds", (f, t) =>
       supabase
         .from("customer_credits")
-        .select("id, amount, created_at, invoices(invoice_number, job_id, customers(name))")
+        // `note` (0050): why the refund was given, in the words of whoever gave it.
+        .select("id, amount, created_at, invoices(invoice_number, job_id, customers(name)), note")
         .eq("disposition", "refund")
         .gte("created_at", startIso)
         .lt("created_at", endIso)
@@ -1908,7 +1915,11 @@ export async function readOwnerMoneyInputs(
       supabase.from("supplier_aliases").select("alias, supplier_account_id").order("alias").range(f, t),
     ),
     readEvery<any>("supplier payments", (f, t) =>
-      supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").order("id").range(f, t),
+      // `reference` is what 0270 calls "Check number, confirmation code, whatever he can match to his
+      // bank", and `note` is why. Without them the accountant's Each Payment To A Supplier had no
+      // check number at all while Each Payment Handed Over on People did - the same question, two
+      // answers, because one read asked for the column and the other didn't.
+      supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at, reference, note").order("id").range(f, t),
     ),
     // OTHER INCOME from bank downloads (0363). A database before 0363 has none: never a lost read.
     readBankChoice(supabase, span, "other_income"),
@@ -2002,7 +2013,12 @@ async function readBankChoice(supabase: any, span: { start: string; end: string 
   for (let i = 0, from = 0; i < MAX_PAGES; i++) {
     const { data, error } = await supabase
       .from("bank_lines")
-      .select("id, amount, posted_on")
+      // `description` and `account_last4` are the bank's OWN words for the line and which account it
+      // posted to - the only thing that tells one $800 deposit from another. They were read nowhere, so
+      // every bank-sorted row in the accountant's file was a bare date and amount. Both columns were
+      // created with the table (0363), so there is no deploy window where one exists without the other,
+      // and 0363's CHECK already cuts any run of 6+ digits out of a description before it is stored.
+      .select("id, amount, posted_on, description, account_last4")
       .eq("choice", choice)
       .gte("posted_on", span.start)
       .lt("posted_on", span.end)

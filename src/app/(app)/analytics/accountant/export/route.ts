@@ -8,9 +8,9 @@ import { todayStrInTz, tzDayStartUtc, wallClockInTz } from "@/lib/tz";
 import { readAllPages } from "@/lib/read-all-pages";
 import { readAccountantInputs } from "@/lib/accountant-lists";
 import { readOwnerMoneyInputs } from "@/lib/analytics/owner-money";
-import { SALES_TAX_INVOICE_COLS } from "@/lib/sales-tax";
 import { contentDisposition } from "@/lib/download-name";
 import {
+  ACCOUNTANT_PERIOD_INVOICE_COLS,
   accountantFileName,
   accountantReadSpan,
   buildAccountantWorkbook,
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
   const startIso = tzDayStartUtc(win.start, tz).toISOString();
   const endIso = tzDayStartUtc(win.end, tz).toISOString();
 
-  const [money, lists, ar, taxInvoices, taxRates] = await Promise.all([
+  const [money, lists, ar, periodInvoices, taxRates] = await Promise.all([
     readOwnerMoneyInputs(supabase, span, tz, todayYmd),
     readAccountantInputs(supabase, orgId),
     // What customers owe, as of today: every invoice sent and not paid (computeArAging's own rule
@@ -99,17 +99,29 @@ export async function GET(req: NextRequest) {
         .order("id")
         .range(f, t),
     ),
-    salesTaxOn
-      ? readAllPages<any>((f, t) =>
-          supabase.from("invoices").select(SALES_TAX_INVOICE_COLS).eq("org_id", orgId).gte("created_at", startIso).lt("created_at", endIso).order("id").range(f, t),
-        )
-      : Promise.resolve(null),
+    // EVERY INVOICE MADE IN THE PERIOD, drafts and voids included, ALWAYS - not only when Sales Tax is
+    // switched on. The workbook's Invoices Made In This Period list and its Sales Tax rows are both
+    // built from these rows, so the two cannot disagree about a period's tax; with Sales Tax off a
+    // company used to have no list of its own invoices in the file at all.
+    readAllPages<any>((f, t) =>
+      supabase
+        .from("invoices")
+        .select(ACCOUNTANT_PERIOD_INVOICE_COLS)
+        .eq("org_id", orgId)
+        .gte("created_at", startIso)
+        .lt("created_at", endIso)
+        .order("id")
+        .range(f, t),
+    ),
     salesTaxOn ? supabase.from("tax_rates").select("name, rate").eq("org_id", orgId).order("rate") : Promise.resolve(null),
   ]);
   if (!money.inputs) return say(`The money couldn't be read just now: ${money.problem ?? "a read didn't come back"}. Nothing was made; try again.`, 503);
   if (!lists.ok) return say(lists.error, 503);
   if (ar.error) return say("What customers owe couldn't be read just now. Nothing was made; try again.", 503);
-  if (taxInvoices?.error || (taxRates as { error?: unknown } | null)?.error) {
+  // NOTHING SILENT: a half-read list of invoices would hand over a period whose own invoices are quietly
+  // missing, and with Sales Tax on it would take the tax figures down with it.
+  if (periodInvoices.error) return say("The invoices of this period couldn't be read just now. Nothing was made; try again.", 503);
+  if ((taxRates as { error?: unknown } | null)?.error) {
     return say("Sales tax couldn't be read just now. Nothing was made; try again.", 503);
   }
 
@@ -123,7 +135,8 @@ export async function GET(req: NextRequest) {
     lists: lists.inputs,
     shelf: lists.shelf,
     arInvoices: ar.rows,
-    salesTax: salesTaxOn ? { invoices: taxInvoices?.rows ?? [], taxRates: ((taxRates as { data?: any[] } | null)?.data ?? []) as any[] } : null,
+    periodInvoices: periodInvoices.rows,
+    salesTax: salesTaxOn ? { taxRates: ((taxRates as { data?: any[] } | null)?.data ?? []) as any[] } : null,
   });
   // Stamped on the company's own clock: an unzipper reads a zip's time as local time.
   const modified = wallClockInTz(tz);

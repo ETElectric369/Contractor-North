@@ -208,6 +208,7 @@ const workbookInput = (money: OwnerMoneyInputs): AccountantWorkbookInput => ({
   lists: EMPTY_LISTS,
   shelf: false,
   arInvoices: [],
+  periodInvoices: [],
   salesTax: null,
 });
 
