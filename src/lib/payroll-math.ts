@@ -235,6 +235,39 @@ export function toPayPaymentRow(row: any): PayPaymentRow {
   };
 }
 
+/**
+ * ── HOW MANY PAYMENTS A LIST DRAWS, AND WHICH ONES ────────────────────────────────────────────
+ *
+ * TWO FAILURES, ONE RULE.
+ *
+ *  · A LIST THAT NEVER ENDS, WITH A DOOR BEHIND IT. A person's statement drew every payment he had
+ *    ever been handed and put the ONLY door to the pay form after the last of them. A year of weekly
+ *    pay is 52 rows at 69px, so the door sat ~3,500px down a field of one-tap Undo buttons, every one
+ *    of which voids a payment and can unlock a pay period with no confirm. Reaching the button that
+ *    pays a man should not mean scrolling past fifty ways to unpay him.
+ *  · A PAYMENT WAITING TO BE CHECKED FALLING OFF THE END. "Paid Recently" already had this rule
+ *    hand-written inside it: an imported payment carries the only "That's Right" there is, so a cap
+ *    that hid it would leave the amber banner at the top of the page pointing at nothing. The
+ *    statement needs the same promise, and two hand-written copies of one rule is how they drift.
+ *
+ * `shown` is the newest `limit`, PLUS any still-unchecked payment the cap would have hidden (those go
+ * at the end, where the hand-written version put them). `hidden` is what is left for the fold to name
+ * — never a lifetime total, only what is not on screen.
+ */
+export function paymentsToShow(
+  payments: PayPaymentRow[] | null | undefined,
+  limit: number,
+): { shown: PayPaymentRow[]; hidden: PayPaymentRow[] } {
+  const all = (payments ?? []).filter((p): p is PayPaymentRow => !!p);
+  // A non-finite or negative limit must not silently mean "none": it means "no cap at all", which is
+  // the behaviour that was there before this function and is never the wrong answer, only the long one.
+  const cap = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : all.length;
+  const newest = all.slice(0, cap);
+  const rest = all.slice(cap);
+  const stillToCheck = rest.filter((p) => p.needsCheck && !p.voided);
+  return { shown: [...newest, ...stillToCheck], hidden: rest.filter((p) => !stillToCheck.includes(p)) };
+}
+
 export type PersonBalance = {
   profileId: string;
   name: string;

@@ -5,7 +5,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
-import { payPeriodBounds, payPeriodForOffset, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
+import { payPeriodBounds, payPeriodForOffset, payPeriodOffsetOf, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
 import {
   aggregatePayrollEntries,
@@ -352,6 +352,48 @@ export default async function PayrollPage({
     }
   }
 
+  /**
+   * WHICH PAY PERIODS HOLD A PERSON'S UNSETTLED MILES, so his statement can say where they are.
+   *
+   * THE DEAD SIGNPOST THIS REPLACES. The statement prints balanceForPerson's heldMiles, which counts
+   * every unsettled business mile in the 18-month window, and it used to send the reader "below" to
+   * the Mileage block — which is ONE pay period, because settleMileage stamps one pay period at a
+   * time. The day after a period rolls over, the statement said 30 miles were held and the block said
+   * "No miles logged in this pay period", with no period named and no way to reach the one that had
+   * them. Miles could sit unsettled for good.
+   *
+   * IT IS THE SAME FUNCTION THE BLOCK READS (aggregatePayrollEntries on one period's closed entries,
+   * the shape `rows` below is built in), on purpose: a figure worked out any other way would promise
+   * a number the block then disagrees with, and the door would land him on a period showing nothing.
+   * Hours are irrelevant here, but the whole period's entries go in anyway — the aggregator nets the
+   * daily commute allowance per group and drops a person with no hours at all, and copying those two
+   * behaviours by hand is how the two figures drift apart.
+   *
+   * The offset is what the pager reads (`/payroll?period=N`). A period with no reachable offset
+   * (forward-dated hours — the pager has no forward offsets) gets NO DOOR rather than a wrong one;
+   * its miles are still inside the total the line prints, so nothing goes unsaid.
+   */
+  const heldMileage: Record<string, { start: string; end: string; miles: number; offset: number | null }[]> = {};
+  for (const [id, mine] of entriesByPerson) {
+    if (drawIds.has(id)) continue; // an owner has no statement to draw this on (0286)
+    const byPeriod = new Map<string, any[]>();
+    for (const e of mine) {
+      if (!e.clock_out) continue; // a running shift's miles are not known yet, exactly as `closed` has it
+      const day = todayStrInTz(tz, new Date(e.clock_in));
+      const p = payPeriodBounds(settings.pay_schedule, settings.pay_anchor, day);
+      pushInto(byPeriod, `${p.start}|${p.end}`, e);
+    }
+    const held: { start: string; end: string; miles: number; offset: number | null }[] = [];
+    for (const [key, group] of byPeriod) {
+      const [start, end] = key.split("|");
+      const [agg] = aggregatePayrollEntries(group, tz);
+      const miles = agg?.heldMiles ?? 0;
+      if (miles <= 0.05) continue;
+      held.push({ start, end, miles, offset: payPeriodOffsetOf(settings.pay_schedule, settings.pay_anchor, today, start) });
+    }
+    if (held.length > 0) heldMileage[id] = held.sort((a, b) => a.start.localeCompare(b.start));
+  }
+
   // THE PERIOD SLICE — feeds ONLY the mileage block and the accountant CSV, both of which are
   // period-shaped by nature. The owed board above never reads it.
   const inPeriod = closed.filter((e) => {
@@ -422,6 +464,7 @@ export default async function PayrollPage({
         ownersOnFile={ownersOnFile}
         viewerId={user?.id ?? null}
         owedPeriods={owedPeriods}
+        heldMileage={heldMileage}
         openShifts={openShifts}
         today={today}
         rows={rows}

@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { payPeriodBounds, todayStrInTz } from "@/lib/tz";
 import {
   payLine,
   payLineFromGross,
   payRateForEntry,
   aggregatePayrollEntries,
   balanceForPerson,
+  paymentsToShow,
   sumPayments,
   sumLockedGross,
   runningCredit,
@@ -768,5 +770,178 @@ describe("the Pay board and its CSV leave the owner off, and say so (0286)", () 
       "Erik Taylor is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out shows on Analytics as Owner's Draw, below Net Profit.",
     );
     expect(ownerWagesRefusal("")).toMatch(/^This person is the owner/);
+  });
+});
+
+/**
+ * ── WHAT A PAYMENT LIST IS ALLOWED TO HIDE ────────────────────────────────────────────────────
+ *
+ * TWO LISTS READ THIS ONE RULE: "Paid Recently" across everybody, and a person's own statement, which
+ * had no cap at all and put the ONLY door to the pay form after the last row. Every row carries a
+ * one-tap Undo that voids a payment and can unlock a pay period with no confirm, so a year of weekly
+ * pay meant scrolling past fifty of those to reach the button that pays the man.
+ *
+ * AND THE CAP MAY NOT HIDE A PAYMENT STILL WAITING TO BE CHECKED. The amber banner at the top of
+ * /payroll counts those and sends him down to confirm them; if a cap folded one away the banner would
+ * be pointing at nothing. That promise was hand-written inside the board and is now here, once.
+ *
+ * Every name and figure is invented. This repository is public.
+ */
+describe("paymentsToShow — the cap, and the one thing it may never fold away", () => {
+  const row = (id: string, over: Partial<PayPaymentRow> = {}): PayPaymentRow => ({
+    id,
+    profileId: "p-1",
+    amount: 100,
+    paidOn: "2026-09-28",
+    method: "cash",
+    reference: null,
+    note: null,
+    needsCheck: false,
+    voided: false,
+    ...over,
+  });
+  const ids = (list: PayPaymentRow[]) => list.map((p) => p.id);
+
+  it("under the cap, everything shows and nothing is hidden", () => {
+    const all = [row("a"), row("b")];
+    expect(paymentsToShow(all, 6)).toEqual({ shown: all, hidden: [] });
+  });
+
+  it("over the cap, the newest are shown and the rest are named for the fold", () => {
+    const all = ["a", "b", "c", "d"].map((id) => row(id));
+    const { shown, hidden } = paymentsToShow(all, 2);
+    expect(ids(shown)).toEqual(["a", "b"]);
+    expect(ids(hidden)).toEqual(["c", "d"]);
+    // `hidden` is what is OFF the screen, never a lifetime total: the two together are the whole list.
+    expect(shown.length + hidden.length).toBe(all.length);
+  });
+
+  it("a payment still waiting to be checked is pulled up past the cap, and is NOT in the fold", () => {
+    const all = [row("a"), row("b"), row("c"), row("d", { needsCheck: true })];
+    const { shown, hidden } = paymentsToShow(all, 2);
+    expect(ids(shown)).toEqual(["a", "b", "d"]);
+    expect(ids(hidden)).toEqual(["c"]);
+  });
+
+  it("a VOIDED import has nothing left to check, so it stays in the fold", () => {
+    const all = [row("a"), row("b"), row("c", { needsCheck: true, voided: true })];
+    const { shown, hidden } = paymentsToShow(all, 2);
+    expect(ids(shown)).toEqual(["a", "b"]);
+    expect(ids(hidden)).toEqual(["c"]);
+  });
+
+  it("a payment is never drawn twice: one already inside the cap is not pulled up again", () => {
+    const all = [row("a", { needsCheck: true }), row("b"), row("c")];
+    const { shown, hidden } = paymentsToShow(all, 2);
+    expect(ids(shown)).toEqual(["a", "b"]);
+    expect(ids(hidden)).toEqual(["c"]);
+  });
+
+  it("nothing in, nothing out", () => {
+    expect(paymentsToShow([], 6)).toEqual({ shown: [], hidden: [] });
+    expect(paymentsToShow(null, 6)).toEqual({ shown: [], hidden: [] });
+    expect(paymentsToShow(undefined, 6)).toEqual({ shown: [], hidden: [] });
+  });
+
+  it("a broken cap means NO cap, never an empty list: a list is better long than missing", () => {
+    const all = [row("a"), row("b"), row("c")];
+    expect(ids(paymentsToShow(all, Number.NaN).shown)).toEqual(["a", "b", "c"]);
+    expect(ids(paymentsToShow(all, -5).shown)).toEqual(["a", "b", "c"]);
+    expect(paymentsToShow(all, Number.NaN).hidden).toEqual([]);
+  });
+});
+
+/**
+ * ── THE HELD-MILES FIGURE AND ITS PAY PERIODS ADD UP ──────────────────────────────────────────
+ *
+ * WHY THIS IS THE GUARD THAT MATTERS. A person's statement prints one all-window held-miles figure and
+ * then draws a door per pay period that holds some of it, each with its own mileage figure. If those
+ * two readings disagree, the line is back to being a lie — the reader sees 57.0 held and a block that
+ * says 7.0, with no screen that reconciles them, which is exactly the defect being fixed.
+ *
+ * They agree only because ONE function works out both: balanceForPerson calls aggregatePayrollEntries
+ * over the whole window, and /payroll calls the SAME function over each pay period's slice. The
+ * commute allowance is netted per DAY, and a day cannot straddle two pay periods, so slicing by period
+ * cannot move a mile. This test is what fails if anybody ever works out either side a second way.
+ *
+ * Every name, date and figure is invented. This repository is public.
+ */
+describe("held miles split across pay periods come to the same total", () => {
+  const PT = "America/Los_Angeles";
+  const ANCHOR = "2026-01-05";
+  /** A shift with miles and real hours, on an org-local day, with no mileage settlement on it. */
+  const shift = (day: string, miles: number) => ({
+    id: `e-${day}-${miles}`,
+    profile_id: "p-9",
+    clock_in: `${day}T15:00:00Z`, // 8am Pacific
+    clock_out: `${day}T23:00:00Z`,
+    lunch_minutes: 0,
+    miles,
+    paid_at: null,
+    mileage_paid_at: null,
+    rate_override: null,
+    split_from: null,
+    profiles: { full_name: "Dana Rook", hourly_rate: 40, commute_baseline_miles: 0 },
+  });
+
+  /** What /payroll does: bucket the person's closed entries by pay period, then read heldMiles off
+   *  the same aggregator the Mileage block reads. */
+  const perPeriod = (entries: any[], schedule: "semimonthly" | "biweekly" | "monthly" | "weekly") => {
+    const byPeriod = new Map<string, any[]>();
+    for (const e of entries) {
+      const p = payPeriodBounds(schedule, ANCHOR, todayStrInTz(PT, new Date(e.clock_in)));
+      const key = `${p.start}|${p.end}`;
+      byPeriod.set(key, [...(byPeriod.get(key) ?? []), e]);
+    }
+    return [...byPeriod.entries()]
+      .map(([key, group]) => ({ key, miles: aggregatePayrollEntries(group, PT)[0]?.heldMiles ?? 0 }))
+      .filter((x) => x.miles > 0.05)
+      .sort((a, b) => a.key.localeCompare(b.key));
+  };
+
+  const windowTotal = (entries: any[]) =>
+    balanceForPerson({ profileId: "p-9", name: "Dana Rook", entries, lockedRuns: [], payments: [], tz: PT }).heldMiles;
+
+  it("three unsettled periods: the statement's figure is exactly the sum of its doors", () => {
+    // The field case: miles left behind in August and September, and some driven this period.
+    const entries = [shift("2026-08-20", 30), shift("2026-09-30", 20), shift("2026-10-02", 7)];
+    const split = perPeriod(entries, "semimonthly");
+    expect(split.map((s) => s.key)).toEqual(["2026-08-16|2026-09-01", "2026-09-16|2026-10-01", "2026-10-01|2026-10-16"]);
+    expect(split.map((s) => s.miles)).toEqual([30, 20, 7]);
+    expect(windowTotal(entries)).toBe(57);
+    // THE INVARIANT: nothing is held in a period the statement cannot name.
+    expect(split.reduce((s, x) => s + x.miles, 0)).toBeCloseTo(windowTotal(entries), 5);
+  });
+
+  it("it holds with a commute allowance netted off, which is per DAY and so cannot cross a period", () => {
+    const withBaseline = (day: string, miles: number) => {
+      const e = shift(day, miles);
+      e.profiles = { ...e.profiles, commute_baseline_miles: 10 };
+      return e;
+    };
+    // Two days in one period and one in another: 10 comes off EACH day, not each period.
+    const entries = [withBaseline("2026-09-18", 30), withBaseline("2026-09-20", 25), withBaseline("2026-10-02", 18)];
+    const split = perPeriod(entries, "semimonthly");
+    expect(split.map((s) => s.miles)).toEqual([35, 8]); // (30-10)+(25-10) = 35, then 18-10 = 8
+    expect(windowTotal(entries)).toBe(43);
+    expect(split.reduce((s, x) => s + x.miles, 0)).toBeCloseTo(windowTotal(entries), 5);
+  });
+
+  it("it holds for every schedule, including the ones whose periods are different lengths", () => {
+    const entries = [shift("2026-07-31", 12), shift("2026-08-31", 9.5), shift("2026-09-14", 4.25), shift("2026-10-02", 6)];
+    for (const schedule of ["weekly", "biweekly", "semimonthly", "monthly"] as const) {
+      const split = perPeriod(entries, schedule);
+      expect(split.reduce((s, x) => s + x.miles, 0)).toBeCloseTo(windowTotal(entries), 5);
+      // And every mile is in exactly one period, so no door double-counts another's miles.
+      expect(split.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("a SETTLED period drops out of both readings at once", () => {
+    const settled = shift("2026-09-20", 30);
+    settled.mileage_paid_at = "2026-09-30T00:00:00Z" as any;
+    const entries = [settled, shift("2026-10-02", 7)];
+    expect(windowTotal(entries)).toBe(7);
+    expect(perPeriod(entries, "semimonthly")).toEqual([{ key: "2026-10-01|2026-10-16", miles: 7 }]);
   });
 });

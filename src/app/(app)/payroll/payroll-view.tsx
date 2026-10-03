@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Check, Download, Undo2 } from "lucide-react";
@@ -14,6 +14,7 @@ import {
   firstName,
   noAnswerSentence,
   owedReading,
+  paymentsToShow,
   payrollCsvRows,
   periodLabel,
   sayMoney,
@@ -49,6 +50,7 @@ export function PayrollView({
   ownersOnFile,
   viewerId,
   owedPeriods,
+  heldMileage,
   openShifts,
   today,
   rows,
@@ -75,6 +77,11 @@ export function PayrollView({
   viewerId: string | null;
   /** What the owed figure is made of, per person: the UNLOCKED pay periods and their gross. */
   owedPeriods: Record<string, { start: string; end: string; gross: number }[]>;
+  /** WHICH PAY PERIODS HOLD EACH PERSON'S UNSETTLED MILES, oldest first, worked out by the same
+   *  function the Mileage block reads (page.tsx). Mileage settles one pay period at a time, so a
+   *  statement printing an all-window held figure needs this to say where those miles actually are.
+   *  A person with none has no key. */
+  heldMileage: Record<string, { start: string; end: string; miles: number; offset: number | null }[]>;
   /** People with a shift still running, and the entry to go fix. */
   openShifts: { profileId: string; name: string; entryId: string }[];
   /** The ORG's today (lib/tz) — the Paid On default. Never the browser's day. */
@@ -100,6 +107,46 @@ export function PayrollView({
   /** The last thing that happened, said in its own words with an Undo beside it — inline, where
    *  his thumb already is, never a toast that floats off before a man on a ladder has read it. */
   const [done, setDone] = useState<{ text: string; paymentId: string | null } | null>(null);
+
+  /**
+   * ── THE ANSWER COMES TO HIS EYE ───────────────────────────────────────────────────────────────
+   *
+   * THE FAILURE THIS FIXES. The banner is at the TOP of the page and the only door to the pay form is
+   * at the FOOT of an open statement, past that person's payment list. Record a payment from there and
+   * the sheet closes, nothing scrolls, and the sentence that says what happened — "Aug 16 to Aug 31
+   * could not be locked yet… Close it on Timecards", or a refusal from Undo or That's Right — lands
+   * hundreds of pixels above the top of the screen. The tap looks like it did nothing, which is the
+   * nothing-silent rule broken by geometry rather than by a missing message.
+   *
+   * ONE BANNER, BROUGHT INTO VIEW — not a second copy drawn inside the statement. Two render sites
+   * for one sentence is two places for it to drift, and a sentence about mileage or about a payment
+   * made from the cross-person feed belongs to neither statement. bills/suppliers-card.tsx already
+   * cures the same failure the same way ("the red line would be below the fold and the door would look
+   * like it did nothing").
+   *
+   * THE COUNTER, not the text, is what the effect watches: `error` is a plain string, so pressing Undo
+   * twice and being refused the identical way twice would not re-fire on the second press — and the
+   * second press is exactly when he is already scrolled away and needs it brought back.
+   */
+  const [answerSeq, setAnswerSeq] = useState(0);
+  const answerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (answerSeq === 0) return; // nothing has been said yet: never move the page on first paint
+    answerRef.current?.scrollIntoView({ block: "center" });
+  }, [answerSeq]);
+
+  /** THE TWO WAYS THE PAGE SPEAKS, each one exclusive of the other and each one counted. Every
+   *  surface that has something to say goes through these, so none of them can say it silently. */
+  function sayDone(d: { text: string; paymentId: string | null }) {
+    setError(null);
+    setDone(d);
+    setAnswerSeq((n) => n + 1);
+  }
+  function sayError(message: string) {
+    setDone(null);
+    setError(message);
+    setAnswerSeq((n) => n + 1);
+  }
 
   /** WHOSE STATEMENT IS OPEN. One at a time: an accordion, not a page and not a sheet over the
    *  board, so the figures sit inside the card they belong to and the banner above still shows. */
@@ -132,10 +179,11 @@ export function PayrollView({
   const totalOwed = r2(crewOwing.reduce((s, b) => s + b.owed, 0));
   const ownerLine = ownersOnBoard.length > 0 ? ownerRegister(ownersOnBoard, viewerId).notOnPayBoard : null;
   const needsCheck = payments.filter((p) => p.needsCheck && !p.voided);
-  const newest = payments.slice(0, RECENT_LIMIT);
   // A payment still waiting to be checked never falls off the end of this list. The amber line at
-  // the top sends him down here to confirm it, and a banner pointing at nothing is a dead end.
-  const recent = [...newest, ...needsCheck.filter((p) => !newest.some((n) => n.id === p.id))];
+  // the top sends him down here to confirm it, and a banner pointing at nothing is a dead end. That
+  // promise used to be written out here by hand; it is now paymentsToShow, which the person's own
+  // statement reads too, because two hand-written copies of one rule is how one of them loses it.
+  const { shown: recent } = paymentsToShow(payments, RECENT_LIMIT);
   const periodHours = rows.reduce((s, r) => s + r.paidHours + r.unpaidHours, 0);
   // Only people who actually drove: this block is about miles now, so a row with nothing but a
   // name in it would be the fluff Erik asked to skim. The CSV below still exports every person.
@@ -159,11 +207,10 @@ export function PayrollView({
       const res = await fn();
       setBusy(null);
       if (!res.ok) {
-        setDone(null);
-        setError(res.error ?? "Something went wrong and nothing was saved.");
+        sayError(res.error ?? "Something went wrong and nothing was saved.");
         return;
       }
-      setDone({ text: res.message ?? fallback, paymentId: undoPaymentId ?? null });
+      sayDone({ text: res.message ?? fallback, paymentId: undoPaymentId ?? null });
       router.refresh();
     });
   }
@@ -187,13 +234,20 @@ export function PayrollView({
    *  phone's Back still closes it — and a refusal drawn nowhere is how a second payment gets typed
    *  for money that never moved. One sentence, two landing spots, never a figure of our own. */
   function sayRefused(message: string) {
-    setDone(null);
     setModalError(message);
-    setError(message);
+    sayError(message);
   }
+
+  /** ONE WRITE AT A TIME, AND THE REF IS WHAT ENFORCES IT. `pending` comes from useTransition and is
+   *  not set synchronously, so two presses dispatched inside one task — a scripted or assistive
+   *  double press, which the disabled footer does not stop — both read the old state and both wrote.
+   *  A ref flips before the await, so the second press sees it. */
+  const paying = useRef(false);
 
   function submitPay(fields: PayFields) {
     if (!payFor || fields.amount <= 0) return;
+    if (paying.current) return;
+    paying.current = true;
     const person = payFor;
     setModalError(null);
     setError(null);
@@ -212,7 +266,7 @@ export function PayrollView({
         // money just locked. If either ever stops coming, his statement still carries an Undo on
         // every payment and the fallback sentence still says what was recorded.
         closePay();
-        setDone({
+        sayDone({
           text:
             res.message ??
             `Recorded ${sayMoney(fields.amount)} paid to ${firstName(person.name)} on ${fmtDay(fields.paidOn)} by ${fields.method}.`,
@@ -226,9 +280,22 @@ export function PayrollView({
         // Before this there was no catch here at all, so nothing was said and the next thing that
         // happened was a second payment being typed. We do NOT know whether the row was written, so
         // the sentence must not claim either way: noAnswerSentence says so, where a test holds it.
-        sayRefused(noAnswerSentence(person.name));
+        //
+        // AND THE FORM CLOSES, WHICH A REFUSAL ABOVE DOES NOT. A refusal is the server saying the row
+        // is NOT there, so the typed figure is worth keeping and retyping it would be pure loss. This
+        // is nobody knowing — the insert runs before applyLocks walks the pay periods, so a timeout or
+        // a dropped response leaves the money recorded — and recordPayment has no idempotency key
+        // (payroll-math noAnswerSentence says so), so a live Record button over that same figure is one
+        // tap from paying the man twice. Closing it is the guard, and it costs nothing: PaySheet mounts
+        // fresh with an empty amount every open, so he could not have reused the figure anyway without
+        // closing the form to go and read his payments, which is exactly what the sentence asks.
+        closePay();
+        sayError(noAnswerSentence(person.name));
+        // Re-read, so the list the sentence sends him to is the one the server has now.
+        router.refresh();
       } finally {
         setBusy(null);
+        paying.current = false;
       }
     });
   }
@@ -289,7 +356,15 @@ export function PayrollView({
         </div>
       )}
 
-      {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {/* THE SAME REF ON BOTH ANSWERS, and they are mutually exclusive by construction (sayDone and
+          sayError each clear the other), so one of them is on screen at a time and the effect above
+          has exactly one element to bring into view. role says it out loud for a screen reader as
+          well, because being announced and being visible are two different promises. */}
+      {error && (
+        <div ref={answerRef} role="alert" className="scroll-mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <div>
         <div className="flex items-start justify-between gap-2">
@@ -334,7 +409,11 @@ export function PayrollView({
       )}
 
       {done && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+        <div
+          ref={answerRef}
+          role="status"
+          className="flex scroll-mt-4 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5"
+        >
           <span className="min-w-0 text-sm text-slate-700">{done.text}</span>
           {done.paymentId && (
             <Button
@@ -418,6 +497,8 @@ export function PayrollView({
                   <PersonStatement
                     balance={b}
                     periods={owedPeriods[b.profileId] ?? []}
+                    heldMileage={heldMileage[b.profileId] ?? []}
+                    period={period}
                     payments={payments.filter((p) => p.profileId === b.profileId)}
                     onClock={onClock}
                     pending={pending}

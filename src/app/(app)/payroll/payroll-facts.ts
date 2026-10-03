@@ -44,6 +44,35 @@ export const THREE_FIGURES_FACTS = [
   "Mileage is in none of the three. It is settled on its own.",
 ] as const;
 
+/**
+ * Beside the held-mileage line in a person's statement.
+ *
+ * WHY THIS LIST EXISTS AT ALL. The statement used to carry one sentence — "Mileage is settled on its
+ * own below" — and it was not true. The held figure counts every unsettled business mile in the
+ * 18-month window (balanceForPerson), while the Mileage block below holds ONE pay period
+ * (page.tsx's period slice), and settleMileage stamps one period at a time. So right after a period
+ * rolls over, the statement said 30 miles were held and the block below said "No miles logged in this
+ * pay period" — a signpost pointing at a room the miles are not in. The scope is now said out loud in
+ * the line itself, with a door per pay period that holds them, and the rest of the explanation is
+ * here where it is read by choice.
+ */
+export const HELD_MILEAGE_FACTS = [
+  // 0095's two-lock rule: mileage_paid_at is its own stamp, untouched by any base-pay payment.
+  "Mileage is its own bucket. It is in none of Earned, Paid or Owed, and a payment never settles it.",
+  // settleMileage takes periodStart/periodEnd and stamps only entries inside them.
+  "Mileage is settled one pay period at a time, because a settlement covers a pay period.",
+  // payroll-view's Mileage block reads the period slice page.tsx hands it, never the whole window.
+  "The Mileage block lower down shows only the pay period you are looking at.",
+  // The figure here comes off balanceForPerson, which is handed every closed entry in the window.
+  "The figure on this line counts every unsettled business mile, however old the pay period.",
+  // The doors under the line are payPeriodOffsetOf → /payroll?period=N.
+  "Any earlier pay period still holding miles has its own door on this line. Open it to settle those.",
+  // summarizeMileage subtracts commute_baseline_miles once per day before anything is held.
+  "Business miles are the miles logged less the daily commute allowance on the person's profile.",
+  // The settle modal starts empty, every open, by the same law as the pay form.
+  "You type the dollars. The app never computes mileage pay or suggests a rate.",
+] as const;
+
 /** Inside the pay form. Was the paragraph under the fields. */
 export const PAYMENT_LANDS_FACTS = [
   "This records money you have already handed over. It does not send anything to anybody.",

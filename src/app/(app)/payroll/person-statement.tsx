@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, Undo2 } from "lucide-react";
+import Link from "next/link";
+import { Check, ChevronRight, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InfoPopup } from "@/components/info-popup";
 import { formatCurrency } from "@/lib/utils";
@@ -8,11 +9,23 @@ import {
   alreadyAppliedTo,
   firstName,
   owedReading,
+  paymentsToShow,
   periodLabel,
   type PayPaymentRow,
   type PersonBalance,
 } from "@/lib/payroll-math";
-import { THREE_FIGURES_FACTS } from "./payroll-facts";
+import { HELD_MILEAGE_FACTS, THREE_FIGURES_FACTS } from "./payroll-facts";
+
+/**
+ * HOW MANY PAYMENTS THE STATEMENT DRAWS BEFORE IT FOLDS THE REST AWAY.
+ *
+ * THE FAILURE THIS PREVENTS. The only door to the pay form is at the FOOT of this statement, past the
+ * payment list, and the list was every payment the person had ever been handed. A year of weekly pay
+ * put that door about 3,500px down — and every row he scrolled past on the way carried a one-tap Undo
+ * that voids a payment and can unlock a pay period with no confirm. Six is enough to recognise the
+ * last few weeks; the rest are one tap behind a fold, and `Paid` above is still the all-time sum.
+ */
+const STATEMENT_PAYMENTS = 6;
 
 /**
  * ── ONE PERSON'S STATEMENT, AND THE BUTTON THAT PAYS HIM, SEPARATED ───────────────────────────
@@ -96,6 +109,8 @@ export function PaymentLine({
 export function PersonStatement({
   balance,
   periods,
+  heldMileage,
+  period,
   payments,
   onClock,
   pending,
@@ -108,9 +123,19 @@ export function PersonStatement({
   balance: PersonBalance;
   /** This person's UNLOCKED pay periods and their gross (owedPeriods[id]). */
   periods: { start: string; end: string; gross: number }[];
+  /** EVERY pay period holding unsettled business miles of his, oldest first, the viewed one included
+   *  (page.tsx heldMileage[id]). `offset` is the `?period=N` that opens it, or null when no
+   *  non-negative offset reaches it. Mileage settles one period at a time, so without this the
+   *  held-miles figure had nowhere to send him. */
+  heldMileage: { start: string; end: string; miles: number; offset: number | null }[];
+  /** The pay period the page is showing, so the held-miles line can say how much of its figure the
+   *  Mileage block below is actually holding instead of pointing "below" and hoping. */
+  period: { start: string; end: string };
   /** THIS person's payments, newest first, voided ones included — all of them, not a window. The
    *  cross-person feed's "Showing 12 of 40 payments" had nowhere to go; a man's own list is where
-   *  the rest of his payments were always supposed to be. */
+   *  the rest of his payments were always supposed to be. It still is: the newest few are drawn and
+   *  the remainder sit behind one fold, so none of them is out of reach and none of them stands
+   *  between him and the pay door at the foot (paymentsToShow says what that cap may not hide). */
   payments: PayPaymentRow[];
   /** A shift still running. The figure rule is owedReading's, shared with the card. */
   onClock: boolean;
@@ -122,6 +147,13 @@ export function PersonStatement({
   const who = firstName(balance.name);
   const reading = owedReading({ name: balance.name, owed: balance.owed, onClock });
   const applied = alreadyAppliedTo(periods, balance.owed);
+  const inView = periodLabel(period.start, period.end);
+  // How much of the held figure the Mileage block below is actually holding, and which other pay
+  // periods hold the rest. Matched on the period's own bounds, not on an index or a count.
+  const isViewed = (h: { start: string; end: string }) => h.start === period.start && h.end === period.end;
+  const heldHere = heldMileage.find(isViewed)?.miles ?? 0;
+  const heldElsewhere = heldMileage.filter((h) => !isViewed(h));
+  const { shown, hidden } = paymentsToShow(payments, STATEMENT_PAYMENTS);
 
   return (
     <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-4 sm:px-5">
@@ -185,13 +217,58 @@ export function PersonStatement({
       )}
 
       {/* HELD MILEAGE IS ITS OWN LINE AND ITS OWN BUCKET (0095's two-lock rule): miles here, never
-          dollars, and never added into any of the three figures above. The dollars are a human
-          decision made in the period-scoped Mileage block further down the page. */}
+          dollars, and never added into any of the three figures above.
+
+          AND IT SAYS ITS OWN SCOPE, which is the whole point of this block. The figure counts every
+          unsettled business mile in the 18-month window; the Mileage block below holds ONE pay period,
+          because settleMileage stamps one pay period at a time. "Mileage is settled on its own below"
+          was therefore false the morning after any period rolled over: the statement said 30 miles
+          were held and the block said "No miles logged in this pay period", with no period named and
+          no door. So the line now says how much of the figure is in view, and every other pay period
+          holding miles gets a door of its own underneath. */}
       {balance.heldMiles > 0.05 && (
-        <p className="mt-3 px-1 text-xs text-slate-500">
-          {balance.heldMiles.toFixed(1)} business miles are held and not settled. Mileage is settled on its own below, and is
-          never part of the three figures above.
-        </p>
+        <div className="mt-3">
+          <div className="flex items-start justify-between gap-2">
+            <p className="min-w-0 px-1 text-xs text-slate-500">
+              {balance.heldMiles.toFixed(1)} business miles are held and not settled.{" "}
+              {heldHere > 0.05
+                ? `${heldHere.toFixed(1)} of them are in ${inView}, in Mileage below.`
+                : `None of them are in ${inView}, the pay period in view.`}
+            </p>
+            <InfoPopup
+              title="How Held Mileage Is Settled"
+              label="About Held Mileage"
+              bullets={HELD_MILEAGE_FACTS}
+              className="-mr-2 -mt-2"
+            />
+          </div>
+          {heldElsewhere.length > 0 && (
+            <div className="mt-1 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white">
+              {heldElsewhere.map((h) =>
+                // A period the pager cannot reach (forward-dated hours) is STATED, never drawn as a
+                // door: a link to the wrong period is worse than a line he has to read.
+                h.offset === null ? (
+                  <div key={`${h.start}|${h.end}`} className="flex min-h-11 items-center justify-between gap-3 px-4 py-2">
+                    <span className="min-w-0 truncate text-sm text-slate-500">{periodLabel(h.start, h.end)}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-slate-500">{h.miles.toFixed(1)} mi held</span>
+                  </div>
+                ) : (
+                  <Link
+                    key={`${h.start}|${h.end}`}
+                    href={`/payroll?period=${h.offset}`}
+                    className="flex min-h-11 items-center justify-between gap-2 px-4 py-2 active:bg-slate-50"
+                  >
+                    <span className="min-w-0 truncate text-sm font-medium text-slate-800">{periodLabel(h.start, h.end)}</span>
+                    <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-slate-600">
+                      {h.miles.toFixed(1)} mi held
+                      <ChevronRight aria-hidden className="h-4 w-4 text-slate-400" />
+                    </span>
+                  </Link>
+                ),
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       <div className="mt-3">
@@ -202,7 +279,7 @@ export function PersonStatement({
           </p>
         ) : (
           <div className="mt-1 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white">
-            {payments.map((p) => (
+            {shown.map((p) => (
               <PaymentLine
                 key={p.id}
                 payment={p}
@@ -213,6 +290,30 @@ export function PersonStatement({
               />
             ))}
           </div>
+        )}
+        {/* THE REST, ONE TAP AWAY. Nothing is dropped — paymentsToShow keeps any still-unchecked
+            payment in the list above whatever the cap, so the amber banner at the top of the page
+            can never be pointing at a "That's Right" that is folded out of sight. The count names
+            what is HIDDEN, not how many he has ever been paid; `Paid` above is the all-time sum. */}
+        {hidden.length > 0 && (
+          <details className="group mt-1">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 px-1 text-sm font-medium text-slate-600 [&::-webkit-details-marker]:hidden">
+              <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open:rotate-90" />
+              Show {hidden.length} Older {hidden.length === 1 ? "Payment" : "Payments"}
+            </summary>
+            <div className="mt-1 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white">
+              {hidden.map((p) => (
+                <PaymentLine
+                  key={p.id}
+                  payment={p}
+                  who={null}
+                  pending={pending}
+                  onUndo={() => onUndo(p)}
+                  onConfirm={() => onConfirm(p)}
+                />
+              ))}
+            </div>
+          </details>
         )}
       </div>
 
