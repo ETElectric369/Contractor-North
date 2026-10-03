@@ -42,9 +42,13 @@ export default async function FormsPage() {
 
   return (
     <div>
+      {/* THE SHEET GETS ITS OWN NAME. This list really does hold the walk-through sheet
+          (is_inspection) next to the crew's checklists, so a bare "inspections" in the description
+          read as the site visit — the second word for the one thing (04a9369a). Nothing is lost: a
+          safety inspection is already a safety checklist. */}
       <PageHeader
         title="Forms"
-        description="Field forms — safety checklists, inspections, sign-offs."
+        description="Field forms — safety checklists, sign-offs, and your walk-through sheet."
       >
         {isStaff && safetyOn && <NewFormButton />}
       </PageHeader>

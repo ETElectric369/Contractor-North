@@ -184,7 +184,8 @@ export default async function NewQuotePage({
         .map((path) => path.split("/").pop() ?? path)
         .map((n) => n.replace(/^\d+-/, "").replace(/_/g, " "));
       const parts = [
-        `From site inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
+        // W2-10: it is a WALK-THROUGH everywhere a person reads it, and the place is named.
+        `From the walk-through — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
         // HIS WORDS, TAKEN AS GIVEN — but not called a measurement, because mostly they aren't.
         // Not one need in his playbook is marked `measured`, yet this header fired on ANY answer,
         // so a paragraph reading "(bulbs or inserts pricing)", "(~$500 optional)" and "(T&M) unknown"

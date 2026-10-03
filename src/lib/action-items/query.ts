@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
 import { bucketInspections } from "@/lib/inspections";
-import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
@@ -745,7 +745,13 @@ async function buildActionItems(ctx: {
     if (!isStaff && a.assigned_to !== userId) continue;
     if (writeUpApptIds.has(a.id)) continue; // already surfaced as a write-up
     if (a.inquiry_id && leadIds.has(String(a.inquiry_id))) continue; // rides its lead's row
-    const type = a.type ? `${a.type[0].toUpperCase()}${a.type.slice(1)}`.replace(/_/g, " ") : null;
+    // ONE WORD FOR THE SITE VISIT (W2-10): read the type by the SAME label as every other
+    // surface. Capitalising the stored value made this front-screen row say "Inspection" where
+    // the planner, the calendar, the job page, the crew board and Google all say "Walk-Through"
+    // — two words for one thing, on the first screen he opens. A computed string like that one is
+    // invisible to the literal sweep in walk-through-word.test.ts, so visit-word.test.ts drives
+    // the row instead. It also fixed "Service call" / "Call" (now Service Call / Phone Call).
+    const type = a.type ? appointmentTypeLabel(a.type) : null;
     items.push({
       id: a.id,
       kind: "appointment",

@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { bucketInspections, captureQuoteId, hasCaptureData, type InspectionBucketRow } from "@/lib/inspections";
+import {
+  bucketInspections,
+  captureQuoteId,
+  hasCaptureData,
+  inspectionRowTags,
+  type InspectionBucketRow,
+} from "@/lib/inspections";
+import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
 
 /** The Walk-Throughs tab's promise (/inspections; W2-10's one word) is TRUTHFUL buckets — pin the
  *  classification rules (Erik's design 2026-07-14) so a refactor can't quietly re-hide open
@@ -116,6 +123,49 @@ describe("bucketInspections", () => {
     expect(b.toWriteUp.map((r) => r.id)).toEqual([w1.id, w2.id]);
     expect(b.upcoming.map((r) => r.id)).toEqual([u2.id, u1.id]);
     expect(b.filed.map((r) => r.id)).toEqual([f2.id, f1.id]);
+  });
+});
+
+/**
+ * NO ROW IN AN OPEN PILE SAYS IT IS FINISHED (report 8592392b, 2026-10-02: "glaring on the front is
+ * [a customer] tagged Done while it sits in the open box"). The green pill came off
+ * `status === "completed"` alone, on the one row component that draws the OPEN piles and the filed
+ * pile both — so every row of "To write up", Create Estimate button and all, wore a Done pill.
+ */
+describe("inspectionRowTags", () => {
+  it("a completed visit with no estimate lands in To Write Up, and wears no done tag there", () => {
+    const r = row({ status: "completed", starts_at: past, capture: cap });
+    // The open pile, by the page's own bucketing…
+    expect(bucketInspections([r], none, none, NOW).toWriteUp).toEqual([r]);
+    // …and the row it draws says nothing about being done.
+    expect(inspectionRowTags(r, true)).toEqual([]);
+  });
+
+  it("no status, in either pile, can produce a done tag or a green one", () => {
+    for (const status of APPOINTMENT_STATUSES) {
+      for (const type of APPOINTMENT_TYPES) {
+        for (const writeUp of [true, false]) {
+          const tags = inspectionRowTags({ type, status, capture: cap }, writeUp);
+          expect(tags.map((t) => t.label).join("|").toLowerCase(), `${type}/${status}`).not.toContain("done");
+          expect(tags.map((t) => t.tone), `${type}/${status}`).not.toContain("green");
+        }
+      }
+    }
+  });
+
+  it("the tags that DO survive: the city's Final Inspection, pending pick, cancelled, no field notes", () => {
+    // This list holds the city's inspection too (ESTIMATE_VISIT_TYPES), so that row says which it is.
+    expect(inspectionRowTags({ type: "final_inspection", status: "scheduled" })).toEqual([
+      { tone: "indigo", label: "Final Inspection" },
+    ]);
+    expect(inspectionRowTags({ type: "inspection", status: "proposed" })).toEqual([{ tone: "amber", label: "pending pick" }]);
+    expect(inspectionRowTags({ type: "inspection", status: "cancelled" })).toEqual([{ tone: "slate", label: "cancelled" }]);
+    // "no field notes" is worth saying only in the pile that is asking for the write-up.
+    expect(inspectionRowTags({ type: "inspection", status: "completed", capture: null }, true)).toEqual([
+      { tone: "slate", label: "no field notes" },
+    ]);
+    expect(inspectionRowTags({ type: "inspection", status: "completed", capture: cap }, true)).toEqual([]);
+    expect(inspectionRowTags({ type: "inspection", status: "completed", capture: null })).toEqual([]);
   });
 });
 

@@ -103,7 +103,7 @@ export const PLANS: PlanDef[] = [
     blurb: "You're quoting constantly and the office work has turned into a second job.",
     fullEstimatesPerMonth: 120,
     included: "120 full estimates a month, so bidding is a daily habit rather than a budget. Everything else, unlimited.",
-    support: "We set it up with you — your price book imported, your inspection sheets written — and answer the same day.",
+    support: "We set it up with you — your price book imported, your walk-through sheet written — and answer the same day.",
   },
   {
     tier: "company",
