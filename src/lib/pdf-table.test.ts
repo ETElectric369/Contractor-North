@@ -443,6 +443,56 @@ describe("a bank statement's pages: the heading says which way the money went", 
     const dl = readBankTable(table, "Statement.pdf", (t) => `h${t.length}`);
     for (const l of dl!.lines) expect(l.description).not.toContain("000199884412");
   });
+
+  /**
+   * THE RUNNING BALANCE DOWN THE SIDE OF THE PAGE WALKS ITS OWN LINES (2026-10-02). A statement's pages
+   * print one, and a text PDF has no printed totals the app can hold the lines to — so this is the only
+   * check this path has, and it catches a line the table extractor dropped or doubled.
+   */
+  it("the balance column off the page walks line by line, and the report says how it was read", () => {
+    const dl = readBankTable(table, "Statement.pdf", (t) => `h${t.length}`, { source: "page" })!;
+    expect(dl.lines.map((l) => l.balanceAfterCents)).toEqual([820144, 1160144, 1070144, 949678, 1137228]);
+    expect(dl.verified?.chain.ran).toBe(true);
+    expect(dl.verified?.chain.links).toBe(4);
+    expect(dl.verified?.chain.breaks).toEqual([]);
+    expect(dl.readSaid).toContain("proves every line");
+    expect(dl.readSaid).toContain("Read off the page itself.");
+  });
+
+  it("A LINE THE EXTRACTOR LOST off a page is named, which is the one thing a text PDF has no totals for", () => {
+    const short = table.filter((r) => !r.join(" ").includes("CHECK 1182"));
+    const dl = readBankTable(short, "Statement.pdf", (t) => `h${t.length}`, { source: "page" })!;
+    expect(dl.lines).toHaveLength(4);
+    expect(dl.verified?.pass).toBe(false);
+    expect(dl.readSaid).toContain("$900.00");
+    expect(dl.readSaid).toContain("Go and look at that line against the paper before you Apply.");
+  });
+
+  /**
+   * AND A LINE LOST OFF THE TOP OR THE BOTTOM IS THE ONE THE CHAIN CANNOT SEE, so the report still asks for
+   * the five-second comparison that catches it (fixed 2026-10-02).
+   *
+   * A link needs a NEIGHBOURING balance, so dropping the FIRST or LAST transaction leaves every remaining
+   * link adding up to the cent. pdfReadSaid asked for the comparison — "Check that against the totals your
+   * statement prints" — and only when it had no `checked` sentence of its own. The moment every download
+   * started carrying a read report, that report BECAME the `checked` sentence and silently replaced the
+   * instruction, on the one door with no printed controls at all: a statement whose extractor dropped its
+   * tail page then read "proves every line" with nothing left anywhere asking him to look.
+   */
+  it("A LINE LOST OFF THE END keeps the one instruction that could catch it", () => {
+    for (const gone of ["09/22/26", "09/02/26"]) {
+      const short = table.filter((r) => !r.join(" ").includes(gone));
+      const dl = readBankTable(short, "Statement.pdf", (t) => `h${t.length}`, { source: "page" })!;
+      expect(dl.lines, gone).toHaveLength(4);
+      // The chain cannot tell: every link it still has adds up, so it passes and says so.
+      expect(dl.verified?.pass, gone).toBe(true);
+      expect(dl.readSaid, gone).toContain("proves every line");
+      // AND THE REPORT A PERSON ACTUALLY READS STILL NAMES THE FIGURE ON HIS OWN PAPER TO CLOSE THE ENDS.
+      const report = pdfReadSaid({ pages: 2, rows: short.length, checked: dl.readSaid }, downloadReadFacts(dl), "2026-09-30");
+      expect(report, gone).toContain("lost off the top or the bottom of the table");
+      expect(report, gone).toContain("the totals your statement prints");
+    }
+  });
 });
 
 /**

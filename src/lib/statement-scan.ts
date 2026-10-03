@@ -1,10 +1,17 @@
-import { readMoney, sayDollars } from "@/lib/supplier-open-list";
+import { readMoney } from "@/lib/supplier-open-list";
+// ONE VERIFICATION FOR EVERY SOURCE (2026-10-02). The printed-totals check that shipped in cn-v1050
+// used to live in this file, reachable only from the scan path — the lopsidedness Erik spotted at
+// once ("is there a second one for all of it?"). It now sits in statement-verify.ts beside the
+// running-balance chain, where the CSV/Excel/OFX door, the text-PDF door and this one all ask the same
+// one function. These re-exports keep this module's own callers pointing at one spelling of each name.
+import { type ScanAccountKind, type ScanCheck, type ScanControls } from "@/lib/statement-verify";
+export { checkScanTotals, scanCheckSaid, type ScanAccountKind, type ScanCheck, type ScanControls, type ScanFail } from "@/lib/statement-verify";
 // ONE DATE READER FOR THE WHOLE LANE. The gate used readDate while the rows it was judging landed
 // through readBankDate, which also takes "2026/09/03", "03-SEP-2026", "3 Sep 2026" and a day with a
 // time on it. The gate then counted FEWER lines than the card carried: a correct read was refused as
 // "$37.42 short", and a duplicated row in one of those date forms rode onto the card uncounted while
 // the card said the read agreed. Two readers for one thing is the defect this repo keeps paying for.
-import { readBankDate } from "@/lib/bank-download";
+import { readBankDate, readBankMoney } from "@/lib/bank-download";
 
 /**
  * A STATEMENT WHOSE LINES ARE PIXELS (2026-10-02).
@@ -18,22 +25,24 @@ import { readBankDate } from "@/lib/bank-download";
  * so the PDF falls through with no phantom card and no zero-line statement. That refusal stays.
  *
  * WHAT THIS FILE IS. The pages are read by a model — the same document block that reads his
- * handwriting today — and this is the part that decides whether to believe it. The model's answer is
- * a PROPOSAL; the ARITHMETIC judges it, never the other way round:
+ * handwriting today — and this file is WHAT THE READER IS ASKED FOR and WHAT CAME BACK. The model's
+ * answer is a PROPOSAL; the ARITHMETIC judges it, never the other way round, and the arithmetic itself
+ * now lives in ONE place for every source (statement-verify.ts):
  *
+ *     the running balance printed after each line, walked line by line (the chain)
  *     beginning balance + money in - money out === ending balance, to the cent
  *         (a CARD's balance is what is owed, so that walk runs the other way: + out - in)
  *     sum of the lines going in  === the printed total of deposits
  *     sum of the lines going out === the printed total of withdrawals
  *
- * A statement prints those control figures itself, so a read that misplaces a column, drops a line or
- * gets one sign backwards fails arithmetic it never saw. Nothing is written when a check fails, and
- * the refusal says WHICH check and BY HOW MUCH so a person can go find the line.
+ * A statement prints those figures itself, so a read that misplaces a column, drops a line or gets one
+ * sign backwards fails arithmetic it never saw. Nothing is written when a check fails, and the refusal
+ * says WHICH check and BY HOW MUCH so a person can go find the line.
  *
- * AND IT NEVER CLAIMS WHAT IT DID NOT CHECK. A paper that prints no totals cannot be checked at all;
- * that is not a refusal (the lines are still the lines), but the read report SAYS, in plain words,
- * that nothing held them to account. A total that quietly went unverified is exactly the claim the
- * silent-write law is about.
+ * AND IT NEVER CLAIMS WHAT IT DID NOT CHECK. A paper that prints no totals and no running balance
+ * cannot be checked at all; that is not a refusal (the lines are still the lines), but the read report
+ * SAYS, in plain words, that nothing held them to account. A total that quietly went unverified is
+ * exactly the claim the silent-write law is about.
  *
  * PURE: no model, no HTTP, no database. The prompts live here as strings so the shape the reader is
  * asked for and the shape this parses can never drift apart; the server action calls the model.
@@ -78,7 +87,7 @@ Respond with ONLY a JSON object (no prose, no code fences):
   "deposits_total": number or null — its own printed total of deposits / credits / additions (on a card: payments and credits),
   "withdrawals_total": number or null — its own printed total of withdrawals / debits / subtractions / checks (on a card: purchases, fees and interest),
   "account_last4": "1234" or null — the LAST FOUR DIGITS ONLY of the account or card number,
-  "lines": [{"date": "YYYY-MM-DD", "description": "as printed", "money_out": number or null, "money_in": number or null}]
+  "lines": [{"date": "YYYY-MM-DD", "description": "as printed", "money_out": number or null, "money_in": number or null, "balance": number or null}]
 }
 
 Rules:
@@ -86,6 +95,7 @@ Rules:
 - EXACTLY ONE of money_out and money_in on each line, as a POSITIVE number, never both, never a minus sign. Money that LEFT the account is money_out (a purchase, a withdrawal, a check, a payment, a fee). Money that ARRIVED is money_in (a deposit, a credit, a refund, interest).
 - ON A CREDIT-CARD STATEMENT the same two columns mean: money_out is what ADDED to the balance (a purchase, a cash advance, a fee, interest), and money_in is what TOOK IT DOWN (the payment you made to the card, a credit, a return, a refund). A card's "PAYMENT - THANK YOU" line is money_in, never money_out.
 - A running balance is NOT a transaction. Never put a balance in money_out or money_in, and never make a line out of a subtotal, a carried-forward figure or a section heading.
+- "balance": if the statement prints a RUNNING BALANCE beside this line, COPY IT EXACTLY as printed, with its minus sign if it has one. If this line has no balance printed beside it, use null. NEVER work a balance out yourself, never carry one down from the line above, and never fill one in because the others have one — code walks these balances line by line to find a line you missed or read twice, and a balance you calculated instead of read would make that check prove nothing.
 - Copy the control figures ONLY if the statement prints them, exactly as printed. If it does not print one, use null. NEVER add them up yourself and never estimate one — code checks your lines against them, and a figure you invented would check nothing.
 - If a line prints no year, take the year from the statement period.
 - Never invent a line, never leave one out, never merge two.
@@ -155,26 +165,6 @@ export type ScanLine = {
   cents: number;
 };
 
-/** Which way this account's balance moves. Null: the reader didn't say, so "deposit" is assumed. */
-export type ScanAccountKind = "deposit" | "card";
-
-/** The statement's own control figures, in cents. Null means the paper does not print it. */
-export type ScanControls = {
-  beginning: number | null;
-  ending: number | null;
-  /** Printed totals as positive magnitudes: a statement may print its withdrawals as -4,210.00. */
-  deposits: number | null;
-  withdrawals: number | null;
-  /**
-   * A BANK ACCOUNT'S BALANCE AND A CARD'S RUN OPPOSITE WAYS, and the gate has to walk the right one.
-   * On a deposit account the balance is money you HAVE, so money in raises it; on a card it is what
-   * you OWE, so a purchase raises it and a payment lowers it. One walk for both refused EVERY
-   * correctly read card statement — and this lane is offered for cards in as many words (SCAN_KIND
-   * _SYSTEM: "a bank's or card company's statement").
-   */
-  account: ScanAccountKind | null;
-};
-
 const accountKindOf = (v: unknown): ScanAccountKind | null => {
   const said = String(v ?? "").trim().toLowerCase();
   if (/credit\s*card|^card$|\bcard\b/.test(said)) return "card";
@@ -188,9 +178,9 @@ export type ScanStatement = {
   table: string[][];
   /**
    * The lines that read cleanly, read with the BANK READER'S OWN day reader so this is exactly the set
-   * `readBankTable` will make of the same table. What the gate is actually handed is that reader's own
-   * lines (`landedScanLines`), so the gate can only ever judge what lands; these are what the
-   * continuation counts from and names its last line by.
+   * `readBankTable` will make of the same table. The GATE never looks at these: it reads the verdict
+   * `readBankTable` worked out from the lines that actually landed, so it can only ever judge what the
+   * card will carry. These are what the continuation counts from and names its last line by.
    */
   lines: ScanLine[];
   /** Every line the reader returned, read or not: what the read report calls the rows on the pages. */
@@ -208,8 +198,13 @@ export type ScanStatement = {
  * account from a column (last4Of) and that last 4 is what stops the same fee on two accounts reading
  * as one line twice. Only four digits ever go in it: `readScannedBank` cuts whatever it was given to
  * its last four before it is a cell at all.
+ *
+ * BALANCE IS LAST, AFTER ACCOUNT, so every column a row already had keeps the position it had. It
+ * carries the running balance the reader COPIED off the line (never one it worked out: SCAN_LINES
+ * _SYSTEM forbids that in as many words), and the one verification walks it line by line — which is the
+ * only check on this path that can catch two errors that cancel out of the printed totals.
  */
-export const SCAN_TABLE_HEADER = ["Date", "Description", "Withdrawal", "Deposit", "Account"];
+export const SCAN_TABLE_HEADER = ["Date", "Description", "Withdrawal", "Deposit", "Account", "Balance"];
 
 const centsOrNull = (v: unknown): number | null => {
   const n = readMoney(v);
@@ -221,6 +216,18 @@ const absCentsOrNull = (v: unknown): number | null => {
 };
 /** A magnitude as a cell the bank reader parses: "1234.56". The column says which way it went. */
 const cell = (cents: number): string => (Math.abs(cents) / 100).toFixed(2);
+/**
+ * A running balance as a cell, WITH its sign, or "" when the paper printed none on that line.
+ *
+ * readBankMoney, NOT readMoney, because readBankMoney is what reads this cell back out again
+ * (bank-download.ts balanceCentsOf) — and the two disagree about "CR", which on a bank's own paper
+ * means the account is in credit and to the supplier reader means a credit memo. One reader for the
+ * round trip, so a figure cannot change sign between being written here and being read there.
+ */
+const balanceCell = (v: unknown): string => {
+  const n = readBankMoney(v);
+  return n === null ? "" : (Math.round(n * 100) / 100).toFixed(2);
+};
 
 /**
  * THE READER'S ANSWER AS ROWS. Every line it returned becomes a row, INCLUDING the ones that could
@@ -263,6 +270,10 @@ export function readScannedBank(parsed: unknown): ScanStatement {
       oneWay && cents < 0 ? cell(cents) : "",
       oneWay && cents > 0 ? cell(cents) : "",
       last4 ?? "",
+      // THE RUNNING BALANCE AS PRINTED, SIGN AND ALL: an overdrawn account prints -300.00 and the
+      // chain has to walk the figure on the paper, not its magnitude. Blank when the reader said null,
+      // which is what a line with no balance beside it is told to answer.
+      balanceCell(l.balance),
     ]);
     if (date && oneWay) lines.push({ at: i + 1, date, description, cents });
   });
@@ -279,16 +290,6 @@ export function readScannedBank(parsed: unknown): ScanStatement {
     },
     last4,
   };
-}
-
-/**
- * THE LINES THAT ACTUALLY LANDED, as the gate's own shape. The gate must judge the rows the card will
- * carry, never a parallel reading of the same answer: `readBankTable` is what turns the table into
- * lines inside `addOpenList`, so handing its lines to `checkScanTotals` makes drift between the two
- * structurally impossible rather than a thing a test has to keep catching.
- */
-export function landedScanLines(lines: readonly { postedOn: string; description: string; cents: number }[]): ScanLine[] {
-  return lines.map((l, i) => ({ at: i + 1, date: l.postedOn, description: l.description, cents: l.cents }));
 }
 
 /**
@@ -352,133 +353,12 @@ export function closeCutJson(raw: string): string | null {
   return end === -1 ? null : text.slice(start, end) + closers;
 }
 
-// ── THE GATE ───────────────────────────────────────────────────────────────────────────────────
-
-export type ScanFail = { which: "withdrawals" | "deposits" | "balance"; said: string; offByCents: number };
-
-export type ScanCheck = {
-  /** May these lines be proposed at all? False only when a check RAN and disagreed. */
-  pass: boolean;
-  /** The checks that ran and agreed, in plain words. */
-  agreed: string[];
-  /** The checks that could not run, each saying which figure the paper does not print. */
-  unchecked: string[];
-  /** Every check that ran and disagreed: which, by how much, in words a person can act on. */
-  failed: ScanFail[];
-};
-
-/** A MAGNITUDE: what went out, what came in, how far apart two figures are. Never a balance. */
-const D = (cents: number) => sayDollars(Math.abs(cents) / 100);
-/**
- * A BALANCE, WITH ITS SIGN. An overdrawn account prints -300.00 and the reader copies it as printed,
- * so stripping the sign gave a sentence that contradicted itself and the paper: "$300.00 to start …
- * ends at $190.00 — $10.00 short" reads as OVER, and neither figure is on his statement. The sentence
- * exists so a person can go and find the line; it has to match what he is holding.
- */
-const S = (cents: number) => sayDollars(cents / 100);
-const gap = (lines: number, printed: number) => `${D(Math.abs(lines - printed))} ${lines < printed ? "short" : "over"}`;
-
-/** How the balance walk is named in the report, so which direction held is never left to be guessed. */
-const BALANCE_SAID = { deposit: "the balance from end to end", card: "the balance from end to end (a card's balance: what you owe)" } as const;
-
-/**
- * THE WHOLE REASON A MODEL MAY TOUCH A STATEMENT AT ALL: its own printed figures judge the read.
- *
- * Nothing in here knows about models, HTTP or the database — it is cents in, verdict out, so it can
- * be tested to the cent. A check with no figure to check against does not fail: it goes unrun, and
- * is NAMED, because "never claim what you did not check" is the law this path lives or dies by.
- */
-export function checkScanTotals(lines: readonly ScanLine[], c: ScanControls): ScanCheck {
-  const out = lines.reduce((n, l) => (l.cents < 0 ? n - l.cents : n), 0);
-  const money = lines.reduce((n, l) => (l.cents > 0 ? n + l.cents : n), 0);
-  const agreed: string[] = [];
-  const unchecked: string[] = [];
-  const failed: ScanFail[] = [];
-
-  // WHETHER THE PAPER'S OWN TWO TOTALS PINNED EVERY LINE. It decides one thing below and nothing else:
-  // whether the balance may be walked the other way round when the named direction doesn't hold.
-  let pinned = 0;
-
-  if (c.withdrawals === null) unchecked.push("the money going out (it prints no total of withdrawals)");
-  else if (out !== c.withdrawals) {
-    failed.push({
-      which: "withdrawals",
-      offByCents: Math.abs(out - c.withdrawals),
-      said: `The money going out doesn't add up: these lines come to ${D(out)} out and your statement prints ${D(c.withdrawals)} — ${gap(out, c.withdrawals)}.`,
-    });
-  } else {
-    agreed.push("the money going out");
-    pinned++;
-  }
-
-  if (c.deposits === null) unchecked.push("the money coming in (it prints no total of deposits)");
-  else if (money !== c.deposits) {
-    failed.push({
-      which: "deposits",
-      offByCents: Math.abs(money - c.deposits),
-      said: `The money coming in doesn't add up: these lines come to ${D(money)} in and your statement prints ${D(c.deposits)} — ${gap(money, c.deposits)}.`,
-    });
-  } else {
-    agreed.push("the money coming in");
-    pinned++;
-  }
-
-  if (c.beginning === null || c.ending === null) {
-    const missing = c.beginning === null && c.ending === null ? "no beginning or ending balance" : c.beginning === null ? "no beginning balance" : "no ending balance";
-    unchecked.push(`the balance from end to end (it prints ${missing})`);
-  } else {
-    /**
-     * THE WALK GOES THE WAY THIS ACCOUNT'S BALANCE GOES. A bank account: beginning + in - out. A card:
-     * beginning + out - in, because the balance is what is OWED and a purchase adds to it. Walking
-     * every statement as a bank account refused every correctly read card month — $709.38 "over" on a
-     * paper with no error on it — and "Drop it again" could never fix it, so each retry bought a fresh
-     * Opus read to print the same sentence.
-     *
-     * THE OTHER DIRECTION IS ONLY EVER ACCEPTED WHEN THE PAPER'S OWN TWO TOTALS ALREADY AGREED. Then
-     * every line's side is pinned by the statement's own printed labels, so the only thing the other
-     * direction can mean is that this is a liability account the reader named wrongly — it cannot
-     * launder a read with its signs inverted, because inverted lines fail those two totals first.
-     * Accepting either direction with no printed totals WOULD launder exactly that, so it is not done.
-     */
-    const asDeposit = c.beginning + money - out;
-    const asCard = c.beginning + out - money;
-    const named: ScanAccountKind = c.account === "card" ? "card" : "deposit";
-    const walked = named === "card" ? asCard : asDeposit;
-    const other = named === "card" ? asDeposit : asCard;
-    if (walked === c.ending) agreed.push(BALANCE_SAID[named]);
-    else if (pinned === 2 && other === c.ending) agreed.push(BALANCE_SAID[named === "card" ? "deposit" : "card"]);
-    else {
-      const how =
-        named === "card"
-          ? `this reads as a card, so ${S(c.beginning)} owed to start, ${D(out)} charged and ${D(money)} paid makes ${S(walked)}`
-          : `${S(c.beginning)} to start, ${D(money)} in and ${D(out)} out makes ${S(walked)}`;
-      failed.push({
-        which: "balance",
-        offByCents: Math.abs(walked - c.ending),
-        said: `The balances don't meet: ${how}, but your statement ends at ${S(c.ending)} — ${gap(walked, c.ending)}.`,
-      });
-    }
-  }
-  return { pass: failed.length === 0, agreed, unchecked, failed };
-}
-
-const list = (parts: readonly string[]): string =>
-  parts.length <= 1 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-
-/**
- * WHAT THE READ REPORT SAYS THE ARITHMETIC DID — carried into pdfReadSaid (supplier-open-list.ts) as
- * the one report's own "held against" clause, never printed as a second summary somewhere else.
- *
- * A paper with no totals on it is the case this sentence exists for: the lines still reach the card,
- * and the card says out loud that NOTHING checked them.
- */
-export function scanCheckSaid(check: ScanCheck): string {
-  const cannot = check.unchecked.length ? ` It could not check ${list(check.unchecked)}, so go down those lines against the paper before you Apply.` : "";
-  if (!check.agreed.length) {
-    return "This statement prints no totals to hold the read against, so NOTHING here checked it: every line is the reader's word. Go down them against the paper before you Apply.";
-  }
-  return `Held against the statement's own printed figures: ${list(check.agreed)} agree to the cent.${cannot}`;
-}
+// ── WHAT THE GATE SAYS WHEN IT TURNS A READ AWAY ───────────────────────────────────────────────
+//
+// THE GATE ITSELF IS statement-verify.ts, for every door at once. What stays here is what only THIS
+// door does with its verdict: a scanned statement whose own arithmetic disagrees does not become a
+// card at all, because its lines are a model's word and nothing else vouches for them. A CSV off the
+// bank with the same break is still the bank's own rows, so that door warns and goes on.
 
 /**
  * WHEN A CHECK DISAGREES, NOTHING IS WRITTEN AND THE AMOUNT IS NAMED. One next action and it is the
@@ -489,8 +369,12 @@ export function scanCheckSaid(check: ScanCheck): string {
  * arithmetic keeps disagreeing with is not something dropping it a third time will mend, and the paper
  * must not be lost over it — so the sentence ends the way READER_SILENT does: one action, then the door
  * that keeps it whatever the reader is doing. A sequence, never a menu of doors to choose between.
+ *
+ * IT TAKES ANY VERDICT WITH FAILURES ON IT (a `StatementVerdict` as well as a printed-totals check), so
+ * a running-balance break refuses this path in the same sentence as a total that doesn't add up. The
+ * verdict puts the chain's break FIRST, because it is the only one of these that names a LINE.
  */
-export function scanRefusalSaid(name: string, check: ScanCheck): string {
+export function scanRefusalSaid(name: string, check: Pick<ScanCheck, "failed">): string {
   const first = check.failed[0];
   const more = check.failed.length - 1;
   const also = more > 0 ? ` ${more === 1 ? "One other check disagrees" : `${more} other checks disagree`} too.` : "";

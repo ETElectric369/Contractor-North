@@ -5,6 +5,12 @@ import { findHeaderRow, fingerprintOf, headerKey, looksLikePaperNumber, readDate
 // bills row with NO LINES under it, so which way the money goes decides whether a job is an answer at
 // all. jobRefusalFor below asks this guard; nothing in this module decides that for itself.
 import { jobCostRefusal } from "@/lib/job-cost-guard";
+// EVERY LINE PROVES THE ONE BEFORE IT (2026-10-02). The reader already FOUND the balance column — it is
+// in BANK_FIELDS, bankTableProof treats it as proof a table is a bank's, and chargesPrintedPositive
+// leans on it — and then threw the value away: there was no balance on BankLine at all. It is carried
+// now, and `readBankTable` hands every download to the ONE verification, so a download cannot come into
+// being without its own arithmetic having been asked about it.
+import { verifySaid, verifyStatement, type ScanControls, type StatementSource, type StatementVerdict } from "@/lib/statement-verify";
 
 /**
  * A BANK'S DOWNLOAD, SORTED THE WAY THE COMPANY SORTS IT (Erik, 2026-09-27, "yes go for those").
@@ -302,6 +308,18 @@ export type BankLine = {
   merchantKey: string;
   /** The line's identity across downloads (bank_lines.line_key). */
   key: string;
+  /**
+   * THE RUNNING BALANCE THE FILE PRINTED AFTER THIS LINE, in integer CENTS, or null when the file
+   * prints none on this line (no balance column at all, a pending line, a card's export).
+   *
+   * CENTS, NEVER A FLOAT, like every other figure in this module: a chain that compared 0.1 + 0.2 with
+   * 0.3 would disagree with a correct statement, and a check that cries wolf is worse than none.
+   *
+   * ADDED 2026-10-02 and so absent from every download stored before then: read it as `?? null`.
+   * It is not part of `lineKeyOf` — the same line in two downloads is the same line whether or not one
+   * of them printed a balance beside it — and not part of the plan's fingerprint.
+   */
+  balanceAfterCents: number | null;
 };
 
 export type BankDownload = {
@@ -319,16 +337,23 @@ export type BankDownload = {
    *  download that prints charges as positive (found by the reader, or a person's Swap). */
   swapped?: boolean;
   /**
-   * WHAT THE READ REPORT SAID ABOUT THE PAPER THESE LINES CAME OFF, kept with the download so it is on
-   * the card where Apply is, and not only in the line under the button he dropped it at.
+   * WHAT THE ONE VERIFICATION FOUND, kept with the download so it is on the card where Apply is, and
+   * not only in the line under the button he dropped it at — a different moment from the drop, since he
+   * may have left the page and come back tomorrow.
    *
-   * It is here for the scanned statement (statement-scan.ts): a model read the pages, and either the
-   * statement's own printed figures agreed with it to the cent or the paper printed no figures to
-   * agree. "Nothing checked this read" is a sentence that has to be in front of him at the moment he
-   * presses Apply, which is a different moment from the drop — he may have left the page and come back
-   * tomorrow. A download, which is arithmetic from end to end, carries nothing here.
+   * EVERY DOWNLOAD CARRIES ONE NOW (2026-10-02). It used to be the scanned statement's alone, which was
+   * the lopsidedness Erik spotted at once: a running balance is printed on a bank CSV, an Excel export
+   * and a statement's pages alike, so the same walk judges every source. Absent on a download stored
+   * before then, and on the copy a viewer who may not see owner money is handed (bank-core.ts).
    */
   readSaid?: string;
+  /**
+   * The verdict itself, in figures rather than words: which checks ran, what broke and by how much.
+   * `readSaid` is this said in plain words, and the card prints only that. It is kept because the
+   * person's Swap re-reads every sign and the verdict has to be worked out again from the paper's own
+   * control figures, which nothing else stores.
+   */
+  verified?: StatementVerdict;
 };
 
 /** Every run of 6 or more digits, even printed in groups ("1234-5678-9012"), cut to its last 4. */
@@ -487,17 +512,35 @@ export function lineKeyOf(hash: Hasher, l: { last4: string | null; fitid: string
  * A BANK'S AMOUNT CELL. The supplier reader (readMoney) is for a supplier's statement, where "CR" is
  * a credit memo (money off what is owed). On a bank's own download CR is money IN and DR money OUT,
  * and a bank (or an OFX TRNAMT) may print a leading "+". Anything else reads as readMoney does.
+ *
+ * NO WORD BOUNDARY BEFORE THE SUFFIX (fixed 2026-10-02). There is no boundary between a digit and a
+ * letter, so "100.00CR" — printed with no space, which plenty of banks do — did not match here at all. It
+ * fell through to readMoney, whose CR means a supplier's credit memo, and came back NEGATIVE: the exact
+ * meaning balanceCentsOf routes through this function to avoid. "400.00DR" has no readMoney rule at all
+ * and came back null, a hole in the column. A checking account in credit was then walked as a card and the
+ * report said "its balance is what you owe" on a deposit account.
  */
 export function readBankMoney(raw: unknown): number | null {
   let s = String(raw ?? "").trim();
   if (!s) return null;
-  const tail = /\s*\b(CR|CREDIT|DR|DEBIT)\.?$/i.exec(s);
+  const tail = /\s*(CR|CREDIT|DR|DEBIT)\.?$/i.exec(s);
   if (tail) s = s.slice(0, tail.index).trim();
   if (s.startsWith("+")) s = s.slice(1).trim();
   const n = readMoney(s);
   if (n === null) return null;
   if (!tail) return n;
   return /^c/i.test(tail[1]) ? Math.abs(n) : -Math.abs(n);
+}
+
+/**
+ * THE RUNNING BALANCE CELL, IN CENTS, with its sign: an overdrawn account prints "-300.00" or
+ * "(300.00)" and the chain has to walk the figure on the paper, not its magnitude. Null when the cell
+ * is empty or doesn't read as money — a blank balance is the ordinary case (a pending line, a column
+ * the bank fills on one row in ten) and never an error.
+ */
+export function balanceCentsOf(raw: unknown): number | null {
+  const n = readBankMoney(raw);
+  return n === null ? null : Math.round(n * 100);
 }
 
 /**
@@ -586,7 +629,12 @@ export function swapDownloadSigns(dl: BankDownload, hash: Hasher): BankDownload 
     cents: -l.cents,
     description: l.description === "Deposit" ? "Withdrawal" : l.description === "Withdrawal" ? "Deposit" : l.description,
   }));
-  return { ...dl, lines: rekeyLines(lines, hash), swapped: !dl.swapped };
+  // THE PRINTED BALANCE IS NOT TOUCHED: it is what the file says, and the file did not change. The walk
+  // simply comes out the other way round (a balance that is what you OWE instead of money you hold),
+  // which the one verification works out for itself — so the sentence beside Apply still matches the
+  // lines under it.
+  const rekeyed = rekeyLines(lines, hash);
+  return { ...dl, lines: rekeyed, swapped: !dl.swapped, ...reverified(dl, rekeyed) };
 }
 
 /** Each line's key made again from what it now says (a bank's own id stays as it was). */
@@ -609,10 +657,25 @@ export function withAccountLast4(dl: BankDownload, last4: string, hash: Hasher):
 }
 
 /**
+ * HOW THE ROWS THIS READER IS HANDED WERE GOT, and the printed figures (if any) that judge them.
+ *
+ * `source` defaults to "rows" because a table of rows is literally what this function is handed — the
+ * honest answer for a CSV, an Excel export or an OFX. A door that read a PDF's text, or had a model
+ * look at the pixels, MUST say so: the read report names it in plain words so a person knows how hard
+ * to look, and `statement-verify.test.ts` fails if any door stops naming it.
+ */
+export type BankRead = { source?: StatementSource; controls?: ScanControls | null };
+
+/**
  * A TABLE INTO A DOWNLOAD. Null when it isn't one (no bank header). Every row that doesn't read is
  * kept by line with the reason, never dropped: a pending line, a line with no day or no amount.
+ *
+ * AND THE DOWNLOAD IS VERIFIED BEFORE IT LEAVES HERE. The one verification (statement-verify.ts) walks
+ * the running balance the file printed, and holds the lines to the paper's own printed totals when it
+ * has them. Doing it HERE rather than at each door is the teeth: a BankDownload cannot come into being
+ * un-asked, whichever door made it, and no door can print an assurance of its own making over it.
  */
-export function readBankTable(table: readonly (readonly string[])[], name: string, hash: Hasher): BankDownload | null {
+export function readBankTable(table: readonly (readonly string[])[], name: string, hash: Hasher, read?: BankRead): BankDownload | null {
   const header = findBankHeader(table);
   if (!header) return null;
   const c = header.columns;
@@ -687,6 +750,10 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
       // and it must never reach a bill number or a crew payment's reference.
       check: checkNumberOf(cell(r, c.check), description),
       last4: c.account === undefined ? nameLast4 : last4Of(cell(r, c.account)),
+      // THE BALANCE PRINTED AFTER THIS LINE. readBankMoney, not readMoney, because it is this file's
+      // own money reader: a bank that prints "1,284.55 CR" beside a line means the account is in
+      // credit, which readMoney (written for a supplier's credit memo) would read as a negative.
+      balanceAfterCents: balanceCentsOf(cell(r, c.balance)),
     });
     fitids.push(cell(r, c.id) || null);
   });
@@ -711,6 +778,7 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
     return { ...l, merchantKey: merchantKeyOf(l.description), key: lineKeyOf(hash, { ...l, fitid: fitids[i] }, repeat) };
   });
   const days = lines.map((l) => l.postedOn).sort();
+  const verified = verifyStatement({ lines, source: read?.source ?? "rows", controls: read?.controls ?? null });
   return {
     v: 1,
     name,
@@ -721,7 +789,29 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
     skipped,
     header: (table[header.row] ?? []).map((h) => String(h ?? "").trim().slice(0, 60)),
     ...(swapped ? { swapped: true } : {}),
+    verified,
+    readSaid: verifySaid(verified),
   };
+}
+
+/**
+ * THE VERDICT WORKED OUT AGAIN FROM THE LINES AS THEY NOW READ. A person's Swap turns every sign over,
+ * so the sentence beside Apply would otherwise be an assurance about a download that no longer exists —
+ * which is the one thing this lane is built to prevent. The source and the paper's own control figures
+ * come off the old verdict, because nothing else keeps them.
+ *
+ * A download stored before the verification existed has nothing to work from, and GOES silent rather
+ * than gaining a sentence nothing checked — or keeping one. It used to return nothing at all, so the spread
+ * above carried the stored sentence straight through, and cn-v1050 stored one on every SCANNED card with
+ * no `verified` beside it ("…the money going out, the money coming in and the balance from end to end agree
+ * to the cent"). One tap on Swap turned every sign over and left that sentence sitting above the inverted
+ * lines. The invariant this commit is for — THE SENTENCE BESIDE APPLY ALWAYS DESCRIBES THE LINES UNDER IT —
+ * has to hold for the only cards that ever carried a sentence before today.
+ */
+function reverified(dl: BankDownload, lines: readonly BankLine[]): Pick<BankDownload, "verified" | "readSaid"> {
+  if (!dl.verified) return { readSaid: undefined };
+  const verified = verifyStatement({ lines, source: dl.verified.source, controls: dl.verified.controls });
+  return { verified, readSaid: verifySaid(verified) };
 }
 
 // ── CHOICES ────────────────────────────────────────────────────────────────────────────────────
@@ -1993,8 +2083,10 @@ export type BankView = {
   askAccount: boolean;
   /** The company's rules that placed lines on this card, each with a way to forget it. */
   rules: { id: string; label: string; n: number }[];
-  /** What the read said about the paper these lines came off (a scanned statement: whether its own
-   *  printed figures checked the read, or that nothing did). Null for a download. */
+  /** What the ONE verification found about these lines — its running balance walked line by line, the
+   *  paper's own printed totals where it prints them, and how the lines were read — or that nothing
+   *  could check them. Null on a download stored before the verification existed, and on the card a
+   *  viewer who may not see owner money is handed. */
   readSaid?: string | null;
   problem: string | null;
 };

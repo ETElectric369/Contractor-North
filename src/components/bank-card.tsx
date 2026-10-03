@@ -249,11 +249,12 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
   return (
     <div className="mt-2 space-y-3">
       <p className="text-sm font-medium text-slate-900">{view.headline}</p>
-      {/* WHAT CHECKED THIS READ, IN FRONT OF HIM WHERE APPLY IS. A scanned statement's lines are a
-          model's transcription: either the statement's own printed figures agreed with them to the cent
-          or the paper printed none, and which of those it was decides how hard he has to look before he
-          presses Apply. The line under the drop button says it at the moment of the drop; this says it
-          at the moment of the decision, which may be tomorrow. A download has nothing here. */}
+      {/* WHAT CHECKED THIS READ, IN FRONT OF HIM WHERE APPLY IS. The paper's own running balance walked
+          line by line, the printed totals where it prints them, or — said out loud — that nothing could
+          check it at all; and one short clause saying how it was read, so he knows how hard to look. The
+          line under the drop button says it at the moment of the drop; this says it at the moment of the
+          decision, which may be tomorrow. EVERY download carries one (2026-10-02): a running balance is
+          printed on a CSV, an Excel export and a statement's pages alike. */}
       {view.readSaid && (
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700" role="status">
           {view.readSaid}

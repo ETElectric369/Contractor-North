@@ -420,18 +420,32 @@ export default async function ReconcilePage() {
         <h2 className="text-base font-semibold text-slate-900">Bring In A Statement</h2>
         {sortsBank ? (
           <>
+            {/* WHAT THIS SAYS IS TRACED TO THE CODE, LINE BY LINE (onboarding-truth law, rewritten
+                2026-10-02 when the running-balance walk shipped). The old paragraph was written when the
+                statement's printed totals were the only arithmetic there was, and it ended "if your
+                statement prints no totals at all, it says that too, so you know nothing but your own eyes
+                has checked it" — which became FALSE the moment a paper with no totals and a walking
+                balance started saying "its own running balance proves every line" (statement-verify.ts).
+                It also never named the walk, so a scan turned away on a chain break was turned away for a
+                reason the page had never mentioned. Every clause below names something the code does:
+                the walk (balanceChain), the refusal on a scan (statement-scan-actions.ts), the warning on
+                a file (open-list-add-core.ts has no pass gate, on purpose), and the silence when a paper
+                prints neither (verifySaid). */}
             <p className="mb-2 mt-1 text-sm text-slate-600">
               Drop your statement here — whatever your bank or supplier gave you, in whatever form they gave it.
-              North works out what it is. When it comes off a PDF, the line underneath says how many pages and rows it
-              read and what they add up to: hold that against the total printed on your own statement, because two
-              numbers agreeing is the proof it read them right. If two columns could both be the amount, it asks you
-              which is which and adds them up once you have said. A statement whose lines are PICTURES is read as
-              well — scanned, photographed, or a PDF whose columns don&apos;t come off as text: its pages are looked
-              at, and then its own beginning balance, ending balance and totals are held against what came off them,
-              to the cent. A card statement is read the way a card works, where what you owe goes up with a purchase.
-              If those figures don&apos;t agree nothing is added and the line below says which one is out and by how
-              much; if your statement prints no totals at all, it says that too, so you know nothing but your own eyes
-              has checked it. Looking at the pages takes a minute, and a long statement takes a few.
+              North works out what it is. Then it checks the read: every line has to add up against the running
+              balance printed beside it, so each line proves the one before it to the cent, and the line underneath
+              says how many of them it held and where it stopped if it stopped. A statement that also prints a
+              beginning balance, an ending balance or totals is held against those as well. If two columns could both
+              be the amount, it asks you which is which and adds them up once you have said. A statement whose lines
+              are PICTURES is read as well — scanned, photographed, or a PDF whose columns don&apos;t come off as
+              text: its pages are looked at, and then its own figures are held against what came off them, to the
+              cent. A card statement is read the way a card works, where what you owe goes up with a purchase. On a
+              picture, a read its own paper disagrees with is refused and nothing is added; on a file off your bank
+              those rows are the bank&apos;s own, so the line says what doesn&apos;t add up and names the line to go
+              and look at. If the paper prints no totals and no running balance, it says that out loud, so you know
+              nothing but your own eyes has checked it. Looking at the pages takes a minute, and a long statement
+              takes a few.
             </p>
             <BankDropLine />
           </>

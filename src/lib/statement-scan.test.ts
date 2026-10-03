@@ -4,7 +4,6 @@ import {
   SCAN_TABLE_HEADER,
   checkScanTotals,
   closeCutJson,
-  landedScanLines,
   notABankScanSaid,
   readScannedBank,
   scanCheckSaid,
@@ -195,6 +194,92 @@ describe("a paper that prints nothing to check against says so, and is still not
   });
 });
 
+/**
+ * THE RUNNING BALANCE THE PAPER PRINTS BESIDE ITS LINES (2026-10-02). Erik: "is there a second one for
+ * all of it as I'm imagining there is?" — and the chain IS the better of the two checks, because a
+ * totals check passes when two errors cancel and a chain cannot.
+ *
+ * THE READER IS TOLD TO COPY IT AND NEVER TO WORK IT OUT (SCAN_LINES_SYSTEM), for the obvious reason: a
+ * balance column the reader calculated from its own lines would agree with its own lines no matter what
+ * it got wrong, which is the false assurance this whole lane exists to prevent.
+ */
+describe("a scanned statement's own running balance walks its lines", () => {
+  /** GOOD's balances, walked by hand from its printed beginning balance of $1,284.55. The third one is
+   *  NEGATIVE: the account was overdrawn that week, and the paper prints it as -70.11. */
+  const WALKED = [1142.47, 1179.89, -70.11, 3329.89, 2517.56, 2505.56];
+  const withBalances = (over: Record<number, number | null> = {}) => ({
+    ...GOOD,
+    lines: GOOD.lines.map((l, i) => ({ ...l, balance: i in over ? over[i] : WALKED[i] })),
+  });
+
+  it("it lands in the table's own Balance column, with its sign, and in cents on every line", () => {
+    const got = readScannedBank(withBalances());
+    expect(got.table[0]).toEqual(SCAN_TABLE_HEADER);
+    expect(got.table[0][5]).toBe("Balance");
+    expect(got.table[3][5]).toBe("-70.11");
+    const dl = readBankTable(got.table, "September.pdf", hash, { source: "picture", controls: got.controls })!;
+    expect(dl.lines.map((l) => l.balanceAfterCents)).toEqual([114247, 117989, -7011, 332989, 251756, 250556]);
+    expect(dl.verified?.chain.ran).toBe(true);
+    expect(dl.verified?.chain.links).toBe(5);
+    expect(dl.verified?.chain.breaks).toEqual([]);
+    expect(dl.verified?.pass).toBe(true);
+    // ONE REPORT, BOTH CHECKS, and the clause that says how hard to look.
+    expect(dl.readSaid).toContain("agree to the cent");
+    expect(dl.readSaid).toContain("proves every line");
+    expect(dl.readSaid).toContain("Read from a picture of the page.");
+  });
+
+  it("A LINE WITH NO BALANCE BESIDE IT is a blank cell, and the chain checks what it can", () => {
+    const got = readScannedBank(withBalances({ 2: null }));
+    expect(got.table[3][5]).toBe("");
+    const dl = readBankTable(got.table, "September.pdf", hash, { source: "picture", controls: got.controls })!;
+    expect(dl.lines[2].balanceAfterCents).toBeNull();
+    expect(dl.verified?.chain.withBalance).toBe(5);
+    expect(dl.verified?.chain.links).toBe(3);
+    expect(dl.verified?.chain.breaks).toEqual([]);
+  });
+
+  /**
+   * THE CASE THAT PROVES THIS WAS WORTH BUILDING. Two misreads that cancel: $100 off the check and $100
+   * onto the card payment. Money out, money in and the balance from end to end all still agree to the
+   * cent — cn-v1050's gate waves it straight through — and the chain names the line.
+   */
+  it("TWO MISREADS THAT CANCEL pass every printed total and are still refused", () => {
+    const cancelled = {
+      ...GOOD,
+      lines: GOOD.lines.map((l, i) => ({
+        ...l,
+        balance: WALKED[i],
+        ...(i === 2 ? { money_out: 1150.0 } : i === 4 ? { money_out: 912.33 } : {}),
+      })),
+    };
+    const got = readScannedBank(cancelled);
+    const dl = readBankTable(got.table, "September.pdf", hash, { source: "picture", controls: got.controls })!;
+    // Every printed figure agrees, exactly as before this lane existed.
+    expect(checkScanTotals(dl.lines, got.controls).pass).toBe(true);
+    // And the chain does not.
+    expect(dl.verified?.pass).toBe(false);
+    expect(dl.verified?.failed[0].which).toBe("chain");
+    const refusal = scanRefusalSaid("September.pdf", { failed: dl.verified!.failed });
+    expect(refusal).toContain("nothing was added");
+    expect(refusal).toContain("line 4 (Sep 5)");
+    expect(refusal).toContain("$100.00");
+    expect(refusal).toContain("+ button");
+  });
+
+  it("a reader that hands back NO balances behaves exactly as it did before: the totals alone judge it", () => {
+    const got = readScannedBank(GOOD);
+    expect(got.table.every((r) => r[5] === "Balance" || r[5] === "")).toBe(true);
+    const dl = readBankTable(got.table, "September.pdf", hash, { source: "picture", controls: got.controls })!;
+    expect(dl.verified?.pass).toBe(true);
+    expect(dl.verified?.chain.ran).toBe(false);
+    expect(dl.readSaid).toContain("agree to the cent");
+    expect(dl.readSaid).toContain("prints no running balance beside its lines");
+    // And it never claims the walk happened.
+    expect(dl.readSaid).not.toContain("proves every line");
+  });
+});
+
 describe("the rows are the rows a CSV would have made: one reader, one card", () => {
   const { got } = gate(GOOD);
 
@@ -245,6 +330,9 @@ describe("one day reader: the gate counts exactly the lines that land", () => {
   const ONE = { description: "CHECK 1042", money_out: 1250.0, money_in: null };
   /** What the gate actually judges: a day and signed cents. (`at` is only ever for naming a row.) */
   const judged = (ls: readonly { date: string; cents: number }[]) => ls.map((l) => ({ date: l.date, cents: l.cents }));
+  /** The lines that LANDED, in the same shape: the gate reads the verdict the bank reader worked out
+   *  from exactly these, so this is the set the card carries. */
+  const landed = (ls: readonly { postedOn: string; cents: number }[]) => ls.map((l) => ({ date: l.postedOn, cents: l.cents }));
   for (const printed of ["2026-09-05", "2026/09/05", "09/05/2026", "05-SEP-2026", "5 Sep 2026", "5 September 2026", "9/5/2026 12:00 AM", "2026-09-05T00:00:00"]) {
     it(`"${printed}" counts once, on both sides`, () => {
       const got = readScannedBank({ ...GOOD, lines: [{ date: printed, ...ONE }] });
@@ -254,7 +342,7 @@ describe("one day reader: the gate counts exactly the lines that land", () => {
       expect(got.lines).toHaveLength(1);
       // THE TEETH: the set the gate judges IS the set the reader produced, line for line and cent for
       // cent. A door that reads a date its own way again would break this, whichever door it is.
-      expect(judged(landedScanLines(dl.lines))).toEqual(judged(got.lines));
+      expect(judged(landed(dl.lines))).toEqual(judged(got.lines));
     });
   }
 
@@ -263,7 +351,7 @@ describe("one day reader: the gate counts exactly the lines that land", () => {
     const got = readScannedBank(mixed);
     const dl = readBankTable(got.table, "September.pdf", hash)!;
     expect(dl.lines).toHaveLength(6);
-    expect(checkScanTotals(landedScanLines(dl.lines), got.controls).pass).toBe(true);
+    expect(checkScanTotals(dl.lines, got.controls).pass).toBe(true);
   });
 
   it("an extra row in a non-ISO date form is caught, not waved through", () => {
@@ -272,7 +360,7 @@ describe("one day reader: the gate counts exactly the lines that land", () => {
     const got = readScannedBank(doubled);
     const dl = readBankTable(got.table, "September.pdf", hash)!;
     expect(dl.lines).toHaveLength(7);
-    const check = checkScanTotals(landedScanLines(dl.lines), got.controls);
+    const check = checkScanTotals(dl.lines, got.controls);
     expect(check.pass).toBe(false);
     expect(scanRefusalSaid("September.pdf", check)).toContain("$1,250.00 over");
   });
@@ -297,7 +385,7 @@ describe("one day reader: the gate counts exactly the lines that land", () => {
     for (const date of forms) for (const amounts of odd) rows.push({ date, description: "WESTMERE HARDWARE", ...amounts });
     const got = readScannedBank({ ...GOOD, lines: rows });
     const dl = readBankTable(got.table, "September.pdf", hash)!;
-    expect(judged(landedScanLines(dl.lines))).toEqual(judged(got.lines));
+    expect(judged(landed(dl.lines))).toEqual(judged(got.lines));
     // And it is a real battery, not an empty one that passes for being empty.
     expect(got.lines.length).toBeGreaterThan(15);
     expect(got.returned).toBe(rows.length);
@@ -307,7 +395,7 @@ describe("one day reader: the gate counts exactly the lines that land", () => {
     const got = readScannedBank({ ...GOOD, lines: [{ date: "09/31/26", description: "CARD PURCHASE HARROWGATE FUEL", money_out: 142.08, money_in: null }, ...GOOD.lines.slice(1)] });
     const dl = readBankTable(got.table, "September.pdf", hash)!;
     expect(dl.skipped[0].why).toContain("didn't read as a day");
-    expect(judged(landedScanLines(dl.lines))).toEqual(judged(got.lines));
+    expect(judged(landed(dl.lines))).toEqual(judged(got.lines));
   });
 });
 
