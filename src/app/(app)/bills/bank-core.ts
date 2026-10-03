@@ -396,7 +396,10 @@ function problemView(dl: BankDownload, problem: string): BankView {
 /** The card an office viewer gets when the owner keeps owner money to themself: its account and
  *  days, and who sorts it. No line, no amount, no flow. */
 function hiddenView(dl: BankDownload): BankView {
-  const bare = { ...dl, lines: [], skipped: [] };
+  // THE READ REPORT GOES TOO, not just the lines: it says what the month adds to, out and in, which is
+  // the owner's money in one sentence (0286). A card with no figures on it must not carry them in its
+  // props either.
+  const bare = { ...dl, lines: [], skipped: [], readSaid: undefined };
   const v = problemView(bare, OWNER_SORTS_BANK);
   return { ...v, canUndo: false, canSwap: false, askAccount: false };
 }
@@ -447,7 +450,10 @@ export function bankLinesStayHere<T extends { proposal?: unknown }>(item: T, vie
   if (!stored?.download) return item;
   const dl = stored.download;
   const sees = !!view && view.problem !== OWNER_SORTS_BANK;
-  const bare: StoredBank = { ...stored, download: { ...dl, lines: [], skipped: [], header: [] }, lineCount: sees ? (dl.lines?.length ?? 0) : null };
+  // THE READ REPORT COMES OFF THE PROPOSAL TOO: the card shows it from `view`, which is the copy this
+  // viewer is allowed (hiddenView drops it), so carrying a second copy in the props would hand the
+  // month's figures to a viewer whose card deliberately has none.
+  const bare: StoredBank = { ...stored, download: { ...dl, lines: [], skipped: [], header: [], readSaid: undefined }, lineCount: sees ? (dl.lines?.length ?? 0) : null };
   return { ...item, proposal: { ...p, bankImport: bare } };
 }
 

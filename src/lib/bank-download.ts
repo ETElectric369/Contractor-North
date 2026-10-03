@@ -318,6 +318,17 @@ export type BankDownload = {
   /** Money in and out were read the other way round from how the file prints them: a card's
    *  download that prints charges as positive (found by the reader, or a person's Swap). */
   swapped?: boolean;
+  /**
+   * WHAT THE READ REPORT SAID ABOUT THE PAPER THESE LINES CAME OFF, kept with the download so it is on
+   * the card where Apply is, and not only in the line under the button he dropped it at.
+   *
+   * It is here for the scanned statement (statement-scan.ts): a model read the pages, and either the
+   * statement's own printed figures agreed with it to the cent or the paper printed no figures to
+   * agree. "Nothing checked this read" is a sentence that has to be in front of him at the moment he
+   * presses Apply, which is a different moment from the drop — he may have left the page and come back
+   * tomorrow. A download, which is arithmetic from end to end, carries nothing here.
+   */
+  readSaid?: string;
 };
 
 /** Every run of 6 or more digits, even printed in groups ("1234-5678-9012"), cut to its last 4. */
@@ -1982,6 +1993,9 @@ export type BankView = {
   askAccount: boolean;
   /** The company's rules that placed lines on this card, each with a way to forget it. */
   rules: { id: string; label: string; n: number }[];
+  /** What the read said about the paper these lines came off (a scanned statement: whether its own
+   *  printed figures checked the read, or that nothing did). Null for a download. */
+  readSaid?: string | null;
   problem: string | null;
 };
 
@@ -2096,6 +2110,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     canSwap: passes.length === 0 && dl.lines.length > 0,
     askAccount: passes.length === 0 && dl.lines.length > 0 && !dl.last4,
     rules: rulesUsed(plan, books, names),
+    readSaid: dl.readSaid ?? null,
     problem: null,
   };
 }

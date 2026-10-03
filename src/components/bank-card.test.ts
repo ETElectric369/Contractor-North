@@ -157,6 +157,21 @@ describe("the bank card", () => {
     expect(labels).not.toContain("Apply");
   });
 
+  /**
+   * A SCANNED STATEMENT'S CARD SAYS WHAT CHECKED THE READ (2026-10-02). Its lines are a model's
+   * transcription of a picture, and the only thing that makes them safe to look at is the statement's
+   * own printed figures. Whether those agreed — or whether the paper printed none at all — has to be in
+   * front of him HERE, beside Apply, and not only in the line under the button he dropped it at.
+   */
+  it("a scanned statement's card carries what the arithmetic found, beside Apply", () => {
+    const agreed = textOf(render({ ...VIEW, readSaid: "Held against the statement's own printed figures: the money going out and the money coming in agree to the cent." }));
+    expect(agreed).toContain("agree to the cent");
+    const nothing = textOf(render({ ...VIEW, readSaid: "This statement prints no totals to hold the read against, so NOTHING here checked it: every line is the reader's word." }));
+    expect(nothing).toContain("NOTHING here checked it");
+    // A DOWNLOAD IS ARITHMETIC END TO END and carries no such line, so the card says nothing extra.
+    expect(textOf(render(VIEW))).not.toContain("checked it");
+  });
+
   it("after a pass, it says what was counted and offers Undo", () => {
     const text = textOf(render({ ...VIEW, appliedSaid: "Applied Sep 27: 96 lines counted. 5 lines left for later are not counted yet.", canUndo: true }));
     expect(text).toContain("5 lines left for later are not counted yet");

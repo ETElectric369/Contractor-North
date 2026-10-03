@@ -85,7 +85,16 @@ export function noTextSaid(name: string): string {
  * the same runs as a table, from where each one sits on the page (what a statement needs). One open,
  * one page loop: a statement PDF used to be parsed twice to get both.
  */
-export type PdfReadResult = { ok: true; text: string; table: string[][]; pages: number } | { ok: false; error: string };
+/**
+ * `noText` AND `pages` ON THE REFUSAL: a PDF that opened cleanly and carries NO text at all is a
+ * different fact from one that would not open, and a door that can have the pages LOOKED at has to
+ * tell them apart — on his July statement, "no text" is the only thing a text reader can ever say
+ * about a month of his money. The sentence stays the same; the fact is now readable in code, and the
+ * page count comes with it because a scan's read report still says how many pages it had.
+ */
+export type PdfReadResult =
+  | { ok: true; text: string; table: string[][]; pages: number }
+  | { ok: false; error: string; noText?: boolean; pages?: number };
 
 /**
  * Browser only. Never throws: every failure is a sentence a person can act on.
@@ -118,7 +127,7 @@ export async function readPdf(data: ArrayBuffer, name = "That PDF", opts: { tabl
       }
     }
     const text = pages.join("\n\n").trim();
-    if (!text) return { ok: false, error: noTextSaid(name) };
+    if (!text) return { ok: false, error: noTextSaid(name), noText: true, pages: pdf.numPages };
     return { ok: true, text, table: wantTable ? tableFromPositionedItems(marks) : [], pages: pdf.numPages };
   } catch (e) {
     return { ok: false, error: `${name} wouldn't open as a PDF (${(e as Error)?.message ?? "unknown error"}).` };

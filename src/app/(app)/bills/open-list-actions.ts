@@ -57,8 +57,12 @@ export async function addOpenList(input: {
    * THE PDF THESE ROWS WERE LIFTED OFF: its pages, and how many rows the table had before any of them
    * were read. A statement that came in as a PDF was PARSED, not downloaded, so the card's line says
    * what came off the paper and he holds it against the total his own statement prints (pdfReadSaid).
+   *
+   * `checked`: what arithmetic already did to a read that needed it — a scanned statement is read by
+   * a model and held against the statement's own printed totals before it ever gets here
+   * (statement-scan.ts), so the report says what that check found instead of asking for it again.
    */
-  pdf?: { pages: number; rows: number } | null;
+  pdf?: { pages: number; rows: number; checked?: string | null } | null;
   /** "bank": the caller promised a bank download, so anything else — a supplier's list included — is
    *  refused in plain words. NO DOOR PASSES IT TODAY: Reconcile's drop line takes either statement on
    *  purpose (Erik: "i want to upload my bank statement and supplier statement"), and this file tells
@@ -77,7 +81,10 @@ export async function addOpenList(input: {
   const listDateFrom = given ? ("file" as const) : ("today" as const);
   const pages = Math.trunc(Number(input?.pdf?.pages));
   const rawRows = Math.trunc(Number(input?.pdf?.rows));
-  const pdf = pages > 0 && rawRows >= 0 ? { pages, rows: rawRows } : null;
+  // A CHECK IS ONLY EVER REPORTED AS A SENTENCE SOMEBODY WROTE, never as a flag this file interprets:
+  // the one place that knows what was checked is the one place that says so (statement-scan.ts).
+  const checked = typeof input?.pdf?.checked === "string" && input.pdf.checked.trim() ? input.pdf.checked.trim().slice(0, 600) : undefined;
+  const pdf = pages > 0 && rawRows >= 0 ? { pages, rows: rawRows, ...(checked ? { checked } : {}) } : null;
   /** THE READ REPORT, where every door reaches it, for whichever card this becomes. */
   const withReport = (line: string, facts: ReadFacts) => (pdf ? `${line} ${pdfReadSaid(pdf, facts, today)}` : line);
   /** A PDF whose columns go to the picker has no reader's figures yet, and the pages are still facts. */
@@ -102,7 +109,11 @@ export async function addOpenList(input: {
       // it is the card's title. The reader sees it whole only to take an account's last 4 from it.
       const read = readBankDownload(bankTable, name);
       if (!read) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
-      const download = { ...read, name: redactDigits(name) };
+      // THE READ REPORT RIDES ON THE DOWNLOAD when something had to check the read: a scanned statement
+      // is a model's transcription held against the paper's own printed figures, and the sentence that
+      // says so (or says nothing could) belongs on the card where Apply is, not only in the line under
+      // the button he dropped it at. A download carries none — it is arithmetic from end to end.
+      const download = { ...read, name: redactDigits(name), ...(checked ? { readSaid: checked } : {}) };
       if (!download.lines.length) return { ok: false, error: noLinesSaid(download, name) };
       if (sha) {
         const seen = await fingerprintSeen(sha);

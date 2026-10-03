@@ -387,7 +387,14 @@ export default async function ReconcilePage() {
           "drop what you were given" and the app works out what it is. Where one format really is
           better — OFX carries the bank's own transaction id, so an overlapping download can never
           count a line twice (0363's fitid: key) — that is the APP's preference to act on, never a
-          choice to hand the person. */}
+          choice to hand the person.
+
+          AND IT NO LONGER NAMES A DOOR THIS ONE CANNOT DO. The sentence here used to send a SCANNED
+          statement to the + button, which was true and is not any more: a scan is read off its pages
+          and held against its own printed figures (statement-scan.ts). What the copy promises instead
+          is the thing that makes a model read safe to look at — the arithmetic, and the plain word
+          when a paper prints nothing to check against. Copy that promises or refuses the wrong thing
+          is how he finds out by being turned away. */}
       {/* THE ANCHOR IS DRAWN FOR EVERY STAFF VIEWER, both halves of the gate, because the Net Profit
           card on /analytics links to it: an anchor that is not drawn is the dead end this page's own
           "File It" door already taught us (see the not-on-an-account section above). */}
@@ -400,8 +407,11 @@ export default async function ReconcilePage() {
               North works out what it is. When it comes off a PDF, the line underneath says how many pages and rows it
               read and what they add up to: hold that against the total printed on your own statement, because two
               numbers agreeing is the proof it read them right. If two columns could both be the amount, it asks you
-              which is which and adds them up once you have said. One kind still has to go in with the + button at the
-              top: a statement that was SCANNED, with no text on its pages at all, which that door reads as a picture.
+              which is which and adds them up once you have said. A statement that was SCANNED, with no text on its
+              pages at all, is read as well — its pages are looked at, and then its own beginning balance, ending
+              balance and totals are held against what came off them, to the cent. If those don&apos;t agree nothing is
+              added and the line below says which one is out and by how much; if your statement prints no totals at
+              all, it says that too, so you know nothing but your own eyes has checked it.
             </p>
             <BankDropLine />
           </>
