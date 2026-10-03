@@ -1,6 +1,6 @@
 "use client";
 
-import { isValidElement, useEffect, useRef, useState } from "react";
+import { isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, MoreHorizontal, type LucideIcon } from "lucide-react";
@@ -410,6 +410,40 @@ function CountBadge({ count, active }: { count?: number; active: boolean }) {
 const TAB_CLS =
   "flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors";
 
+/** How wide the More panel's bottom fade is: `.menu-scroll-cue` in globals.css masks exactly this
+ *  many px, and tabs.test.ts holds the two together so they cannot drift. One number with one
+ *  meaning — what the fade covers IS how much hidden content is worth announcing. */
+export const CUE_PX = 18;
+
+/**
+ * IS THERE MORE PAST THE FAR EDGE? — the one question both fades in this file ask, with one answer,
+ * because a fade is a CLAIM about content and a wrong claim is worse than no fade at all.
+ *
+ * MEASURED, NEVER INFERRED (2026-10-03). The More panel's bottom cue used to key off "the placement
+ * hook capped this panel", which answers a different question, and it was wrong at both ends: a
+ * capped list scrolled to its very end had nothing below the last row and was fringed anyway, and a
+ * list overflowing by 5px of blank row padding wore the fade over its last row from the moment it
+ * opened. `slack` is the fade's own width, so hidden content narrower than the fade — which would
+ * dim more row than it reveals — does not count as "more".
+ */
+export function moreBeyondEdge({
+  scrolled,
+  visible,
+  total,
+  slack,
+}: {
+  /** scrollTop / scrollLeft. */
+  scrolled: number;
+  /** clientHeight / clientWidth. 0 is "not laid out yet", never "it all fits". */
+  visible: number;
+  /** scrollHeight / scrollWidth. */
+  total: number;
+  /** px of hidden content to ignore — the fade's own width. */
+  slack: number;
+}): boolean {
+  return visible > 0 && total - visible - scrolled > slack;
+}
+
 /** The horizontally-scrollable run of tabs, with edge fades when it overflows.
  *  Each item renders as a <Link> when it has an href, else a <button>. */
 function ScrollStrip({ items, activeId, onSelect }: { items: TabBarItem[]; activeId?: string; onSelect?: (id: string) => void }) {
@@ -422,7 +456,8 @@ function ScrollStrip({ items, activeId, onSelect }: { items: TabBarItem[]; activ
     const update = () => {
       setFade({
         left: el.scrollLeft > 4,
-        right: el.clientWidth > 0 && el.scrollLeft + el.clientWidth < el.scrollWidth - 4,
+        // The same question the More panel's bottom cue asks, and the same answer (moreBeyondEdge).
+        right: moreBeyondEdge({ scrolled: el.scrollLeft, visible: el.clientWidth, total: el.scrollWidth, slack: 4 }),
       });
     };
     update();
@@ -609,9 +644,35 @@ function MoreMenu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const [cue, setCue] = useState(false);
   const { panelRef, panelStyle } = useGlassMenuPlacement(open);
+  const cap = panelStyle.maxHeight;
   const activeHere = items.some((t) => t.id === activeId);
   const ActiveIcon = activeOverflow ? componentIcon(activeOverflow.icon) : null;
+
+  /* THE FADE IS MEASURED OFF THE ROWS (see the scroller below for what it says and why).
+     useLayoutEffect, with the cap in the deps, because the cap is what sets the port's height and
+     the placement hook lands it in this same commit: the first pass sees an uncapped scroller, the
+     cap arrives, this runs again against the real clientHeight — all before paint, so no frame is
+     ever drawn with a stale fade (and a reopen never flashes the last open's). A panel with no cap
+     is its content's own height and cannot hide a row, so there is nothing to listen to. */
+  useLayoutEffect(() => {
+    const el = rowsRef.current;
+    if (!el || cap === undefined) {
+      setCue(false);
+      return;
+    }
+    const update = () =>
+      setCue(moreBeyondEdge({ scrolled: el.scrollTop, visible: el.clientHeight, total: el.scrollHeight, slack: CUE_PX }));
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      el.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, cap]);
 
   useEffect(() => {
     if (!open) return;
@@ -714,13 +775,20 @@ function MoreMenu({
               AND IT SAYS SO. A capped list scrolls silently: iOS draws no scrollbar at rest, so on
               a 375x667 phone the five rows that fit looked like the whole list and the last cluster
               might as well not exist. `menu-scroll-cue` fades the bottom edge of the rows — the one
-              thing on screen that says "there is more below". It is drawn only when the hook
-              actually capped this panel, so a list that fits whole is never fringed with a hint
-              about rows that do not exist. */}
+              thing on screen that says "there is more below".
+
+              AND ONLY WHEN THERE IS (2026-10-03). The fade used to be drawn whenever the hook had
+              capped the panel, which is a coarser question than "are there rows below what you can
+              see", and it lied at both ends: the office list scrolled to its very end (scrollTop
+              256 of 256) still fringed its last row, Work Orders, with nothing under it; and a
+              tech's four rows, 229px of them in a 224px port, wore the fade from the moment they
+              opened over 5px of blank row padding. So `cue` is measured off this scroller — on open
+              and on every scroll — and the fade goes out at the last row. */}
           <div
+            ref={rowsRef}
             className={cn(
               "relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain",
-              panelStyle.maxHeight !== undefined && "menu-scroll-cue",
+              cue && "menu-scroll-cue",
             )}
           >
             <MoreMenuRows items={items} activeId={activeId} onPick={pick} />

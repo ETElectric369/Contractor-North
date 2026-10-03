@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  */
 vi.mock("next/navigation", () => ({ usePathname: () => "/x", useSearchParams: () => new URLSearchParams() }));
 
-import { MoreMenuRows, type TabBarItem } from "./tabs";
+import { MoreMenuRows, moreBeyondEdge, CUE_PX, type TabBarItem } from "./tabs";
 import { placeGlassMenu } from "./ui/glass-menu";
 import { Camera, FileText, Receipt, Stamp } from "lucide-react";
 
@@ -111,11 +111,9 @@ describe("the panel never hides under the bottom dock, nor above the top of the 
     expect(src()).toMatch(/min-h-0 flex-1 overflow-y-auto[\s\S]*?<MoreMenuRows/);
   });
 
-  it("a capped list says it continues — the fade is drawn only when the hook actually capped it", () => {
-    const scroller = src().match(/"relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain",\s*([^\n]+)/)?.[1] ?? "";
-    expect(scroller).toContain('panelStyle.maxHeight !== undefined && "menu-scroll-cue"');
-    // The cue itself: one definition, in the stylesheet, fading the bottom edge of the rows.
+  it("a capped list says it continues — one cue, one definition, in the stylesheet", () => {
     // iOS draws no scrollbar at rest, so without it five rows of nine read as the whole list.
+    expect(src()).toContain('"menu-scroll-cue"');
     const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
     expect(css).toMatch(/\.menu-scroll-cue \{[^}]*mask-image: linear-gradient\(to bottom, #000 calc\(100% - 18px\), transparent\);/);
   });
@@ -126,5 +124,66 @@ describe("the panel never hides under the bottom dock, nor above the top of the 
     expect(panel).not.toMatch(/\bz-30\b/);
     const dock = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-action-dock.tsx"), "utf8");
     expect(dock).toContain("sticky -top-4 z-40");
+  });
+});
+
+/**
+ * THE FADE IS A CLAIM, SO IT HAS TO BE TRUE (2026-10-03, the far end of the same report). The bottom
+ * cue was drawn whenever the placement hook had capped the panel, and "capped" answers a coarser
+ * question than "are there rows below what you can see". Two ways it lied, both measured in a
+ * browser and in iOS Safari at 375x667:
+ *   - the office More, 480px of rows capped to 234, scrolled to its very end (scrollTop 256 of 256):
+ *     the last row, Work Orders, still sat under the fade with nothing below it — its glyph chip
+ *     dimmed to 0.44 — so the one mark that means "there is more" pointed at nothing.
+ *   - a tech's four-row More: 229px of rows in a 224px port, 5px hidden and every one of them blank
+ *     row padding, and the fade lay over the last row from the moment it opened.
+ * So the cue is measured off the scroller now, by the same one predicate ScrollStrip's right-edge
+ * fade has always used. The port is the cap less its 1px borders and py-1: 234 − 2 − 8 = 224.
+ */
+describe("the bottom fade says there is more below only when there is", () => {
+  const src = () => readFileSync(join(process.cwd(), "src/components/tabs.tsx"), "utf8");
+  const OFFICE = { visible: 224, total: 480, slack: CUE_PX };
+
+  it("at the end of the list it lets go: scrolled to the bottom, nothing is below the last row", () => {
+    expect(moreBeyondEdge({ ...OFFICE, scrolled: 256 })).toBe(false);
+  });
+
+  it("at the top and through the middle it still says so", () => {
+    expect(moreBeyondEdge({ ...OFFICE, scrolled: 0 })).toBe(true);
+    expect(moreBeyondEdge({ ...OFFICE, scrolled: 120 })).toBe(true);
+  });
+
+  it("never for a 5px overflow: a short list the hook capped by a sliver of padding is not fringed", () => {
+    expect(moreBeyondEdge({ visible: 224, total: 229, scrolled: 0, slack: CUE_PX })).toBe(false);
+  });
+
+  it("nor when less than the fade's own width is left — the fade would dim more row than it reveals", () => {
+    expect(moreBeyondEdge({ ...OFFICE, scrolled: 256 - CUE_PX })).toBe(false);
+    expect(moreBeyondEdge({ ...OFFICE, scrolled: 256 - CUE_PX - 1 })).toBe(true);
+  });
+
+  it("a port of 0 is 'not laid out yet', not 'it all fits'", () => {
+    expect(moreBeyondEdge({ visible: 0, total: 0, scrolled: 0, slack: CUE_PX })).toBe(false);
+  });
+
+  it("the class follows the measurement, never the hook's cap", () => {
+    const scroller = src().match(/"relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain",\s*([^\n]+)/)?.[1] ?? "";
+    expect(scroller).toContain('cue && "menu-scroll-cue"');
+    expect(scroller).not.toContain("panelStyle.maxHeight");
+    expect(src()).not.toContain('panelStyle.maxHeight !== undefined && "menu-scroll-cue"');
+    // Measured when the panel is placed AND on every scroll, or the cue can only be right once.
+    expect(src()).toMatch(/el\.addEventListener\("scroll", update, \{ passive: true \}\);[\s\S]*?\}, \[open, cap\]\);/);
+  });
+
+  it("one predicate for both fades in this file: the strip's right edge asks it the same way", () => {
+    expect(src().match(/moreBeyondEdge\(\{/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(src()).not.toContain("el.scrollLeft + el.clientWidth < el.scrollWidth - 4");
+  });
+
+  it("CUE_PX is the fade's real width: the constant and the stylesheet cannot drift", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toMatch(
+      new RegExp(`\\.menu-scroll-cue \\{[^}]*mask-image: linear-gradient\\(to bottom, #000 calc\\(100% - ${CUE_PX}px\\), transparent\\);`),
+    );
   });
 });
