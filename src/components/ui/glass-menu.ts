@@ -39,25 +39,55 @@ function viewportBottomLimit(): number {
 }
 
 /**
+ * Where menu content must STOP at the TOP — the mirror of viewportBottomLimit(), and the half that
+ * was missing. A panel that opens UPWARD is not clipped by the window; it is clipped by the nearest
+ * ancestor that SCROLLS, which in the app shell is `<main className="turn-host flex-1
+ * overflow-y-auto">` — and main starts BELOW the top bar (h-[calc(4rem+var(--sat))]), 84px down on a
+ * 375x667 phone and 123px down in the iOS shell at sat 59. Measuring room above from the window's
+ * edge let the tab strip's nine-row More panel open to y 8, putting its first rows — the MONEY
+ * header and Invoices — above main's top edge where they are CUT OFF AND UNREACHABLE: main has
+ * nothing to scroll (scrollHeight === clientHeight) and the panel's own scroller is already at 0.
+ * That is Erik's "Can't see the bottom of the list" from the other end.
+ *
+ * Same walk and same rule as scrollerOf() in pull-to-refresh.tsx — nearest computed overflow-y
+ * auto/scroll — kept here rather than imported because that module is a whole feature component
+ * (router, icons, the turned-sideways geometry) and this is the primitive underneath it. 0 means
+ * "nothing clips it": off the shell the window's own edge is the limit, which is what EDGE is for.
+ */
+export function clipTopLimit(anchor: HTMLElement | null): number {
+  for (let n: HTMLElement | null = anchor; n; n = n.parentElement) {
+    const oy = getComputedStyle(n).overflowY;
+    if (oy === "auto" || oy === "scroll") return n.getBoundingClientRect().top;
+  }
+  return 0;
+}
+
+/**
  * THE PLACEMENT MATH, pure (so it is tested without a browser). Given the panel's height, the trigger's
- * top and bottom (viewport px) and where content must stop at the bottom (the dock's top edge), it
- * drops down when the panel fits below; otherwise it opens upward when that fits or there is more room
- * above; and whichever side it takes, a panel taller than that side's room gets a max-height (it
- * scrolls) so no row ends up out of reach.
+ * top and bottom (viewport px) and where content must stop at each end (the dock's top edge below, the
+ * clipping scroller's top edge above), it drops down when the panel fits below; otherwise it opens
+ * upward when that fits or there is more room above; and whichever side it takes, a panel taller than
+ * that side's room gets a max-height (it scrolls) so no row ends up out of reach.
+ *
+ * `topLimit` is REQUIRED, not optional with a 0 default: a caller that forgets it is a caller whose
+ * tall panel opens up through the top of the page again, and there is no way to notice that by
+ * reading the call. Pass clipTopLimit(anchor) — 0 only when nothing clips the panel.
  */
 export function placeGlassMenu({
   panelH,
   anchorTop,
   anchorBottom,
   bottomLimit,
+  topLimit,
 }: {
   panelH: number;
   anchorTop: number;
   anchorBottom: number;
   bottomLimit: number;
+  topLimit: number;
 }): { dropUp: boolean; maxHeight: number | undefined } {
   const roomBelow = bottomLimit - EDGE - anchorBottom - GAP_PX;
-  const roomAbove = anchorTop - GAP_PX - EDGE;
+  const roomAbove = anchorTop - GAP_PX - Math.max(EDGE, topLimit);
   const up = panelH > roomBelow && (panelH <= roomAbove || roomAbove > roomBelow);
   const room = up ? roomAbove : roomBelow;
   // The 96px floor keeps a freak short viewport usable (scrollable) rather than sliver-thin.
@@ -73,7 +103,10 @@ export function placeGlassMenu({
  * viewport minus the mobile bottom nav) and there's more room above, it flips UP
  * from the trigger instead. Belt-and-suspenders: whichever side it hangs on, if
  * the panel still can't fit it gets a max-height + internal scroll so no row
- * (Remove is deliberately LAST) can ever be unreachable.
+ * (Remove is deliberately LAST) can ever be unreachable. "Room above" is room
+ * inside the box that clips the panel, not room to the window's edge — see
+ * clipTopLimit: the tab strip's nine-row More panel used to open straight through
+ * the top of the scrolling <main> and lose its first rows there.
  *
  * Usage — attach `panelRef` to the panel div and spread `panelStyle` FIRST, then
  * the call site's horizontal anchor (position stays inline because .glass-gloss
@@ -117,7 +150,13 @@ export function useGlassMenuPlacement(
     panel.style.maxHeight = "";
     const panelH = panel.offsetHeight;
     panel.style.maxHeight = inlineMax;
-    const placed = placeGlassMenu({ panelH, anchorTop: a.top, anchorBottom: a.bottom, bottomLimit: viewportBottomLimit() });
+    const placed = placeGlassMenu({
+      panelH,
+      anchorTop: a.top,
+      anchorBottom: a.bottom,
+      bottomLimit: viewportBottomLimit(),
+      topLimit: clipTopLimit(anchor),
+    });
     setDropUp(placed.dropUp);
     setMaxHeight(placed.maxHeight);
   }, [open, contentKey]);
