@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Check, Landmark, Loader2 } from "lucide-react";
 import { sha256Hex } from "@/lib/content-hash";
@@ -28,22 +27,27 @@ import { readStatementScan } from "@/app/(app)/bills/statement-scan-actions";
  *
  * It is the same door as Snap Or Note (addOpenList reads a bank's columns as a bank download and
  * anything else as a supplier's open list); the file is read on this device and only its rows go to
- * the server, which keeps the last 4 of an account and never a long number. It then waits under
- * Needs You on Bills as one card, and nothing is written until a person presses Apply there.
+ * the server, which keeps the last 4 of an account and never a long number. It then waits ON THIS
+ * PAGE as one card, directly under this line, and nothing is written until a person presses Apply.
  *
  * WHY IT LIVES ON RECONCILE AND NOT ON MONEY. Erik asked twice: "i want to upload my bank statement
  * and supplier statement, every item will either match or need a category", and then, seeing this
  * line on /analytics, "this should be in reconcile too i imagine". Reconcile's law is that it FILLS
  * IN DOTS, it never CONTROLS SYSTEMS — a peace maker. Bringing a paper IN is an intake, not a
- * control, so the door belongs on the page named for the job; ANSWERING it still happens on the
- * paper's own card under Needs You, which is the one place every paper is answered.
+ * control, so the door belongs on the page named for the job.
+ *
+ * AND ANSWERING IT HAPPENS HERE TOO, SINCE 2026-10-03. Erik: "so it still doesnt make sense to me that
+ * all this reconcile stuff is on the bills page." The card used to wait on /bills, so this line's one
+ * link sent him to another page to finish what he had just started. A document comparing two records
+ * is answered where it is dropped; a paper that becomes a cost is still answered on Bills
+ * (lib/paperwork answeredOnReconcile). So the words say "below" and the router refresh draws it.
  */
 export function BankDropLine() {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  /** `waiting`: the download is under Needs You on Bills now, so the link there leads somewhere. An
-   *  "Already In" (applied, or set aside in files) is not there, and gets no link. */
+  /** `waiting`: the statement's own card is on this page now (the refresh below draws it), so the line
+   *  says where to look. An "Already In" (applied, or set aside in files) has no card, and says nothing. */
   const [said, setSaid] = useState<{ text: string; ok: boolean; waiting?: boolean } | null>(null);
 
   async function take(file: File | undefined) {
@@ -82,7 +86,7 @@ export function BankDropLine() {
         });
         const got = await readStatementScan({ name: file.name || "Statement", base64: read.scan.base64, pages: read.scan.pages, sha256: sha, listDate: read.scan.listDate });
         if (!got.ok) return setSaid({ text: got.already ? `${got.already} Nothing was added twice.` : (got.error ?? "Not added."), ok: !!got.already });
-        setSaid({ text: (got.line ?? "Waiting under Needs You on Bills.").replace("Waiting below", "Waiting under Needs You on Bills"), ok: true, waiting: true });
+        setSaid({ text: got.line ?? "Waiting below.", ok: true, waiting: true });
         router.refresh();
         return;
       }
@@ -97,9 +101,9 @@ export function BankDropLine() {
       // may read, with four of its lines sampled onto the card — so `expect: "bank"` had been the
       // only thing refusing it here. The refusal is now `unreadBankTable` inside addOpenList, where
       // every door gets it, because this door cannot tell the two files apart and nor could the next.
-      const added = await addOpenList({ name: file.name || "Statement", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop", pdf: read.pdf });
+      const added = await addOpenList({ name: file.name || "Statement", sha256: sha, table: read.table, heading: read.heading, listDate: read.listDate, source: "bills_drop", pdf: read.pdf });
       if (!added.ok) return setSaid({ text: added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), ok: !!added.already });
-      setSaid({ text: (added.line ?? "Waiting under Needs You on Bills.").replace("Waiting below", "Waiting under Needs You on Bills"), ok: true, waiting: true });
+      setSaid({ text: added.line ?? "Waiting below.", ok: true, waiting: true });
       router.refresh();
     } catch (e) {
       setSaid({ text: `Not added: ${(e as Error)?.message ?? "something went wrong"}.`, ok: false });
@@ -142,12 +146,8 @@ export function BankDropLine() {
         <p className={`mt-2 flex items-start gap-2 text-sm ${said.ok ? "text-slate-700" : "text-red-700"}`} role={said.ok ? "status" : "alert"}>
           {said.ok ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-green-600" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
           <span>
-            {said.text}{" "}
-            {said.waiting && (
-              <Link href="/bills#sort-these" className="inline-flex min-h-11 items-center font-medium text-brand underline">
-                Open Needs You On Bills
-              </Link>
-            )}
+            {said.text}
+            {said.waiting ? " Its card is right below." : ""}
           </span>
         </p>
       )}

@@ -28,6 +28,10 @@ import {
   unresolveDuplicateBill,
 } from "@/app/(app)/bills/supplier-actions";
 import { BankDropLine } from "./bank-drop-line";
+import { readStatementCards } from "./statement-cards";
+import { PaperworkList } from "@/components/paperwork-row";
+import { InfoPopup } from "@/components/info-popup";
+import { STATEMENT_FACTS } from "./statement-facts";
 
 export const dynamic = "force-dynamic";
 /**
@@ -76,12 +80,13 @@ const OWED_READ = "what your suppliers say you owe";
  *     here goes through a server action /bills already had, writing supplier_aliases,
  *     supplier_accounts or bills.superseded_by_bill_id — nothing of this page's own. There is no
  *     reconcile table and there must never be one.
- *  2. IT IS NEVER THE ONLY DOOR. A bank download and a supplier's open list arrive in the one paper
- *     queue and are ANSWERED on their own card under Needs You, which is where that stays. The
- *     supplier gap is read-only here and links to the card that owns those figures. Bringing one IN
- *     is a different thing and it does live here (Bring In A Statement, at the bottom): an intake is
- *     not a control, and Snap Or Note on Bills still takes the same files, so this is not the only
- *     way in either.
+ *  2. IT IS NEVER THE ONLY DOOR. A bank download and a supplier's open list are answered on their own
+ *     card, and that card is drawn wherever the paper is — inside Bring In A Statement here, in the
+ *     Organize tray, and on Snap Or Note's own sheet — so no screen is the only way to an answer. (It
+ *     used to say the answer "stays under Needs You on Bills". It does not: a statement compares two
+ *     records, so `answeredOnReconcile` draws its card here, where it was dropped, instead of sending a
+ *     person to another page to press Apply. The old sentence is the behaviour this release replaced.)
+ *     The supplier gap is read-only here and links to the card that owns those figures.
  *  3. IT READS THE SAME FUNCTIONS THE OWNING SCREENS READ. Every supplier figure comes out of
  *     `readSupplierOwed` — the one read behind Nort, the Suppliers card, the workbook and the P&L —
  *     and no amount is added up on this page.
@@ -144,6 +149,18 @@ export default async function ReconcilePage() {
   const owed = owedRead.owed;
   const work = await readReconcileWork(supabase, orgId, figuresFrom(owed));
 
+  // ── THE STATEMENTS DROPPED HERE, ANSWERED HERE (2026-10-03) ──────────────────────────────────
+  // Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills page."
+  // A bank download and a supplier's open list compare two records, which is this page's whole
+  // sentence, so their cards live where they are dropped instead of sending him to /bills to press
+  // Apply. The rule is lib/paperwork's `answeredOnReconcile`, read by this page and by Bills.
+  //
+  // AND IT IS WHY THE ALL-CLEAR BELOW MAY NOW SPEAK OF THE QUEUE AT ALL: it used to say "Nothing
+  // here is waiting on you" precisely because this page did not read `organized_items`. It does now,
+  // so `statementsWaiting` is in `nothingAtAll` — the sentence counts what it claims.
+  const statements = await readStatementCards(supabase, orgId);
+  const statementsWaiting = statements.items.length;
+
   // ── THE SUPPLIER GAP: TWO RECORDS, BOTH HANDED IN ────────────────────────────────────────────
   // One row per supplier whose own papers we hold, built by the read rather than here. Why it is not
   // filtered off "what you owe your suppliers" is written at `supplierGapRows`: a supplier whose own
@@ -161,7 +178,7 @@ export default async function ReconcilePage() {
   // Two reads stand behind this page and either can lose a table. Whichever did, the sentence under
   // the one number may not claim an all-clear: with the supplier half unread "your papers line up" is
   // a sentence the app cannot stand behind, and he acts on the lead without scrolling.
-  const couldNotRead = [...new Set([...(owed?.failed ?? []), ...work.failed, ...(owedRead.threw ? [OWED_READ] : [])])];
+  const couldNotRead = [...new Set([...(owed?.failed ?? []), ...work.failed, ...(owedRead.threw ? [OWED_READ] : []), ...(statements.error ? ["the statements waiting on you"] : [])])];
   const allRead = couldNotRead.length === 0;
 
   // The papers on no supplier account. They are in NEITHER side of any gap, so this page says so in
@@ -190,7 +207,7 @@ export default async function ReconcilePage() {
   // Plain words, never an error, and never an empty heading. It must answer for EVERY pile the page
   // draws, including the papers on no account — /bills' own "File It" door lands here because of
   // them, and "Nothing for you to do here" printed directly above that pile is a dead end.
-  const nothingAtAll = allRead && !gaps.length && !open.length && !papersOnNoAccount;
+  const nothingAtAll = allRead && !gaps.length && !open.length && !papersOnNoAccount && !statementsWaiting;
 
   return (
     <div>
@@ -233,13 +250,13 @@ export default async function ReconcilePage() {
                 is drawn even on an all-clear page — that is the moment he brings the next download in
                 — and a flat "nothing to do" printed above it reads as a contradiction, so where the
                 door is drawn the sentence ends by naming it instead.
-                IT STILL SAYS "HERE", AND THE WORD IS LOAD-BEARING. A bare "nothing is waiting on you"
-                is a claim about the whole book, and the door directly below this sentence CREATES
-                waiting work: dropping a download puts a card under Needs You on Bills, which this
-                page never reads (it reads bills and supplier papers, not the paper queue). The
-                refresh after a drop would then print the all-clear over "Waiting under Needs You on
-                Bills." — the lead claiming what it did not check, which is the one thing it may not
-                do. Scoped to this page, both sentences are true at once. */}
+                IT STILL SAYS "HERE", AND THE WORD IS LOAD-BEARING — for a different reason since
+                2026-10-03. It used to be the scope: the door CREATED waiting work this page never read,
+                so a bare "nothing is waiting on you" would have been printed over "Waiting under Needs
+                You on Bills". The card is answered on this page now, so the page DOES read the queue
+                (`statementsWaiting`), and the all-clear is gated on it being empty — which is what
+                earned the right to say anything about it at all. "Here" stays because the claim is
+                still only about what this page counted: a receipt waiting on Bills is not in it. */}
             <p className="mt-1 text-sm text-slate-600">
               Your bills and your suppliers&apos; own papers line up, no supplier name is waiting to be put on an account,
               and no ticket is waiting on you to pick a job.{" "}
@@ -258,7 +275,9 @@ export default async function ReconcilePage() {
                   ? "Couldn't Check Everything Just Now"
                   : papersOnNoAccount > 0
                     ? `${papersOnNoAccount} ${papersOnNoAccount === 1 ? "Paper" : "Papers"} Not On A Supplier Account Yet`
-                    : "Nothing To Sort Out Right Now"}
+                    : statementsWaiting > 0
+                      ? `${statementsWaiting} ${statementsWaiting === 1 ? "Statement" : "Statements"} Waiting On You`
+                      : "Nothing To Sort Out Right Now"}
             </p>
             {/* "No money gap" is itself an all-clear, so it waits on every read landing. */}
             <p className="mt-1 text-sm text-slate-600">
@@ -269,6 +288,13 @@ export default async function ReconcilePage() {
                   names and tickets filed twice" whatever was actually drawn, which went stale the
                   moment the pile stopped being about names at all. */}
               {waiting > 0 ? ` What is below is ${open.map((k) => RECONCILE_KINDS[k].heading).join(", ")}.` : ""}
+              {/* A STATEMENT HE DROPPED IS WAITING ON HIM, ON THIS PAGE, and it is named here because
+                  this is where he stops reading. It is not one of the typed kinds (reconcile-kinds.ts):
+                  a paper waiting for Apply is the answer to the intake door at the bottom, not a
+                  disagreement between two records of ours, so it is a sentence and never a badge. */}
+              {statementsWaiting > 0
+                ? ` ${statementsWaiting === 1 ? "A statement you brought in is" : `${statementsWaiting} statements you brought in are`} waiting under Bring In A Statement below.`
+                : ""}
             </p>
           </>
         )}
@@ -381,11 +407,12 @@ export default async function ReconcilePage() {
           should be in reconcile too i imagine". So it moved here and left /analytics — one door, on
           the page named for the job.
 
-          AND IT HOLDS NO APPLY, WHICH IS THE LAW: "reconcile is the bottom fold filling in dots not
-          controlling systems, a peace maker". Bringing a paper IN is an intake, not a control.
-          ANSWERING it stays on the paper's own card under Needs You, the one place every paper is
-          answered — carrying that Apply here would make Reconcile the only door to a queued paper,
-          the one thing the law forbids outright.
+          AND IT CARRIES THE PAPER'S OWN CARD, APPLY AND ALL. This block used to say the opposite —
+          "it holds no Apply, which is the law" — and the law it cited is about this page OWNING a
+          record, which it still does not: every write goes through the same server action the card
+          always called. Answering a statement IS the reconciliation, so the card is drawn where the
+          paper was dropped (see THE APPLY THE LAW DOES NOT FORBID, below). The card is drawn in the
+          Organize tray and on Snap Or Note's sheet as well, so this is not the only door to it.
 
           IT IS DRAWN EVEN WHEN NOTHING DISAGREES. It used to sit inside {!nothingAtAll}, which hid
           it at precisely the moment a person opens this page: the book is quiet and he has the next
@@ -417,35 +444,34 @@ export default async function ReconcilePage() {
           card on /analytics links to it: an anchor that is not drawn is the dead end this page's own
           "File It" door already taught us (see the not-on-an-account section above). */}
       <Card id="bring-in-a-statement" className="mb-6 scroll-mt-20 p-4">
-        <h2 className="text-base font-semibold text-slate-900">Bring In A Statement</h2>
+        {/* ── ONE LINE, AND AN INFO ICON FOR THE REST (Erik, 2026-10-03) ──────────────────────
+            "this huge box of text in front of me is hard for me to read and takes up a lot of space on
+            the screen, valuable space for reconciling, so my idea is in places like this we can have a
+            little info icon with a popup text box" — and then: "inside the info box that wall of text
+            will be a lot easier to read if its broken into bullet points".
+
+            The paragraph below was eleven facts in eleven lines of prose. It was three sentences when
+            it shipped and grew by one explanation per release. The heading keeps the icon; the card
+            keeps ONE line; every fact is a bullet in the box, and NOTHING IS CUT.
+
+            AND IT REALLY IS ONE LINE NOW (review, 2026-10-03). A SECOND paragraph survived the move,
+            under the drop button, in both the waiting and the empty state — "every line either matches a
+            paper you already have or asks you what it was for, and nothing is written until you press
+            Apply" — about four more lines of 14px prose at 375px, in the space he asked for back, while
+            the comment below claimed every crowding clause was already in the box. It is a bullet in
+            STATEMENT_FACTS now, and reconcile-page-doors.test.ts keeps it off the card. */}
+        <div className="flex items-center gap-1">
+          <h2 className="text-base font-semibold text-slate-900">Bring In A Statement</h2>
+          <InfoPopup title="How A Statement Is Read" label="How A Statement Is Read" bullets={STATEMENT_FACTS} />
+        </div>
         {sortsBank ? (
           <>
-            {/* WHAT THIS SAYS IS TRACED TO THE CODE, LINE BY LINE (onboarding-truth law, rewritten
-                2026-10-02 when the running-balance walk shipped). The old paragraph was written when the
-                statement's printed totals were the only arithmetic there was, and it ended "if your
-                statement prints no totals at all, it says that too, so you know nothing but your own eyes
-                has checked it" — which became FALSE the moment a paper with no totals and a walking
-                balance started saying "its own running balance proves every line" (statement-verify.ts).
-                It also never named the walk, so a scan turned away on a chain break was turned away for a
-                reason the page had never mentioned. Every clause below names something the code does:
-                the walk (balanceChain), the refusal on a scan (statement-scan-actions.ts), the warning on
-                a file (open-list-add-core.ts has no pass gate, on purpose), and the silence when a paper
-                prints neither (verifySaid). */}
+            {/* THE ONE LINE. What it promises is the whole of what this door does: hand it over and the
+                app works out what it is. Every clause that used to crowd this card is in STATEMENT_FACTS,
+                behind the icon above — each one still traced to the code that does it. */}
             <p className="mb-2 mt-1 text-sm text-slate-600">
               Drop your statement here — whatever your bank or supplier gave you, in whatever form they gave it.
-              North works out what it is. Then it checks the read: every line has to add up against the running
-              balance printed beside it, so each line proves the one before it to the cent, and the line underneath
-              says how many of them it held and where it stopped if it stopped. A statement that also prints a
-              beginning balance, an ending balance or totals is held against those as well. If two columns could both
-              be the amount, it asks you which is which and adds them up once you have said. A statement whose lines
-              are PICTURES is read as well — scanned, photographed, or a PDF whose columns don&apos;t come off as
-              text: its pages are looked at, and then its own figures are held against what came off them, to the
-              cent. A card statement is read the way a card works, where what you owe goes up with a purchase. On a
-              picture, a read its own paper disagrees with is refused and nothing is added; on a file off your bank
-              those rows are the bank&apos;s own, so the line says what doesn&apos;t add up and names the line to go
-              and look at. If the paper prints no totals and no running balance, it says that out loud, so you know
-              nothing but your own eyes has checked it. Looking at the pages takes a minute, and a long statement
-              takes a few.
+              North works out what it is, and checks the read against the figures the paper prints.
             </p>
             <BankDropLine />
           </>
@@ -458,13 +484,49 @@ export default async function ReconcilePage() {
             list of what is open goes in through Snap Or Note on Bills, the same as any other paper.
           </p>
         )}
-        <p className="mt-1 text-sm text-slate-600">
-          Either one is answered on its own card under Needs You on Bills, where every line either matches a paper you
-          already have or asks you what it was for, and nothing is written until you press Apply there.
-        </p>
-        <Link href="/bills" className="mt-1 flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-          Open Bills
-        </Link>
+        {/* ── AND IT IS ANSWERED RIGHT HERE (2026-10-03) ──────────────────────────────────────
+            Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills
+            page." He dropped a statement at the line above and then walked to /bills to press Apply —
+            a merry-go-round for one paper. The card that arrives is the ANSWER to this card, so it is
+            inside this one: no second section of its own, and no second place to answer the same paper.
+
+            THE APPLY THE LAW DOES NOT FORBID. The law is "reconcile is the bottom fold filling in dots
+            not controlling systems, a peace maker" — Reconcile must not RUN things. Answering a
+            statement IS the reconciliation: two records held against each other, line by line, with a
+            person pressing. What the law forbids is this page owning a record, and it still owns none
+            — every write goes through the same server action the card always called.
+
+            THE CARD, NOT A COPY OF IT. `PaperworkRow` returns the bank card or the open-list card and
+            nothing else for these two states, which is why it takes no jobs and no number matches
+            here: a statement is never filed onto a job.
+
+            AND THE LIST STAYS MOUNTED PAST ZERO (review, 2026-10-03). PaperworkList keeps the done
+            trail — the green sentence and its Undo — in its OWN state, and this used to swap the whole
+            list out for a quiet paragraph the moment the last statement was answered. Apply, and
+            `router.refresh()` returned no statements, the list unmounted and the trail went with it: an
+            Apply that marked 23 papers paid lost its in-page Undo, and Not Now "vanished" with no
+            lasting word, the exact complaint this release exists to answer. So the list is always drawn
+            and the quiet paragraph is its `empty` — the same keep-alive NeedsYou on Bills has, where the
+            comment already says "a card just answered keeps its Undo". */}
+        {statements.error ? (
+          <p className="mt-2 text-sm text-amber-800" role="alert">
+            {statements.error} Reload the page to try again.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-3">
+            {statementsWaiting > 0 && (
+              <p className="text-sm text-slate-600">
+                {statementsWaiting === 1 ? "This one is waiting on you." : `These ${statementsWaiting} are waiting on you.`}
+              </p>
+            )}
+            <PaperworkList
+              items={statements.items}
+              jobs={[]}
+              matches={{}}
+              empty={<p className="text-sm text-slate-600">Whatever you drop waits here on its own card.</p>}
+            />
+          </div>
+        )}
       </Card>
     </div>
   );

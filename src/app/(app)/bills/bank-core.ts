@@ -68,8 +68,8 @@ import { customerNamePart } from "@/lib/schedule-options";
  * on top of RLS, which holds bank_lines and bank_rules to the company's staff (0363). Every write
  * comes back with .select("id"): a zero-row write is a 204, and a 204 reads exactly like success.
  *
- * BEFORE 0363 IS APPLIED nothing crashes: the download still lands under Needs You on Bills, and its card
- * says it needs one database update.
+ * BEFORE 0363 IS APPLIED nothing crashes: the download still lands on Reconcile, under Bring In A
+ * Statement, and its card says it needs one database update.
  */
 
 type Db = any;
@@ -418,8 +418,11 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   return { books, problem: null };
 }
 
-/** The empty card a problem gives: the headline still reads, nothing can be pressed but Set Aside. */
-function problemView(dl: BankDownload, problem: string): BankView {
+/** The empty card a problem gives: the headline still reads, nothing can be pressed but Set Aside.
+ *  `appliedLines` rides in even here, because Delete is drawn on this card too and it runs the Undo
+ *  first: a confirm that says nothing is written while the books hold what Apply wrote is the one thing
+ *  this card may not say, whether or not its books could be read this time. */
+function problemView(dl: BankDownload, problem: string, appliedLines = 0): BankView {
   const empty: BankBooks = {
     already: new Map(),
     payments: [],
@@ -435,7 +438,7 @@ function problemView(dl: BankDownload, problem: string): BankView {
     crewPaid: [],
   };
   const plan = planBankDownload({ ...dl, lines: [] }, empty);
-  return { ...bankViewOf({ ...dl, lines: [] }, plan, empty), problem };
+  return { ...bankViewOf({ ...dl, lines: [] }, plan, empty), problem, appliedLines };
 }
 
 /** The card an office viewer gets when the owner keeps owner money to themself: its account and
@@ -474,7 +477,7 @@ export async function bankViews(
     const dl = stored.download;
     const { books, problem } = await loadBankBooks(supabase, orgId, dl, tz);
     if (!books) {
-      out[i.id] = problemView(dl, problem ?? "The books couldn't be read.");
+      out[i.id] = problemView(dl, problem ?? "The books couldn't be read.", (stored.applied ?? []).reduce((n, a) => n + (Number(a?.lines) || 0), 0));
       continue;
     }
     out[i.id] = bankViewOf(dl, planBankDownload(dl, books), books, { today, applied: stored.applied ?? null });
@@ -534,7 +537,7 @@ export async function createBankPaper(
 /** What the drop line says the moment a download lands. */
 export function bankLine(dl: BankDownload): string {
   const n = dl.lines.length;
-  return `Read as a bank download: ${n} ${n === 1 ? "line" : "lines"}. Waiting below with how it sorts; nothing is written until you press Apply.`;
+  return `Read as a bank download: ${n} ${n === 1 ? "line" : "lines"}. Waiting on Reconcile with how it sorts; nothing is written until you press Apply.`;
 }
 
 // ── APPLY ──────────────────────────────────────────────────────────────────────────────────────
@@ -579,7 +582,7 @@ export function depositMethod(description: string): string {
  * (org_id, line_key)), and each money row marked once (its UNIQUE bank_line_id).
  *
  * Rows the person left for later write nothing and stay on the card, named as not counted: the row
- * goes back under Needs You with only them.
+ * stays waiting on Reconcile with only them.
  */
 export async function applyBankCore(
   supabase: Db,

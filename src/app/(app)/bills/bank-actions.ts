@@ -11,7 +11,7 @@ import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 /**
  * A BANK DOWNLOAD'S BUTTONS (2026-09-27). There is no import button: the download arrives through
  * Snap Or Note, Organize or Reconcile's "Drop A Bank Or Supplier Statement" line (addOpenList recognises it)
- * and waits under Needs You on Bills as one card. These are that card's Apply and Undo. Staff only: a tech
+ * and waits on Reconcile as one card (lib/paperwork answeredOnReconcile). These are that card's Apply and Undo. Staff only: a tech
  * never sees a bank line (0363 RLS), and requireStaff says no before anything is read.
  */
 
@@ -19,6 +19,7 @@ type Result = { ok: boolean; error?: string; message?: string; stale?: boolean }
 
 function revalidateBank() {
   revalidatePath("/bills");
+  revalidatePath("/reconcile");
   revalidatePath("/organize");
   revalidatePath("/planner");
   revalidatePath("/analytics");
@@ -136,7 +137,11 @@ export async function undoBankDownload(id: string): Promise<Result> {
   if (error || !back?.length) {
     return {
       ok: true,
-      message: `Undone: ${down.undone} ${down.undone === 1 ? "line" : "lines"} came off. The card didn't go back under Needs You${error ? ` (${dbError(error)})` : ""}; refresh the page.`,
+      // WHERE THE CARD ACTUALLY IS (review, 2026-10-03). This named the queue card on Bills, and a bank
+      // download has not been drawn there since 6b7f553d — it is answered on Reconcile. A sentence that
+      // sends him to a card that is not on that page is the onboarding-truth law broken, on the one path
+      // where he is already being told something went wrong.
+      message: `Undone: ${down.undone} ${down.undone === 1 ? "line" : "lines"} came off. The card didn't reset on Reconcile${error ? ` (${dbError(error)})` : ""}; refresh the page.`,
     };
   }
   return {

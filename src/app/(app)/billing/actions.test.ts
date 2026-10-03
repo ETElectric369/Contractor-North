@@ -75,6 +75,10 @@ type Q = {
   cols: string;
   payload?: any;
   single?: boolean;
+  /** The window a paged read asked for, when it asked for one (`.range(from, to)`). */
+  range?: { from: number; to: number };
+  /** The ceiling a read asked for (`.limit(n)`), honoured so a CUT is a cut here as it is in Postgres. */
+  limit?: number;
 };
 type Reply = { data?: any; error?: any } | undefined;
 
@@ -94,6 +98,15 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
       r = { data: { invoice_number: null, status: "draft", created_at: "", job_id: null, invoice_items: [] } };
     }
     if (r === undefined) throw new Error(`unrouted: ${q.table}.${q.verb} [${q.cols}] ${JSON.stringify(q.payload ?? null)}`);
+    // `range` AND `limit` ARE HONOURED, because PostgREST cuts a read and says nothing about it: status
+    // 200, no error, the rest simply missing. A fake that handed every row back whatever was asked for
+    // could not tell a whole read from a cut one — which is the bug the same-ticket question had — and a
+    // paged read (readAllPages) would never see an empty page and would stop itself with "more than
+    // 50000 rows to read at once".
+    if (Array.isArray(r.data)) {
+      if (q.range) return { data: r.data.slice(q.range.from, q.range.to + 1), error: r.error ?? null };
+      if (q.limit !== undefined) return { data: r.data.slice(0, q.limit), error: r.error ?? null };
+    }
     return { data: r.data ?? null, error: r.error ?? null };
   };
   const client: any = {
@@ -117,7 +130,9 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
           try { resolve(answer(q)); } catch (e) { reject?.(e); }
         },
       };
-      for (const m of ["eq", "neq", "in", "is", "not", "gt", "gte", "lt", "lte", "or", "ilike", "overlaps", "order", "limit", "range", "filter", "contains"]) {
+      chain.range = (from: number, to: number) => { q.range = { from, to }; return chain; };
+      chain.limit = (n: number) => { q.limit = n; return chain; };
+      for (const m of ["eq", "neq", "in", "is", "not", "gt", "gte", "lt", "lte", "or", "ilike", "overlaps", "order", "filter", "contains"]) {
         chain[m] = () => chain;
       }
       return chain;
@@ -164,6 +179,13 @@ function costsImportRoute(opts: {
   /** The source_ids this invoice's own materials lines already carry (returns credited HERE). */
   heldHere?: string[][];
   heldHereError?: any;
+  /**
+   * EVERY BILL OF THESE AMOUNTS IN THE WHOLE BOOK, which is a different read from the job's own bills:
+   * it carries the superseded rows and each bill's job, and it is what the "same ticket on two jobs"
+   * question is asked of (ticket-on-two-jobs.ts). Absent: nothing of these amounts anywhere else.
+   */
+  everyBillOfTheseAmounts?: any[];
+  everyBillError?: any;
 }) {
   return (q: Q): Reply => {
     if (q.table === "invoices" && q.verb === "select") {
@@ -177,7 +199,13 @@ function costsImportRoute(opts: {
     }
     if (q.table === "invoices" && q.verb === "update") return { data: null }; // recalcInvoice
     if (q.table === "purchase_orders") return { data: [] };
-    if (q.table === "bills") return { data: opts.bills };
+    if (q.table === "bills") {
+      // The two-jobs read is the one that asks for the superseded column and the job's own row.
+      if (q.cols.includes("superseded_by_bill_id")) {
+        return opts.everyBillError ? { error: opts.everyBillError } : { data: opts.everyBillOfTheseAmounts ?? [] };
+      }
+      return { data: opts.bills };
+    }
     if (q.table === "bill_line_items") return { data: opts.lines };
     if (q.table === "invoice_items" && q.verb === "select") {
       if (q.cols.includes("invoices!inner")) return { data: [] };             // claims by id
@@ -1553,5 +1581,306 @@ describe("setInvoiceStatus — a draft marked sent by hand starts its terms from
     state.client = fakeSupabase(route({ status: "sent", sent_at: "2026-08-01T18:00:00Z" }, updates), calls);
     expect(await setInvoiceStatus(DRAFT, "void")).toEqual({ ok: true });
     expect(updates.some((u) => "due_date" in (u.payload ?? {}))).toBe(false);
+  });
+});
+
+
+/**
+ * ── A TICKET ON TWO JOBS IS CAUGHT BEFORE THE INVOICE GOES OUT (2026-10-03) ────────────────────
+ *
+ * ONE $95.27 SUPPLY-HOUSE TICKET WAS FILED ON TWO JOBS. Both jobs were invoiced and both customers
+ * PAID: $102.34 on one and $119.09 on the other — $221.43 collected for one $95.27 purchase. Erik
+ * found it on Reconcile months later and let it go.
+ *
+ * The marked-duplicate guard (`.is("superseded_by_bill_id", null)`) was already real and in the right
+ * place. What was missing is a question at the moment the invoice is BUILT: `duplicateTicketGroups` ran
+ * when Reconcile or Bills LOADED, so invoicing both jobs before ever opening Reconcile sent both copies
+ * out. Every figure, name and place below is invented; the shape is his.
+ */
+const OTHER_JOB = "7b2f0e55-1111-4000-8000-00000000abcd";
+const TICKET = { number: "7701-220889", amount: "95.27", supplier: "Halverson Electric Supply" };
+
+/** The copy on the invoice's own job, and the copy on another job: identical, line for line. */
+const ticketLines = (billId: string) =>
+  ["12 AWG black 500ft", "1/2 EMT connector", "4in square box", "4in square ring", "Lever connector 3-port", "1/2 EMT coupling"].map((d, i) => ({
+    id: `${billId}-l${i}`,
+    bill_id: billId,
+    description: d,
+    quantity: "1.00",
+    unit_price: "15.88",
+    amount: "15.88",
+    category: "Electrical",
+    sort_order: i,
+    billable: true,
+    billed_amount: null,
+  }));
+
+const HERE_BILL = { id: "aa11bb22-0000-4000-8000-000000000011", supplier: TICKET.supplier, bill_number: null, amount: TICKET.amount, po_id: null, pricing_provisional: false };
+/** The same ticket, filed to another job — with that job's number AND its customer, so the sentence
+ *  can name it the way this repo names a job (Erik: "i cant tell by job numbers alone"). */
+const THERE_BILL = {
+  id: "aa11bb22-0000-4000-8000-000000000022",
+  supplier: TICKET.supplier,
+  amount: TICKET.amount,
+  bill_date: "2026-08-28",
+  job_id: OTHER_JOB,
+  notes: "portal-20260828-2.pdf",
+  supplier_invoice_number: TICKET.number,
+  superseded_by_bill_id: null,
+  jobs: { job_number: "J-102", name: "4 Bramble Lane", customers: { name: "Remy Dunsmore" } },
+  bill_line_items: ticketLines("aa11bb22-0000-4000-8000-000000000022"),
+};
+const HERE_ROW = {
+  id: HERE_BILL.id,
+  supplier: TICKET.supplier,
+  amount: TICKET.amount,
+  bill_date: "2026-07-29",
+  job_id: JOB,
+  notes: "portal-20260729-1.pdf",
+  supplier_invoice_number: TICKET.number,
+  superseded_by_bill_id: null,
+  jobs: { job_number: "J-046", name: "12 Sycamore Row", customers: { name: "Nora Gorse" } },
+  bill_line_items: ticketLines(HERE_BILL.id),
+};
+
+const importWithTicket = (everyBillOfTheseAmounts: any[]) =>
+  importCostsIntoInvoice(INV, 20);
+
+describe("importCostsIntoInvoice — the same ticket on two jobs, asked before it is sent", () => {
+  it("names the other job by place, number AND who, and does not refuse the import", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillOfTheseAmounts: [HERE_ROW, THERE_BILL],
+      }),
+      calls,
+    );
+    const res: any = await importWithTicket([HERE_ROW, THERE_BILL]);
+    // A QUESTION, NOT A REFUSAL: two identical runs a month apart are normal, and only he was there.
+    expect(res.ok).toBe(true);
+    const warn = (res.stats?.warnings ?? []).join(" ");
+    expect(warn).toContain("The same $95.27 Halverson Electric Supply ticket is also on");
+    expect(warn).toContain("4 Bramble Lane · J-102 — Remy Dunsmore");
+    expect(warn).not.toMatch(/also on J-102\b/); // never a bare number
+    expect(warn).toContain("pick which job it belongs to on Reconcile before you send this");
+    // And the count that arms the door to the picker, so the question has somewhere to be answered.
+    expect(res.stats?.same_ticket_two_jobs).toBe(1);
+  });
+
+  /**
+   * IT READS AS A SENTENCE WHERE IT IS PRINTED (review, 2026-10-03). invoice-detail joins the warnings
+   * with ". " and prints them under the import row, and every other import warning starts a sentence
+   * ("Removed …", "Merged …"). A lowercase clause read as a sentence cut in half — and the job's own
+   * label ends in an em dash, so a second one straight after it put two dashes in a row.
+   */
+  it("starts with a capital and never runs two em dashes together", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillOfTheseAmounts: [HERE_ROW, THERE_BILL],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    const warn: string = (res.stats?.warnings ?? []).join(" ");
+    expect(warn.startsWith("The same $95.27")).toBe(true);
+    expect(warn).not.toMatch(/^[a-z]/);
+    // "— Remy Dunsmore — if that was one trip" was the pair of dashes. A full stop separates them now.
+    expect(warn).not.toMatch(/—[^—]{0,30}—/);
+    expect(warn).toContain("Remy Dunsmore. If that was one trip");
+  });
+
+  /**
+   * TWO PHOTOGRAPHS OF ONE TICKET, BOTH ON THIS JOB, BOTH ON THIS INVOICE (review, 2026-10-03).
+   * `findDuplicateBills` has no job term, so this is the very pair Reconcile lists — but the gate wanted
+   * a copy on ANOTHER job and skipped the group, and the customer was charged $95.27 twice, with markup,
+   * on one invoice with nothing asked. The marks name the two lines: the amount and the job cannot.
+   */
+  it("asks about two copies of one ticket on THIS job, both on this invoice", async () => {
+    const SECOND = {
+      ...HERE_ROW,
+      id: "aa11bb22-0000-4000-8000-000000000033",
+      notes: "portal-20260729-2.pdf",
+      bill_line_items: ticketLines("aa11bb22-0000-4000-8000-000000000033"),
+    };
+    const secondBill = { ...HERE_BILL, id: SECOND.id };
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL, secondBill],
+        lines: [...ticketLines(HERE_BILL.id), ...ticketLines(SECOND.id)],
+        landedAfter: [HERE_BILL.id, SECOND.id],
+        everyBillOfTheseAmounts: [HERE_ROW, SECOND],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    const warn: string = (res.stats?.warnings ?? []).join(" ");
+    expect(warn).toContain("The same $95.27 Halverson Electric Supply ticket is on this invoice twice");
+    expect(warn).toContain("portal-20260729-1.pdf, portal-20260729-2.pdf");
+    expect(warn).toContain("pick which copy counts on Reconcile before you send this");
+    // And the door is armed, because a question with nowhere to answer it is the dead end.
+    expect(res.stats?.same_ticket_two_jobs).toBe(1);
+  });
+
+  /**
+   * THE READ IS WHOLE OR IT IS A FAILURE (read-all-pages.ts). It was one unordered `.limit(500)`:
+   * PostgREST cuts a select with status 200 and no error, so with enough bills of these amounts the
+   * other copy of the ticket could sit outside the cut and the invoice went out with nothing said.
+   */
+  it("pages the whole book, so a copy past the first page is still found", async () => {
+    // A LONG-LIVED BOOK. The read asks for every bill at any of the invoice's distinct amounts, which on
+    // a big invoice is hundreds of amounts, so a thousand other papers genuinely come back with the pair.
+    // The ticket's partner is ordered LAST, past the first page's 1,000 rows.
+    const filler = Array.from({ length: 1000 }, (_, i) => ({
+      ...HERE_ROW,
+      id: `bb11bb22-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      job_id: `job-filler-${i}`,
+      supplier: `Other Supply ${i}`,
+      amount: String(100 + i) + ".55",
+      notes: `filler-${i}.pdf`,
+      supplier_invoice_number: null,
+      jobs: { job_number: `J-${i}`, name: `Filler ${i}`, customers: { name: `Someone ${i}` } },
+      bill_line_items: [],
+    }));
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillOfTheseAmounts: [HERE_ROW, ...filler, THERE_BILL],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    expect((res.stats?.warnings ?? []).join(" ")).toContain("4 Bramble Lane · J-102 — Remy Dunsmore");
+    expect(res.stats?.same_ticket_two_jobs).toBe(1);
+    // It really paged: more than one window of this table was asked for.
+    const windows = calls.filter((q) => q.table === "bills" && q.cols.includes("superseded_by_bill_id") && q.range);
+    expect(windows.length).toBeGreaterThan(1);
+    // A thousand rows through the real matcher: generous, because the point is the WINDOW, not the clock.
+  }, 20_000);
+
+  it("says nothing when the ticket is on one job only", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({ bills: [HERE_BILL], lines: ticketLines(HERE_BILL.id), landedAfter: [HERE_BILL.id], everyBillOfTheseAmounts: [HERE_ROW] }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    expect((res.stats?.warnings ?? []).join(" ")).not.toContain("also on");
+    expect(res.stats?.same_ticket_two_jobs).toBeUndefined();
+  });
+
+  /** A PICK HE HAS ALREADY MADE IS NOT A QUESTION. The copy he set aside points at the copy he kept,
+   *  which is what makes the group read as answered (isOpenDuplicateGroup) — and the set-aside copy
+   *  can never be billed anyway, by the guard that was already there. */
+  it("says nothing about a duplicate he has already answered", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillOfTheseAmounts: [HERE_ROW, { ...THERE_BILL, superseded_by_bill_id: HERE_BILL.id }],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    expect((res.stats?.warnings ?? []).join(" ")).not.toContain("also on");
+  });
+
+  /** NOTHING IS CLAIMED FROM A READ THAT FAILED, and the import still lands: an invented all-clear is
+   *  worse than silence, and Reconcile's picker still finds it afterwards. */
+  it("a lost read says nothing, logs itself, and does not stop the import", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillError: { message: "timeout" },
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    expect((res.stats?.warnings ?? []).join(" ")).not.toContain("also on");
+  });
+
+  /**
+   * IT IS NOT A SECOND OPINION ABOUT WHAT A DUPLICATE IS. One function decides (duplicateTicketGroups,
+   * the same one Reconcile's picker is built from), so a ticket this warns about is one that picker will
+   * show him. A second matcher here is how the two screens come to disagree about his money.
+   */
+  it("asks duplicateTicketGroups, and nothing of its own", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/ticket-on-two-jobs.ts"), "utf8");
+    expect(src).toContain("duplicateTicketGroups(");
+    expect(src).toContain("isOpenDuplicateGroup(");
+    // It never pairs bills itself: the matcher is `findDuplicateBills`, reached only through
+    // duplicateTicketGroups, so there is one answer about what a duplicate is and one place it lives.
+    expect(src).not.toMatch(/findDuplicateBills\s*\(/);
+    expect(src).not.toContain('from "@/lib/supplier-identity"');
+    expect(src).toContain("copySaid(");
+  });
+
+  /**
+   * AND THE QUESTION HAS A DOOR (no dead ends). The pick is made where that record lives, so the invoice
+   * links to Reconcile's picker rather than carrying a second copy of it. The anchor is really drawn
+   * there whenever this fires: the warning only speaks about a group `isOpenDuplicateGroup` calls open,
+   * and Reconcile draws the section for every group it has, answered or not.
+   */
+  it("the invoice page draws the door to the picker when a ticket is on two jobs", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
+    expect(src).toContain("same_ticket_two_jobs");
+    expect(src).toContain('href="/reconcile#same-ticket-two-jobs"');
+    expect(src).toContain("Pick Which Job The Ticket Is On");
+    // Drawn only when there is one, so it is never a door to a page with nothing about it.
+    expect(src).toContain("{twoJobTickets > 0 && (");
+    const anchors = readFileSync(join(process.cwd(), "src/lib/reconcile-kinds.ts"), "utf8");
+    expect(anchors).toContain('anchor: "same-ticket-two-jobs"');
+  });
+
+  /**
+   * ── AND THE QUESTION SURVIVES THE WALK TO THE SEND BUTTON (review, 2026-10-03) ──────────────
+   *
+   * The sentence existed only at the moment of an import. The four job-level doors toasted it and then
+   * changed the route under it — five seconds for a sentence with two dollar figures in it, while the
+   * draft was still loading — and the draft itself started with the count at 0, so it opened with no
+   * sentence and no "Pick Which Job" link, and Send had no check. Two teeth: the toast now sticks, and
+   * the page asks the server itself on every load.
+   */
+  it("every job-level door makes a money warning stick instead of flashing it", () => {
+    for (const door of [
+      "src/app/(app)/jobs/[id]/new-invoice-button.tsx",
+      "src/app/(app)/jobs/[id]/unbilled-card.tsx",
+      "src/app/(app)/billing/new-invoice-button.tsx",
+      "src/app/(app)/billing/invoice-job-button.tsx",
+    ]) {
+      const src = readFileSync(join(process.cwd(), door), "utf8");
+      expect(src, door).toContain('toast(res.importWarning, res.partial ? "error" : "info", undefined, res.partial ? { sticky: true } : undefined)');
+    }
+  });
+
+  it("the invoice page asks the question itself on every load, by the same one matcher", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/page.tsx"), "utf8");
+    // One function, so the page and the import cannot disagree about what a duplicate is.
+    expect(page).toContain("twoJobTicketsOnInvoice(");
+    expect(page).toContain('.filter((i) => i.import_source === "costs")');
+    expect(page).toContain("twoJobTickets={twoJobTickets.said}");
+    const detail = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
+    // The count and the sentence both START at what the server found, not at nothing.
+    expect(detail).toContain("useState(twoJobSeed.length)");
+    expect(detail).toContain('useState<string | null>(twoJobSeed.join(". ") || null)');
+    expect(detail).toContain("{!importWarn && twoJobSaid && <span className=\"text-xs text-amber-700\">{twoJobSaid}.</span>}");
+    const check = readFileSync(join(process.cwd(), "src/app/(app)/billing/ticket-on-two-jobs.ts"), "utf8");
+    // It reads only; a read is a proposal, and a lost read says nothing rather than an all-clear.
+    expect(check).toContain("return ticketsAlsoOnAnotherJob(supabase, orgId, String(jobId), bills, new Set(bills.map((b) => b.id)));");
+    expect(check).toContain('reportError("invoicePage.ticketOnTwoJobs"');
+    expect(check).not.toMatch(/\.(?:insert|update|delete|upsert)\(/);
   });
 });

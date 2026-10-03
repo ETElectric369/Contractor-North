@@ -169,7 +169,9 @@ export function NewInvoiceButton({
         });
         return;
       }
-      if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info");
+      // STICKY WHEN IT IS A MONEY QUESTION (review, 2026-10-03): `goTo` changes the route under the
+      // toast, so a sentence with two dollar figures in it had five seconds while the draft loaded.
+      if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info", undefined, res.partial ? { sticky: true } : undefined);
       goTo(res.id);
     });
   }

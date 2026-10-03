@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, Check, Columns3, Loader2, Store } from "lucide-react";
+import { Check, Columns3, Loader2, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { FIELD_LABELS, sayDollars, type OpenListColumns, type OpenListField, type OpenListView, type PlanPaper } from "@/lib/supplier-open-list";
 import { applyOpenList, pickOpenListAccount, pickOpenListColumns } from "@/app/(app)/bills/open-list-actions";
-import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
+import { NotNowOrDelete } from "@/components/not-now-or-delete";
 
 /**
  * A SUPPLIER'S OPEN LIST, AS ONE CARD IN SORT THESE (Erik, 2026-09-26: "we cant get too complicated
@@ -20,7 +20,7 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  * total or count says it is short closes nothing at all (Apply then only adds and corrects).
  */
 
-type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) => void;
+type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string, gone?: string) => void;
 
 const PICK_ORDER: OpenListField[] = ["reference", "openBalance", "amount", "invoiceDate", "type", "po", "dueDate", "discountAmount", "discountDate"];
 
@@ -65,10 +65,27 @@ export function OpenListCard({
   const [sure, setSure] = useState(false);
   const [cols, setCols] = useState<OpenListColumns>(() => view?.needs?.columns ?? {});
 
+  // PUT IT AWAY OR BIN IT, with where it goes said on the card (NotNowOrDelete, 2026-10-03). Erik
+  // dropped a statement, wanted to bin it, and could not: this row offered Apply and Not Now and no
+  // menu at all, and Not Now archived it without a word about where it went.
+  //
+  // AND DELETE SAYS WHAT COMES OFF THE BOOKS (review, 2026-10-03). `deleteOrganizedItem` runs the Undo
+  // first, so on a card left on screen from before an Apply in another tab Delete takes those papers
+  // back — while the one fixed confirm said "nothing it would have changed is written".
+  const appliedPapers = view?.appliedPapers ?? 0;
   const notNow = (
-    <Button variant="outline" onClick={() => run("keep", () => keepPaperwork(itemId), "Set aside.")} disabled={working} title="Set it aside in Organize's Archive">
-      <Archive /> Not Now
-    </Button>
+    <NotNowOrDelete
+      itemId={itemId}
+      what="supplier's list"
+      label="Not Now"
+      alsoTakesBack={
+        appliedPapers > 0
+          ? `the ${appliedPapers === 1 ? "1 paper" : `${appliedPapers} papers`} an Apply on this list already wrote or marked paid go back as they were`
+          : null
+      }
+      run={run}
+      working={working}
+    />
   );
 
   if (!view) {

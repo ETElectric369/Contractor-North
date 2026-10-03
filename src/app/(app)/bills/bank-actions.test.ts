@@ -1108,10 +1108,46 @@ describe("the owner's money", () => {
     // Any other paper goes as it is.
     const plain = { id: "p", proposal: { picture: true } };
     expect(bankLinesStayHere(plain, undefined)).toBe(plain);
-    // Both pages that hand paper rows to the browser run every row through it.
+    // EVERY PLACE THAT HANDS A PAPER ROW TO THE BROWSER RUNS EVERY ROW THROUGH IT. The bank card moved
+    // off /bills to /reconcile on 2026-10-03 (lib/paperwork answeredOnReconcile), so the list of places
+    // moved with it rather than this tripwire being dropped: Reconcile's read, Organize's page, and
+    // Snap Or Note's sheet, which draws the same card for a file just dropped.
     const { readFileSync } = await import("node:fs");
-    for (const page of ["src/app/(app)/bills/page.tsx", "src/app/(app)/organize/page.tsx"])
-      expect(readFileSync(page, "utf8")).toContain("...bankLinesStayHere(i, bankCards[i.id]),");
+    for (const page of [
+      "src/app/(app)/reconcile/statement-cards.ts",
+      "src/app/(app)/organize/page.tsx",
+      "src/app/(app)/snap-or-note-actions.ts",
+    ])
+      expect(readFileSync(page, "utf8"), page).toContain("...bankLinesStayHere(i, bankCards[i.id]),");
+    // AND /bills HANDS NO BANK VIEW AT ALL ANY MORE, which is the stronger boundary: it does not read
+    // one, so it cannot leak one. A download there would carry `bank: null` and draw no card.
+    const bills = readFileSync("src/app/(app)/bills/page.tsx", "utf8");
+    expect(bills).not.toContain("bankViews(");
+    expect(bills).toContain("const papers = trayPapers.filter((i) => !answeredOnReconcile(i));");
+  });
+
+  /**
+   * ── AND NO SENTENCE SENDS HIM TO A CARD THAT IS NOT THERE (review, 2026-10-03) ──────────────
+   *
+   * The Undo's failure line still sent him to the queue card on Bills, where a bank download has not been
+   * drawn since the cards moved. It shows in the card's OWN status line (ok:true with a message), so he
+   * would have gone looking on a page that holds only a pointer. The sweep of these sentences greps the
+   * words "Needs You on Bills" — and this one never said Bills, so it slipped straight through.
+   */
+  it("the Undo's failure line names Reconcile, the page the card is actually on", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/app/(app)/bills/bank-actions.ts", "utf8");
+    expect(src).toContain("The card didn't reset on Reconcile");
+    // THE TRIPWIRE IS THE WORDS, however they are phrased: no sentence and no comment in the files these
+    // two cards are drawn from may put the answer "under Needs You" again.
+    for (const f of [
+      "src/app/(app)/bills/bank-actions.ts",
+      "src/app/(app)/bills/bank-core.ts",
+      "src/app/(app)/bills/supplier-import-actions.ts",
+      "src/components/paperwork-row.tsx",
+    ]) {
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/under Needs You|to Needs You/);
+    }
   });
 });
 

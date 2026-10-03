@@ -1093,6 +1093,15 @@ export interface DuplicateBillCopy {
   billId: string;
   jobId: string | null;
   jobName: string | null;
+  /**
+   * THE JOB SAID IN FULL — the place, the number AND who ("4 Bramble Lane · J-102 — Remy Dunsmore").
+   * Erik: "i cant tell by job numbers alone". A duplicate is now also named in a sentence read AWAY
+   * from this card — the warning on an invoice being built (billing/actions.ts) — and there the place
+   * alone is not enough to know which job it is. Built by `jobSaidLabel`, so one function decides how a
+   * job is named everywhere, and every caller of `duplicateTicketGroups` reads the same answer.
+   * Null when the paper is on no job at all.
+   */
+  jobSaid?: string | null;
   billDate: string | null;
   supplier: string;
   /** Where it came from: the CED portal filename, "85 Whit.pdf", whatever the scanner kept. */
@@ -1109,9 +1118,20 @@ export interface DuplicateBillGroup {
   resolution?: { keptBillId: string; at?: string | null } | null;
 }
 
-/** "13631 Nightshade", "Overhead (no job)" - a copy named the way it reads on the card. */
+/** "13631 Nightshade", "Overhead (no job)" - a copy named the way it reads ON the card, beside the
+ *  other copy. The button says this, because the card around it already shows both jobs. */
 export function copyPlace(copy: DuplicateBillCopy): string {
   return copy.jobName?.trim() || "Overhead (no job)";
+}
+
+/**
+ * A COPY NAMED IN A SENTENCE READ AWAY FROM THE CARD: the place, the number and who. Erik: "i cant
+ * tell by job numbers alone", and an invoice being built on one job has no sight of the other.
+ * Falls back to the place when the read that made the copy did not carry the number or the customer,
+ * so a thinner projection says less rather than saying something wrong.
+ */
+export function copySaid(copy: DuplicateBillCopy): string {
+  return copy.jobSaid?.trim() || copyPlace(copy);
 }
 
 /**

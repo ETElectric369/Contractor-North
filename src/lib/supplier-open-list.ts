@@ -132,6 +132,9 @@ export type OpenListNeedsColumns = {
   listDateFrom: OpenList["listDateFrom"];
   /** The table as it came (capped), so the picker can show it and the answer can re-read it. */
   raw: string[][];
+  /** The heading block a PDF's crop took off (ReadListInput.heading), kept so the re-read after the
+   *  columns are picked still finds the paper's own date and printed total. */
+  heading?: string[][];
   header: string[];
   /** The row the header was found on, or -1 when there is none. */
   headerRow: number;
@@ -463,6 +466,13 @@ export function printedFigures(lines: readonly string[]): { total: number | null
 
 export type ReadListInput = {
   table: readonly (readonly string[])[];
+  /**
+   * THE HEADING BLOCK A PDF'S CROP TOOK OFF (pdf-table's `fromHeading`), untrusted cells like `table`
+   * itself. A letterhead taller than the readers' 15-row reach makes the table start AT its column
+   * headings, so the rows where the paper names its own date and prints its own total are not in
+   * `table` any more; they are read here, on the server, exactly as if they were still above it.
+   */
+  heading?: readonly (readonly string[])[];
   from: OpenListSource;
   name: string;
   listDate: string | null;
@@ -483,6 +493,9 @@ export type ReadListInput = {
 export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenList } | { ok: false; needs: OpenListNeedsColumns } | { ok: false; error: string } {
   const table = capTable(input.table).filter((r) => r.some((c) => c.trim() !== ""));
   if (!table.length) return { ok: false, error: `${input.name} has no rows in it.` };
+  // THE ROWS A PDF'S CROP TOOK OFF, read here exactly as if they were still above the table. Capped
+  // and blank-stripped by the same rule, because they came in from a browser like every other cell.
+  const cropped = capTable(input.heading ?? []).filter((r) => r.some((c) => c.trim() !== ""));
   let headerRow = input.headerRow ?? findHeaderRow(table);
   let columns: OpenListColumns | null = input.columns ?? null;
   let unsure: OpenListField[] = [];
@@ -492,7 +505,7 @@ export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenL
         ok: false,
         needs: {
           v: 1, from: input.from, name: input.name, listDate: input.listDate, listDateFrom: input.listDateFrom,
-          raw: table, header: [], headerRow: -1, columns: {}, missing: ["reference", "openBalance"], unsure: [],
+          raw: table, heading: cropped, header: [], headerRow: -1, columns: {}, missing: ["reference", "openBalance"], unsure: [],
         },
       };
     }
@@ -509,7 +522,7 @@ export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenL
       ok: false,
       needs: {
         v: 1, from: input.from, name: input.name, listDate: input.listDate, listDateFrom: input.listDateFrom,
-        raw: table, header, headerRow, columns, missing, unsure,
+        raw: table, heading: cropped, header, headerRow, columns, missing, unsure,
       },
     };
   }
@@ -573,7 +586,32 @@ export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenL
     seen.set(key, next);
     rows.push(next);
   }
-  const printed = printedFigures([...table.slice(0, Math.max(headerRow, 0)).map((r) => r.join(" ")), ...trailer]);
+  /**
+   * THE PAPER'S OWN BLOCK: the rows above its column headings, plus whatever a PDF's crop took off the
+   * top (`input.heading`). A tall letterhead makes the table start AT the headings, so without the
+   * cropped rows this slice is empty and the paper's printed total and its own date are both lost.
+   */
+  const headingBlock = [...cropped, ...table.slice(0, Math.max(headerRow, 0))];
+  const printed = printedFigures([...headingBlock.map((r) => r.join(" ")), ...trailer]);
+  /**
+   * THE DAY THE PAPER PRINTS BEATS THE DAY THE FILE WAS SAVED (tableStatementDate: $9,410.92).
+   *
+   * The caller hands in the file's save timestamp, or the day it came in. Neither is the statement's
+   * own date, and on his real statement the file was saved two months after the paper was printed —
+   * which moved `closeCutoff` two months forward and would have marked 24 unpaid bills paid.
+   *
+   * THE FILE TIMESTAMP IS THE LAST RESORT, NEVER A CEILING OVERRIDDEN. A printed date LATER than the
+   * day we already have is a misread, not a statement from the future: the file cannot have been
+   * saved before the paper it holds was printed, and taking a later date would widen the cutoff — the
+   * exact harm this closes. So only an earlier (or equal) printed date is taken — and only when there
+   * IS a day to hold it against, because an unbounded date read off a paper could be any year at all,
+   * and a cutoff is only ever as safe as the day it is counted back from.
+   *
+   * A LIST THAT ALREADY SAYS "printed" IS LEFT ALONE: the text lane found the date in the whole text,
+   * which is more than this heading block can see.
+   */
+  const printedDate = input.listDateFrom === "printed" ? null : tableStatementDate(headingBlock, headingBlock.length);
+  const ownDate = printedDate && input.listDate && printedDate <= input.listDate ? printedDate : null;
   if (!rows.length) return { ok: false, error: `No papers could be read from ${input.name}.${skipped.length ? ` ${skipped.slice(0, 3).map((s) => s.why).join(" ")}` : ""}` };
   return {
     ok: true,
@@ -581,8 +619,8 @@ export function readOpenListTable(input: ReadListInput): { ok: true; list: OpenL
       v: 1,
       from: input.from,
       name: input.name,
-      listDate: input.listDate,
-      listDateFrom: input.listDateFrom,
+      listDate: ownDate ?? input.listDate,
+      listDateFrom: ownDate ? "printed" : input.listDateFrom,
       accountNumber,
       printedTotal: input.printedTotal ?? printed.total,
       printedCount: input.printedCount ?? printed.count,
@@ -765,6 +803,34 @@ function statementFromLines(lines: readonly string[]): { rows: string[][]; heade
   return { rows, header: ["Reference", "Type", "Invoice Date", "Due Date", "Amount", "Open Balance"] };
 }
 
+/** The words a statement prints over its own date, and nothing else: never a row's date column. */
+const OWN_DATE_LABEL = /^(?:statement\s*date|as\s*of|date)\s*:?$/i;
+
+/**
+ * THE SAME LABEL WITH ITS DAY IN THE SAME CELL. "Statement Date: 09/25/26" is one cell; so is a title
+ * cell that reads "Open Items As Of 09/25/26", where the label is not at the start. `statement date`
+ * and `as of` are the paper naming its own day and may be found anywhere in the cell; a BARE `date`
+ * may not — "Invoice Date Due Date" is a column heading, so that one has to start the cell.
+ */
+const OWN_DATE_IN_CELL: readonly { re: RegExp; rank: 2 | 1 }[] = [
+  { re: /\b(?:statement\s*date|as\s*of)\b\s*:?\s*(.+)$/i, rank: 2 },
+  { re: /^\s*date\b\s*:?\s*(.+)$/i, rank: 1 },
+];
+
+/** How loudly a cell claims to be the statement's own day: the explicit words beat a bare DATE. */
+const ownDateRank = (cell: string): 2 | 1 | 0 => {
+  if (!OWN_DATE_LABEL.test(cell)) return 0;
+  return /^(?:statement\s*date|as\s*of)/i.test(cell.trim()) ? 2 : 1;
+};
+
+/** A date out of a heading-block cell. An .xlsx hands a date cell up as its Excel serial ("46290"),
+ *  so `serialOk`: a cell a date LABEL points at is a date column in effect (readXlsx reads no styles,
+ *  so it cannot know). The split is for a value cell that runs on ("09/25/26  PAGE 1"). */
+const headingDate = (cell: string): string | null => {
+  const s = String(cell ?? "").trim();
+  return readDate(s, true) ?? readDate(s.split(/\s+/)[0], true);
+};
+
 /** "STATEMENT DATE 09/25/26", "Statement Date: Sep 25, 2026", "DATE\n09/25/26" near the top. */
 function statementDate(lines: readonly string[]): string | null {
   for (let i = 0; i < Math.min(lines.length, 60); i++) {
@@ -776,6 +842,83 @@ function statementDate(lines: readonly string[]): string | null {
     }
   }
   return null;
+}
+
+/**
+ * ── THE DATE A TABLE-BORNE STATEMENT CALLS ITS OWN (2026-10-03; it is worth $9,410.92) ────────
+ *
+ * Erik dropped a real supplier statement and it proposed marking 23 bills paid. Of the 26 unpaid
+ * bills on that account only 2 were dated on or before the day the statement was PRINTED; the other
+ * 24 — $9,410.92 of money he genuinely owes — were dated after it. `closeCutoff` was already right.
+ * The DATE was wrong: `readListFile` sets `listDate` from the file's save timestamp, which was the
+ * day he downloaded the file, two months after the paper was printed, so the cutoff moved two months
+ * forward and swallowed every bill that had arrived since.
+ *
+ * ONE RULE, ONE PLACE. `statementDate` already hunts for the printed day and was used ONLY on the
+ * pasted-text path. This asks the SAME function of a table, so a statement that arrives as a CSV, an
+ * .xlsx or a PDF whose columns came off as cells finds its own date exactly as pasted text does.
+ *
+ * IT LOOKS ONLY AT THE HEADING BLOCK — the rows ABOVE the column headings, which is where the paper
+ * speaks for itself and where `printedFigures` already reads its total. Every row further down
+ * carries a date of its own, so a naive first-date-you-find would take an invoice's date and call it
+ * the statement's; above the headings there are no rows.
+ *
+ * AND IT READS BOTH WAYS A HEADING BLOCK IS PRINTED. His own layout puts the labels DATE / ACCOUNT /
+ * PAGE down one column with their values in the next cell ACROSS, so the day sits beside the word.
+ * Other papers print the labels across one row and the values across the next, so the day sits
+ * UNDER the word, in the same column. Both are the paper naming its own date; neither is a guess.
+ *
+ * ── IT SCANS CELLS, NOT THE JOINED LINE (review, 2026-10-03) ──────────────────────────────────
+ *
+ * This asked `statementDate` of each row with its blanks dropped and joined, and that pattern is
+ * ANCHORED at the start of the line — so ANY cell to the left of the label hid it. On a PDF every mark
+ * on one y-line is one row (pdf-table rowsOf), so the letterhead, the remit-to block or the bill-to
+ * address sitting on the same line as the DATE box is the ordinary case, and "ET ELECTRIC 123 MAIN ST
+ * | DATE | 09/25/26" read as no date at all — straight back to the file's save day, which is the
+ * $9,410.92 harm this function exists to stop. Two labels on one row ("Account No: 55012 | Statement
+ * Date: 09/25/26") failed the same way, and so did "Statement as of 09/25/26".
+ *
+ * SO EVERY CELL IS ASKED, and the day is taken from the next non-blank cell ACROSS, else the cell
+ * BELOW. `statement date` and `as of` beat a bare `date`, so a paper printing both gives the one it
+ * calls its own. The joined line stays as the last resort, because that is the same rule the pasted-
+ * text lane reads with and a heading block that came off as one cell per line is exactly its shape.
+ *
+ * AND AN .xlsx DATE CELL IS A NUMBER (review, 2026-10-03). `readXlsx` reads no styles.xml, so a real
+ * Excel date comes up as its serial ("46290"). The row date columns already pass `serialOk`; the
+ * heading reads did not, so an .xlsx statement whose DATE cell is a genuine date behaved exactly as
+ * before this function existed. A cell a date label points at is a date column in effect (headingDate).
+ */
+export function tableStatementDate(table: readonly (readonly string[])[], headerRow: number): string | null {
+  const rows = (table ?? []).slice(0, Math.max(headerRow, 0)).map((r) => (r ?? []).map((c) => String(c ?? "").trim()));
+  const found: { rank: number; date: string }[] = [];
+  const add = (rank: number, date: string | null) => {
+    if (date) found.push({ rank, date });
+  };
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = 0; j < rows[i].length; j++) {
+      const cell = rows[i][j];
+      if (!cell) continue;
+      // THE DAY IN THE LABEL'S OWN CELL: "Statement Date: 09/25/26", "Open Items As Of 09/25/26".
+      for (const { re, rank } of OWN_DATE_IN_CELL) {
+        const m = re.exec(cell);
+        if (m) add(rank, headingDate(m[1]));
+      }
+      const rank = ownDateRank(cell);
+      if (!rank) continue;
+      // THE DAY BESIDE THE WORD: the next cell across that has anything in it (his own layout).
+      const across = rows[i].slice(j + 1).find(Boolean);
+      if (across) add(rank, headingDate(across));
+      // THE DAY UNDER THE WORD: the cell below the label, in its own column (indices kept).
+      if (i + 1 < rows.length) add(rank, headingDate(rows[i + 1][j] ?? ""));
+    }
+  }
+  // "STATEMENT DATE" and "AS OF" beat a bare "DATE", so a paper printing both gives the one it calls
+  // its own; at the same rank the first one printed wins.
+  let best: { rank: number; date: string } | undefined;
+  for (const f of found) if (!best || f.rank > best.rank) best = f;
+  if (best) return best.date;
+  // THE LAST RESORT: the heading block as lines, read by the rule the pasted-text lane uses.
+  return statementDate(rows.map((r) => r.filter(Boolean).join(" ")));
 }
 
 /**
@@ -1417,6 +1560,13 @@ export type OpenListView = {
     firstList: boolean;
   };
   dateSaid: string;
+  /**
+   * HOW MANY PAPERS AN APPLY ON THIS LIST ALREADY WROTE OR MARKED. 0 when none has. The card's Delete
+   * confirm names it, because `deleteOrganizedItem` runs the Undo first: on a card still on screen from
+   * before an Apply in another tab, Delete takes those papers back, and the one fixed confirm sentence
+   * said nothing was written.
+   */
+  appliedPapers: number;
   /** Something that stops it, in words (no supplier account at all, a list that read nothing). */
   problem: string | null;
 };

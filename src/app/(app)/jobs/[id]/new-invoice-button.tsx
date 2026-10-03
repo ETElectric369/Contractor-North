@@ -176,7 +176,13 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
       toast(res.error ?? "Could not create the invoice.", "error", door ? { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) } : undefined);
       return false;
     }
-    if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info");
+    // A MONEY WARNING STAYS UNTIL IT IS READ (review, 2026-10-03). This toast raised the sentence and
+    // then changed the route under it: five seconds for "the same $95.27 ticket is also on 4 Bramble
+    // Lane · J-102 — Remy Dunsmore. If that was one trip, pick which job it belongs to…" while the draft
+    // was still loading, and then the draft itself said nothing. `partial` means something needs looking
+    // at before this goes out, which is exactly the sentence that may not be a glimpse — the same reason
+    // the sales-tax line below is sticky. A plain fact ("Started INV-062…") still passes by.
+    if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info", undefined, res.partial ? { sticky: true } : undefined);
     router.push(`/billing/${res.id}`);
     return true;
   }

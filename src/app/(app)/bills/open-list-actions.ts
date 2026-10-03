@@ -22,7 +22,7 @@ import { isMissingColumnError } from "@/app/(app)/organize/paperwork-core";
  * A SUPPLIER'S OPEN LIST: THE DOORS (Erik, 2026-09-26: "we cant get too complicated for the user
  * so maybe we can fold all of these tools into the statement upload"). There is no button for this.
  * A list arrives through the doors paper already arrives through (Snap Or Note, Organize, the
- * paste box, a statement PDF) and waits under Needs You on Bills as ONE card. These are the card's buttons.
+ * paste box, a statement PDF) and waits on Reconcile as ONE card (lib/paperwork answeredOnReconcile). These are the card's buttons.
  */
 
 type Result = { ok: boolean; error?: string; message?: string };
@@ -62,6 +62,7 @@ async function saveStored(supabase: any, orgId: string, id: string, p: PaperProp
   if (error) return { ok: false, error: dbError(error) };
   if (!back?.length) return { ok: false, error: "Nothing was saved. The list was applied or removed from another screen." };
   revalidatePath("/bills");
+  revalidatePath("/reconcile");
   revalidatePath("/organize");
   return { ok: true };
 }
@@ -86,7 +87,10 @@ export async function pickOpenListColumns(id: string, picked: OpenListColumns): 
   }
   if (columns.reference === undefined) return { ok: false, error: "Pick the column that holds the paper numbers." };
   if (columns.openBalance === undefined && columns.amount === undefined) return { ok: false, error: "Pick the column that holds what is still owed." };
-  const read = readOpenListTable({ table: needs.raw, from: needs.from, name: needs.name, listDate: needs.listDate, listDateFrom: needs.listDateFrom, columns, headerRow: needs.headerRow });
+  // `heading` rides along for the same reason `pdf` does: a PDF whose letterhead pushed the headings out
+  // of the readers' reach came here with its own date box and printed total cropped off the table, and
+  // this re-read is the ONE path that can still take them (the list it builds has not been applied).
+  const read = readOpenListTable({ table: needs.raw, heading: needs.heading ?? [], from: needs.from, name: needs.name, listDate: needs.listDate, listDateFrom: needs.listDateFrom, columns, headerRow: needs.headerRow });
   if (!read.ok) return { ok: false, error: "error" in read ? read.error : "Those columns still don't read as a list. Check the paper number and amount columns." };
   const list = { ...read.list, columnsBy: "person" as const, accountId: needs.accountId ?? null, accountFrom: needs.accountFrom ?? null };
   const saved = await saveStored(ctx.supabase, ctx.orgId, id, got.p, { list, needs: null });
@@ -150,6 +154,7 @@ export async function applyOpenList(id: string, opts: { fingerprint: string; who
     wholeList: opts?.wholeList === true,
   });
   revalidatePath("/bills");
+  revalidatePath("/reconcile");
   revalidatePath("/organize");
   revalidatePath("/planner"); // My Day's supplier cards and Pay By line read these same papers
   return res;

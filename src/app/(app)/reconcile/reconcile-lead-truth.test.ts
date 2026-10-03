@@ -388,15 +388,32 @@ describe("the all-clear is scoped to what this page counted", () => {
     expect(textOf(html)).toContain("Drop A Bank Or Supplier Statement");
   });
 
-  it("and the scope is required, because nothing on this page reads the paper queue", async () => {
-    // THE TRIPWIRE FROM THE OTHER END. The day this page does read `organized_items` and counts what
-    // waits under Needs You, the sentence above may be widened — and that happens here, on purpose,
-    // rather than in a copy-edit that nobody checked the reads for.
+  it("and the page reads the queue in exactly one place, which is what lets the lead speak of it", async () => {
+    /**
+     * THE TRIPWIRE, TURNED AROUND ON 2026-10-03 — which is what it was written for. It used to say that
+     * NOTHING on this page read `organized_items`, and its own note said: "The day this page does read
+     * organized_items and counts what waits under Needs You, the sentence above may be widened — and
+     * that happens here, on purpose, rather than in a copy-edit that nobody checked the reads for."
+     *
+     * That day came: a statement is answered where it is dropped (lib/paperwork answeredOnReconcile).
+     * So the rule is now that the read lives in ONE named place and the LEAD COUNTS IT — the all-clear
+     * is gated on `statementsWaiting`, so "Nothing here is waiting on you" is still a claim about
+     * something this page measured. A second read somewhere on this page could count a statement the
+     * lead does not, which is the false all-clear from a new direction.
+     */
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    for (const f of ["page.tsx", "reconcile-read.ts", "supplier-gap.tsx"]) {
-      const src = readFileSync(join(process.cwd(), "src/app/(app)/reconcile", f), "utf8");
-      expect(src, f).not.toContain('from("organized_items")');
+    const dir = "src/app/(app)/reconcile";
+    for (const f of ["page.tsx", "reconcile-read.ts", "supplier-gap.tsx", "bank-drop-line.tsx"]) {
+      expect(readFileSync(join(process.cwd(), dir, f), "utf8"), f).not.toContain('from("organized_items")');
     }
+    const cards = readFileSync(join(process.cwd(), dir, "statement-cards.ts"), "utf8");
+    expect(cards).toContain('from("organized_items")');
+    // Three organizations share one database: the read is pinned to this one (tenant isolation).
+    expect(cards).toContain('.eq("org_id", orgId)');
+    // And the lead is gated on it, so it cannot print an all-clear over a statement waiting below.
+    const page = readFileSync(join(process.cwd(), dir, "page.tsx"), "utf8");
+    expect(page).toContain("const statementsWaiting = statements.items.length;");
+    expect(page).toContain("&& !statementsWaiting;");
   });
 });

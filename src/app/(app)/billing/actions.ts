@@ -48,6 +48,7 @@ import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/p
 import { formatCurrency } from "@/lib/utils";
 import { paymentMethodKey } from "@/lib/payment-method";
 import { reportError } from "@/lib/observe";
+import { ticketsAlsoOnAnotherJob } from "./ticket-on-two-jobs";
 import {
   readJobStock,
   stockImportRows,
@@ -557,6 +558,13 @@ export type ImportStats = {
   /** Money the office should look at before sending, one sentence each (materials only, so far):
    *  an edited "Supplies & tax" row left behind by its re-priced parts (INV-074). */
   warnings?: string[];
+  /**
+   * HOW MANY TICKETS ON THIS INVOICE ARE ALSO FILED ON ANOTHER JOB (2026-10-03). One $95.27 ticket went
+   * out on two jobs and both customers paid. The sentences are in `warnings` like every other thing to
+   * look at before sending; this count is what lets the screen draw the door to the picker beside them,
+   * so the question is not asked with nowhere to answer it.
+   */
+  same_ticket_two_jobs?: number;
   /** What this run did that the counts don't say, one clause each, for a caller that writes its
    *  own sentence instead of showing `summary` (refreshActualsDraw): a counter-preview price, a
    *  supplier return not credited or held, the invoice's own markup kept. Also in `summary`. */
@@ -2401,6 +2409,22 @@ async function importCostsCore(
     const kept = `materials priced at the ${keptMarkup}% markup already on this invoice`;
     stats.summary += ` · ${kept}`;
     notes.push(kept);
+  }
+  /**
+   * THE SAME TICKET ON TWO JOBS, ASKED WHILE IT IS STILL FREE TO ANSWER (2026-10-03). One $95.27
+   * supply-house ticket was filed on two jobs; both were invoiced, both customers paid, and $221.43 was
+   * collected for one $95.27 purchase. The marked-duplicate guard above (`superseded_by_bill_id`) is
+   * real, but nothing asked at the moment the invoice was BUILT — and he had not opened Reconcile yet.
+   *
+   * NOT A REFUSAL. Two identical runs a month apart are normal and only he was on those jobs, so this
+   * is a question on the same line the office already reads before sending. Named for the bills that
+   * LANDED (`after`), like the counter-preview warning beside it: a receipt held back behind an edited
+   * line puts no charge on this invoice to go and look at.
+   */
+  const twoJobs = await ticketsAlsoOnAnotherJob(supabase, ctx.orgId, inv.job_id, (bills ?? []) as { id: string; amount: unknown }[], after);
+  if (twoJobs.said.length) {
+    stats.warnings = [...(stats.warnings ?? []), ...twoJobs.said];
+    stats.same_ticket_two_jobs = twoJobs.said.length;
   }
   const flagged = after ? provisional.filter((id) => after.has(id)) : provisional;
   if (flagged.length) {

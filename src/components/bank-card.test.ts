@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { BankView } from "@/lib/bank-download";
@@ -104,6 +106,7 @@ const VIEW: BankView = {
   skipped: [],
   appliedSaid: null,
   canUndo: false,
+  appliedLines: 0,
   swapped: false,
   canSwap: false,
   askAccount: false,
@@ -172,6 +175,12 @@ describe("the bank card", () => {
     expect(text).not.toContain("No guess");
     expect(labels).toContain("Apply");
     expect(labels).toContain("Set Aside");
+    // DELETE IS ON THE CARD, AND BOTH DOORS SAY WHERE THE PAPER GOES (2026-10-03). Erik dropped a
+    // statement, wanted to bin it, and could not: this row draws no menu, so Set Aside was the only way
+    // out and it archived the download with no word on the card about where it went.
+    expect(labels).toContain("Delete");
+    expect(text).toContain("Set Aside keeps it in Organize, under Archive");
+    expect(text).toContain("Delete removes it and its file for good");
     // "Not Now" means nothing here: a pick is cleared by tapping it again.
     expect(labels).not.toContain("Not Now");
     for (const b of buttons(html)) {
@@ -214,18 +223,61 @@ describe("the bank card", () => {
     expect(buttons(render(VIEW)).every((b) => !b.text.includes("J-054"))).toBe(true);
   });
 
-  it("a problem is said, with Set Aside; no Apply", () => {
-    const text = textOf(render({ ...VIEW, problem: "Sorting a bank download needs one database update first. It is waiting here and nothing was changed." }));
+  it("a problem is said, with Set Aside and Delete; no Apply", () => {
+    const html = render({ ...VIEW, problem: "Sorting a bank download needs one database update first. It is waiting here and nothing was changed." });
+    const text = textOf(html);
     expect(text).toContain("needs one database update");
     expect(text).not.toContain("Apply");
     expect(text).toContain("Set Aside");
+    // A DOWNLOAD HE CANNOT ANSWER IS STILL ONE HE CAN BIN: the way out is drawn in every state.
+    expect(buttons(html).map((b) => b.text)).toContain("Delete");
   });
 
-  it("the same month downloaded again: nothing to Apply, one tap puts it away", () => {
+  /**
+   * ── THE WAY OUT IS DRAWN IN EVERY STATE, THIS ONE INCLUDED (review, 2026-10-03) ─────────────
+   *
+   * "Done: Nothing New" used to REPLACE the Set Aside / Delete pair, so the one state a second download
+   * of an overlapping month lands in had no Delete and no sentence saying where the paper goes — which
+   * is the very thing Erik could not find, in the shape it most often arrives. One put-away door still,
+   * not two: the door's words change, the pair does not.
+   */
+  it("the same month downloaded again: nothing to Apply, and the paper can still be binned", () => {
     const html = render({ ...VIEW, rows: [], counts: { ...VIEW.counts, matched: 0, ruled: 0, needRows: 0, needLines: 0 }, headline: "Bank ••1234 · Aug 26–Sep 25 · 118 already in North · nothing needs you" });
     const labels = buttons(html).map((b) => b.text);
     expect(labels).toContain("Done: Nothing New");
+    expect(labels).toContain("Delete");
     expect(labels).not.toContain("Apply");
+    // One door that puts it away, never two that archive the same paper in different words.
+    expect(labels).not.toContain("Set Aside");
+    expect(labels.filter((l) => l === "Done: Nothing New")).toHaveLength(1);
+    // And where it goes is said ON the card, not only in the toast after the tap.
+    expect(textOf(html)).toContain("keeps it in Organize, under Archive");
+  });
+
+  /**
+   * ── DELETE SAYS WHAT COMES OFF THE BOOKS (review, 2026-10-03) ──────────────────────────────
+   *
+   * Delete runs `undoBankCore` first, so on a PART-APPLIED download it deletes the bills and the invoice
+   * payments Apply wrote and voids the supplier and crew payments — while the confirm said "nothing it
+   * would have changed is written". Apply 30 of 40, tap Delete to bin the leftovers, and the customer's
+   * payments came off with no word until the toast afterwards.
+   */
+  it("a part-applied download: the card says Delete also takes back what Apply wrote", () => {
+    const html = render({ ...VIEW, appliedSaid: "Applied Sep 27: 30 lines counted.", canUndo: true, appliedLines: 30 });
+    const text = textOf(html);
+    expect(text).toContain("everything it already wrote comes off: the 30 lines it counted, with their bills and payments");
+    // The plain line is still the plain line when nothing has been written.
+    expect(textOf(render(VIEW))).not.toContain("already wrote comes off");
+  });
+
+  it("the confirm itself carries the sentence, so it is read BEFORE the deed", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/not-now-or-delete.tsx"), "utf8");
+    // One confirm, built from the clause the card hands in — never a fixed string for every state.
+    expect(src).toContain("const tail = clause || \"nothing it would have changed is written\";");
+    expect(src).toContain("confirm(`Delete this ${what}? It goes for good, with its file, and ${tail}.`)");
+    const card = readFileSync(join(process.cwd(), "src/components/bank-card.tsx"), "utf8");
+    expect(card).toContain("alsoTakesBack={");
+    expect(card).toContain("view?.appliedLines ?? 0");
   });
 
   /**

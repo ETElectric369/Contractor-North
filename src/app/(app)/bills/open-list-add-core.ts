@@ -59,6 +59,14 @@ export type AddOpenListInput = {
   name: string;
   sha256?: string | null;
   table?: string[][] | null;
+  /**
+   * THE HEADING BLOCK A PDF'S CROP TOOK OFF (pdf-table `fromHeading`). A letterhead taller than the
+   * readers' 15-row reach makes `table` start AT its column headings, so the rows where the paper names
+   * its own date and prints its own total are not in it any more. UNTRUSTED CELLS like `table` itself:
+   * the server reads them (readOpenListTable's `heading`), so no browser hands up a date or a total of
+   * its own working out.
+   */
+  heading?: string[][] | null;
   text?: string | null;
   /** The day the file was saved (the browser's lastModified), or null for today. */
   listDate?: string | null;
@@ -172,6 +180,7 @@ export async function addOpenListCore(
       if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
       revalidatePath("/bills");
       revalidatePath("/organize");
+      revalidatePath("/reconcile");
       revalidatePath("/planner");
       return { ok: true, id: placed.id, line: withReport(bankLine(download), downloadReadFacts(download), download.readSaid) };
     }
@@ -191,7 +200,8 @@ export async function addOpenListCore(
   if (input?.expect === "bank") return { ok: false, error: `${name} doesn't read as a bank download. Download it as CSV, Excel or OFX/QFX and drop that. Nothing was added.` };
   if (Array.isArray(input?.table)) {
     const table = capTable(input.table);
-    const read = readOpenListTable({ table, from: "file", name, listDate, listDateFrom });
+    const heading = Array.isArray(input?.heading) ? capTable(input.heading) : [];
+    const read = readOpenListTable({ table, heading, from: "file", name, listDate, listDateFrom });
     if (read.ok) stored = { list: read.list, needs: null };
     else if ("needs" in read) {
       // A BANK'S FILE THAT DIDN'T READ AS ONE waits for its columns with no long number in it.
@@ -200,7 +210,9 @@ export async function addOpenListCore(
       const needs = { ...read.needs, pdf };
       const hasRef = needs.headerRow >= 0 && readHeaderRow(needs.raw[needs.headerRow] ?? []).columns.reference !== undefined;
       stored = mayBeBankTable(needs.raw, needs.headerRow, hasRef)
-        ? { list: null, needs: { ...needs, raw: redactWordCells(needs.raw), header: needs.header.map((h) => redactDigits(h)) } }
+        // The cropped heading block is redacted by the same rule as the table: it is the same file's
+        // cells, and a bank's own letterhead carries the account number as readily as its lines do.
+        ? { list: null, needs: { ...needs, raw: redactWordCells(needs.raw), heading: redactWordCells(needs.heading ?? []), header: needs.header.map((h) => redactDigits(h)) } }
         : { list: null, needs };
     } else return { ok: false, error: read.error };
   } else if (typeof input?.text === "string" && input.text.trim()) {
@@ -232,5 +244,7 @@ export async function addOpenListCore(
   if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
   revalidatePath("/bills");
   revalidatePath("/organize");
+  // The card waits on /reconcile (lib/paperwork answeredOnReconcile), so that page is told as well.
+  revalidatePath("/reconcile");
   return { ok: true, id: placed.id, line: stored.list ? withReport(openListLine(stored), listReadFacts(stored.list)) : withPages(openListLine(stored)) };
 }

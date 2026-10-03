@@ -53,12 +53,8 @@ import { reportError } from "@/lib/observe";
 import { BooksBeginLine } from "./books-begin-line";
 import { NeedsYou, PaperworkDropZone } from "./bills-drop";
 import { SnapOrNoteButton } from "@/components/snap-or-note";
-import { openListViews } from "./open-list-core";
-import { bankLinesStayHere, bankViews } from "./bank-core";
-import type { BankView } from "@/lib/bank-download";
-import type { OpenListView } from "@/lib/supplier-open-list";
 import type { PaperRowItem } from "@/components/paperwork-row";
-import { readinessOf, type NumberMatch } from "@/lib/paperwork";
+import { answeredOnReconcile, readinessOf, TRAY_WINDOW, type NumberMatch } from "@/lib/paperwork";
 import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { billOfTie, billPapers, type PaperTie } from "@/lib/job-photos";
@@ -282,7 +278,10 @@ export default async function BillsPage({
       .select("*, jobs(job_number, name)")
       .eq("status", "needs_review")
       .order("created_at", { ascending: false })
-      .limit(200),
+      // ONE WINDOW, SHARED WITH RECONCILE (TRAY_WINDOW, beside `answeredOnReconcile`): this page counts
+      // every statement it finds as "waiting on Reconcile" and links there, so a wider window here than
+      // there would point at a paper that page never reads.
+      .limit(TRAY_WINDOW),
     // Every printed number already on the books, for "Same Purchase: Tie Them".
     loadBooks(supabase, orgId),
     // What a waiting paper names, matched again by today's rules (rematchTray: no model, no write).
@@ -404,22 +403,31 @@ export default async function BillsPage({
   // ONE PAPER DOOR (W1-30): a paper put in through Snap Or Note is source "organize", so one the
   // reader hasn't finished (not read yet, or too big) is drawn here too, with its Read Now, exactly
   // as one dropped on this page always was: it may well be a bill.
-  const papers = ((paperRows ?? []) as any[]).filter(
+  const trayPapers = ((paperRows ?? []) as any[]).filter(
     (i) =>
       i.kind === "receipt" ||
       i.source === "bills_drop" ||
       (i.doc_type && i.doc_type !== "not_a_cost") ||
       (i.kind !== "note" && !!i.file_url && ["not_read", "too_big"].includes(readinessOf(i).state)),
   );
+  /**
+   * A STATEMENT IS ANSWERED WHERE IT IS DROPPED (2026-10-03). Erik: "so it still doesnt make sense to
+   * me that all this reconcile stuff is on the bills page." A bank download and a supplier's open list
+   * compare two records, so their cards moved to /reconcile; a receipt, a supplier invoice and a bill
+   * to sort become COSTS on jobs, so they stay here with the jobs and the buckets.
+   *
+   * THE RULE IS NOT SPELLED OUT HERE — `answeredOnReconcile` (lib/paperwork.ts) is the one function
+   * both pages read, so this page and that one cannot disagree about where a paper is answered.
+   *
+   * Needs You's count is `items.length + supplierCards`, so dropping them from `papers` takes them out
+   * of the count by construction; and `statementsElsewhere` is what keeps the empty line true and the
+   * old doors pointing somewhere (My Day's Papers To Sort still lands on #sort-these).
+   */
+  const papers = trayPapers.filter((i) => !answeredOnReconcile(i));
+  const statementsElsewhere = trayPapers.length - papers.length;
   let paperUrls = new Map<string, string>();
   const signPapers = async () => {
     paperUrls = await signDocumentUrls(supabase, papers.map((i) => i.file_url));
-  };
-  // A SUPPLIER'S OPEN LIST waiting under Needs You is compared against that supplier's papers as
-  // the page loads, so its card is never stale (open-list-core). Nothing waiting, nothing read.
-  let listViews: Record<string, OpenListView> = {};
-  const viewLists = async () => {
-    listViews = await openListViews(supabase, orgId, papers);
   };
   // ALREADY BILLED ON THE BILL'S OWN ROW (0357, Erik: "the Already Billed could connect to the bill on
   // that screen too"). Where each live bill's job could hold it, what the jobs' invoices hold, and
@@ -450,19 +458,15 @@ export default async function BillsPage({
   const signBillPapers = async () => {
     billPaperUrls = await signDocumentUrls(supabase, billTies.map((t) => t.file_url));
   };
-  // A BANK DOWNLOAD waiting under Needs You is sorted against the books as the page loads (bank-core),
-  // so its card is never stale. Nothing waiting, nothing read.
-  let bankCards: Record<string, BankView> = {};
-  const viewBanks = async () => {
-    bankCards = await bankViews(supabase, orgId, papers);
-  };
-  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach(), signBillPapers(), viewBanks()]);
-  // A bank download's own lines never go to the browser: its card is `bank` (bankLinesStayHere).
+  await Promise.all([signPaths(), readClaims(), signPapers(), readAbReach(), signBillPapers()]);
+  // NO OPEN-LIST OR BANK VIEW IS READ HERE ANY MORE: those two cards are answered on /reconcile
+  // (answeredOnReconcile), which makes those reads — and `bankLinesStayHere`, which kept a download's
+  // own lines off this page — that page's. Two round trips this page no longer makes.
   const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({
-    ...bankLinesStayHere(i, bankCards[i.id]),
+    ...i,
     signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null,
-    open_list: listViews[i.id] ?? null,
-    bank: bankCards[i.id] ?? null,
+    open_list: null,
+    bank: null,
   }));
   const paperMatches: Record<string, NumberMatch[]> = Object.fromEntries(paperItems.map((i) => [i.id, matchesOnBooks(i, books)]));
   // Open AND finished jobs (audit v994, PR1): a ticket that lands after a job is complete is still
@@ -1144,12 +1148,17 @@ export default async function BillsPage({
   // card) or the waiting papers unread, "every paper is in your books" would be a false all-clear right
   // under the sentence saying it couldn't check, so the card carries the alert alone.
   const supplierUnread = !paperFeed && readFailed.size > 0;
+  // AND IT NEVER CLAIMS A STATEMENT IS SORTED. "Every paper is in your books" is false while a bank
+  // download or a supplier's open list sits unanswered on /reconcile, so when one does the sentence
+  // scopes itself to this page and the line above it names the paper and the page it is on.
   const needsYouEmpty =
     supplierUnread || trayErr
       ? null
       : waitingByAccount.size
         ? "Nothing else waiting on you."
-        : `Nothing waiting. Every paper${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`;
+        : statementsElsewhere > 0
+          ? "Nothing else waiting here."
+          : `Nothing waiting. Every paper${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`;
   // The jobs Add By Hand offers: open and finished, never cancelled, the place first and the number second.
   const handJobs = paperJobs.map((j) => ({ id: j.id, label: jobPickLabel(j) }));
 
@@ -1191,6 +1200,7 @@ export default async function BillsPage({
           always={hasSupplierSide || !!trayErr}
           emptyLine={needsYouEmpty}
           trayUnread={!!trayErr}
+          statementsElsewhere={statementsElsewhere}
           supplier={
             supplierUnread ? (
               <p className="text-sm text-amber-800" role="alert">

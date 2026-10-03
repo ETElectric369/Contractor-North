@@ -32,7 +32,10 @@ export function InvoiceJobButton({ jobId }: { jobId: string }) {
               }
               return;
             }
-            if (res.importWarning) toast(res.importWarning, "info");
+            // STICKY WHEN IT IS A MONEY QUESTION (review, 2026-10-03): the route changes under the toast,
+            // so a sentence to act on before sending had 2.8 seconds while the draft loaded. `partial` is
+            // the server's own word for "something here needs looking at".
+            if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info", undefined, res.partial ? { sticky: true } : undefined);
             router.push(`/billing/${res.id}`);
           })
         }

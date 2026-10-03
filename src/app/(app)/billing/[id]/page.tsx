@@ -42,6 +42,7 @@ import { invoiceCanHoldNoJobHours, noJobHandsShown } from "@/lib/already-billed"
 import { markupBoxSeed } from "@/lib/invoice-markup";
 import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
 import { netTermsDays } from "@/lib/invoice-due";
+import { twoJobTicketsOnInvoice } from "../ticket-on-two-jobs";
 import { estimateIsTheContract, isLiveQuote } from "@/lib/invoice-import-rule";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 import { embeddedJob, isFinishedJobStatus } from "@/lib/action-items/due-filters";
@@ -161,7 +162,7 @@ export default async function InvoicePage({
      a lost read shows the door, and the sheet says what it finds. */
   const noJobDoorHere = invoiceCanHoldNoJobHours(inv as any, (items ?? []) as unknown[]);
   const invJobIdEarly = ((inv as { job_id?: string | null }).job_id ?? null) as string | null;
-  const [supplierNames, { data: payRows }, markupRead, qboOn, noJobHands, openNoJob, jobContract] = await Promise.all([
+  const [supplierNames, { data: payRows }, markupRead, qboOn, noJobHands, openNoJob, jobContract, twoJobTickets] = await Promise.all([
     fetchSupplierNames(supabase),
     supabase.from("profile_pay").select("id, bill_rate"),
     /* WHAT THIS INVOICE IS PRICED AT (Erik, 2026-09-25: "i changed andrew's invoice to 11% ... but
@@ -218,6 +219,29 @@ export default async function InvoicePage({
           },
         )
       : Promise.resolve(undefined),
+    /* ── THE SAME TICKET ON TWO JOBS, ASKED WHENEVER THIS PAGE OPENS (review, 2026-10-03) ─────────
+       The sentence used to exist only at the moment of an IMPORT: the four job-level doors toasted it
+       and then changed the route under it, and the draft they landed on started with the count at 0, so
+       the question arrived where nobody could read it and Send had no check at all. It is asked here
+       now, off the bills this invoice's own cost lines charge, by the SAME function the import runs —
+       one matcher, so the page and the import cannot disagree about what a duplicate is.
+       A READ IS A PROPOSAL: this writes nothing, and a lost read says nothing (never an all-clear).
+       IT RIDES IN THIS BREATH, not in a wave of its own (the phone-lag class, audit v921). It is two
+       hops inside it — the charged bills' amounts, then every bill at those amounts — and it is asked
+       only of an invoice that HAS imported costs on a job, which is the only kind that can carry one. */
+    hasCostLines && invJobIdEarly
+      ? twoJobTicketsOnInvoice(
+          supabase,
+          String((inv as { org_id?: string | null }).org_id ?? ""),
+          invJobIdEarly,
+          ((items ?? []) as { import_source?: string | null; source_ids?: string[] | null }[])
+            .filter((i) => i.import_source === "costs")
+            .flatMap((i) => i.source_ids ?? []),
+        ).catch((e: unknown) => {
+          reportError("billing.[id].twoJobTickets", e, { invoiceId: inv.id });
+          return { said: [] as string[] };
+        })
+      : Promise.resolve({ said: [] as string[] }),
   ]);
   const noJobHandLines = noJobHands && noJobHands !== "failed" ? noJobHands.lines : [];
   // openNoJob null: the read was lost, so the door shows (the sheet says what it finds). A database
@@ -590,6 +614,9 @@ export default async function InvoicePage({
         customerHoldsOlderCopy={holdsOlderCopy}
         netDays={netTermsDays((org as any)?.settings)}
         estimateIsContract={jobContract}
+        /* THE QUESTION THIS DRAFT IS CARRYING, read on every load rather than only at an import: the
+           sentence to read before Send, and the count that arms the door to the picker. */
+        twoJobTickets={twoJobTickets.said}
       />
     </div>
   );

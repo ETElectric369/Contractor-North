@@ -255,7 +255,13 @@ async function readPaper(id: string): Promise<{ ok: true; item?: OrganizedResult
  * is in — and so does a refusal of a file a person chose as a list himself, because there is no second
  * path for a CSV.
  */
-async function oneList(id: number, file: File, already?: { table: string[][]; pages: number; rows: number; sha: string | null }): Promise<{ filed: boolean }> {
+async function oneList(
+  id: number,
+  file: File,
+  /** `heading` is the block a PDF's crop took off (pdf-table `fromHeading`): the paper's own date box
+   *  and printed total, which the cropped table no longer carries. The server reads those cells. */
+  already?: { table: string[][]; heading: string[][]; pages: number; rows: number; sha: string | null },
+): Promise<{ filed: boolean }> {
   const name = file.name || "A file with no name";
   say(id, name, "Reading the list…", "busy");
   let table: string[][];
@@ -284,6 +290,7 @@ async function oneList(id: number, file: File, already?: { table: string[][]; pa
     name,
     sha256: sha,
     table,
+    heading: already?.heading,
     listDate,
     source: "organize",
     pdf: already ? { pages: already.pages, rows: already.rows } : null,
@@ -347,7 +354,7 @@ async function oneStaff(id: number, file: File, orgId: string) {
     if (got.ok) {
       const list = tableReadsAsList(got.table);
       if (list) {
-        const asList = await oneList(id, file, { table: list.rows, pages: got.pages, rows: got.table.length, sha });
+        const asList = await oneList(id, file, { table: list.rows, heading: list.heading, pages: got.pages, rows: got.table.length, sha });
         if (asList.filed) return;
       }
       pdfText = got.text;
