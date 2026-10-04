@@ -1,4 +1,5 @@
 "use server";
+import { readUsualBillingKind } from "@/lib/schedule-options";
 import { dbError } from "@/lib/db-error";
 import { importExtras, extrasSentence, type ImportOutcomeLike } from "@/lib/import-extras";
 
@@ -2099,6 +2100,9 @@ export async function importJobs(
   const todayStr = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
 
   const results: JobImportResult[] = [];
+  // ONE READ FOR THE WHOLE IMPORT, not one per row: the answer cannot change mid-file.
+  const usualBilling = await readUsualBillingKind(supabase);
+
   for (const r of (rows ?? []).slice(0, 200)) {
     const cname = (r.customer || "").trim();
     if (!cname && !(r.job_name || "").trim()) {
@@ -2164,6 +2168,13 @@ export async function importJobs(
         name: jobName,
         customer_id: customerId,
         status,
+        // THE IMPORTER SAYS IT TOO (2026-10-03). A CSV has no column for it, so an imported job fell
+        // to the old 'fixed' default — which is not a label: it gates whether the hours and receipts
+        // are OFFERED at invoicing, the Unbilled card, the portal, and step 4 of completeJobWhenPaid.
+        // An IMPORT is the worst place to get it wrong: it makes many jobs at once and nobody opens
+        // them one by one afterwards. The company's own usual kind is the honest guess, and a person
+        // can still change any job that is the other sort.
+        billing_type: usualBilling,
         address: r.address?.trim() || null,
         city: r.city?.trim() || null,
         state: r.state?.trim() || null,

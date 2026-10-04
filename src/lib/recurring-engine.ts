@@ -1,3 +1,4 @@
+import { readUsualBillingKind } from "@/lib/schedule-options";
 import "server-only";
 import { reportError } from "@/lib/observe";
 import { advance } from "@/lib/automations-math";
@@ -106,6 +107,11 @@ async function createOccurrence(supabase: any, t: any, userId: string | null, or
       name: jobNameFrom({ typed: title, customer: who, street: null, todayStr: todayStrInTz(tz) }),
       customer_id: t.customer_id,
       description: t.description,
+      // THE KIND OF BILLING TRAVELS WITH THE JOB (2026-10-03). A job off a recurring template named
+      // none, so it was born 'fixed' by default — and on a T&M company that switches off whether its
+      // hours and receipts are offered at invoicing, the Unbilled card, the portal, and step 4 of
+      // completeJobWhenPaid. A recurring job is the one a person is LEAST likely to re-check.
+      billing_type: await readUsualBillingKind(supabase),
       status: "scheduled",
       scheduled_start: tzDateTimeUtc(t.next_date, win.start, tz),
       scheduled_end: tzDateTimeUtc(t.next_date, win.end, tz),

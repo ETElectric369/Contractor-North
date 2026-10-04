@@ -1,4 +1,5 @@
 "use server";
+import { readUsualBillingKind } from "@/lib/schedule-options";
 import { dbError } from "@/lib/db-error";
 import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind } from "@/lib/schedule/work-shape";
 
@@ -1310,6 +1311,11 @@ export async function createJobFromAppointment(
     .insert({
       name: jobName,
       customer_id: customerId,
+      // THE KIND OF BILLING TRAVELS WITH THE JOB (2026-10-03). Named nothing, so the column fell to
+      // its default 'fixed' — which not only mislabels the job but switches OFF whether its hours and
+      // receipts are offered at invoicing, the Unbilled card, the portal, and step 4 of
+      // completeJobWhenPaid. readUsualBillingKind is the company's own answer; a failed read is "tm".
+      billing_type: await readUsualBillingKind(supabase),
       inquiry_id: inquiryId,
       // The visit's notes (the lead's message, what the inspector was told) are the job's scope.
       description: (appt as { notes?: string | null }).notes ?? null,

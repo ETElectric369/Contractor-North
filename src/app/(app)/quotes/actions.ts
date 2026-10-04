@@ -1,4 +1,5 @@
 "use server";
+import { readUsualBillingKind } from "@/lib/schedule-options";
 import { reportError } from "@/lib/observe";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { dbError } from "@/lib/db-error";
@@ -1263,6 +1264,15 @@ export async function createJobFromQuote(
       customer_id: resolvedCustomerId ?? q.customer_id,
       inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
       name: jobName,
+      // THE KIND OF BILLING TRAVELS WITH THE JOB (2026-10-03). This insert named no billing_type, so
+      // the column fell to its default of 'fixed' — and on a company whose work is mostly T&M that is
+      // the wrong answer nearly every time. It is not only a label: jobBillsItsActuals(billing_type)
+      // gates whether the hours and receipts are OFFERED when invoicing, whether the job page draws
+      // its Unbilled card, what the customer's portal shows, AND step 4 of completeJobWhenPaid — the
+      // guard that exists BECAUSE hours once went unbilled. A job wrongly born 'fixed' therefore
+      // completes silently on a customer's payment with its unbilled work invisible on every surface
+      // at once. readUsualBillingKind is the company's own answer and a failed read falls to "tm".
+      billing_type: await readUsualBillingKind(supabase),
       ...(inheritedAddress
         ? {
             address: inheritedAddress.address,

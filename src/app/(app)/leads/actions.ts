@@ -1,4 +1,5 @@
 "use server";
+import { readUsualBillingKind } from "@/lib/schedule-options";
 import { dbError } from "@/lib/db-error";
 import { placeJobOnDay, planDayTimes } from "../schedule/actions";
 
@@ -830,6 +831,13 @@ export async function convertInquiry(
         customer_id: customerId,
         inquiry_id: id, // provenance: this estimate/job traces back to the lead
         name: jobName,
+        // HOW IT BILLS TRAVELS WITH IT (2026-10-03). This insert named no billing_type, so the
+        // column fell to its old default of 'fixed' — and that is not a label: it gates whether the
+        // hours and receipts are OFFERED at invoicing, the Unbilled card, the portal, and step 4 of
+        // completeJobWhenPaid, the guard that exists because hours once went unbilled. The same
+        // sentence two lines up — "a fact stated once survives every step" — is why this belongs
+        // here. 0379 fills it at the database for any door that forgets; this one says it out loud.
+        billing_type: await readUsualBillingKind(supabase),
         description: inq.message ?? null,
         // The size he set on the lead — the flow's whole point is that a fact stated once
         // survives every step (the appointment path already carries it; the job path dropped it).
