@@ -7,6 +7,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import {
   AUTHORITY_MAX,
   INSPECTION_RESULTS,
+  WHY_MAX,
   INSPECTION_WINDOWS,
   INSPECTOR_MAX,
   MAX_INSPECTION_POSITION,
@@ -247,15 +248,25 @@ export async function recordInspectionResult(input: {
   result: string;
   result_on?: string | null;
   inspector?: string | null;
+  /** WHY IT FAILED. Required on a failure, ignored otherwise (Erik, 2026-10-03). */
+  why?: string | null;
 }): Promise<InspectionRecorded> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
   const supabase = ctx.supabase;
 
-  if (!isResult(input.result)) return { ok: false, error: "Say how it went: passed, failed or cancelled." };
+  if (!isResult(input.result)) return { ok: false, error: "Pick the inspection status: passed, failed or cancelled." };
   const on = day(input.result_on);
   if (!on) return { ok: false, error: "Put the day they came on it — a result needs a date." };
+  // A FAILURE SAYS WHY, AND THE SERVER IS WHERE THAT HOLDS (Erik, 2026-10-03: "Inspection Status:
+  // Passed or Failed (if failed, why)"). A failed inspection with no reason is a visit you have to
+  // make again just to learn what it was for, and the correction cannot be priced or ordered. The
+  // form disables Save without it; this refuses it, because a form is a convention and a door is not.
+  const why = text(input.why, WHY_MAX);
+  if (input.result === "failed" && !why) {
+    return { ok: false, error: "Say why it failed — what has to be put right before they come back. Nothing was saved." };
+  }
 
   const { data: row, error: readErr } = await supabase
     .from("permit_inspections")
@@ -272,6 +283,9 @@ export async function recordInspectionResult(input: {
   const patch: Record<string, unknown> = { result: input.result, result_on: on };
   const who = text(input.inspector, INSPECTOR_MAX);
   if (who) patch.inspector = who; // FILL, NEVER OVERWRITE: a blank box never erases who came
+  // The reason rides with the result it explains. Written on a failure; on a pass or a cancellation
+  // an earlier failure's reason is LEFT ALONE, because it is the history of why they came back.
+  if (why) patch.notes = why;
   const { data: saved, error } = await supabase
     .from("permit_inspections")
     .update(patch)

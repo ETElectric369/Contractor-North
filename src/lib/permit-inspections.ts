@@ -73,6 +73,10 @@ export const INSPECTION_RESULTS: readonly [InspectionResult, string][] = [
 export const MAX_INSPECTION_POSITION = 20;
 export const AUTHORITY_MAX = 80;
 export const INSPECTOR_MAX = 80;
+/** 0378's own CHECK on notes. A FAILED inspection must carry its reason (Erik, 2026-10-03: "Inspection
+ *  Status: Passed or Failed (if failed, why)") — a failure nobody wrote a reason on is a visit you
+ *  have to make again to find out what it was for. */
+export const WHY_MAX = 2000;
 
 export type InspectionWindow = "morning" | "afternoon" | "all_day";
 export type InspectionResult = "passed" | "failed" | "cancelled";
@@ -358,7 +362,7 @@ export const allInspectionsPassed = (rows: readonly PermitInspection[] | null | 
  * THE ONE LINE THE JOB AND THE CARD SAY. Plain words, the reader is an electrician between jobs.
  *   "Waiting on Liberty Utilities — Thu Oct 15, morning"
  *   "Town of Truckee inspection to book"
- *   "Town of Truckee was booked Oct 15 — say how it went"
+ *   "Town of Truckee was booked Oct 15 — record the inspection status"
  *   "Town of Truckee failed Oct 15 — book another visit"
  */
 export function standLine(stand: InspectionStand): string | null {
@@ -377,7 +381,7 @@ export function standLine(stand: InspectionStand): string | null {
     case "to_book":
       return `${who} inspection to book`;
     case "overdue":
-      return `${who} was booked ${on(stand.day)} — say how it went`;
+      return `${who} was booked ${on(stand.day)} — record the inspection status`;
     case "needs_another": {
       const said = stand.row?.result === "cancelled" ? "cancelled" : "failed";
       const d = on(stand.day);

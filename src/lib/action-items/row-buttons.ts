@@ -222,7 +222,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       };
     case "receipt_unbilled":
       return { ...none, primary: open("Record It", item.href) };
-    // THE ROW'S OWN STATE PICKS THE WORDS: Book It, Say How It Went, or Book Another Visit. The chip
+    // THE ROW'S OWN STATE PICKS THE WORDS: Book It, Record Inspection Status, or Book Another Visit. The chip
     // and the door are declared together (permit-inspection-items INSPECTION_DOOR) so they cannot
     // drift. Every one of them opens the permit's card, which is where all three are answered.
     case "permit_inspection":

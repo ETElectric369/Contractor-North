@@ -225,7 +225,7 @@ describe("saveInspection: booking one is never gated", () => {
     // another visit" to the very action that recorded the pass, and the permit stayed red forever.
     const pass = await recordInspectionResult({ id: "new-3", result: "passed", result_on: "2026-10-20" });
     expect(pass.ok).toBe(true);
-    expect(pass.next).toBe(`${UTIL} was booked Oct 15 — say how it went`);
+    expect(pass.next).toBe(`${UTIL} was booked Oct 15 — record the inspection status`);
     expect(pass.next).not.toContain("book another visit");
     expect(state.permits[0].status).toBe("issued");
   });
@@ -247,9 +247,38 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
     expect(state.writes).toEqual([]);
   });
 
+  /**
+   * A FAILURE SAYS WHY (Erik, 2026-10-03: "Inspection Status: Passed or Failed (if failed, why)").
+   * A failed inspection with no reason is a visit somebody has to make again just to learn what it
+   * was for, and the correction can be neither priced nor ordered. The form shuts Save without it;
+   * this is the door refusing it, because a form is a convention and a door is the boundary.
+   */
+  it("a failure with no reason is refused, and nothing is written", async () => {
+    const before = { ...state.inspections[0] };
+    const res = await recordInspectionResult({ id: "i1", result: "failed", result_on: THU });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/why it failed/i);
+    expect(res.error).toMatch(/nothing was saved/i);
+    expect(state.inspections[0]).toEqual(before);
+  });
+
+  it("a failure WITH a reason keeps it on the visit it explains", async () => {
+    const res = await recordInspectionResult({ id: "i1", result: "failed", result_on: THU, why: "Panel not bonded" });
+    expect(res.ok).toBe(true);
+    expect(state.inspections[0].result).toBe("failed");
+    expect(state.inspections[0].notes).toBe("Panel not bonded");
+  });
+
+  it("a PASS never wipes the reason an earlier failure left — that is why they came back", async () => {
+    state.inspections[0] = { ...state.inspections[0], notes: "Panel not bonded" };
+    const res = await recordInspectionResult({ id: "i1", result: "passed", result_on: THU });
+    expect(res.ok).toBe(true);
+    expect(state.inspections[0].notes).toBe("Panel not bonded");
+  });
+
   it("a made-up result is refused", async () => {
     expect((await recordInspectionResult({ id: "i1", result: "sort of", result_on: THU })).error).toBe(
-      "Say how it went: passed, failed or cancelled.",
+      "Pick the inspection status: passed, failed or cancelled.",
     );
   });
 
@@ -289,10 +318,10 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
   it("WRITTEN UP A DAY LATE, the sentence is read against TODAY — never the day they came", async () => {
     // Friday. Nothing was written up on Thursday, so he records the town for Thursday. Reading the
     // verdict against Thursday said "Waiting on Liberty Utilities — Thu Oct 15, morning" while the card
-    // beside it, on the real today, read "Liberty Utilities was booked Oct 15 — say how it went".
+    // beside it, on the real today, read "Liberty Utilities was booked Oct 15 — record the inspection status".
     state.today = "2026-10-16";
     const res = await recordInspectionResult({ id: "i1", result: "passed", result_on: THU });
-    expect(res.next).toBe(`${UTIL} was booked Oct 15 — say how it went`);
+    expect(res.next).toBe(`${UTIL} was booked Oct 15 — record the inspection status`);
   });
 
   it("A LOST RE-READ NEVER PASSES FOR 'nothing outstanding': it says the permit was not re-checked", async () => {
@@ -313,7 +342,7 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
 
   it("a failure still says failed even when the re-read is lost — that much this visit knows", async () => {
     state.reReadFails = true;
-    const res = await recordInspectionResult({ id: "i1", result: "failed", result_on: THU });
+    const res = await recordInspectionResult({ id: "i1", result: "failed", result_on: THU, why: "Panel not bonded" });
     expect(res.ok).toBe(true);
     expect(state.permits[0].status).toBe("failed");
     expect(res.message).toContain("wasn't re-checked");
@@ -358,7 +387,7 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
   });
 
   it("a failure says failed on the permit too — a failed inspection needs somebody most of all", async () => {
-    const res = await recordInspectionResult({ id: "i1", result: "failed", result_on: THU });
+    const res = await recordInspectionResult({ id: "i1", result: "failed", result_on: THU, why: "Panel not bonded" });
     expect(state.permits[0].status).toBe("failed");
     expect(res.next).toBe(`${TOWN} failed Oct 15 — book another visit`);
   });

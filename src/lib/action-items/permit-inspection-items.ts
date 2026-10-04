@@ -116,7 +116,7 @@ export const INSPECTION_CHIP: Partial<Record<InspectionStandState, string>> = {
 /** THE BUTTON each chip opens with. One place, so the chip and the door can never drift apart. */
 export const INSPECTION_DOOR: Record<string, string> = {
   "To Book": "Book It",
-  "Not Written Up": "Say How It Went",
+  "Not Written Up": "Record Inspection Status",
   Failed: "Book Another Visit",
   Cancelled: "Book Another Visit",
 };

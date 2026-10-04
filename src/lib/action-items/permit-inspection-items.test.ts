@@ -87,7 +87,7 @@ describe("the gate decides what may nag", () => {
       id: "permitinsp-p1",
       kind: "permit_inspection",
       title: "Meter Base Swap · J-052",
-      subtitle: "Town of Truckee was booked Oct 15 — say how it went · Permit E-1234 · Snowbell Holdings",
+      subtitle: "Town of Truckee was booked Oct 15 — record the inspection status · Permit E-1234 · Snowbell Holdings",
       chip: "Not Written Up",
       when: THU,
       urgency: 1,
@@ -250,7 +250,7 @@ describe("the row's one button says what to do with it", () => {
     }
     expect(words).toEqual({
       "To Book": "Book It",
-      "Not Written Up": "Say How It Went",
+      "Not Written Up": "Record Inspection Status",
       Failed: "Book Another Visit",
       Cancelled: "Book Another Visit",
     });

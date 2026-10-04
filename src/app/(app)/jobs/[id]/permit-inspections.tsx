@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, type Tone } from "@/components/ui/badge";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { InfoPopup } from "@/components/info-popup";
 import { useToast } from "@/components/toast";
 import {
@@ -14,6 +14,7 @@ import {
   INSPECTION_RESULTS,
   INSPECTION_WINDOWS,
   INSPECTOR_MAX,
+  WHY_MAX,
   inOrder,
   inspectionLine,
   isOpenInspection,
@@ -170,7 +171,7 @@ export function PermitInspections({
                         className="min-h-11"
                         onClick={() => setForm(form?.kind === "result" && form.id === r.id ? null : { kind: "result", id: r.id })}
                       >
-                        {isOpenInspection(r) ? "Say How It Went" : "Change It"}
+                        {isOpenInspection(r) ? "Record Inspection Status" : "Change It"}
                       </Button>
                       <Button
                         size="icon-sm"
@@ -330,17 +331,18 @@ function ResultForm({
   pending: boolean;
   todayStr: string;
   onCancel: () => void;
-  onSave: (input: { id: string; result: string; result_on: string; inspector: string | null }) => void;
+  onSave: (input: { id: string; result: string; result_on: string; inspector: string | null; why: string | null }) => void;
 }) {
   const [result, setResult] = useState<string>(row.result ?? "passed");
   const [on, setOn] = useState((row.result_on ?? row.scheduled_for ?? todayStr).slice(0, 10));
   const [who, setWho] = useState(row.inspector ?? "");
+  const [why, setWhy] = useState(row.notes ?? "");
 
   return (
     <div className="mt-2 space-y-2 rounded-md border border-slate-200 bg-white p-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <div>
-          <Label htmlFor={`rr-${row.id}`}>How It Went</Label>
+          <Label htmlFor={`rr-${row.id}`}>Inspection Status</Label>
           <Select id={`rr-${row.id}`} className="h-11" value={result} onChange={(e) => setResult(e.target.value)}>
             {INSPECTION_RESULTS.map(([v, l]) => (
               <option key={v} value={v}>
@@ -358,11 +360,33 @@ function ResultForm({
           <Input id={`rw-${row.id}`} className="h-11" maxLength={INSPECTOR_MAX} value={who} onChange={(e) => setWho(e.target.value)} placeholder="The inspector's name" />
         </div>
       </div>
+      {/* A FAILURE SAYS WHY (Erik, 2026-10-03: "Inspection Status: Passed or Failed (if failed, why)").
+          Drawn only on a failure, because a reason box standing open under a pass invites a note
+          nobody asked for and buries the one that matters. Save is shut without it, and the door
+          refuses it too — the form is a convention, the server is the boundary. */}
+      {result === "failed" && (
+        <div>
+          <Label htmlFor={`rn-${row.id}`}>Why It Failed</Label>
+          <Textarea
+            id={`rn-${row.id}`}
+            rows={2}
+            maxLength={WHY_MAX}
+            value={why}
+            onChange={(e) => setWhy(e.target.value)}
+            placeholder="What has to be put right before they come back"
+          />
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <Button size="sm" variant="outline" className="min-h-11" onClick={onCancel}>
           Cancel
         </Button>
-        <Button size="sm" className="min-h-11" disabled={pending || !on} onClick={() => onSave({ id: row.id, result, result_on: on, inspector: who.trim() || null })}>
+        <Button
+          size="sm"
+          className="min-h-11"
+          disabled={pending || !on || (result === "failed" && !why.trim())}
+          onClick={() => onSave({ id: row.id, result, result_on: on, inspector: who.trim() || null, why: why.trim() || null })}
+        >
           {pending ? "Saving…" : "Save Result"}
         </Button>
       </div>

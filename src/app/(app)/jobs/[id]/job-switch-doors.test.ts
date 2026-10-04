@@ -93,7 +93,7 @@ describe("Permits & Inspections on the job's Permits tab", () => {
     const off = r(JobPermits, { jobId: "j1", permits, inspections: booked, todayStr: "2026-10-14", canAdd: false });
     expect(off).toContain("Town of Truckee · Thu Oct 15, morning");
     expect(off).not.toContain("Add Inspection");
-    expect(off).not.toContain("Say How It Went");
+    expect(off).not.toContain("Record Inspection Status");
   });
 
   it("a lost read says so, and claims nothing about who has been", () => {

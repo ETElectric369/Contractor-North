@@ -247,7 +247,7 @@ describe("where the permit stands — one verdict every door reads", () => {
     expect(s.state).toBe("overdue");
     expect(s.hisToDo).toBe(true);
     expect(s.authority).toBe(TOWN);
-    expect(standLine(s)).toBe("Town of Truckee was booked Oct 15 — say how it went");
+    expect(standLine(s)).toBe("Town of Truckee was booked Oct 15 — record the inspection status");
   });
 
   it("nobody has called them yet: his to book", () => {
