@@ -832,7 +832,7 @@ describe("the company's own rules", () => {
       rules: [
         rule({ id: "r-shell", key: "shell" }),
         rule({ id: "r-draw", key: "transfer 9876", choice: "draw", bucket: null }),
-        rule({ id: "r-home", key: "home", choice: "personal", bucket: null }),
+        rule({ id: "r-home", key: "home", choice: "draw", bucket: null }),
         rule({ id: "r-home-hw", key: "home hardware", choice: "cost", bucket: "Tools & Supplies" }),
       ],
     });
@@ -849,7 +849,7 @@ describe("the company's own rules", () => {
     const books = ORG_BOOKS({
       rules: [
         rule({ id: "r-in", direction: "in", key: "shell", choice: "other_income", bucket: null }),
-        rule({ id: "r-check", key: "check", choice: "personal", bucket: null }),
+        rule({ id: "r-check", key: "check", choice: "draw", bucket: null }),
         rule({ id: "r-dep", direction: "in", key: "deposit", choice: "other_income", bucket: null }),
       ],
     });
@@ -892,7 +892,7 @@ describe("the company's own rules", () => {
     expect(row("ZELLE").learnable).toBe(false);
   });
 
-  it("a store with two answers: a fill-up is Fuel, a coffee is Personal (no Meals bucket), and an amount between them is ASKED", () => {
+  it("a store with two answers: a fill-up is Fuel, a coffee the Owner's Draw (no Meals bucket), and an amount between them is ASKED", () => {
     // Filed two ways before: fill-ups of $120-$140 as Fuel, an $11.75 coffee as Personal. A coffee is
     // no business-cost bucket (there is no Meals), so the person said Personal, or could say Other.
     const dl = readBankTable(
@@ -907,20 +907,20 @@ describe("the company's own rules", () => {
     const books = ORG_BOOKS({
       rules: [
         rule({ id: "r-fuel", key: "corner", choice: "cost", bucket: "Fuel", minCents: 12000, maxCents: 14000 }),
-        rule({ id: "r-coffee", key: "corner", choice: "personal", bucket: null, minCents: 1175, maxCents: 1175 }),
+        rule({ id: "r-coffee", key: "corner", choice: "draw", bucket: null, minCents: 1175, maxCents: 1175 }),
       ],
     });
     const plan = planBankDownload(dl, books);
     const at = (cents: number) => plan.dispositions.get(dl.lines.find((l) => l.cents === cents)!.key);
     expect(at(-13120)).toEqual({ how: "rule", ruleId: "r-fuel", choice: { choice: "cost", bucket: "Fuel" } });
-    expect(at(-1175)).toEqual({ how: "rule", ruleId: "r-coffee", choice: { choice: "personal" } });
+    expect(at(-1175)).toEqual({ how: "rule", ruleId: "r-coffee", choice: { choice: "draw" } });
     // $45 is in neither band (Fuel reaches down to $60, the coffee up to $23.50): asked, never forced.
     expect(at(-4500)).toMatchObject({ how: "need" });
     const row = plan.groups.find((g) => g.keys.includes(dl.lines.find((l) => l.cents === -4500)!.key))!;
     // Its guess is the nearest answer, marked Guess and never picked; the other answer is a tap away.
     expect(ruleHintFor(dl.lines.find((l) => l.cents === -4500)!, books.rules)!.id).toBe("r-fuel");
     expect(row.guess).toBe("cost:Fuel");
-    expect(row.buttons).toEqual(["cost:Fuel", "cost:Auto", "personal"]);
+    expect(row.buttons).toEqual(["cost:Fuel", "cost:Auto", "draw"]);
     expect(plan.counts).toMatchObject({ ruled: 2, needLines: 1 });
   });
 
@@ -939,7 +939,8 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(shell.keys).toHaveLength(3);
     expect(shell.cents).toBe(-28845);
     expect(shell.guess).toBe("cost:Fuel");
-    expect(shell.buttons).toEqual(["cost:Fuel", "cost:Auto", "personal"]);
+    // ONE OWNER'S DRAW BUTTON, NOT TWO (0380): Personal stood beside it and was the same answer.
+    expect(shell.buttons).toEqual(["cost:Fuel", "cost:Auto", "draw"]);
     expect(plan.groups.find((g) => g.label.includes("ACME INSURANCE"))!.guess).toBe("cost:Insurance & Licenses");
     expect(plan.groups.find((g) => g.label.includes("SERVICE FEE"))!.guess).toBe("cost:Fees");
     // An ATM is Cash Taken Out (Not A Cost), W1-34: never a petty-cash top-up any more.
@@ -1050,14 +1051,14 @@ describe("the card and the person's answers", () => {
     const shell = plan.groups.find((g) => g.merchantKey === "shell")!;
     const dep = plan.groups.find((g) => g.label === "DEPOSIT")!;
     const out = validPicks(
-      { [shell.id]: "cost:Fuel", [dep.id]: "invoice:inv-1", "out:nobody": "personal" },
+      { [shell.id]: "cost:Fuel", [dep.id]: "invoice:inv-1", "out:nobody": "draw" },
       plan,
       books,
     );
     expect(out.refused).toEqual(["an answer for a row that is no longer on the card"]);
     expect(out.ok.size).toBe(2);
     expect(out.refused).toHaveLength(1);
-    const wrong = validPicks({ [shell.id]: "other_income", [dep.id]: "personal" }, plan, books);
+    const wrong = validPicks({ [shell.id]: "other_income", [dep.id]: "draw" }, plan, books);
     expect(wrong.ok.size).toBe(0);
     expect(wrong.refused).toHaveLength(2);
     const stranger = validPicks({ [shell.id]: "crew:not-our-person" }, plan, books);
@@ -1091,9 +1092,14 @@ describe("the card and the person's answers", () => {
   });
 
   it("choice ids read back exactly; a bucket is the whole answer, Fuel and Auto included", () => {
-    for (const id of ["cost:Fuel", "cost:Auto", "cost:Fees", "draw", "personal", "cash_out", "not_cost", "other_income", "not_income", "crew:abcdef12", "supplier:abcdef12", "invoice:abcdef12"]) {
+    for (const id of ["cost:Fuel", "cost:Auto", "cost:Fees", "draw", "cash_out", "not_cost", "other_income", "not_income", "crew:abcdef12", "supplier:abcdef12", "invoice:abcdef12"]) {
       expect(choiceId(parseChoiceId(id)!)).toBe(id);
     }
+    // THE RETIRED WORD DOES NOT READ BACK AS ITSELF (0380): Personal was a second button for Owner's
+    // Draw, so a card drawn before the merge and pressed after applies as the draw. It is the one id
+    // that does not round-trip, on purpose - nothing is written under it again.
+    expect(parseChoiceId("personal")).toEqual({ choice: "draw" });
+    expect(choiceId(parseChoiceId("personal")!)).toBe("draw");
     expect(parseChoiceId("cost:Fuel")).toEqual({ choice: "cost", bucket: "Fuel" });
     expect(choiceLabel(parseChoiceId("cost:Fuel")!, { accounts: new Map(), crew: new Map(), invoices: new Map(), jobs: new Map() })).toBe("Fuel");
     expect(choiceLabel(parseChoiceId("cost:Auto")!, { accounts: new Map(), crew: new Map(), invoices: new Map(), jobs: new Map() })).toBe("Auto");

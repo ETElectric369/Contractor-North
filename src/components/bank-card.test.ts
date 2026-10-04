@@ -43,7 +43,7 @@ const VIEW: BankView = {
       buttons: [
         { id: "cost:Fuel", label: "Fuel" },
         { id: "cost:Auto", label: "Auto" },
-        { id: "personal", label: "Personal" },
+        { id: "draw", label: "Owner's Draw" },
       ],
     },
     {
@@ -71,8 +71,8 @@ const VIEW: BankView = {
   otherInSingle: [{ id: "invoice:inv-1", label: "On INV-1001" }],
   flow: [
     { key: "fuel", label: "Fuel", cents: 96500 },
-    { key: "draw", label: "Owner's Draw", cents: 250000 },
-    { key: "personal", label: "Personal", cents: 22000 },
+    // ONE SEGMENT FOR WHAT THE OWNER TOOK OUT (0380): Personal was a second one beside it.
+    { key: "draw", label: "Owner's Draw", cents: 272000 },
   ],
   // WHERE THE MONEY CAME IN: invented figures of the shape bank-money-in.ts returns - a channel that
   // reaches the account, one that only reaches it after its fee, one that is still in the app, cash that
@@ -163,12 +163,12 @@ describe("the bank card", () => {
     const text = textOf(html);
     expect(text).toContain(VIEW.headline);
     expect(text).toContain("Where $3,685.00 Went");
-    expect(text).toContain("Owner's Draw $2,500.00");
+    expect(text).toContain("Owner's Draw $2,720.00");
     expect(text).toContain("SHELL 123 ANYTOWN 3 charges · $288.45");
     // The guess is marked, and NOT picked: no button is pressed until a person taps.
     expect(html).not.toContain('aria-pressed="true"');
     const labels = buttons(html).map((b) => b.text);
-    expect(labels.slice(0, 4)).toEqual(["Fuel Guess", "Auto", "Personal", "Other…"]);
+    expect(labels.slice(0, 4)).toEqual(["Fuel Guess", "Auto", "Owner's Draw", "Other…"]);
     expect(labels).toContain("On INV-1001 Guess");
     expect(labels).toContain("Pay Pat Crew Guess");
     expect(text).toContain("A button marked Guess is the app's guess.");
@@ -199,7 +199,7 @@ describe("the bank card", () => {
   });
 
   it("a row with no guess says so, and none of its buttons is called one", () => {
-    const html = render({ ...VIEW, rows: [{ ...VIEW.rows[0], guess: null, buttons: [{ id: "personal", label: "Personal" }, { id: "draw", label: "Owner's Draw" }] }] });
+    const html = render({ ...VIEW, rows: [{ ...VIEW.rows[0], guess: null, buttons: [{ id: "draw", label: "Owner's Draw" }, { id: "cost:Fuel", label: "Fuel" }] }] });
     expect(textOf(html)).toContain("No guess");
     expect(html).not.toMatch(/>Guess</);
   });
@@ -355,7 +355,7 @@ describe("a pick on a row that left the card", () => {
 
 describe("where the money went: one colour per segment", () => {
   it("no two segments share a colour", () => {
-    const keys = ["fuel", "business", "materials", "suppliers", "crew", "draw", "cash_out", "not_cost", "personal", "books", "need", "other"];
+    const keys = ["fuel", "business", "materials", "suppliers", "crew", "draw", "cash_out", "not_cost", "books", "need", "other"];
     expect(new Set(keys.map(toneOf)).size).toBe(keys.length);
   });
 });

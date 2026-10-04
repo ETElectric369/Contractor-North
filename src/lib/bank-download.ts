@@ -838,8 +838,20 @@ export type BankChoice =
   // snapped receipt filed on that job writes, so it lands in Materials & Bills inside Cost Of Goods
   // Sold. Money coming IN is never put on a job here: see jobRefusalFor.
   | { choice: "job"; jobId: string }
+  /**
+   * WHAT THE OWNER TOOK OUT, and the ONE answer for money that was not the business's (Erik,
+   * 2026-10-04: "anything thats not business is therefore taken out of the owners draw, simple").
+   * It writes no row: the bank line IS the record, and the profit and loss reads it back from
+   * bank_lines as equity below Net Profit (owner-money.ts). Money OUT only, the mirror of owner_in.
+   *
+   * 'personal' WAS A SECOND WORD FOR THIS SAME ANSWER, and is retired (0380). It wrote no row
+   * either, and it was read by NOTHING: not the profit and loss, not the accountant's download, not
+   * a job. A dentist filed that way showed once on the card that sorted it and then left the books
+   * entirely, so the draw read LOW by exactly the sum of it. A dollar that leaves the account and is
+   * not a business cost has nowhere else to be. Nothing was ever stored under the old word (checked
+   * before the merge: zero bank_lines, zero bank_rules, all three companies).
+   */
   | { choice: "draw" }
-  | { choice: "personal" }
   | { choice: "cash_out" }
   | { choice: "not_cost" }
   | { choice: "supplier"; supplierAccountId: string }
@@ -921,8 +933,13 @@ export function parseChoiceId(id: unknown): BankChoice | null {
     case "cash_out":
     case CASH_OUT_STORED:
       return s === head ? { choice: "cash_out" } : null;
-    case "draw":
+    // THE RETIRED WORD FOR OWNER'S DRAW (0380), so a card drawn before the merge still applies when
+    // it is pressed after: the pick comes back as the answer that replaced it. Nothing is ever
+    // written under 'personal' again - storedAnswer sees 'draw' - and the database stopped allowing
+    // the word in the same release.
     case "personal":
+      return s === head ? { choice: "draw" } : null;
+    case "draw":
     case "not_cost":
     case "other_income":
     case "not_income":
@@ -997,8 +1014,6 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
       return c.bucket;
     case "draw":
       return "Owner's Draw";
-    case "personal":
-      return "Personal";
     case "cash_out":
       return "Cash Taken Out (Not A Cost)";
     case "not_cost":
@@ -1789,13 +1804,15 @@ function buttonsFor(g: NeedGroup, books: BankBooks): string[] {
   }
   if (g.check) {
     for (const c of books.crew.slice(0, 2)) add(`crew:${c.id}`);
-    if (out.length < 2) add("personal");
+    if (out.length < 2) add("draw");
     return out.slice(0, 2);
   }
   // Fuel and Auto are each other's second: a fill-up guessed as a repair, or the other way round.
   if (g.guess === choiceId(FUEL)) add(choiceId(AUTO));
   if (g.guess === choiceId(AUTO)) add(choiceId(FUEL));
-  add("personal");
+  // ONE BUTTON, NOT TWO (0380): Personal and Owner's Draw stood side by side here and were the same
+  // answer, so the second slot is the draw and the third goes to Fuel - the bucket money out lands in
+  // most often, and the one Erik watches.
   add("draw");
   add(choiceId(FUEL));
   return out.slice(0, 3);
@@ -1858,7 +1875,7 @@ export function everyChoice(direction: "in" | "out", books: Pick<BankBooks, "acc
   }
   // Every bucket, Fuel and Auto first (the list's own order).
   const out: BankChoice[] = BUSINESS_COST_BUCKETS.map((b): BankChoice => ({ choice: "cost", bucket: b }));
-  out.push({ choice: "draw" }, { choice: "personal" }, { choice: "cash_out" }, { choice: "not_cost" });
+  out.push({ choice: "draw" }, { choice: "cash_out" }, { choice: "not_cost" });
   for (const a of books.accounts) if (a.onAccount) out.push({ choice: "supplier", supplierAccountId: a.id });
   for (const c of books.crew) out.push({ choice: "crew", profileId: c.id });
   return [...out, ...jobs()];
@@ -1898,8 +1915,8 @@ export type FlowSegment = { key: string; label: string; cents: number };
  * bucket, the one Erik watches), every other business cost as ONE Overhead segment (the profit and
  * loss's own word for them, profit-and-loss.ts; six pinks side by side read as one colour anyway,
  * and the legend is the place for names), Materials & Bills, Crew Pay, Owner's Draw (here: money the
- * owner took out of the account). The rest are the bank's own: Suppliers, Cash Taken Out,
- * Transfers, Personal, Already In North, Needs You.
+ * owner took out of the account, which since 0380 is every dollar of his own spending too). The rest
+ * are the bank's own: Suppliers, Cash Taken Out, Transfers, Already In North, Needs You.
  *
  * THIS BAR IS A BREAKDOWN, so every dollar lands in exactly one segment: Fuel out on its own means
  * the Overhead segment here is the OTHER buckets, even though Fuel is an Overhead bucket itself
@@ -1918,8 +1935,6 @@ export function flowLabelOf(choice: string, bucket: string | null): { key: strin
     }
     case "draw":
       return { key: "draw", label: "Owner's Draw" };
-    case "personal":
-      return { key: "personal", label: "Personal" };
     // An ATM's cash (W1-34), its own segment: no cost yet, and never the owner's. A line stored under
     // the old word (an ATM top-up applied before) is the same money.
     case "cash_out":

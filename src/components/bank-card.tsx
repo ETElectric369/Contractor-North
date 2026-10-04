@@ -18,7 +18,7 @@ import { NotNowOrDelete } from "@/components/not-now-or-delete";
  *
  *   Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 5 need you, in 3 rows
  *   [one bar: where the money went]
- *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Auto] [Personal] [Other…]
+ *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Auto] [Owner's Draw] [Other…]
  *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted Or Not Income] [Other…]
  *       Card: $17,751.63 paid this period, $17,228.55 to reach here after $523.08 of fees.
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
@@ -55,7 +55,6 @@ const TONES: Record<string, string> = {
   draw: "bg-green-600",
   cash_out: "bg-orange-400",
   not_cost: "bg-cyan-800",
-  personal: "bg-slate-600",
   books: "bg-stone-300",
   need: "bg-yellow-200",
 };
@@ -429,7 +428,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
               </ul>
             )}
             <p className="text-xs text-slate-500">
-              Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw, Owner&apos;s Money In, Personal and Cash Taken Out are kept as the bank line only, never a cost and never income; cash counts when its receipts come in.
+              Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw — anything that wasn&apos;t the business&apos;s — Owner&apos;s Money In and Cash Taken Out are kept as the bank line only, never a cost and never income; cash counts when its receipts come in.
             </p>
             {view.rules.length > 0 && (
               <div>

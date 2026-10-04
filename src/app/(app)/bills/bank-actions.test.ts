@@ -367,9 +367,9 @@ describe("the door", () => {
     const shell = rowBy(v, "SHELL");
     // The total of three different fills, said as a total (never "3×", which reads as each).
     expect(shell.money).toBe("3 charges · $288.45");
-    expect(shell.buttons.map((b) => b.label)).toEqual(["Fuel", "Auto", "Personal"]);
+    expect(shell.buttons.map((b) => b.label)).toEqual(["Fuel", "Auto", "Owner's Draw"]);
     expect(rowBy(v, "Deposit").buttons.map((b) => b.label)).toEqual(["On INV-1001", "Other Income", "Already Counted Or Not Income"]);
-    expect(rowBy(v, "Check 1043").buttons.map((b) => b.label)).toEqual(["Pay Pat Crew", "Personal"]);
+    expect(rowBy(v, "Check 1043").buttons.map((b) => b.label)).toEqual(["Pay Pat Crew", "Owner's Draw"]);
     // Another company's supplier, invoice and crew are never offered.
     expect(JSON.stringify(v)).not.toMatch(/Someone Else|INV-9|Other Crew/);
     expect(v.otherOut.map((b) => b.label)).toContain("Pay Contractor Supply");
@@ -408,7 +408,7 @@ describe("Apply", () => {
     const v = await view(id);
     const answer: Record<string, string> = {
       SHELL: "cost:Fuel",
-      DENTAL: "personal",
+      DENTAL: "personal", // the retired word for Owner's Draw (0380): a card drawn before the merge
       "ONLINE TRANSFER": "draw",
       Deposit: "invoice:inv-1",
       "Check 1043": "crew:pat",
@@ -425,13 +425,15 @@ describe("Apply", () => {
     expect(res.ok).toBe(true);
     expect(res.message).toMatch(/^Applied: 8 lines counted, 1 matched to what was already here, 7 you answered\. 1 left for later is not counted yet/);
     // It says what it remembered, and for which amounts.
-    expect(res.message).toContain("Remembered for next time: DENTAL CARE LLC → Personal ($150.00); SHELL 123 ANYTOWN ST → Fuel ($88.45 to $100.00)");
+    expect(res.message).toContain("Remembered for next time: DENTAL CARE LLC → Owner's Draw ($150.00); SHELL 123 ANYTOWN ST → Fuel ($88.45 to $100.00)");
 
     const lines = db.bank_lines;
     expect(lines).toHaveLength(8);
     expect(lines.every((l) => l.org_id === "org-1" && l.import_id === id && !/\d{6,}/.test(l.description))).toBe(true);
     expect(lines.find((l) => l.description.includes("TRANSFER TO CHK"))).toMatchObject({ choice: "draw", sorted_by: "person", amount: -2000 });
-    expect(lines.find((l) => l.description.includes("DENTAL"))).toMatchObject({ choice: "personal" });
+    // THE DENTIST IS THE OWNER'S DRAW (0380), under the one word the profit and loss reads back.
+    expect(lines.find((l) => l.description.includes("DENTAL"))).toMatchObject({ choice: "draw" });
+    expect(lines.some((l) => l.choice === "personal")).toBe(false);
     expect(lines.find((l) => l.description.includes("STRIPE"))).toMatchObject({ choice: "matched", sorted_by: "match" });
 
     // FUEL: three paid business costs in Add Business Cost's shape, in the Fuel bucket, each marked.
@@ -471,7 +473,7 @@ describe("Apply", () => {
 
     // RULES from the taps, one per merchant; never from the deposit's invoice or the check.
     expect(db.bank_rules.map((r) => [r.direction, r.merchant_key, r.choice, r.bucket]).sort()).toEqual([
-      ["out", "dental", "personal", null],
+      ["out", "dental", "draw", null],
       ["out", "shell", "cost", "Fuel"],
       ["out", "transfer 9876", "draw", null],
     ]);
@@ -723,7 +725,7 @@ describe("the next download", () => {
     const v = await view(first);
     const shell = rowBy(v, "SHELL").id;
     const dental = rowBy(v, "DENTAL").id;
-    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [shell]: "cost:Fuel", [dental]: "personal" } });
+    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [shell]: "cost:Fuel", [dental]: "draw" } });
     const next = await drop(NEXT_CSV, "Next.csv");
     const nv = await view(next);
     // 3 overlap (DENTAL, STRIPE, SHELL 9/16); the two new SHELL fills go by the rule; nothing asks.
@@ -1048,7 +1050,7 @@ describe("Undo", () => {
     const id = await drop();
     const v = await view(id);
     const picks: Record<string, string> = {};
-    for (const r of v.rows) picks[r.id] = r.direction === "in" ? "other_income" : "personal";
+    for (const r of v.rows) picks[r.id] = r.direction === "in" ? "other_income" : "draw";
     await applyBankDownload(id, { fingerprint: v.fingerprint, picks });
     expect(db.organized_items[0].status).toBe("filed");
     const res = await undoPaperwork(id);

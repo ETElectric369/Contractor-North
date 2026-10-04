@@ -166,7 +166,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     await as(techA);
     expect((await c.query("select id from bank_lines")).rowCount).toBe(0);
     expect((await c.query("select id from bank_rules")).rowCount).toBe(0);
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-03', -1, 'personal', 'person')", [orgA, importA, KEY(2)])).toBe("42501");
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-03', -1, 'draw', 'person')", [orgA, importA, KEY(2)])).toBe("42501");
     expect((await c.query("update bank_rules set uses = 9")).rowCount).toBe(0);
     expect((await c.query("delete from bank_lines")).rowCount).toBe(0);
     await asServer();
@@ -179,7 +179,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect((await c.query("update bank_lines set description = 'x'")).rowCount).toBe(0);
     expect((await c.query("delete from bank_rules")).rowCount).toBe(0);
     // Writing a row INTO another company is refused outright.
-    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'dental', 'personal')", [orgA])).toBe("42501");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'dental', 'draw')", [orgA])).toBe("42501");
     await asServer();
     await c.query("set local role anon");
     expect(await refused("select id from bank_lines")).toBe("42501");
@@ -189,21 +189,21 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
 
   it("a line counts once per company; another company may hold the same key", async () => {
     if (!ready()) return;
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -12.5, 'personal', 'person')", [orgA, importA, KEY(1)])).toBe("23505");
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -12.5, 'draw', 'person')", [orgA, importA, KEY(1)])).toBe("23505");
     expect((await line(orgB, 1)).rowCount).toBe(1);
   });
 
   it("the database refuses a long number in a description, a $0 line, a cost with no bucket, and a bucket that isn't one", async () => {
     if (!ready()) return;
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, description, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'ACH 123456789', 'personal', 'person')", [orgA, importA, KEY(3)])).toBe("23514");
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, description, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'ACH ••6789', 'personal', 'person')", [orgA, importA, KEY(3)])).toBeNull();
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', 0, 'personal', 'person')", [orgA, importA, KEY(4)])).toBe("23514");
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, description, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'ACH 123456789', 'draw', 'person')", [orgA, importA, KEY(3)])).toBe("23514");
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, description, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'ACH ••6789', 'draw', 'person')", [orgA, importA, KEY(3)])).toBeNull();
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', 0, 'draw', 'person')", [orgA, importA, KEY(4)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'person')", [orgA, importA, KEY(5)])).toBe("23514");
     // The seven buckets (0362): Fuel and Auto are, the old Gas & Truck is not.
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Gas & Truck', 'person')", [orgA, importA, KEY(6)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Auto', 'person')", [orgA, importA, KEY(8)])).toBeNull();
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket) values ($1, 'out', 'garage', 'cost', 'Gas & Truck')", [orgA])).toBe("23514");
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, 'not-a-key', '2001-01-02', -1, 'personal', 'person')", [orgA, importA])).toBe("23514");
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, 'not-a-key', '2001-01-02', -1, 'draw', 'person')", [orgA, importA])).toBe("23514");
     // No fuel "kind" anywhere: a Fuel answer is the Fuel bucket.
     expect(
       (await one("select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name in ('bills', 'bank_lines', 'bank_rules') and column_name in ('cost_kind', 'matched_kind')")).n,
@@ -214,12 +214,18 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'regular', 'other_income')", [orgA])).toBe("23514");
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'savings', 'not_income')", [orgA])).toBeNull();
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket) values ($1, 'out', 'shell', 'cost', 'Fuel')", [orgA])).toBe("23505");
-    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'shell', 'personal', 100, 2000)", [orgA])).toBeNull();
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'shell', 'draw', 100, 2000)", [orgA])).toBeNull();
     // A second COST answer for the same merchant is its own rule too (a fill-up Fuel, oil Auto).
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket, min_cents, max_cents) values ($1, 'out', 'shell', 'cost', 'Auto', 800, 900)", [orgA])).toBeNull();
-    expect((await c.query("select answer from bank_rules where org_id = $1 and merchant_key = 'shell' order by answer", [orgA])).rows.map((r) => r.answer)).toEqual(["cost:Auto", "cost:Fuel", "personal"]);
-    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'dental', 'personal', 500, 100)", [orgA])).toBe("23514");
-    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents) values ($1, 'out', 'dental', 'personal', 500)", [orgA])).toBe("23514");
+    expect((await c.query("select answer from bank_rules where org_id = $1 and merchant_key = 'shell' order by answer", [orgA])).rows.map((r) => r.answer)).toEqual(["cost:Auto", "cost:Fuel", "draw"]);
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'dental', 'draw', 500, 100)", [orgA])).toBe("23514");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents) values ($1, 'out', 'dental', 'draw', 500)", [orgA])).toBe("23514");
+    // THE RETIRED WORD IS GONE FROM THE DATABASE TOO (0380). Personal was a second word for Owner's
+    // Draw that no statement read, so the draw read low by every dollar of it. The app stopped
+    // offering it and stopped writing it; this is the half that makes it impossible. Nothing was
+    // stored under it when it went (zero bank_lines, zero bank_rules), so nothing had to be moved.
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-09', -1, 'personal', 'person')", [orgA, importA, KEY(9)])).toBe("23514");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'retired', 'personal')", [orgA])).toBe("23514");
   });
 
   it("a bank download or a supplier's list in the tray is staff-only, even on a row a tech made (0365)", async () => {
@@ -256,7 +262,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect((await c.query("select id from bank_rules")).rowCount).toBe(0);
     expect((await c.query("update bank_lines set description = 'x'")).rowCount).toBe(0);
     expect((await c.query("delete from bank_rules")).rowCount).toBe(0);
-    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'cafe', 'personal')", [orgA])).toBe("42501");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'cafe', 'draw')", [orgA])).toBe("42501");
     expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(0);
     // A supplier's list is still the office's to sort.
     expect((await c.query("select id from organized_items where title = 'TEST 0365 list'")).rowCount).toBe(1);
