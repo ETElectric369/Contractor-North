@@ -1,5 +1,6 @@
 import { shortDay } from "@/lib/come-back-days";
 import { todayStrInTz } from "@/lib/tz";
+import { isSchedulable } from "@/lib/waiting-on";
 
 /**
  * JOBS NEEDING A DAY (Wave 1, NY-feeders): ONE rule where there were two.
@@ -16,6 +17,12 @@ import { todayStrInTz } from "@/lib/tz";
  *   · nobody clocked in on it right now (the crew is standing on it),
  * and it isn't already on Needs You as a Won estimate (one won job, one line). No three-day window:
  * a job doesn't stop needing a day because a week went by.
+ *
+ * AND IT IS NOT WAITING ON SOMEBODY ELSE. A job that cannot proceed until the county, the utility or
+ * another trade acts is a BLOCK, not an action (0178): asking it for a date is asking a person to
+ * invent one. Two ways to be waiting, one rule — its own blocked_on (0178's words, read through
+ * lib/waiting-on), and a permit whose inspection is still outstanding (0378), which comes to Needs You
+ * as its own row naming the authority. Either way the day row would be the second row about one job.
  *
  * The why line says what is behind it, in at most 140 characters:
  *   "Never had a day"            never dated, never worked
@@ -46,6 +53,10 @@ export type NeedDayJob = {
   scheduled_start?: string | null;
   scheduled_end?: string | null;
   created_at?: string | null;
+  /** Waiting on somebody else, in his own words (0178). A job that cannot proceed is not asked for a
+   *  date — that is the whole reason the column exists, and this is its first reader. */
+  blocked_on?: string | null;
+  blocked_since?: string | null;
   customers?: { name?: string | null } | { name?: string | null }[] | null;
   job_schedule_segments?: { start_date?: string | null; end_date?: string | null }[] | null;
   /** The job's latest time entry (the read embeds one, newest first); more are fine. */
@@ -124,6 +135,14 @@ export function jobsNeedingADay(input: {
   billedJobIds?: ReadonlySet<string>;
   /** Lines still to buy, per job (the newest list's open lines). */
   toBuy?: ReadonlyMap<string, number>;
+  /**
+   * Jobs whose permit is still waiting on an inspection (0378). A DAY IS NOT WHAT THESE NEED: the
+   * work is done and the town or the utility has to come, which is its own row on Needs You, naming
+   * the authority. One job, one row — the same rule that makes a job's lines to buy ride its day row
+   * rather than making a second one. Only final inspections are modelled, so an outstanding one means
+   * the work is behind it.
+   */
+  awaitingInspectionJobIds?: ReadonlySet<string>;
 }): NeedDayFinding[] {
   const { todayStr } = input;
   const tz = input.tz ?? null;
@@ -131,6 +150,11 @@ export function jobsNeedingADay(input: {
   for (const j of input.jobs ?? []) {
     if (!j?.id) continue;
     if (!NEEDS_A_DAY_STATUSES.includes(String(j.status ?? ""))) continue;
+    // WAITING ON SOMEBODY ELSE IS NOT NEEDING A DAY (0178, whose words this reads). Asking for a date
+    // on a job that cannot proceed is asking a person to invent one, which is the bumping 0178 was
+    // written to stop. A permit's outstanding inspection says the same thing from its own rows.
+    if (!isSchedulable(j)) continue;
+    if (input.awaitingInspectionJobIds?.has(j.id)) continue;
     if (input.wonJobIds?.has(j.id)) continue;
     if (input.billedJobIds?.has(j.id)) continue; // billed = done (0205)
     if (input.clockedInJobIds?.has(j.id)) continue;

@@ -12,6 +12,10 @@ export const FEEDER_SWITCHES: Partial<Record<ActionKind, readonly FeatureKey[]>>
   // An inspection that happened and was never written up: a Leads & Inspections nudge, and its
   // door is the estimate builder, so it needs Estimates too.
   inspection_writeup: ["leads", "estimates"],
+  // A permit still waiting on the town or the utility: a Permits & Inspections nudge, and its door is
+  // the job's Permits tab. A company that does no permit work (the trade defaults switch it off for
+  // landscaping and painting) has no permits to wait on, and its read is skipped.
+  permit_inspection: ["permits"],
 };
 
 /**

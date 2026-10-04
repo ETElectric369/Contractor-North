@@ -27,6 +27,14 @@ import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
 import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
+import {
+  PERMIT_INSPECTION_COLUMNS,
+  inOrder,
+  inspectionLine,
+  permitInspectionStand,
+  standLine,
+  type PermitInspection,
+} from "@/lib/permit-inspections";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 import { PNL_WORDS, bucketHalvesWords } from "@/lib/analytics/profit-and-loss";
@@ -381,7 +389,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_permits",
     description:
-      "List PERMITS with status, authority, and inspection date. Use for 'what permits are open', 'any inspections coming up', 'permit status on the Miller job'. Pass a job_id to filter to one job.",
+      "List PERMITS with their status, who ISSUED them, and the INSPECTIONS each one still needs — who is coming, the day and part-day booked, how it went, and where the permit stands ('Waiting on Liberty Utilities — Thu Oct 15, morning'). A permit can need several inspections from different authorities, IN ORDER: the next one is only callable once the one in front has passed. Use for 'what permits are open', 'who still has to inspect the Miller job', 'is the meter back on'. Pass a job_id to filter to one job.",
     input_schema: {
       type: "object",
       properties: {
@@ -1690,10 +1698,17 @@ export async function runDataTool(
 
       case "list_permits": {
         const lim = clampLimit(input.limit, 30);
+        // WHO STILL HAS TO COME, NOT ONE DATE (0378). permits.inspection_date carried a single
+        // inspection and is superseded: a permit's visits are rows in permit_inspections, in order,
+        // and the one rule (lib/permit-inspections) says where the permit stands. Nort reads the same
+        // answer every screen reads — never a second definition of "waiting on the utility". The order
+        // is newest permit first now: there is no single inspection date left to sort by.
         let q = supabase
           .from("permits")
-          .select("id, permit_number, type, authority, status, inspection_date, jobs(job_number, name)")
-          .order("inspection_date", { ascending: true, nullsFirst: false })
+          .select(
+            `id, permit_number, type, authority, status, jobs(job_number, name), permit_inspections(${PERMIT_INSPECTION_COLUMNS})`,
+          )
+          .order("created_at", { ascending: false })
           .limit(lim);
         const st = sanitize(input.status);
         if (st) q = q.eq("status", st);
@@ -1701,17 +1716,26 @@ export async function runDataTool(
         if (jid) q = q.eq("job_id", jid);
         const { data, error } = await q;
         if (error) throw error;
+        // The COMPANY's day: whether an inspection is still ahead or was missed is read against it.
+        const permitsToday = await orgTodayStr(supabase);
         return JSON.stringify({
           count: data?.length ?? 0,
-          permits: (data ?? []).map((p: any) => ({
-            id: p.id,
-            permit_number: p.permit_number,
-            type: p.type,
-            authority: p.authority,
-            status: p.status,
-            inspection_date: p.inspection_date,
-            job: p.jobs ? `${p.jobs.job_number} ${p.jobs.name}` : null,
-          })),
+          permits: (data ?? []).map((p: any) => {
+            const rows = (p.permit_inspections ?? []) as PermitInspection[];
+            const stand = permitInspectionStand(rows, permitsToday);
+            return {
+              id: p.id,
+              permit_number: p.permit_number,
+              type: p.type,
+              // Who ISSUED it — a different question from who inspects it.
+              issued_by: p.authority,
+              status: p.status,
+              job: p.jobs ? `${p.jobs.job_number} ${p.jobs.name}` : null,
+              // In order: who comes, the day and part-day booked, and how it went once it has.
+              inspections: inOrder(rows).map((r) => inspectionLine(rows, r)),
+              where_it_stands: standLine(stand),
+            };
+          }),
         });
       }
 

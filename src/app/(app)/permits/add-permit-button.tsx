@@ -26,7 +26,6 @@ export function AddPermitButton({ jobs }: { jobs: JobOpt[] }) {
   const [authority, setAuthority] = useState("");
   const [status, setStatus] = useState("applied");
   const [applied, setApplied] = useState("");
-  const [inspDate, setInspDate] = useState("");
   const [notes, setNotes] = useState("");
 
   function save() {
@@ -39,11 +38,10 @@ export function AddPermitButton({ jobs }: { jobs: JobOpt[] }) {
         authority,
         status,
         applied_date: applied || null,
-        inspection_date: inspDate || null,
         notes,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      setNum(""); setAuthority(""); setApplied(""); setInspDate(""); setNotes(""); setJobId("");
+      setNum(""); setAuthority(""); setApplied(""); setNotes(""); setJobId("");
       setOpen(false);
       router.refresh();
     });
@@ -77,8 +75,9 @@ export function AddPermitButton({ jobs }: { jobs: JobOpt[] }) {
             <div><Label htmlFor="ap-auth">Authority</Label><Input id="ap-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="ap-status">Status</Label><Select id="ap-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
             <div><Label htmlFor="ap-applied">Applied date</Label><Input id="ap-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
-            <div><Label htmlFor="ap-insp">Inspection date</Label><Input id="ap-insp" type="date" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /></div>
           </div>
+          {/* No inspection field (0378): a permit's inspections are booked on the permit's own card,
+              one per authority that has to come, in the order they come. */}
           <div><Label htmlFor="ap-notes">Notes</Label><Textarea id="ap-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
         </div>
       </Modal>

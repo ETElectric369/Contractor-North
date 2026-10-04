@@ -16,11 +16,15 @@ import { EditPermitButton } from "../../permits/edit-permit-button";
 import {
   PERMIT_TYPES as TYPES,
   PERMIT_STATUSES as STATUSES,
-  PERMIT_INSPECTION_RESULTS as RESULTS,
   permitStatusTone as statusTone,
-  permitResultTone as resultTone,
 } from "@/lib/permit-options";
+import type { PermitInspection } from "@/lib/permit-inspections";
+import { PermitInspections } from "./permit-inspections";
 
+/** THE THREE SUPERSEDED COLUMNS ARE NOT HERE (0378). permits.inspection_date / inspector /
+ *  inspection_result carried ONE inspection inline, and a permit needs several from different
+ *  authorities: they live in permit_inspections now, drawn by <PermitInspections> on each card.
+ *  permits.authority STAYS and keeps its own meaning — who ISSUED the permit. */
 export interface Permit {
   id: string;
   permit_number: string | null;
@@ -29,9 +33,6 @@ export interface Permit {
   status: string;
   applied_date: string | null;
   issued_date: string | null;
-  inspection_date: string | null;
-  inspector: string | null;
-  inspection_result: string;
   fee: number;
   notes: string | null;
 }
@@ -39,7 +40,27 @@ export interface Permit {
 
 /** `canAdd` = the Permits & Inspections switch (0352). Off, Add Permit goes; the permits already on
  *  the job stay listed and editable (the tab shows the Off line above them). */
-export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; permits: Permit[]; canAdd?: boolean }) {
+export function JobPermits({
+  jobId,
+  permits,
+  canAdd = true,
+  inspections = [],
+  inspectionsUnread = false,
+  todayStr = "",
+  authorities = [],
+}: {
+  jobId: string;
+  permits: Permit[];
+  canAdd?: boolean;
+  /** Every inspection on this job's permits (0378) in one list; each card takes its own. */
+  inspections?: PermitInspection[];
+  /** The read failed: each card says so rather than reading as a permit with no inspections. */
+  inspectionsUnread?: boolean;
+  /** The COMPANY's today, from the server: the gate is read against it, never the browser's clock. */
+  todayStr?: string;
+  /** The authorities this company has called before, suggested under the free text box. */
+  authorities?: string[];
+}) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -52,9 +73,6 @@ export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; p
   const [status, setStatus] = useState("applied");
   const [applied, setApplied] = useState("");
   const [fee, setFee] = useState(0);
-  const [inspDate, setInspDate] = useState("");
-  const [inspector, setInspector] = useState("");
-  const [result, setResult] = useState("pending");
   const [notes, setNotes] = useState("");
   const [portalUrl, setPortalUrl] = useState("");
 
@@ -63,11 +81,10 @@ export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; p
     start(async () => {
       const res = await createPermit({
         job_id: jobId, type, permit_number: num, authority, status,
-        applied_date: applied || null, fee, inspection_date: inspDate || null,
-        inspector, inspection_result: result, notes, portal_url: portalUrl,
+        applied_date: applied || null, fee, notes, portal_url: portalUrl,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      setNum(""); setAuthority(""); setApplied(""); setFee(0); setInspDate(""); setInspector(""); setNotes(""); setPortalUrl("");
+      setNum(""); setAuthority(""); setApplied(""); setFee(0); setNotes(""); setPortalUrl("");
       setAdding(false);
       toast("Permit added", "success");
       router.refresh();
@@ -91,15 +108,15 @@ export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; p
             <div><Label htmlFor="p-status">Status</Label><Select id="p-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
             <div><Label htmlFor="p-applied">Applied date</Label><Input id="p-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
             <div><Label htmlFor="p-fee">Fee</Label><NumberInput id="p-fee" value={fee} onValueChange={setFee} /></div>
-            <div><Label htmlFor="p-idate">Inspection date</Label><Input id="p-idate" type="date" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /></div>
-            <div><Label htmlFor="p-insp">Inspector</Label><Input id="p-insp" value={inspector} onChange={(e) => setInspector(e.target.value)} /></div>
-            <div><Label htmlFor="p-res">Inspection result</Label><Select id="p-res" value={result} onChange={(e) => setResult(e.target.value)}>{RESULTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
           </div>
           <div>
             <Label htmlFor="p-portal">City portal link</Label>
             <Input id="p-portal" value={portalUrl} onChange={(e) => setPortalUrl(e.target.value)} placeholder="https://… (the authority's permit-status page)" />
           </div>
           <div><Label htmlFor="p-notes">Notes</Label><Textarea id="p-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
+          {/* The inspections are not fields on the permit any more (0378): save the permit, then Add
+              Inspection on its own card books each authority that has to come. One permit, many visits. */}
+          <p className="text-xs text-slate-500">Save it, then add the inspections it needs on the permit&rsquo;s own card.</p>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
             <Button size="sm" onClick={add} disabled={pending}>{pending ? "Saving…" : "Save Permit"}</Button>
@@ -133,11 +150,18 @@ export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; p
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
                     {p.applied_date && <span>Applied {formatDate(p.applied_date)}</span>}
-                    {p.inspection_date && <span>Inspection {formatDate(p.inspection_date)}</span>}
-                    {p.inspector && <span>· {p.inspector}</span>}
                     {Number(p.fee) > 0 && <span>· ${Number(p.fee).toFixed(2)}</span>}
                   </div>
                   {p.notes && <div className="mt-1 whitespace-pre-wrap text-xs text-slate-500">{p.notes}</div>}
+                  {/* WHO STILL HAS TO COME (0378): this permit's own inspections, in the order they come. */}
+                  <PermitInspections
+                    permitId={p.id}
+                    rows={(inspections ?? []).filter((i) => i.permit_id === p.id)}
+                    todayStr={todayStr}
+                    suggestions={authorities}
+                    canWrite={canAdd}
+                    unread={inspectionsUnread}
+                  />
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <Select
@@ -151,7 +175,6 @@ export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; p
                     {/* NOTE: first-underscore-only label — fine while every PERMIT_STATUSES value
                         has ≤1 underscore; switch to the spine's [value,label] pairs if that changes. */}
                     <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
-                    <Badge tone={resultTone(p.inspection_result)}>{p.inspection_result}</Badge>
                     <EditPermitButton permit={p as any} jobId={jobId} />
                     <button onClick={() => { if (confirm("Delete this permit?")) start(async () => { const res = await deletePermit(p.id, jobId); if (!res?.ok) { toast(res?.error ?? "Couldn't delete permit — try again.", "error"); return; } toast("Permit deleted", "success"); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
                   </div>

@@ -6,6 +6,19 @@ import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string };
 
+/**
+ * THE PERMIT ITSELF — NOT ITS INSPECTIONS (0378).
+ *
+ * permits.inspection_date, permits.inspector and permits.inspection_result are SUPERSEDED: they
+ * carried ONE inspection inline, and a permit needs several, from different authorities, in order
+ * ("we have to get it inspected by both the Town of Truckee and Liberty Utilities before Liberty will
+ * put the meter back on"). They live in permit_inspections now — booked and written up through
+ * permits/inspection-actions. Nothing here reads or writes them, and tests/no-superseded-permit-columns
+ * fails the suite if anything starts again.
+ *
+ * `authority` STAYS, and keeps its own meaning: who ISSUED the permit. Who issues it and who inspects
+ * it are not the same question.
+ */
 export interface PermitInput {
   job_id?: string | null;
   permit_number?: string | null;
@@ -16,9 +29,6 @@ export interface PermitInput {
   issued_date?: string | null;
   expires_date?: string | null;
   fee?: number;
-  inspection_date?: string | null;
-  inspector?: string | null;
-  inspection_result?: string;
   notes?: string | null;
   portal_url?: string | null;
 }
@@ -43,9 +53,6 @@ export async function createPermit(input: PermitInput): Promise<Result> {
     issued_date: input.issued_date || null,
     expires_date: input.expires_date || null,
     fee: input.fee ?? 0,
-    inspection_date: input.inspection_date || null,
-    inspector: input.inspector?.trim() || null,
-    inspection_result: input.inspection_result || "pending",
     notes: input.notes?.trim() || null,
     portal_url: input.portal_url?.trim() || null,
     created_by: ctx.userId,
@@ -62,7 +69,7 @@ export async function updatePermit(id: string, patch: PermitInput): Promise<Resu
   const clean: Record<string, unknown> = {};
   for (const k of [
     "permit_number", "type", "authority", "status", "applied_date", "issued_date",
-    "expires_date", "inspection_date", "inspector", "inspection_result", "notes", "portal_url",
+    "expires_date", "notes", "portal_url",
   ] as const) {
     if (patch[k] !== undefined) clean[k] = (patch[k] as string) || null;
   }
