@@ -61,7 +61,19 @@ export const isWorkKind = (v: unknown): v is WorkKind =>
  * workKind(), and a WRITE GUARD accepts any known kind (sizeLead, the rail's sizeAppointment), so a
  * row's own old kind always saves. Only the pickers narrow (kindOptions).
  */
-export const PICKABLE_WORK_KINDS: readonly WorkKind[] = ["walkthrough", "job", "service", "call", "other"] as const;
+/* SERVICE CAME OFF THIS LIST TOO (2026-10-03), the same day Service Call came off the appointment
+ * pickers. Erik: "I think we should takeoff service call as a bucket because its deadweight as we
+ * have replaced it with time and material versus fixed price."
+ *
+ * THE ROUND TRIP IS WHY IT HAD TO GO FROM BOTH. Service work now books as a JOB, so leaving
+ * `service` here would leave TWO kinds pointing at one appointment type and the kind could not be
+ * read back — two names for one thing, which is the fault this file exists to stop. What the
+ * distinction was for (is this small reactive work or a project?) is answered by jobs.billing_type.
+ *
+ * WORK_KINDS and isWorkKind stay BROAD, so an inquiry already tagged `service` still reads back as
+ * Service Call, still saves, and is still offered to the row that has it (kindOptions). The CHECK
+ * inquiries_work_kind_known (0230/0232) is untouched: nothing stored changes. */
+export const PICKABLE_WORK_KINDS: readonly WorkKind[] = ["walkthrough", "job", "call", "other"] as const;
 
 /** A kind picker's options for one row: the five, plus the row's own old kind (Quote, Office) when
  *  it has one, so an old row never reads "Kind?" and re-picking what it already is still saves. */
@@ -211,7 +223,13 @@ export function dayLoad(items: { planned_minutes?: number | null }[]): {
  */
 export function appointmentTypeFor(kind: string | null | undefined): string {
   switch (kind) {
-    case "service": return "service_call";
+    // SERVICE WORK BOOKS AS A JOB (2026-10-03). It used to book as 'service_call', which came off
+    // the pickable list the same day — the appointment page already called that type legacy, saying
+    // "new ones become real jobs at booking", and this was the one door still making them. The lead
+    // KIND stays `service`, because "what kind of work is this" is a live question on an inquiry and
+    // a different one from how the booking is typed. Reading an old service_call row still answers
+    // `service` (the map above), so nothing already written changes its mind.
+    case "service": return "job";
     case "office": return "meeting";
     case "quote": return "quote";
     case "job": return "job";

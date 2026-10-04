@@ -103,14 +103,14 @@ describe("appointment.create — a spoken local time is stored as that local tim
   });
 });
 
-describe("appointment.create books one of the five kinds a person picks (W2-06)", () => {
+describe("appointment.create books one of the four kinds a person picks (W2-06)", () => {
   it("no type books Other, never an inspection or the old 'appointment'", async () => {
     await create({ title: "Dentist", starts_at: "2026-09-25T10:00" });
     expect((createAppointment.mock.calls[0][0] as FormData).get("type")).toBe("other");
   });
 
-  it("each of the five goes through as given; a kind nobody picks any more is refused before anything is written", async () => {
-    for (const type of ["inspection", "job", "service_call", "call", "other"]) {
+  it("each of the four goes through as given; a kind nobody picks any more is refused before anything is written", async () => {
+    for (const type of ["inspection", "job", "call", "other"]) {
       createAppointment.mockClear();
       await create({ title: "x", type, starts_at: "2026-09-25T10:00" });
       expect((createAppointment.mock.calls[0][0] as FormData).get("type"), type).toBe(type);

@@ -209,9 +209,14 @@ describe("the tag he chose is the tag that lands", () => {
   });
 
   it("round-trips every kind the dropdown offers", () => {
-    for (const k of ["job", "service", "office", "quote"] as const) {
+    for (const k of ["job", "office", "quote"] as const) {
       expect(workKind({ kind: "appointment", type: appointmentTypeFor(k) })).toBe(k);
     }
+    // `service` left the dropdown on 2026-10-03 and books as a JOB, so it cannot round-trip through
+    // a booking — by design, since that is the two-names-for-one-thing the retirement removed. The
+    // direction an old row needs still holds:
+    expect(appointmentTypeFor("service")).toBe("job");
+    expect(workKind({ kind: "appointment", type: "service_call" })).toBe("service");
     // an inspection is the fallback and stays one
     expect(appointmentTypeFor("walkthrough")).toBe("inspection");
     expect(workKind({ kind: "appointment", type: "inspection" })).toBe("walkthrough");

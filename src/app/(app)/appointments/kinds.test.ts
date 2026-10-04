@@ -90,9 +90,12 @@ beforeEach(() => {
   s.stored = "meeting";
 });
 
-describe("a new visit is one of the five", () => {
-  it("each of the five books as given", async () => {
-    for (const type of ["inspection", "job", "service_call", "call", "other"]) {
+/* FOUR since 2026-10-03, not five: Service Call came off the pickable list (statuses.ts says why
+ * — the code already called it legacy, isServiceCall had no callers, and jobs.billing_type answers
+ * the question it used to ask). An old service_call row still READS as Service Call. */
+describe("a new visit is one of the four", () => {
+  it("each of the four books as given", async () => {
+    for (const type of ["inspection", "job", "call", "other"]) {
       s.inserts = [];
       expect(await createAppointment(form({ type })), type).toMatchObject({ ok: true });
       expect(s.inserts[0]?.row.type, type).toBe(type);
@@ -151,10 +154,12 @@ describe("offering times", () => {
     expect(s.proposals[0].type).toBe("inspection");
   });
 
-  it("takes one of the five, and refuses an old kind in words", async () => {
-    expect(await createAppointmentProposal(form({ slots_json: slots, type: "service_call" }))).toMatchObject({ ok: true });
-    expect(s.proposals[0].type).toBe("service_call");
+  it("takes one of the four, and refuses a kind nobody picks any more — service_call among them now", async () => {
+    expect(await createAppointmentProposal(form({ slots_json: slots, type: "job" }))).toMatchObject({ ok: true });
+    expect(s.proposals[0].type).toBe("job");
     expect(await createAppointmentProposal(form({ slots_json: slots, type: "quote" }))).toEqual({ ok: false, error: PICK });
+    // Retired 2026-10-03 and refused at the door from that moment, like quote and meeting before it.
+    expect(await createAppointmentProposal(form({ slots_json: slots, type: "service_call" }))).toEqual({ ok: false, error: PICK });
   });
 });
 
@@ -177,9 +182,11 @@ describe("the pickers offer the five (and a row's own old kind)", () => {
     return [...sel.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map((m) => m[2]);
   };
 
-  it("the kind select (lead row and rail) offers Kind? and the five; an old Quote lead keeps Quote, never reads Kind?", () => {
-    expect(kindSelect(null)).toEqual(["Kind?", "Inspection", "Job", "Service Call", "Phone Call", "Other"]);
-    expect(kindSelect("quote")).toEqual(["Kind?", "Inspection", "Job", "Service Call", "Phone Call", "Other", "Quote"]);
+  it("the kind select (lead row and rail) offers Kind? and the four; an old Quote lead keeps Quote, never reads Kind?", () => {
+    expect(kindSelect(null)).toEqual(["Kind?", "Inspection", "Job", "Phone Call", "Other"]);
+    expect(kindSelect("quote")).toEqual(["Kind?", "Inspection", "Job", "Phone Call", "Other", "Quote"]);
+    // Service Call retired 2026-10-03: off the offer, still kept by the row that already is one.
+    expect(kindSelect("service")).toContain("Service Call");
     expect(kindSelect("office")).toContain("Office");
     // Its selects are 44px targets.
     const html = renderToStaticMarkup(createElement(WorkShapeControls, { workKind: null, plannedMinutes: null, onPatch: () => {} }));

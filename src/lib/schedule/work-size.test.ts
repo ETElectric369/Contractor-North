@@ -121,10 +121,22 @@ describe("every kind the app offers survives the round trip", () => {
     }
   });
 
+  /* OVER THE KINDS THAT CAN STILL BE BOOKED, not every kind that ever existed. A RETIRED kind
+   * cannot round-trip through a booking by definition: `service` books as a JOB since 2026-10-03,
+   * so booking it and reading back answers "job", correctly. The direction that matters for an old
+   * row is the other one, and it is pinned right below: a stored service_call still reads Service
+   * Call. Asserting the impossible direction would have forced `service` to keep its own
+   * appointment type, which is the two-names-for-one-thing this retirement removed. */
   it("reads back as the same kind it was booked as", () => {
-    for (const k of WORK_KINDS) {
+    for (const k of PICKABLE_WORK_KINDS) {
       expect(workKind({ kind: "appointment", type: appointmentTypeFor(k) })).toBe(k);
     }
+  });
+
+  it("a retired kind still reads back off its OWN stored type, and books as what replaced it", () => {
+    expect(workKind({ kind: "appointment", type: "service_call" })).toBe("service");
+    expect(workKind({ kind: "lead", workKind: "service" })).toBe("service");
+    expect(appointmentTypeFor("service")).toBe("job");
   });
 
   it("has a label and a tone — no blank badges", () => {
@@ -140,9 +152,12 @@ describe("every kind the app offers survives the round trip", () => {
       expect(appointmentTypeLabel(t)).toBeTruthy();
       expect(appointmentTypeLabel(t)).not.toBe(t); // a raw enum value is not a label
     }
-    for (const k of WORK_KINDS) {
+    // The bookable kinds only: a retired kind books as what replaced it (see the test above).
+    for (const k of PICKABLE_WORK_KINDS) {
       expect(KIND_FROM_APPT_TYPE[appointmentTypeFor(k)]).toBe(k);
     }
+    // And every type the table allows still names a kind, retired ones included.
+    for (const t of APPOINTMENT_TYPES) expect(KIND_FROM_APPT_TYPE[t]).toBeTruthy();
   });
 
   it("includes the phone call that started this", () => {
@@ -158,11 +173,15 @@ describe("every kind the app offers survives the round trip", () => {
  * exactly these (and a row's own old kind); the guards still accept every known kind, so nothing an
  * old row already is can be refused.
  */
-describe("the five kinds a person picks survive the round trip, Other included", () => {
-  it("are the five, in the picker's order, each a kind a writer accepts", () => {
-    expect([...PICKABLE_WORK_KINDS]).toEqual(["walkthrough", "job", "service", "call", "other"]);
+describe("the four kinds a person picks survive the round trip, Other included", () => {
+  it("are the four, in the picker's order, each a kind a writer accepts", () => {
+    expect([...PICKABLE_WORK_KINDS]).toEqual(["walkthrough", "job", "call", "other"]);
     for (const k of PICKABLE_WORK_KINDS) expect(isWorkKind(k) || k === "other", k).toBe(true);
-    expect(PICKABLE_WORK_KINDS.map((k) => KIND_LABEL[k])).toEqual(["Inspection", "Job", "Service Call", "Phone Call", "Other"]);
+    expect(PICKABLE_WORK_KINDS.map((k) => KIND_LABEL[k])).toEqual(["Inspection", "Job", "Phone Call", "Other"]);
+    // An inquiry already tagged `service` still reads back, still saves, and is still offered to it.
+    expect(KIND_LABEL.service).toBe("Service Call");
+    expect(kindOptions("service")).toContain("service");
+    expect(appointmentTypeFor("service")).toBe("job");
   });
 
   it("book as a type the table allows and a person can pick, and read back as the kind picked", () => {
@@ -188,8 +207,11 @@ describe("the five kinds a person picks survive the round trip, Other included",
     expect(workKind({ kind: "lead", workKind: "quote" })).toBe("quote");
     expect(workKind({ kind: "lead", workKind: "office" })).toBe("office");
     expect(workKind({ kind: "appointment", type: "meeting" })).toBe("office");
-    expect(kindOptions("quote")).toEqual(["walkthrough", "job", "service", "call", "other", "quote"]);
-    expect(kindOptions("office")).toEqual(["walkthrough", "job", "service", "call", "other", "office"]);
+    expect(kindOptions("quote")).toEqual(["walkthrough", "job", "call", "other", "quote"]);
+    expect(kindOptions("office")).toEqual(["walkthrough", "job", "call", "other", "office"]);
+    // Service Call joined them on 2026-10-03: off the picker, still offered to the row that is one,
+    // so re-saving an inquiry already tagged Service Call never silently re-tags it.
+    expect(kindOptions("service")).toEqual(["walkthrough", "job", "call", "other", "service"]);
     // A current kind adds nothing; junk or nothing is never offered.
     expect(kindOptions("job")).toEqual([...PICKABLE_WORK_KINDS]);
     expect(kindOptions("nonsense")).toEqual([...PICKABLE_WORK_KINDS]);

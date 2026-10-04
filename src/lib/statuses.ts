@@ -71,7 +71,18 @@ export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
  * appointment / final_inspection still reads truly under its old label, and its own old kind always
  * saves (appointments/actions resolveType). Only the pickers and the create guards narrow to this.
  */
-export const PICKABLE_APPOINTMENT_TYPES = ["inspection", "job", "service_call", "call", "other"] as const satisfies readonly AppointmentType[];
+/* SERVICE CALL CAME OFF THIS LIST (Erik, 2026-10-03): "I think we should takeoff service call as a
+ * bucket because its deadweight as we have replaced it with time and material versus fixed price."
+ * He is right, and the code already said so: the appointment page called it "a legacy
+ * service_call/job appointment — new ones become real jobs at booking", isServiceCall() had NO
+ * callers, and the one query that still named it grouped it WITH 'job'. The question it used to
+ * answer at booking — do I bill actuals or a price? — is jobs.billing_type now, so the bucket was
+ * asking something that had moved. Two August rows still READ as Service Call, because
+ * APPOINTMENT_TYPES above is the read set and only this list narrows.
+ * NOT THE SAME THING as the 'service' WorkKind on an inquiry (schedule/work-shape.ts, pinned by
+ * inquiries_work_kind_known): that is a live answer to a different question — what KIND of work is
+ * this — on a different table. It stays. */
+export const PICKABLE_APPOINTMENT_TYPES = ["inspection", "job", "call", "other"] as const satisfies readonly AppointmentType[];
 export type PickableAppointmentType = (typeof PICKABLE_APPOINTMENT_TYPES)[number];
 export const isPickableAppointmentType = (t: unknown): t is PickableAppointmentType =>
   (PICKABLE_APPOINTMENT_TYPES as readonly string[]).includes(String(t ?? ""));
@@ -95,11 +106,6 @@ export const INSPECTION_TYPES = ["inspection", "final_inspection"] as const;
  *  it and vanished. INSPECTION_TYPES itself stays narrow: it gates inspection-only UI. */
 export const ESTIMATE_VISIT_TYPES = [...INSPECTION_TYPES, "quote"] as const;
 
-/** The squeeze-it-in work — what the job board is for. Erik: "these are the ones that would go to
- *  the board becuase i dont know at what moment ill be able to squeeze them in… and its ready for
- *  an invoice." Deliberately its own predicate rather than a === so the board and the calendar can
- *  never disagree about what counts. */
-export const isServiceCall = (t: string | null | undefined): boolean => t === "service_call";
 export const isInspectionType = (t: string | null | undefined): boolean =>
   (INSPECTION_TYPES as readonly string[]).includes(t ?? "");
 

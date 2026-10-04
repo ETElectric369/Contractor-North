@@ -9,9 +9,11 @@ import {
   isPickableAppointmentType,
 } from "./statuses";
 
-describe("the five kinds a person picks (W2-06)", () => {
-  it("are Inspection, Job, Service Call, Phone Call and Other, each a type the table allows, each with a real label", () => {
-    expect(PICKABLE_APPOINTMENT_TYPES.map(appointmentTypeLabel)).toEqual(["Inspection", "Job", "Service Call", "Phone Call", "Other"]);
+describe("the four kinds a person picks (W2-06, Service Call retired 2026-10-03)", () => {
+  it("are Inspection, Job, Phone Call and Other, each a type the table allows, each with a real label", () => {
+    expect(PICKABLE_APPOINTMENT_TYPES.map(appointmentTypeLabel)).toEqual(["Inspection", "Job", "Phone Call", "Other"]);
+    // An old row still READS as Service Call — the read set keeps it, only the pickers narrowed.
+    expect(appointmentTypeLabel("service_call")).toBe("Service Call");
     for (const t of PICKABLE_APPOINTMENT_TYPES) {
       expect(APPOINTMENT_TYPES as readonly string[]).toContain(t);
       expect(appointmentTypeLabel(t)).not.toBe(t); // a raw enum value is not a label
