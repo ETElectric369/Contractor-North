@@ -227,7 +227,62 @@ describe("saveInspection: booking one is never gated", () => {
     expect(pass.ok).toBe(true);
     expect(pass.next).toBe(`${UTIL} was booked Oct 15 — record the inspection status`);
     expect(pass.next).not.toContain("book another visit");
+    expect(state.permits[0].status).toBe("inspection_scheduled"); // the retry is ON THE BOOKS, so the permit says so itself (0380-era rule, Erik 2026-10-04)
+  });
+});
+
+describe("the permit follows its visits: booking one says so on the permit itself", () => {
+  /* ERIK, 2026-10-04, looking at a job with BOTH visits booked for one Thursday morning and the
+     dropdown still reading Applied: "they were already scheduled and the dropdown still said applied
+     not scheduled, can that be automatic?" He had told the app the visits were booked and then had to
+     tell it again in a different control - the chain law on one screen. The split is by WHO KNOWS:
+     the authority says not submitted / applied / issued, he says closed, and the VISITS say the rest. */
+
+  it("HIS OWN CASE: a permit reading Applied with a visit booked says Inspection Scheduled", async () => {
+    state.permits[0].status = "applied";
+    state.inspections = [insp({ position: 1, authority: TOWN, scheduled_for: THU, scheduled_window: "morning" })];
+    const res = await saveInspection({ id: "i1", permit_id: "p1", authority: TOWN, scheduled_for: THU, scheduled_window: "morning" });
+    expect(res.ok).toBe(true);
+    expect(state.permits[0].status).toBe("inspection_scheduled");
+  });
+
+  it("booking a fresh one moves it too - the door that never ran the rule at all", async () => {
+    state.permits[0].status = "applied";
+    const res = await saveInspection({ permit_id: "p1", authority: TOWN, scheduled_for: THU, scheduled_window: "morning" });
+    expect(res.ok).toBe(true);
+    expect(state.permits[0].status).toBe("inspection_scheduled");
+  });
+
+  it("CLOSED IS THE OFFICE'S LAST WORD: a visit booked after it does not re-open the paperwork", async () => {
+    state.permits[0].status = "closed";
+    state.inspections = [insp({ position: 1, authority: TOWN, scheduled_for: THU })];
+    await saveInspection({ id: "i1", permit_id: "p1", authority: TOWN, scheduled_for: THU });
+    expect(state.permits[0].status).toBe("closed");
+  });
+
+  it("A VISIT WITH NO DAY IS NOT A BOOKING: the permit goes back to issued rather than claiming one", async () => {
+    // He wrote the authority down to phone later. Nobody is coming yet, so the permit must not say
+    // somebody is - and the word the chain itself wrote is the one word it may take back.
+    state.permits[0].status = "inspection_scheduled";
+    state.inspections = [insp({ position: 1, authority: UTIL })];
+    await saveInspection({ id: "i1", permit_id: "p1", authority: UTIL });
     expect(state.permits[0].status).toBe("issued");
+  });
+
+  it("and it never writes one of the AUTHORITY'S words: an authority with no day leaves Applied alone", async () => {
+    state.permits[0].status = "applied";
+    state.inspections = [insp({ position: 1, authority: UTIL })];
+    await saveInspection({ id: "i1", permit_id: "p1", authority: UTIL });
+    expect(state.permits[0].status).toBe("applied");
+  });
+
+  it("the booking is saved even when the permit's own status will not move, and it says so", async () => {
+    state.permits[0].status = "applied";
+    state.statusWriteFails = true;
+    const res = await saveInspection({ permit_id: "p1", authority: TOWN, scheduled_for: THU });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain(`${TOWN} booked`);
+    expect(res.message).toContain("set it by hand");
   });
 });
 
@@ -289,7 +344,7 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
     expect(res.message).toBe(`${TOWN} passed.`);
     expect(res.next).toBe(`Waiting on ${UTIL} — Thu Oct 15, morning`);
     expect(res.href).toBe("/jobs/j1?tab=permits");
-    expect(state.permits[0].status).toBe("issued"); // not this visit's word to overwrite
+    expect(state.permits[0].status).toBe("inspection_scheduled"); // THE UTILITY IS STILL BOOKED, and a booked visit is the permit's own word now (Erik 2026-10-04)
     expect(state.inspections[0]).toMatchObject({ result: "passed", result_on: THU, inspector: "Dana" });
   });
 
@@ -361,7 +416,7 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
     state.today = "2026-10-20";
     const res = await recordInspectionResult({ id: "i2", result: "passed", result_on: "2026-10-20" });
     expect(res.ok).toBe(true);
-    expect(state.permits[0].status).toBe("issued");
+    expect(state.permits[0].status).toBe("inspection_scheduled"); // the red word is still taken back - to what is TRUE, which is that a retry is booked
     expect(res.next).toBe(`Waiting on ${UTIL} — Thu Oct 22`);
   });
 
@@ -369,7 +424,7 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
     state.permits[0].status = "failed";
     state.inspections[0] = { ...state.inspections[0], result: "failed", result_on: THU };
     await recordInspectionResult({ id: "i1", result: "passed", result_on: THU });
-    expect(state.permits[0].status).toBe("issued");
+    expect(state.permits[0].status).toBe("inspection_scheduled"); // corrected, and the visit still to come is what the permit reads
   });
 
   it("a closed permit the chain never wrote is left exactly as the office left it", async () => {
@@ -475,7 +530,7 @@ describe("deleteInspection: only a booking nobody went to", () => {
     const res = await deleteInspection("i2", "p1");
     expect(res.clear).toBe(false);
     expect(res.next).toBe(`Waiting on ${TOWN} — Thu Oct 15`);
-    expect(state.permits[0].status).toBe("issued");
+    expect(state.permits[0].status).toBe("inspection_scheduled"); // the town's visit is still booked, so the permit is not back to merely issued
   });
 
   it("a lost re-read after the removal says the permit was not re-checked", async () => {

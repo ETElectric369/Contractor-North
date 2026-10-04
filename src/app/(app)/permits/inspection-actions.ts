@@ -107,14 +107,27 @@ async function inspectionsOf(supabase: any, orgId: string, permitId: string) {
  * that changes a permit's visits reads this, so a pass and a removed booking can never leave the
  * permit saying two different things.
  *
- * `passed` and `failed` ARE THE ONLY TWO WORDS THE CHAIN WRITES, so they are the only two it may take
- * back. Every other status — not submitted, applied, issued, inspection scheduled, closed — is the
- * office's word for where the paperwork is, and not this visit's to overwrite. What the rows say:
+ * THREE WORDS, NOT TWO (Erik, 2026-10-04). This file used to reserve `inspection scheduled` as the
+ * office's own word, alongside not submitted / applied / issued / closed. He booked both visits on a
+ * job, watched the dropdown go on reading "Applied", and asked the obvious question:
+ * "they were already scheduled and the dropdown still said applied not scheduled, can that be
+ * automatic?" It is the chain law in one screen — he had told the app the visits were booked, then
+ * had to tell it again in a different control. So the split is no longer by word, it is by WHO KNOWS:
  *
- *   clear                       passed   nothing is outstanding and the last visit passed
- *   a visit FAILED, another owed failed   isOpenPermit counts a failure most of all
- *   anything else               —        the rows say nothing. A CANCELLED visit is not a failure:
- *                                       the permit is simply still open, waiting for another day.
+ *   the authority knows   not submitted · applied · issued      only the town can say these
+ *   you know              closed                                 only you can say you are done with it
+ *   THE VISITS KNOW       inspection scheduled · passed · failed  so the visits write them
+ *
+ * What the rows say:
+ *
+ *   clear                       passed                nothing is outstanding and the last visit passed
+ *   a visit FAILED, another owed failed                isOpenPermit counts a failure most of all
+ *   booked / overdue            inspection scheduled   somebody is coming, or the day went by unwritten
+ *   anything else               —                      the rows say nothing. A CANCELLED visit is not a
+ *                                                      failure: the permit is simply still open.
+ *
+ * CLOSED IS NEVER TAKEN BACK. It is the one word that means the office is finished with this piece of
+ * paper, so a visit written up afterwards does not re-open it.
  *
  * AND IT TAKES ITS OWN WORDS BACK. A retry that passed with the utility still to come used to leave
  * the permit reading red `failed` forever, beside a card saying "Waiting on Liberty Utilities"; a
@@ -133,13 +146,22 @@ async function closeThePermit(
   /** This very write said a visit failed — true even when the re-read was lost. */
   failedNow: boolean,
 ): Promise<string | null> {
+  // THE OFFICE'S LAST WORD STANDS. Nothing derived from a visit re-opens a permit somebody closed.
+  if (permit.status === "closed") return null;
   // What the rows say the permit's own word is, or null for "they don't say".
   let rowsSay: string | null = null;
   if (!stand) rowsSay = failedNow ? "failed" : null;
   else if (stand.state === "clear") rowsSay = "passed";
   else if (stand.state === "needs_another" && stand.row?.result === "failed") rowsSay = "failed";
+  // SOMEBODY IS COMING (Erik, 2026-10-04). `overdue` is the same word: the day was booked and has gone
+  // by with nothing written up, which is still a visit on the books, not a permit that went back to
+  // merely issued. A row with no day is NOT this — it falls through, and a permit that said scheduled
+  // goes back to issued below, because a booking without a day is not a booking.
+  else if (stand.state === "booked" || stand.state === "overdue") rowsSay = "inspection_scheduled";
   // The rows say nothing, so the only thing left to write is taking back a word the chain itself wrote.
-  const wroteItself = permit.status === "passed" || permit.status === "failed";
+  // "scheduled" is the legacy job-tab spelling of inspection_scheduled (lib/permit-options).
+  const wroteItself =
+    permit.status === "passed" || permit.status === "failed" || permit.status === "inspection_scheduled" || permit.status === "scheduled";
   const next = rowsSay ?? (stand && wroteItself ? "issued" : null);
   if (!next || permit.status === next) return null;
   const { data, error } = await supabase
@@ -150,6 +172,22 @@ async function closeThePermit(
     .select("id");
   if (error || !data?.length) return `The visit is recorded, but the permit still reads "${permit.status ?? "open"}" — set it by hand.`;
   return null;
+}
+
+/**
+ * THE PERMIT FOLLOWS ITS VISITS, from whichever door moved them. Re-reads the rows against the
+ * company's own today and runs the one rule above — never a second reading of the same facts.
+ * Returns the sentence to say when the permit would not move; null when nothing needed saying.
+ */
+async function permitFollowsItsVisits(
+  supabase: any,
+  orgId: string,
+  permit: { id: string; status: string | null },
+  permitId: string,
+): Promise<string | null> {
+  const after = await inspectionsOf(supabase, orgId, permitId);
+  const stand = "error" in after ? null : permitInspectionStand(after.rows, await orgTodayStr(supabase));
+  return closeThePermit(supabase, orgId, permit, stand, false);
 }
 
 /** The job page, the permits tab, and Needs You: everything that shows who still has to come. */
@@ -211,8 +249,9 @@ export async function saveInspection(input: InspectionInput): Promise<Inspection
       .select("id");
     if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "Nothing was saved — that inspection was removed from another screen." };
+    const moved = await permitFollowsItsVisits(supabase, ctx.orgId, got.permit, input.permit_id);
     rev(got.permit.job_id);
-    return { ok: true, message: "Inspection saved" };
+    return { ok: true, message: ["Inspection saved", moved].filter(Boolean).join(" ") };
   }
 
   const have = await inspectionsOf(supabase, ctx.orgId, input.permit_id);
@@ -229,8 +268,12 @@ export async function saveInspection(input: InspectionInput): Promise<Inspection
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Nothing was saved. Try it again." };
+  // BOOKING ONE IS WHAT PUTS THE PERMIT ON "INSPECTION SCHEDULED" — the half that was missing, and the
+  // only door of the four that never ran the rule.
+  const moved = await permitFollowsItsVisits(supabase, ctx.orgId, got.permit, input.permit_id);
   rev(got.permit.job_id);
-  return { ok: true, message: when ? `${authority} booked` : `${authority} added — book a day when you have one` };
+  const booked = when ? `${authority} booked` : `${authority} added — book a day when you have one`;
+  return { ok: true, message: [booked, moved].filter(Boolean).join(" ") };
 }
 
 /**
