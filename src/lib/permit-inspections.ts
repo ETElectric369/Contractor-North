@@ -26,6 +26,16 @@ import type { Blockable } from "@/lib/waiting-on";
  *   that permit shut forever; "the one in front of me passed" lets the re-inspection clear the way,
  *   which is what actually happens on site.
  *
+ *   AND THE RE-INSPECTION SITS WHERE THE VISIT IT REPLACES SAT. A new booking is written on the END
+ *   (nextPosition), so on Thursday's own job — town at 1 and utility at 2, both booked for one
+ *   morning — a town retry lands at 3, BEHIND the utility. Read literally, the retry then waits for
+ *   the utility and the utility waits for the failed town: the permit is wedged shut and the card
+ *   says "book another visit" forever, however many visits are booked. So the order each authority's
+ *   visits happen in is worked out here (`inOrder`): a visit that did not pass and a later visit from
+ *   the SAME authority are one chain, the replacement sits right behind the one it replaces, and the
+ *   replaced visit is history — it gates nobody. Nothing is renumbered in the database: no write has
+ *   to shuffle positions, and 0378 keeps them unique.
+ *
  *   THE GATE IS ABOUT NAGGING, NEVER ABOUT WRITING. Both of that job's inspections are ALREADY booked
  *   for the morning of Thursday 15 October — he booked them by phone, days ahead, before the town had
  *   been anywhere. So nothing here may stop a person booking a blocked inspection. What the gate
@@ -94,14 +104,58 @@ export const windowLabel = (w: string | null | undefined): string | null =>
 export const resultLabel = (r: string | null | undefined): string | null =>
   INSPECTION_RESULTS.find(([v]) => v === r)?.[1] ?? null;
 
-/** The order the authorities come in. A stable sort, so two rows that somehow share a position
- *  (0378 forbids it; a read from an older row set might not) keep the order they arrived in. */
-export function inOrder<T extends { position: number }>(rows: readonly T[] | null | undefined): T[] {
-  return (rows ?? [])
+/** What the order needs to know about a row: where it was written down, who is coming, and whether
+ *  they passed. Optional, so a caller with only positions still reads in position order. */
+type Ordinal = { position: number; authority?: string | null; result?: string | null };
+
+/** A visit that did not pass invites another from the same authority — that is what a re-inspection
+ *  IS. A passed visit does not, and neither does one nobody has written up yet (two visits booked for
+ *  one authority is two visits, not a retry). */
+const didNotPass = (r: Pick<Ordinal, "result">): boolean => r.result === "failed" || r.result === "cancelled";
+
+/** The same authority however it was typed: the box is free text, and a retry is booked by typing the
+ *  name again or picking it from the suggestions. Blank never matches blank — a row with no authority
+ *  0378 would refuse is nobody's retry. */
+const authorityKey = (a: string | null | undefined): string => String(a ?? "").trim().toLowerCase();
+
+/**
+ * THE ORDER THE VISITS ACTUALLY HAPPEN IN, with each one said to be SUPERSEDED or not — the one walk
+ * the card's list and the gate both read, so they can never disagree about which visit is in front of
+ * which.
+ *
+ * Position order first (a stable sort, so two rows that somehow share a position — 0378 forbids it, an
+ * older row set might not — keep the order they arrived in). Then each authority's visits are gathered
+ * into ONE CHAIN: a visit that did not pass is replaced by that authority's next visit, and the
+ * replacement belongs directly behind it, not on the end behind an authority that cannot come until it
+ * has passed. Everything but the last of a chain is SUPERSEDED: history, which gates nobody.
+ */
+function ordered<T extends Ordinal>(rows: readonly T[] | null | undefined): { row: T; superseded: boolean }[] {
+  const byPosition = (rows ?? [])
     .filter(Boolean)
     .map((r, i) => ({ r, i }))
     .sort((a, b) => Number(a.r.position ?? 0) - Number(b.r.position ?? 0) || a.i - b.i)
     .map(({ r }) => r);
+
+  const chains: T[][] = [];
+  /** The chain an authority's NEXT visit joins: it has one only while its last visit did not pass. */
+  const awaitingAnother = new Map<string, T[]>();
+  for (const r of byPosition) {
+    const who = authorityKey(r.authority);
+    const replacing = who ? awaitingAnother.get(who) : undefined;
+    const chain = replacing ?? [];
+    if (!replacing) chains.push(chain); // nothing to replace: this visit starts its own place in line
+    chain.push(r);
+    if (!who) continue;
+    if (didNotPass(r)) awaitingAnother.set(who, chain);
+    else awaitingAnother.delete(who);
+  }
+  return chains.flatMap((chain) => chain.map((row, i) => ({ row, superseded: i < chain.length - 1 })));
+}
+
+/** The order the authorities come in, with a re-inspection sitting right behind the visit it replaces
+ *  (`ordered`) — what the card lists, top to bottom, and what the gate reads. */
+export function inOrder<T extends Ordinal>(rows: readonly T[] | null | undefined): T[] {
+  return ordered(rows).map((o) => o.row);
 }
 
 /** The place the next authority booked goes. Clamped to 0378's ceiling, so the form never offers a
@@ -111,18 +165,29 @@ export function nextPosition(rows: readonly { position: number }[] | null | unde
   return Math.min(MAX_INSPECTION_POSITION, Math.max(0, ...used, 0) + 1);
 }
 
-/** The row IN FRONT of this position — the greatest position below it, not "position - 1": positions
- *  have gaps the moment a row is deleted, and a gap must not be read as "nothing in front of me". */
-export function previousOf<T extends { position: number }>(
-  rows: readonly T[] | null | undefined,
-  position: number,
-): T | null {
-  const before = inOrder(rows).filter((r) => Number(r.position ?? 0) < Number(position));
-  return before.length ? before[before.length - 1] : null;
+/**
+ * THE ROW IN FRONT of this position — not "position - 1": positions have gaps the moment a row is
+ * deleted, and a gap must not be read as "nothing in front of me".
+ *
+ * It is the row in front IN THE ORDER THE VISITS HAPPEN (`ordered`), and a SUPERSEDED visit is skipped:
+ * a town visit that failed and was re-booked is history, so it no longer stands in front of the retry
+ * that replaced it (which would wait for itself) nor in front of the utility behind it (which must wait
+ * for the RETRY). Positions are unique per permit (0378), so the position names the row; one that has
+ * just been deleted from another screen still reads what sorts before it.
+ */
+export function previousOf<T extends Ordinal>(rows: readonly T[] | null | undefined, position: number): T | null {
+  const seq = ordered(rows);
+  const mine = Number(position);
+  const at = seq.findIndex((o) => Number(o.row.position ?? 0) === mine);
+  const before = (at >= 0 ? seq.slice(0, at) : seq.filter((o) => Number(o.row.position ?? 0) < mine)).filter(
+    (o) => !o.superseded,
+  );
+  return before.length ? before[before.length - 1].row : null;
 }
 
 /** THE GATE. Can this position be called yet? Only a PASS in front opens it: a failed or cancelled
- *  visit in front means the tag isn't on, so the utility has nothing to come to. */
+ *  visit in front means the tag isn't on, so the utility has nothing to come to. A failed visit that
+ *  has been RE-BOOKED is not in front of anybody (previousOf): the retry stands in its place. */
 export function isUnblocked(rows: readonly PermitInspection[] | null | undefined, position: number): boolean {
   const prev = previousOf(rows, position);
   return !prev || prev.result === "passed";
@@ -201,7 +266,9 @@ export function inspectionLine(rows: readonly PermitInspection[], row: PermitIns
  *   booked         the next one has a day, today or later: THEIRS, and it comes back on that day
  *   overdue        the next one's day has gone by and nobody said how it went: HIS
  *   needs_another  the last visit did not pass, so somebody has to come again: HIS
- *   clear          every visit is settled and the last one passed — the meter is on, the job is done
+ *   clear          every visit is settled and the last one passed, so the job is done (0378's own
+ *                  answer to "when is the job done?"). NOT "the meter is on": a utility being last is
+ *                  a fact about THAT job, and this app also serves decks, plumbing and painting.
  *
  * `needs_another` is also the answer when every open row is BLOCKED (the one in front failed): then
  * the thing that needs doing is another visit from the authority that failed, never the blocked row.
@@ -257,8 +324,10 @@ export function permitInspectionStand(
   // never the subject — it is not his and it is not late.
   const next = open.find((r) => isUnblocked(ord, r.position));
   if (!next) {
-    // Every open row waits on one in front that did not pass. THAT one is the work.
-    const stuck = ord.filter((r) => !isOpenInspection(r) && r.result !== "passed").at(-1) ?? ord[0];
+    // Every open row waits on one in front that did not pass. THAT one is the work: the visit the
+    // first open row is actually waiting for, never "the last failure anywhere" — a failure that has
+    // already been re-booked is superseded and is nobody's work any more.
+    const stuck = previousOf(ord, open[0].position) ?? ord[ord.length - 1];
     return {
       ...base,
       state: "needs_another",
@@ -280,8 +349,8 @@ export function permitInspectionStand(
   return { ...base, state: "booked", authority: next.authority, row: next, day, window: next.scheduled_window, hisToDo: false, waitingOnThem: true };
 }
 
-/** Every visit passed: the meter is on and the job is genuinely finished (0378's own answer to
- *  "when is the job done?"). Derived from the one verdict, so there is no second definition. */
+/** Every visit passed, so the job is genuinely finished (0378's own answer to "when is the job
+ *  done?"). Derived from the one verdict, so there is no second definition. */
 export const allInspectionsPassed = (rows: readonly PermitInspection[] | null | undefined, todayStr: string): boolean =>
   permitInspectionStand(rows, todayStr).state === "clear";
 
@@ -294,7 +363,11 @@ export const allInspectionsPassed = (rows: readonly PermitInspection[] | null | 
  */
 export function standLine(stand: InspectionStand): string | null {
   const who = stand.authority;
-  if (!who) return stand.state === "clear" ? "Every inspection passed — the meter is on" : null;
+  // PLAIN, AND TRUE IN EVERY TRADE. This said "the meter is on", which is a fact about an ELECTRICAL
+  // job whose last authority is the utility — nothing in the data says a utility came, and 0378 is
+  // explicit that the utility being last is a fact about the world and not in the schema. So a deck
+  // permit whose one county inspection passed told the builder the meter was on.
+  if (!who) return stand.state === "clear" ? "Every inspection passed — the job is done" : null;
   const on = (d: string | null) => shortDayWords(d) ?? "";
   switch (stand.state) {
     case "booked": {

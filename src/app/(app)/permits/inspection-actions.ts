@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { orgTodayStr } from "@/lib/billing-pipeline";
 import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import {
@@ -12,8 +13,10 @@ import {
   PERMIT_INSPECTION_COLUMNS,
   nextPosition,
   permitInspectionStand,
+  resultLabel,
   standLine,
   type InspectionResult,
+  type InspectionStand,
   type InspectionWindow,
   type PermitInspection,
 } from "@/lib/permit-inspections";
@@ -42,13 +45,17 @@ import {
  * closes the PERMIT — status passed; a failure says failed), and CARRIES FORWARD what was captured:
  * the sentence it hands back names the next authority and where to go, and the pages that show the
  * job, its inspections and Needs You are all re-read. Doing one of the three would be the defect.
+ *
+ * SO DOES TAKING A BOOKING OFF, because it can finish a permit too — and both doors close it through
+ * the SAME function (`closeThePermit`), which is also the only thing that ever writes the permit's own
+ * status from a visit. Two copies of "when does a permit close" is how one of them goes stale.
  */
 
 export type InspectionSaved = { ok: boolean; error?: string; message?: string };
 
 /** What a recorded result hands back: what is true now, and the one next step, with its door. */
 export type InspectionRecorded = InspectionSaved & {
-  /** The permit has no inspection left outstanding and the last one passed: the meter is on. */
+  /** The permit has no inspection left outstanding and the last one passed: the job is done. */
   clear?: boolean;
   /** The next thing, in plain words ("Liberty Utilities inspection to book"), or null when done. */
   next?: string | null;
@@ -94,6 +101,56 @@ async function inspectionsOf(supabase: any, orgId: string, permitId: string) {
   return { rows: (data ?? []) as PermitInspection[] } as const;
 }
 
+/**
+ * CLOSE WHAT IT CAME FROM — the permit itself, and never silently. ONE RULE, ONE PLACE: every door
+ * that changes a permit's visits reads this, so a pass and a removed booking can never leave the
+ * permit saying two different things.
+ *
+ * `passed` and `failed` ARE THE ONLY TWO WORDS THE CHAIN WRITES, so they are the only two it may take
+ * back. Every other status — not submitted, applied, issued, inspection scheduled, closed — is the
+ * office's word for where the paperwork is, and not this visit's to overwrite. What the rows say:
+ *
+ *   clear                       passed   nothing is outstanding and the last visit passed
+ *   a visit FAILED, another owed failed   isOpenPermit counts a failure most of all
+ *   anything else               —        the rows say nothing. A CANCELLED visit is not a failure:
+ *                                       the permit is simply still open, waiting for another day.
+ *
+ * AND IT TAKES ITS OWN WORDS BACK. A retry that passed with the utility still to come used to leave
+ * the permit reading red `failed` forever, beside a card saying "Waiting on Liberty Utilities"; a
+ * permit the chain closed `passed` whose last visit was then corrected to cancelled stayed green
+ * beside "book another visit". Either way the rows have moved on, so the permit goes back to `issued`.
+ *
+ * Returns the sentence to say when the status would not move — the visit IS recorded, so that is never
+ * a failure of the whole deed, but it is never silent either.
+ */
+async function closeThePermit(
+  supabase: any,
+  orgId: string,
+  permit: { id: string; status: string | null },
+  /** Null when the permit's rows could not be re-read: then nothing is derived from them. */
+  stand: InspectionStand | null,
+  /** This very write said a visit failed — true even when the re-read was lost. */
+  failedNow: boolean,
+): Promise<string | null> {
+  // What the rows say the permit's own word is, or null for "they don't say".
+  let rowsSay: string | null = null;
+  if (!stand) rowsSay = failedNow ? "failed" : null;
+  else if (stand.state === "clear") rowsSay = "passed";
+  else if (stand.state === "needs_another" && stand.row?.result === "failed") rowsSay = "failed";
+  // The rows say nothing, so the only thing left to write is taking back a word the chain itself wrote.
+  const wroteItself = permit.status === "passed" || permit.status === "failed";
+  const next = rowsSay ?? (stand && wroteItself ? "issued" : null);
+  if (!next || permit.status === next) return null;
+  const { data, error } = await supabase
+    .from("permits")
+    .update({ status: next })
+    .eq("id", permit.id)
+    .eq("org_id", orgId)
+    .select("id");
+  if (error || !data?.length) return `The visit is recorded, but the permit still reads "${permit.status ?? "open"}" — set it by hand.`;
+  return null;
+}
+
 /** The job page, the permits tab, and Needs You: everything that shows who still has to come. */
 function rev(jobId: string | null | undefined) {
   if (jobId) revalidatePath(`/jobs/${jobId}`);
@@ -135,13 +192,14 @@ export async function saveInspection(input: InspectionInput): Promise<Inspection
   const got = await permitFor(supabase, ctx.orgId, input.permit_id);
   if ("error" in got) return { ok: false, error: got.error };
 
-  const fields = {
-    authority,
-    scheduled_for: when,
-    scheduled_window: win,
-    inspector: text(input.inspector, INSPECTOR_MAX),
-    notes: text(input.notes, 2000),
-  };
+  // FILL, NEVER OVERWRITE — the same rule the result door follows. A key the caller never sent must
+  // not blank what a result recorded: the booking form sends only who / which day / which part of the
+  // day, so moving a passed visit by one day, or fixing the spelling of the town, used to wipe the
+  // inspector who came and any notes on it. An INSERT leaves those columns at their NULL default,
+  // which is what a brand new visit has, so one patch serves both doors.
+  const fields: Record<string, unknown> = { authority, scheduled_for: when, scheduled_window: win };
+  if (input.inspector !== undefined) fields.inspector = text(input.inspector, INSPECTOR_MAX);
+  if (input.notes !== undefined) fields.notes = text(input.notes, 2000);
 
   if (input.id) {
     const { data, error } = await supabase
@@ -225,43 +283,49 @@ export async function recordInspectionResult(input: {
 
   // ── CARRY IT FORWARD ───────────────────────────────────────────────────────────────────────────
   // Read the permit's rows back and ask the one rule where it stands now. Never guess from the row
-  // just written: another screen may have added the utility's visit while this one was open. The day
-  // the verdict is read against is the day they CAME — the day this sentence is about — so no second
-  // read of the company's timezone stands between pressing the button and being told what is true.
+  // just written: another screen may have added the utility's visit while this one was open.
+  //
+  // AGAINST THE COMPANY'S TODAY, like every other door (the card, the job's own line, Needs You,
+  // Nort). The day they CAME is not a clock: writing up Thursday's visit on Friday read the verdict
+  // as if it were still Thursday, so the sentence said "Waiting on Liberty Utilities — Thu Oct 15"
+  // while the card beside it, on the real today, said "Liberty Utilities was booked Oct 15 — say how
+  // it went". Two contradictory statements on one card. One read of the org's timezone is the price.
+  //
+  // AND A LOST READ CLAIMS NOTHING. "No rows" reads as a permit with nothing outstanding, so the
+  // chain skipped closing it, said no next step, and still reported success: the permit stayed open
+  // and counted open with nobody told. The visit IS written, so this is never a failure of the deed —
+  // it is a sentence that says what could not be checked.
   const after = await inspectionsOf(supabase, ctx.orgId, String(row.permit_id));
-  const rows = "error" in after ? [] : after.rows;
-  const stand = permitInspectionStand(rows, on);
+  const stand = "error" in after ? null : permitInspectionStand(after.rows, await orgTodayStr(supabase));
   const jobHref = got.permit.job_id ? `/jobs/${got.permit.job_id}?tab=permits` : null;
 
   // ── AND CLOSE WHAT IT CAME FROM ────────────────────────────────────────────────────────────────
-  // The permit itself is the door this visit came through. The last pass closes it (status passed, so
-  // the job's Permits tab stops counting it open — badges show only what is OPEN); a failure says
-  // failed, which isOpenPermit counts most of all. Any other state leaves the permit's own status
-  // alone: it is the office's word for where the paperwork is, not this visit's to overwrite.
-  let closing: string | null = null;
-  const nextStatus = stand.state === "clear" ? "passed" : input.result === "failed" ? "failed" : null;
-  if (nextStatus && got.permit.status !== nextStatus) {
-    const { data: done, error: statusErr } = await supabase
-      .from("permits")
-      .update({ status: nextStatus })
-      .eq("id", got.permit.id)
-      .eq("org_id", ctx.orgId)
-      .select("id");
-    // The visit IS recorded, so this is never a failure of the whole deed — but it is never silent
-    // either: the sentence says the permit's own status did not move, so nobody believes it did.
-    if (statusErr || !done?.length) closing = `The visit is recorded, but the permit still reads "${got.permit.status ?? "open"}" — set it by hand.`;
-  }
+  const closing = await closeThePermit(supabase, ctx.orgId, got.permit, stand, input.result === "failed");
 
   rev(got.permit.job_id);
 
   const number = got.permit.permit_number ? ` on permit ${got.permit.permit_number}` : "";
   const said = input.result === "passed" ? "passed" : input.result === "failed" ? "failed" : "was cancelled";
   const head = `${row.authority} ${said}`;
+  if (!stand) {
+    return {
+      ok: true,
+      clear: false,
+      message: [`${head}.`, "The permit's other inspections couldn't be read just now, so it wasn't re-checked or closed — reload the job.", closing]
+        .filter(Boolean)
+        .join(" "),
+      next: null,
+      href: jobHref,
+    };
+  }
   if (stand.state === "clear") {
     return {
       ok: true,
       clear: true,
-      message: [`${head}. Every inspection${number} has passed — the meter is on and the job is done.`, closing].filter(Boolean).join(" "),
+      // NOT "the meter is on": that is a fact about an electrical job whose last authority is the
+      // utility, and this app also serves decks, plumbing and painting. 0378's own answer to "when is
+      // the job done?" is this one, and it is true in every trade.
+      message: [`${head}. Every inspection${number} has passed — the job is done.`, closing].filter(Boolean).join(" "),
       next: "Finish the job and bill it",
       href: got.permit.job_id ? `/jobs/${got.permit.job_id}` : null,
     };
@@ -276,22 +340,69 @@ export async function recordInspectionResult(input: {
   };
 }
 
-/** Take a booking off a permit — the wrong authority, or a visit that was never going to happen.
- *  A visit that HAPPENED is a result (passed / failed / cancelled), never a deletion. */
-export async function deleteInspection(id: string, permitId: string): Promise<InspectionSaved> {
+/**
+ * TAKE A BOOKING OFF A PERMIT — the wrong authority, or a visit that was never going to happen.
+ *
+ * A VISIT THAT HAPPENED IS A RESULT, NEVER A DELETION, AND THIS DOOR NOW HOLDS THAT LINE. It was
+ * prose only: the action never looked at `result`, so one tap erased the day somebody came, who came
+ * and how it went — and the visit in front of the next authority with it, leaving the utility reading
+ * as unblocked with nothing having passed. Changing what it says is the other door ("Change It").
+ *
+ * AND TAKING THE LAST OPEN ONE OFF CAN FINISH THE PERMIT. Removing the utility's booking from a permit
+ * whose town visit passed leaves `clear` — the card went green "every inspection passed" while the
+ * permit itself stayed `issued` and counted open. One door opens, the last one closes: the same rule
+ * that closes a permit on the last pass runs here, and the sentence says what became true.
+ */
+export async function deleteInspection(id: string, permitId: string): Promise<InspectionRecorded> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
   const got = await permitFor(ctx.supabase, ctx.orgId, permitId);
   if ("error" in got) return { ok: false, error: got.error };
-  const { data, error } = await ctx.supabase
+
+  const { data, error: readErr } = await ctx.supabase
+    .from("permit_inspections")
+    .select("id, authority, result")
+    .eq("id", id)
+    .eq("permit_id", permitId)
+    .eq("org_id", ctx.orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  const mine = data as { authority?: string | null; result?: string | null } | null;
+  if (!mine) return { ok: false, error: "That inspection isn't here any more." };
+  const who = String(mine.authority ?? "").trim() || "That";
+  const happened = resultLabel(mine.result);
+  if (happened) {
+    return {
+      ok: false,
+      error: `That visit already happened — ${who} ${happened.toLowerCase()}. Removing it would erase who came and what they said. Use Change It to fix it.`,
+    };
+  }
+
+  const { data: gone, error } = await ctx.supabase
     .from("permit_inspections")
     .delete()
     .eq("id", id)
     .eq("org_id", ctx.orgId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "Nothing was removed — it had already gone." };
+  if (!gone?.length) return { ok: false, error: "Nothing was removed — it had already gone." };
+
+  // What the permit stands at now, read against the company's today like every other door. A lost
+  // read claims nothing: the booking IS off, and the sentence says the permit was not re-checked.
+  const after = await inspectionsOf(ctx.supabase, ctx.orgId, permitId);
+  const stand = "error" in after ? null : permitInspectionStand(after.rows, await orgTodayStr(ctx.supabase));
+  const closing = await closeThePermit(ctx.supabase, ctx.orgId, got.permit, stand, false);
   rev(got.permit.job_id);
-  return { ok: true, message: "Inspection removed" };
+
+  const head = `${who} inspection removed.`;
+  return {
+    ok: true,
+    clear: stand?.state === "clear",
+    message: [head, stand ? null : "The permit's other inspections couldn't be read just now, so it wasn't re-checked — reload the job.", closing]
+      .filter(Boolean)
+      .join(" "),
+    next: stand ? standLine(stand) : null,
+    href: got.permit.job_id ? `/jobs/${got.permit.job_id}?tab=permits` : null,
+  };
 }

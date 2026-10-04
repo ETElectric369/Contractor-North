@@ -1,3 +1,4 @@
+import { isOpenPermit } from "@/lib/open-counts";
 import {
   permitInspectionStand,
   standLine,
@@ -24,7 +25,10 @@ import { jobWords } from "./words";
  *                                             It is not overdue and it is not his, so it is in no
  *                                             pile — it is on the permit's card, where the person who
  *                                             wants it looks, and it becomes his the moment the one
- *                                             in front passes.
+ *                                             in front passes. A SETTLED PERMIT and a job NOBODY HAS
+ *                                             STARTED are the same answer, for the same reason: the
+ *                                             visit is real, it is on the card, and it is not a thing
+ *                                             to put in front of him today.
  *
  * THE BADGE STAYS HONEST (the badge invariant): the his-to-do rows roll up into one pile (piles.ts
  * `permit_inspections`), so a company with four open permits adds one to the badge, not four; and a
@@ -38,12 +42,15 @@ import { jobWords } from "./words";
 export const PERMITS_READ_CAP = 200;
 
 /** The columns the feeder's permit read asks for (the projection law: one list, one place). The
- *  customer rides along because a job is named by its number AND its customer AND where it is. */
-export const PERMIT_FEED_COLUMNS = "id, permit_number, job_id, jobs(id, job_number, name, status, customers(name))";
+ *  customer rides along because a job is named by its number AND its customer AND where it is, and
+ *  the permit's own STATUS because a permit the office has settled is nobody's nag (isOpenPermit). */
+export const PERMIT_FEED_COLUMNS =
+  "id, permit_number, status, job_id, jobs(id, job_number, name, status, customers(name))";
 
 export type PermitFeedRow = {
   id: string;
   permit_number?: string | null;
+  status?: string | null;
   job_id?: string | null;
   jobs?: FeedJob | FeedJob[] | null;
 };
@@ -59,6 +66,45 @@ type FeedJob = {
 /** A cancelled job's inspections are nobody's business. Every other job's still are — a job marked
  *  complete can easily be waiting on the utility, which is the whole state this lane adds. */
 export const DEAD_JOB_STATUS = "cancelled";
+
+/**
+ * A JOB NOBODY HAS STARTED AND NOBODY HAS GIVEN A DAY. "Final inspections come with permits" (Erik),
+ * so the visits are written down the day the permit is pulled — long before anyone is on site, and a
+ * final cannot be called until the work is done. So a permit whose next visit is merely listed, or
+ * booked for a day still ahead, is NOT this job's nag yet, and above all it must not hide the job from
+ * Jobs Needing A Day, which is the only door that asks for its day.
+ *
+ * A day that has GONE BY, or a visit that did not pass, means somebody has already been: that is real
+ * whatever the job's status says, so those still count.
+ */
+export const UNSTARTED_JOB_STATUS = "to_be_scheduled";
+
+/**
+ * A LOST READ OF THE PERMITS OR THEIR VISITS SAYS SO — one line, never a quiet zero (the Needs You
+ * convention). Quiet zero was the worse answer here: with no permits the feeder names no job as
+ * awaiting an inspection, so every job waiting on the town or the utility is asked to pick a day
+ * again, with nothing on the screen saying anything failed.
+ */
+export const PERMIT_INSPECTIONS_UNREAD_ITEM: Omit<ActionItem, "stream"> = {
+  id: "permitinsp-unread",
+  kind: "permit_inspection",
+  title: "Permit Inspections · Couldn't Check",
+  subtitle: "Couldn't read which permits are still waiting on an inspection just now. Open a job's Permits tab to see them.",
+  who: null,
+  when: null,
+  urgency: 1,
+  done: false,
+  href: "/jobs",
+  affordances: ["open"],
+};
+
+/** PostgREST or Postgres saying the table isn't there: 0378 is not applied yet, which its own header
+ *  calls a supported state ("Safe before or after the code"). Then there is nothing to tell a person —
+ *  the feature simply isn't on this database yet — so it goes to the ops sink once and no further. */
+export function isMissingInspectionsTable(err: unknown): boolean {
+  const code = String((err as { code?: string } | null)?.code ?? "");
+  return code === "PGRST205" || code === "42P01";
+}
 
 /** THE CHIP each state says: the STATE it is in, never the verb (the button is the verb). */
 export const INSPECTION_CHIP: Partial<Record<InspectionStandState, string>> = {
@@ -110,11 +156,23 @@ export function permitInspectionItems(input: {
     // open nothing (the standalone list is retired: /permits sends you to Jobs). No dead doors.
     if (!jobId) continue;
     if (String(job?.status ?? "") === DEAD_JOB_STATUS) continue;
+    // A PERMIT THE OFFICE HAS SETTLED IS NOBODY'S NAG (isOpenPermit: passed and closed are settled).
+    // Its visits still read on its own card, where the person who wants them looks. Without this, a
+    // permit finished last year with an open row left on it — 0378's backfill carries the old inline
+    // inspection forward as row one — nags on Needs You forever, and the job it hangs on silently
+    // drops off Jobs Needing A Day. The feeder's own badge rule is the same one: show only what is OPEN.
+    if (!isOpenPermit(p.status ?? null)) continue;
 
     const rows = byPermit.get(String(p.id)) ?? [];
     const stand = permitInspectionStand(rows, input.todayStr);
     if (stand.state === "none" || stand.state === "clear") continue;
-    awaitingJobIds.add(jobId);
+    // THE WORK COMES FIRST (UNSTARTED_JOB_STATUS, whose comment carries the why).
+    const unstarted = String(job?.status ?? "") === UNSTARTED_JOB_STATUS;
+    // Nobody has started it and nobody has phoned them: there is nothing to chase yet.
+    if (unstarted && stand.state === "to_book") continue;
+    // A visit booked ahead on a job nobody has started is a real fact — it waits in the fold with its
+    // day — but it is no reason to stop asking that job for a day.
+    if (!(unstarted && stand.state === "booked")) awaitingJobIds.add(jobId);
 
     const why = standLine(stand) ?? "";
     const number = String(p.permit_number ?? "").trim();

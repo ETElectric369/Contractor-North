@@ -48,8 +48,9 @@ const HOW_IT_WORKS = [
   "You can still book it now. Inspectors are booked days ahead — often two on one morning — and the order only decides what the app calls ready, never what you may write down.",
   "A booking is a DAY plus morning, afternoon or all day: an inspector gives you a window, never a time.",
   "Saying how it went needs the day they came, and one of passed, failed or cancelled.",
-  "A visit that failed stays on the list as what happened. Book another one with the same authority; it goes on the end and clears the way when it passes.",
-  "When every inspection has passed, the permit is closed and the job is genuinely finished — on this job that is the visit where the meter goes back on.",
+  "A visit that failed stays on the list as what happened. Book another one with the same authority and it takes that visit's place in the line, so whoever was waiting on it now waits on the new one.",
+  "Only a booking nobody went to can be removed. A visit that happened is changed, never removed — removing it would erase who came and what they said.",
+  "When every inspection has passed, the permit is closed and the job is genuinely finished. On an electrical job the last visit is often the utility's, where the meter goes back on.",
   "Who ISSUED the permit is a different question, and it is the permit's own Authority above. This list is who INSPECTS it.",
 ];
 
@@ -80,7 +81,7 @@ export function PermitInspections({
   /** Which form is open: a booking (new or an id), a result (an id), or nothing. */
   const [form, setForm] = useState<{ kind: "book" | "result"; id: string | null } | null>(null);
   /** WHAT THE LAST RESULT CARRIED FORWARD: what is true now, and the one next step, with its door.
-   *  A toast is gone in four seconds; "the meter is on — finish the job and bill it" is the end of the
+   *  A toast is gone in four seconds; "the job is done — finish the job and bill it" is the end of the
    *  chain and has to stay on the screen until he takes it. */
   const [carried, setCarried] = useState<{ message: string; next: string | null; href: string | null } | null>(null);
 
@@ -121,7 +122,7 @@ export function PermitInspections({
         )}
       </div>
 
-      {/* WHERE IT STANDS, in one line: who still has to come, or that the meter is on. Never while the
+      {/* WHERE IT STANDS, in one line: who still has to come, or that every visit passed. Never while the
           read is lost: a verdict worked out from rows nobody could read is a guess. */}
       {!unread && line && (
         <div className="mt-1">
@@ -180,19 +181,26 @@ export function PermitInspections({
                       >
                         <Pencil aria-hidden />
                       </Button>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={`Remove the ${r.authority} inspection`}
-                        title="Remove"
-                        disabled={pending}
-                        onClick={() => {
-                          if (!confirm(`Remove the ${r.authority} inspection from this permit?`)) return;
-                          run(deleteInspection(r.id, permitId), "Couldn't remove it — try again.");
-                        }}
-                      >
-                        <Trash2 aria-hidden className="text-slate-400" />
-                      </Button>
+                      {/* ONLY A BOOKING NOBODY WENT TO. A visit that happened is a result: removing
+                          it would erase the day they came, who came and how it went — and with it the
+                          visit in front of the next authority, which would then read as unblocked
+                          with nothing having passed. The action refuses it too; this stops the door
+                          being offered at all. */}
+                      {isOpenInspection(r) && (
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label={`Remove the ${r.authority} inspection`}
+                          title="Remove"
+                          disabled={pending}
+                          onClick={() => {
+                            if (!confirm(`Remove the ${r.authority} inspection from this permit?`)) return;
+                            run(deleteInspection(r.id, permitId), "Couldn't remove it — try again.");
+                          }}
+                        >
+                          <Trash2 aria-hidden className="text-slate-400" />
+                        </Button>
+                      )}
                     </>
                   )}
                 </span>

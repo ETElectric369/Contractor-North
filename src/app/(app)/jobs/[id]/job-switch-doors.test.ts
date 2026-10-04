@@ -103,9 +103,20 @@ describe("Permits & Inspections on the job's Permits tab", () => {
     expect(html).not.toContain("Waiting on");
   });
 
-  it("every inspection passed: the card says the meter is on", () => {
+  it("every inspection passed: the card says so in words that hold in every trade", () => {
     const done = booked.map((b) => ({ ...b, result: "passed", result_on: "2026-10-15" }));
-    expect(r(JobPermits, { jobId: "j1", permits, inspections: done, todayStr: "2026-10-16" })).toContain("Every inspection passed — the meter is on");
+    const html = r(JobPermits, { jobId: "j1", permits, inspections: done, todayStr: "2026-10-16" });
+    // NOT "the meter is on": that is a fact about an electrical job whose last authority is the
+    // utility, and this card draws a deck's and a plumber's permits too.
+    expect(html).toContain("Every inspection passed — the job is done");
+    expect(html).not.toContain("meter is on");
+  });
+
+  it("a visit that HAPPENED has no Remove button — only a booking nobody went to can be taken off", () => {
+    const done = booked.map((b) => ({ ...b, result: "passed", result_on: "2026-10-15" }));
+    expect(r(JobPermits, { jobId: "j1", permits, inspections: done, todayStr: "2026-10-16" })).not.toContain("Remove the");
+    // An open booking still has it.
+    expect(r(JobPermits, { jobId: "j1", permits, inspections: booked, todayStr: "2026-10-14" })).toContain("Remove the Town of Truckee inspection");
   });
 });
 

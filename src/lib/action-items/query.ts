@@ -41,7 +41,9 @@ import {
 } from "./receipts-not-on-a-bill";
 import {
   PERMIT_FEED_COLUMNS,
+  PERMIT_INSPECTIONS_UNREAD_ITEM,
   PERMITS_READ_CAP,
+  isMissingInspectionsTable,
   permitInspectionItems,
   type PermitFeedRow,
 } from "./permit-inspection-items";
@@ -152,6 +154,10 @@ type DoneRead =
 
 /** Said to the ops sink ONCE per server, not on every page's badge, while 0371 isn't applied. */
 let doneRpcMissingSaid = false;
+
+/** The same, for the deploy window before 0378: the code may ship first, so permit_inspections may
+ *  not be there yet. A missing table is a supported state, not something to put on a person's list. */
+let inspectionsMissingSaid = false;
 
 /** An embed PostgREST may hand back as one row or a one-row array. */
 const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
@@ -274,14 +280,22 @@ async function buildActionItems(ctx: {
 
   // WHO STILL HAS TO COME (0378). The permits on a job, then those permits' visits: two reads chained,
   // started here so they ride beside the fan-out below rather than adding a serial wave to every staff
-  // build. No status filter on the permits — a permit marked passed can still have a re-inspection
-  // added to it, and the only honest answer about where a permit stands comes from its rows — so the
-  // read is the NEWEST PERMITS_READ_CAP of them and the pile says "N+" when there are more.
-  // A FAILED READ CLAIMS NOTHING: no rows, so no row on the card and no job quietly dropped from Jobs
-  // Needing A Day. Saying a town has been somewhere it hasn't is the one thing this must never do.
-  const permitFeedP: Promise<{ permits: PermitFeedRow[]; inspections: PermitInspection[]; capped: boolean }> =
+  // build. No status filter in the SQL: the status is SELECTED and the FEEDER decides, in one place,
+  // which permits are nobody's nag (isOpenPermit — passed and closed are settled), because that same
+  // decision also has to say which jobs are waiting on an authority. The read is the NEWEST
+  // PERMITS_READ_CAP of them and the pile says "N+" when there are more.
+  // A FAILED READ CLAIMS NOTHING, AND SAYS SO: no rows means no row on the card, but it also means no
+  // job is named as awaiting an inspection — so every job waiting on the town or the utility would be
+  // asked to pick a day again, with nothing on the screen saying anything failed. That is the mis-ask
+  // this feature exists to stop, so a lost read gets one "Couldn't Check" line and the ops sink hears
+  // it. The one exception is permit_inspections not being there at all: the code may deploy before
+  // 0378 ("Safe before or after the code"), and that window is said once per server, to the sink only.
+  // Saying a town has been somewhere it hasn't is still the one thing this must never do.
+  type PermitFeed = { permits: PermitFeedRow[]; inspections: PermitInspection[]; capped: boolean; failed: boolean };
+  const noPermitFeed = (failed = false): PermitFeed => ({ permits: [], inspections: [], capped: false, failed });
+  const permitFeedP: Promise<PermitFeed> =
     isStaff && feederOn("permit_inspection", features)
-      ? (async () => {
+      ? (async (): Promise<PermitFeed> => {
           const permitsR: Read = await Promise.resolve(
             supabase
               .from("permits")
@@ -290,10 +304,13 @@ async function buildActionItems(ctx: {
               .order("created_at", { ascending: false })
               .limit(PERMITS_READ_CAP),
           );
-          if (permitsR.error) return { permits: [], inspections: [], capped: false };
+          if (permitsR.error) {
+            reportError("action-items.permitInspections.permits", permitsR.error);
+            return noPermitFeed(true);
+          }
           const permits = (permitsR.data ?? []) as PermitFeedRow[];
           const ids = permits.map((p) => String(p.id ?? "")).filter(Boolean);
-          if (!ids.length) return { permits: [], inspections: [], capped: false };
+          if (!ids.length) return noPermitFeed();
           const visits = await inChunks(
             ids,
             (chunk) =>
@@ -303,14 +320,29 @@ async function buildActionItems(ctx: {
                 .in("permit_id", chunk)
                 .order("position", { ascending: true }) as PromiseLike<Read>,
           );
-          if (visits.error) return { permits: [], inspections: [], capped: false };
+          if (visits.error) {
+            if (isMissingInspectionsTable(visits.error)) {
+              if (!inspectionsMissingSaid) {
+                inspectionsMissingSaid = true;
+                reportError("action-items.permitInspections.needs0378", visits.error);
+              }
+              return noPermitFeed();
+            }
+            reportError("action-items.permitInspections.visits", visits.error);
+            return noPermitFeed(true);
+          }
           return {
             permits,
             inspections: (visits.data ?? []) as PermitInspection[],
             capped: typeof permitsR.count === "number" ? permitsR.count > permits.length : permits.length >= PERMITS_READ_CAP,
+            failed: false,
           };
-        })().catch(() => ({ permits: [], inspections: [], capped: false }))
-      : Promise.resolve({ permits: [], inspections: [], capped: false });
+        })().catch((e) => {
+          // A THROW is swallowed here too, so it is said here too: a bug in the read is not a zero.
+          reportError("action-items.permitInspections", e);
+          return noPermitFeed(true);
+        })
+      : Promise.resolve(noPermitFeed());
 
   // ── The four aged reads, floored by the books start (chained, started now) ──
   // Visits from PAST days nobody closed out. absorbed=false (0237): a booking that became a job is
@@ -1364,6 +1396,9 @@ async function buildActionItems(ctx: {
   // gate's whole point (permit-inspection-items). Its jobs are then asked for no date in 3).
   const permitFeed = await permitFeedP;
   const inspectionFeed = permitInspectionItems({ permits: permitFeed.permits, inspections: permitFeed.inspections, todayStr });
+  // A lost read claims nothing: one Couldn't Check line, never a quiet zero — and never a job quietly
+  // asked for a day again as though no permit were waiting on anybody.
+  if (permitFeed.failed) items.push(PERMIT_INSPECTIONS_UNREAD_ITEM);
   for (const it of inspectionFeed.now) items.push(it);
   for (const w of inspectionFeed.waiting) waiting.push(w);
   if (inspectionFeed.now.length) counts.permit_inspections = permitFeed.capped ? { capped: true } : {};

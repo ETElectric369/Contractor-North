@@ -64,6 +64,32 @@ function codeLines(text: string): { line: number; text: string }[] {
 
 const all = WALKED.flatMap((d) => [...files(path.join(ROOT, d))]);
 
+/** The three columns that may never be selected off `permits` again. */
+const SUPERSEDED = ["inspection_date", "inspection_result", "inspector"] as const;
+
+/**
+ * EVERY QUOTE STYLE A SELECT LIST CAN BE WRITTEN IN. This read only double quotes, so the ban it
+ * promises ("in any select list that names permits' own columns") was not the ban it enforced: the
+ * same list in single quotes, or in a BACKTICK — which is how this lane's own permits read is written,
+ * `id, permit_number, …, permit_inspections(${COLUMNS})` — walked straight past it. The next reader of
+ * `inspector` is most likely to be in exactly that file, and it is not one of the permit files the
+ * other rule covers.
+ *
+ * "" and '' are one line only: a run of text between two unrelated quotes on different lines is not a
+ * string. A backtick MAY span lines, because a template literal does.
+ */
+export function selectLists(text: string): string[] {
+  const out: string[] = [];
+  for (const re of [/"([^"\n]*)"/g, /'([^'\n]*)'/g, /`([^`]*)`/g]) {
+    for (const m of text.matchAll(re)) if (/\bpermit_number\b/.test(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** The column named as its own item in a comma-separated select list. */
+const namesColumn = (list: string, col: string): boolean =>
+  new RegExp(`(^|[\\s,(])${col}($|[\\s,)])`).test(list);
+
 describe("0378: nothing reads permits.inspection_date / .inspector / .inspection_result again", () => {
   it("the walk found the repo (so a passing run means something)", () => {
     expect(all.length).toBeGreaterThan(400);
@@ -121,18 +147,36 @@ describe("0378: nothing reads permits.inspection_date / .inspector / .inspection
     const hits: string[] = [];
     for (const f of all) {
       if (f.includes("0378_")) continue;
-      const text = readFileSync(f, "utf8");
-      // A select list naming permit_number is a permits read, wherever it lives. One line only: a
-      // run of text between two unrelated quotes on different lines is not a string.
-      for (const m of text.matchAll(/"([^"\n]*\bpermit_number\b[^"\n]*)"/g)) {
-        const list = m[1];
-        for (const col of ["inspection_date", "inspection_result", "inspector"]) {
-          if (new RegExp(`(^|[\\s,(])${col}($|[\\s,)])`).test(list)) {
-            hits.push(`${path.relative(ROOT, f)} selects permits.${col}`);
-          }
+      // A select list naming permit_number is a permits read, wherever it lives and however it is
+      // quoted (selectLists), because PostgREST takes the list as a string either way.
+      for (const list of selectLists(readFileSync(f, "utf8"))) {
+        for (const col of SUPERSEDED) {
+          if (namesColumn(list, col)) hits.push(`${path.relative(ROOT, f)} selects permits.${col}`);
         }
       }
     }
     expect(hits, `A permits read is back on a superseded column:\n${hits.join("\n")}`).toEqual([]);
+  });
+
+  it("IT SEES ALL THREE QUOTE STYLES — a single-quoted or backtick select is a select too", () => {
+    // Each of these is a real way to write the read, and each used to walk straight past the guard.
+    const forms = [
+      `.from("permits").select("id, permit_number, inspector")`,
+      `.from("permits").select('id, permit_number, inspector')`,
+      ".from(\"permits\").select(`id, permit_number, inspector`)",
+      ".from(\"permits\").select(`\n  id,\n  permit_number,\n  inspector\n`)",
+    ];
+    for (const form of forms) {
+      const lists = selectLists(form);
+      expect(lists.length, `no select list found in: ${form}`).toBeGreaterThan(0);
+      expect(
+        lists.some((l) => namesColumn(l, "inspector")),
+        `this select slipped past the guard: ${form}`,
+      ).toBe(true);
+    }
+    // And the lane's OWN read, which names permit_number in a backtick, still passes: the interpolated
+    // column list is not a bare `inspector`, so a true select is caught without a false alarm.
+    const ours = ".select(`id, permit_number, type, authority, status, jobs(job_number, name), permit_inspections(${PERMIT_INSPECTION_COLUMNS})`)";
+    expect(selectLists(ours).some((l) => SUPERSEDED.some((c) => namesColumn(l, c)))).toBe(false);
   });
 });

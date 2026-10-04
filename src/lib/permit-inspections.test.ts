@@ -84,6 +84,101 @@ describe("the order is a gate: only a PASS in front opens the next one", () => {
     expect(previousOf(rows, 5)?.position).toBe(2);
   });
 
+  it("A RETRY NEVER WAITS FOR THE VISIT IT REPLACES — booked on the end, read in its place", () => {
+    // Thursday's own job: town at 1 and utility at 2, both booked for one morning. The town fails, he
+    // books the town again, and the new row lands on the END (nextPosition) — behind the utility. Read
+    // literally, the retry waits for the utility and the utility waits for the failed town: the permit
+    // is wedged shut, and the card says "book another visit" however many visits are booked.
+    const rows = meterJob();
+    rows[0] = { ...rows[0], result: "failed", result_on: THU };
+    const retry = row({ position: 3, authority: TOWN, scheduled_for: "2026-10-20", scheduled_window: "morning" });
+    const wedged = [...rows, retry];
+
+    // The retry is callable now; the failed visit it replaces is history and gates nobody.
+    expect(isUnblocked(wedged, 3)).toBe(true);
+    expect(blockedBy(wedged, 3)).toBeNull();
+    // The utility waits for the RETRY, not for the visit that already failed.
+    expect(isUnblocked(wedged, 2)).toBe(false);
+    expect(previousOf(wedged, 2)?.position).toBe(3);
+    // The card lists it where it happens: right behind the visit it replaces, ahead of the utility.
+    expect(inOrder(wedged).map((r) => r.position)).toEqual([1, 3, 2]);
+    expect(inspectionLine(wedged, retry)).toBe("Town of Truckee · Tue Oct 20, morning");
+
+    // And the verdict is about the retry, so doing what the app asked changes what it says.
+    const s = permitInspectionStand(wedged, "2026-10-16");
+    expect(s.state).toBe("booked");
+    expect(s.authority).toBe(TOWN);
+    expect(s.waitingOnThem).toBe(true);
+    expect(standLine(s)).toBe("Waiting on Town of Truckee — Tue Oct 20, morning");
+    // The retry's own day going by is a missed write-up, like any other.
+    expect(permitInspectionStand(wedged, "2026-10-21").state).toBe("overdue");
+    // And when it passes, the utility is up: the permit is not wedged shut.
+    const cleared = wedged.map((r) => (r.position === 3 ? { ...r, result: "passed" as const, result_on: "2026-10-20" } : r));
+    expect(isUnblocked(cleared, 2)).toBe(true);
+    expect(permitInspectionStand(cleared, "2026-10-21").authority).toBe(UTIL);
+  });
+
+  it("with no utility at all, the retry is still the subject — and a cancelled visit rebooked too", () => {
+    for (const result of ["failed", "cancelled"] as const) {
+      const rows = [
+        row({ position: 1, authority: TOWN, result, result_on: THU }),
+        row({ position: 2, authority: TOWN, scheduled_for: "2026-10-20", scheduled_window: "morning" }),
+      ];
+      expect(inspectionLine(rows, rows[1])).toBe("Town of Truckee · Tue Oct 20, morning");
+      const s = permitInspectionStand(rows, "2026-10-16");
+      expect(s.state).toBe("booked");
+      expect(standLine(s)).toBe("Waiting on Town of Truckee — Tue Oct 20, morning");
+      expect(permitInspectionStand(rows, "2026-10-21").state).toBe("overdue");
+    }
+  });
+
+  it("a retry nobody has phoned for yet is HIS to book, and the failure it replaces is spent", () => {
+    const rows = [
+      row({ position: 1, authority: TOWN, result: "failed" as const, result_on: THU }),
+      row({ position: 2, authority: UTIL, scheduled_for: THU, scheduled_window: "morning" }),
+      row({ position: 3, authority: TOWN }),
+    ];
+    const s = permitInspectionStand(rows, "2026-10-20");
+    expect(s.state).toBe("to_book");
+    expect(s.authority).toBe(TOWN);
+    expect(s.hisToDo).toBe(true);
+    expect(standLine(s)).toBe("Town of Truckee inspection to book");
+  });
+
+  it("a second failure chains too: the latest retry is the only one that gates anybody", () => {
+    const rows = [
+      row({ position: 1, authority: TOWN, result: "failed" as const, result_on: THU }),
+      row({ position: 2, authority: UTIL, scheduled_for: THU, scheduled_window: "morning" }),
+      row({ position: 3, authority: TOWN, result: "failed" as const, result_on: "2026-10-20" }),
+      row({ position: 4, authority: TOWN, scheduled_for: "2026-10-27", scheduled_window: "morning" }),
+    ];
+    expect(inOrder(rows).map((r) => r.position)).toEqual([1, 3, 4, 2]);
+    expect(isUnblocked(rows, 4)).toBe(true);
+    expect(blockedBy(rows, 2)).toBe(TOWN);
+    expect(previousOf(rows, 2)?.position).toBe(4);
+    expect(standLine(permitInspectionStand(rows, "2026-10-21"))).toBe("Waiting on Town of Truckee — Tue Oct 27, morning");
+  });
+
+  it("two visits booked for one authority is two visits, not a retry: neither is superseded", () => {
+    // Nothing failed, so nothing is being replaced — the order stays exactly as it was written down.
+    const rows = [
+      row({ position: 1, authority: TOWN, scheduled_for: THU }),
+      row({ position: 2, authority: UTIL, scheduled_for: THU }),
+      row({ position: 3, authority: TOWN, scheduled_for: "2026-10-20" }),
+    ];
+    expect(inOrder(rows).map((r) => r.position)).toEqual([1, 2, 3]);
+    expect(isUnblocked(rows, 3)).toBe(false);
+    expect(blockedBy(rows, 3)).toBe(UTIL);
+  });
+
+  it("nothing is left waiting on a failure that was never re-booked", () => {
+    const rows = meterJob();
+    rows[0] = { ...rows[0], result: "failed", result_on: THU };
+    expect(isUnblocked(rows, 2)).toBe(false);
+    expect(blockedBy(rows, 2)).toBe(TOWN);
+    expect(permitInspectionStand(rows, FRI).state).toBe("needs_another");
+  });
+
   it("reads in position order however the rows arrive, and the next booking goes on the end", () => {
     const jumbled = [row({ position: 2, authority: UTIL }), row({ position: 1 })];
     expect(inOrder(jumbled).map((r) => r.position)).toEqual([1, 2]);
@@ -128,7 +223,7 @@ describe("where the permit stands — one verdict every door reads", () => {
     expect(standLine(s)).toBe("Waiting on Liberty Utilities — Thu Oct 15, morning");
   });
 
-  it("the utility passes: that is the end — the meter is on", () => {
+  it("the utility passes: that is the end — and the words hold in every trade", () => {
     const rows = meterJob().map((r) => ({ ...r, result: "passed" as const, result_on: THU }));
     const s = permitInspectionStand(rows, THU);
     expect(s.state).toBe("clear");
@@ -136,7 +231,13 @@ describe("where the permit stands — one verdict every door reads", () => {
     expect(s.waitingOnThem).toBe(false);
     expect(s.outstanding).toEqual([]);
     expect(allInspectionsPassed(rows, THU)).toBe(true);
-    expect(standLine(s)).toBe("Every inspection passed — the meter is on");
+    // NOT "the meter is on". Nothing in the data says a utility came — 0378 is explicit that the
+    // utility being last is a fact about the world, not the schema — and this app also serves decks,
+    // plumbing and painting. A deck permit's one county inspection told the builder the meter was on.
+    expect(standLine(s)).toBe("Every inspection passed — the job is done");
+    const deck = [row({ position: 1, authority: "Nevada County Building", result: "passed" as const, result_on: THU })];
+    expect(standLine(permitInspectionStand(deck, THU))).toBe("Every inspection passed — the job is done");
+    expect(standLine(permitInspectionStand(deck, THU))).not.toContain("meter");
   });
 
   it("booked and nobody wrote it up: HIS by the next morning, never before", () => {
