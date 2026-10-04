@@ -131,8 +131,29 @@ function isMissingColumn(err: unknown): boolean {
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
     `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
+  /**
+   * BY THE DAY ON THE PAPER, NEWEST FIRST (Erik, 2026-10-04: "everything has a date and should be
+   * filtered that way anyway, that makes the newest bills on top of the list and oldest at the
+   * bottom for us ... all im saying is i noticed all the bills were mixed and thats how i got
+   * confused af").
+   *
+   * It ordered by `created_at` — the moment the ROW was typed into North, which for a supplier
+   * invoice entered weeks later has nothing to do with the bill. His first ten read Oct 1, Oct 1,
+   * Sep 29, Sep 28, Jun 29, Jul 31, Sep 11, Jun 23, Jul 30, Aug 24: four in order by luck and then
+   * scrambled, because he had just imported a run of old CED invoices and they landed on top of
+   * everything recent. Scrolling that list for what is still open is not a reading task, it is a
+   * search — which is exactly how five settled bills and three open ones looked the same to him.
+   *
+   * `created_at` stays as the tie-break, so several tickets dated the same day keep a stable order
+   * (and the one bill with no date at all sorts last rather than first — a paper nobody dated is not
+   * the newest thing he owns).
+   */
   const read = (o: BillColumns) =>
-    supabase.from("bills").select(columns(o)).order("created_at", { ascending: false });
+    supabase
+      .from("bills")
+      .select(columns(o))
+      .order("bill_date", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
 
   // Newest columns fall off first. Four attempts is the worst case and it only happens on a
   // database that is behind the deploy; the normal path is one query, same as before.

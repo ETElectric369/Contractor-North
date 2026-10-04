@@ -136,3 +136,31 @@ describe("the bills the supplier's own closed papers cover are settled in the le
     expect(PAGE).not.toMatch(/from\("bills"\)\s*\.update\(/);
   });
 });
+
+/**
+ * THE LIST IS IN THE ORDER OF THE PAPER, NOT THE ORDER IT WAS TYPED (Erik, 2026-10-04).
+ *
+ * It ordered by `created_at`. He imported a run of old supplier invoices in one sitting and they
+ * landed on top of everything recent: his first ten read Oct 1, Oct 1, Sep 29, Sep 28, Jun 29,
+ * Jul 31, Sep 11, Jun 23, Jul 30, Aug 24. "all the bills were mixed and thats how i got confused af."
+ *
+ * A bill's own day is the only thing a person can navigate a supplier's book by, and it is the thing
+ * every supplier statement is cut on ("everything has been paid and credits applied through 9/24").
+ * Scrolling an entry-ordered list for what is still open is a search, not a read.
+ */
+describe("the bills list is ordered by the day on the paper", () => {
+  it("orders by bill_date, newest first, with created_at only as the tie-break", () => {
+    expect(PAGE).toContain('.order("bill_date", { ascending: false, nullsFirst: false })');
+    // The tie-break still exists: several tickets dated the same day keep a stable order.
+    expect(PAGE).toContain('.order("bill_date", { ascending: false, nullsFirst: false })\n      .order("created_at", { ascending: false })');
+  });
+
+  it("never orders the bills read by created_at alone again", () => {
+    // The exact shape that shipped the mixing, pinned so it cannot come back on a refactor.
+    expect(PAGE).not.toContain('.from("bills").select(columns(o)).order("created_at", { ascending: false })');
+  });
+
+  it("a paper nobody dated sorts LAST, never as the newest thing he owns", () => {
+    expect(PAGE).toContain("nullsFirst: false");
+  });
+});
