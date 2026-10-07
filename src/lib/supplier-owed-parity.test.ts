@@ -244,13 +244,14 @@ describe("one book of paper, three doors, one figure", () => {
    * figure is theirs: $3,000.00. Our three tickets come to $3,500.00 and that is a DIFFERENT
    * question (what was bought and not squared up), which is why it is a different number.
    */
-  it("the Bills page and Nort say what the supplier's own papers say", async () => {
+  it("the Bills page and Nort say what is open on our own bills, with the supplier's figure beside it", async () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
     expect(read!.failed).toEqual([]);
-    expect(read!.owed.total).toBe(3000);
+    expect(read!.owed.total).toBe(3500);
     expect(read!.owed.lines).toEqual([
-      { accountId: ACCOUNT, name: "Northside Wholesale Supply", owed: 3000, how: "their-own-papers", papers: 3, onAccount: true },
+      { accountId: ACCOUNT, name: "Northside Wholesale Supply", owed: 3500, how: "my-open-bills", papers: 3, onAccount: true },
     ]);
+    expect(read!.accounts.find((a) => a.accountId === ACCOUNT)?.theirs).toBe(3000);
     // Every ticket landed on the account, including the one only the alias reaches.
     expect(read!.owed.notOnAnAccount.papers).toBe(0);
     expect(read!.bought.total).toBe(3500);
@@ -265,7 +266,7 @@ describe("one book of paper, three doors, one figure", () => {
   it("the accountant's download agrees with the Bills page to the cent", async () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
     expect(workbookOwed(inputs())).toBe(read!.owed.total);
-    expect(workbookRows(inputs())).toEqual([{ name: "Northside Wholesale Supply", owed: 3000 }]);
+    expect(workbookRows(inputs())).toEqual([{ name: "Northside Wholesale Supply", owed: 3500 }]);
   });
 
   /**
@@ -277,7 +278,6 @@ describe("one book of paper, three doors, one figure", () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
     const blind = inputs({ supplierAliases: [] });
     expect(workbookOwed(blind)).toBe(3500);
-    expect(workbookOwed(blind)).not.toBe(read!.owed.total);
     expect(workbookRows(blind).map((r) => r.name)).toContain("NWS Counter");
   });
 
@@ -299,7 +299,7 @@ describe("one book of paper, three doors, one figure", () => {
     // Their side is the line out of `whatISupplierOwed`; our side is that account's own slice of
     // `whatIBoughtNotSettled`. Both arrive from this read; neither is worked out on the page.
     const line = read!.owed.lines.find((l) => l.accountId === ACCOUNT)!;
-    expect(line.owed).toBe(3000);
+    expect(line.owed).toBe(3500);
     expect(read!.boughtByAccount[ACCOUNT].total).toBe(3500);
     // The per-account slices add back up to the whole-book figure: no ticket is in two accounts and
     // none is dropped, which is what would make a per-supplier row quietly wrong.
@@ -319,17 +319,18 @@ describe("the P&L card names each dollar once, and says nothing untrue about the
     const m = computeOwnerMoney(inputs(), WINDOW, TZ, TODAY);
     const owed = m.caveats.find((c) => c.kind === "supplier_owed");
     const noDoc = m.caveats.find((c) => c.kind === "supplier_no_document");
-    expect(owed).toMatchObject({ total: 3000 });
+    expect(owed).toMatchObject({ total: 3500 });
     // ONLY t3 has no paper of the supplier's behind it. t2 does, and it is the same one t1 covers.
+    // Since 0383 that slice is INSIDE the owed figure (an open bill is owed whatever paper covers
+    // it); what it says is that the supplier's list cannot be holding it yet. Never $5,500.00.
     expect(noDoc).toMatchObject({ total: 500, count: 1 });
-    // The two slices together are the three tickets' worth of money, never $5,500.00.
-    expect((owed as any).total + (noDoc as any).total).toBe(3500);
+    expect((owed as any).total).toBe(3500);
   });
 
   it("says it in a sentence that does not assert something false about the supplier", () => {
     const line = countedNotPaidLine(computeOwnerMoney(inputs(), WINDOW, TZ, TODAY))!;
     expect(line).toBe(
-      "Counted, though not paid yet: $3,000.00 owed to Northside Wholesale Supply by its own invoices and $500.00 in 1 bill Northside Wholesale Supply has sent no invoice for yet.",
+      "Counted, though not paid yet: $3,500.00 owed to Northside Wholesale Supply and $500.00 of that in 1 bill Northside Wholesale Supply has sent no invoice for yet.",
     );
     // The $2,000.00 ticket is nowhere named as one they never billed, and the total named is not $5,000.
     expect(line).not.toContain("$2,000.00");
@@ -344,8 +345,9 @@ describe("the P&L card names each dollar once, and says nothing untrue about the
   it("still counts the supplier's invoice when no covering ticket was ever filed", () => {
     const unfiled = inputs({ bills: BILLS.filter((b) => b.id !== "t1") });
     const m = computeOwnerMoney(unfiled, WINDOW, TZ, TODAY);
-    expect(m.caveats.find((c) => c.kind === "supplier_owed")).toMatchObject({ total: 3000 });
+    // Our open bills without t1: 2,500. Their invoice for it stands in THEIR figure, beside ours (0383).
+    expect(m.caveats.find((c) => c.kind === "supplier_owed")).toMatchObject({ total: 2500 });
     expect(m.caveats.find((c) => c.kind === "supplier_no_document")).toMatchObject({ total: 500, count: 1 });
-    expect(countedNotPaidLine(m)).toContain("$3,000.00 owed to Northside Wholesale Supply by its own invoices");
+    expect(countedNotPaidLine(m)).toContain("$2,500.00 owed to Northside Wholesale Supply and $500.00 of that in 1 bill");
   });
 });

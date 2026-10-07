@@ -232,7 +232,7 @@ describe("the still-owed rule is written in exactly one place", () => {
    */
   it("no reader writes the is-this-a-disagreement test itself", () => {
     // The open half, by any of its names, on a line that also asks whether a paper is on an account.
-    const openHalf = /\b(isStillOwed|isOnAccountBill|boughtAtRegister)\s*\(/;
+    const openHalf = /\b(isStillOwed|isOnAccountBill|isPaidBill|openOwed)\s*\(/;
     const accountHalf = /\baccountOf\s*\(|\baccountId\b|\bsupplier_account_id\b/;
     const hits: string[] = [];
     let scanned = 0;
@@ -439,20 +439,6 @@ describe("the still-owed rule is written in exactly one place", () => {
       expect(gap, row).not.toContain(row);
     }
     expect(gap).not.toMatch(/\bfrom "@\/lib\/supplier-owed"/);
-  });
-
-  /**
-   * AND THE COSTS TAB MAY NOT DRAW A BILL ROW WITHOUT THE SUPPLIER'S VERDICT. The component was
-   * taught `billSettledLabel` and the job page never passed the fact, so the badge could not fire
-   * there however right the expression was. A grep cannot see an unpassed prop; this checks the one
-   * thing a grep can see, that the page goes through the shared read and hands the row down.
-   */
-  it("the job's Costs tab gets the fact from the one read", () => {
-    const page = readFileSync(join(ROOT, "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
-    expect(page).toContain("readSettledBySupplier(supabase, j.org_id,");
-    expect(page).toContain("settledBySupplier: says !== undefined");
-    expect(page).toContain("bills={costBills as any}");
-    expect(page).toContain("settledSaysUnread={settledSays.unread}");
   });
 
   /**

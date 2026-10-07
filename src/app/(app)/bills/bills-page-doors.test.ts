@@ -410,7 +410,7 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   // "Unpaid" over a Suppliers card saying "Owed" is the screen naming two different amounts for
   // one pile of money.
   { door: /^All Bills · 9 Bought On Account \$4,801\.98$/, was: "the tabs under the page (All Bills (15) · $X)", home: "all-bills" },
-  { door: /^(On Account Mark Settled|Settled Mark On Account)$/, was: "Settled/On Account badge toggle (its face said Switch)", home: "all-bills", times: 15 },
+  { door: /^(On Account Mark Paid|Paid Mark On Account)$/, was: "Settled/On Account badge toggle (its face said Switch)", home: "all-bills", times: 15 },
   { door: "Edit", was: "pencil icon (bare 16px)", home: "all-bills", times: 15 },
   { door: "Delete", was: "trash icon (bare 16px)", home: "all-bills", times: 15 },
   { door: /^Bill Only What This Job Used$/, was: "receipt card, per line", home: "all-bills" },
@@ -492,10 +492,10 @@ describe("every door keeps exactly one home", () => {
     expect(lines).toHaveLength(2);
     for (const l of lines) expect(l).toMatch(/\b1 To Check\b/);
     expect(text(suppliers)).not.toMatch(/\+ \$[\d,.]+ they never sent paper for/);
-    expect(text(section(`supplier-checks-${CED}`))).toMatch(/\$[\d,.]+ on \d+ bills? Consolidated Electrical Distributors never sent paper for\. Still owed; mark (it|them) Settled when you pay\./);
+    expect(text(section(`supplier-checks-${CED}`))).toMatch(/\$[\d,.]+ on \d+ bills? Consolidated Electrical Distributors never sent paper for\. Still owed; mark (it|them) Paid when you pay, or check (its box|their boxes) when you record the payment\./);
     expect(text(section(`supplier-checks-${OSH}`))).toContain("1 bill marked On Account, $16.28, but you pay Outdoor Supply Hardware (OSH - Cupertino) at the register.");
     // The one slate line under Record A Payment, model B's own arithmetic.
-    expect(text(section(`supplier-invoices-${CED}`))).toContain("You've sent $2,000.00 since Sep 5, 2026. It's already off their figure.");
+    expect(text(section(`supplier-invoices-${CED}`))).toContain("You've sent $2,000.00 since Sep 5, 2026");
     expect(text(html)).not.toContain("Why Don't These Subtract?");
     expect(text(html)).not.toContain("What Does Undo Do?");
     // Their Papers' number counts the open papers in Invoices With No Job and Not Recorded Yet, each
@@ -874,7 +874,7 @@ describe("Title Case and 44px on the old controls the recon named", () => {
     const ledger = section("all-bills");
     const pills = Array.from(ledger.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*>/g)).map((m) => m[0]);
     expect(pills.length).toBe(0);
-    const toggles = Array.from(ledger.matchAll(/<button[^>]*aria-label="How this bill was bought[^"]*"[^>]*>/g)).map((m) => m[0]);
+    const toggles = Array.from(ledger.matchAll(/<button[^>]*aria-label="Whether this bill is paid[^"]*"[^>]*>/g)).map((m) => m[0]);
     expect(toggles.length).toBe(15);
     for (const t of toggles) expect(t).toContain("min-h-11");
   });

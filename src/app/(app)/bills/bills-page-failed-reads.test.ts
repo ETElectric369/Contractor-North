@@ -226,8 +226,9 @@ describe("the bills unread", () => {
     expect(text).toContain("Couldn't check your books just now");
     expect(text).not.toMatch(/\$10\.00 ahead/);
     expect(text).not.toContain("Square With Everyone");
-    // CED is counted from its own papers, which were read: its figure stands.
-    expect(text).toContain("Consolidated Electrical Distributors says");
+    // Since 0383 CED's figure is our own open bills too, so with the bills unread it cannot total either.
+    expect(text).not.toContain("Consolidated Electrical Distributors says");
+    expect(text).toContain("Couldn't Total");
   });
 
   it("search never says 'not in your books' when the books were not read", async () => {
@@ -252,9 +253,8 @@ describe("the links unread", () => {
     expect(text).toContain("Couldn't check your bills against the papers Consolidated Electrical Distributors sent just now");
     expect(text).toContain("Couldn't check your bills against their papers");
     expect(text).not.toContain("your paperwork rather than theirs");
-    expect(text).toContain("Which of your unpaid bills there they never billed you for couldn't be checked just now");
-    // CED's own figure stands: the links are not in it.
-    expect(text).toContain("Consolidated Electrical Distributors says");
+    // The paragraph that explained his unpaid bills away as "your paperwork" is gone with 0383.
+    expect(text).not.toContain("Which of your unpaid bills there they never billed you for");
   });
 });
 
@@ -272,16 +272,19 @@ describe("the payments unread", () => {
     const { text } = await renderWith("supplier_payments");
     expect(text).not.toContain("your bills less payments");
     expect(text).toContain("Couldn't Total");
-    expect(text).toContain("Consolidated Electrical Distributors says");
+    // Since 0383 every on-account figure stands on the payments read: CED's cannot total either.
+    expect(text).not.toContain("Consolidated Electrical Distributors says");
   });
 
   it("CED never reads 'you have sent $0.00': its payments say they couldn't be read", async () => {
     // W1-33: one slate line under Record A Payment, model B's own arithmetic, instead of the grid.
     const whole = await renderWith();
-    expect(whole.text).toContain("You've sent $100.00 since Sep 5, 2026. It's already off their figure.");
+    expect(whole.text).toContain("You've sent $100.00 since Sep 5, 2026");
     const { text } = await renderWith("supplier_payments");
     expect(text).not.toMatch(/sent \$0\.00/);
-    expect(text).toContain("Couldn't read your payments just now.");
+    // Since 0383 every on-account figure stands on the payments read, so the slate line gives way
+    // to the one notice; the per-account failure lines below stay.
+    expect(text).toContain("Couldn't read everything this balance is made of just now");
     // The failure lines stay exactly as they were: said where they happen, never folded or counted.
     expect(text).toContain("Couldn't read your payments to Consolidated Electrical Distributors just now");
     expect(text).toContain("Couldn't read your payments to Ace Mountain Hardware just now");

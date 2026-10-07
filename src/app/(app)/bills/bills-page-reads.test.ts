@@ -124,14 +124,16 @@ describe("the bills the supplier's own closed papers cover are settled in the le
     expect([...seeing]).toEqual(["b-loose"]);
   });
 
-  it("the page reads the one covering walk, only once the links read, and hands it to every ledger row", () => {
-    expect(PAGE).toContain("const settledBySupplierIds: ReadonlySet<string> = linksErr ? new Set<string>() : coverage.settledBySupplier;");
+  it("the page reads the one covering walk, and no longer wears the supplier's verdict as a state on a row (0383)", () => {
     // ONE WALK, NOT FOUR: the page no longer builds its own `coverBill` loop, and it hands
     // supplierDocumentRows the accounts so a paper can be placed by the account's own name.
     expect(PAGE).toContain("const coveredBillIds = coverage.covered;");
     expect(PAGE).toContain("accountRows: (accountRows ?? []) as any[],");
     expect(PAGE).not.toContain("const coverBill = (billId: string, documentAccountId: string)");
-    expect(PAGE).toContain("settledBySupplier: settledBySupplierIds.has(String(b.id)),");
+    // "Settled · CED Says" retired: a closed paper of theirs over an open bill of ours is Reconcile's
+    // row, and every ledger row carries the bill's own number instead.
+    expect(PAGE).not.toContain("settledBySupplierIds.has(");
+    expect(PAGE).toContain("amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,");
     // Read-side only: no write to bills.status rides along.
     expect(PAGE).not.toMatch(/from\("bills"\)\s*\.update\(/);
   });

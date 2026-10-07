@@ -857,7 +857,7 @@ export function SupplierUnfiledSpellings({
           <p>
             If one of them really is a supplier you buy from on account, Give It Its Own Account and every bill scanned
             under that name goes onto it. It goes on as a counter you pay at the till, with no running balance
-            {canSetOnAccount ? ", and its Suppliers line offers to turn a running balance on." : "; you can mark its bills Settled in All Bills."}
+            {canSetOnAccount ? ", and its Suppliers line offers to turn a running balance on." : "; you can mark its bills Paid in All Bills."}
           </p>
         </WhyFold>
       </div>

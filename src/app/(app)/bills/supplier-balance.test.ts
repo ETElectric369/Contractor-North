@@ -21,6 +21,7 @@ const bill = (over: Partial<SupplierBillRow> = {}): SupplierBillRow => ({
   supplier: "Consolidated Electrical Dist.",
   billDate: "2026-08-01",
   amount: 100,
+  amountPaid: null,
   status: "unpaid",
   jobId: null,
   jobName: null,
@@ -53,38 +54,40 @@ const account = (over: Partial<SupplierAccountRow> = {}): SupplierAccountRow => 
   ...over,
 });
 
-describe("owed is unpaid bills minus live payments", () => {
-  it("is the difference, not a count of ticked boxes", () => {
+describe("owed is what is open on the bills, by the number (0383)", () => {
+  it("is the open money, and a payment is not subtracted again: it already came off the bills it paid", () => {
     const b = supplierBalance(
       account({
-        bills: [bill({ amount: 5570.56 }), bill({ amount: 4366.24 }), bill({ amount: 2179.38 }), bill({ amount: 456.02 })],
-        payments: [payment({ amount: 4000 })],
+        bills: [bill({ amount: 5570.56, amountPaid: 4000 }), bill({ amount: 4366.24 }), bill({ amount: 2179.38 }), bill({ amount: 456.02 })],
+        payments: [payment({ amount: 4000, allocated: 4000, bills: 1 })],
       }),
       "2026-09-18",
     );
-    expect(b.charged).toBe(12572.2);
+    expect(b.charged).toBe(8572.2);
     expect(b.paid).toBe(4000);
+    expect(b.unmatched).toBe(0);
     expect(b.owed).toBe(8572.2);
   });
 
-  // "i pay them in chunks that never match the ticckets" - the whole reason this shape exists.
-  // Three odd chunks against three odd tickets must land on the cent, not near it.
-  it("takes chunks that match no ticket", () => {
+  // "i pay them in chunks that never match the ticckets": the chunks land on the bills oldest first,
+  // and what is left of each bill is what is owed - to the cent.
+  it("takes chunks that match no ticket, as what is left on each bill", () => {
     const b = supplierBalance(
       account({
-        bills: [bill({ amount: 1513.71 }), bill({ amount: 162.32 }), bill({ amount: 3034.54 })],
-        payments: [payment({ amount: 1000 }), payment({ amount: 2500.5 }), payment({ amount: 333.33 })],
+        bills: [bill({ amount: 1513.71, amountPaid: 1513.71 }), bill({ amount: 162.32, amountPaid: 162.32 }), bill({ amount: 3034.54, amountPaid: 2157.8 })],
+        payments: [payment({ amount: 1000, allocated: 1000 }), payment({ amount: 2500.5, allocated: 2500.5 }), payment({ amount: 333.33, allocated: 333.33 })],
       }),
       "2026-09-18",
     );
-    expect(b.charged).toBe(4710.57);
+    expect(b.charged).toBe(876.74);
+    expect(b.chargedBills).toBe(1);
     expect(b.paid).toBe(3833.83);
     expect(b.owed).toBe(876.74);
   });
 
   it("leaves a voided payment out of the money but keeps it on the record", () => {
     const acct = account({
-      bills: [bill({ amount: 500 })],
+      bills: [bill({ amount: 500, amountPaid: 200 })],
       payments: [payment({ amount: 200 }), payment({ amount: 300, voided: true })],
     });
     const b = supplierBalance(acct, "2026-09-18");
@@ -95,9 +98,19 @@ describe("owed is unpaid bills minus live payments", () => {
     expect(acct.payments).toHaveLength(2);
   });
 
-  it("can go negative when he has paid ahead of what is scanned", () => {
-    const b = supplierBalance(account({ bills: [bill({ amount: 100 })], payments: [payment({ amount: 400 })] }), "2026-09-18");
+  it("says what of a payment is ahead on the account, and goes negative on a credit", () => {
+    const b = supplierBalance(
+      account({ bills: [bill({ amount: 100, amountPaid: 100 }), bill({ amount: -300 })], payments: [payment({ amount: 400, allocated: 100, bills: 1 })] }),
+      "2026-09-18",
+    );
     expect(b.owed).toBe(-300);
+    expect(b.unmatched).toBe(300);
+  });
+
+  it("falls back to the status word on a row read without the number", () => {
+    const b = supplierBalance(account({ bills: [bill({ amount: 100, status: "paid" }), bill({ amount: 40 })] }), "2026-09-18");
+    expect(b.owed).toBe(40);
+    expect(b.settledAtRegister).toBe(100);
   });
 });
 
@@ -114,11 +127,13 @@ describe("a register receipt is money spent, not money owed", () => {
     expect(b.owed).toBe(456.02);
   });
 
-  it("counts anything that is not 'paid' as still on account", () => {
+  it("counts anything that is not 'paid' as still on account, and by the number when it has one", () => {
     expect(isOnAccountBill({ status: "unpaid" })).toBe(true);
     expect(isOnAccountBill({ status: "" })).toBe(true);
     expect(isOnAccountBill({ status: "paid" })).toBe(false);
     expect(isOnAccountBill({ status: "PAID" })).toBe(false);
+    expect(isOnAccountBill({ status: "unpaid", amount: 100, amountPaid: 100 })).toBe(false);
+    expect(isOnAccountBill({ status: "paid", amount: 100, amountPaid: 60 })).toBe(true);
   });
 });
 
@@ -381,11 +396,11 @@ const everyNumberIn = (value: unknown): number[] => {
   return [];
 };
 
-describe("when the supplier has spoken, the balance is the supplier's", () => {
-  it("reads CED's $3,845.14 and says which model said so", () => {
+describe("when the supplier has spoken, their figure stands BESIDE ours (0383)", () => {
+  it("reads CED's $3,845.14 as their figure and keeps ours as what is open on our bills", () => {
     const b = supplierBalance(cedAccount(), TODAY);
     expect(b.model).toBe("supplier-invoices");
-    expect(b.owed).toBe(3845.14);
+    expect(b.owed).toBe(7360.93);
     expect(b.supplierSays?.gross).toBe(3845.14);
     expect(b.supplierSays?.openDocuments).toBe(20);
   });
@@ -409,7 +424,7 @@ describe("when the supplier has spoken, the balance is the supplier's", () => {
     expect(b.livePayments).toBe(3);
     expect(b.firstPayment?.paidOn).toBe("2026-08-05");
     expect(b.lastPayment?.paidOn).toBe("2026-09-12");
-    expect(b.owed).toBe(3845.14);
+    expect(b.owed).toBe(7360.93);
   });
 
   it("does not let a voided payment change a supplier balance either way", () => {
@@ -417,7 +432,7 @@ describe("when the supplier has spoken, the balance is the supplier's", () => {
     withVoid.payments = [...withVoid.payments, payment({ amount: 750, paidOn: "2026-09-15", voided: true })];
     const b = supplierBalance(withVoid, TODAY);
     expect(b.paid).toBe(6000);
-    expect(b.owed).toBe(3845.14);
+    expect(b.owed).toBe(7360.93);
   });
 
   it("ages the oldest open document against the org's today", () => {
@@ -558,45 +573,47 @@ describe("what one open document holds", () => {
   });
 });
 
-describe("the two models are never mixed", () => {
-  // Every account in his book except CED. Nothing about this shape has changed.
-  it("leaves an account with no supplier documents exactly where it was", () => {
+describe("one model: our open bills, with the supplier's own figure beside them where we hold their papers", () => {
+  it("an account with no supplier documents is our open bills, and the payments are inside them", () => {
     const b = supplierBalance(
-      account({ bills: [bill({ amount: 5570.56 }), bill({ amount: 456.02 })], payments: [payment({ amount: 2000 })] }),
+      account({ bills: [bill({ amount: 5570.56, amountPaid: 2000 }), bill({ amount: 456.02 })], payments: [payment({ amount: 2000, allocated: 2000 })] }),
       TODAY,
     );
-    expect(b.model).toBe("bills-minus-payments");
+    expect(b.model).toBe("my-open-bills");
     expect(b.supplierSays).toBeNull();
     expect(b.owed).toBe(4026.58);
   });
 
   it("treats an empty supplier list as no supplier data at all", () => {
     const b = supplierBalance(account({ bills: [bill({ amount: 500 })], payments: [payment({ amount: 100 })], supplierInvoices: [] }), TODAY);
-    expect(b.model).toBe("bills-minus-payments");
-    expect(b.owed).toBe(400);
+    expect(b.model).toBe("my-open-bills");
+    expect(b.owed).toBe(500);
   });
 
-  // Not the same sentence as "no data". The supplier has answered, and the answer is nothing owed.
-  it("says paid up when every document the supplier issued is closed", () => {
+  // The supplier has answered, and the answer is nothing owed - while a bill of ours is still open.
+  // That is the disagreement Reconcile names ("they call it paid, your bill is open"); the figure
+  // stays ours until the bill is marked paid or the payment that paid it is recorded.
+  it("keeps our open bill in the figure when every document the supplier issued is closed, with theirs beside it", () => {
     const b = supplierBalance(
       account({ bills: [bill({ amount: 500 })], payments: [payment({ amount: 100 })], supplierInvoices: CED_CLOSED }),
       TODAY,
     );
     expect(b.model).toBe("supplier-invoices");
-    expect(b.owed).toBe(0);
+    expect(b.owed).toBe(500);
+    expect(b.supplierSays?.gross).toBe(0);
     expect(b.supplierSays?.openDocuments).toBe(0);
     expect(b.supplierSays?.discountStillClaimable).toBe(0);
-    // Model A would have said $400 here, and the supplier says otherwise.
     expect(b.charged).toBe(500);
     expect(b.paid).toBe(100);
   });
 
-  it("shows a register account the supplier's own figure and says the contradiction out loud", () => {
+  it("shows a register account holding the supplier's open paper its own (empty) figure and says the contradiction out loud", () => {
     // on_account = false means no RUNNING balance of ours. A document the supplier issued and
-    // still calls open is not us pretending - it is a fact with a file behind it - so it is shown,
-    // and the flag goes up beside it rather than the number being swallowed.
+    // still calls open is a fact with a file behind it: it stands beside the figure, and the flag
+    // goes up rather than the number being swallowed.
     const b = supplierBalance(account({ onAccount: false, supplierInvoices: [open("1106500", 212.5)] }), TODAY);
-    expect(b.owed).toBe(212.5);
+    expect(b.owed).toBe(0);
+    expect(b.supplierSays?.gross).toBe(212.5);
     expect(b.openDocumentsOnRegisterAccount).toBe(true);
     // The OLD flag counts unpaid bills and the card quotes a bill count and `charged` off it.
     // There are no unpaid bills here, so it stays down and that sentence never gets to say

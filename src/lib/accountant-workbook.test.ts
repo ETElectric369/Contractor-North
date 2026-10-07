@@ -406,8 +406,9 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
   it("prints what's open as of the download day, with that date", () => {
     expect(summary.rows.some((r) => r.cells[0] === `Open As Of ${TODAY}`)).toBe(true);
     expect(cents(rowOf(summary, "Customers Owe You")!.cells[1])).toBe(100000); // INV-107; the draft isn't counted
-    // Northline Supply: 600 + 1200 on account, less the 500 sent (the voided 100 never counts).
-    expect(cents(rowOf(summary, "Suppliers Say You Owe")!.cells[1])).toBe(130000);
+    // Northline Supply: 600 + 1200 open on account (0383: the 500 sent is matched to no bill, so it
+    // is ahead on the account, not off the figure; the voided 100 never counts).
+    expect(cents(rowOf(summary, "Suppliers Say You Owe")!.cells[1])).toBe(180000);
     const open = tab(wb, "Open");
     expect(open.rows[0].cells[0]).toBe(`Open As Of ${TODAY}`);
     expect(String(open.rows[1].cells[0])).toContain(TODAY);
@@ -758,18 +759,20 @@ describe("what suppliers are owed is /bills' rule: an account paid ahead doesn't
   const withAhead = (): OwnerMoneyInputs => {
     const m = money();
     m.supplierAccounts = [...(m.supplierAccounts ?? []), { id: "a2", name: "Paid Ahead Co", on_account: true }];
-    m.supplierPayments = [...(m.supplierPayments ?? []), { id: "sp9", supplier_account_id: "a2", amount: 700, paid_on: "2026-06-15", method: "check", voided_at: null }];
+    // Matched to no bill (0383): with nothing owed there, the $700 is money ahead.
+    m.supplierPayments = [...(m.supplierPayments ?? []), { id: "sp9", supplier_account_id: "a2", amount: 700, paid_on: "2026-06-15", method: "check", voided_at: null, allocated: 0, bills: 0 }];
     return m;
   };
   const wb = buildAccountantWorkbook(input({ money: withAhead() }));
 
   it("Suppliers Say You Owe counts only what is owed, as /bills does; the credit is its own labelled row", () => {
-    // Northline: 1,800 of bills less 500 sent = 1,300 owed. Paid Ahead Co: 700 sent, no bills.
-    expect(cents(rowOf(tab(wb, "Summary"), "Suppliers Say You Owe")!.cells[1])).toBe(130000);
+    // Northline: 1,800 open on bills (the 500 sent is matched to none, so it is ahead, not off the
+    // figure). Paid Ahead Co: 700 sent, no bills.
+    expect(cents(rowOf(tab(wb, "Summary"), "Suppliers Say You Owe")!.cells[1])).toBe(180000);
     const open = tab(wb, "Open");
     const owedAt = open.rows.findIndex((r) => r.cells[0] === "Suppliers Say You Owe");
     const owedTotal = open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!;
-    expect(cents(owedTotal.cells[1])).toBe(130000);
+    expect(cents(owedTotal.cells[1])).toBe(180000);
     const owedRows = dataRows(open.rows.slice(owedAt + 2, open.rows.indexOf(owedTotal)));
     expect(owedRows.map((r) => r.cells[0])).toEqual(["Northline Supply"]);
     const aheadAt = open.rows.findIndex((r) => r.cells[0] === "Paid Ahead (Credit With The Supplier)");
@@ -821,10 +824,11 @@ describe("the supplier's own invoices list reconciles to the figure above it, to
     // 2,000 less the 225.47 memo plus 300 left on the part-paid ticket plus the 450 paper with no
     // balance recorded = 2,524.53, and that is the itemized Total AND the figure above it.
     expect(cents(docTotal.cells[5])).toBe(252453);
-    expect(cents(docTotal.cells[5])).toBe(toCents(bal.owed!));
+    // Their itemized list totals THEIR figure (supplierSays), which stands beside ours (0383).
+    expect(cents(docTotal.cells[5])).toBe(toCents(bal.supplierSays!.gross));
     const owedAt = open.rows.findIndex((r) => r.cells[0] === "Suppliers Say You Owe");
     const owedTotal = open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!;
-    expect(cents(owedTotal.cells[1])).toBe(cents(docTotal.cells[5]));
+    expect(cents(owedTotal.cells[1])).toBe(toCents(bal.owed!));
 
     expect(docRows.map((r) => [r.cells[2], r.cells[3], cents(r.cells[4]), cents(r.cells[5])])).toEqual([
       ["8802-1105000", "Invoice (No Balance Recorded)", 45000, 45000],
@@ -1244,10 +1248,10 @@ describe("a ticket spelled like an account but never filed reads its account on 
     const row = bills.find((r) => r.cells[2] === "NS-131")!;
     expect(row.cells[4]).toBe("Northline Supply");
     expect(bills.map((r) => r.cells[4])).not.toContain("No supplier account");
-    // The figure above counts it inside the account, which is why the row had to: $1,860 of tickets less
-    // the $500 sent is what Suppliers Say You Owe says.
+    // The figure above counts it inside the account, which is why the row had to: $1,860 of tickets
+    // open is what Suppliers Say You Owe says (the $500 sent is matched to no bill: ahead, not off it).
     const owedAt = open.rows.findIndex((r) => r.cells[0] === "Suppliers Say You Owe");
-    expect(cents(open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!.cells[1])).toBe(136000);
+    expect(cents(open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!.cells[1])).toBe(186000);
   });
 
   it("Costs answers with the same account, the same unpaid mark and the ticket's own memo", () => {

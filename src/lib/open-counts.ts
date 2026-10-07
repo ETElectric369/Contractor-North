@@ -82,13 +82,10 @@ export function isOpenAppointment(status: string | null | undefined): boolean {
  * the next. `isStillOwed` is the expression now; this is the name the open-counts list knows it by,
  * and the doc comment that used to promise a reach this function did not have is below in full.
  *
- * `settledBySupplier` is read-side only and never a column: bills.status says HOW a bill was
- * bought, not whether the supplier was paid, and applying a supplier's open list closes the
- * supplier's OWN documents. `supplierCoverage` in lib/supplier-owed.ts works out which bills that
- * covers - and it now does so for every bill, not only the ones carrying a stored account id,
- * which is the gate that capped the first attempt at one reader out of four.
+ * BY THE NUMBER (0383): a bill is open while amount − amount_paid is not zero. A reader that did
+ * not select the number falls back to the status word, which the database derives from it.
  */
-export function isOpenBill(b: { status?: string | null; superseded?: boolean | null; settledBySupplier?: boolean | null }): boolean {
+export function isOpenBill(b: { status?: string | null; amount?: unknown; amountPaid?: number | null; superseded?: boolean | null }): boolean {
   return isStillOwed(b);
 }
 

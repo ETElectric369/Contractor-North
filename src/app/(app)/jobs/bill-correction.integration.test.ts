@@ -9,7 +9,8 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  * requireStaff → the reads → the writes), run against the test database through the PostgREST-shaped
  * shim over one pg connection, speaking as the company's office exactly as PostgREST does. Proven:
  *   · Correct This Bill writes its own bill UNDER the original, with its own line, and the sentence;
- *     an attach TAKES the original's job and status whatever is sent;
+ *     an attach TAKES the original's job whatever is sent; the purchase's state is derived from the
+ *     money by 0383 (a paid ticket corrected by a difference is open again until it is paid);
  *   · one level only: a correction of a correction is refused, at the door and at the database;
  *   · never on or as a bill set aside as a duplicate, and a bill carrying a correction cannot be set
  *     aside;
@@ -212,7 +213,7 @@ d("a bill may correct an earlier bill (0381): the door and the three triggers", 
     expect(again).toEqual({ ok: false, error: "test-1109100 is already attached to TEST-SO-257899. Nothing was attached." });
   });
 
-  it("an attach TAKES the original's job and status, whatever the writer sent", async () => {
+  it("an attach TAKES the original's job, whatever the writer sent; the purchase's state is the money's (0383)", async () => {
     if (!needs()) return;
     const loose = await bill({ number: "TEST-O-LOOSE", amount: 10, status: "paid" });
     const attached = await one(
@@ -220,7 +221,9 @@ d("a bill may correct an earlier bill (0381): the door and the three triggers", 
        values ($1, $2, 'TEST CED', 'TEST-C-LOOSE', 1, 'unpaid', $3) returning job_id, status`,
       [orgId, jobB, loose],
     );
-    expect(attached).toEqual({ job_id: jobA, status: "paid" });
+    // A paid $10 ticket corrected by $1 is a purchase $1 short: both read On Account until it is paid.
+    expect(attached).toEqual({ job_id: jobA, status: "unpaid" });
+    expect(await one("select status from public.bills where id = $1", [loose])).toEqual({ status: "unpaid" });
   });
 
   it("one level only: a correction of a correction is refused, at the door and at the database", async () => {

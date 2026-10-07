@@ -40,7 +40,7 @@ import {
 } from "@/app/(app)/bills/supplier-name-work";
 import { countOpen } from "@/lib/open-counts";
 import { NO_DISAGREEMENTS, type ReconcileOpenCounts } from "@/lib/reconcile-kinds";
-import type { NotOnAnAccount } from "@/lib/supplier-owed";
+import { openOwed, type NotOnAnAccount } from "@/lib/supplier-owed";
 import type { SupplierOwedRead } from "@/lib/supplier-owed-read";
 import type { SupplierGapRow } from "./supplier-gap";
 import type { SupplierCandidateQuestion, SupplierMergeProposal, SupplierSpelling, DuplicateBillGroup } from "@/app/(app)/bills/supplier-balance";
@@ -61,7 +61,22 @@ export interface ReconcileFigures {
   notOnAnAccount: NotOnAnAccount;
 }
 
+/** One bill the supplier's closed paper covers while it is still open here (0383). */
+export interface TheyCallItPaidRow {
+  billId: string;
+  /** The bill's own number, or the spelling on it. */
+  label: string;
+  /** What is open on it, by the number. */
+  open: number;
+  accountId: string;
+  accountName: string;
+  jobId: string | null;
+  jobLabel: string | null;
+}
+
 export interface ReconcileWork {
+  /** The supplier calls it paid; the bill is open here. Settled on the bill, never here. */
+  theyCallItPaid: TheyCallItPaidRow[];
   proposals: SupplierMergeProposal[];
   questions: SupplierCandidateQuestion[];
   loose: SupplierSpelling[];
@@ -99,6 +114,7 @@ export interface ReconcilePile {
 const NO_PILE: ReconcilePile = { figure: null, unnamed: { papers: 0, total: 0 }, settledAtTheRegister: 0 };
 
 const EMPTY: ReconcileWork = {
+  theyCallItPaid: [],
   proposals: [],
   questions: [],
   loose: [],
@@ -131,7 +147,7 @@ function isMissingColumn(err: unknown): boolean {
  */
 async function readBillsWithLines(supabase: any, orgId: string) {
   const columns = (supersede: boolean) =>
-    `id, supplier, supplier_account_id, amount, status, bill_date, job_id, category, notes, supplier_invoice_number${supersede ? ", superseded_by_bill_id" : ""}, jobs(job_number, name, customers(name)), bill_line_items(description)`;
+    `id, supplier, supplier_account_id, bill_number, amount, amount_paid, status, bill_date, job_id, category, notes, supplier_invoice_number${supersede ? ", superseded_by_bill_id" : ""}, jobs(job_number, name, customers(name)), bill_line_items(description)`;
   const read = (supersede: boolean) =>
     supabase.from("bills").select(columns(supersede)).eq("org_id", orgId).order("created_at", { ascending: false }).limit(5000);
   const first = await read(true);
@@ -196,11 +212,7 @@ export async function readReconcileWork(
     );
   const accountOf = (billId: string) => identity.get(billId)?.accountId ?? null;
 
-  const pile = papersOnNoAccount({
-    bills: live,
-    accountOf,
-    settledBySupplier: figures?.settledBySupplier ?? null,
-  });
+  const pile = papersOnNoAccount({ bills: live, accountOf });
   const unfiled = pile.unfiled;
 
   const aliasesOf = new Map<string, { alias: string }[]>();
@@ -226,7 +238,32 @@ export async function readReconcileWork(
   const { proposals, questions, loose } = supplierNameWork({ unfiled, accounts, aliasRows });
   const { groups: duplicates, ready: supersedeReady } = duplicateTicketGroups({ bills: billRows });
 
+  // ── THEY CALL IT PAID, YOUR BILL IS OPEN (0383) ────────────────────────────────────────────
+  // The set is the one covering walk's (supplierCoverage.settledBySupplier, handed down from the
+  // one read): open bills of ours every covering document of their own supplier calls closed. The
+  // rows name the bill, what is open on it, and the account, so the two doors on /bills can be
+  // pointed at exactly.
+  const accountNameOf = new Map(accountRows.map((a) => [String(a.id), String(a.name ?? "").trim() || "a supplier"]));
+  const theyCallItPaid: TheyCallItPaidRow[] = live
+    .filter((b) => figures?.settledBySupplier?.has(String(b.id)))
+    .map((b) => {
+      const accountId = accountOf(String(b.id)) ?? "";
+      const job = (b as any).jobs as { job_number?: string | null; name?: string | null; customers?: { name?: string | null } | null } | null | undefined;
+      return {
+        billId: String(b.id),
+        label: String((b as any).bill_number || b.supplier_invoice_number || b.supplier || "a bill").trim(),
+        open: openOwed({ status: b.status, amount: b.amount, amountPaid: (b as any).amount_paid == null ? null : Number((b as any).amount_paid) || 0 }),
+        accountId,
+        accountName: accountNameOf.get(accountId) ?? "the supplier",
+        jobId: b.job_id ?? null,
+        jobLabel: job?.job_number ? `${job.job_number} (${[job.customers?.name, job.name].filter(Boolean).join(", ")})` : job?.name ?? null,
+      };
+    })
+    .filter((r) => r.open > 0.005)
+    .sort((x, y) => y.open - x.open);
+
   return {
+    theyCallItPaid,
     proposals,
     questions,
     loose,
@@ -312,9 +349,10 @@ export function supplierGapRows(owed: SupplierOwedRead | null): SupplierGapRow[]
       return {
         accountId: a.accountId,
         name: a.name,
-        // Their own open balance. A credit of theirs arrives here negative, which is a real reading:
-        // their book says money back where ours says money out.
-        theirs: a.owed ?? 0,
+        // THEIR own open balance (supplierSays.gross, 0383: beside ours, never inside it). A credit of
+        // theirs arrives here negative, which is a real reading: their book says money back where
+        // ours says money out.
+        theirs: a.theirs ?? 0,
         ours: ours?.total ?? 0,
         oursPapers: ours?.papers ?? 0,
       };

@@ -59,12 +59,14 @@ import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematch
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { billOfTie, billPapers, type PaperTie } from "@/lib/job-photos";
 import {
+  r2,
   isOnAccountBill,
   supplierBalance,
   type SupplierAccountRow,
   type SupplierBillRow,
 } from "./supplier-balance";
 import {
+  openOwed,
   billSettledLabel,
   supplierBalancesUnread,
   supplierFigureUnread,
@@ -118,7 +120,7 @@ function isMissingColumn(err: unknown): boolean {
   return (
     code === "42703" ||
     /does not exist/i.test(message) ||
-    /\b(billable|supplier_account_id|supplier_invoice_number|is_statement|superseded_by_bill_id|pricing_provisional|corrects_bill_id)\b/i.test(
+    /\b(billable|supplier_account_id|supplier_invoice_number|is_statement|superseded_by_bill_id|pricing_provisional|corrects_bill_id|amount_paid)\b/i.test(
       message,
     )
   );
@@ -130,7 +132,7 @@ function isMissingColumn(err: unknown): boolean {
  *  the part of the job somebody had set. */
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
-    `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}${o.corrects ? ", corrects_bill_id" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
+    `id, supplier, bill_number, amount, status, bill_date, created_at, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}${o.corrects ? ", corrects_bill_id, amount_paid" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
   /**
    * BY THE DAY ON THE PAPER, NEWEST FIRST (Erik, 2026-10-04: "everything has a date and should be
    * filtered that way anyway, that makes the newest bills on top of the list and oldest at the
@@ -229,6 +231,7 @@ export default async function BillsPage({
     shelfLotsRead,
     shelfItemsRead,
     { data: billTieRows, error: billTiesErr },
+    { data: allocationRows },
   ] = await Promise.all([
     supabase
       .from("purchase_orders")
@@ -335,6 +338,10 @@ export default async function BillsPage({
       .or("bill_id.not.is.null,tied_bill_id.not.is.null")
       .not("file_url", "is", null)
       .limit(5000),
+    // WHICH BILLS EACH PAYMENT PAID (0383), so the ledger row can say "paid 7 bills" or "not matched
+    // to bills". A database without the table answers with an error and a null, which reads as
+    // nothing known - the row says nothing rather than something wrong.
+    supabase.from("supplier_payment_allocations").select("supplier_payment_id, bill_id, amount").limit(5000),
   ]);
   const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
   const orgTz = orgSettings.timezone;
@@ -584,6 +591,16 @@ export default async function BillsPage({
   // key itself is `aliasKey`, inside supplier-name-work.ts — what `supplier_aliases` is unique on,
   // what a press actually moves bills by, and what the resolver groups a paper on no account under.
 
+  // What each payment pays (0383): how many bills, and how much cash of it reached a bill.
+  const allocatedOf = new Map<string, { bills: number; allocated: number }>();
+  for (const a of (allocationRows ?? []) as any[]) {
+    const key = String(a?.supplier_payment_id ?? "");
+    if (!key) continue;
+    const g = allocatedOf.get(key) ?? { bills: 0, allocated: 0 };
+    g.bills += 1;
+    g.allocated = r2(g.allocated + (Number(a?.amount) || 0));
+    allocatedOf.set(key, g);
+  }
   const supplierPayments = ((paymentRows ?? []) as any[]).map((r) => ({
     id: String(r.id),
     accountId: String(r.supplier_account_id ?? ""),
@@ -595,14 +612,38 @@ export default async function BillsPage({
     // A VOIDED PAYMENT IS A FACT, NOT AN ABSENCE. It stays on the list, crossed out, and stops
     // counting - void, never delete, like every other money row in this app.
     voided: !!r.voided_at,
+    ...(allocationRows ? { bills: allocatedOf.get(String(r.id))?.bills ?? 0, allocated: allocatedOf.get(String(r.id))?.allocated ?? 0 } : {}),
   }));
 
+  // THE SUPPLIER'S PROMPT-PAY DISCOUNT ON EACH LINKED OPEN DOCUMENT, per bill, for the pay sheet's
+  // preview (the server reads the same documents when it records the payment).
+  const discountOfBill = new Map<string, { amount: number; by: string }>();
+  {
+    const docById = new Map(((invoiceRows ?? []) as any[]).map((d) => [String(d.id), d]));
+    for (const l of (billLinkRows ?? []) as any[]) {
+      const d = docById.get(String(l?.supplier_invoice_id ?? ""));
+      const off = Number(d?.discount_amount) || 0;
+      const by = String(d?.discount_by ?? "");
+      if (!d || d.closed === true || off <= 0.005 || !/^\d{4}-\d{2}-\d{2}$/.test(by)) continue;
+      const key = String(l?.bill_id ?? "");
+      const prev = discountOfBill.get(key);
+      discountOfBill.set(key, { amount: r2((prev?.amount ?? 0) + off), by: prev && prev.by < by ? prev.by : by });
+    }
+  }
   const toBillRow = (b: any): SupplierBillRow => ({
     id: String(b.id),
     supplier: String(b.supplier ?? ""),
     billDate: b.bill_date ?? null,
     amount: Number(b.amount) || 0,
+    // ONE NUMBER PER BILL (0383). Null when the ladder dropped the column: then the status word,
+    // derived from the same number, decides (isStillOwed's fallback).
+    amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,
     status: String(b.status ?? ""),
+    correctsBillId: b.corrects_bill_id ?? null,
+    billNumber: b.bill_number ?? null,
+    createdAt: b.created_at ?? null,
+    discountAmount: discountOfBill.get(String(b.id))?.amount ?? null,
+    discountBy: discountOfBill.get(String(b.id))?.by ?? null,
     jobId: b.job_id ?? null,
     jobName: b.jobs?.name ?? null,
     // THE NUMBER IS ALREADY IN THE DATA, AND NOTHING WAS READING IT HERE (review, 2026-09-19).
@@ -729,14 +770,9 @@ export default async function BillsPage({
   // on the account a paper RESOLVES to rather than the column it happens to carry.
   const coveredBillIds = coverage.covered;
 
-  // ── THE BILLS THE SUPPLIER'S OWN BOOKS CALL SETTLED (8a982483) ──────────────────────────────
-  // Same walk as coverBill, and the document's `closed` (an applied open list) is what the ledger
-  // was never told: an on-account bill every covering document from its own account calls closed
-  // is settled in the supplier's books, so All Bills stops counting it as Unpaid and its row says
-  // "Settled · CED Says". bills.status is not written. A lost links read would make a bill covered
-  // only by a Record link look open again, so, like noSupplierDocument, nothing is settled until
-  // the links read.
-  const settledBySupplierIds: ReadonlySet<string> = linksErr ? new Set<string>() : coverage.settledBySupplier;
+  // THE BILLS THE SUPPLIER'S OWN BOOKS CALL SETTLED are no longer a state on this page (0383): a
+  // closed paper of theirs over a bill still open here is Reconcile's row ("They Call It Paid, Your
+  // Bill Is Open"), drawn from the same covering walk by the one read.
 
   // ── WHO EACH PAPER BELONGS TO, AND THE ROWS THAT HANG OFF IT ────────────────────────────────
   // Built here, after identity, so every pile on this page is cut from the SAME set of paper. The
@@ -748,10 +784,7 @@ export default async function BillsPage({
   for (const b of liveBills) {
     const key = accountOfBill(String(b.id));
     if (!key) continue;
-    // THE BALANCE IS TOLD WHAT THE LEDGER ALREADY KNEW. A ticket the supplier's own closed paper
-    // covers used to leave the All Bills count and stay inside the figure at the top of the card,
-    // because the balance had no way to hear about it. It rides on the row now.
-    const row: SupplierBillRow = { ...toBillRow(b), settledBySupplier: settledBySupplierIds.has(String(b.id)) };
+    const row: SupplierBillRow = toBillRow(b);
     billsOf.set(key, [...(billsOf.get(key) ?? []), row]);
   }
 
@@ -767,9 +800,9 @@ export default async function BillsPage({
   if (!linksErr) for (const b of liveBills) {
     const accountId = accountOfBill(String(b.id)) ?? "";
     if (!accountId || !documentsOf.has(accountId)) continue;
-    if (!isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledBySupplierIds.has(String(b.id)) })) continue;
+    if (!isOnAccountBill({ status: String(b.status ?? ""), amount: b.amount, amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0 })) continue;
     if (coveredBillIds.has(String(b.id))) continue;
-    const amount = Number(b.amount) || 0;
+    const amount = openOwed({ amount: b.amount, amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0, status: b.status });
     if (amount <= 0.005) continue;
     const g = noSupplierDocument.get(accountId) ?? { total: 0, bills: 0, ids: [] };
     g.total = Math.round((g.total + amount) * 100) / 100;
@@ -860,8 +893,8 @@ export default async function BillsPage({
     supplierAccountId: b.supplier_account_id ?? null,
     supplier: b.supplier ?? null,
     amount: b.amount,
+    amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,
     status: b.status ?? null,
-    settledBySupplier: settledBySupplierIds.has(String(b.id)),
   }));
 
   // (a) WHAT HE OWES HIS SUPPLIERS. The one-number answer, and the one the card leads with.
@@ -874,6 +907,8 @@ export default async function BillsPage({
         onAccount: a.onAccount,
         owed: b.owed,
         model: b.model,
+        theirs: b.supplierSays ? b.supplierSays.gross : null,
+        unmatched: b.unmatched,
         openPapers: b.chargedBills,
         // A model-A figure with one of its reads missing is not zero and not a guess: it is named
         // as one we could not total, exactly as the card has always done it.
@@ -882,13 +917,12 @@ export default async function BillsPage({
     }),
     papers: owedPapers,
     identity: supplierOf,
-    settledBySupplier: settledBySupplierIds,
   });
 
   // (b) WHAT HE BOUGHT AND HAS NOT SQUARED UP. A purchasing figure. NOT a debt, and the label it
   // is given below says so - "$10k Unpaid" over "$5k Owed" is the screen telling a man he owes two
   // different amounts.
-  const boughtNotSettled = whatIBoughtNotSettled({ papers: owedPapers, settledBySupplier: settledBySupplierIds });
+  const boughtNotSettled = whatIBoughtNotSettled({ papers: owedPapers });
 
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" The same cards My Day shows, from the same call
   // (supplierPaperFeed), so the two screens can never disagree about which paper is waiting.
@@ -947,7 +981,6 @@ export default async function BillsPage({
     // ON NO ACCOUNT AS THE RESOLVER READS IT, not as the column reads it: a paper spelled with the
     // account's own name is ON that account now.
     accountOf: accountOfBill,
-    settledBySupplier: settledBySupplierIds,
   });
 
   // Every dollar on this page is accounted for somewhere. Until a spelling is on an account its
@@ -1062,7 +1095,7 @@ export default async function BillsPage({
         b.job_id ? `on ${jobSaid(b.job_id) ?? b.jobs?.name ?? "a job"}` : isShelfTicket(b) ? "shop stock" : `business cost, ${bucketOf(b.category)}`,
         // THE ROW'S OWN WORDS, from the one function that makes them (8a982483): a ticket the
         // supplier's closed paper covers reads the same in Search Or Ask as it does on its row.
-        billSettledLabel({ ...b, settledBySupplier: settledBySupplierIds.has(String(b.id)) }, shortSupplierName).toLowerCase(),
+        billSettledLabel({ status: b.status, amount: b.amount, amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0 }, formatCurrency).toLowerCase(),
       ]
         .filter(Boolean)
         .join(" · "),
@@ -1076,8 +1109,8 @@ export default async function BillsPage({
         ...kindWords,
         // The words he might TYPE to find it, which is a wider net than the words the row shows:
         // "unpaid" still finds a ticket still owed even though no screen calls it that any more.
-        isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledBySupplierIds.has(String(b.id)) })
-          ? "on account unpaid bought"
+        isOnAccountBill({ status: String(b.status ?? ""), amount: b.amount, amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0 })
+          ? "on account unpaid bought open"
           : "settled paid",
         b.jobs?.job_number,
         b.jobs?.name,
@@ -1125,16 +1158,9 @@ export default async function BillsPage({
       ...b,
       shownNumber: b.bill_number || b.supplier_invoice_number || reading.invoiceNumber || null,
       superseded: !!b.superseded_by_bill_id,
-      // Settled in the supplier's own books (every covering document closed): not open (isOpenBill).
-      settledBySupplier: settledBySupplierIds.has(String(b.id)),
-      // WHO says so: the account's short name ("CED"), not the spelling the receipt reader stored
-      // on bills.supplier (the row's first line already prints that one, in full).
-      // BY IDENTITY (8a982483). This read the raw column, which is null on more than half his book,
-      // so the very tickets only the resolver could reach - the ones this fix exists for - fell back
-      // to the typed spelling and named the supplier differently from every other row.
-      settledBySupplierName: settledBySupplierIds.has(String(b.id))
-        ? shortSupplierName(accountNameOf.get(String(accountOfBill(String(b.id)) ?? "")) || b.supplier)
-        : null,
+      // ONE NUMBER PER BILL (0383): the row's badge and the Unpaid filter read amount_paid, which
+      // rides on `...b`; a ladder rung without it leaves the status word to decide.
+      amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,
       receipt: receiptById.get(String(b.id)) ?? null,
       papers: paperOfBill[String(b.id)] ?? null,
     };

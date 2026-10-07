@@ -102,12 +102,13 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
     const [due] = supplierPayDue({ rows, accounts: ACCOUNTS, today: TONIGHT });
     const account: SupplierAccountRow = {
       id: CED, name: "Consolidated Electrical Distributors", accountNumber: "AC-10427", branchCode: null, onAccount: true, note: null,
-      aliases: [], bills: [{ id: "b1", supplier: "CED", billDate: "2026-09-01", amount: 999, status: "unpaid", jobId: null, jobName: null, invoiceNumber: null, isStatement: false }],
+      aliases: [], bills: [{ id: "b1", supplier: "CED", billDate: "2026-09-01", amount: 999, amountPaid: null, status: "unpaid", jobId: null, jobName: null, invoiceNumber: null, isStatement: false }],
       payments: [{ id: "p1", amount: 6000, paidOn: "2026-08-05", method: "check", reference: null, note: null, voided: false }],
       supplierInvoices: rows,
     };
-    // The payment sheet's "You owe" (model B: bills and payments are not in it).
-    expect(due.owed).toBe(supplierBalance(account, TONIGHT).owed);
+    // THEIR figure (supplierSays): the discount is theirs, so the cheque is measured against their
+    // own list, which stands beside our open bills on the card (0383).
+    expect(due.owed).toBe(supplierBalance(account, TONIGHT).supplierSays!.gross);
     // "Discount Still On The Table".
     const claim = claimableDiscounts(rows, TONIGHT);
     expect(due.saves).toBe(claim.dueOnNext);
@@ -217,7 +218,7 @@ describe("Paying clears the line (keyed to the cheque, never to when a paper lan
     const owedNow = supplierBalance(
       { id: CED, name: "CED", accountNumber: null, branchCode: null, onAccount: true, note: null, aliases: [], bills: [], payments: [], supplierInvoices: rowsOf(docs) },
       "2026-10-06",
-    ).owed;
+    ).supplierSays!.gross;
     const [due] = dueWith([pay(2000, "2026-10-02")], "2026-10-06", docs);
     expect(due.owed).toBe(owedNow);
     expect(due.sent).toBe(2000);

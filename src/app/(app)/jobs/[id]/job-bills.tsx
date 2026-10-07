@@ -49,14 +49,8 @@ interface Bill {
   bill_date: string | null;
   /** The PO this bill pays — when set, the bill SUPERSEDES that PO in every cost sum. */
   po_id?: string | null;
-  /**
-   * THE SUPPLIER'S OWN BOOKS CALL IT SETTLED (8a982483, readSettledBySupplier). BillRowDoors was
-   * taught to say this and this tab never passed it, so the same ticket read "Settled · CED Says" on
-   * /bills and "On Account" here. Declared on the row that the page hands down, so a Costs tab that
-   * forgets to compute it does not silently claim the money is still out.
-   */
-  settledBySupplier?: boolean | null;
-  settledBySupplierName?: string | null;
+  /** ONE NUMBER PER BILL (0383): how much of it is paid. BillRowDoors reads what is open. */
+  amount_paid?: number | null;
   /** WHICH PART OF THE JOB this cost is (item C1; column 0105). Shown on the row and set in the Edit
    *  Bill box, so a cost that is under no part of the job says so instead of quietly reading
    *  "Uncategorized" on the budget sheet and nowhere else. */
@@ -108,7 +102,6 @@ export function JobBills({
   billedHours = [],
   handsNote,
   papers = null,
-  settledSaysUnread = false,
   correctionsReady = false,
 }: {
   jobId: string;
@@ -128,9 +121,6 @@ export function JobBills({
   /** Each bill's own paper (lib/job-photos billPapers): the receipt it was read from, opened from
    *  its row instead of from the Photos grid. A bill with none draws no door. */
   papers?: Record<string, BillPaper[]> | null;
-  /** The covering read failed, so no row may claim either way: it is SAID instead of a row quietly
-   *  reading "On Account" for a ticket the supplier may already have settled. */
-  settledSaysUnread?: boolean;
   /** The page read bills.corrects_bill_id (0381 is on the database): Correct This Bill is drawn. */
   correctionsReady?: boolean;
 }) {
@@ -318,14 +308,6 @@ export function JobBills({
         </div>
       )}
       {!groups && groupsNote && <p className="mb-3 text-sm text-slate-500">{groupsNote}</p>}
-      {/* NOTHING SILENT: with the covering read lost, a row saying "On Account" would be claiming
-          money is still out when the supplier may already have settled it. So it says so instead. */}
-      {settledSaysUnread && bills.length > 0 && (
-        <p className="mb-3 text-sm text-amber-800" role="alert">
-          Couldn&apos;t check these against the papers your suppliers sent just now, so none is named as one
-          they say is settled. Reload the page to try again.
-        </p>
-      )}
 
       {groups ? (
         <>
@@ -523,7 +505,7 @@ function JobBillEditModal({
             <Label htmlFor="be-status">Status</Label>
             <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="unpaid">On Account</option>
-              <option value="paid">Settled At The Counter</option>
+              <option value="paid">Paid</option>
             </Select>
           </div>
           {/* The same control the Add Cost sheets draw; nothing when this job's estimate has no parts. */}

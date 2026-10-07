@@ -2134,7 +2134,13 @@ export async function setBillStatus(
   const supabase = ctx.supabase;
   // The `if` is load-bearing: an unconditional .eq("org_id", null) matches no row ever, which
   // would turn a missing org on the profile into every tap of this badge silently refusing.
-  let write = supabase.from("bills").update({ status }).eq("id", id);
+  // THE DATABASE KEEPS THE MONEY RULES HERE (0383, bill_money_follows). 'paid' is his word that the
+  // whole purchase is paid in full: amount_paid := amount on every member. 'unpaid' puts it back,
+  // keeping what a recorded payment paid - and is REFUSED when the payments cover it ("… is paid by
+  // the payment of Oct 5. Undo that payment to put it back on account."), as is marking a
+  // correction by itself. dbError hands the trigger's own sentence straight back.
+  const word = String(status ?? "").trim().toLowerCase() === "paid" ? "paid" : "unpaid";
+  let write = supabase.from("bills").update({ status: word }).eq("id", id);
   if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
   const { data, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };

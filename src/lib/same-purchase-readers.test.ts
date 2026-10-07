@@ -37,7 +37,7 @@ describe("every reader of 'is this purchase already on the books?' reads correct
   it("/bills reads it on the top rung of its missing-column ladder, beside the number columns", () => {
     const src = read("src/app/(app)/bills/page.tsx");
     expect(src).toContain('", supplier_account_id, supplier_invoice_number, is_statement"');
-    expect(src).toContain('${o.corrects ? ", corrects_bill_id" : ""}');
+    expect(src).toContain('${o.corrects ? ", corrects_bill_id, amount_paid" : ""}');
   });
 
   it("loadBooks asks for the column on every bills read, and again without it only when the database lacks it", () => {

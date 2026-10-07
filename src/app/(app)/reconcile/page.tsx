@@ -18,6 +18,7 @@ import {
 } from "@/lib/reconcile-kinds";
 import { figuresFrom, readReconcileWork, supplierGapRows } from "./reconcile-read";
 import { SupplierGap, disagreeing, moneyInDispute, type SupplierGapRow } from "./supplier-gap";
+import { TheyCallItPaid } from "./they-call-it-paid";
 import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings } from "@/app/(app)/bills/supplier-merge-review";
 import { SupplierDuplicates } from "@/app/(app)/bills/supplier-duplicates";
 import {
@@ -318,6 +319,15 @@ export default async function ReconcilePage() {
           cannot tell, what it has no opinion about. The three piles are derived from each other —
           what is "loose" is what no proposal and no question already speaks for — so they are built
           together and drawn together, or the same spelling gets two buttons doing one thing. */}
+      {/* ── THEY CALL IT PAID, YOUR BILL IS OPEN (0383) ─────────────────────────────────────
+          Drawn whenever a row exists (a link kind: its doors are on the bill and the Suppliers
+          card, so it never badges). */}
+      {work.theyCallItPaid.length > 0 && (
+        <section id={RECONCILE_KINDS["they-call-it-paid"].anchor} className="scroll-mt-20">
+          <TheyCallItPaid rows={work.theyCallItPaid} />
+        </section>
+      )}
+
       {has("supplier-names") && (
         <section id={RECONCILE_KINDS["supplier-names"].anchor} className="scroll-mt-20">
           <SupplierMergeReview

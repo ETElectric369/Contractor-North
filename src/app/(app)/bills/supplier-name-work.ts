@@ -30,7 +30,7 @@ import {
   suggestSupplierGroups,
   type BillFingerprint,
 } from "@/lib/supplier-identity";
-import { paperDisagrees } from "@/lib/supplier-owed";
+import { paperDisagrees, openOwed } from "@/lib/supplier-owed";
 import { jobSaidLabel } from "@/lib/job-pick-label";
 import {
   candidateMoving,
@@ -104,6 +104,8 @@ export interface NameWorkBill {
   supplier_account_id?: string | null;
   status?: string | null;
   amount?: unknown;
+  /** bills.amount_paid (0383): the still-owed test reads it; absent falls back to the status word. */
+  amount_paid?: number | null;
   job_id?: string | null;
   bill_date?: string | null;
   supplier_invoice_number?: string | null;
@@ -160,8 +162,6 @@ export function papersOnNoAccount(input: {
   bills: readonly NameWorkBill[];
   /** From `resolveSupplierPapers`: which account a paper belongs to, or null. */
   accountOf: (billId: string) => string | null;
-  /** From `supplierCoverage`. Absent means not checked, and nothing is treated as settled. */
-  settledBySupplier?: ReadonlySet<string> | null;
 }): PapersOnNoAccount {
   const unfiled = new Map<string, UnfiledSpelling>();
   const unnamed = { papers: 0, total: 0 };
@@ -182,7 +182,7 @@ export function papersOnNoAccount(input: {
     // spellings of card swipes, each wearing a button offering to open a supplier account with a
     // petrol station. The count of what dropped out is carried, because nothing leaves a figure in
     // silence.
-    if (!paperDisagrees({ accountId, paper: { status: b.status, settledBySupplier: input.settledBySupplier?.has(id) } })) {
+    if (!paperDisagrees({ accountId, paper: { status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null } })) {
       settledAtTheRegister += 1;
       const settledAlias = String(b.supplier ?? "").trim();
       if (settledAlias) {
@@ -213,7 +213,8 @@ export function papersOnNoAccount(input: {
       { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0, categories: [], uncategorised: 0, onAJob: 0, settledSiblings: 0 };
     g.bills += 1;
     g.total = r2(g.total + amount);
-    g.unpaid = r2(g.unpaid + amount);
+    // BY THE NUMBER (0383): what is open on it, as whatISupplierOwed's loose arm counts it.
+    g.unpaid = r2(g.unpaid + openOwed({ status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null }));
     g.unpaidBills += 1;
     const category = String(b.category ?? "").trim();
     if (category) {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { formatDate } from "@/lib/utils";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -118,19 +119,6 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).not.toContain("balance.supplierSays.nextDiscountAmount >=");
   });
 
-  /**
-   * MODEL A: ticking a bill settled and recording the cheque that covered it take the same dollar
-   * off twice. Neither control can be blocked - the app cannot know which bills a cheque covered -
-   * so the collision has to be speakable instead: one check (W1-33), one sentence and one door, and
-   * the payment's own Undo stays on its row.
-   */
-  it("asks him to check bills marked settled beside recorded payments on the same account", () => {
-    expect(CARD).toContain('balance.model === "bills-minus-payments" &&');
-    expect(CARD).toContain("const settledBesidePayments =");
-    expect(CARD).toContain("if a check covered them, this balance is too low.");
-    // Undo stays on the payment's own row.
-    expect(CARD).toContain("() => actions.voidPayment(p.id),");
-  });
 
   /**
    * ONE VOCABULARY, CARD AND LIST. The bills list stopped printing the raw column and now says
@@ -147,7 +135,7 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).toContain('<a href="#all-bills"');
     expect(CARD).not.toContain("further down this page");
     expect(CARD).toContain("still marked On Account.`");
-    expect(CARD).toContain("Still owed; mark {c.bills.length === 1 ? \"it\" : \"them\"} Settled when you pay.");
+    expect(CARD).toContain("Still owed; mark {c.bills.length === 1 ? \"it\" : \"them\"} Paid when you pay, or check");
   });
 
   /**
@@ -159,35 +147,14 @@ describe("the card says the things a balance cannot say for itself", () => {
   it("names the question behind each of the two supplier figures instead of asking him to accept both", () => {
     // The sentence, not the comment above it: the comment quotes the hedge to say what it prevents.
     expect(CARD).not.toContain("neither is wrong.");
-    expect(CARD).toContain("so it answers a");
-    expect(CARD).toContain("different question: that one counts every ticket you have not squared up, and the figure above is what is");
-    expect(CARD).toContain("still owed once the payments you have sent come off");
+    // Since 0383 both figures come off the one number on each bill, and the card says so: the only
+    // difference it can name is credits, which sit beside the total.
+    expect(CARD).toContain("Math.abs(boughtNotSettled.total - totalOwed) > 0.005");
+    expect(CARD).toContain("the difference from the figure above is credits, which are beside the");
+    expect(CARD).toContain("their figure stands beside yours on the line, and Reconcile names any bill they call paid that is still open here.");
   });
 
-  /**
-   * AND IT DOES NOT CALL THE HEADLINE A SUPPLIER'S ASK WHEN NO SUPPLIER ASKED. `totalOwed` is a blend:
-   * their own papers where they send them, our own tickets where they do not, register accounts and
-   * papers on no account — the fold above names all four. A company nobody sends a portal balance to
-   * has a headline made entirely of its own tickets, so "what your suppliers are asking you for" was a
-   * sentence about a document that does not exist. The supplier's-own-figure half is said only where
-   * there is one, gated on the same `theirOwnPapers` slice the fold is built from.
-   */
-  it("claims a supplier's own figure only where this company has supplier papers", () => {
-    expect(CARD).not.toContain("what your suppliers are asking you for");
-    expect(CARD).toContain('{theirOwnPapers > 0.005 ? ", which is your suppliers\' own figure where they send you papers" : ""}');
-  });
 
-  /** Model B: their figure cannot cover a purchase they never billed him for. */
-  it("does not explain away the bills the supplier has no document for", () => {
-    expect(CARD).toContain("const modelledExplained =");
-    // "bought on account", the same words All Bills now leads with (8a982483), so the sentence
-    // pointing at that fold and the fold's own line are about the same question in the same words.
-    expect(CARD).toContain("${formatCurrency(modelledExplained)} bought on account there, which is your paperwork rather than theirs.");
-    expect(CARD).not.toContain("${formatCurrency(modelledBillsUnpaid)} unpaid there");
-    expect(CARD).toContain("{account.name} never sent");
-    // And the list of his own bills stops calling itself the balance under model B.
-    expect(CARD).toContain('{fromSupplier ? "Your Bills On This Account" : "What The Balance Is Made Of"}');
-  });
 });
 
 /**
@@ -213,6 +180,7 @@ describe("the supplier detail: Check These", () => {
     supplier: "Valley Supply",
     billDate,
     amount,
+    amountPaid: null,
     status,
     jobId: null,
     jobName: null,
@@ -228,11 +196,10 @@ describe("the supplier detail: Check These", () => {
     expect(checksOf(a)).toEqual([]);
   });
 
-  it("N counts only live checks: settled beside payments (model A), and the register pair", () => {
-    const modelA = acct({ bills: [bill("b1", 100), bill("b2", 30, "paid")], payments: [pay("p1", 40, "2026-09-05")] });
-    expect(checksOf(modelA).map((c) => c.kind)).toEqual(["settled_beside_payments"]);
-    // A balance that couldn't be totalled asks no arithmetic check (the failure is said instead).
-    expect(checksOf(modelA, [], true)).toEqual([]);
+  it("N counts only live checks: a paid bill beside a payment is no longer one (0383 matches payments to bills), the register pair is", () => {
+    const paidBeside = acct({ bills: [bill("b1", 100), bill("b2", 30, "paid")], payments: [pay("p1", 40, "2026-09-05")] });
+    expect(checksOf(paidBeside)).toEqual([]);
+    expect(checksOf(paidBeside, [], true)).toEqual([]);
     const register = acct({ onAccount: false, bills: [bill("b3", 16.28)] });
     expect(checksOf(register)).toEqual([{ kind: "register_on_account", count: 1, charged: 16.28 }]);
   });
@@ -248,9 +215,15 @@ describe("the supplier detail: Check These", () => {
     expect(checksOf(acct({ bills: [bill("b1", 467.87)] }), ["b1"])).toEqual([]);
   });
 
-  it("the slate line says the arithmetic of the model actually used", () => {
+  it("the slate line says what is open, what he has sent, and what of it is ahead", () => {
     const a = acct({ bills: [bill("b1", 100)], payments: [pay("p1", 40, "2026-09-05")] });
-    expect(paymentLine({ account: a, balance: supplierBalance(a, "2026-09-26"), paymentsUnread: false })).toBe("$100.00 charged less $40.00 you've sent.");
+    expect(paymentLine({ account: a, balance: supplierBalance(a, "2026-09-26"), paymentsUnread: false })).toBe(
+      `$100.00 open on 1 bill. You've sent $40.00 since ${formatDate("2026-09-05")}.`,
+    );
+    const ahead = acct({ bills: [bill("b1", 100)], payments: [{ ...pay("p1", 40, "2026-09-05"), allocated: 25, bills: 1 }] });
+    expect(paymentLine({ account: ahead, balance: supplierBalance(ahead, "2026-09-26"), paymentsUnread: false })).toBe(
+      `$100.00 open on 1 bill. You've sent $40.00 since ${formatDate("2026-09-05")}, $15.00 of it ahead on the account.`,
+    );
     expect(paymentLine({ account: a, balance: supplierBalance(a, "2026-09-26"), paymentsUnread: true })).toBe("Couldn't read your payments just now.");
     expect(paymentLine({ account: acct({ onAccount: false }), balance: supplierBalance(acct({ onAccount: false }), "2026-09-26"), paymentsUnread: false })).toBeNull();
   });
@@ -270,7 +243,7 @@ describe("the supplier detail: Check These", () => {
     expect(quiet).not.toContain('id="supplier-checks-a1"');
     // The detail opens on Record A Payment, the slate line under it, and the ⋯ holding Edit Account.
     expect(quiet).toContain("Record A Payment");
-    expect(quiet).toContain("$100.00 charged less $40.00 you&#x27;ve sent.");
+    expect(quiet).toContain(`$100.00 open on 1 bill. You&#x27;ve sent $40.00 since ${formatDate("2026-09-05")}.`);
     expect(quiet).toMatch(/<button[^>]*aria-label="Actions"/);
     const live = render([acct({ onAccount: false, bills: [bill("b3", 16.28)] })]);
     expect(live).toContain("1 To Check");

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { setBillStatus, deleteBill } from "@/app/(app)/jobs/actions";
-import { shortSupplierName } from "@/lib/supplier-name";
+import { formatCurrency } from "@/lib/utils";
 import { billSettledLabel, billSettledTone, boughtHowFace, flipBoughtHow } from "@/lib/supplier-owed";
 import { CorrectBillModal, type CorrectableBill } from "@/components/correct-bill-modal";
 
@@ -19,9 +19,10 @@ import { CorrectBillModal, type CorrectableBill } from "@/components/correct-bil
  *
  *   Owed = bills not marked paid, minus payments recorded against the account,
  *
- * so ticking a bill a cheque already covered takes the same dollar off twice. The control stays (a
- * counter receipt settled at the till is what it is for) and its face says how the bill was bought,
- * never "paid". Every door is 44px at 375px, and Delete asks first: there is no Undo behind it.
+ * so ticking a bill a cheque already covered took the same dollar off twice. Since 0383 a bill
+ * carries ONE NUMBER (amount_paid): the tap is his word that the whole purchase is paid in full, a
+ * recorded payment pays bills by name, and the badge reads what is open. Every door is 44px at
+ * 375px, and Delete asks first: there is no Undo behind it.
  *
  * CORRECT THIS BILL (0381) is the fourth door, on a bill that is not itself a correction and not set
  * aside, where the page could read the column (`correct`). A CORRECTION's row has no toggle: it is
@@ -41,14 +42,10 @@ export function BillRowDoors({
     supplier: string;
     status: string;
     job_id?: string | null;
-    /**
-     * THE SUPPLIER'S OWN BOOKS CALL IT SETTLED (8a982483). The SAME bill read "On Account" on a
-     * job's Costs tab and "Settled · <supplier> Says" on /bills, because only /bills was told. The
-     * badge says it wherever the row is drawn now, and the control still says how it was BOUGHT -
-     * those are two different facts and both belong on the row.
-     */
-    settledBySupplier?: boolean | null;
-    settledBySupplierName?: string | null;
+    /** ONE NUMBER PER BILL (0383): the badge reads what is open, so a part-paid bill says its figures. */
+    amount?: unknown;
+    amount_paid?: number | null;
+    superseded?: boolean | null;
   };
   /** The job the row is drawn on, for the server's revalidation; the bill's own job otherwise. */
   jobId?: string | null;
@@ -65,6 +62,7 @@ export function BillRowDoors({
   const [correcting, setCorrecting] = useState(false);
   const busy = pending || disabled;
   const job = jobId ?? bill.job_id ?? "";
+  const paper = { status: bill.status, amount: bill.amount, amountPaid: bill.amount_paid ?? null, superseded: bill.superseded ?? null };
 
   function toggleStatus() {
     const next = flipBoughtHow(bill);
@@ -74,21 +72,11 @@ export function BillRowDoors({
         toast(res?.error ?? "Couldn't update the bill — try again.", "error");
         return;
       }
-      // WHAT THE TAP ACTUALLY DID, AND NOTHING MORE (8a982483).
-      //
-      // It used to promise the tap moved the supplier balance, and where a supplier sends its own
-      // papers that is FALSE: the balance is their open documents, and flipping bills.status moves
-      // it not one cent. A sentence the app says out loud after a write, that the next screen
-      // contradicts, is the onboarding-truth law broken at the worst possible moment - just after
-      // he pressed something.
-      //
-      // bills.status says HOW it was bought. That is what the toast says now.
-      toast(
-        next === "paid"
-          ? "Marked settled at the register - it is no longer on account"
-          : "Marked on account - it is money you still owe them",
-        "success",
-      );
+      // WHAT THE TAP ACTUALLY DID (0383): Mark Paid is his word that the whole purchase is paid in
+      // full, and the database writes the number from it; Mark On Account puts it back, keeping
+      // whatever a recorded payment paid. A payment that paid it is undone on the payment, and the
+      // server says so in the trigger's words when this tap is refused.
+      toast(next === "paid" ? "Marked paid in full - it is no longer on account" : "Marked on account - it is money you still owe them", "success");
       router.refresh();
     });
   }
@@ -110,7 +98,7 @@ export function BillRowDoors({
     <>
       {follows ? (
         <span className="flex min-h-11 items-center gap-2 px-2 text-xs font-medium text-slate-600">
-          <Badge tone={billSettledTone(bill)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
+          <Badge tone={billSettledTone(paper)}>{billSettledLabel(paper, formatCurrency)}</Badge>
           <span>Follows {follows}</span>
         </span>
       ) : (
@@ -118,17 +106,13 @@ export function BillRowDoors({
           type="button"
           onClick={toggleStatus}
           disabled={busy}
-          aria-label="How this bill was bought: tap to switch between Settled and On Account"
+          aria-label="Whether this bill is paid: tap to switch between Paid and On Account"
           className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
         >
-          {/* THE WORDS AND THE COLOUR FROM THE SAME THREE FACTS (8a982483): the tone used to come
-              from bills.status alone, so a ticket the supplier had settled read in the amber of
-              money still owed. */}
-          <Badge tone={billSettledTone(bill)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
+          {/* THE WORDS AND THE COLOUR FROM THE SAME NUMBER (0383): what is open on the bill. */}
+          <Badge tone={billSettledTone(paper)}>{billSettledLabel(paper, formatCurrency)}</Badge>
           {/* THE DEED, NOT "SWITCH" (ea2b7172): on a job page a bare "Switch" beside the badge read
-              as "switch the job". The face says what the tap does to THIS bill - and where the
-              supplier has already settled it, it names the register rather than offering to do the
-              thing the badge beside it says is done. */}
+              as "switch the job". The face says what the tap does to THIS bill. */}
           <span>{boughtHowFace(bill)}</span>
         </button>
       )}

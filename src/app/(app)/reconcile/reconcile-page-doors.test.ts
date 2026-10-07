@@ -601,6 +601,9 @@ describe("the kinds Record is what the page is made of", () => {
   it("the sections run in the Record's order, the money reading first", () => {
     const order = Object.values(RECONCILE_KINDS)
       .sort((a, b) => a.order - b.order)
+      // "They Call It Paid" is drawn only with a row in it (a link kind, answered on the bill), and
+      // this book has none: a closed supplier paper over an open bill is a fixture of its own.
+      .filter((d) => d.anchor !== RECONCILE_KINDS["they-call-it-paid"].anchor)
       .map((d) => html.indexOf(`id="${d.anchor}"`));
     for (const i of order) expect(i).toBeGreaterThan(-1);
     expect([...order].sort((a, b) => a - b)).toEqual(order);

@@ -21,9 +21,11 @@ import {
   supplierBalance,
   type SupplierAccountRow,
   type SupplierActionResult,
+  type SupplierBillRow,
   type SupplierPayMethod,
 } from "./supplier-balance";
-import { notOnAnAccountSentence, supplierFigureUnread, type SupplierOwedLine, type WhatISupplierOwed } from "@/lib/supplier-owed";
+import { notOnAnAccountSentence, openOwed, supplierFigureUnread, type SupplierOwedLine, type WhatISupplierOwed } from "@/lib/supplier-owed";
+import { openPurchasesOf, planPaymentAllocation, type OpenPurchase } from "@/lib/payment-allocation";
 import { SupplierPaperLists, type SupplierInvoiceActions } from "./supplier-invoices-card";
 import { type ReconcileJob, type SupplierInvoiceRow, type SupplierPaperCard, type SupplierReconcileFeed } from "./supplier-reconcile";
 
@@ -38,6 +40,7 @@ export interface SuppliersCardActions {
    * worked out for him: "i pay them in chunks that never match the ticckets".
    */
   recordPayment: (input: {
+    billIds?: readonly string[] | null;
     accountId: string;
     amount: number;
     paidOn: string;
@@ -136,14 +139,12 @@ export function discountDeadlineSentence(claim: { total: number; dueOnNext: numb
  *
  *   · no_paper: model B, bills on the account the supplier never sent paper for. Still owed, and
  *     in no balance (their figure can't cover a purchase they never billed).
- *   · settled_beside_payments: model A, bills marked settled at the counter beside recorded
  *     payments; if a check covered those bills, the balance is too low by that much.
  *   · register_on_account / register_open_papers: a supplier he pays at the register holding bills
  *     marked On Account, or open papers of theirs.
  */
 export type SupplierCheck =
   | { kind: "no_paper"; total: number; bills: SupplierAccountRow["bills"] }
-  | { kind: "settled_beside_payments"; settled: number; paid: number }
   | { kind: "register_on_account"; count: number; charged: number }
   | { kind: "register_open_papers"; count: number; gross: number };
 
@@ -160,21 +161,13 @@ export function supplierChecks(input: {
   const noDocBills = balance.model === "supplier-invoices" ? account.bills.filter((b) => noDocIds.has(b.id)) : [];
   const noDocTotal = r2(noDocBills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0));
   if (noDocBills.length && noDocTotal > 0.005) out.push({ kind: "no_paper", total: noDocTotal, bills: noDocBills });
-  // MODEL A ONLY: a ticked bill and a cheque can take the same dollar off twice.
-  const settledBesidePayments =
-    !unread &&
-    balance.model === "bills-minus-payments" &&
-    account.onAccount &&
-    balance.settledAtRegister > 0.005 &&
-    balance.paid > 0.005;
-  if (settledBesidePayments) out.push({ kind: "settled_beside_payments", settled: balance.settledAtRegister, paid: balance.paid });
   if (balance.unpaidOnRegisterAccount) out.push({ kind: "register_on_account", count: balance.chargedBills, charged: balance.charged });
   if (balance.openDocumentsOnRegisterAccount && balance.supplierSays)
     out.push({ kind: "register_open_papers", count: balance.supplierSays.openDocuments, gross: balance.supplierSays.gross });
   return out;
 }
 
-/** The slate line under Record A Payment: the arithmetic of the model actually used. */
+/** The slate line under Record A Payment: what is open, what he has sent, and what of it is ahead. */
 export function paymentLine(input: {
   account: Pick<SupplierAccountRow, "name">;
   balance: ReturnType<typeof supplierBalance>;
@@ -183,12 +176,13 @@ export function paymentLine(input: {
   const { account, balance, paymentsUnread } = input;
   if (balance.owed === null) return null;
   if (paymentsUnread) return "Couldn't read your payments just now.";
-  if (balance.model === "supplier-invoices") {
-    return balance.paid > 0.005 && balance.firstPayment
-      ? `You've sent ${formatCurrency(balance.paid)} since ${formatDate(balance.firstPayment.paidOn)}. It's already off their figure.`
+  const open = `${formatCurrency(balance.charged)} open on ${balance.chargedBills} ${balance.chargedBills === 1 ? "bill" : "bills"}.`;
+  const sent =
+    balance.paid > 0.005 && balance.firstPayment
+      ? `You've sent ${formatCurrency(balance.paid)} since ${formatDate(balance.firstPayment.paidOn)}${balance.unmatched > 0.005 ? `, ${formatCurrency(balance.unmatched)} of it ahead on the account` : ""}.`
       : `No payment to ${account.name} is recorded here yet.`;
-  }
-  return `${formatCurrency(balance.charged)} charged less ${formatCurrency(balance.paid)} you've sent.`;
+  const theirs = balance.supplierSays ? ` Their own list says ${formatCurrency(balance.supplierSays.gross)} open.` : "";
+  return `${open} ${sent}${theirs}`;
 }
 
 /** The ⋯ on an open account: its one row (Edit Account) is the card's own child. */
@@ -197,9 +191,10 @@ const ACCOUNT_MENU = { center: { label: "Actions", icon: "more" }, nodes: [] };
 /**
  * ONE LINE PER SUPPLIER, AND THE FIRST PLACE HE CAN PAY ONE (Erik, 2026-09-18; 0270; Wave B).
  *
- * Owed = unpaid bills MINUS live payments (model A), or what the supplier itself calls open once
- * its own papers are loaded (model B, supplierBalance). He pays in chunks that never match the
- * tickets, so a payment is an amount he types, and no bill is flipped by it.
+ * Owed = what is OPEN on the account's bills, by the number each bill carries (0383, supplierBalance).
+ * A payment pays the bills he checks, oldest first, or - with no boxes - the account's open bills
+ * oldest first, the last one part-paid (CED's own rule, his words); what is left is money ahead. The
+ * supplier's own papers, where they send them, stand BESIDE the figure, never inside it.
  *
  * WAVE B, "IT LOOKS LIKE ONE BIG RUN-ON SENTENCE": each account is ONE LINE (its name, what it says
  * is owed, and "N To Check" when something needs checking) that opens to its detail (W1-33: one
@@ -317,6 +312,8 @@ export function SuppliersCard({
   const [method, setMethod] = useState<SupplierPayMethod>("check");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
+  /** CED's boxes: the purchases he checked, by the original bill's id. Empty = a payment to the account. */
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const [sheetError, setSheetError] = useState<string | null>(null);
 
   const balances = useMemo(
@@ -384,23 +381,55 @@ export function SuppliersCard({
   // these four, which is what makes the sentence below checkable instead of decorative.
   const sumOf = (pick: (l: SupplierOwedLine) => boolean) =>
     r2((owedToSuppliers?.lines ?? []).filter(pick).reduce((s, l) => s + l.owed, 0));
-  const theirOwnPapers = sumOf((l) => l.how === "their-own-papers");
-  const myTickets = sumOf((l) => l.how === "my-tickets-less-payments");
+  const myOpenBills = sumOf((l) => l.how === "my-open-bills");
   // An account he settles at the register that is somehow carrying tickets marked On Account. No
   // balance to sit in, still money, and the contradiction belongs on screen rather than inside a
   // figure - which is what the card's own checks have always said about it.
   const registerOwed = sumOf((l) => l.how === "my-tickets-no-account" && l.accountId !== "");
-  // Accounts whose figure now comes from the supplier, and what his own paperwork still says.
+  // Accounts whose own papers we hold: their figure stands beside ours on the line.
   const supplierModelled = balances.filter((b) => b.balance.model === "supplier-invoices");
-  const modelledBillsUnpaid = r2(supplierModelled.reduce((s, b) => s + b.balance.charged, 0));
-  const modelledNoDocument = r2(
-    supplierModelled.reduce((s, { account }) => s + (noSupplierDocument[account.id]?.total ?? 0), 0),
-  );
-  const modelledExplained = r2(Math.max(0, modelledBillsUnpaid - modelledNoDocument));
 
   const payBalance = payFor ? supplierBalance(payFor, today) : null;
   const payUnread = !!payFor && !!payBalance && cantTotal(payFor, payBalance);
-  const payDirty = amount !== null || reference.trim() !== "" || note.trim() !== "" || paidOn !== today;
+  const payDirty = amount !== null || checked.size > 0 || reference.trim() !== "" || note.trim() !== "" || paidOn !== today;
+  // THE OPEN PURCHASES ON THIS ACCOUNT, OLDEST FIRST: a bill and its corrections as one box. The
+  // server re-reads and re-plans these on the write (recordSupplierPayment); the sheet only draws
+  // the boxes and the preview out of the same pure rule, so the two cannot disagree.
+  const payPurchases: OpenPurchase[] = useMemo(() => {
+    if (!payFor) return [];
+    const numberOf = (b: SupplierBillRow | undefined) => String(b?.billNumber || b?.invoiceNumber || "").trim() || "a bill with no number";
+    const byId = new Map(payFor.bills.map((b) => [b.id, b]));
+    return openPurchasesOf(
+      payFor.bills.filter((b) => !b.superseded).map((b) => ({ id: b.id, amount: b.amount, amountPaid: b.amountPaid, billDate: b.billDate, createdAt: b.createdAt ?? null, correctsBillId: b.correctsBillId ?? null })),
+      (root, kids) => (kids.length ? `${numberOf(byId.get(root.id))} corrected by ${kids.map((k) => numberOf(byId.get(k.id))).join(", ")}` : numberOf(byId.get(root.id))),
+      // THE SUPPLIER'S PROMPT-PAY DISCOUNT still alive on the day he paid, so the preview reads the
+      // discounted total the way the server will (recordSupplierPayment reads the same documents).
+      (_root, memberIds) =>
+        memberIds.reduce((s, id) => {
+          const b = byId.get(id);
+          const off = Number(b?.discountAmount ?? 0) || 0;
+          const by = String(b?.discountBy ?? "");
+          return off > 0.005 && /^\d{4}-\d{2}-\d{2}$/.test(by) && paidOn <= by ? r2(s + off) : s;
+        }, 0),
+    );
+  }, [payFor, paidOn]);
+  const payPlan = useMemo(
+    () => (amount !== null && amount > 0 ? planPaymentAllocation({ amount, purchases: payPurchases, chosen: [...checked] }) : null),
+    [amount, payPurchases, checked],
+  );
+  const checkedOpen = r2(payPurchases.filter((p) => checked.has(p.rootId)).reduce((s, p) => s + p.open, 0));
+  const checkedDiscount = r2(payPurchases.filter((p) => checked.has(p.rootId)).reduce((s, p) => s + p.discount, 0));
+  function toggleBox(rootId: string) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(rootId)) next.delete(rootId);
+      else next.add(rootId);
+      // CHECKING TOTALS IT UP, "and thats my amount" - still his to change.
+      const sum = r2(payPurchases.filter((p) => next.has(p.rootId)).reduce((s, p) => s + p.open, 0));
+      setAmount(next.size ? sum : null);
+      return next;
+    });
+  }
 
   function run(fn: () => Promise<SupplierActionResult>, key: string, fallback: string, undoPaymentId?: string | null) {
     setError(null);
@@ -459,6 +488,7 @@ export function SuppliersCard({
     setMethod("check");
     setReference("");
     setNote("");
+    setChecked(new Set());
     setPayFor(account);
   }
 
@@ -513,6 +543,7 @@ export function SuppliersCard({
     const amt = r2(amount);
     const on = paidOn;
     const how = method;
+    const boxes = [...checked];
     setSheetError(null);
     setBusy(`pay:${account.id}`);
     start(async () => {
@@ -523,6 +554,7 @@ export function SuppliersCard({
         method: how,
         reference: reference.trim() || undefined,
         note: note.trim() || undefined,
+        billIds: boxes,
       });
       setBusy(null);
       // THE SHEET STAYS OPEN ON FAILURE, so the odd amount he just typed is not eaten.
@@ -532,6 +564,7 @@ export function SuppliersCard({
       }
       setPayFor(null);
       setAmount(null);
+      setChecked(new Set());
       setReference("");
       setNote("");
       // recordPayment hands back the row it wrote, so the Undo below voids exactly that payment.
@@ -573,7 +606,7 @@ export function SuppliersCard({
             one: this is the debt, and All Bills below is what he has bought and not squared up. */}
         {!balancesUnread && totalOwed > 0.005 && (
           <p className="mt-0.5 text-sm text-slate-500">
-            What you still owe your suppliers. Where they send you their own papers, this is their figure.
+            What is still open on your own bills after the payments matched to them. Where a supplier sends their own papers, their figure is beside it.
           </p>
         )}
         {balancesUnread && (
@@ -589,18 +622,14 @@ export function SuppliersCard({
         )}
         <WhyFold>
           <p>
-            What you still owe on account, supplier by supplier. A payment is a chunk of money, not a ticket ticked
-            off, so it marks no bill paid.
+            What you still owe on account, supplier by supplier, by the number each bill carries: what it is for, less
+            what is paid on it. A payment pays the bills you check, oldest first, or the account&apos;s open bills oldest
+            first with the last one part-paid; what is left over is money ahead on the account.
           </p>
           {totalOwed > 0.005 && !balancesUnread && (
             <p>
               {[
-                theirOwnPapers > 0.005
-                  ? `${formatCurrency(theirOwnPapers)} is what your suppliers' own papers say is still open.`
-                  : "",
-                myTickets > 0.005
-                  ? `${formatCurrency(myTickets)} is from your own tickets, on suppliers who have not sent you a balance.`
-                  : "",
+                myOpenBills > 0.005 ? `${formatCurrency(myOpenBills)} is open on your bills on accounts that keep a balance.` : "",
                 registerOwed > 0.005
                   ? `${formatCurrency(registerOwed)} is on suppliers you pay at the register and still marked On Account.`
                   : "",
@@ -611,41 +640,20 @@ export function SuppliersCard({
               {aheadAt.length > 0 ? ` You are ahead at ${aheadAt.map((a) => a.name).join(", ")}, which does not come off the total.` : ""}
             </p>
           )}
-          {/* THE TWO FIGURES, NAMED, ON THE SAME SCREEN. The arithmetic that reconciles them used
-              to be the only honest thing on this card and it was folded away under a heading that
-              led with one number over a list that led with another.
-              AND EACH ONE NAMES ITS QUESTION. This sentence used to end "and neither is wrong",
-              which asked him to accept two numbers on faith; two true figures are only confusing
-              while nobody says what each one answers, so now it says.
-              AND IT DOES NOT CALL THE FIGURE ABOVE A SUPPLIER'S ASK WHEN NO SUPPLIER ASKED. It used to
-              end by calling that figure what the suppliers were asking for, and the figure is a BLEND:
-              their own papers where they send them, plus our own open tickets, plus register accounts,
-              plus papers on no account (the fold above names each slice). A company nobody sends a
-              portal balance to has a total made entirely of its own tickets — no supplier has asked
-              for anything, and the two figures then differ only by the payments sent against them. So
-              the supplier's-own-figure half of the sentence is said only where there IS one, which is
-              the same hedge the headline carries ("Where they send you their own papers, this is their
-              figure"). */}
-          {boughtNotSettled && boughtNotSettled.total > 0.005 && (
+          {/* THE TWO FIGURES, when they differ. Since 0383 both come off the same number on each
+              bill, so All Bills' open count and this figure agree to the cent except for credits,
+              which sit beside the total rather than inside it, and the figure says so. */}
+          {boughtNotSettled && Math.abs(boughtNotSettled.total - totalOwed) > 0.005 && (
             <p>
-              All Bills below says {formatCurrency(boughtNotSettled.total)} across {boughtNotSettled.papers}{" "}
-              {boughtNotSettled.papers === 1 ? "bill" : "bills"} bought on account and not squared up yet, so it answers a
-              different question: that one counts every ticket you have not squared up, and the figure above is what is
-              still owed once the payments you have sent come off
-              {theirOwnPapers > 0.005 ? ", which is your suppliers' own figure where they send you papers" : ""}.
+              All Bills below counts {formatCurrency(boughtNotSettled.total)} open across {boughtNotSettled.papers}{" "}
+              {boughtNotSettled.papers === 1 ? "bill" : "bills"}; the difference from the figure above is credits, which are beside the
+              total and not inside it.
             </p>
           )}
           {supplierModelled.length > 0 && (
             <p>
-              {supplierModelled.map((b) => b.account.name).join(", ")} {supplierModelled.length === 1 ? "is" : "are"} counted from
-              their own open papers, not your bills, and your payments are not taken off again: they already did.
-              {paperlessUnread
-                ? modelledBillsUnpaid > 0.005
-                  ? " Which of your unpaid bills there they never billed you for couldn't be checked just now, so none is called your paperwork."
-                  : ""
-                : modelledExplained > 0.005
-                  ? ` All Bills still shows ${formatCurrency(modelledExplained)} bought on account there, which is your paperwork rather than theirs.`
-                  : ""}
+              {supplierModelled.map((b) => b.account.name).join(", ")} {supplierModelled.length === 1 ? "sends" : "send"} you their own
+              papers: their figure stands beside yours on the line, and Reconcile names any bill they call paid that is still open here.
             </p>
           )}
         </WhyFold>
@@ -747,7 +755,7 @@ export function SuppliersCard({
               const oldestFirst = [...unpaidBills].sort((a, b) => String(a.billDate ?? "").localeCompare(String(b.billDate ?? "")));
               const shownBills = oldestFirst.slice(0, LIST_LIMIT);
               const hiddenBills = oldestFirst.length - shownBills.length;
-              const hiddenBillTotal = r2(oldestFirst.slice(LIST_LIMIT).reduce((s, b) => s + (Number(b.amount) || 0), 0));
+              const hiddenBillTotal = r2(oldestFirst.slice(LIST_LIMIT).reduce((s, b) => s + openOwed(b), 0));
               const shownPayments = account.payments.slice(0, LIST_LIMIT);
               const hiddenPayments = account.payments.length - shownPayments.length;
               const facts: string[] = [];
@@ -860,7 +868,7 @@ export function SuppliersCard({
                                   <>
                                     <p>
                                       {formatCurrency(c.total)} on {c.bills.length} {c.bills.length === 1 ? "bill" : "bills"} {account.name} never sent
-                                      paper for. Still owed; mark {c.bills.length === 1 ? "it" : "them"} Settled when you pay.
+                                      paper for. Still owed; mark {c.bills.length === 1 ? "it" : "them"} Paid when you pay, or check {c.bills.length === 1 ? "its box" : "their boxes"} when you record the payment.
                                     </p>
                                     {/* WHAT THEIR FIGURE DOES NOT COVER, one bill at a time. */}
                                     <ul className="mt-1 space-y-0.5 text-xs">
@@ -882,16 +890,6 @@ export function SuppliersCard({
                                     {c.bills.length > LIST_LIMIT && (
                                       <p className="text-xs">…and {c.bills.length - LIST_LIMIT} more, in All Bills.</p>
                                     )}
-                                    {seeAllInAllBills("Open In All Bills")}
-                                  </>
-                                )}
-                                {c.kind === "settled_beside_payments" && (
-                                  <>
-                                    <p>
-                                      {formatCurrency(c.settled)} of bills are marked settled and {formatCurrency(c.paid)} in payments is
-                                      recorded; if a check covered them, this balance is too low.
-                                    </p>
-                                    {/* The payment's own Undo stays on its row, below. */}
                                     {seeAllInAllBills("Open In All Bills")}
                                   </>
                                 )}
@@ -934,16 +932,13 @@ export function SuppliersCard({
                       {balance.settledAtRegister > 0.005 && (
                         <p className="mt-2 text-xs text-slate-500">
                           + {formatCurrency(balance.settledAtRegister)} on {balance.settledBills}{" "}
-                          {balance.settledBills === 1 ? "receipt" : "receipts"} settled at the counter, not in this balance.
+                          {balance.settledBills === 1 ? "bill" : "bills"} paid in full, not in this balance.
                         </p>
                       )}
 
                       {shownBills.length > 0 && (
                         <div className="mt-3">
-                          {/* Under model B these are his paperwork beside the balance, not its parts. */}
-                          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                            {fromSupplier ? "Your Bills On This Account" : "What The Balance Is Made Of"}
-                          </h3>
+                          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">What The Balance Is Made Of</h3>
                           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                             {shownBills.map((b) => (
                               <li key={b.id} className="flex items-start justify-between gap-3 px-3 py-2">
@@ -962,9 +957,10 @@ export function SuppliersCard({
                                     {b.invoiceNumber ? ` · #${b.invoiceNumber}` : ""}
                                     {b.isStatement ? " · a statement" : ""}
                                     {fromSupplier && noDocIds.has(b.id) ? " · no paper from them" : ""}
+                                    {b.amountPaid !== null && b.amountPaid > 0.005 && openOwed(b) > 0.005 ? ` · ${formatCurrency(b.amountPaid)} paid of ${formatCurrency(b.amount)}` : ""}
                                   </span>
                                 </span>
-                                <span className="shrink-0 text-sm tabular-nums text-slate-800">{formatCurrency(b.amount)}</span>
+                                <span className="shrink-0 text-sm tabular-nums text-slate-800">{formatCurrency(openOwed(b))}</span>
                               </li>
                             ))}
                           </ul>
@@ -987,6 +983,12 @@ export function SuppliersCard({
                                 <span className="min-w-0">
                                   <span className={`block truncate text-sm ${p.voided ? "text-slate-400 line-through" : "text-slate-800"}`}>
                                     {formatDate(p.paidOn)} · {formatCurrency(p.amount)} · {p.method}
+                                    {/* WHICH BILLS IT PAID (0383): said on the row, so a chunk is never a mystery. */}
+                                    {p.bills !== undefined && !p.voided
+                                      ? p.bills > 0
+                                        ? ` · paid ${p.bills} ${p.bills === 1 ? "bill" : "bills"}${(p.allocated ?? 0) < p.amount - 0.005 ? `, ${formatCurrency(r2(p.amount - (p.allocated ?? 0)))} ahead` : ""}`
+                                        : " · not matched to bills"
+                                      : ""}
                                   </span>
                                   {p.voided && <span className="block text-xs font-medium text-slate-500">undone</span>}
                                   {p.reference && <span className="block truncate text-xs text-slate-400">ref {p.reference}</span>}
@@ -1135,8 +1137,8 @@ export function SuppliersCard({
           }
         >
           <div className="space-y-4">
-            {/* WHAT IT WILL DO, BEFORE HE PRESSES: the balance now and the balance after, which is
-                the one thing a man sending an odd chunk of money actually wants to see. */}
+            {/* WHAT IT WILL DO, BEFORE HE PRESSES: what is open now, and what this payment pays, out
+                of the same rule the server applies (lib/payment-allocation). */}
             <div className="rounded-lg bg-slate-50 px-3 py-2.5">
               <div className="text-sm font-semibold text-slate-900">
                 {payUnread
@@ -1147,51 +1149,46 @@ export function SuppliersCard({
                     ? `${formatCurrency(-(payBalance.owed ?? 0))} paid ahead right now`
                     : "Paid up right now"}
               </div>
-              {/* THE WORKING UNDER THE FIGURE HAS TO BE THE WORKING THAT PRODUCED IT (review,
-                  2026-09-19). This sub-line printed "$7,456.20 charged on N bills, $6,000.00 paid"
-                  underneath a number that came from the supplier's own open documents and never
-                  subtracted a payment - model A's arithmetic sitting under model B's answer, on the
-                  one screen where he decides how much to write a cheque for. The accordion row was
-                  branched for exactly this and the sheet, twelve hundred lines away, was not. */}
               <div className="mt-0.5 text-xs text-slate-500">
                 {payUnread
                   ? "Some of what this balance is made of didn't load, so no figure is shown. What you record here is saved either way."
-                  : payBalance.model === "supplier-invoices"
-                  ? `${payFor.name} says so themselves, across ${payBalance.supplierSays?.openDocuments ?? 0} open ${(payBalance.supplierSays?.openDocuments ?? 0) === 1 ? "document" : "documents"}. ${paymentsUnread ? "Couldn't read your payments to them just now." : `You have sent them ${formatCurrency(payBalance.paid)} so far, which is already inside their figure.`}`
-                  : `${formatCurrency(payBalance.charged)} charged on ${payBalance.chargedBills} ${payBalance.chargedBills === 1 ? "bill" : "bills"}, ${formatCurrency(payBalance.paid)} paid so far.`}
+                  : paymentLine({ account: payFor, balance: payBalance, paymentsUnread })}
                 {payFor.accountNumber ? ` Account ${payFor.accountNumber}.` : ""}
               </div>
-              {amount !== null && amount > 0 && !payUnread && (
+              {payPlan && !payUnread && (
                 <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-sm font-medium text-slate-900">
-                  {/* UNDER MODEL B THIS IS A PREDICTION, NOT A FACT, and the words have to admit
-                      it: the number on the left is the supplier's, and it only moves when THEY
-                      apply the payment. Saying "after this: X" would be the app asserting what
-                      another company's ledger is going to say. */}
-                  {payBalance.model === "supplier-invoices" ? (
-                    <>
-                      {payFor.name} should read{" "}
-                      {formatCurrency(Math.abs(r2((payBalance.owed ?? 0) - amount)))}
-                      {r2((payBalance.owed ?? 0) - amount) < -0.005 ? " paid ahead" : " owing"} once they apply this.
-                    </>
-                  ) : (
-                    <>
-                      After this: {formatCurrency(Math.abs(r2((payBalance.owed ?? 0) - amount)))}
-                      {r2((payBalance.owed ?? 0) - amount) < -0.005 ? " paid ahead" : " still owed"}
-                    </>
+                  {payPlan.paidInFull.length > 0 && (
+                    <span className="block">
+                      Pays {payPlan.paidInFull.length === 1 ? payPlan.paidInFull[0].label : `${payPlan.paidInFull.length} bills`} in full
+                      {payPlan.partPaid ? "," : "."}
+                    </span>
                   )}
+                  {payPlan.partPaid && (
+                    <span className="block">
+                      {payPlan.partPaid.purchase.label} part-paid {formatCurrency(payPlan.partPaid.paid)}, {formatCurrency(payPlan.partPaid.left)} still open.
+                    </span>
+                  )}
+                  {payPlan.spilled.length > 0 && (
+                    <span className="block text-xs font-normal text-slate-600">
+                      More than the boxes: the extra goes on {payPlan.spilled.map((p) => p.label).join(", ")}, oldest first.
+                    </span>
+                  )}
+                  <span className="block">
+                    After this: {formatCurrency(Math.abs(r2((payBalance.owed ?? 0) - (amount ?? 0) + payPlan.ahead)))}
+                    {r2((payBalance.owed ?? 0) - (amount ?? 0) + payPlan.ahead) < -0.005 ? " paid ahead" : " still owed"}
+                    {payPlan.ahead > 0.005 ? `, ${formatCurrency(payPlan.ahead)} of this payment ahead on the account` : ""}
+                  </span>
                 </div>
               )}
-              {amount !== null && amount > (payBalance.owed ?? 0) + 0.005 && !payUnread && (
+              {payPlan && payPlan.ahead > 0.005 && !payUnread && (
                 <div className="mt-1 text-xs leading-relaxed text-amber-700">
-                  That is {formatCurrency(r2(amount - (payBalance.owed ?? 0)))} more than this account shows owing.
-                  Fine if you are paying ahead or a ticket has not been scanned yet - the extra sits on the account
-                  and comes off the next bills.
+                  {formatCurrency(payPlan.ahead)} of this is more than what is open. Fine if you are paying ahead or a ticket has not
+                  been scanned yet: it stays on the account and comes off the next bill you record.
                 </div>
               )}
               {payBalance.hasStatements && (
                 <div className="mt-1 text-xs leading-relaxed text-slate-500">
-                  Some of these are statements covering several of their invoices, so this payment cannot be pinned
-                  to one invoice number. Put what you can match in the reference below.
+                  Some of these are statements covering several of their invoices, so a box here pays the statement&apos;s bill.
                 </div>
               )}
             </div>
@@ -1210,10 +1207,43 @@ export function SuppliersCard({
                 autoFocus
               />
               <p className="mt-1 text-xs text-slate-400">
-                Whatever you actually sent them. It does not have to match a ticket, and it does not mark any bill
-                paid.
+                Whatever you actually sent them. Check the bills it paid below, or leave the boxes empty and it pays the
+                oldest first.
               </p>
             </div>
+
+            {/* CED'S BOXES (Erik, 2026-10-04): the account's open purchases oldest first, one box per
+                purchase (a bill and its corrections together). Checking totals into Amount. */}
+            {payPurchases.length > 0 && (
+              <fieldset>
+                <legend className="text-sm font-medium text-slate-700">Open Bills, Oldest First</legend>
+                <ul className="mt-1 divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {payPurchases.map((p) => (
+                    <li key={p.rootId}>
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 shrink-0 accent-[rgb(var(--glass-ink))]"
+                          checked={checked.has(p.rootId)}
+                          onChange={() => toggleBox(p.rootId)}
+                          aria-label={`Pay ${p.label}, ${formatCurrency(p.open)} open`}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-slate-800">
+                          {p.date ? `${formatDate(p.date)} · ` : ""}
+                          {p.label}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-slate-800">{formatCurrency(p.open)}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs text-slate-400">
+                  {checked.size > 0
+                    ? `Checked: ${formatCurrency(checkedOpen)} on ${checked.size} ${checked.size === 1 ? "bill" : "bills"}.${checkedDiscount > 0.005 ? ` ${formatCurrency(r2(checkedOpen - checkedDiscount))} with their prompt-pay discount, which counts as paid in full.` : ""}`
+                    : "No boxes: a payment to the account pays these oldest first and leaves the last one part-paid."}
+                </p>
+              </fieldset>
+            )}
 
             <div>
               <Label htmlFor="supplier-pay-on">Paid On</Label>

@@ -1625,16 +1625,12 @@ export async function runDataTool(
           as_of: read.today,
           // (a) THE ONE NUMBER. Lead with it.
           owed: money(read.owed.total),
-          owed_means: "What the company owes its suppliers. Where a supplier sends its own papers this is THEIR figure.",
+          owed_means:
+            "What the company owes its suppliers: what is still open on its own bills after the payments matched to them (a bill carries amount_paid; a part-paid bill counts its balance). Where a supplier sends its own papers, THEIR figure stands beside it on /bills, never inside it.",
           by_supplier: read.owed.lines.map((l) => ({
             supplier: l.name || "a supplier with no name on the paper",
             owed: money(l.owed),
-            how:
-              l.how === "their-own-papers"
-                ? "their own open papers"
-                : l.how === "my-tickets-less-payments"
-                  ? "our tickets less what we have sent them"
-                  : "our own tickets - they have sent no balance",
+            how: l.how === "my-open-bills" ? "what is open on our bills after the payments matched to them" : "our own tickets - not on a supplier account that keeps a balance",
             on_a_supplier_account: l.accountId !== "",
           })),
           // (b) A DIFFERENT QUESTION. Never added to the figure above.
@@ -1667,7 +1663,7 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 20);
         let q = supabase
           .from("bills")
-          .select("id, supplier, bill_number, amount, status, pricing_provisional, superseded_by_bill_id, jobs(name)")
+          .select("id, supplier, bill_number, amount, amount_paid, status, pricing_provisional, superseded_by_bill_id, jobs(name)")
           // A REPLACED COPY IS NOT A SECOND DEBT (0271). When the supplier's own invoice arrives
           // for a purchase already on the books as a counter ticket, the ticket stays — its
           // history is real — and points at the bill that took over. Every other cost reader hides
@@ -1690,6 +1686,10 @@ export async function runDataTool(
             supplier: b.supplier,
             bill_number: b.bill_number,
             amount: money(b.amount),
+            // ONE NUMBER PER BILL (0383): how much of it is paid, and what is still open. Status is
+            // derived from these per purchase; say the figures, not the word, when he asks what is owed.
+            paid: money(b.amount_paid),
+            open: money(Number(b.amount) - Number(b.amount_paid)),
             status: b.status,
             // A counter preview is not his price (0271): the Sunnyvale ticket printed retail where
             // his contract price belongs. Say "provisional" when reading one of these back.
@@ -2660,7 +2660,7 @@ export async function runDataTool(
           // or a container used in pieces — and this select list knew about none of them, so Nort
           // read the Kettle Chips and the whole 500ct Twister box back as the customer's cost.
           // The projection law: a field that is missing at runtime is missing from a select list.
-          .select("id, org_id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, job_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
+          .select("id, org_id, supplier, bill_number, amount, amount_paid, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, job_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
           .eq("id", bid)
           .maybeSingle();
         if (error) throw error;

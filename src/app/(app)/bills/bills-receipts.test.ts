@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { formatCurrency } from "@/lib/utils";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isOpenBill } from "@/lib/open-counts";
@@ -39,79 +40,41 @@ describe("All Bills lists receipt files, and is never a second upload door (Wave
   });
 });
 
-describe("a bill's status says how it was bought, in words", () => {
+describe("a bill's row says what is open on it, by the number (0383)", () => {
   it("never prints the raw database word on the badge, and makes the words in one place", () => {
-    // ONE EXPRESSION FOR THE ROW'S WORDS (8a982483). This file and bill-row-doors.tsx each wrote the
-    // badge out by hand, and only this one had been told about the supplier's closed paper - so the
-    // SAME bill read "On Account" on a job's Costs tab and "Settled · CED Says" here.
-    expect(SRC).toContain("billSettledLabel(b, shortSupplierName)");
+    // ONE EXPRESSION FOR THE ROW'S WORDS (8a982483, 0383): this file and bill-row-doors.tsx each
+    // wrote the badge out by hand once; now both read what is open on the bill through
+    // billSettledLabel, so the same bill cannot read two ways on two screens.
+    expect(SRC).toContain("billSettledLabel({ status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null, superseded: b.superseded }, formatCurrency)");
     expect(SRC).not.toContain("<Badge tone={statusTone(b.status)}>{b.status}</Badge>");
-    expect(billSettledLabel({ status: "paid", supplier: "CED" }, shortSupplierName)).toBe("Settled");
-    expect(billSettledLabel({ status: "unpaid", supplier: "CED", settledBySupplier: true }, shortSupplierName)).toBe("Settled · CED Says");
-    expect(billSettledLabel({ status: "unpaid", supplier: "CED" }, shortSupplierName)).toBe("On Account");
+    expect(billSettledLabel({ status: "paid", amount: 100, amountPaid: 100 }, formatCurrency)).toBe("Paid");
+    expect(billSettledLabel({ status: "unpaid", amount: 523.47, amountPaid: 200 }, formatCurrency)).toBe("Part-Paid $200.00 Of $523.47");
+    expect(billSettledLabel({ status: "unpaid", amount: 100, amountPaid: 0 }, formatCurrency)).toBe("On Account");
+    // The row carries the number, so the badge and the Unpaid filter read the same column.
+    expect(SRC).toContain("amount_paid?: number | null;");
   });
 
   /**
-   * "SETTLED · CED SAYS", NEVER THE 63-CHARACTER SPELLING. bills.supplier keeps whatever the receipt
-   * reader found (19 of CED's 21 bills are "Consolidated Electrical Distributors, Inc. (CED)" or a
-   * cousin; the two spelled "CED" are paid and print plain "Settled"). The right-hand column is
-   * shrink-0, so a label that long took the whole 390px row on the phone and truncated the bill's
-   * name, number, date and job to nothing, while repeating the name the first line already prints.
+   * "$10k UNPAID" OVER "$5k OWED" (8a982483, settled by 0383): the Unpaid count and the Suppliers
+   * card's figure read the same number on each bill, so a bill a payment paid, or a person marked
+   * paid, leaves the count the moment the number says so - and a part-paid one stays, at its balance.
    */
-  it("says who settled it by the account's short name, in a label that can't widen the column", () => {
-    const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
-    expect(SRC).toContain("settledBySupplierName?: string | null;");
-    // BY IDENTITY, NOT THE STORED COLUMN (8a982483). This named the supplier off
-    // `b.supplier_account_id`, which is null on more than half his book, so exactly the tickets only
-    // the resolver reaches - the ones this whole fix is about - fell back to the typed spelling.
-    expect(PAGE).toContain('shortSupplierName(accountNameOf.get(String(accountOfBill(String(b.id)) ?? "")) || b.supplier)');
-    // The label itself is bounded, whatever name reaches it.
-    expect(SRC).toContain('<span className="block max-w-[9rem] truncate text-xs text-slate-400">');
-    // The one rule, run on the spellings CED's bills actually carry.
-    // THE ONE EXPRESSION, not a copy of it in the test (8a982483): a test that re-writes the rule
-    // it is checking passes happily while the app does something else.
-    const label = (b: { status: string; supplier: string; settledBySupplier?: boolean; settledBySupplierName?: string | null }) =>
-      billSettledLabel(b, shortSupplierName);
-    const account = shortSupplierName("Consolidated Electrical Distributors, Inc. (CED)");
-    expect(account).toBe("CED");
-    for (const spelling of ["Consolidated Electrical Distributors, Inc. (CED)", "Consolidated Electrical Dist.", "Consolidated Electrical Distributors, Inc.", "CED"]) {
-      expect(label({ status: "unpaid", supplier: spelling, settledBySupplier: true, settledBySupplierName: account })).toBe("Settled · CED Says");
-    }
-    // A bill on no account (the page stamps null) still never prints the long spelling.
-    expect(label({ status: "unpaid", supplier: "Consolidated Electrical Distributors, Inc.", settledBySupplier: true, settledBySupplierName: null })).toBe("Settled · CED Says");
-    expect(label({ status: "unpaid", supplier: "Brandow's Hardware", settledBySupplier: true, settledBySupplierName: null })).toBe("Settled · Brandow's Hardware Says");
-  });
-
-  /**
-   * "$10k UNPAID" OVER "$5k OWED" (8a982483). Applying a CED open list closes CED's documents and
-   * never a bill, so every ticket ever bought on account stayed Unpaid under All Bills. The page
-   * now works out which on-account bills the supplier's own closed papers cover, and the ledger's
-   * one open test (isOpenBill) leaves them out, so the fold's count and the card's balance stop
-   * disagreeing by the same tickets.
-   */
-  it("a bill the supplier's closed papers cover leaves the Unpaid count and says who says so", () => {
-    expect(SRC).toContain("const unpaid = bills.filter((b) => isOpenBill(b));");
-    expect(SRC).toContain("settledBySupplier?: boolean;");
-    const settled = { id: "b1", supplier: "CED", status: "unpaid", superseded: false, settledBySupplier: true };
-    const stillOpen = { id: "b2", supplier: "CED", status: "unpaid", superseded: false, settledBySupplier: false };
+  it("the Unpaid count reads what is open on each bill", () => {
+    expect(SRC).toContain("const unpaid = bills.filter((b) => isOpenBill({ status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null, superseded: b.superseded }));");
+    const paidByNumber = { id: "b1", supplier: "CED", status: "unpaid", amount: 100, amountPaid: 100, superseded: false };
+    const partPaid = { id: "b2", supplier: "CED", status: "unpaid", amount: 100, amountPaid: 40, superseded: false };
     const asBefore = { id: "b3", supplier: "CED", status: "unpaid", superseded: false };
-    expect([settled, stillOpen, asBefore].filter((b) => isOpenBill(b)).map((b) => b.id)).toEqual(["b2", "b3"]);
-    // The label the row prints for each.
-    // THE ONE EXPRESSION, not a copy of it in the test (8a982483): a test that re-writes the rule
-    // it is checking passes happily while the app does something else.
-    const label = (b: { status: string; supplier: string; settledBySupplier?: boolean; settledBySupplierName?: string | null }) =>
-      billSettledLabel(b, shortSupplierName);
-    expect(label(settled)).toBe("Settled · CED Says");
-    expect(label(stillOpen)).toBe("On Account");
-    expect(label({ status: "paid", supplier: "CED", settledBySupplier: true })).toBe("Settled");
+    expect([paidByNumber, partPaid, asBefore].filter((b) => isOpenBill(b)).map((b) => b.id)).toEqual(["b2", "b3"]);
   });
 
   it("gives the Edit Bill Status picker two Title Case choices (the add form went: Add By Hand asks Paid?)", () => {
     // The ledger's Add A Bill By Hand fold is gone (W1-32); a new cost goes in through Add By Hand,
     // the one typed sheet, whose Paid? is Already Paid or On Account (Still Owed).
     expect(SRC.match(/<option value="unpaid">On Account<\/option>/g)).toHaveLength(1);
-    expect(SRC.match(/<option value="paid">Settled At The Counter<\/option>/g)).toHaveLength(1);
-    expect(SRC).not.toContain('<option value="paid">Paid</option>');
+    // "Settled At The Counter" retired with 0383: a bill paid by a cheque against the account was
+    // never settled at any counter. Paid is his word that the whole purchase is paid in full.
+    expect(SRC.match(/<option value="paid">Paid<\/option>/g)).toHaveLength(1);
+    expect(SRC).not.toContain("Settled At The Counter");
     expect(SRC).not.toContain('<option value="unpaid">Unpaid</option>');
     expect(SRC).not.toContain("Add A Bill By Hand");
     expect(SRC).not.toMatch(/\bcreateBill\b/);
@@ -134,10 +97,10 @@ describe("a bill's status says how it was bought, in words", () => {
     // screen contradicted it. bills.status says HOW it was bought, so that is what the toast says.
     expect(DOORS).not.toContain("comes out of the supplier balance");
     expect(DOORS).not.toContain("goes back into the supplier balance");
-    expect(DOORS).toContain("Marked settled at the register - it is no longer on account");
+    expect(DOORS).toContain("Marked paid in full - it is no longer on account");
     expect(DOORS).toContain("Marked on account - it is money you still owe them");
     // And the badge is the one expression, so this row and the job's Costs tab cannot disagree.
-    expect(DOORS).toContain("billSettledLabel(bill, shortSupplierName)");
+    expect(DOORS).toContain("billSettledLabel(paper, formatCurrency)");
     expect(DOORS).toContain("if (!confirm(`Delete bill from");
   });
 });

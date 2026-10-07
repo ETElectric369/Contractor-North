@@ -38,6 +38,8 @@ import { alreadyBilledOffer, isMissingHandClaims } from "@/lib/already-billed-re
 import { samePurchaseSentence, type SamePurchaseCandidate } from "@/lib/same-purchase";
 import { samePurchaseFor, type SupplierDocRead } from "./same-purchase-read";
 import { aliasKey } from "@/lib/supplier-identity";
+import { indexSupplierIdentity, resolveSupplierPapers } from "@/lib/supplier-owed";
+import { openPurchasesOf, planPaymentAllocation, r2 } from "@/lib/payment-allocation";
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 import { creditWait } from "./supplier-reconcile";
@@ -1206,14 +1208,22 @@ export async function unresolveDuplicateBill(groupId: string): Promise<SupplierA
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * RECORD A CHUNK SENT TO A SUPPLIER. An AMOUNT, not a tick:
+ * RECORD A PAYMENT TO A SUPPLIER, AND WHICH BILLS IT PAID (0270, 0383).
  *
- *   "yes i pay them in chunks that never match the ticckets"
+ *   "yes i pay them in chunks that never match the ticckets" (2026-09-18)
+ *   "i check all the boxes next to all the invoices i want to pay and it totals it up and thats my
+ *    amount … if i make a payment to the account instead it'll mark off in order from old to new
+ *    the ones that are fully paid and leave the last one partially paid" (2026-10-04)
  *
- * It lands on the ACCOUNT, never on a bill, and it flips no bill's status. Owed is then the
- * account's unpaid bills minus its live payments, and a $4,000 cheque against $5,570.56 of tickets
- * says exactly what it should: $1,570.56 to go. A "Mark Paid" tick could only ever have said one
- * ticket is square, which is a thing he has never once done.
+ * The payment lands on the ACCOUNT, as before, and now says which purchases it paid, by the rule
+ * CED's own portal uses (lib/payment-allocation): the boxes he checked oldest first, then - with
+ * money left - the next open purchases oldest first; no boxes means every open purchase oldest
+ * first; the last one the money reaches is part-paid; anything past the last is money ahead, said
+ * out loud. A payment short of the boxes by the supplier's printed discount is paid in full with
+ * the discount recorded. THE SERVER DECIDES, never the sheet: the purchases are re-read here, placed
+ * on the account by the one resolver, and the database rolls every allocation into bills.amount_paid
+ * (0383's triggers), deriving each purchase's status from it. A refused allocation voids the payment
+ * it just wrote and says why, so nothing is half-recorded.
  */
 export async function recordSupplierPayment(input: {
   accountId: string;
@@ -1222,6 +1232,8 @@ export async function recordSupplierPayment(input: {
   method?: string | null;
   reference?: string | null;
   note?: string | null;
+  /** The boxes he checked: bill ids (an original or any member of a purchase). Empty: to the account. */
+  billIds?: readonly string[] | null;
 }): Promise<SupplierActionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1251,6 +1263,78 @@ export async function recordSupplierPayment(input: {
   const account = await readAccount(supabase, org.orgId, accountId);
   if ("error" in account) return { ok: false, error: account.error };
 
+  // ── THE ACCOUNT'S OPEN PURCHASES, READ HERE ──────────────────────────────────────────────────
+  const chosen = [...new Set((input?.billIds ?? []).map((id) => String(id ?? "")).filter(Boolean))];
+  const [billsRes, aliasRes, acctRes, linksRes, docsRes] = await Promise.all([
+    supabase
+      .from("bills")
+      .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, amount_paid, bill_date, created_at, corrects_bill_id, superseded_by_bill_id, job_id")
+      .eq("org_id", org.orgId)
+      .is("superseded_by_bill_id", null)
+      .order("created_at", { ascending: true })
+      .limit(BILL_SCAN_LIMIT),
+    supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", org.orgId).limit(5000),
+    supabase.from("supplier_accounts").select("id, name").eq("org_id", org.orgId).limit(500),
+    supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", org.orgId).limit(5000),
+    supabase.from("supplier_invoices").select("id, discount_amount, discount_by, closed").eq("org_id", org.orgId).limit(5000),
+  ]);
+  if (billsRes?.error) return { ok: false, error: `Reading your bills didn't go through, so nothing was recorded. ${dbError(billsRes.error)}` };
+  if (aliasRes?.error || acctRes?.error) return { ok: false, error: "Reading your supplier accounts didn't go through, so nothing was recorded. Try it again." };
+  const billRows = ((billsRes?.data ?? []) as any[]).filter((b) => b?.id);
+  const identity = resolveSupplierPapers(
+    billRows.map((b) => ({ id: String(b.id), supplierAccountId: b.supplier_account_id ?? null, supplier: b.supplier ?? null })),
+    indexSupplierIdentity({ accounts: ((acctRes?.data ?? []) as any[]).map((a) => ({ id: a?.id, name: a?.name })), aliases: (aliasRes?.data ?? []) as any[] }),
+  );
+  const mine = billRows.filter((b) => identity.get(String(b.id))?.accountId === accountId);
+  const byId = new Map(mine.map((b) => [String(b.id), b]));
+  const numberOf = (b: any) => String(b?.bill_number || b?.supplier_invoice_number || "").trim() || "a bill with no number";
+
+  // EVERY BOX MUST BE ONE OF THIS ACCOUNT'S PURCHASES (identity-resolved), or nothing is written.
+  for (const id of chosen) {
+    if (!byId.has(id)) return { ok: false, error: `One of the bills you checked is not on this account, so nothing was recorded. Reload the page and try again.` };
+  }
+  // A box on a correction means its purchase.
+  const chosenRoots = chosen.map((id) => String(byId.get(id)?.corrects_bill_id || id));
+
+  // THE SUPPLIER'S PROMPT-PAY DISCOUNT still available on the day he paid, per purchase, from the
+  // documents linked to its bills. Lost reads mean no discount, never a guessed one.
+  const docOf = new Map<string, any>(((docsRes?.error ? [] : (docsRes?.data ?? [])) as any[]).map((d) => [String(d.id), d]));
+  const docsOfBill = new Map<string, string[]>();
+  for (const l of (linksRes?.error ? [] : (linksRes?.data ?? [])) as any[]) {
+    const bid = String(l?.bill_id ?? "");
+    if (bid) docsOfBill.set(bid, [...(docsOfBill.get(bid) ?? []), String(l?.supplier_invoice_id ?? "")]);
+  }
+  const discountOf = (_root: string, memberIds: string[]) => {
+    const seen = new Set<string>();
+    let total = 0;
+    for (const id of memberIds) {
+      for (const docId of docsOfBill.get(id) ?? []) {
+        if (seen.has(docId)) continue;
+        seen.add(docId);
+        const d = docOf.get(docId);
+        if (!d || d.closed === true) continue;
+        const off = money(d.discount_amount);
+        const by = String(d.discount_by ?? "");
+        if (off > 0.005 && /^\d{4}-\d{2}-\d{2}$/.test(by) && paidOn <= by) total = r2(total + off);
+      }
+    }
+    return total;
+  };
+  const purchases = openPurchasesOf(
+    mine.map((b) => ({
+      id: String(b.id),
+      amount: money(b.amount),
+      amountPaid: b.amount_paid == null ? null : money(b.amount_paid),
+      billDate: b.bill_date ?? null,
+      createdAt: b.created_at ?? null,
+      correctsBillId: b.corrects_bill_id ?? null,
+    })),
+    (root, kids) => (kids.length ? `${numberOf(byId.get(root.id))} corrected by ${sayList(kids.map((k) => numberOf(byId.get(k.id))))}` : numberOf(byId.get(root.id))),
+    discountOf,
+  );
+  const plan = planPaymentAllocation({ amount, purchases, chosen: chosenRoots });
+
+  // ── THE PAYMENT, THEN WHAT IT PAID ───────────────────────────────────────────────────────────
   const { data: inserted, error: insErr } = await supabase
     .from("supplier_payments")
     .insert({
@@ -1273,28 +1357,68 @@ export async function recordSupplierPayment(input: {
     });
     return { ok: false, error: "That payment didn't save, so nothing was recorded. Try it again." };
   }
+  const paymentId = String(inserted[0].id);
+
+  if (plan.rows.length) {
+    const { data: allocated, error: allocErr } = await supabase
+      .from("supplier_payment_allocations")
+      .insert(plan.rows.map((r) => ({ org_id: org.orgId, supplier_payment_id: paymentId, bill_id: r.billId, amount: r.amount, discount: r.discount, created_by: ctx.userId })))
+      .select("id");
+    if (allocErr || (allocated?.length ?? 0) !== plan.rows.length) {
+      // HALF A RECORD IS NO RECORD: the payment just written is voided, and the sentence says why.
+      await supabase.from("supplier_payments").update({ voided_at: new Date().toISOString() }).eq("id", paymentId).eq("org_id", org.orgId);
+      if (!allocErr) reportError("bills:recordSupplierPayment", new Error("allocation insert wrote fewer rows than planned"), { paymentId, planned: plan.rows.length, wrote: allocated?.length ?? 0 });
+      return {
+        ok: false,
+        error: `The payment couldn't be matched to the bills, so it was not recorded. ${allocErr ? dbError(allocErr) : "Try it again."}`,
+      };
+    }
+  }
+
+  // ── WHAT HAPPENED, IN HIS WORDS ───────────────────────────────────────────────────────────────
+  const said: string[] = [];
+  const full = plan.paidInFull.filter((p) => !plan.spilled.includes(p));
+  if (full.length) said.push(`Paid ${sayList(full.map((p) => p.label))} in full.`);
+  const spilledFull = plan.spilled.filter((p) => plan.paidInFull.includes(p));
+  const over = r2(plan.spilled.reduce((s, p) => s + (plan.partPaid?.purchase === p ? plan.partPaid.paid : p.open - (plan.tookDiscounts && chosenRoots.includes(p.rootId) ? p.discount : 0)), 0));
+  if (plan.spilled.length) {
+    const names = plan.spilled.map((p) => p.label);
+    said.push(`${sayMoney(over)} over the boxes went on ${sayList(names)}${spilledFull.length === plan.spilled.length ? ", paid in full" : ""}.`);
+  }
+  if (plan.partPaid) {
+    said.push(`${plan.partPaid.purchase.label} part-paid ${sayMoney(plan.partPaid.paid)}, ${sayMoney(plan.partPaid.left)} still open.`);
+  }
+  if (plan.tookDiscounts && plan.discounts > 0.005) {
+    said.push(`${sayMoney(plan.discounts)} of that is ${account.name}'s prompt-pay discount, so ${sayList(plan.paidInFull.filter((p) => p.discount > 0.005).map((p) => p.label))} ${plan.paidInFull.filter((p) => p.discount > 0.005).length === 1 ? "is" : "are"} paid in full.`);
+  }
+  if (plan.ahead > 0.005) {
+    said.push(purchases.length ? `${sayMoney(plan.ahead)} is not matched to a bill yet; it is ahead on the account and comes off the next bill you record.` : `Nothing is open on this account, so it is ahead on the account and comes off the next bill you record.`);
+  }
 
   // PAYING A PAY-AT-THE-REGISTER SUPPLIER IS NOT AN ERROR, it is a fact worth stating. Those carry
   // no running balance by design, so a payment recorded against one would otherwise drop out of
   // sight with no explanation - the silent half of a dead end.
-  const offAccount = account.onAccount
-    ? ""
-    : ` ${account.name} is set to pay at the register, so this is recorded but there is no running balance for it to come off.`;
+  const offAccount = account.onAccount ? "" : ` ${account.name} is set to pay at the register, so this is recorded but there is no running balance for it to come off.`;
 
   revalidatePath("/bills");
   // My Day's "Pay CED $X By Oct 10" reads this payment (supplier-pay-due.ts): paying clears it.
   revalidatePath("/planner");
+  for (const r of plan.rows) {
+    const jobId = byId.get(r.billId)?.job_id;
+    if (jobId) revalidatePath(`/jobs/${jobId}`);
+  }
   return {
     ok: true,
-    paymentId: String(inserted[0].id),
-    message: `Recorded ${sayMoney(amount)} to ${account.name}.${offAccount}`,
+    paymentId,
+    message: `Recorded ${sayMoney(amount)} to ${account.name}.${said.length ? ` ${said.join(" ")}` : ""}${offAccount}`,
   };
 }
 
 /**
  * UNDO A PAYMENT. Voided, never deleted - the undo-trail law, and the same shape every other money
  * row in this app takes: the row stays on the screen, crossed out, and stops counting. A deleted
- * payment is a balance that changed with nothing on the page to explain it.
+ * payment is a balance that changed with nothing on the page to explain it. The bills it paid go
+ * back on account by trigger (0383, payment_void_rolls_up): what he said was paid otherwise stays.
  */
 export async function voidSupplierPayment(paymentId: string): Promise<SupplierActionResult> {
   const ctx = await requireStaff();
@@ -1336,7 +1460,7 @@ export async function voidSupplierPayment(paymentId: string): Promise<SupplierAc
   revalidatePath("/planner"); // a voided payment puts My Day's Pay By line back
   return {
     ok: true,
-    message: `Voided the ${sayMoney(amount)} payment to ${name}. It stays on the list and goes back onto what you owe.`,
+    message: `Voided the ${sayMoney(amount)} payment to ${name}. It stays on the list, and any bills it paid are back on account.`,
   };
 }
 
@@ -1708,7 +1832,6 @@ export async function recordSupplierInvoiceAsBill(input: {
   if (!(total > 0)) return { ok: false, error: `There is no amount on ${number}, so there is nothing to record.` };
 
   const openBalance = row.open_balance == null ? total : money(row.open_balance);
-  const partlyPaid = !row.closed && openBalance > 0 && Math.round(openBalance * 100) !== Math.round(total * 100);
 
   const jobLabel = text(row.jobs?.name) ?? text(row.jobs?.job_number) ?? "its job";
 
@@ -1903,18 +2026,13 @@ export async function recordSupplierInvoiceAsBill(input: {
       bill_number: number,
       amount: total,
       // ONLY THE SUPPLIER CAN SAY WHETHER IT IS PAID, which is the whole reason supplier_invoices
-      // exists (0273). `closed` is their answer, read out of their own portal.
+      // exists (0273). `closed` is their answer, read out of their own portal - and since 0383 the
+      // NUMBER carries it: paid in full when closed, else what they show paid. Status derives.
       status: row.closed ? "paid" : "unpaid",
+      amount_paid: row.closed ? total : r2(Math.max(0, Math.min(total, total - openBalance))),
       bill_date: text(row.invoice_date),
       category: toShelf ? "Shop Stock" : bucket ?? "Invoice",
-      // WHAT THE SUPPLIER SAYS IS STILL OWED, when it is not simply all of it. `bills.status` has
-      // two states and a part-paid invoice is neither: recorded as unpaid it shows at full value
-      // on his Unpaid filter while the card directly above says the supplier is owed ten dollars
-      // on that same document (review, 2026-09-19). The status stays the supplier's own verdict;
-      // the figure that contradicts it is written down rather than left off the screen.
-      notes: partlyPaid
-        ? `Recorded from ${accountName} invoice ${number}, the supplier's own document. They show ${sayMoney(openBalance)} of it still open.`
-        : `Recorded from ${accountName} invoice ${number}, the supplier's own document.`,
+      notes: `Recorded from ${accountName} invoice ${number}, the supplier's own document.`,
       created_by: ctx.userId,
       // Their file, their contract prices. Not a counter preview (0271).
       pricing_provisional: false,

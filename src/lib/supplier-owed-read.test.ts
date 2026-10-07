@@ -135,31 +135,34 @@ describe("Nort reads the same figure the card shows", () => {
   it("answers what you owe, and it is the card's number", async () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
     expect(read).not.toBeNull();
-    // 1200 (their own open paper) + 120 (register supplier) + 250 (unfiled) + 40 (no name on it)
-    expect(read!.owed.total).toBe(1610);
+    // Our open bills on the account (500 + 3034.54 + 800) + 120 (register supplier) + 250 (unfiled) + 40 (no name on it)
+    expect(read!.owed.total).toBe(4744.54);
     expect(read!.failed).toEqual([]);
   });
 
-  it("drops the ticket their own closed paper covers, found by the number on its line", async () => {
+  it("names the ticket their own closed paper covers while it is still open here, found by the number on its line", async () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
     // t2 is $3,034.54 on NO account: reachable only because identity placed it by the account's own
-    // name AND the number parse found the closed paper. Every earlier reader missed both.
-    expect(read!.bought.ids).not.toContain("t2");
-    expect(read!.bought.total).toBe(1710);
-    expect(read!.bought.papers).toBe(5);
+    // name AND the number parse found the closed paper. Since 0383 that is a DISAGREEMENT Reconcile
+    // names (they call it paid, the bill is open), never a figure's exclusion: the bill counts until
+    // its own number says paid.
+    expect([...read!.settledBySupplier]).toEqual(["t2"]);
+    expect(read!.bought.ids).toContain("t2");
+    expect(read!.bought.total).toBe(4744.54);
+    expect(read!.bought.papers).toBe(6);
   });
 
-  it("answers the two questions with two different numbers, neither of them wrong", async () => {
+  it("answers the two questions with ONE number now: both count what is open on each bill (0383)", async () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
-    expect(read!.owed.total).not.toBe(read!.bought.total);
-    // Our tickets on that account say $1,300.00; their own open paper says $1,200.00.
-    expect(Math.round((read!.bought.total - read!.owed.total) * 100) / 100).toBe(100);
+    expect(read!.owed.total).toBe(read!.bought.total);
+    // Their own open paper ($1,200.00) stands beside the account's figure, never inside it.
+    expect(read!.accounts.find((a) => a.accountId === ACCOUNT)).toMatchObject({ owed: 4334.54, theirs: 1200, model: "supplier-invoices" });
   });
 
-  it("never subtracts payments already inside what the supplier closed ($1,360.93)", async () => {
+  it("never subtracts payments again ($1,360.93): a matched payment already came off the bills it paid", async () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
     const line = read!.owed.lines.find((l) => l.name === "Northgate Electrical Distributors");
-    expect(line).toMatchObject({ owed: 1200, how: "their-own-papers" });
+    expect(line).toMatchObject({ owed: 4334.54, how: "my-open-bills" });
   });
 
   it("says how many papers are not on a supplier account yet", async () => {
@@ -196,7 +199,7 @@ describe("Nort reads the same figure the card shows", () => {
     expect(read!.owed.lines.some((l) => l.accountId === ACCOUNT)).toBe(false);
     expect(read!.owed.ahead.some((a) => a.accountId === ACCOUNT)).toBe(false);
     // Before this it answered $1,665.46 AHEAD at that account - 500 + 800 + 3034.54 - 6000.
-    expect(read!.owed.total).not.toBe(1610);
+    expect(read!.owed.total).not.toBe(4744.54);
   });
 
   it("refuses to answer for no company at all", async () => {

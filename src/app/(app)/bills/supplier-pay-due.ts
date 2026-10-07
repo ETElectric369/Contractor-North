@@ -233,7 +233,10 @@ export function supplierPayDue(input: {
       supplierInvoices: documents,
     };
     const balance = supplierBalance(account, today);
-    if (balance.model !== "supplier-invoices" || balance.owed === null || !(balance.owed > 0.005)) continue;
+    // THE SUPPLIER'S OWN FIGURE, by their own papers: the discount is theirs, so the cheque it names
+    // is measured against what THEY say is open (0383 put our own open bills in `owed`; this line
+    // was always about their list).
+    if (!balance.supplierSays || !(balance.supplierSays.gross > 0.005)) continue;
     const claim = claimableDiscounts(documents, today);
     if (!(claim.dueOnNext > 0.005) || !claim.nextDeadline) continue;
     const payBy = claim.nextDeadline;
@@ -253,8 +256,8 @@ export function supplierPayDue(input: {
       });
       if (sent >= clearTarget(paidAgainst, payBy, today, sent) - 0.005) continue;
     }
-    // The /bills figure, to the cent: a payment never comes off it here (supplierBalance's rule).
-    const owed = balance.owed;
+    // Their figure, to the cent: a payment never comes off it here (they apply it, then he re-downloads).
+    const owed = balance.supplierSays.gross;
     out.push({
       accountId: id,
       accountName: account.name,

@@ -136,7 +136,8 @@ export const billActions: Record<string, ActionDef> = {
     name: "bill.setStatus",
     group: "bill",
     label: "Mark bill paid/unpaid",
-    description: "Set a supplier bill's paid/unpaid status.",
+    description:
+      "Mark a supplier bill paid or unpaid. 'paid' is the person's word that the whole purchase (the bill and its corrections) is paid in full; 'unpaid' puts it back on account, keeping whatever a recorded supplier payment paid, and is refused when a recorded payment covers it (undo that payment instead). A correction follows the bill it corrects.",
     input: z.object({ id: z.string(), status: z.string(), job_id: z.string() }),
     auth: "staff",
     effect: "write",

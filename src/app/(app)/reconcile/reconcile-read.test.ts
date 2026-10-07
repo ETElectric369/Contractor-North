@@ -229,8 +229,9 @@ describe("the two records, both from readSupplierOwed", () => {
       supplier_invoices: [{ ...BOOK.supplier_invoices[0], total: 300, open_balance: 0, closed: true }],
     };
     const { owed } = await read(closed as any);
-    // Nothing on that line: their own paper is closed, so they are owed nothing and there is no line.
-    expect(owed!.owed.lines.find((l) => l.accountId === ACCOUNT)).toBeUndefined();
+    // Our side is the line now (0383): their paper is closed, ours is open, and the row names the gap.
+    expect(owed!.owed.lines.find((l) => l.accountId === ACCOUNT)).toMatchObject({ owed: 421.75 });
+    expect(owed!.accounts.find((a) => a.accountId === ACCOUNT)?.theirs).toBe(0);
     // And the row is there all the same, because we hold their papers: two records, far apart.
     const rows = supplierGapRows(owed);
     expect(rows).toEqual([{ accountId: ACCOUNT, name: "Crestline Electrical Wholesale", theirs: 0, ours: 421.75, oursPapers: 2 }]);
@@ -240,7 +241,7 @@ describe("the two records, both from readSupplierOwed", () => {
   /** An account we hold NO paper of has one record, not two. Comparing it would invent a quarrel. */
   it("an account whose papers we do not hold is not compared at all", async () => {
     const { owed } = await read({ ...BOOK, supplier_invoices: [] } as any);
-    expect(owed!.owed.lines.find((l) => l.accountId === ACCOUNT)?.how).toBe("my-tickets-less-payments");
+    expect(owed!.owed.lines.find((l) => l.accountId === ACCOUNT)?.how).toBe("my-open-bills");
     expect(supplierGapRows(owed)).toEqual([]);
   });
 
@@ -273,9 +274,10 @@ describe("the two records, both from readSupplierOwed", () => {
   it("their own papers and our own tickets come back per account, from the owning functions", async () => {
     const { owed } = await read(BOOK as any);
     const line = owed!.owed.lines.find((l) => l.accountId === ACCOUNT)!;
-    // Theirs: their one open invoice.
-    expect(line.how).toBe("their-own-papers");
-    expect(line.owed).toBe(300);
+    // Ours, by the number (0383): the three open tickets. Theirs stands beside it on the account.
+    expect(line.how).toBe("my-open-bills");
+    expect(line.owed).toBe(443.5);
+    expect(owed!.accounts.find((a) => a.accountId === ACCOUNT)?.theirs).toBe(300);
     // Ours: the three open tickets the resolver placed on that account (400 + 21.75 + 21.75).
     expect(owed!.boughtByAccount[ACCOUNT]).toMatchObject({ total: 443.5, papers: 3 });
     // And the whole-book figure is still the whole book, loose spellings included (443.50 on the

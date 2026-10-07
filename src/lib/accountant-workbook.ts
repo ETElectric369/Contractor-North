@@ -13,7 +13,6 @@ import {
   recordDay,
   supplierAccountRowsOf,
   supplierIdentityOf,
-  supplierSettledOf,
   windowMonths,
   type OwnerMoney,
   type OwnerMoneyCostLine,
@@ -46,7 +45,7 @@ import { summarizeMileage } from "@/lib/mileage-math";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { tzMinutesOfDay } from "@/lib/tz";
 import { isOnAccountBill, supplierBalance } from "@/app/(app)/bills/supplier-balance";
-import { whatISupplierOwed, type SupplierOwedHow } from "@/lib/supplier-owed";
+import { openOwed, whatISupplierOwed, type SupplierOwedHow } from "@/lib/supplier-owed";
 import { buildXlsx, type XlsxRow, type XlsxSheet, type XlsxValue } from "@/lib/xlsx-write";
 import { buildZip, type DeflateRaw } from "@/lib/zip-write";
 
@@ -994,7 +993,6 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   // a ticket cannot read one way here and another way there. "Where" beside them is the free-text
   // SPELLING, which is why a supplier written five ways cannot be filtered as one company without this.
   const { of: costIdentity } = supplierIdentityOf(inp);
-  const costSettled = supplierSettledOf(inp, costIdentity);
   const costAcctName = new Map((inp.supplierAccounts ?? []).map((a: any) => [String(a?.id), String(a?.name ?? "").trim()]));
   /** The supplier account a ticket belongs to, by IDENTITY (filed, alias or the account's own name) -
    *  never `bills.supplier_account_id` alone, which is null on more than half a real book. */
@@ -1066,7 +1064,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
         PNL_LABEL.get(key) ?? key,
         money(l.cents),
         what,
-        isBill ? yesNo(isOnAccountBill({ status: String(r.status ?? ""), settledBySupplier: costSettled.has(String(r.id)) })) : null,
+        isBill ? yesNo(isOnAccountBill({ status: String(r.status ?? ""), amount: r.amount, amountPaid: r.amount_paid == null ? null : Number(r.amount_paid) || 0 })) : null,
         isBill ? accountOf(r.id) : null,
         isBill ? memo(r.notes, input.showOwner) : null,
       ),
@@ -1564,7 +1562,6 @@ function openFigures(input: AccountantWorkbookInput): OpenFigures {
   // no account still gets a row - one per spelling, named, never a lump - and the "How North Knows"
   // column says whose word each row is, which was always this tab's best idea.
   const { of: identity } = supplierIdentityOf(inp);
-  const settled = supplierSettledOf(inp, identity);
   const owed = whatISupplierOwed({
     accounts: [...accounts.values()].map((acct) => {
       const bal = supplierBalance(acct, todayYmd);
@@ -1574,6 +1571,8 @@ function openFigures(input: AccountantWorkbookInput): OpenFigures {
         onAccount: acct.onAccount,
         owed: bal.owed,
         model: bal.model,
+        theirs: bal.supplierSays ? bal.supplierSays.gross : null,
+        unmatched: bal.unmatched,
         openPapers: bal.chargedBills,
       };
     }),
@@ -1584,16 +1583,14 @@ function openFigures(input: AccountantWorkbookInput): OpenFigures {
         supplierAccountId: b.supplier_account_id ?? null,
         supplier: b.supplier ?? null,
         amount: b.amount,
+        amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,
         status: b.status ?? null,
-        settledBySupplier: settled.has(String(b.id)),
       })),
     identity,
-    settledBySupplier: settled,
   });
 
   const HOW: Record<SupplierOwedHow, string> = {
-    "their-own-papers": "Their own open invoices",
-    "my-tickets-less-payments": "Bills minus payments",
+    "my-open-bills": "What is open on North's bills after the payments matched to them",
     "my-tickets-no-account": "North's own tickets - the supplier has sent no balance",
   };
   for (const l of owed.lines) {
@@ -1639,7 +1636,7 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   if (!open.suppliers.length) rows.push(note(`No supplier was owed anything on ${day}.`));
   rows.push(beforeTotals());
   rows.push(total("Total", money(open.suppliersCents)));
-  rows.push(note("A supplier that sends its own invoices is owed what those say is still open. Crew still owed is on People."));
+  rows.push(note("What is open on North's own bills to each supplier, by the number each bill carries (a payment matched to a bill has come off it). Where a supplier sends its own invoices, what those say is listed below, beside it. Crew still owed is on People."));
 
   // THE PAPERS BEHIND THAT FIGURE (Erik, report 80cbd6fa: the download "needs to have ALL the data
   // available to be itemized"). One row per supplier above is a balance; these are the documents it is
@@ -1653,11 +1650,10 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   // exclusion it was missing: a ticket the supplier's own closed paper covers is counted inside
   // that paper already, so counting it here overstated what North had bought and not squared.
   const { of: identityHere } = supplierIdentityOf(inp);
-  const settledHere = supplierSettledOf(inp, identityHere);
   rows.push(blank(), title("Bills North Has Marked Unpaid"));
   rows.push(
     note(
-      `Every ticket on the books not marked paid, as of ${day}, except any the supplier's own closed paper already covers. For an account North tracks by its own bills, what is owed above is these less what was sent (each payment is on Costs). This is what North BOUGHT on account; what is owed above is what the suppliers say, and they are different figures.`,
+      `Every bill on the books with money still open on it, as of ${day}, at what is open (a part-paid bill at its balance). A payment matched to a bill has already come off it (each payment is on Costs); a payment matched to no bill is money ahead on the account and is not in these figures.`,
     ),
   );
   // NAME JOBS, NOT NUMBERS: the job's own number beside its name, the way every other list on this
@@ -1667,8 +1663,10 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   let unpaidCents = 0;
   for (const b of inp.bills ?? []) {
     if (!b || b.superseded_by_bill_id) continue;
-    if (!isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledHere.has(String(b.id)) })) continue;
-    const c = cents(b.amount);
+    const paper = { status: String(b.status ?? ""), amount: b.amount, amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0 };
+    if (!isOnAccountBill(paper)) continue;
+    // AT WHAT IS OPEN (0383): a part-paid bill at its balance, as the figure above counts it.
+    const c = cents(openOwed(paper));
     if (!c) continue;
     unpaidCents += c;
     const at = recordDay(b.bill_date, b.created_at, input.tz);

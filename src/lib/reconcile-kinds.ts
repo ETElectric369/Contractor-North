@@ -56,6 +56,8 @@
 export type ReconcileKind =
   /** Their own open papers against our own open tickets, per supplier. READ-ONLY plus a link. */
   | "supplier-gap"
+  /** The supplier's closed paper covers a bill of ours that is still open (0383). Answered on the bill. */
+  | "they-call-it-paid"
   /** Several spellings that look like one account. */
   | "supplier-names"
   /** A spelling the matcher will not rule on: a typo, or a second company. A person decides. */
@@ -66,7 +68,7 @@ export type ReconcileKind =
   | "same-ticket-two-jobs";
 
 /** The kinds a person presses a button on HERE. The badge is counted over these and no others. */
-export type ReconcileAnsweredHere = Exclude<ReconcileKind, "supplier-gap">;
+export type ReconcileAnsweredHere = Exclude<ReconcileKind, "supplier-gap" | "they-call-it-paid">;
 
 /**
  * Where the press happens. `"here"` means Reconcile carries the control; the other shape means the
@@ -103,13 +105,25 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     answeredOn: { screen: "Suppliers", href: "/bills#suppliers" },
     order: 1,
   },
+  "they-call-it-paid": {
+    // ONE NUMBER PER BILL (0383): a bill is paid when its own number says so. The supplier's closed
+    // paper over a bill still open here is the one place the two books disagree about a bill, and
+    // the doors that settle it write the number: Mark Paid on the bill, or Record A Payment with
+    // that bill's box checked. Neither press lives here.
+    heading: "They Call It Paid, Your Bill Is Open",
+    anchor: "they-call-it-paid",
+    ours: "A bill of yours with money still open on it",
+    theirs: "The supplier's own paper covering it, which they have closed",
+    answeredOn: { screen: "Bills", href: "/bills" },
+    order: 2,
+  },
   "supplier-names": {
     heading: "Supplier Names That Look Like One Account",
     anchor: "supplier-names",
     ours: "Several spellings off your receipts, each carrying its own money",
     theirs: "One supplier account they should all be filed on",
     answeredOn: "here",
-    order: 2,
+    order: 3,
   },
   "same-supplier-or-two": {
     heading: "Same Supplier, Or Two?",
@@ -117,7 +131,7 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     ours: "A spelling off a receipt the matcher will not rule on",
     theirs: "An account that may be the same company, or may not",
     answeredOn: "here",
-    order: 3,
+    order: 4,
   },
   "not-on-an-account": {
     // THE PILE IS PAPERS, NOT NAMES, and that word is the whole fix. Named by its spellings, the
@@ -129,7 +143,7 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     ours: "A paper still open, under the name typed on it",
     theirs: "No supplier account holding the other half of it",
     answeredOn: "here",
-    order: 4,
+    order: 5,
   },
   "same-ticket-two-jobs": {
     heading: "The Same Ticket On Two Jobs",
@@ -137,7 +151,7 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     ours: "One job's costs, carrying this ticket",
     theirs: "Another job's costs, carrying the very same ticket",
     answeredOn: "here",
-    order: 5,
+    order: 6,
   },
 };
 

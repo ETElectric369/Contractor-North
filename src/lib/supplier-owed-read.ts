@@ -188,7 +188,7 @@ export async function readSettledBySupplier(
 export async function readSupplierOwed(supabase: any, orgId: string): Promise<SupplierOwedRead | null> {
   if (!orgId) return null;
 
-  const [orgRes, acctRes, aliasRes, billsRes, docsRes, linksRes, payRes] = await Promise.all([
+  const [orgRes, acctRes, aliasRes, billsRes, docsRes, linksRes, payRes, allocRes] = await Promise.all([
     supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
     supabase.from("supplier_accounts").select("id, name, account_number, branch_code, on_account").eq("org_id", orgId).limit(500),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(2000),
@@ -198,7 +198,7 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
     supabase
       .from("bills")
       .select(
-        "id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, status, bill_date, job_id, is_statement, superseded_by_bill_id, corrects_bill_id, notes, bill_line_items(description)",
+        "id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, amount_paid, status, bill_date, job_id, is_statement, superseded_by_bill_id, corrects_bill_id, notes, bill_line_items(description)",
       )
       .eq("org_id", orgId)
       .is("superseded_by_bill_id", null)
@@ -209,6 +209,9 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
     ),
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
     supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").eq("org_id", orgId).limit(2000),
+    // Which bills each payment paid (0383): what of a payment is matched, so an account that owes
+    // nothing with cash on it reads "ahead" here exactly as /bills reads it.
+    supabase.from("supplier_payment_allocations").select("supplier_payment_id, amount").eq("org_id", orgId).limit(5000),
   ]);
 
   const failed: string[] = [];
@@ -226,6 +229,16 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
   const documents = rowsOf(docsRes, "the suppliers' own papers");
   const links = rowsOf(linksRes, "which paper covers which bill");
   const payments = rowsOf(payRes, "payments you have sent");
+  const allocatedOf = new Map<string, { allocated: number; bills: number }>();
+  if (!allocRes?.error) {
+    for (const a of (allocRes?.data ?? []) as any[]) {
+      const k = String(a?.supplier_payment_id ?? "");
+      const g = allocatedOf.get(k) ?? { allocated: 0, bills: 0 };
+      g.allocated = Math.round((g.allocated + (Number(a?.amount) || 0)) * 100) / 100;
+      g.bills += 1;
+      allocatedOf.set(k, g);
+    }
+  }
 
   const tz = (orgRes?.data as { settings?: { timezone?: string } } | null)?.settings?.timezone ?? "America/Los_Angeles";
   const today = todayStrInTz(tz);
@@ -283,12 +296,14 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
           supplier: String(b.supplier ?? ""),
           billDate: b.bill_date ?? null,
           amount: Number(b.amount) || 0,
+          amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,
           status: String(b.status ?? ""),
+          correctsBillId: b.corrects_bill_id ?? null,
+          billNumber: b.bill_number ?? null,
           jobId: b.job_id ?? null,
           jobName: null,
           invoiceNumber: b.supplier_invoice_number ?? null,
           isStatement: !!b.is_statement,
-          settledBySupplier: settledBySupplier.has(String(b.id)),
         })),
       payments: payments
         .filter((p) => String(p?.supplier_account_id ?? "") === id)
@@ -297,6 +312,7 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
           amount: Number(p.amount) || 0,
           paidOn: String(p.paid_on ?? ""),
           method: String(p.method ?? "other"),
+          ...(allocRes?.error ? {} : { allocated: allocatedOf.get(String(p.id))?.allocated ?? 0, bills: allocatedOf.get(String(p.id))?.bills ?? 0 }),
           reference: null,
           note: null,
           voided: !!p.voided_at,
@@ -311,6 +327,8 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
       onAccount: row.onAccount,
       owed: balance.owed,
       model: balance.model,
+      theirs: balance.supplierSays ? balance.supplierSays.gross : null,
+      unmatched: balance.unmatched,
       openPapers: balance.chargedBills,
       // A model-A figure built on a read that failed is NAMED, never guessed at - by the one
       // function /bills' page and the Suppliers card both ask. This spelled the rule out itself and
@@ -327,8 +345,9 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
     supplierAccountId: b.supplier_account_id ?? null,
     supplier: b.supplier ?? null,
     amount: b.amount,
+    amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,
     status: b.status ?? null,
-    settledBySupplier: settledBySupplier.has(String(b.id)),
+    supersededByBillId: b.superseded_by_bill_id ?? null,
   }));
 
   // ── QUESTION (b), ONE ACCOUNT AT A TIME ─────────────────────────────────────────────────────
@@ -344,12 +363,12 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
   }
   const boughtByAccount: Record<string, BoughtNotSettled> = {};
   for (const [accountId, own] of papersOfAccount) {
-    boughtByAccount[accountId] = whatIBoughtNotSettled({ papers: own, settledBySupplier });
+    boughtByAccount[accountId] = whatIBoughtNotSettled({ papers: own });
   }
 
   return {
-    owed: whatISupplierOwed({ accounts: figures, papers, identity, settledBySupplier }),
-    bought: whatIBoughtNotSettled({ papers, settledBySupplier }),
+    owed: whatISupplierOwed({ accounts: figures, papers, identity }),
+    bought: whatIBoughtNotSettled({ papers }),
     today,
     failed,
     accounts: figures,

@@ -237,36 +237,51 @@ export function resolveSupplierPapers(
 
 /** The fields the still-owed test reads, and nothing else. */
 export interface StillOwedShape {
-  /** `bills.status`: 'unpaid' is on account, 'paid' is settled at the register on the spot. */
+  /** `bills.status`, DERIVED per purchase by the database (0383): 'paid' when nothing is open. */
   status?: string | null;
   /** Set aside as another paper's duplicate. Either spelling of the same fact. */
   superseded?: boolean | null;
   supersededByBillId?: string | null;
+  /** `bills.amount`. */
+  amount?: unknown;
   /**
-   * The supplier's own books call this one settled - every document of theirs that covers it is
-   * closed, and none is still open. Computed by `supplierCoverage`, never stored, never a column.
+   * `bills.amount_paid` (0383): how much of this bill is paid, whoever paid it and however. OPEN is
+   * amount − amount_paid. Absent (a reader that did not select it) falls back to the status word,
+   * which the database derives from the same number — and one-number-readers.test.ts fails any
+   * figure reader that leaves it out.
    */
-  settledBySupplier?: boolean | null;
+  amountPaid?: number | null;
+}
+
+/** What is still OPEN on one paper: amount − amount_paid, or the whole amount when the number was
+ *  not read and the status says it is owed. Negative on a credit. Zero on a duplicate set aside. */
+export function openOwed(paper: StillOwedShape | null | undefined): number {
+  if (!paper) return 0;
+  if (paper.superseded || paper.supersededByBillId) return 0;
+  const amount = money(paper.amount);
+  if (paper.amountPaid === undefined || paper.amountPaid === null) return isPaidBill(paper) ? 0 : amount;
+  return r2(amount - money(paper.amountPaid));
 }
 
 /**
  * IS THIS PAPER STILL OWED. The single expression, and the only one allowed in the tree - there is
  * a test that fails if any file outside this module writes it again.
  *
- * It was written three times before this (`isOpenBill`, `isOnAccountBill`, and inline on the
- * suppliers card), each knowing a different subset of the three facts, which is how the same ticket
- * could be settled on one line of a screen and owed on the next.
+ * BY THE NUMBER (0383): a paper is owed while anything is open on it, which is amount − amount_paid
+ * to the cent. A part-paid bill is owed its balance; a credit is owed back; a bill the Mark Paid tap
+ * or a matched payment covered is not. The supplier's own verdict on a paper of ours is NOT a state
+ * here any more: a closed paper of theirs over an open bill of ours is a disagreement Reconcile
+ * names, and the door that settles it writes the number (Mark Paid, or the payment that paid it).
  *
- * THE LEAN IS DELIBERATE and it is `isOnAccountBill`'s: anything not explicitly 'paid' counts as
- * owed. A null status, a typo, a status some later migration adds should all surface as money he
- * may still owe and be argued with on screen, never quietly leave a figure and make the number he
- * is trusting too small.
+ * THE LEAN IS DELIBERATE: a reader that never selected the number falls back to the status word,
+ * and anything not explicitly 'paid' counts as owed, so money he may still owe surfaces on screen
+ * and is argued with there, never quietly left out of a figure he is trusting.
  */
 export function isStillOwed(paper: StillOwedShape | null | undefined): boolean {
   if (!paper) return false;
   if (paper.superseded || paper.supersededByBillId) return false;
-  if (boughtAtRegister(paper)) return false;
-  return !paper.settledBySupplier;
+  if (paper.amountPaid === undefined || paper.amountPaid === null) return !isPaidBill(paper);
+  return Math.abs(openOwed(paper)) >= 0.005;
 }
 
 /**
@@ -297,90 +312,61 @@ export function paperDisagrees(input: {
   accountId: string | null | undefined;
   /** The paper, in the shape the still-owed test reads. */
   paper: StillOwedShape | null | undefined;
-  /** From `supplierCoverage`, when the caller holds the set rather than the flag on the paper. */
-  settledBySupplier?: boolean | null;
 }): boolean {
   // On an account, the supplier's own balance is the other record, and the gap per supplier is
   // where that comparison belongs — not in the pile of papers nobody has filed.
   if (input?.accountId) return false;
-  return isStillOwed({ ...(input?.paper ?? {}), settledBySupplier: input?.paper?.settledBySupplier || input?.settledBySupplier });
+  return isStillOwed(input?.paper);
 }
 
 /**
- * HOW IT WAS BOUGHT, WHICH IS THE ONLY THING bills.status SAYS - and naming that is most of what
- * this whole fix is (8a982483).
- *
- * 'paid' means settled at the register on the spot. It does NOT mean the supplier has been paid:
- * applying a supplier's open list closes the SUPPLIER'S documents and writes no bill, so an
- * on-account ticket keeps this status forever and reading it as a debt is the bug. Every screen that
- * wants "is this still owed" wants `isStillOwed` above. This one is for the CONTROL that writes the
- * column, and for a row's face, which must say what the tap will do.
+ * THE STATUS WORD, which the database derives from the number per purchase (0383): 'paid' when
+ * nothing is open on the bill and the corrections under it. This is for the CONTROL that writes the
+ * column (the Mark Paid / Mark On Account tap writes the word; the trigger writes the number from
+ * it), and for a row's face, which must say what the tap will do. A figure wants `isStillOwed`.
  */
-export function boughtAtRegister(paper: { status?: string | null } | null | undefined): boolean {
+export function isPaidBill(paper: { status?: string | null } | null | undefined): boolean {
   return String(paper?.status ?? "").toLowerCase() === "paid";
 }
 
 /** What that control writes when somebody taps it. One place, so the face and the write agree. */
 export function flipBoughtHow(paper: { status?: string | null } | null | undefined): "paid" | "unpaid" {
-  return boughtAtRegister(paper) ? "unpaid" : "paid";
+  return isPaidBill(paper) ? "unpaid" : "paid";
 }
 
 /**
- * WHAT ONE PAPER'S ROW SAYS ABOUT ITSELF - one expression, every screen (8a982483).
+ * WHAT ONE PAPER'S ROW SAYS ABOUT ITSELF - one expression, every screen (8a982483, 0383).
  *
- * The SAME bill read "On Account" on a job's Costs tab and "Settled · <supplier> Says" on /bills,
- * because the badge was written out by hand in both places and only one of them had been told about
- * the supplier's closed paper. Two screens disagreeing about one ticket is the small, visible
- * version of two figures disagreeing about one pile of money.
- *
- * THREE DIFFERENT FACTS, and the order matters:
- *   · settled at the register on the spot   -> "Settled"       (bills.status, how it was bought)
- *   · their own closed paper covers it      -> "Settled · X Says"
- *   · neither                               -> "On Account"
+ * Three states, from the one number: paid in full, part-paid (the figures, so he can see the
+ * balance), on account. "Settled · <supplier> Says" retired with 0383: the supplier's closed paper
+ * over an open bill of ours is a Reconcile row, never a badge; "Settled At The Counter" retired with
+ * it, because a bill paid by a cheque against the account was never settled at any counter.
  */
 export function billSettledLabel(
-  paper: { status?: string | null; supplier?: string | null; settledBySupplier?: boolean | null; settledBySupplierName?: string | null },
-  shortName: (raw: string | null | undefined) => string,
+  paper: StillOwedShape,
+  formatMoney: (v: number) => string = (v) => `$${v.toFixed(2)}`,
 ): string {
-  if (String(paper?.status ?? "").toLowerCase() === "paid") return "Settled";
-  if (paper?.settledBySupplier) return `Settled · ${paper.settledBySupplierName || shortName(paper.supplier)} Says`;
+  if (paper?.superseded || paper?.supersededByBillId) return "Set Aside";
+  if (!isStillOwed(paper)) return "Paid";
+  const amount = money(paper?.amount);
+  const paid = paper?.amountPaid === undefined || paper?.amountPaid === null ? 0 : money(paper.amountPaid);
+  if (amount > 0.005 && paid > 0.005 && paid < amount - 0.005) return `Part-Paid ${formatMoney(paid)} Of ${formatMoney(amount)}`;
   return "On Account";
 }
 
-/**
- * THAT BADGE'S COLOUR, DECIDED BY THE SAME THREE FACTS AS ITS WORDS (8a982483).
- *
- * The badge took its words from the three facts above and its tone from `statusTone(bill.status)`,
- * which knows two. So a ticket whose supplier has closed the paper covering it read "Settled · X
- * Says" in the amber of money still owed. The word and the colour are one statement and they are
- * decided here together, or a screen can make them disagree again.
- */
-export function billSettledTone(
-  paper: { status?: string | null; settledBySupplier?: boolean | null },
-): "green" | "amber" {
-  if (boughtAtRegister(paper)) return "green";
-  return paper?.settledBySupplier ? "green" : "amber";
+/** THAT BADGE'S COLOUR, DECIDED BY THE SAME FACT AS ITS WORDS: green when nothing is open. */
+export function billSettledTone(paper: StillOwedShape): "green" | "amber" {
+  return isStillOwed(paper) ? "amber" : "green";
 }
 
 /**
- * THE FACE OF THE CONTROL THAT WRITES `bills.status`, AND IT MAY NOT OFFER WHAT THE BADGE BESIDE IT
- * SAYS IS DONE.
- *
- * A ticket the supplier's own closed paper covers showed a badge reading "Settled · X Says" next to
- * a button whose face said "Mark Settled" - a button offering to do the thing the words beside it
- * had just said was already done. Tapping it writes `status='paid'` and moves no money, so the lie
- * was in the face, not the deed: the deed is "this one was settled AT THE REGISTER", which is a
- * different fact from the supplier's verdict and the only fact this column holds.
- *
- * So where the supplier has already settled it, the face names the register out loud. Where it has
- * not, "Mark Settled" is unambiguous beside "On Account" and stays - the shorter face on a 375px
- * row, for the state that is almost every row.
+ * THE FACE OF THE CONTROL THAT WRITES `bills.status`. Marking a bill paid is HIS WORD that the whole
+ * purchase is paid in full (the database writes amount_paid := amount); marking it On Account puts
+ * it back, keeping whatever a matched payment paid - and is refused when the payments cover it,
+ * naming the payment to undo. The face says the deed.
  */
-export function boughtHowFace(
-  paper: { status?: string | null; settledBySupplier?: boolean | null },
-): string {
-  if (boughtAtRegister(paper)) return "Mark On Account";
-  return paper?.settledBySupplier ? "Mark Settled At The Register" : "Mark Settled";
+export function boughtHowFace(paper: { status?: string | null }): string {
+  return isPaidBill(paper) ? "Mark On Account" : "Mark Paid";
 }
 
 // ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -403,10 +389,10 @@ export interface SupplierCoverage {
    *  SAME walk, or the card and /bills can name different tickets as covering one paper. */
   byDocument: ReadonlyMap<string, ReadonlySet<string>>;
   /**
-   * Papers every covering document of their own supplier calls CLOSED, and none calls open. These
-   * are settled in the supplier's books whatever `bills.status` says, and they are the double
-   * count Erik was looking at: counted once inside the supplier's closed paper and once again as
-   * an unpaid ticket.
+   * OPEN papers of ours every covering document of their own supplier calls CLOSED, and none calls
+   * open: the supplier's books say settled, ours say owed. Since 0383 this is a DISAGREEMENT for
+   * Reconcile to name, with the two doors that settle it (Mark Paid; record the payment that paid
+   * it), never a state a row wears or a figure leaves out.
    */
   settledBySupplier: ReadonlySet<string>;
 }
@@ -467,11 +453,10 @@ export function supplierCoverage(input: {
   for (const p of input?.papers ?? []) {
     const id = String(p?.id ?? "");
     if (!id) continue;
-    // A duplicate set aside, or a ticket paid at the register, is not "settled by the supplier" -
-    // it was never in a balance for them to settle. Saying so would put a second sentence on a row
-    // that already has a true one.
-    if (p?.superseded || p?.supersededByBillId) continue;
-    if (String(p?.status ?? "").toLowerCase() === "paid") continue;
+    // A duplicate set aside, or a bill with nothing open on it, is not "settled by the supplier" -
+    // there is nothing left for them to have settled. What is left in this set is the DISAGREEMENT
+    // Reconcile names (0383): their closed paper over a bill of ours that is still open.
+    if (!isStillOwed(p)) continue;
     if (closedCover.has(id) && !openCover.has(id)) settledBySupplier.add(id);
   }
 
@@ -502,8 +487,9 @@ export const BOUGHT_NOT_SETTLED_LABEL = "Bought On Account, Not Squared Up Yet";
 /**
  * QUESTION (b): WHAT DID I BUY AND NOT SETTLE YET.
  *
- * Our own open tickets, every spelling, on an account or not. What this is FOR: he has bought
- * materials on account and not yet squared them, and that is worth seeing whether or not a
+ * Our own open tickets, every spelling, on an account or not, BY THE NUMBER (0383): what is still
+ * open on each, so a part-paid bill counts its balance and a credit nets. What this is FOR: he has
+ * bought materials on account and not yet squared them, and that is worth seeing whether or not a
  * supplier has billed him for it.
  *
  * WHAT IT DELIBERATELY IS NOT: a debt. It is built from our paperwork, not theirs. A supplier may
@@ -511,24 +497,18 @@ export const BOUGHT_NOT_SETTLED_LABEL = "Bought On Account, Not Squared Up Yet";
  * it at all - which is why it is a different number from (a) and must never be labelled as if it
  * were the same one.
  *
- * WHAT IT DELIBERATELY EXCLUDES: a superseded duplicate, a ticket settled at the register, and a
- * ticket the supplier's own closed papers cover. That last one is the exclusion that was missing
- * everywhere but one component, and it is Erik's double count: the same materials counted once
- * inside the supplier's closed paper and once again here.
+ * WHAT IT DELIBERATELY EXCLUDES: a superseded duplicate and anything with nothing open on it.
  */
 export function whatIBoughtNotSettled(input: {
-  papers?: readonly (SupplierPaperRef & StillOwedShape & { amount?: unknown })[] | null;
-  /** From `supplierCoverage`. Absent means not checked, and nothing is excluded on a guess. */
-  settledBySupplier?: ReadonlySet<string> | null;
+  papers?: readonly (SupplierPaperRef & StillOwedShape)[] | null;
 }): BoughtNotSettled {
   let total = 0;
   const ids: string[] = [];
   for (const p of input?.papers ?? []) {
     const id = String(p?.id ?? "");
     if (!id) continue;
-    if (!isStillOwed({ ...p, settledBySupplier: p?.settledBySupplier || input?.settledBySupplier?.has(id) }))
-      continue;
-    total = r2(total + money(p?.amount));
+    if (!isStillOwed(p)) continue;
+    total = r2(total + openOwed(p));
     ids.push(id);
   }
   return { total, papers: ids.length, ids };
@@ -544,10 +524,10 @@ export const SUPPLIER_OWED_LABEL = "Owed To Suppliers";
 
 /** How one line's figure was reached, so a screen or a workbook column can say it per row. */
 export type SupplierOwedHow =
-  /** Model B. Their own open papers. Checkable line by line against their portal. */
-  | "their-own-papers"
-  /** Model A. Our open tickets less what we have sent them. Right until they tell us otherwise. */
-  | "my-tickets-less-payments"
+  /** Our open purchases on the account, by the number (0383): what is open on each bill after
+   *  the payments matched to it and whatever he marked paid. The supplier's own figure stands
+   *  BESIDE it where we hold their papers (`supplierSays`), never inside it. */
+  | "my-open-bills"
   /** No account at all: our open tickets under the name the scanner typed. */
   | "my-tickets-no-account";
 
@@ -649,11 +629,11 @@ export function supplierBalancesUnread(reads: SupplierBalanceReads): boolean {
  */
 export function supplierFigureUnread(input: {
   onAccount: boolean;
-  model: "supplier-invoices" | "bills-minus-payments";
+  model: "supplier-invoices" | "my-open-bills";
   /** `supplierBalancesUnread` of the three reads. */
   balancesUnread: boolean;
 }): boolean {
-  return input.balancesUnread && input.onAccount && input.model !== "supplier-invoices";
+  return input.balancesUnread && input.onAccount;
 }
 
 /** One account's figure as `supplierBalance` already produced it. Passed IN rather than recomputed:
@@ -666,8 +646,14 @@ export interface SupplierAccountFigure {
   onAccount: boolean;
   /** `supplierBalance().owed`. NULL for a register supplier with no papers, or an unread balance. */
   owed: number | null;
-  /** `supplierBalance().model`. */
-  model: "supplier-invoices" | "bills-minus-payments";
+  /** `supplierBalance().model`: whether the supplier's own papers stand beside the figure. */
+  model: "supplier-invoices" | "my-open-bills";
+  /** THE SUPPLIER'S OWN OPEN BALANCE (`supplierSays.gross`) where we hold their papers, else null.
+   *  Beside `owed`, never inside it: Reconcile draws the two against each other. */
+  theirs?: number | null;
+  /** `supplierBalance().unmatched`: cash sent that no bill holds (0383). On an account that owes
+   *  nothing it is money AHEAD, and goes beside the total the way a credit does. */
+  unmatched?: number;
   /** How many of our own open tickets are filed there, for the line's sentence. */
   openPapers?: number;
   /** True when one of the reads behind this figure failed, so it must not be totalled or zeroed. */
@@ -723,11 +709,9 @@ export function whatISupplierOwed(input: {
   /** One per supplier account, already totalled by `supplierBalance`. */
   accounts?: readonly SupplierAccountFigure[] | null;
   /** Every live paper in the book, so the ones on no account can be gathered by identity. */
-  papers?: readonly (SupplierPaperRef & StillOwedShape & { amount?: unknown })[] | null;
+  papers?: readonly (SupplierPaperRef & StillOwedShape)[] | null;
   /** From `resolveSupplierPapers`: who each paper belongs to. */
   identity: ReadonlyMap<string, SupplierPaperIdentity>;
-  /** From `supplierCoverage`. */
-  settledBySupplier?: ReadonlySet<string> | null;
 }): WhatISupplierOwed {
   const lines: SupplierOwedLine[] = [];
   const ahead: WhatISupplierOwed["ahead"] = [];
@@ -742,11 +726,11 @@ export function whatISupplierOwed(input: {
   for (const p of input?.papers ?? []) {
     const id = String(p?.id ?? "");
     if (!id) continue;
-    const settled = p?.settledBySupplier || input?.settledBySupplier?.has(id);
     const who = input.identity.get(id) ?? supplierAccountForPaper(p, null);
-    const amount = money(p?.amount);
+    // BY THE NUMBER (0383): what is still open on the paper, not its face value.
+    const amount = openOwed(p);
     if (who.accountId) {
-      if (!isStillOwed({ ...p, settledBySupplier: settled })) continue;
+      if (!isStillOwed(p)) continue;
       const g = openOnAccount.get(who.accountId) ?? { total: 0, papers: 0 };
       g.total = r2(g.total + amount);
       g.papers += 1;
@@ -757,7 +741,7 @@ export function whatISupplierOwed(input: {
     // decides that pile and nothing else: `paperDisagrees`. The door on /bills quotes
     // `notOnAnAccount` out of this arm and the section it lands on draws rows out of the same
     // expression, which is what stops one page saying "1 bill" over a list of thirty-one.
-    if (!paperDisagrees({ accountId: who.accountId, paper: p, settledBySupplier: settled })) continue;
+    if (!paperDisagrees({ accountId: who.accountId, paper: p })) continue;
     const g = loose.get(who.group) ?? {
       name: who.spelling || NO_SUPPLIER_NAME_LABEL,
       total: 0,
@@ -801,8 +785,10 @@ export function whatISupplierOwed(input: {
     }
 
     const owed = r2(Number(a.owed));
-    if (owed < -0.005) {
-      ahead.push({ accountId, name, credit: r2(-owed) });
+    const unmatched = r2(Math.max(0, Number(a?.unmatched ?? 0) || 0));
+    // AHEAD: a credit on the account, or cash sent that no bill holds while nothing is owed (0383).
+    if (owed < -0.005 || (owed <= 0.005 && unmatched > 0.005)) {
+      ahead.push({ accountId, name, credit: r2((owed < 0 ? -owed : 0) + unmatched) });
       continue;
     }
     if (owed <= 0.005) continue;
@@ -810,7 +796,7 @@ export function whatISupplierOwed(input: {
       accountId,
       name,
       owed,
-      how: holdsTheirOwnPapers(a) ? "their-own-papers" : "my-tickets-less-payments",
+      how: "my-open-bills",
       papers: a?.openPapers ?? open.papers,
       onAccount: !!a?.onAccount,
     });

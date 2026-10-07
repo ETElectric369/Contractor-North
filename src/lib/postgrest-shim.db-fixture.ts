@@ -81,6 +81,7 @@ const EMBEDS: Record<string, Record<string, { kind: "child" | "parent"; column: 
   appointments: { customers: { kind: "parent", column: "customer_id" }, inquiries: { kind: "parent", column: "inquiry_id" }, jobs: { kind: "parent", column: "job_id" } },
   jobs: { customers: { kind: "parent", column: "customer_id" } },
   stock_moves: { inventory_items: { kind: "parent", column: "item_id" }, jobs: { kind: "parent", column: "job_id" } },
+  supplier_payments: { supplier_accounts: { kind: "parent", column: "supplier_account_id" } },
 };
 
 /** A value as a pg parameter for a filter or a column: objects and arrays of objects go as JSON text

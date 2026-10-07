@@ -64,7 +64,7 @@
  */
 
 import { aliasKey } from "@/lib/supplier-identity";
-import { isStillOwed } from "@/lib/supplier-owed";
+import { isStillOwed, openOwed } from "@/lib/supplier-owed";
 
 /** The methods migration 0270 lets `supplier_payments.method` be. */
 export const SUPPLIER_PAY_METHODS = ["cash", "check", "transfer", "card", "other"] as const;
@@ -83,6 +83,10 @@ export interface SupplierPaymentRow {
   note: string | null;
   /** True once `voided_at` is set. A void stays on the list, crossed out: the history is his. */
   voided: boolean;
+  /** How many bills this payment pays (supplier_payment_allocations, 0383), when the page read them. */
+  bills?: number;
+  /** Cash of it matched to bills. amount − allocated is money ahead on the account. */
+  allocated?: number;
 }
 
 export interface SupplierBillRow {
@@ -91,8 +95,20 @@ export interface SupplierBillRow {
   supplier: string;
   billDate: string | null;
   amount: number;
-  /** bills.status - 'unpaid' (on account) or 'paid' (settled at the register). */
+  /** bills.status, DERIVED per purchase by the database from the number below (0383). */
   status: string;
+  /** bills.amount_paid (0383): how much of it is paid. OPEN = amount − amountPaid. Null when the
+   *  page could not read the column (then status decides, by `isStillOwed`'s fallback). */
+  amountPaid: number | null;
+  /** The bill this one corrects (0381): one purchase, one box on the payment sheet. */
+  correctsBillId?: string | null;
+  /** The bill's own number, for the payment sheet's boxes. */
+  billNumber?: string | null;
+  createdAt?: string | null;
+  /** The supplier's prompt-pay discount on the open document linked to this bill, and its last day
+   *  (0383): the payment sheet previews the discounted total with them. */
+  discountAmount?: number | null;
+  discountBy?: string | null;
   jobId: string | null;
   jobName: string | null;
   /** The supplier's OWN invoice number (CED: 8802-1101363), when it is known. */
@@ -106,13 +122,6 @@ export interface SupplierBillRow {
    * with went on sitting inside the figure at the top of the card.
    */
   superseded?: boolean;
-  /**
-   * THE SUPPLIER'S OWN BOOKS CALL THIS ONE SETTLED - every document of theirs covering it is
-   * closed, and none is still open. Read-side only, worked out by `supplierCoverage`, never a
-   * column and never written to bills.status. Under model B it changes nothing (their open papers
-   * were always the figure); under model A it is the whole of 8a982483.
-   */
-  settledBySupplier?: boolean;
 }
 
 /**
@@ -180,10 +189,9 @@ export interface SupplierAccountRow {
  * how much to trust a figure is entitled to know which one he is looking at.
  */
 export type SupplierBalanceModel =
-  /** A. Unpaid bills minus live payments. Right when nobody knows which invoices a cheque settled. */
-  | "bills-minus-payments"
-  /** B. The sum of what the supplier still calls open. Payments are NOT subtracted - they are
-   *  already inside what the supplier closed, and taking them off again is the $1,360.93 bug. */
+  /** Our own open purchases, by the number. Every account. */
+  | "my-open-bills"
+  /** The same figure, with the supplier's own papers standing BESIDE it (`supplierSays`). */
   | "supplier-invoices";
 
 /**
@@ -246,18 +254,21 @@ export interface SupplierPayByFigure {
 }
 
 export interface SupplierBalance {
-  /** Bills bought ON ACCOUNT (status 'unpaid') - the only thing a balance is made of. */
+  /** What is OPEN on the account's live bills, by the number (0383) - the balance itself. */
   charged: number;
   chargedBills: number;
-  /** Bills settled at the register. Reported, never in the balance. */
+  /** Bills with nothing open on them, at face value. Reported, never in the balance. */
   settledAtRegister: number;
   settledBills: number;
   /** Live (non-voided) payments. */
   paid: number;
   livePayments: number;
+  /** Cash of those not matched to any bill: money ahead on the account, said beside the figure. */
+  unmatched: number;
   /**
-   * THE NUMBER. Under model A it is charged minus paid. Under model B it is `supplierSays.gross`
-   * and the payments are NOT in it - see the header, and the $1,360.93 test.
+   * THE NUMBER: what is open on our own purchases (0383). A matched payment is already inside it
+   * (it lowered the bills it paid), so nothing is subtracted here; the supplier's own figure stands
+   * BESIDE it in `supplierSays` where we hold their papers - see the $1,360.93 test.
    *
    * NULL for a pay-at-the-register supplier with no supplier documents, which has no running
    * balance and must not be given one. A zero would read as "paid up", which is a different
@@ -319,7 +330,7 @@ export interface SupplierBalance {
  * second one is the double count Erik was looking at. Both are facts about the bill, so they ride
  * on the bill row and this test reads them.
  */
-export const isOnAccountBill = (bill: { status: string; superseded?: boolean | null; settledBySupplier?: boolean | null }) =>
+export const isOnAccountBill = (bill: { status: string; amount?: unknown; amountPaid?: number | null; superseded?: boolean | null }) =>
   isStillOwed(bill);
 
 /**
@@ -712,37 +723,35 @@ export function supplierBalance(account: SupplierAccountRow, today: string): Sup
   let hasStatements = false;
 
   for (const bill of account.bills ?? []) {
-    const amount = r2(Number(bill.amount) || 0);
-    // NEITHER PILE. A duplicate somebody set aside, and a ticket the supplier's own closed paper
-    // covers, are not money on account and they are not money settled at the register either -
-    // they are already counted somewhere else, which is the whole complaint. Letting them fall to
-    // the `else` below would move the double count rather than end it.
-    if (bill.superseded || bill.settledBySupplier) continue;
+    // A duplicate somebody set aside is counted nowhere: the ticket that replaced it already is.
+    if (bill.superseded) continue;
     if (isOnAccountBill(bill)) {
-      charged = r2(charged + amount);
+      // BY THE NUMBER (0383): what is still open on it, not its face value.
+      charged = r2(charged + openOwed(bill));
       chargedBills += 1;
       if (bill.isStatement) hasStatements = true;
       // A bill with no date cannot be the oldest - it has no age to compare. It still counts in
       // the money; it just never becomes the sentence "oldest 64 days old".
       if (bill.billDate && (!oldestUnpaid || bill.billDate < oldestUnpaid)) oldestUnpaid = bill.billDate;
     } else {
-      settledAtRegister = r2(settledAtRegister + amount);
+      settledAtRegister = r2(settledAtRegister + (r2(Number(bill.amount) || 0)));
       settledBills += 1;
     }
   }
 
-  // THE LEDGER IS COMPUTED UNDER BOTH MODELS, ALWAYS. Under model A it is an input to the
-  // balance; under model B it stops being one and becomes what he actually SENT them, for ticking
-  // off against his bank statement. It never stops being computed, because a payment ledger that
-  // vanished the day the supplier's documents arrived would be the app hiding his own money from
-  // him - and the whole reason model B exists is that a screen has to be checkable.
+  // THE LEDGER: what he actually SENT them, for ticking off against his bank statement, and how
+  // much of it is matched to bills. It is never subtracted from the figure: a matched payment
+  // already lowered the bills it paid, and an unmatched one is money ahead, said beside the figure.
   let paid = 0;
+  let unmatched = 0;
   let livePayments = 0;
   let lastPayment: SupplierPaymentRow | null = null;
   let firstPayment: SupplierPaymentRow | null = null;
   for (const payment of account.payments ?? []) {
     if (payment.voided) continue;
-    paid = r2(paid + (Number(payment.amount) || 0));
+    const amount = Number(payment.amount) || 0;
+    paid = r2(paid + amount);
+    if (payment.allocated !== undefined && payment.allocated !== null) unmatched = r2(unmatched + Math.max(0, amount - (Number(payment.allocated) || 0)));
     livePayments += 1;
     // Newest by the day it was paid, not by the order the rows came back - he records Friday's
     // cheque on Monday, and the list must still name the latest payment.
@@ -759,11 +768,11 @@ export function supplierBalance(account: SupplierAccountRow, today: string): Sup
     settledBills,
     paid,
     livePayments,
-    // MODEL B DOES NOT SUBTRACT THE PAYMENTS. His $6,000 is already inside what CED closed, and
-    // taking it off the open balances counts the same money twice in the other direction: the
-    // night this shipped that read $1,360.93 against CED's $3,845.14.
-    owed: supplierSays ? supplierSays.gross : account.onAccount ? r2(charged - paid) : null,
-    model: supplierSays ? "supplier-invoices" : "bills-minus-payments",
+    unmatched,
+    // ONE MODEL (0383): what is open on our own purchases. A register supplier with nothing of
+    // theirs on file has no running balance and gets null, never a zero that reads "paid up".
+    owed: account.onAccount || supplierSays ? charged : null,
+    model: supplierSays ? "supplier-invoices" : "my-open-bills",
     supplierSays,
     oldestUnpaid,
     oldestUnpaidDays: daysBetweenYmd(oldestUnpaid, today),

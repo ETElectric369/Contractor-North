@@ -92,19 +92,8 @@ export interface BillRow {
    * original says "Corrected by … · $… together". Absent before 0381 is on the database.
    */
   corrects_bill_id?: string | null;
-  /**
-   * Settled in the supplier's own books (8a982483): every document from its account that covers
-   * this bill is closed (an applied open list). bills.status still says On Account, because that
-   * is how it was bought; the row says "Settled · CED Says" and Unpaid leaves it out (isOpenBill).
-   */
-  settledBySupplier?: boolean;
-  /**
-   * WHO says it is settled: the supplier ACCOUNT's short name ("CED"), never bills.supplier. That
-   * column keeps the spelling the receipt reader found ("Consolidated Electrical Distributors,
-   * Inc. (CED)", 19 of CED's 21 bills), which the row's first line already prints and which, in
-   * the right-hand column that can't shrink, would push the bill's own name and number off a phone.
-   */
-  settledBySupplierName?: string | null;
+  /** ONE NUMBER PER BILL (0383): how much of it is paid. The badge and Unpaid read what is open. */
+  amount_paid?: number | null;
   /**
    * The receipt's per-line billing switches (0268/0272), when this bill is a live receipt on a job
    * with lines. They live in the bill's own detail now: one place per bill, no second list.
@@ -303,7 +292,7 @@ export function BillsReceipts({
   // and this line calling itself "Unpaid" over a card saying "Owed" is what made him stop believing
   // the screen. The page hands the answer down (`boughtNotSettled`) so the two cannot drift; the
   // local sum is the fallback for a caller that has not been given it.
-  const unpaid = bills.filter((b) => isOpenBill(b));
+  const unpaid = bills.filter((b) => isOpenBill({ status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null, superseded: b.superseded }));
   const unpaidTotal = boughtNotSettled ? boughtNotSettled.total : unpaid.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const unpaidCount = boughtNotSettled ? boughtNotSettled.papers : unpaid.length;
 
@@ -350,7 +339,7 @@ export function BillsReceipts({
               {/* The label is bounded (max-w + truncate) so a long typed supplier can never widen
                   this shrink-0 column and collapse the bill's name, number and job on the left. */}
               <span className="block max-w-[9rem] truncate text-xs text-slate-400">
-                {billSettledLabel(b, shortSupplierName)}
+                {billSettledLabel({ status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null, superseded: b.superseded }, formatCurrency)}
               </span>
             </span>
           </summary>
@@ -696,10 +685,10 @@ function BillEditModal({
           <div className={follows ? "hidden" : undefined}>
             <Label htmlFor="be-status">Status</Label>
             <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-              {/* The same two words as the add form and the badge: one vocabulary for one
-                  column, or the screen teaches him two different meanings for one tick. */}
+              {/* The same two words as the badge: one vocabulary for one column. Paid is his word
+                  that the whole purchase is paid in full (0383 writes the number from it). */}
               <option value="unpaid">On Account</option>
-              <option value="paid">Settled At The Counter</option>
+              <option value="paid">Paid</option>
             </Select>
           </div>
         </div>

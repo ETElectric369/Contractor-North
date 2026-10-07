@@ -4,7 +4,8 @@ import {
   NO_SUPPLIER_NAME_LABEL,
   billSettledLabel,
   billSettledTone,
-  boughtAtRegister,
+  isPaidBill,
+  openOwed,
   boughtHowFace,
   flipBoughtHow,
   indexSupplierIdentity,
@@ -157,66 +158,57 @@ describe("the one covering walk", () => {
 });
 
 describe("the one still-owed test", () => {
-  it("counts anything not explicitly paid, and never a duplicate or a supplier-settled ticket", () => {
+  it("answers by the number when it has it, and by the status word when it has not; never a duplicate", () => {
     expect(isStillOwed({ status: "unpaid" })).toBe(true);
     expect(isStillOwed({ status: null })).toBe(true);
     expect(isStillOwed({ status: "PAID" })).toBe(false);
     expect(isStillOwed({ status: "unpaid", superseded: true })).toBe(false);
     expect(isStillOwed({ status: "unpaid", supersededByBillId: "x" })).toBe(false);
-    expect(isStillOwed({ status: "unpaid", settledBySupplier: true })).toBe(false);
+    // ONE NUMBER PER BILL (0383): what is open decides, whatever the word says.
+    expect(isStillOwed({ status: "unpaid", amount: 523.47, amountPaid: 523.47 })).toBe(false);
+    expect(isStillOwed({ status: "paid", amount: 523.47, amountPaid: 200 })).toBe(true);
+    expect(isStillOwed({ status: "unpaid", amount: -51.58, amountPaid: 0 })).toBe(true);
+    expect(isStillOwed({ status: "unpaid", amount: -51.58, amountPaid: -51.58 })).toBe(false);
+    expect(isStillOwed({ status: "unpaid", amount: 10, amountPaid: 9.996 })).toBe(false);
+    expect(openOwed({ status: "unpaid", amount: 523.47, amountPaid: 200 })).toBe(323.47);
+    expect(openOwed({ status: "unpaid", amount: 523.47 })).toBe(523.47);
+    expect(openOwed({ status: "paid", amount: 523.47 })).toBe(0);
+    expect(openOwed({ status: "unpaid", amount: 523.47, amountPaid: 100, superseded: true })).toBe(0);
   });
 });
 
-describe("what bills.status says, and what it does not", () => {
-  it("says only how the thing was bought", () => {
-    expect(boughtAtRegister({ status: "paid" })).toBe(true);
-    expect(boughtAtRegister({ status: "unpaid" })).toBe(false);
-    expect(boughtAtRegister({ status: null })).toBe(false);
+describe("what bills.status says, and what a row says about itself", () => {
+  it("the status word is the number's, and the control flips it", () => {
+    expect(isPaidBill({ status: "paid" })).toBe(true);
+    expect(isPaidBill({ status: "unpaid" })).toBe(false);
+    expect(isPaidBill({ status: null })).toBe(false);
     expect(flipBoughtHow({ status: "paid" })).toBe("unpaid");
     expect(flipBoughtHow({ status: "unpaid" })).toBe("paid");
   });
 
-  it("gives a row the same words wherever it is drawn", () => {
-    const short = (n: string | null | undefined) => String(n ?? "").split(" ")[0] ?? "";
-    expect(billSettledLabel({ status: "paid", supplier: "Ridgeline Lumber" }, short)).toBe("Settled");
-    expect(billSettledLabel({ status: "unpaid", supplier: "Ridgeline Lumber" }, short)).toBe("On Account");
-    expect(billSettledLabel({ status: "unpaid", supplier: "Ridgeline Lumber", settledBySupplier: true }, short)).toBe("Settled · Ridgeline Says");
-    // A ticket settled at the register is just Settled: there is no supplier verdict to quote.
-    expect(billSettledLabel({ status: "paid", supplier: "Ridgeline Lumber", settledBySupplier: true }, short)).toBe("Settled");
-    // The account's own short name wins over the spelling the scanner wrote.
-    expect(
-      billSettledLabel({ status: "unpaid", supplier: "Northgate Electrical Distributors, Inc.", settledBySupplier: true, settledBySupplierName: "Northgate" }, short),
-    ).toBe("Settled · Northgate Says");
+  it("gives a row the same words wherever it is drawn: Paid, Part-Paid with its figures, On Account", () => {
+    const fmt = (v: number) => `$${v.toFixed(2)}`;
+    expect(billSettledLabel({ status: "paid", amount: 100, amountPaid: 100 }, fmt)).toBe("Paid");
+    expect(billSettledLabel({ status: "unpaid", amount: 100, amountPaid: 0 }, fmt)).toBe("On Account");
+    expect(billSettledLabel({ status: "unpaid", amount: 523.47, amountPaid: 200 }, fmt)).toBe("Part-Paid $200.00 Of $523.47");
+    expect(billSettledLabel({ status: "unpaid", amount: 100, amountPaid: 50, superseded: true }, fmt)).toBe("Set Aside");
+    // Without the number, the word decides, as before 0383.
+    expect(billSettledLabel({ status: "paid" }, fmt)).toBe("Paid");
+    expect(billSettledLabel({ status: "unpaid" }, fmt)).toBe("On Account");
+    // "Settled · X Says" is gone: the supplier's closed paper over an open bill is a Reconcile row.
+    expect(billSettledLabel({ status: "unpaid", amount: 100, amountPaid: 0 }, fmt)).not.toContain("Says");
   });
 
-  /**
-   * THE WORDS AND THE COLOUR ARE ONE STATEMENT. The badge took its words from the three facts and
-   * its tone from `statusTone(bill.status)`, which knows two, so a ticket the supplier had closed
-   * read "Settled · CED Says" in the amber of money still owed.
-   */
-  it("colours the badge by the same three facts that choose its words", () => {
+  it("colours the badge by the same number that chooses its words", () => {
     expect(billSettledTone({ status: "paid" })).toBe("green");
     expect(billSettledTone({ status: "unpaid" })).toBe("amber");
-    expect(billSettledTone({ status: "unpaid", settledBySupplier: true })).toBe("green");
-    // Settled at the register, whatever the supplier's papers say: it never was in their balance.
-    expect(billSettledTone({ status: "paid", settledBySupplier: true })).toBe("green");
+    expect(billSettledTone({ status: "unpaid", amount: 100, amountPaid: 100 })).toBe("green");
+    expect(billSettledTone({ status: "paid", amount: 100, amountPaid: 40 })).toBe("amber");
   });
 
-  /**
-   * AND THE BUTTON MAY NOT OFFER WHAT THE BADGE BESIDE IT SAYS IS DONE. A ticket whose covering
-   * supplier paper is closed showed "Settled · CED Says" next to a face reading "Mark Settled" - a
-   * control offering to do the thing the words beside it had just said was already done. The tap
-   * writes `status='paid'` and moves no money, so the face has to name the deed it really does.
-   */
-  it("never offers to settle a ticket the badge beside it already calls settled", () => {
-    const short = (n: string | null | undefined) => String(n ?? "").split(" ")[0] ?? "";
-    expect(boughtHowFace({ status: "unpaid" })).toBe("Mark Settled");
+  it("the control's face says the deed: Mark Paid on an open bill, Mark On Account on a paid one", () => {
+    expect(boughtHowFace({ status: "unpaid" })).toBe("Mark Paid");
     expect(boughtHowFace({ status: "paid" })).toBe("Mark On Account");
-    const closed = { status: "unpaid", supplier: "Ridgeline Lumber", settledBySupplier: true };
-    expect(billSettledLabel(closed, short)).toBe("Settled · Ridgeline Says");
-    expect(boughtHowFace(closed)).toBe("Mark Settled At The Register");
-    // The pair never reads as one offering the other: that is the whole rule.
-    expect(boughtHowFace(closed)).not.toBe(`Mark ${billSettledLabel(closed, short).split(" ")[0]}`);
   });
 });
 
@@ -239,12 +231,12 @@ describe("a figure built on a read that failed is named, not guessed", () => {
     expect(supplierBalancesUnread({ bills: false, payments: false, theirOwnPapers: true })).toBe(true);
   });
 
-  it("names an on-account model-A figure it cannot total, and leaves the supplier's own figure alone", () => {
-    const unread = (over: { onAccount?: boolean; model?: "supplier-invoices" | "bills-minus-payments"; balancesUnread?: boolean }) =>
-      supplierFigureUnread({ onAccount: true, model: "bills-minus-payments", balancesUnread: true, ...over });
+  it("names an on-account figure it cannot total, whether or not the supplier's own papers stand beside it", () => {
+    const unread = (over: { onAccount?: boolean; model?: "supplier-invoices" | "my-open-bills"; balancesUnread?: boolean }) =>
+      supplierFigureUnread({ onAccount: true, model: "my-open-bills", balancesUnread: true, ...over });
     expect(unread({})).toBe(true);
-    // A figure that IS the supplier's own papers did not come from the reads that failed.
-    expect(unread({ model: "supplier-invoices" })).toBe(false);
+    // Since 0383 every account's figure is our own open bills, so their papers do not save it.
+    expect(unread({ model: "supplier-invoices" })).toBe(true);
     // A register supplier keeps no running balance to fail to total.
     expect(unread({ onAccount: false })).toBe(false);
     expect(unread({ balancesUnread: false })).toBe(false);
@@ -252,38 +244,48 @@ describe("a figure built on a read that failed is named, not guessed", () => {
 });
 
 describe("(b) what did I buy and not settle yet", () => {
-  const bought = whatIBoughtNotSettled({ papers, settledBySupplier: coverage.settledBySupplier });
+  const bought = whatIBoughtNotSettled({ papers });
 
-  it("is every one of our own open tickets, to the cent", () => {
-    // t1 500 + t4 120 + t5 250 + t7 40 + t8 800
-    expect(bought.total).toBe(1710);
-    expect(bought.papers).toBe(5);
-    expect(bought.ids).toEqual(["t1", "t4", "t5", "t7", "t8"]);
+  it("is every one of our own open tickets, by the number, to the cent", () => {
+    // t1 500 + t2 3034.54 + t4 120 + t5 250 + t7 40 + t8 800
+    expect(bought.total).toBe(4744.54);
+    expect(bought.papers).toBe(6);
+    expect(bought.ids).toEqual(["t1", "t2", "t4", "t5", "t7", "t8"]);
   });
 
-  it("drops the ticket the supplier's own closed paper covers - the double count, gone", () => {
-    expect(bought.ids).not.toContain("t2");
-    const uncorrected = whatIBoughtNotSettled({ papers });
-    expect(uncorrected.total).toBe(4744.54);
-    expect(r(uncorrected.total - bought.total)).toBe(3034.54);
+  it("counts what is OPEN on a paper, so a part-paid bill counts its balance and a paid one nothing (0383)", () => {
+    const byNumber = whatIBoughtNotSettled({
+      papers: [
+        { id: "a", supplierAccountId: ACCOUNT, supplier: "x", amount: 523.47, amountPaid: 200, status: "unpaid" },
+        { id: "b", supplierAccountId: ACCOUNT, supplier: "x", amount: 100, amountPaid: 100, status: "unpaid" },
+        { id: "c", supplierAccountId: ACCOUNT, supplier: "x", amount: -20, amountPaid: 0, status: "unpaid" },
+      ],
+    });
+    expect(byNumber.total).toBe(303.47);
+    expect(byNumber.ids).toEqual(["a", "c"]);
+  });
+
+  it("the ticket their closed paper covers is still counted: that disagreement is Reconcile's row, not a figure's exclusion", () => {
+    expect([...coverage.settledBySupplier]).toEqual(["t2"]);
+    expect(bought.ids).toContain("t2");
   });
 });
 
 describe("(a) what do I owe this supplier", () => {
   const figures: SupplierAccountFigure[] = [
-    { accountId: ACCOUNT, name: "Northgate Electrical Distributors", onAccount: true, owed: 1200, model: "supplier-invoices" },
-    { accountId: REGISTER, name: "Cutter Rentals", onAccount: false, owed: null, model: "bills-minus-payments" },
+    { accountId: ACCOUNT, name: "Northgate Electrical Distributors", onAccount: true, owed: 1200, model: "supplier-invoices", theirs: 1200 },
+    { accountId: REGISTER, name: "Cutter Rentals", onAccount: false, owed: null, model: "my-open-bills" },
   ];
-  const owed = whatISupplierOwed({ accounts: figures, papers, identity, settledBySupplier: coverage.settledBySupplier });
+  const owed = whatISupplierOwed({ accounts: figures, papers, identity });
 
   it("leads with one number", () => {
     // 1200 their own papers + 120 on a register supplier + 250 unfiled + 40 unnamed
     expect(owed.total).toBe(1610);
   });
 
-  it("takes the supplier's own word where there is one, and says so per row", () => {
+  it("takes the account's figure as handed in, and says it is our open bills", () => {
     const line = owed.lines.find((l) => l.accountId === ACCOUNT);
-    expect(line).toMatchObject({ owed: 1200, how: "their-own-papers" });
+    expect(line).toMatchObject({ owed: 1200, how: "my-open-bills" });
   });
 
   it("falls back to our own open tickets where there is no account", () => {
@@ -364,7 +366,6 @@ describe("(a) what do I owe this supplier", () => {
       accounts: figures,
       papers: withReturn,
       identity: id2,
-      settledBySupplier: coverage.settledBySupplier,
     });
 
     // THE ONE NUMBER DOES NOT MOVE. It was $1,558.42 before this - $51.58 less than he owes.
@@ -385,7 +386,6 @@ describe("(a) what do I owe this supplier", () => {
       accounts: figures,
       papers: withReturn,
       identity: resolveSupplierPapers(withReturn, index),
-      settledBySupplier: coverage.settledBySupplier,
     });
     expect(notOnAnAccountSentence(owedBack.notOnAnAccount, (v) => `$${v.toFixed(2)}`)).toBe(
       "$290.00 of this is on 3 papers that are not on a supplier account yet, counted under the name on the paper. 1 of them has no supplier name on it at all. A credit of $51.58 on 1 of them is money back, so it is not in the figure.",
@@ -403,7 +403,6 @@ describe("(a) what do I owe this supplier", () => {
       accounts: figures,
       papers: evens,
       identity: resolveSupplierPapers(evens, index),
-      settledBySupplier: coverage.settledBySupplier,
     });
     expect(owedEven.total).toBe(1610);
     expect(owedEven.lines.find((l) => l.name === "Summit Supply")).toBeUndefined();
@@ -413,10 +412,9 @@ describe("(a) what do I owe this supplier", () => {
 
   it("keeps a credit at one supplier out of the total: being ahead there does not pay here", () => {
     const ahead = whatISupplierOwed({
-      accounts: [...figures, { accountId: "acct-ahead", name: "Bay Fasteners", onAccount: true, owed: -75.5, model: "bills-minus-payments" }],
+      accounts: [...figures, { accountId: "acct-ahead", name: "Bay Fasteners", onAccount: true, owed: -75.5, model: "my-open-bills" }],
       papers,
       identity,
-      settledBySupplier: coverage.settledBySupplier,
     });
     expect(ahead.total).toBe(1610);
     expect(ahead.ahead).toEqual([{ accountId: "acct-ahead", name: "Bay Fasteners", credit: 75.5 }]);
@@ -427,17 +425,17 @@ describe("(a) what do I owe this supplier", () => {
       accounts: [{ ...figures[0], unread: true }, figures[1]],
       papers,
       identity,
-      settledBySupplier: coverage.settledBySupplier,
     });
     expect(unread.couldNotTotal).toEqual([{ accountId: ACCOUNT, name: "Northgate Electrical Distributors" }]);
     expect(unread.total).toBe(410);
   });
 
-  it("is a DIFFERENT number from (b), and the gap is one supplier's own word against our tickets", () => {
-    const bought = whatIBoughtNotSettled({ papers, settledBySupplier: coverage.settledBySupplier });
-    expect(owed.total).not.toBe(bought.total);
-    // Our tickets on that account say $1,300.00; the supplier's own open papers say $1,200.00.
-    expect(r(bought.total - owed.total)).toBe(100);
+  it("takes an account's figure as handed in and never re-totals it; (b) is the papers by the number", () => {
+    const bought = whatIBoughtNotSettled({ papers });
+    // The account figure was handed in as 1200 and stands; the papers on it come to 4334.54.
+    expect(owed.lines.find((l) => l.accountId === ACCOUNT)?.owed).toBe(1200);
+    expect(whatIBoughtNotSettled({ papers: papers.filter((p) => identity.get(p.id)?.accountId === ACCOUNT) }).total).toBe(4334.54);
+    expect(r(bought.total - owed.total)).toBe(3134.54);
   });
 });
 
@@ -457,7 +455,9 @@ describe("the figure a supplier gives us, end to end through supplierBalance", (
         supplier: p.supplier,
         billDate: "2026-09-01",
         amount: p.amount,
+        amountPaid: null,
         status: p.status,
+        superseded: !!(p as { supersededByBillId?: string }).supersededByBillId,
         jobId: null,
         jobName: null,
         invoiceNumber: null,
@@ -470,10 +470,12 @@ describe("the figure a supplier gives us, end to end through supplierBalance", (
     supplierInvoices: [D_OPEN, D_CLOSED],
   };
 
-  it("$1,360.93 never comes back: model B does not subtract payments already inside what they closed", () => {
+  it("$1,360.93 never comes back: the figure is what is open on our bills, and the payments are never subtracted again", () => {
     const balance = supplierBalance(account, TODAY);
     expect(balance.model).toBe("supplier-invoices");
-    expect(balance.owed).toBe(1200);
+    // t1 open; t3 is a duplicate set aside. Their own figure stands beside it.
+    expect(balance.owed).toBe(500);
+    expect(balance.supplierSays?.gross).toBe(1200);
     // What he actually SENT them is still a fact on the screen, it is just not an input here.
     expect(balance.paid).toBe(6000);
   });
@@ -484,9 +486,8 @@ describe("the figure a supplier gives us, end to end through supplierBalance", (
       accounts: [{ accountId: account.id, name: account.name, onAccount: true, owed: balance.owed, model: balance.model }],
       papers: papers.filter((p) => identity.get(p.id)?.accountId === ACCOUNT),
       identity,
-      settledBySupplier: coverage.settledBySupplier,
     });
-    expect(owed.total).toBe(1200);
+    expect(owed.total).toBe(500);
   });
 });
 

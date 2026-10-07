@@ -117,8 +117,6 @@ import { jobTakes } from "@/lib/stock-ledger";
 import { TookFromStock } from "../../materials/took-from-stock";
 import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
-import { readSettledBySupplier } from "@/lib/supplier-owed-read";
-import { shortSupplierName } from "@/lib/supplier-name";
 
 export const dynamic = "force-dynamic";
 
@@ -223,7 +221,7 @@ export default async function JobDetailPage({
         // Bill box would open empty and clear a part somebody had already set — THE PROJECTION LAW.
         .select(
           "id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, scope_category, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)" +
-            (withCorrects ? ", corrects_bill_id" : ""),
+            (withCorrects ? ", corrects_bill_id, amount_paid" : ""),
         )
         .eq("job_id", id)
         // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without
@@ -391,7 +389,6 @@ export default async function JobDetailPage({
     jobStock,
     handClaims,
     abReach,
-    settledSays,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -590,32 +587,12 @@ export default async function JobDetailPage({
           },
         )
       : Promise.resolve(null as { charge: boolean; ret: boolean } | null),
-    // WHAT THE SUPPLIER'S OWN BOOKS SAY ABOUT THESE TICKETS (8a982483). The badge on a bill row is
-    // one expression both screens draw, but only /bills had ever been handed the fact, so a ticket
-    // whose covering supplier paper is closed said "Settled · CED Says" there and "On Account" here -
-    // one ticket described two ways, with nothing on this tab saying the money had already left the
-    // supplier's balance. THE SAME covering walk, never a second copy. Staff only (the Costs tab is).
-    // A lost read says so in words below; it never quietly draws "On Account".
-    viewerIsStaff
-      ? readSettledBySupplier(supabase, j.org_id, (bills ?? []) as any[]).catch((e: unknown) => {
-          reportError("jobs.[id].settledBySupplier", e, { jobId: id });
-          return { settled: new Map<string, string>(), unread: true, failed: ["the suppliers' own papers"] };
-        })
-      : Promise.resolve({ settled: new Map<string, string>(), unread: false, failed: [] as string[] }),
   ]);
 
-  // THE COSTS TAB'S BILL ROWS, CARRYING THE SUPPLIER'S OWN VERDICT (8a982483). The badge is one
-  // expression (billSettledLabel) and this screen drew it already; what it had never been handed was
-  // the FACT, so every ticket here read "On Account" however many closed supplier papers covered it.
-  // The name is the ACCOUNT's, the way /bills names it, so the two rows read the same words.
-  const costBills = ((bills ?? []) as any[]).map((b) => {
-    const says = settledSays.settled.get(String(b.id));
-    return {
-      ...b,
-      settledBySupplier: says !== undefined,
-      settledBySupplierName: says ? shortSupplierName(says) : null,
-    };
-  });
+  // THE COSTS TAB'S BILL ROWS. Since 0383 a bill carries its own number (amount_paid, read above
+  // on the corrections rung): the badge reads what is open, and no second read of the suppliers'
+  // papers is needed to draw it.
+  const costBills = ((bills ?? []) as any[]).map((b) => ({ ...b }));
 
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -1842,7 +1819,6 @@ export default async function JobDetailPage({
               <JobBills
                 jobId={j.id}
                 bills={costBills as any}
-                settledSaysUnread={settledSays.unread}
                 correctionsReady={correctionsReady}
                 pos={(pos ?? []) as any}
                 groups={costGroups}
