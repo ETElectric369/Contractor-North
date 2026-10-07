@@ -70,7 +70,80 @@ export type LedgerBill = {
   /** The supplier invoice numbers the bill's own notes or lines name (readBillInvoice), filled by
    *  the caller that read them. A scanned statement names several. */
   named_numbers?: string[] | null;
+  /**
+   * 0381: this bill CORRECTS an earlier one (the supplier's later paper for the same purchase, filed
+   * as its own bill under it). An original and the corrections under it are ONE PURCHASE here: a
+   * number on any member finds them all, a document covering any member covers them all, and they
+   * are offered once, as the original, at the together total. Every reader that feeds this type
+   * selects the column (same-purchase-readers.test.ts holds them to it).
+   */
+  corrects_bill_id?: string | null;
 };
+
+/**
+ * ONE PURCHASE: a bill and the corrections attached under it (0381), original first. A bill that
+ * carries no correction is a purchase of one. The J-011 shape: 8802-SO-257899 ($613.19) corrected
+ * by 8802-1109100 ($95.99) is one purchase, $709.18, and CED's own copy of 8802-1109100 is that
+ * purchase's paper, never "$95.99 on the books" with the $613.19 ticket still uncovered.
+ */
+export type Purchase = {
+  original: LedgerBill;
+  corrections: LedgerBill[];
+  /** The original and its corrections, original first. */
+  members: LedgerBill[];
+  /** What the purchase comes to: the original and every correction, summed in cents. */
+  amount: number;
+};
+
+const cents = (v: unknown): number => Math.round((Number(v) || 0) * 100);
+
+/**
+ * THE PURCHASES IN A LIST OF BILLS, and which purchase each bill belongs to. Live bills only (a
+ * set-aside copy is in nobody's books). A correction whose original is NOT in the list stands as a
+ * purchase of its own rather than vanishing: a list cut short must never hide a cost.
+ */
+export function purchasesOf(bills: readonly LedgerBill[]): { purchases: Purchase[]; of: Map<string, Purchase> } {
+  const live = bills.filter(isLive);
+  const byId = new Map(live.map((b) => [b.id, b] as const));
+  const under = new Map<string, LedgerBill[]>();
+  const originals: LedgerBill[] = [];
+  for (const b of live) {
+    const of = String(b.corrects_bill_id ?? "");
+    if (of && of !== b.id && byId.has(of)) under.set(of, [...(under.get(of) ?? []), b]);
+    else originals.push(b);
+  }
+  const purchases: Purchase[] = [];
+  const of = new Map<string, Purchase>();
+  for (const original of originals) {
+    const corrections = under.get(original.id) ?? [];
+    const members = [original, ...corrections];
+    const p: Purchase = { original, corrections, members, amount: members.reduce((s, m) => s + cents(m.amount), 0) / 100 };
+    purchases.push(p);
+    for (const m of members) of.set(m.id, p);
+  }
+  return { purchases, of };
+}
+
+/** The purchase one bill is part of; the bill alone when `bills` does not hold it. */
+export function purchaseOf(bill: LedgerBill, bills: readonly LedgerBill[]): Purchase {
+  return purchasesOf(bills).of.get(bill.id) ?? { original: bill, corrections: [], members: [bill], amount: Number(bill.amount) || 0 };
+}
+
+/** Hits grown to whole purchases: a number on any member finds them all, original first, each once. */
+function wholePurchases(hits: readonly LedgerBill[], bills: readonly LedgerBill[], except?: string | null): LedgerBill[] {
+  if (!hits.length) return [];
+  const { of } = purchasesOf(bills);
+  const out: LedgerBill[] = [];
+  const seen = new Set<string>();
+  for (const h of hits) {
+    for (const m of of.get(h.id)?.members ?? [h]) {
+      if (seen.has(m.id) || m.id === except) continue;
+      seen.add(m.id);
+      out.push(m);
+    }
+  }
+  return out;
+}
 
 /** The numbers a bill's own paper names, read the way the /bills page reads them. */
 export function namedNumbersOf(b: { notes?: string | null; bill_line_items?: { description?: string | null }[] | null; line_items?: { description?: string | null }[] | null }): {
@@ -117,7 +190,8 @@ export function billsCarryingNumber(
     if (sameSupplier({ name: who.supplier ?? null, account: who.accountId ?? null }, { name: b.supplier, account: b.supplier_account_id ?? null }, aliases))
       out.push(b);
   }
-  return out;
+  // ONE PURCHASE (0381): the number on a correction finds its original too, and the other way round.
+  return wholePurchases(out, bills, opts.exceptBillId);
 }
 
 /**
@@ -136,7 +210,7 @@ export function billsMaybeCarryingNumber(
   const n = normalizeDocNumber(number);
   if (!n || !isLongNumber(n)) return [];
   const certain = new Set(billsCarryingNumber(number, who, bills, aliases).map((b) => b.id));
-  return bills.filter(
+  const hits = bills.filter(
     (b) =>
       isLive(b) &&
       !certain.has(b.id) &&
@@ -145,6 +219,7 @@ export function billsMaybeCarryingNumber(
         normalizeDocNumber(b.supplier_invoice_number) === n ||
         (b.named_numbers ?? []).some((x) => normalizeDocNumber(x) === n)),
   );
+  return wholePurchases(hits, bills);
 }
 
 /**
@@ -172,7 +247,7 @@ export function billsCarryingLongNumberElsewhere(
   if (!n || !isLongNumber(n)) return [];
   const certain = new Set(billsCarryingNumber(number, who, bills, aliases, opts).map((b) => b.id));
   const mine = who.accountId || accountForSupplier(who.supplier, aliases);
-  return bills.filter((b) => {
+  const hits = bills.filter((b) => {
     if (!isLive(b) || b.id === opts.exceptBillId || certain.has(b.id)) return false;
     const carries =
       normalizeDocNumber(b.bill_number) === n ||
@@ -182,6 +257,7 @@ export function billsCarryingLongNumberElsewhere(
     const theirs = b.supplier_account_id || accountForSupplier(b.supplier, aliases);
     return !(mine && theirs && mine !== theirs);
   });
+  return wholePurchases(hits, bills, opts.exceptBillId);
 }
 
 /** A supplier's own document, as the near-match needs it. */
@@ -207,27 +283,56 @@ export function billsCoveredByDocuments(
   aliases: SupplierAliasIndex | null = null,
 ): Set<string> {
   const covered = new Set<string>();
-  for (const l of links) if (l?.bill_id) covered.add(String(l.bill_id));
+  // A link to any member of a purchase covers the whole purchase (0381): CED's copy of the
+  // correction's paper covers the ticket it corrects.
+  const { of } = purchasesOf(bills);
+  for (const l of links) {
+    if (!l?.bill_id) continue;
+    const id = String(l.bill_id);
+    for (const m of of.get(id)?.members ?? []) covered.add(m.id);
+    covered.add(id);
+  }
   for (const d of docs) {
     for (const b of billsCarryingNumber(d.invoice_number, { accountId: d.supplier_account_id }, bills, aliases)) covered.add(b.id);
   }
   return covered;
 }
 
-/** One bill offered as maybe the same purchase as a supplier document. */
+/** One purchase offered as maybe the same as a supplier document: its ORIGINAL bill, whole. */
 export type SamePurchaseCandidate = {
+  /** The original bill's id (the one a tie links, the one Correct This Bill opens). */
   billId: string;
-  /** The bill carries the document's own number: certain, not a maybe. */
+  /** The purchase carries the document's own number: certain, not a maybe. */
   exact: boolean;
   /** Not exact, but the bill carries this long number under a supplier name on no account yet
    *  (billsMaybeCarryingNumber): a maybe, said as such. */
   otherSpelling?: boolean;
+  /**
+   * THE SAME PURCHASE AT ANOTHER PRICE (0381): not within tolerance, but on the document's account
+   * and job within the days, offered when nothing is within tolerance. The door is Correct This
+   * Bill, never a tie: the paper's total becomes the purchase's, as a correction under the bill.
+   */
+  reprice?: boolean;
+  /** What the purchase comes to: the bill and every correction under it (one bill: its amount). */
+  amount: number;
+  /** What the document says the purchase comes to, on a reprice offer. */
+  paperTotal?: number;
   dollarsOff: number;
   daysApart: number | null;
   jobId: string | null;
-  /** "Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle". */
+  /** "Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle";
+   *  with a correction: "… #8802-SO-257899 corrected by 8802-1109100, $709.18 together, …". */
   label: string;
 };
+
+/** How many purchases at another price are offered at most, closest in money first. */
+export const REPRICE_OFFERS = 3;
+/**
+ * A purchase at another price is the same order of money: the paper within half to twice the
+ * purchase (the J-011 shape is $613.19 against $709.18). A $44.44 ticket is never "the same
+ * purchase" as a $709.18 paper, whatever the job (skeptic review of cn-v1066).
+ */
+export const REPRICE_RATIO = 2;
 
 /** "Within a few dollars and days": the counter ticket and CED's invoice for it are the same
  *  total (the tax is on both), a few days apart; a scan that was photographed late, or an invoice
@@ -257,11 +362,19 @@ function daysBetween(a: string | null, b: string | null): number | null {
 
 const money = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export function billLabel(b: LedgerBill): string {
-  const amount = Number(b.amount);
+/**
+ * "Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle".
+ * With the corrections under it (0381), the purchase whole: "… #8802-SO-257899 corrected by
+ * 8802-1109100, $709.18 together, 2026-09-24, on J-011 13897 Honeysuckle".
+ */
+export function billLabel(b: LedgerBill, corrections: readonly LedgerBill[] = []): string {
+  const amount = corrections.length ? (cents(b.amount) + corrections.reduce((s, c) => s + cents(c.amount), 0)) / 100 : Number(b.amount);
   const job = b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.jobs?.name ? b.jobs.name : b.job_id ? "a job" : "business costs";
   const number = b.bill_number || b.supplier_invoice_number;
-  return `${b.supplier ?? "A bill"}${number ? ` #${number}` : ""}${Number.isFinite(amount) ? `, ${money(amount)}` : ""}${ymd(b.bill_date) ? `, ${ymd(b.bill_date)}` : ""}, on ${job}`;
+  const by = corrections.map((c) => c.bill_number || c.supplier_invoice_number || "a correction");
+  return `${b.supplier ?? "A bill"}${number ? ` #${number}` : ""}${by.length ? ` corrected by ${by.join(", ")}` : ""}${
+    Number.isFinite(amount) ? `, ${money(amount)}${by.length ? " together" : ""}` : ""
+  }${ymd(b.bill_date) ? `, ${ymd(b.bill_date)}` : ""}, on ${job}`;
 }
 
 /**
@@ -275,6 +388,17 @@ export function billLabel(b: LedgerBill): string {
  *     has one (a no-job document is offered the account's bills on any job, or none), within
  *     samePurchaseTolerance of its total (never a $0.00 bill) and SAME_PURCHASE_DAYS of its date either side.
  *
+ * ONE PURCHASE, WHOLE (0381): a bill and the corrections under it are weighed together, at the
+ * together total, and offered once as the original. A correction is never offered on its own.
+ *
+ * THE SAME PURCHASE AT ANOTHER PRICE (reprice, Erik 2026-10-04): the counter priced a fixture at
+ * $0.00 and CED's invoice for the same purchase came to $95.99 more. Nothing within tolerance, so
+ * the card offered only Record It As A Bill: a second full bill on the job, billed to the customer
+ * twice on T&M. Now, when NO purchase is within tolerance and the document has a job (filed on
+ * one, or `namedJobId`, the job its printed label names by the exact rule), the uncovered
+ * purchases on that account and job within the days are offered, at most REPRICE_OFFERS, closest
+ * in money first, and the door is Correct This Bill. Still a suggestion: a person decides.
+ *
  * Ranked: exact first, then the smallest difference in money, then in days. Nothing is picked.
  */
 export function samePurchaseCandidates(
@@ -282,57 +406,79 @@ export function samePurchaseCandidates(
   bills: readonly LedgerBill[],
   covered: ReadonlySet<string>,
   aliases: SupplierAliasIndex | null = null,
+  opts: { namedJobId?: string | null } = {},
 ): SamePurchaseCandidate[] {
   const accountId = doc.supplier_account_id ?? null;
   const total = Number(doc.total);
   const docDate = ymd(doc.invoice_date);
   const out: SamePurchaseCandidate[] = [];
+  const reprice: SamePurchaseCandidate[] = [];
   const exactIds = new Set(billsCarryingNumber(doc.invoice_number, { accountId }, bills, aliases).map((b) => b.id));
   const otherSpellingIds = new Set(billsMaybeCarryingNumber(doc.invoice_number, { accountId }, bills, aliases).map((b) => b.id));
-  for (const b of bills) {
-    if (!isLive(b)) continue;
-    const amount = Number(b.amount);
-    const dollarsOff = Number.isFinite(amount) && Number.isFinite(total) ? Math.round(Math.abs(amount - total) * 100) / 100 : Infinity;
+  const repriceJob = doc.job_id ?? opts.namedJobId ?? null;
+  for (const p of purchasesOf(bills).purchases) {
+    const b = p.original;
+    const amount = p.amount;
+    const dollarsOff = Number.isFinite(total) ? Math.round(Math.abs(amount - total) * 100) / 100 : Infinity;
     const daysApart = daysBetween(ymd(b.bill_date), docDate);
+    const any = (set: ReadonlySet<string>) => p.members.some((m) => set.has(m.id));
     const candidate = (exact: boolean, otherSpelling = false): SamePurchaseCandidate => ({
       billId: b.id,
       exact,
       ...(otherSpelling ? { otherSpelling: true } : {}),
+      amount,
       dollarsOff: Number.isFinite(dollarsOff) ? dollarsOff : 0,
       daysApart,
       jobId: b.job_id ?? null,
-      label: billLabel(b),
+      label: billLabel(b, p.corrections),
     });
-    if (exactIds.has(b.id)) {
+    if (any(exactIds)) {
       out.push(candidate(true));
       continue;
     }
-    if (otherSpellingIds.has(b.id)) {
-      if (!b.is_statement && !covered.has(b.id)) out.push(candidate(false, true));
+    if (any(otherSpellingIds)) {
+      if (!b.is_statement && !any(covered)) out.push(candidate(false, true));
       continue;
     }
     if (!accountId) continue;
     const billAccount = b.supplier_account_id || accountForSupplier(b.supplier, aliases);
     if (billAccount !== accountId) continue;
-    if (b.is_statement || covered.has(b.id)) continue;
+    if (b.is_statement || any(covered)) continue;
     if (doc.job_id && b.job_id !== doc.job_id) continue;
     if (!(Math.abs(amount) > 0.005)) continue;
-    if (!(dollarsOff <= samePurchaseTolerance(total))) continue;
     if (daysApart !== null && daysApart > SAME_PURCHASE_DAYS) continue;
-    out.push(candidate(false));
+    if (dollarsOff <= samePurchaseTolerance(total)) {
+      out.push(candidate(false));
+      continue;
+    }
+    // Only a real purchase (above zero), a dated paper (an undated one is not "within the days"),
+    // and the same order of money (REPRICE_RATIO either way).
+    if (
+      repriceJob &&
+      b.job_id === repriceJob &&
+      daysApart !== null &&
+      amount > 0.005 &&
+      Number.isFinite(total) &&
+      total > 0.005 &&
+      total <= amount * REPRICE_RATIO &&
+      amount <= total * REPRICE_RATIO
+    ) {
+      reprice.push({ ...candidate(false), reprice: true, paperTotal: total });
+    }
   }
-  return out.sort(
-    (a, b) =>
-      Number(b.exact) - Number(a.exact) ||
-      Number(!!b.otherSpelling) - Number(!!a.otherSpelling) ||
-      a.dollarsOff - b.dollarsOff ||
-      (a.daysApart ?? SAME_PURCHASE_DAYS + 1) - (b.daysApart ?? SAME_PURCHASE_DAYS + 1),
-  );
+  const byMoneyThenDays = (a: SamePurchaseCandidate, b: SamePurchaseCandidate) =>
+    a.dollarsOff - b.dollarsOff || (a.daysApart ?? SAME_PURCHASE_DAYS + 1) - (b.daysApart ?? SAME_PURCHASE_DAYS + 1);
+  if (!out.length) return reprice.sort(byMoneyThenDays).slice(0, REPRICE_OFFERS);
+  return out.sort((a, b) => Number(b.exact) - Number(a.exact) || Number(!!b.otherSpelling) - Number(!!a.otherSpelling) || byMoneyThenDays(a, b));
 }
 
 /** The sentence a candidate is offered with, the same on the card and in a refusal. */
 export function samePurchaseSentence(c: SamePurchaseCandidate): string {
   if (c.exact) return `Already on the books with this number: ${c.label}.`;
+  if (c.reprice) {
+    const gap = cents(c.paperTotal) - cents(c.amount);
+    return `Maybe the same purchase at another price: ${c.label}. This paper says ${money(Number(c.paperTotal) || 0)} (${gap < 0 ? "−" : "+"}${money(Math.abs(gap) / 100)}). Correct This Bill puts the difference under it as its own bill.`;
+  }
   if (c.otherSpelling)
     return `Maybe already on the books: ${c.label}. It carries this number, under a supplier name that is on no supplier account yet.`;
   const days = c.daysApart === null ? "" : c.daysApart === 0 ? ", the same day" : `, ${c.daysApart} day${c.daysApart === 1 ? "" : "s"} apart`;

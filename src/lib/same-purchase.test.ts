@@ -127,10 +127,12 @@ describe("samePurchaseCandidates: the counter ticket and CED's invoice for it", 
     expect(samePurchaseCandidates(cedInvoice, [{ ...paperB, is_statement: true }], new Set(), aliases)).toEqual([]);
   });
 
-  it("only within a few dollars and days", () => {
-    expect(samePurchaseCandidates(cedInvoice, [{ ...paperB, amount: "330.00" }], new Set(), aliases)).toEqual([]);
+  it("only within a few dollars and days (outside the dollars, on the same job, it is a reprice offer, never a tie)", () => {
+    const off = samePurchaseCandidates(cedInvoice, [{ ...paperB, amount: "330.00" }], new Set(), aliases);
+    expect(off).toEqual([expect.objectContaining({ billId: "e2380fc9", reprice: true, exact: false })]);
     expect(samePurchaseCandidates(cedInvoice, [{ ...paperB, bill_date: "2026-07-01" }], new Set(), aliases)).toEqual([]);
-    expect(samePurchaseCandidates(cedInvoice, [{ ...paperB, amount: "321.00" }], new Set(), aliases)).toHaveLength(1);
+    expect(samePurchaseCandidates(cedInvoice, [{ ...paperB, amount: "321.00" }], new Set(), aliases)).toEqual([expect.objectContaining({ billId: "e2380fc9", exact: false })]);
+    expect(samePurchaseCandidates(cedInvoice, [{ ...paperB, amount: "321.00" }], new Set(), aliases)[0].reprice).toBeUndefined();
   });
 
   it("a $0.00 placeholder is never 'maybe the same purchase', and a small invoice is held to 3% (the live replay)", () => {
@@ -138,8 +140,9 @@ describe("samePurchaseCandidates: the counter ticket and CED's invoice for it", 
     const small: SupplierDoc = { ...cedInvoice, id: "si-small", invoice_number: "8802-1105997", job_id: "j13", total: "2.30", invoice_date: "2026-08-19" };
     const zero: LedgerBill = { ...paperB, id: "zero", bill_number: null, amount: "0.00", job_id: "j13", bill_date: "2026-08-19" };
     expect(samePurchaseCandidates(small, [zero], new Set(), aliases)).toEqual([]);
-    expect(samePurchaseCandidates(small, [{ ...zero, amount: "4.00" }], new Set(), aliases)).toEqual([]);
-    expect(samePurchaseCandidates(small, [{ ...zero, amount: "2.30" }], new Set(), aliases)).toHaveLength(1);
+    // $4.00 against $2.30 is outside 3%: not a tie; on the same job it is offered as another price.
+    expect(samePurchaseCandidates(small, [{ ...zero, amount: "4.00" }], new Set(), aliases)).toEqual([expect.objectContaining({ billId: "zero", reprice: true })]);
+    expect(samePurchaseCandidates(small, [{ ...zero, amount: "2.30" }], new Set(), aliases)).toEqual([expect.objectContaining({ billId: "zero", exact: false })]);
   });
 
   it("a bill carrying the invoice's own number is certain, and ranked first", () => {
@@ -182,5 +185,117 @@ describe("the same long number under another spelling is offered, never assumed"
   it("not when a document already covers it, or it is a statement", () => {
     expect(samePurchaseCandidates(doc, [unfiled], new Set(["tray-1"]), aliases)).toEqual([]);
     expect(samePurchaseCandidates(doc, [{ ...unfiled, is_statement: true }], new Set(), aliases)).toEqual([]);
+  });
+});
+
+/**
+ * ONE PURCHASE, WHOLE (0381, task 2 2026-10-07). The J-011 shape, scrubbed: the counter ticket
+ * 8802-SO-257899 ($613.19) and the correction 8802-1109100 ($95.99) filed under it. CED's own copy
+ * of 8802-1109100 ($709.18) is that purchase's paper.
+ */
+describe("a bill and the corrections under it are one purchase", () => {
+  const ticket: LedgerBill = { ...paperB, id: "ticket", bill_number: "8802-SO-257899", amount: "613.19", bill_date: "2026-09-24" };
+  const correction: LedgerBill = { ...paperB, id: "corr", bill_number: "8802-1109100", amount: "95.99", bill_date: "2026-10-07", corrects_bill_id: "ticket" };
+  const other: LedgerBill = { ...paperB, id: "other", bill_number: "8802-SO-257900", amount: "95.99", bill_date: "2026-10-06" };
+  const cedCopy: SupplierDoc = { id: "si-copy", invoice_number: "8802-1109100", supplier_account_id: CED, job_id: null, total: "709.18", invoice_date: "2026-10-07" };
+
+  it("the number on the correction finds the ticket too, original first; and the ticket's number finds the correction", () => {
+    expect(billsCarryingNumber("8802-1109100", { accountId: CED }, [other, correction, ticket], aliases).map((b) => b.id)).toEqual(["ticket", "corr"]);
+    expect(billsCarryingNumber("8802-SO-257899", { accountId: CED }, [other, correction, ticket], aliases).map((b) => b.id)).toEqual(["ticket", "corr"]);
+  });
+
+  it("CED's copy of the correction's paper covers the whole purchase, and so does a link to either member", () => {
+    expect([...billsCoveredByDocuments([ticket, correction, other], [cedCopy], [], aliases)].sort()).toEqual(["corr", "ticket"]);
+    expect([...billsCoveredByDocuments([ticket, correction, other], [], [{ bill_id: "corr", supplier_invoice_id: "si-x" }], aliases)].sort()).toEqual(["corr", "ticket"]);
+    expect([...billsCoveredByDocuments([ticket, correction, other], [], [{ bill_id: "ticket", supplier_invoice_id: "si-x" }], aliases)].sort()).toEqual(["corr", "ticket"]);
+  });
+
+  it("is offered once, as the original, at the together total, and the label says so", () => {
+    const c = samePurchaseCandidates(cedCopy, [other, correction, ticket], new Set(), aliases);
+    expect(c.map((x) => [x.billId, x.exact, x.amount])).toEqual([["ticket", true, 709.18]]);
+    expect(c[0].label).toBe("Consolidated Electrical Dist. #8802-SO-257899 corrected by 8802-1109100, $709.18 together, 2026-09-24, on J-011 13897 Honeysuckle");
+    expect(samePurchaseSentence(c[0])).toBe(`Already on the books with this number: ${c[0].label}.`);
+  });
+
+  it("a correction is never a candidate on its own: a $95.99 paper on the job is offered the other $95.99 ticket, not the correction", () => {
+    const near: SupplierDoc = { ...cedCopy, id: "si-near", invoice_number: "8802-1109200", total: "95.99", job_id: J011 };
+    expect(samePurchaseCandidates(near, [ticket, correction, other], new Set(), aliases).map((x) => x.billId)).toEqual(["other"]);
+  });
+
+  it("the tolerance is measured against the together total", () => {
+    const paper: SupplierDoc = { ...cedCopy, id: "si-t", invoice_number: "8802-1109300", total: "709.18", job_id: J011 };
+    expect(samePurchaseCandidates(paper, [ticket, correction], new Set(), aliases).map((x) => [x.billId, x.exact, x.dollarsOff])).toEqual([["ticket", false, 0]]);
+    // $613.19 alone is no longer the purchase's figure: not a tie (a reprice offer at most).
+    expect(samePurchaseCandidates({ ...paper, total: "613.19" }, [ticket, correction], new Set(), aliases).filter((x) => !x.reprice)).toEqual([]);
+  });
+
+  it("a correction whose original the list does not hold stands alone rather than vanishing", () => {
+    expect(billsCarryingNumber("8802-1109100", { accountId: CED }, [correction], aliases).map((b) => b.id)).toEqual(["corr"]);
+    expect(samePurchaseCandidates(cedCopy, [correction], new Set(), aliases).map((x) => [x.billId, x.amount])).toEqual([["corr", 95.99]]);
+  });
+
+  it("a set-aside copy (0271) is in no purchase", () => {
+    expect(billsCarryingNumber("8802-1109100", { accountId: CED }, [ticket, { ...correction, superseded_by_bill_id: "keeper" }], aliases)).toEqual([]);
+  });
+});
+
+/**
+ * THE SAME PURCHASE AT ANOTHER PRICE (Erik, 2026-10-04: the counter priced a fixture at $0.00 and
+ * CED's invoice came to $95.99 more). Nothing within tolerance used to mean Record It As A Bill was
+ * the only door: a second full bill on the job. Now the uncovered tickets on that job are offered,
+ * and the door is Correct This Bill.
+ */
+describe("the same purchase at another price: a reprice offer, never a tie", () => {
+  const ticket: LedgerBill = { ...paperB, id: "ticket", bill_number: "8802-SO-257899", amount: "613.19", bill_date: "2026-09-24" };
+  const second: LedgerBill = { ...paperB, id: "second", bill_number: "8802-SO-257901", amount: "400.00", bill_date: "2026-09-25" };
+  const third: LedgerBill = { ...paperB, id: "third", bill_number: "8802-SO-257902", amount: "380.00", bill_date: "2026-09-26" };
+  const fourth: LedgerBill = { ...paperB, id: "fourth", bill_number: "8802-SO-257903", amount: "360.00", bill_date: "2026-09-27" };
+  const tiny: LedgerBill = { ...paperB, id: "tiny", bill_number: "8802-SO-257906", amount: "44.44", bill_date: "2026-09-26" };
+  const elsewhere: LedgerBill = { ...paperB, id: "elsewhere", bill_number: "8802-SO-257904", amount: "700.00", bill_date: "2026-10-01", job_id: "job-other" };
+  /** CED's invoice for the ticket, $95.99 more, filed on no job yet; its printed label names J-011. */
+  const invoice: SupplierDoc = { id: "si-inv", invoice_number: "8802-1109100", supplier_account_id: CED, job_id: null, total: "709.18", invoice_date: "2026-10-07" };
+  const all = [ticket, second, third, fourth, tiny, elsewhere];
+
+  it("offers the uncovered tickets on the job the paper names, closest in money first, at most three, and says the gap", () => {
+    const c = samePurchaseCandidates(invoice, all, new Set(), aliases, { namedJobId: J011 });
+    expect(c.map((x) => [x.billId, x.reprice, x.amount, x.paperTotal, x.dollarsOff])).toEqual([
+      ["ticket", true, 613.19, 709.18, 95.99],
+      ["second", true, 400, 709.18, 309.18],
+      ["third", true, 380, 709.18, 329.18],
+    ]);
+    expect(samePurchaseSentence(c[0])).toBe(
+      "Maybe the same purchase at another price: Consolidated Electrical Dist. #8802-SO-257899, $613.19, 2026-09-24, on J-011 13897 Honeysuckle. This paper says $709.18 (+$95.99). Correct This Bill puts the difference under it as its own bill.",
+    );
+  });
+
+  it("a paper filed on the job gets the same offer; a paper that names no job and is filed on none gets none", () => {
+    expect(samePurchaseCandidates({ ...invoice, job_id: J011 }, all, new Set(), aliases).map((x) => x.billId)).toEqual(["ticket", "second", "third"]);
+    expect(samePurchaseCandidates(invoice, all, new Set(), aliases)).toEqual([]);
+  });
+
+  it("never while anything is within tolerance, and never a covered ticket, a statement, another account, or one past the days", () => {
+    const tie: LedgerBill = { ...paperB, id: "tie", bill_number: "8802-SO-257905", amount: "709.18", bill_date: "2026-10-06" };
+    expect(samePurchaseCandidates(invoice, [ticket, tie], new Set(), aliases, { namedJobId: J011 }).map((x) => [x.billId, !!x.reprice])).toEqual([["tie", false]]);
+    expect(samePurchaseCandidates(invoice, [ticket], new Set(["ticket"]), aliases, { namedJobId: J011 })).toEqual([]);
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, is_statement: true }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, supplier: "Home Depot", supplier_account_id: "acct-hd" }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, bill_date: "2026-07-01" }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+  });
+
+  it("a paper for less says a credit", () => {
+    const less: SupplierDoc = { ...invoice, total: "561.61" };
+    const c = samePurchaseCandidates(less, [ticket], new Set(), aliases, { namedJobId: J011 });
+    expect(samePurchaseSentence(c[0])).toContain("This paper says $561.61 (−$51.58).");
+  });
+
+  it("the same order of money only: never a $44.44 ticket for a $709.18 paper, never a credit bill, never an undated paper", () => {
+    expect(samePurchaseCandidates(invoice, [tiny], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "-50.00" }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+    expect(samePurchaseCandidates({ ...invoice, invoice_date: null }, [ticket], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+    // Half and twice are the edges, either way round.
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "354.59" }], new Set(), aliases, { namedJobId: J011 })).toHaveLength(1);
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "354.58" }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "1418.36" }], new Set(), aliases, { namedJobId: J011 })).toHaveLength(1);
+    expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "1418.37" }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
   });
 });

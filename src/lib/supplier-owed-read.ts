@@ -198,7 +198,7 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
     supabase
       .from("bills")
       .select(
-        "id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, status, bill_date, job_id, is_statement, superseded_by_bill_id, notes, bill_line_items(description)",
+        "id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, status, bill_date, job_id, is_statement, superseded_by_bill_id, corrects_bill_id, notes, bill_line_items(description)",
       )
       .eq("org_id", orgId)
       .is("superseded_by_bill_id", null)

@@ -111,6 +111,9 @@ export const billActions: Record<string, ActionDef> = {
       bill_date: z.string().nullable().optional(),
       notes: z.string().nullable().optional(),
       lines: z.array(z.object({ description: z.string(), amount: z.number().nullable().optional() })).min(1),
+      // The supplier's own document the paper IS (task 2): the server checks the document is offered
+      // this bill and that the number and total are its own, then ties the correction to it.
+      supplier_invoice_id: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -122,6 +125,7 @@ export const billActions: Record<string, ActionDef> = {
         paperTotal: i.paper_total,
         billDate: i.bill_date ?? null,
         notes: i.notes ?? null,
+        supplierInvoiceId: i.supplier_invoice_id ?? null,
         lines: (i.lines as { description: string; amount?: number | null }[]).map((l) => ({ description: l.description, amount: l.amount ?? null })),
       });
       // ANNOUNCE THE DEED: the sentence is what the database now holds, said back by the surface.

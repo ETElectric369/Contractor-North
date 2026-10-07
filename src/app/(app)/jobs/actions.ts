@@ -38,7 +38,10 @@ import { scopeAfterJobMove, scopeForWrite, type BillScopeAnswer } from "@/lib/bi
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { restampLotsForBill } from "@/lib/stock-ledger";
 import { exactAccountFor, isMissingColumnError, papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
-import { CORRECTIONS_NOT_READY, billLabel, correctionOfCorrectionRefusal, planBillCorrection, setAsideOriginalRefusal } from "@/lib/bill-correction";
+import { CORRECTIONS_NOT_READY, billLabel, correctionOfCorrectionRefusal, planBillCorrection, setAsideOriginalRefusal, toCents } from "@/lib/bill-correction";
+import { normalizeDocNumber, SAME_PURCHASE_DAYS } from "@/lib/same-purchase";
+import { samePurchaseFor } from "@/app/(app)/bills/same-purchase-read";
+import type { CorrectableBill } from "@/components/correct-bill-modal";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -1803,6 +1806,14 @@ export async function correctBill(input: {
   notes?: string | null;
   /** What the difference is for. A line with no amount takes what is left of it. */
   lines: { description: string; amount?: number | null }[];
+  /**
+   * THE SUPPLIER'S OWN DOCUMENT THE PAPER IS (task 2, 2026-10-07: Correct This Bill from the
+   * supplier card). Read here, never trusted from the client: it must be an invoice on this
+   * company that the one reading every door uses (samePurchaseFor) offers THIS bill, and the typed
+   * number and total must be the document's own. The correction is then tied to it
+   * (bill_supplier_invoices), so the document leaves Not Recorded Yet.
+   */
+  supplierInvoiceId?: string | null;
 }): Promise<Result & { id?: string; sentence?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1848,6 +1859,80 @@ export async function correctBill(input: {
   const sameKey = (n: unknown) => String(n ?? "").trim().toLowerCase();
   if (paperNumber && under.some((u) => sameKey(u.bill_number) === sameKey(paperNumber))) {
     return { ok: false, error: `${paperNumber} is already attached to ${billLabel(o.bill_number)}. Nothing was attached.` };
+  }
+
+  // THE SUPPLIER'S OWN PAPER, FROM THE CARD (task 2): read here, and held to the reading the card
+  // offered it with. An invoice on this company; offered THIS bill by samePurchaseFor (the same
+  // number, a near total, or the same purchase at another price, on this account and job); and the
+  // number and total typed are the paper's own, so the correction's row IS that paper.
+  let paper: { id: string; number: string; jobId: string | null } | null = null;
+  const supplierInvoiceId = String(input.supplierInvoiceId ?? "").trim();
+  if (supplierInvoiceId) {
+    const { data: doc, error: docErr } = await supabase
+      .from("supplier_invoices")
+      .select("id, invoice_number, kind, invoice_date, job_id, job_name_raw, supplier_account_id, total")
+      .eq("org_id", orgId)
+      .eq("id", supplierInvoiceId)
+      .maybeSingle();
+    if (docErr) {
+      reportError("jobs.correctBill.paper", docErr, { billId: o.id, supplierInvoiceId });
+      return { ok: false, error: "Couldn't read the supplier's paper just now, so nothing was attached. Try again in a moment." };
+    }
+    if (!doc) return { ok: false, error: "That supplier paper isn't here anymore. Reload the page. Nothing was attached." };
+    const d = doc as any;
+    const docNumber = String(d.invoice_number ?? "").trim();
+    if (String(d.kind ?? "invoice") !== "invoice") {
+      return { ok: false, error: `${docNumber || "That paper"} isn't a purchase, so it corrects nothing. Nothing was attached.` };
+    }
+    // ALREADY TIED TO A BILL (0277: one link per document): the paper is some purchase's already,
+    // tied from another screen since the card was drawn. A second record of it under this bill
+    // would be the same money twice.
+    const { data: tiedRows, error: tiedErr } = await supabase
+      .from("bill_supplier_invoices")
+      .select("bill_id, bills(bill_number, job_id, jobs(job_number, name))")
+      .eq("org_id", orgId)
+      .eq("supplier_invoice_id", supplierInvoiceId)
+      .limit(1);
+    if (tiedErr) {
+      reportError("jobs.correctBill.tied", tiedErr, { billId: o.id, supplierInvoiceId });
+      return { ok: false, error: "Couldn't check whether the supplier's paper is already tied to a bill, so nothing was attached. Try again in a moment." };
+    }
+    const tied = (tiedRows?.[0] as any)?.bills;
+    if (tiedRows?.length) {
+      const tiedJob = tied?.jobs ? jobLabelWithNumber(Array.isArray(tied.jobs) ? tied.jobs[0] : tied.jobs) : tied?.job_id ? "a job" : "business costs";
+      return {
+        ok: false,
+        error: `${docNumber} is already tied to ${billLabel(tied?.bill_number)} on ${tiedJob}, so it corrects nothing here. Nothing was attached. Reload the page.`,
+      };
+    }
+    const found = await samePurchaseFor(supabase, orgId, {
+      id: String(d.id),
+      invoice_number: d.invoice_number ?? null,
+      supplier_account_id: d.supplier_account_id ?? null,
+      job_id: d.job_id ?? null,
+      job_name_raw: d.job_name_raw ?? null,
+      total: d.total ?? null,
+      invoice_date: d.invoice_date ?? null,
+    });
+    if (!found) return { ok: false, error: `Couldn't check whether ${docNumber} could be ${billLabel(o.bill_number)}, so nothing was attached. Try again.` };
+    if (!found.candidates.some((c) => c.billId === o.id)) {
+      return {
+        ok: false,
+        error: `${docNumber} isn't a paper ${billLabel(o.bill_number)} could be: not the same account and job, or more than ${SAME_PURCHASE_DAYS} days apart. Nothing was attached. Reload the page: the card may have changed.`,
+      };
+    }
+    // The box holds the paper's own number and total, read-only; a mismatch means the paper changed
+    // under the box (re-imported), so the way out is a fresh box.
+    if (normalizeDocNumber(paperNumber) !== normalizeDocNumber(docNumber)) {
+      return { ok: false, error: `Paper Number must be the number on the supplier's paper, ${docNumber}. Nothing was attached. Reload the page and open Correct This Bill again.` };
+    }
+    if (toCents(input.paperTotal) !== toCents(d.total)) {
+      return {
+        ok: false,
+        error: `Paper Total must be what the supplier's paper says, ${formatCurrency(Number(d.total) || 0)}. Nothing was attached. Reload the page and open Correct This Bill again.`,
+      };
+    }
+    paper = { id: String(d.id), number: docNumber, jobId: d.job_id ?? null };
   }
   const byOrder = (a: any, b: any) => Number(a?.sort_order ?? 0) - Number(b?.sort_order ?? 0);
   const lineOf = (l: any) => ({ description: l?.description ?? null, amount: l?.amount ?? null, billable: l?.billable ?? null, category: l?.category ?? null });
@@ -1937,10 +2022,97 @@ export async function correctBill(input: {
     return { ok: false, error: "The correction's lines didn't save, so nothing was attached. Try again in a moment." };
   }
 
+  // THE PAPER IS TIED TO ITS CORRECTION (bill_supplier_invoices, 0273/0277): a link to any member
+  // covers the whole purchase (same-purchase.ts), so the document leaves Not Recorded Yet. NOTHING
+  // HALF-DONE: a link that does not land (the paper tied elsewhere in the same breath, 0277's one
+  // link per document) takes the correction back off, the way its lines failing does; a correction
+  // standing for a paper another bill holds is one purchase counted twice. The paper takes the job
+  // its purchase is on when it had none, as Put It On would have.
+  if (paper) {
+    const { data: joined, error: joinErr } = await supabase
+      .from("bill_supplier_invoices")
+      .insert({ org_id: orgId, bill_id: newId, supplier_invoice_id: paper.id })
+      .select("id");
+    if (joinErr || !joined?.length) {
+      reportError("jobs.correctBill.tie", joinErr ?? new Error("tie returned no row"), { billId: newId, supplierInvoiceId: paper.id });
+      const { error: linesGoneErr } = await supabase.from("bill_line_items").delete().eq("bill_id", newId);
+      const { data: gone, error: goneErr } = linesGoneErr ? { data: null, error: linesGoneErr } : await supabase.from("bills").delete().eq("org_id", orgId).eq("id", newId).select("id");
+      if (goneErr || !gone?.length) {
+        reportError("jobs.correctBill.tieUndo", goneErr ?? new Error("correction row did not come back off"), { billId: newId });
+        return {
+          ok: false,
+          error: `${paper.number} couldn't be tied to its correction, and the correction couldn't be taken back off. Delete the ${plan.row.bill_number} correction under ${billLabel(o.bill_number)}, then try again.`,
+        };
+      }
+      return {
+        ok: false,
+        error: `${paper.number} couldn't be tied to the correction (it may have been tied to another bill just now), so the correction was taken back off. Nothing was attached. Reload the page.`,
+      };
+    }
+    if (!paper.jobId && o.job_id) {
+      const { error: fileErr } = await supabase.from("supplier_invoices").update({ job_id: o.job_id }).eq("org_id", orgId).eq("id", paper.id).is("job_id", null).select("id");
+      if (fileErr) reportError("jobs.correctBill.paperJob", fileErr, { supplierInvoiceId: paper.id });
+    }
+    revalidatePath("/planner"); // My Day's supplier cards
+  }
+
   if (o.job_id) revalidatePath(`/jobs/${o.job_id}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // a correction moves job cost and profit
   return { ok: true, id: newId, sentence: plan.sentence };
+}
+
+/**
+ * THE BILL CORRECT THIS BILL OPENS, read for a door that holds only its id (the supplier card's
+ * "maybe the same purchase at another price" offer): the bill as the box needs it, its lines and
+ * the corrections already under it, and nothing more. Staff only, org-pinned. A correction or a
+ * set-aside copy is refused in the database's own words, as the box's Attach would be.
+ */
+export async function correctableBill(billId: string): Promise<{ ok: true; bill: CorrectableBill } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error ?? "Sign in again to open this bill.") };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const supabase = ctx.supabase;
+  const id = String(billId ?? "").trim();
+  if (!id) return { ok: false, error: "Couldn't tell which bill you meant." };
+  const [{ data: row, error }, { data: underRows, error: underErr }] = await Promise.all([
+    supabase
+      .from("bills")
+      .select("id, supplier, amount, bill_number, supplier_invoice_number, bill_date, corrects_bill_id, superseded_by_bill_id, bill_line_items(description, amount, billable, category, sort_order)")
+      .eq("org_id", ctx.orgId)
+      .eq("id", id)
+      .maybeSingle(),
+    supabase.from("bills").select("id, bill_number, amount, bill_line_items(description, amount, billable, category, sort_order)").eq("org_id", ctx.orgId).eq("corrects_bill_id", id).limit(50),
+  ]);
+  if (error || underErr) {
+    if (isMissingColumnError(error ?? underErr)) return { ok: false, error: CORRECTIONS_NOT_READY };
+    reportError("jobs.correctableBill.read", error ?? underErr, { billId: id });
+    return { ok: false, error: "Couldn't read that bill just now. Try again in a moment." };
+  }
+  if (!row) return { ok: false, error: "That bill isn't here, or this login can't see it." };
+  const b = row as any;
+  if (b.corrects_bill_id) return { ok: false, error: correctionOfCorrectionRefusal(b.bill_number) };
+  if (b.superseded_by_bill_id) return { ok: false, error: setAsideOriginalRefusal(b.bill_number) };
+  const byOrder = (x: any, y: any) => Number(x?.sort_order ?? 0) - Number(y?.sort_order ?? 0);
+  const under = (underRows ?? []) as any[];
+  const linesOf = (x: any) =>
+    [...((x?.bill_line_items ?? []) as any[])]
+      .sort(byOrder)
+      .map((l) => ({ description: l?.description ?? null, amount: Number(l?.amount) || 0, billable: l?.billable ?? null, category: l?.category ?? null }));
+  return {
+    ok: true,
+    bill: {
+      id: String(b.id),
+      supplier: String(b.supplier ?? "").trim() || "A bill",
+      amount: Number(b.amount) || 0,
+      bill_number: b.bill_number ?? null,
+      // The number the row prints: typed, or the one Record It As A Bill stored.
+      shownNumber: b.bill_number ?? b.supplier_invoice_number ?? null,
+      bill_date: b.bill_date ?? null,
+      lines: [b, ...under].flatMap(linesOf),
+      corrections: under.map((u) => ({ billNumber: u.bill_number ?? null, amount: Number(u.amount) || 0 })),
+    },
+  };
 }
 
 /**

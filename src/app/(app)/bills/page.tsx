@@ -694,6 +694,9 @@ export default async function BillsPage({
     // the unfiled pile, and was counted under a heading that said "Owed" - which is the mechanical
     // half of 8a982483.
     accountRows: (accountRows ?? []) as any[],
+    // The exact "the paper names this job" rule (task 2): a paper filed on no job is offered a
+    // purchase at another price on the job its printed label names.
+    mark: markCtx,
   });
   const documentsOf = new Map<string, SupplierDocumentRow[]>();
   for (const row of supplierDocuments) {
@@ -904,6 +907,9 @@ export default async function BillsPage({
           accounts: ((accountRows ?? []) as any[]).map((a) => ({ id: String(a.id), name: a.name ?? null })),
           today,
           tz: orgTz,
+          // The card asks the exact rule first ("The paper names J-011"); the scored guess answers
+          // only where it finds nothing (task 2: one rule for one question).
+          mark: markCtx,
           shopStock,
         });
   // Already Billed On J-010 on the cards (0357), from the reading the ledger already made; a card's

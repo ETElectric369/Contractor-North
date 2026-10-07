@@ -1667,6 +1667,8 @@ export function supplierDocCoverage(docs: any[], bills: any[], identity?: Readon
     bill_date: b.bill_date ?? null,
     job_id: b.job_id ?? null,
     superseded_by_bill_id: null,
+    // 0381: a correction and its original are one purchase, covered together (same-purchase.ts).
+    corrects_bill_id: b.corrects_bill_id ?? null,
     named_numbers: namedNumbersOf({ notes: b.notes ?? null, bill_line_items: b.bill_line_items ?? null }).numbers,
   }));
   /** The account on a row THIS function built above, which is already resolved (see `accountOf`).
@@ -2046,7 +2048,7 @@ async function readBills(supabase: any): Promise<{ rows: any[]; problem: string 
   // numbers a bill carries (bill_number, supplier_invoice_number, the ones named on its notes and
   // lines) say which supplier document covers it (supplierDocCoverage), the /bills reading.
   const cols =
-    "id, job_id, amount, bill_date, created_at, category, status, po_id, superseded_by_bill_id, supplier_account_id, supplier, bill_number, supplier_invoice_number, notes, bill_line_items(description)";
+    "id, job_id, amount, bill_date, created_at, category, status, po_id, superseded_by_bill_id, corrects_bill_id, supplier_account_id, supplier, bill_number, supplier_invoice_number, notes, bill_line_items(description)";
   let withShelf = true;
   const out: any[] = [];
   for (let i = 0, from = 0; i < MAX_PAGES; i++) {

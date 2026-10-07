@@ -28,6 +28,13 @@ export type CorrectableBill = {
 type Row = { description: string; amount: number };
 
 /**
+ * THE SUPPLIER'S OWN PAPER, WHEN THE BOX OPENS FROM IT (task 2, 2026-10-07: the supplier card's
+ * "maybe the same purchase at another price"): its number and total are the paper's and are not
+ * typed again, and the server ties the correction to the document (supplierInvoiceId).
+ */
+export type PaperForCorrection = { paperNumber: string; paperTotal: number; paperDate?: string | null; supplierInvoiceId: string };
+
+/**
  * CORRECT THIS BILL (0381). The supplier's later paper for a purchase already on the books: its
  * number, what it says the purchase comes to, and what the difference is for. It goes in as its own
  * bill UNDER this one, with its own lines, and the next invoice on the job carries it.
@@ -41,12 +48,24 @@ type Row = { description: string; amount: number };
  *   - The plan is lib/bill-correction's, run here too so a refusal is said before anything is sent;
  *     the server runs the same plan again before it writes.
  */
-export function CorrectBillModal({ bill, onClose }: { bill: CorrectableBill; onClose: () => void }) {
+export function CorrectBillModal({
+  bill,
+  paper,
+  onClose,
+  onAttached,
+}: {
+  bill: CorrectableBill;
+  /** Opened from the supplier's own document: its number and total pre-filled and held. */
+  paper?: PaperForCorrection | null;
+  onClose: () => void;
+  /** Said once the correction landed (the card it opened from shows the sentence in its place). */
+  onAttached?: (sentence: string) => void;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [paperNumber, setPaperNumber] = useState("");
-  const [paperTotal, setPaperTotal] = useState(0);
-  const [paperDate, setPaperDate] = useState(bill.bill_date ?? "");
+  const [paperNumber, setPaperNumber] = useState(paper?.paperNumber ?? "");
+  const [paperTotal, setPaperTotal] = useState(paper?.paperTotal ?? 0);
+  const [paperDate, setPaperDate] = useState(paper?.paperDate ?? bill.bill_date ?? "");
   const [rows, setRows] = useState<Row[]>([{ description: "", amount: 0 }]);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
@@ -67,7 +86,8 @@ export function CorrectBillModal({ bill, onClose }: { bill: CorrectableBill; onC
   // What a line with no amount will take: the difference less the lines that have one.
   const leftCents = gapCents - rows.reduce((s, r) => s + (r.amount ? toCents(credit ? -r.amount : r.amount) : 0), 0);
 
-  const dirty = !!paperNumber.trim() || paperTotal > 0 || rows.some((r) => r.description.trim() || r.amount);
+  // Opened from the paper, the number and total are its own: only what a person typed makes it dirty.
+  const dirty = paper ? rows.some((r) => r.description.trim() || r.amount) : !!paperNumber.trim() || paperTotal > 0 || rows.some((r) => r.description.trim() || r.amount);
   const setRow = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   function attach() {
@@ -83,9 +103,12 @@ export function CorrectBillModal({ bill, onClose }: { bill: CorrectableBill; onC
         paper_total: paperTotal,
         bill_date: paperDate || null,
         lines,
+        ...(paper ? { supplier_invoice_id: paper.supplierInvoiceId } : {}),
       });
       if (!res.ok) return setError(res.error ?? "The correction didn't attach. Try again.");
-      setSaid(res.recorded ?? `${paperNumber.trim()} is attached under ${label}.`);
+      const sentence = res.recorded ?? `${paperNumber.trim()} is attached under ${label}.`;
+      setSaid(sentence);
+      onAttached?.(sentence);
       router.refresh();
     });
   }
@@ -122,7 +145,7 @@ export function CorrectBillModal({ bill, onClose }: { bill: CorrectableBill; onC
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2 sm:col-span-1">
             <Label htmlFor="cb-number">Paper Number</Label>
-            <Input id="cb-number" value={paperNumber} onChange={(e) => setPaperNumber(e.target.value)} autoFocus />
+            <Input id="cb-number" value={paperNumber} onChange={(e) => setPaperNumber(e.target.value)} autoFocus={!paper} readOnly={!!paper} />
           </div>
           <div className="col-span-2 sm:col-span-1">
             <Label htmlFor="cb-date">Paper Date</Label>
@@ -130,9 +153,15 @@ export function CorrectBillModal({ bill, onClose }: { bill: CorrectableBill; onC
           </div>
           <div className="col-span-2">
             <Label htmlFor="cb-total">Paper Total</Label>
-            <NumberInput id="cb-total" value={paperTotal} onValueChange={setPaperTotal} placeholder={had.toFixed(2)} />
+            {/* From the supplier's own document: read off it, not typed, so the row IS that paper. */}
+            {paper ? (
+              <Input id="cb-total" value={formatCurrency(paperTotal)} readOnly />
+            ) : (
+              <NumberInput id="cb-total" value={paperTotal} onValueChange={setPaperTotal} placeholder={had.toFixed(2)} />
+            )}
             <p className={`mt-1 text-xs ${credit ? "text-sky-700" : "text-slate-500"}`}>
               {typedTotal ? paperGapWords(original, paperTotal) : "What the supplier's paper says the whole purchase comes to."}
+              {paper ? " Read off the supplier's paper." : ""}
             </p>
           </div>
         </div>

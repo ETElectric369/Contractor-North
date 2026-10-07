@@ -344,6 +344,82 @@ describe("which papers make a card", () => {
     expect(c.samePurchase[0].sentence).toContain("Maybe already on the books");
   });
 
+  /** The exact "the paper names this job" context, built from the same job rows (loadMarkContext's shape). */
+  const MARK = {
+    markJobs: JOB_ROWS.map((j) => ({ id: j.id, job_number: j.job_number, name: j.name, address: j.address, customerNames: [], ...(j.status === "complete" ? { closed: true } : {}) })),
+    pos: [],
+    selfNames: ["Erik Taylor", "ET Electric"],
+  };
+  const feedWithMark = (over: { documents?: any[]; bills?: any[]; links?: any[] } = {}) => {
+    const bills = over.bills ?? hisBills();
+    const { rows } = supplierDocumentRows({ documents: over.documents ?? hisDocuments(), bills, links: over.links ?? LINKS, aliasRows: [], mark: MARK });
+    return supplierPaperFeed({ since: booksBeginOn(ET_SETTINGS, bills), rows, jobs: JOBS, accounts: ACCOUNTS, mark: MARK });
+  };
+
+  it("ONE RULE FIRST (task 2): the paper that names J-011 exactly says so as a fact; a typo stays the scored guess", () => {
+    const docs = [
+      ...hisDocuments(),
+      doc({ id: "spaced", invoice_number: "8802-1109101", invoice_date: "2026-10-01", job_name_raw: "13897 HONEY SUCKLE", total: "88.00" }),
+      doc({ id: "typo", invoice_number: "8802-1109102", invoice_date: "2026-10-01", job_name_raw: "13897 HANEYSUCKLE", total: "89.00" }),
+    ];
+    const feed = feedWithMark({ documents: docs });
+    const exact = card(feed, "8802-1106969")!;
+    expect(exact.verdict).toBe("one");
+    expect(exact.suggestion?.label).toBe("J-011");
+    expect(exact.because).toBe('"13897 HONEYSUCKLE" names J-011 13897 Honeysuckle.');
+    const spaced = card(feed, "8802-1109101")!;
+    expect(spaced.suggestion?.label).toBe("J-011");
+    expect(spaced.because).toBe('"13897 HONEY SUCKLE" names J-011 13897 Honeysuckle.');
+    const typo = card(feed, "8802-1109102")!;
+    expect(typo.suggestion?.label).toBe("J-011");
+    expect(typo.because).toContain("looks like");
+    // ARR56 names the on-hold J-013 exactly (spaced either way); a Fernhill still asks.
+    expect(card(feed, "8802-1102103")!.because).toBe('"ARR56" names J-013 ARR #56.');
+    expect(card(feed, "8802-1105878")!.verdict).toBe("ask");
+    // Without the context the card answers exactly as before.
+    expect(card(feedTonight({ documents: docs }), "8802-1109101")!.because).toContain("looks like");
+  });
+
+  /** The J-011 shape (0381), scrubbed: a counter ticket, and CED's invoice for it at another price. */
+  const ticket = {
+    id: "ticket",
+    supplier: "Consolidated Electrical Dist.",
+    supplier_account_id: CED,
+    bill_number: "8802-SO-257899",
+    supplier_invoice_number: null,
+    amount: "613.19",
+    bill_date: "2026-09-24",
+    job_id: "j-011",
+    is_statement: false,
+    superseded_by_bill_id: null,
+    corrects_bill_id: null,
+    notes: null,
+    jobs: { job_number: "J-011", name: "13897 Honeysuckle" },
+    line_items: [],
+  };
+  const cedInvoice = doc({ id: "reprice", invoice_number: "8802-1109100", invoice_date: "2026-10-07", job_name_raw: "13897 HONEYSUCKLE", total: "709.18" });
+
+  it("AT ANOTHER PRICE (task 2): CED's invoice for the ticket, filed on no job, is offered the ticket on the job its label names, for Correct This Bill", () => {
+    const c = card(feedWithMark({ documents: [...hisDocuments(), cedInvoice], bills: [...hisBills(), ticket] }), "8802-1109100")!;
+    expect(c.samePurchase).toEqual([expect.objectContaining({ billId: "ticket", exact: false, reprice: true })]);
+    expect(c.samePurchase[0].sentence).toContain("Maybe the same purchase at another price");
+    expect(c.samePurchase[0].sentence).toContain("This paper says $709.18 (+$95.99)");
+    // Without the exact context a no-job paper gets no reprice offer: never a guessed job.
+    expect(card(feedTonight({ documents: [...hisDocuments(), cedInvoice], bills: [...hisBills(), ticket] }), "8802-1109100")!.samePurchase).toEqual([]);
+  });
+
+  it("ONE PURCHASE (0381): once the correction carries CED's number, the invoice's card is gone and the ticket is covered with it", () => {
+    const correction = { ...ticket, id: "corr", bill_number: "8802-1109100", amount: "95.99", bill_date: "2026-10-07", corrects_bill_id: "ticket" };
+    const bills = [...hisBills(), ticket, correction];
+    const { rows } = supplierDocumentRows({ documents: [...hisDocuments(), cedInvoice], bills, links: LINKS, aliasRows: [], mark: MARK });
+    expect(rows.find((r) => r.id === "reprice")!.billCount).toBe(2);
+    expect(card(feedWithMark({ documents: [...hisDocuments(), cedInvoice], bills }), "8802-1109100")).toBeUndefined();
+    // And another paper near the correction's $95.99 alone is offered nothing of the pair.
+    const near = doc({ id: "near", invoice_number: "8802-1109200", invoice_date: "2026-10-07", job_name_raw: "13897 HONEYSUCKLE", total: "95.99" });
+    const c = card(feedWithMark({ documents: [...hisDocuments(), cedInvoice, near], bills }), "8802-1109200")!;
+    expect(c.samePurchase).toEqual([]);
+  });
+
   it("the pickers never offer a cancelled job", () => {
     expect(feedTonight().jobs.map((j) => j.label)).not.toContain("J-099");
   });

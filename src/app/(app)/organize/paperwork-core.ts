@@ -630,8 +630,24 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
       return [];
     }
   };
+  /**
+   * THE BILLS, WITH 0381's corrects_bill_id: a correction and its original are one purchase
+   * (same-purchase.ts), so File It names the whole purchase and never offers a correction alone. A
+   * database the migration has not reached is asked again without the column: `safe` alone would
+   * read a missing column as an EMPTY book, and an empty book is a second bill for every paper.
+   */
+  const withCorrections = async <T,>(q: (cols: string) => PromiseLike<{ data: unknown; error: unknown }>, cols: string): Promise<T[]> => {
+    try {
+      const first = await q(`${cols}, corrects_bill_id`);
+      if (!first.error) return Array.isArray(first.data) ? (first.data as T[]) : [];
+      if (!isMissingColumnError(first.error)) return [];
+    } catch {
+      return [];
+    }
+    return safe<T>(() => q(cols));
+  };
   const [bills, papers, supplierInvoices, aliasRows, links, bankBills, plainCosts] = await Promise.all([
-    safe<BookedBill>(() =>
+    withCorrections<BookedBill>((cols) =>
       supabase
         .from("bills")
         // BOTH NUMBER COLUMNS, and whether it was set aside (audit v994, DB1): a bill Record It As
@@ -642,12 +658,13 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         // 5000 cap with no order would, past the cap, drop an arbitrary set, and a match missed
         // here is a second bill. Only a bill with a number in either column can match, only a live
         // one counts, and if the cap is ever reached it is the oldest that fall off.
-        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)")
+        .select(cols)
         .eq("org_id", orgId)
         .or("bill_number.not.is.null,supplier_invoice_number.not.is.null")
         .is("superseded_by_bill_id", null)
         .order("created_at", { ascending: false })
         .limit(5000),
+      "id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)",
     ),
     safe<BookedPaper>(() =>
       supabase
@@ -682,25 +699,26 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     // offered Same Purchase: Tie Them, and wrote a SECOND bill on the same job — the job cost doubled
     // and, on a time-and-material job, the customer was billed for it twice. The job comes with it
     // (jobs(...)), because the sentence names the job the way Erik reads one.
-    safe<BookedBill>(() =>
+    withCorrections<BookedBill>((cols) =>
       supabase
         .from("bills")
-        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)")
+        .select(cols)
         .eq("org_id", orgId)
         .not("bank_line_id", "is", null)
         .is("superseded_by_bill_id", null)
         .order("bill_date", { ascending: false })
         .limit(2000),
+      "id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)",
     ),
     // EVERY OTHER BUSINESS COST WITH NO NUMBER (review of release/v1026): the same shape written by
     // Add By Hand, or a company's fill-ups loaded by hand from a bank export before the bank
     // door, carry no bank_line_id, so the read above never sees them and a pump receipt of the same
     // money filed a second cost. No job, live, no number in either column, in a bucket (or the
     // pre-0362 Gas & Truck). Never names bank_line_id, so it answers before 0363 too.
-    safe<BookedBill>(() =>
+    withCorrections<BookedBill>((cols) =>
       supabase
         .from("bills")
-        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id")
+        .select(cols)
         .eq("org_id", orgId)
         .is("job_id", null)
         .is("superseded_by_bill_id", null)
@@ -709,6 +727,7 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .in("category", [...BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK])
         .order("bill_date", { ascending: false })
         .limit(2000),
+      "id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id",
     ),
   ]);
   const cover = new Map<string, NonNullable<BookedSupplierInvoice["covered_by"]>>();

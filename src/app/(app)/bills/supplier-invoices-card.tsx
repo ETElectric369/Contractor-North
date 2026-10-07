@@ -10,6 +10,7 @@ import { Fold, WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { r2, type SupplierActionResult } from "./supplier-balance";
 import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
+import { CorrectFromPaperButton } from "@/components/correct-from-paper";
 import { companyUseWord } from "@/lib/paperwork";
 import type { TicketLineChoice } from "@/lib/shelf-plan";
 import {
@@ -604,20 +605,34 @@ export function SupplierPaperLists({
                     {invoice.samePurchase.map((c) => (
                       <div key={c.billId} className="space-y-1.5">
                         <p className="text-xs leading-relaxed text-amber-900">{c.sentence}</p>
-                        <Button
-                          variant="outline"
-                          className="h-11 w-full"
-                          disabled={pending}
-                          onClick={() =>
-                            run(
-                              () => actions.tieToBill!({ invoiceId: invoice.id, billId: c.billId }),
-                              `tie:${invoice.id}`,
-                              `Invoice ${invoice.invoiceNumber} is tied to the bill already in your books.`,
-                            )
-                          }
-                        >
-                          {busy === `tie:${invoice.id}` ? "Tying Them…" : "Same Purchase: Tie Them"}
-                        </Button>
+                        {/* AT ANOTHER PRICE (task 2): Correct This Bill, never a tie at the wrong price. */}
+                        {c.reprice ? (
+                          <CorrectFromPaperButton
+                            billId={c.billId}
+                            className="h-11 w-full"
+                            paper={{ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, total: invoice.total, date: invoice.invoiceDate ?? null }}
+                            disabled={pending}
+                            onAttached={(sentence) => {
+                              setDone(sentence);
+                              router.refresh();
+                            }}
+                          />
+                        ) : (
+                          <Button
+                            variant="outline"
+                            className="h-11 w-full"
+                            disabled={pending}
+                            onClick={() =>
+                              run(
+                                () => actions.tieToBill!({ invoiceId: invoice.id, billId: c.billId }),
+                                `tie:${invoice.id}`,
+                                `Invoice ${invoice.invoiceNumber} is tied to the bill already in your books.`,
+                              )
+                            }
+                          >
+                            {busy === `tie:${invoice.id}` ? "Tying Them…" : "Same Purchase: Tie Them"}
+                          </Button>
+                        )}
                       </div>
                     ))}
                     {actions.recordAsBill && invoice.jobId ? (

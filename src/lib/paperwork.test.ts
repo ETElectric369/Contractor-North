@@ -500,6 +500,57 @@ describe("finished jobs: fileable, never picked, and a street they share picks n
   });
 });
 
+describe("two spellings of one name, and a job named by its street (task 2, 2026-10-07)", () => {
+  // Measured on ET's book: CED's counter writes a job's words run together or apart ("13897 HONEY
+  // SUCKLE", "ARR56"), and one job is NAMED by a street its address field does not carry.
+  const JOBS: MarkJob[] = [
+    { id: "j11", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", customerNames: ["Andrew Crake"] },
+    { id: "j13", job_number: "J-013", name: "ARR #56", address: "300 West Garnet Boulevard", customerNames: ["Alder Ridge Rentals"] },
+    { id: "j17", job_number: "J-017", name: "ARR #224", address: "300 West Garnet Boulevard", customerNames: ["Alder Ridge Rentals"] },
+    { id: "j28", job_number: "J-028", name: "41 Larkspur Place", address: "41 Larkspur Court", customerNames: ["Andrew Crake"] },
+    { id: "j06", job_number: "J-006", name: "5659 Fernhill", address: "5659 Fernhill Road", customerNames: ["Pat Doe"] },
+    { id: "j14", job_number: "J-014", name: "5659 Fernhill", address: "5659 Fernhill Rd, Carnelian Bay, CA 96140, USA", customerNames: ["Pat Doe"] },
+    { id: "j16", job_number: "J-016", name: "13466 Nightshade", address: "13466 Nightshade Boulevard", customerNames: ["Tess Zane"] },
+  ];
+
+  it("words run together or apart are one name and one street", () => {
+    expect(jobFromPaperMarks({ po: "13897 HONEY SUCKLE" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "po" });
+    expect(jobFromPaperMarks({ po: "13897HONEYSUCKLE" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "po" });
+    expect(jobFromPaperMarks({ address: "13897 HONEY SUCKLE WAY" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "address" });
+    expect(jobFromPaperMarks({ po: "ARR56" }, JOBS)).toMatchObject({ kind: "one", jobId: "j13", from: "po" });
+    expect(jobFromPaperMarks({ po: "ARR 224" }, JOBS)).toMatchObject({ kind: "one", jobId: "j17", from: "po" });
+    expect(jobFromPaperMarks({ jobName: "arr #56" }, JOBS)).toMatchObject({ kind: "one", jobId: "j13", from: "job_name" });
+  });
+
+  it("a job named by a street is on that street, even where its address field says another", () => {
+    expect(jobFromPaperMarks({ po: "41 LARKSPUR PL" }, JOBS)).toMatchObject({ kind: "one", jobId: "j28", from: "po" });
+    expect(jobFromPaperMarks({ address: "41 Larkspur Place" }, JOBS)).toMatchObject({ kind: "one", jobId: "j28", from: "address" });
+    // The address field's own street still names it too.
+    expect(jobFromPaperMarks({ po: "41 LARKSPUR CT" }, JOBS)).toMatchObject({ kind: "one", jobId: "j28" });
+    // A type that disagrees with both is another street.
+    expect(jobFromPaperMarks({ po: "41 LARKSPUR DR" }, JOBS)).toEqual({ kind: "none" });
+  });
+
+  it("still spelling, never likeness: a typo names nothing, and the card's guess stays a guess", () => {
+    expect(jobFromPaperMarks({ po: "13897 HANEYSUCKLE" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "13897 HONEY" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "ARR 5" }, JOBS)).toEqual({ kind: "none" });
+  });
+
+  it("house numbers and shared names stay apart: five Fernhills ask, 13631 is never 13466", () => {
+    expect(jobFromPaperMarks({ po: "5659 FERNHILL" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "5661 FERNHILL" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "13631 NIGHTSHADE" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "13466 NIGHT SHADE" }, JOBS)).toMatchObject({ kind: "one", jobId: "j16" });
+  });
+
+  it("the company's own name is never a job, spaced either way", () => {
+    const own: MarkJob[] = [...JOBS, { id: "jx", job_number: "J-099", name: "ET Electric", address: null, customerNames: ["Erik Taylor"] }];
+    expect(jobFromPaperMarks({ po: "ETELECTRIC" }, own, [], ["ET Electric"])).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ customer: "ERIKTAYLOR" }, own, [], ["Erik Taylor"])).toEqual({ kind: "none" });
+  });
+});
+
 describe("the job in the PO box: 13897 HONEYSUCKLE (Erik, 2026-09-24)", () => {
   // ET's live row 12962a84: a CED sales order, $323.71, 8802-SO-257555, PO "13897 HONEYSUCKLE",
   // hint "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE". It came in with no job picked.
@@ -849,6 +900,34 @@ describe("findSameNumber: the same purchase already on the books", () => {
     );
     expect(m).toEqual([expect.objectContaining({ kind: "bill", billId: "bill-7", jobId: "job-046" })]);
     expect(m[0].sentence).toBe("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Wexley.");
+  });
+
+  it("a CED document tied to a CORRECTION is the purchase its original names: found once, whole (0381, task 2)", () => {
+    // Correct This Bill from the supplier's paper ties the document to the correction row, which
+    // carries the paper's number. The tray names the purchase once, by its original, never a second
+    // "covered by a bill" row for the same money.
+    const original = { ...bill, id: "orig", bill_number: "8802-SO-257899", amount: "613.19", bill_date: "2026-09-24", job_id: "job-011", jobs: { job_number: "J-011", name: "13897 Honeysuckle" } };
+    const correction = { ...original, id: "corr", bill_number: "8802-1109100", amount: "95.99", bill_date: "2026-10-07", corrects_bill_id: "orig" };
+    const m = findSameNumber(
+      receipt({ vendor: "Consolidated Electrical Dist.", doc_number: "8802-1109100", doc_type: "bill" }),
+      {
+        bills: [original, correction],
+        supplierInvoices: [
+          {
+            id: "si-c",
+            invoice_number: "8802-1109100",
+            supplier_account_id: "acct-ced",
+            total: 709.18,
+            covered_by: { id: "corr", job_id: "job-011", jobs: { job_number: "J-011", name: "13897 Honeysuckle" } },
+          },
+        ],
+      },
+      aliases,
+    );
+    expect(m).toEqual([expect.objectContaining({ kind: "bill", billId: "orig", jobId: "job-011" })]);
+    expect(m[0].sentence).toBe(
+      "Already on the books: Consolidated Electrical Dist. #8802-SO-257899 corrected by 8802-1109100, $709.18 together, 2026-09-24, on J-011 13897 Honeysuckle.",
+    );
   });
 
   it("a covering bill that also carries the number is found once, not twice", () => {

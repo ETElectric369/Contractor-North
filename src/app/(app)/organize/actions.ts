@@ -52,7 +52,7 @@ import {
   looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
 } from "@/app/(app)/bills/receipt-billing";
-import { billLabel, billsCarryingNumber } from "@/lib/same-purchase";
+import { billLabel, billsCarryingNumber, purchaseOf } from "@/lib/same-purchase";
 import {
   billStatusFromItem,
   cleanDocNumber,
@@ -634,9 +634,11 @@ ${MASKED_PRICE_PROMPT_RULE}`,
         docNumber,
       });
       if (tie.ok) revalidatePath(`/jobs/${doc.job_id}`);
+      // The purchase whole (0381): a bill and the corrections under it, named once with the together total.
+      const label = billLabel(same[0], purchaseOf(same[0], same).corrections);
       const said = tie.ok
-        ? `Already on the books: ${billLabel(same[0])}. This photo is filed with that bill; nothing was recorded twice.`
-        : `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
+        ? `Already on the books: ${label}. This photo is filed with that bill; nothing was recorded twice.`
+        : `Already on the books: ${label}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
       // WHICH BILL, AND WHETHER IT IS THIS JOB'S (d1ff7c5a): when the tie above did NOT land, the
       // doors beside this sentence used to be Record As Cost (another paid read, the same answer)
       // or Different Purchase (a SECOND bill for the same money). Naming the bill lets the door

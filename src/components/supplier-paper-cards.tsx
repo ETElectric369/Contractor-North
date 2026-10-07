@@ -21,6 +21,7 @@ import { supplierPaperContents } from "@/app/(app)/bills/paper-contents-action";
 import { stopWaitingOnCredit, waitOnCredit } from "@/app/(app)/bills/waiting-credit-actions";
 import { offLinesWords, type PaperContents } from "@/lib/supplier-paper-contents";
 import { AlreadyBilledSheet } from "@/components/already-billed-sheet";
+import { CorrectFromPaperButton } from "@/components/correct-from-paper";
 import { unmarkAlreadyBilled, type AlreadyBilledWrite } from "@/app/(app)/jobs/already-billed-actions";
 
 type UndoToken = NonNullable<SupplierActionResult["undo"]>;
@@ -663,9 +664,20 @@ export function SupplierPaperCards({
             {c.samePurchase.map((s) => (
               <div key={s.billId} className="space-y-1">
                 <p className="text-xs text-amber-900">{s.sentence}</p>
-                <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => tie(c, s.billId)}>
-                  Same Purchase: Tie Them
-                </Button>
+                {/* AT ANOTHER PRICE (task 2): the door is Correct This Bill, the one box the bill rows
+                    use, with this paper's number and total in it; a tie would keep the wrong price. */}
+                {s.reprice ? (
+                  <CorrectFromPaperButton
+                    billId={s.billId}
+                    paper={{ invoiceId: c.invoiceId, invoiceNumber: c.invoiceNumber, total: c.total, date: c.date }}
+                    disabled={busy === c.invoiceId}
+                    onAttached={(sentence) => settle(c, { ok: true, message: sentence }, sentence)}
+                  />
+                ) : (
+                  <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => tie(c, s.billId)}>
+                    Same Purchase: Tie Them
+                  </Button>
+                )}
               </div>
             ))}
             <p className="text-xs text-amber-900">Any other button below records it as a different purchase.</p>

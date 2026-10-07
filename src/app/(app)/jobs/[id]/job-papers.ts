@@ -155,7 +155,7 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
   const [billsRes, aliasRes, paperSettings] = await Promise.all([
     supabase
       .from("bills")
-      .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, is_statement, notes, bill_line_items(description)")
+      .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, corrects_bill_id, amount, bill_date, job_id, is_statement, notes, bill_line_items(description)")
       .eq("org_id", orgId)
       .is("superseded_by_bill_id", null)
       .limit(5000),
@@ -180,6 +180,7 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
       bill_date: b.bill_date ?? null,
       job_id: b.job_id ?? null,
       superseded_by_bill_id: b.superseded_by_bill_id ?? null,
+      corrects_bill_id: b.corrects_bill_id ?? null,
       is_statement: !!b.is_statement || named.isStatement,
       named_numbers: named.numbers,
     };

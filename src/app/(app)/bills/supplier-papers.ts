@@ -55,6 +55,8 @@ import { featureOn } from "@/lib/features";
 import { todayStrInTz } from "@/lib/tz";
 import { readAlreadyBilledReach } from "@/lib/already-billed-read";
 import { reportError } from "@/lib/observe";
+import { loadMarkContext, type MarkContext } from "@/app/(app)/organize/paperwork-core";
+import { jobFromPaperMarks } from "@/lib/paperwork";
 
 /** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
  *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
@@ -130,6 +132,12 @@ export function supplierDocumentRows(input: {
    *  alias. Optional: without them identity falls back to filed-or-alias, which is what every
    *  reader did before 8a982483 and is still correct, just narrower. */
   accountRows?: any[];
+  /**
+   * THE EXACT "THE PAPER NAMES THIS JOB" RULE (loadMarkContext; task 2, 2026-10-07): a paper filed
+   * on no job is offered a purchase at another price only on the job its printed label names
+   * exactly. Optional: without it such a paper gets no reprice offer (never a guessed one).
+   */
+  mark?: MarkContext | null;
 }): SupplierDocumentCoverage {
   const documents = (input.documents ?? []) as any[];
   const coveringBills = new Map<string, Set<string>>();
@@ -189,6 +197,8 @@ export function supplierDocumentRows(input: {
       is_statement: !!b.is_statement || named.isStatement,
       jobs: b.jobs ?? null,
       named_numbers: named.numbers,
+      // 0381: a correction and its original are one purchase (same-purchase.ts).
+      corrects_bill_id: b.corrects_bill_id ?? null,
     };
   });
   const ledgerDocs: SupplierDoc[] = documents.map((r) => ({
@@ -243,9 +253,13 @@ export function supplierDocumentRows(input: {
     // Tie Them. Only offered. Nothing is tied until a person presses it, and the server re-checks.
     if (row.billCount === 0 && row.kind === "invoice") {
       const doc = ledgerDocs.find((d) => d.id === id);
-      const candidates = doc ? samePurchaseCandidates(doc, ledgerBills, coveredByDocs, aliasIndex) : [];
+      // AT ANOTHER PRICE (task 2): the job a no-job paper names, by the exact rule the card asks.
+      const named = !r.job_id && input.mark && r.job_name_raw ? jobFromPaperMarks({ po: r.job_name_raw }, input.mark.markJobs, input.mark.pos, input.mark.selfNames) : null;
+      const candidates = doc ? samePurchaseCandidates(doc, ledgerBills, coveredByDocs, aliasIndex, { namedJobId: named?.kind === "one" ? named.jobId : null }) : [];
       if (candidates.length)
-        row.samePurchase = candidates.slice(0, 3).map((c) => ({ billId: c.billId, exact: c.exact, sentence: samePurchaseSentence(c) }));
+        row.samePurchase = candidates
+          .slice(0, 3)
+          .map((c) => ({ billId: c.billId, exact: c.exact, sentence: samePurchaseSentence(c), ...(c.reprice ? { reprice: true } : {}) }));
     }
     return row;
   });
@@ -421,6 +435,8 @@ export function supplierPaperFeed(input: {
   tz?: string | null;
   /** The Shop Stock switch (0352). false: the cards don't offer the shelf. Absent = on. */
   shopStock?: boolean;
+  /** The exact "the paper names this job" rule (task 2): the card asks it before its scored guess. */
+  mark?: MarkContext | null;
 }): SupplierPaperFeed {
   const names = new Map((input.accounts ?? []).map((a) => [String(a.id), shortSupplierName(a.name)]));
   const opts = {
@@ -428,6 +444,7 @@ export function supplierPaperFeed(input: {
     today: input.today ?? null,
     tz: input.tz ?? null,
     supplierName: (accountId: string | null) => (accountId && names.get(accountId)) || "The Supplier",
+    mark: input.mark ?? null,
   };
   const cards = supplierPaperNeeds(input.rows, input.jobs, opts);
   const waiting = supplierPapersWaitingOnCredit(input.rows, input.jobs, opts);
@@ -538,7 +555,7 @@ export async function readSupplierPaperHomes(supabase: any, orgId: string, today
     readSupplierDocuments(supabase, orgId),
     supabase
       .from("bills")
-      .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, superseded_by_bill_id, notes, bill_line_items(description)")
+      .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, superseded_by_bill_id, corrects_bill_id, notes, bill_line_items(description)")
       .eq("org_id", orgId)
       .is("superseded_by_bill_id", null)
       .limit(5000),
@@ -592,7 +609,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
     readSupplierDocuments(supabase, orgId),
     supabase
       .from("bills")
-      .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, superseded_by_bill_id, notes, jobs(job_number, name), bill_line_items(description)")
+      .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, superseded_by_bill_id, corrects_bill_id, notes, jobs(job_number, name), bill_line_items(description)")
       .eq("org_id", orgId)
       .is("superseded_by_bill_id", null)
       .limit(5000),
@@ -617,6 +634,12 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   // nothing would read as "nothing waiting". No supplier documents at all: nothing to bring him.
   if (docsRes?.error) return { papers: null, payDue: [], failed: { papers: true, pay: true } };
   if (!(docsRes?.data ?? []).length) return null;
+  // The exact "the paper names this job" rule, the one /bills and the job page ask (task 2): a second
+  // breath only when a purchase paper is filed on no job and prints a label (three small reads; My
+  // Day is read on every staff navigation, so not for nothing). A lost read is no exact pick, never
+  // a wrong one: the card falls back to its scored guess.
+  const needsMark = ((docsRes?.data ?? []) as any[]).some((r) => String(r?.kind ?? "invoice") === "invoice" && !r?.job_id && String(r?.job_name_raw ?? "").trim());
+  const mark: MarkContext | null = needsMark ? await loadMarkContext(supabase, orgId).catch((): MarkContext | null => null) : null;
   const accounts = acctRes?.error ? [] : ((acctRes?.data ?? []) as any[]);
   // A failed bills, links or aliases read would make covered papers look uncovered: false cards.
   const papersReadable = !(billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error || settingsRes?.error);
@@ -629,6 +652,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
     // spelling an account's own name resolved to nothing here, so a paper his books already cover
     // could still have been brought to him as one that needs sorting.
     accountRows: accounts,
+    mark,
   });
   const feed = papersReadable
     ? supplierPaperFeed({
@@ -639,6 +663,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
         today,
         tz: settingsRes.data?.timezone ?? null,
         shopStock,
+        mark,
       })
     : null;
   // Already Billed On J-010 (0357) on the cards whose one job could hold it: one more breath, only

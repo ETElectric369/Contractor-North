@@ -20,7 +20,7 @@ import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type
 import { accountForSupplier, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import type { StoredOpenList } from "@/lib/supplier-open-list";
 import type { StoredBank } from "@/lib/bank-download";
-import { billsCarryingLongNumberElsewhere, billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
+import { billLabel, billsCarryingLongNumberElsewhere, billsCarryingNumber, normalizeDocNumber, purchasesOf, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
 import { cleanLines, type BillLine as PaperLine } from "@/lib/paper-lines";
 import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "@/lib/shelf-plan";
 import { isLinelessReturn, RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
@@ -1029,8 +1029,11 @@ export function streetKey(raw: string | null | undefined): string | null {
  */
 export function sameStreet(a: StreetParts | null, b: StreetParts | null): boolean {
   if (!a || !b) return false;
-  if (a.number !== b.number || a.words.length !== b.words.length) return false;
-  if (a.words.some((w, i) => w !== b.words[i])) return false;
+  if (a.number !== b.number) return false;
+  // THE SAME WORDS, SPACED EITHER WAY (task 2, 2026-10-07): CED's counter writes "13897 HONEY SUCKLE"
+  // for the job at 13897 Honeysuckle. Words run together are one word; still spelling, never
+  // likeness ("13897 HANEYSUCKLE" is another street).
+  if (a.words.join("") !== b.words.join("")) return false;
   return !a.type || !b.type || a.type === b.type;
 }
 
@@ -1059,8 +1062,13 @@ export function addressInHint(hint: string | null | undefined): string | null {
  *   · each mark finds the open jobs it names exactly: a job number; a PO against job numbers,
  *     this org's own purchase orders, AND the jobs' names and streets (a contractor writes the
  *     JOB in a supplier's PO box: "13897 HONEYSUCKLE", "561 FERNHILL", Erik on every CED ticket);
- *     an address by its street (sameStreet: a type left off is not a different street); a job
- *     name, by name or by street; a customer;
+ *     an address by its street (sameStreet: a type left off is not a different street; words run
+ *     together are one word); a job name, by name (spaced either way: "ARR56" is "ARR #56") or by
+ *     street (a job NAMED by its street is on that street); a customer;
+ *   · ONE RULE FOR "THE PAPER NAMES THIS JOB" (task 2, 2026-10-07): the supplier card on /bills,
+ *     the job page's papers and the paperwork tray all ask this, so a paper the card puts on
+ *     J-011 is one J-011's own page lists. The card's scored guess (matchJobName) answers only
+ *     where this finds nothing, and says it is a guess;
  *   · the company's own name and its people's names (selfNames) are never a customer or a job
  *     name: they are on every paper as who it was sold to;
  *   · a mark that names exactly one job is decisive, and every mark that names anything must
@@ -1078,7 +1086,7 @@ export function jobFromPaperMarks(
   // Only an OPEN job is ever picked. A finished one is known here for one reason: a street it
   // shares with an open job is not enough to pick the open one (Erik, audit v994 PR1).
   const openIds = new Set(jobs.filter((j) => !j.closed).map((j) => j.id));
-  const self = new Set(selfNames.map((n) => wordsKey(n)).filter((n) => n.length >= 3));
+  const self = new Set(selfNames.map((n) => compactKey(n)).filter((n) => n.length >= 3));
   type StreetHit = { open: string[]; closed: MarkJob[] };
   type Found = { kind: JobMarkKind; words: string; ids: Set<string>; byStreetOnly: Set<string>; closedOnStreet: MarkJob[] };
   const found: Found[] = [];
@@ -1095,11 +1103,14 @@ export function jobFromPaperMarks(
       closedOnStreet: street.closed,
     });
   };
-  const jobStreets = new Map(jobs.map((j) => [j.id, streetParts(j.address)] as const));
+  // A JOB'S STREETS: its address, AND ITS NAME WHEN THE NAME IS A STREET (task 2, 2026-10-07). The
+  // job named "41 Larkspur Place" is at that street whatever its address field holds; "41 LARKSPUR
+  // PL" in CED's PO box names it.
+  const jobStreets = new Map(jobs.map((j) => [j.id, [streetParts(j.address), streetParts(j.name)].filter((s): s is StreetParts => !!s)] as const));
   const onStreet = (raw: string | null | undefined): StreetHit => {
     const s = streetParts(raw);
     if (!s) return { open: [], closed: [] };
-    const on = jobs.filter((j) => sameStreet(s, jobStreets.get(j.id) ?? null));
+    const on = jobs.filter((j) => (jobStreets.get(j.id) ?? []).some((js) => sameStreet(s, js)));
     return { open: on.filter((j) => openIds.has(j.id)).map((j) => j.id), closed: on.filter((j) => !openIds.has(j.id)) };
   };
   /**
@@ -1107,13 +1118,17 @@ export function jobFromPaperMarks(
    * its customer ("Marla Finch") is also that customer's name, so the same words name every open
    * job of that customer too: with more than one, the name is not decisive and nothing is picked
    * (the customer mark reads those words the same way).
+   *
+   * SPACED EITHER WAY (task 2): "ARR56" names the job "ARR #56" and "13897 HONEY SUCKLE" the job
+   * "13897 Honeysuckle" (compactKey, as a printed job number is read). Still exact: "HANEYSUCKLE"
+   * names nothing.
    */
   const byName = (raw: string | null | undefined): string[] => {
-    const k = wordsKey(raw);
+    const k = compactKey(raw);
     if (k.length < 3 || self.has(k)) return [];
-    const named = jobs.filter((j) => wordsKey(j.name) === k).map((j) => j.id);
+    const named = jobs.filter((j) => compactKey(j.name) === k).map((j) => j.id);
     if (!named.length) return [];
-    return [...named, ...jobs.filter((j) => (j.customerNames ?? []).some((c) => wordsKey(c) === k)).map((j) => j.id)];
+    return [...named, ...jobs.filter((j) => (j.customerNames ?? []).some((c) => compactKey(c) === k)).map((j) => j.id)];
   };
 
   const jobNumber = compactKey(marks.jobNumber);
@@ -1136,12 +1151,12 @@ export function jobFromPaperMarks(
 
   add("job_name", marks.jobName, byName(marks.jobName), onStreet(marks.jobName));
 
-  const customer = wordsKey(marks.customer);
+  const customer = compactKey(marks.customer);
   if (customer.length >= 3 && !self.has(customer))
     add(
       "customer",
       marks.customer,
-      jobs.filter((j) => (j.customerNames ?? []).some((c) => wordsKey(c) === customer)).map((j) => j.id),
+      jobs.filter((j) => (j.customerNames ?? []).some((c) => compactKey(c) === customer)).map((j) => j.id),
     );
 
   const decisive = found.filter((f) => f.ids.size === 1);
@@ -1369,15 +1384,17 @@ export function findSameNumber(
   if (!number) return [];
   const me = { name: item.vendor ?? null, account: null };
   const out: NumberMatch[] = [];
-  // The bill THIS paper made is never "already on the books" against itself.
-  for (const b of billsCarryingNumber(item.doc_number, { supplier: item.vendor }, books.bills ?? [], aliases, { exceptBillId: item.bill_id })) {
-    const amount = amountOf(b);
-    const job = b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.job_id ? "a job" : "business costs";
+  // The bill THIS paper made is never "already on the books" against itself. A bill and the
+  // corrections under it (0381) are named once, as the purchase they are: "#8802-SO-257899
+  // corrected by 8802-1109100, $709.18 together".
+  const carrying = billsCarryingNumber(item.doc_number, { supplier: item.vendor }, books.bills ?? [], aliases, { exceptBillId: item.bill_id });
+  for (const p of purchasesOf(carrying).purchases) {
+    const b = p.original;
     out.push({
       kind: "bill",
       billId: b.id,
       jobId: b.job_id ?? null,
-      sentence: `Already on the books: ${b.supplier ?? "a bill"} #${b.bill_number}${amount !== null ? `, ${money(amount)}` : ""}${b.bill_date ? `, ${b.bill_date}` : ""}, on ${job}.`,
+      sentence: `Already on the books: ${billLabel(b, p.corrections)}.`,
     });
   }
   // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (DB5): said, never refused, never tied for them.
@@ -1404,8 +1421,11 @@ export function findSameNumber(
     const said = `${si.invoice_number}${total !== null ? `, ${money(total)}` : ""}`;
     const cover = si.covered_by;
     if (cover?.id) {
-      // Already a cost: the bill that covers it is the purchase. Found once, whichever way.
-      if (cover.id === item.bill_id || out.some((m) => m.kind === "bill" && m.billId === cover.id)) continue;
+      // Already a cost: the bill that covers it is the purchase. Found once, whichever way: a
+      // document tied to a CORRECTION (Correct This Bill from the supplier's paper) is the same
+      // purchase the rows above name by its original (0381: one purchase, one answer).
+      const family = purchasesOf(books.bills ?? []).of.get(cover.id)?.members.map((m) => m.id) ?? [cover.id];
+      if (cover.id === item.bill_id || out.some((m) => m.kind === "bill" && family.includes(m.billId))) continue;
       const job = cover.jobs?.job_number ? `${cover.jobs.job_number}${cover.jobs.name ? ` ${cover.jobs.name}` : ""}` : cover.job_id ? "a job" : "business costs";
       out.push({
         kind: "bill",

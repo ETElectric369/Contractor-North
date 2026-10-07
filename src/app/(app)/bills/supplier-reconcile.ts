@@ -43,6 +43,7 @@ import {
   documentDiscount,
 } from "./supplier-balance";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
+import { jobFromPaperMarks, type MarkJob, type MarkPo } from "@/lib/paperwork";
 import { todayStrInTz } from "@/lib/tz";
 
 // ── THE CLEAR LINE: WHERE A COMPANY'S BOOKS IN NORTH BEGIN ─────────────────────────────────────
@@ -104,9 +105,10 @@ export interface SupplierInvoiceRow extends SupplierDocument {
   /**
    * Bills that may be this purchase already (same-purchase.ts, audit v994): the same number, or
    * the same account and job within a few dollars and days. Offered as Same Purchase: Tie Them,
-   * never tied by the app. Absent when there are none.
+   * never tied by the app. Absent when there are none. `reprice` (task 2): the same purchase at
+   * another price, whose door is Correct This Bill, never a tie.
    */
-  samePurchase?: { billId: string; exact: boolean; sentence: string }[];
+  samePurchase?: { billId: string; exact: boolean; sentence: string; reprice?: boolean }[];
   /** The supplier account it is on, so a card can say who sent it ("CED"). Absent on old callers. */
   supplierAccountId?: string | null;
   /**
@@ -1021,8 +1023,9 @@ export interface SupplierPaperCard {
   onJob: PaperJob | null;
   /** The matcher's sentence, the grey line on the card. */
   because: string;
-  /** Bills that may be this very purchase (same-purchase.ts), offered as Same Purchase: Tie Them. */
-  samePurchase: { billId: string; exact: boolean; sentence: string }[];
+  /** Bills that may be this very purchase (same-purchase.ts), offered as Same Purchase: Tie Them;
+   *  one at another price (`reprice`) is offered Correct This Bill instead. */
+  samePurchase: { billId: string; exact: boolean; sentence: string; reprice?: boolean }[];
   /**
    * WAITING ON A CREDIT (0346): a person said a credit memo for the same amount is coming. `since`
    * is when; `back` is the day it comes back as a card by itself; `overdue` is true once that day
@@ -1151,7 +1154,20 @@ export type PaperCardOpts = {
   today?: string | null;
   /** The ORG's timezone, for the day a wait was stamped (creditWait). */
   tz?: string | null;
+  /**
+   * THE EXACT "THE PAPER NAMES THIS JOB" RULE (task 2, 2026-10-07): the jobs, purchase orders and
+   * the company's own names the paperwork tray and the job page match against (loadMarkContext).
+   * With it, a card asks jobFromPaperMarks FIRST and says "names J-011" as a fact; the scored guess
+   * (matchJobName) answers only where it finds nothing. Without it, the scored guess as before.
+   */
+  mark?: { markJobs: MarkJob[]; pos: MarkPo[]; selfNames: string[] } | null;
 };
+
+/** A job the exact rule named that the card's own list does not hold (older than its 500), as the
+ *  picker needs it. */
+function reconcileJobOfMark(m: MarkJob | undefined): ReconcileJob | null {
+  return m ? { id: m.id, jobNumber: m.job_number ?? null, name: String(m.name ?? "").trim(), status: m.closed ? "complete" : null, address: m.address ?? null } : null;
+}
 
 function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: PaperCardOpts): SupplierPaperCard[] {
   const all = invoices ?? [];
@@ -1182,8 +1198,21 @@ function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: 
     if (!(total > 0.005)) continue;
     if (isBeforeLine(inv.invoiceDate, opts.since)) continue;
 
-    const match = matchJobName(inv.jobNameRaw, jobs);
     const jobId = inv.jobId ?? null;
+    // ONE RULE FIRST (task 2): the exact "the paper names this job" rule the job page and the tray
+    // ask, over CED's job-name field read as the PO box. Where it names one open job, that job is
+    // the card's one button and the line says so as a fact. Where it finds nothing (a typo, a
+    // finished job, two jobs on one street), the scored guess answers exactly as before, and its
+    // own words say it is a guess ("looks like … Check it before you file it").
+    const named = !jobId && opts.mark && inv.jobNameRaw ? jobFromPaperMarks({ po: inv.jobNameRaw }, opts.mark.markJobs, opts.mark.pos, opts.mark.selfNames) : null;
+    const namedJob = named?.kind === "one" ? (jobById.get(named.jobId) ?? reconcileJobOfMark(opts.mark?.markJobs.find((j) => j.id === named.jobId))) : null;
+    const match: JobNameMatch = namedJob
+      ? {
+          verdict: "one",
+          ranked: [{ job: namedJob, score: 0 }],
+          because: `"${String(inv.jobNameRaw ?? "").trim().replace(/\s+/g, " ")}" names ${[namedJob.jobNumber, namedJob.name].filter(Boolean).join(" ")}.`,
+        }
+      : matchJobName(inv.jobNameRaw, jobs);
     if (!jobId && match.verdict === "stock") continue;
 
     const top = match.ranked[0]?.score ?? 0;
@@ -1228,7 +1257,7 @@ function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: 
           : { id: jobId, label: String(inv.jobName ?? "").trim() || "Its Job", name: String(inv.jobName ?? "").trim(), status: null }
         : null,
       because: match.because,
-      samePurchase: (inv.samePurchase ?? []).map((s) => ({ billId: s.billId, exact: s.exact, sentence: s.sentence })),
+      samePurchase: (inv.samePurchase ?? []).map((s) => ({ billId: s.billId, exact: s.exact, sentence: s.sentence, ...(s.reprice ? { reprice: true } : {}) })),
       ...(wait
         ? {
             waitingCredit: wait,
