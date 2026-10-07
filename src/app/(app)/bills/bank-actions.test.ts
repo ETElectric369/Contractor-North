@@ -25,7 +25,8 @@ vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPd
 // The cost guard's own sentence: a refusal here must BE it, never a second wording of the same rule.
 import { RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
 import { addOpenList } from "./open-list-actions";
-import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
+import { applyBankDownload, forgetBankRule, reanswerBankLine, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
+import { REANSWER_TO_PAYMENT } from "@/lib/bank-reanswer";
 import { applyBankCore, bankLinesStayHere, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
 import { describePaper, readinessOf } from "@/lib/paperwork";
 import { fileItem, undoPaperwork } from "@/app/(app)/organize/actions";
@@ -37,6 +38,8 @@ let missingBank = false;
 /** 0375 not applied yet: bank_lines has no job_id, so asking for it or writing it fails the way
  *  PostgREST fails (an unknown column, an unknown key in the schema cache). */
 let noJobColumn = false;
+/** A write the database refuses (a trigger, a lost connection), for the all-or-nothing tests. */
+let refuseWrite: ((table: string, verb: string) => boolean) | null = null;
 
 // bank_rules: one per merchant AND answer (0363's generated `answer` column, spelled out here).
 const UNIQUE: Record<string, string[]> = {
@@ -83,6 +86,7 @@ function fakeDb() {
           if ((verb === "insert" || verb === "upsert") && (Array.isArray(payload) ? payload : [payload]).some((r: Row) => r && "job_id" in r))
             return { data: null, error: { code: "PGRST204", message: "Could not find the 'job_id' column of 'bank_lines' in the schema cache" } };
         }
+        if (verb !== "select" && refuseWrite?.(table, verb)) return { data: null, error: { code: "P0001", message: `TEST: the database refused that ${verb} on ${table}.` } };
         if (verb === "insert" || verb === "upsert") {
           const list = (Array.isArray(payload) ? payload : [payload]).map((r: Row): Row => ({
             id: `${table}-${++seq}`,
@@ -196,6 +200,7 @@ function seed() {
   seq = 0;
   missingBank = false;
   noJobColumn = false;
+  refuseWrite = null;
   db = {
     organizations: [{ id: "org-1", settings: { timezone: "America/Los_Angeles" } }],
     customers: [
@@ -1057,6 +1062,259 @@ describe("Undo", () => {
     expect(res.ok).toBe(true);
     expect(db.bank_lines).toHaveLength(0);
     expect(db.organized_items[0].status).toBe("needs_review");
+  });
+});
+
+/**
+ * CHANGE ANSWER (correction door B, 2026-10-07): ONE line a download already counted, answered again,
+ * without Undo taking the whole download back. Its old answer's money row comes off by Undo's own rule,
+ * the new one is written by Apply's own shape, the line says the new answer, and the rule the old answer
+ * taught is settled. Everything here is a made-up statement and a made-up company.
+ */
+describe("Change Answer", () => {
+  /** The year rides in a sentence only when the line is not this year's. */
+  const day = (d: string) => `${d}(, 20\\d\\d)?`;
+  // A line with no job reads the same whether its job_id is absent or null (the column, 0375).
+  const snapshot = () =>
+    structuredClone({ bank_lines: db.bank_lines.map((l) => ({ ...l, job_id: l.job_id ?? null })), bank_rules: db.bank_rules, bills: db.bills, payments: db.payments, pay_payments: db.pay_payments, invoices: db.invoices });
+
+  async function crewCheck() {
+    const id = await drop();
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "Check 1043").id]: "crew:pat" } });
+    const line = db.bank_lines.find((l) => l.check_number === "1043")!;
+    expect(line).toMatchObject({ choice: "crew", profile_id: "pat", sorted_by: "person" });
+    return { id, line };
+  }
+
+  it("a check answered as crew pay that was the truck's repair: Business Cost · Auto, and its voided payment stays void", async () => {
+    const { id, line } = await crewCheck();
+    // Voided by hand since: it was never crew pay.
+    db.pay_payments[0].voided_at = "2026-10-05T09:28:00Z";
+    const res = await reanswerBankLine({ lineId: line.id, choice: "cost:Auto" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toMatch(new RegExp(`^${day("September 5")} Check 1043 is now Business Cost · Auto\\. Its crew payment stays void\\. A paid bill of \\$640\\.00 is on the books for it\\.$`));
+    // THE SAME LINE, its new answer, sorted by a person; nothing of the crew answer rides along.
+    expect(db.bank_lines.find((l) => l.id === line.id)).toMatchObject({ choice: "cost", bucket: "Auto", profile_id: null, supplier_account_id: null, invoice_id: null, sorted_by: "person", amount: -640, line_key: line.line_key });
+    // THE BILL APPLY WOULD HAVE WRITTEN for Auto: paid, the bank's day, the check's number, the same note.
+    expect(db.bills).toEqual([
+      expect.objectContaining({ org_id: "org-1", job_id: null, category: "Auto", amount: 640, status: "paid", bill_date: "2026-09-05", bill_number: "Check 1043", bank_line_id: line.id, notes: "From the bank download (••1234) of Sep 2–Sep 24." }),
+    ]);
+    expect(db.pay_payments[0].voided_at).toBe("2026-10-05T09:28:00Z");
+    // NO RULE IS MADE from one re-answer (a check teaches none anyway).
+    expect(db.bank_rules).toHaveLength(0);
+    // AND UNDO STILL KNOWS ITS OWN: the bill the new answer wrote comes off with the download.
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+  });
+
+  it("a crew payment still live is voided, never deleted", async () => {
+    const { line } = await crewCheck();
+    const res = await reanswerBankLine({ lineId: line.id, choice: "draw" });
+    expect(res.message).toMatch(new RegExp(`^${day("September 5")} Check 1043 is now Owner's Draw\\. Its crew payment was voided\\.$`));
+    expect(db.pay_payments).toHaveLength(1);
+    expect(db.pay_payments[0]).toMatchObject({ voided_by: "user-1" });
+    expect(db.pay_payments[0].voided_at).toBeTruthy();
+    expect(db.bills).toHaveLength(0);
+  });
+
+  const TRANSFERS = `Date,Description,Amount
+06/03/2026,ONLINE TRANSFER FROM CHK XXXXXX9876 REF #IB0001,5000.00
+07/01/2026,ONLINE TRANSFER FROM CHK XXXXXX9876 REF #IB0002,2000.00
+07/30/2026,ONLINE TRANSFER FROM CHK XXXXXX9876 REF #IB0003,550.00
+09/03/2026,ONLINE TRANSFER FROM CHK XXXXXX9876 REF #IB0004,1000.00
+`;
+  async function transfersAnsweredNotIncome() {
+    const id = await drop(TRANSFERS, "Savings1234.csv");
+    const v = await view(id);
+    expect(v.rows.every((r) => r.direction === "in")).toBe(true);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: Object.fromEntries(v.rows.map((r) => [r.id, "not_income"])) });
+    expect(db.bank_rules.map((r) => [r.direction, r.merchant_key, r.choice, r.min_cents, r.max_cents])).toEqual([["in", "transfer 9876", "not_income", 55_000, 500_000]]);
+    return { id, june3: db.bank_lines.find((l) => l.posted_on === "2026-06-03")! };
+  }
+
+  it("the owner's own money answered Not Income: Owner's Money In, and the rule narrows to the answers that survive", async () => {
+    const { june3 } = await transfersAnsweredNotIncome();
+    const res = await reanswerBankLine({ lineId: june3.id, choice: "owner_in" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toMatch(new RegExp(`^${day("June 3")} .*TRANSFER.* is now Owner's Money In\\. The rule that said Already Counted Or Not Income now covers \\$550\\.00 to \\$2,000\\.00\\.$`));
+    expect(db.bank_lines.find((l) => l.id === june3.id)).toMatchObject({ choice: "owner_in", bucket: null, sorted_by: "person" });
+    // WRITES NOTHING: the bank line IS the record of the owner's own money.
+    expect(db.bills).toHaveLength(0);
+    expect(db.payments.filter((p) => p.bank_line_id)).toHaveLength(0);
+    // THE RULE KEEPS THE BAND OF WHAT IS STILL ANSWERED THAT WAY, and NO Owner's Money In rule is made.
+    expect(db.bank_rules.map((r) => [r.choice, r.min_cents, r.max_cents])).toEqual([["not_income", 55_000, 200_000]]);
+  });
+
+  it("a line already changed some other way: nothing about it moves, and the rule that still says the old answer settles", async () => {
+    const { june3 } = await transfersAnsweredNotIncome();
+    // Changed by hand, outside the door: the line says Owner's Money In, the rule still reaches $5,000.
+    db.bank_lines.find((l) => l.id === june3.id)!.choice = "owner_in";
+    const before = structuredClone(db.bank_lines);
+    const res = await reanswerBankLine({ lineId: june3.id, choice: "owner_in" });
+    expect(res.message).toMatch(/ already says Owner's Money In\. The rule that said Already Counted Or Not Income now covers \$550\.00 to \$2,000\.00\.$/);
+    expect(db.bank_lines).toEqual(before);
+    expect(db.bank_rules[0]).toMatchObject({ min_cents: 55_000, max_cents: 200_000 });
+    // Asked again: nothing left to settle, and it says so.
+    expect((await reanswerBankLine({ lineId: june3.id, choice: "owner_in" })).message).toMatch(/ already says Owner's Money In\. Nothing was changed\.$/);
+  });
+
+  it("a merchant's two answers: the line's bill moves to the new bucket, the old answer's rule goes, the new one widens", async () => {
+    const id = await drop(
+      `Account Number,Post Date,Check,Description,Debit,Credit,Status,Balance
+XXXXX1234,09/02/2026,,1111-CORNER STORE ANYTOWN,138.62,,Posted,1000.00
+XXXXX1234,09/05/2026,,1111-CORNER STORE ANYTOWN,13.31,,Posted,986.69
+XXXXX1234,09/12/2026,,1111-CORNER STORE ANYTOWN,120.00,,Posted,866.69
+`,
+      "Store1234.csv",
+    );
+    const v = await view(id);
+    const rows = v.rows.filter((r) => r.title.includes("CORNER STORE"));
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rows[0].id]: "cost:Fuel", [rows[1].id]: "cost:Other" } });
+    const coffee = db.bank_lines.find((l) => Number(l.amount) === -13.31)!;
+    const bill = db.bills.find((b) => b.bank_line_id === coffee.id)!;
+    expect(bill.category).toBe("Other");
+    const res = await reanswerBankLine({ lineId: coffee.id, choice: "cost:Fuel" });
+    expect(res.message).toMatch(
+      new RegExp(`^${day("September 5")} .*CORNER STORE.* is now Business Cost · Fuel\\. Its bill moved to Fuel\\. The rule that said Other is gone: no other line was answered that way\\. The rule for Fuel now covers \\$13\\.31 to \\$138\\.62\\.$`),
+    );
+    // THE SAME BILL, MOVED in one guarded write: never a moment with neither, never two.
+    expect(db.bills).toHaveLength(3);
+    expect(db.bills.find((b) => b.id === bill.id)).toMatchObject({ category: "Fuel", job_id: null, amount: 13.31, bank_line_id: coffee.id });
+    expect(db.bank_rules.map((r) => [r.choice, r.bucket, r.min_cents, r.max_cents])).toEqual([["cost", "Fuel", 1331, 13862]]);
+  });
+
+  it("onto the job it was for: the business cost's bill moves onto the job, and Undo still takes it off", async () => {
+    const id = await drop(`Date,Description,Amount\n09/12/2026,ANYTOWN WIRE HOUSE #4,-340.55\n`, "Card1234.csv");
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "cost:Tools & Supplies" } });
+    const line = db.bank_lines[0];
+    const res = await reanswerBankLine({ lineId: line.id, choice: "job:job-kitchen" });
+    // The one tap taught Tools & Supplies for this merchant; nothing else answered it that way, so it
+    // goes. A job is never a rule's (0375), so nothing is learned or widened in its place.
+    expect(res.message).toMatch(
+      new RegExp(`^${day("September 12")} ANYTOWN WIRE HOUSE #4 is now a cost on 41 Larkspur · J-054 — Marla Finch\\. Its bill moved onto that job\\. The rule that said Tools & Supplies is gone: no other line was answered that way\\.$`),
+    );
+    expect(db.bank_rules).toHaveLength(0);
+    expect(db.bank_lines[0]).toMatchObject({ choice: "job", job_id: "job-kitchen", bucket: null });
+    expect(db.bills).toEqual([expect.objectContaining({ job_id: "job-kitchen", category: null, amount: 340.55, bank_line_id: line.id })]);
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills).toHaveLength(0);
+  });
+
+  it("a deposit put on an invoice, answered again: the payment comes off and the invoice is worked out again", async () => {
+    const id = await drop();
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "Deposit").id]: "invoice:inv-1" } });
+    expect(db.invoices.find((i) => i.id === "inv-1")).toMatchObject({ amount_paid: 1275 });
+    const dep = db.bank_lines.find((l) => l.description === "DEPOSIT")!;
+    const res = await reanswerBankLine({ lineId: dep.id, choice: "other_income" });
+    expect(res.message).toMatch(/ is now Other Income\. Its payment came off its invoice, and the invoice was worked out again\.$/);
+    expect(db.payments.find((p) => p.invoice_id === "inv-1")).toBeUndefined();
+    expect(db.invoices.find((i) => i.id === "inv-1")).toMatchObject({ amount_paid: 0 });
+    expect(db.bank_lines.find((l) => l.id === dep.id)).toMatchObject({ choice: "other_income", invoice_id: null });
+  });
+
+  it("a matched payout answered again: what it matched keeps everything and loses only the mark", async () => {
+    const id = await drop();
+    await applyBankDownload(id, { fingerprint: (await view(id)).fingerprint, picks: {} });
+    const payout = db.bank_lines.find((l) => l.description.includes("STRIPE"))!;
+    expect(payout).toMatchObject({ choice: "matched" });
+    const res = await reanswerBankLine({ lineId: payout.id, choice: "cost:Fees" });
+    expect(res.message).toMatch(/ is now Refund: Fees\. What it matched stays on the books as it was, without its mark\. A refund of \$485\.40 comes off Fees\.$/);
+    expect(db.payments.filter((p) => p.id === "pay-c1" || p.id === "pay-c2").map((p) => [p.bank_line_id, p.amount])).toEqual([
+      [null, 250],
+      [null, 250],
+    ]);
+    expect(db.bills).toEqual([expect.objectContaining({ category: "Fees", amount: -485.4, bank_line_id: payout.id })]);
+  });
+
+  it("refuses a payment answer in words, and changes nothing", async () => {
+    const { line } = await crewCheck();
+    const before = snapshot();
+    expect(await reanswerBankLine({ lineId: line.id, choice: "supplier:acct-cs" })).toEqual({ ok: false, error: REANSWER_TO_PAYMENT });
+    expect(await reanswerBankLine({ lineId: line.id, choice: "invoice:inv-1" })).toEqual({ ok: false, error: REANSWER_TO_PAYMENT });
+    expect(await reanswerBankLine({ lineId: line.id, choice: "matched" })).toEqual({ ok: false, error: REANSWER_TO_PAYMENT });
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("money in is never a cost on a job, an answer must fit the way the money went, and a job must be one of this company's", async () => {
+    const id = await drop();
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "Deposit").id]: "not_income", [rowBy(v, "SHELL").id]: "cost:Fuel" } });
+    const dep = db.bank_lines.find((l) => l.description === "DEPOSIT")!;
+    const fill = db.bank_lines.find((l) => l.description.includes("SHELL"))!;
+    const before = snapshot();
+    const onJob = await reanswerBankLine({ lineId: dep.id, choice: "job:job-kitchen" });
+    expect(onJob.ok).toBe(false);
+    expect(onJob.error).toContain(RETURN_ON_JOB_WHY);
+    expect((await reanswerBankLine({ lineId: fill.id, choice: "other_income" })).error).toMatch(/^Nothing was changed\. .*that answer doesn't fit money out\.$/);
+    expect((await reanswerBankLine({ lineId: fill.id, choice: "job:job-theirs" })).error).toMatch(/that job isn't one of yours\.$/);
+    expect((await reanswerBankLine({ lineId: fill.id, choice: "job:job-off" })).error).toMatch(/that job isn't one of yours\.$/);
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("another company's line is not here at all", async () => {
+    const { line } = await crewCheck();
+    state.orgId = "org-2";
+    expect(await reanswerBankLine({ lineId: line.id, choice: "draw" })).toMatchObject({ ok: false, error: expect.stringMatching(/^That bank line isn't here any more/) });
+    state.orgId = "org-1";
+    expect(db.bank_lines.find((l) => l.id === line.id)).toMatchObject({ choice: "crew" });
+  });
+
+  it("a bill somebody changed since refuses the whole change, and sends him to that bill", async () => {
+    const id = await drop();
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
+    const fill = db.bank_lines.find((l) => l.description.includes("SHELL") && Number(l.amount) === -88.45)!;
+    db.bills.find((b) => b.bank_line_id === fill.id)!.amount = 90;
+    const before = snapshot();
+    const res = await reanswerBankLine({ lineId: fill.id, choice: "draw" });
+    expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/ wasn't changed: its bill was changed since\. Open that bill instead\.$/) });
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("nothing half-done: a bill that won't write puts the line back as it was, and the crew payment stays live", async () => {
+    const { line } = await crewCheck();
+    const before = snapshot();
+    refuseWrite = (table, verb) => table === "bills" && verb === "insert";
+    const res = await reanswerBankLine({ lineId: line.id, choice: "cost:Auto" });
+    expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/^Nothing was changed: its bill wasn't written\. /) });
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("nothing half-done: a crew payment that won't void takes the new bill back off and puts the line back", async () => {
+    const { line } = await crewCheck();
+    const before = snapshot();
+    refuseWrite = (table, verb) => table === "pay_payments" && verb === "update";
+    const res = await reanswerBankLine({ lineId: line.id, choice: "cost:Auto" });
+    expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/^Nothing was changed: /) });
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("the card lists every line a pass counted, each with what it holds, for Change Answer", async () => {
+    const id = await drop();
+    const v = await view(id);
+    expect(v.sortedLines).toEqual([]);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "Check 1043").id]: "crew:pat", [rowBy(v, "SHELL").id]: "cost:Fuel" } });
+    const after = await view(id);
+    expect(after.sortedProblem).toBeNull();
+    expect(after.sortedLines.map((l) => [l.title, l.answer, l.by])).toEqual([
+      ["1111-SHELL 123 ANYTOWN ST", "Fuel", "Answered By You"],
+      ["Check 1043", "Pay Pat Crew", "Answered By You"],
+      ["1111-SHELL 456 OTHERTOWN", "Fuel", "Answered By You"],
+      ["1111-SHELL 123 ANYTOWN ST", "Fuel", "Answered By You"],
+      ["STRIPE TRANSFER ST-AB12", "Already In North (Matched)", "Matched"],
+    ]);
+    const check = after.sortedLines.find((l) => l.title === "Check 1043")!;
+    expect(check.current).toBe("crew:pat");
+    // An office viewer the owner keeps owner money from gets none of them.
+    db.organizations[0].settings = { timezone: "America/Los_Angeles", office_sees_owner_money: false };
+    db.profiles.find((p) => p.id === "user-1")!.role = "office";
+    const hidden = await view(id);
+    expect(hidden.sortedLines).toEqual([]);
+    expect(await reanswerBankLine({ lineId: check.id, choice: "draw" })).toMatchObject({ ok: false, error: expect.stringMatching(/^The owner sorts/) });
   });
 });
 

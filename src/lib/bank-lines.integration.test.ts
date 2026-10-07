@@ -297,6 +297,38 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect((await one("select bank_line_id from bills where id = $1", [bill])).bank_line_id).toBeNull();
   });
 
+  /**
+   * CHANGE ANSWER (2026-10-07) is the first UPDATE of bank_lines the app makes: one line's answer
+   * changed in place, guarded by the answer it had. The database permits it to the company's own staff
+   * and to nobody else, and its CHECKs still hold the shape (a cost names its bucket, nothing else may).
+   */
+  it("one line's answer is changed in place by the company's staff only, and the CHECKs still hold its shape", async () => {
+    if (!ready()) return;
+    await as(staffA);
+    const lid = (await line(orgA, 10, { description: "CHECK", merchant_key: "check", check_number: "1003", amount: -1360, choice: "crew", bucket: null, profile_id: staffA })).rows[0].id;
+    await asServer();
+    // Nobody else changes it: a tech of the same company, another company's staff.
+    for (const who of [techA, staffB]) {
+      await as(who);
+      expect((await c.query("update bank_lines set choice = 'draw', profile_id = null where id = $1", [lid])).rowCount).toBe(0);
+      await asServer();
+    }
+    await as(staffA);
+    // Crew pay to Business Cost · Auto, guarded by the answer it had: the same line, key, day and money.
+    const moved = await c.query(
+      "update bank_lines set choice = 'cost', bucket = 'Auto', profile_id = null, sorted_by = 'person' where id = $1 and org_id = $2 and choice = 'crew' returning choice, bucket, profile_id, amount::text as amount, line_key",
+      [lid, orgA],
+    );
+    expect(moved.rows).toEqual([{ choice: "cost", bucket: "Auto", profile_id: null, amount: "-1360.00", line_key: KEY(10) }]);
+    // A second screen's change guarded by the old answer finds nothing to change.
+    expect((await c.query("update bank_lines set choice = 'draw', bucket = null where id = $1 and choice = 'crew'", [lid])).rowCount).toBe(0);
+    // A cost with no bucket, or a bucket on an answer that is not a cost, is refused by the database.
+    expect(await refused("update bank_lines set bucket = null where id = $1", [lid])).toBe("23514");
+    expect(await refused("update bank_lines set choice = 'draw' where id = $1", [lid])).toBe("23514");
+    expect(await refused("update bank_lines set choice = 'draw', bucket = null where id = $1", [lid])).toBeNull();
+    await asServer();
+  });
+
   it("a Fuel bill re-filed to another bucket is simply that bucket: nothing rides along to clear", async () => {
     if (!ready()) return;
     const id = (await one("insert into bills (org_id, job_id, supplier, amount, status, bill_date, category) values ($1, null, 'TEST 0363 FUEL', 40, 'paid', '2001-01-03', 'Fuel') returning id", [orgA])).id;

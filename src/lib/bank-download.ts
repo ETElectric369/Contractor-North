@@ -477,6 +477,18 @@ export function isBareCheck(line: Pick<BankLine, "check" | "merchantKey">): bool
   return !!line.check && (line.merchantKey === "" || line.merchantKey === "check" || line.merchantKey === "chk");
 }
 
+/**
+ * A LINE THAT IS ALWAYS A ROW OF ITS OWN AND NEVER TEACHES A RULE, whatever the books say: a check
+ * that names nobody, a line with no merchant words or only generic ones, a check going out, money in
+ * that may be a customer's. planBankDownload asks this (with the two questions only the books can
+ * answer: a deposit an open invoice may be) to decide a row is single; Change Answer asks it to know
+ * which of a merchant's answered lines could have taught that merchant's rule. One test, so the two
+ * can never disagree about which lines a rule came from.
+ */
+export function teachesNoRule(line: Pick<BankLine, "cents" | "description" | "merchantKey" | "check">): boolean {
+  return isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || (line.cents <= 0 && !!line.check) || isCustomerMoneyIn(line);
+}
+
 const digitsOnly = (s: unknown) => String(s ?? "").replace(/\D/g, "");
 
 /** The last 4 digits of an account cell ("XXXXX1234", "****1234", "Checking - 1234"). */
@@ -1092,6 +1104,38 @@ export function billPlacement(a: { choice: string; bucket?: string | null; job_i
   return storedChoiceName(a.choice) === "job" ? { job_id: a.job_id ?? null, category: null } : { job_id: null, category: a.bucket ?? null };
 }
 
+/**
+ * THE ANSWER A STORED LINE (OR RULE) HOLDS, back as the app's choice: storedAnswer turned round. Null
+ * for a matched line (it holds no answer of its own, only a mark on a row already there) and for a
+ * row whose bucket or id no longer reads as an answer (it is said by its stored word instead).
+ */
+export function answerOfStored(a: {
+  choice: string;
+  bucket?: string | null;
+  supplier_account_id?: string | null;
+  profile_id?: string | null;
+  invoice_id?: string | null;
+  job_id?: string | null;
+}): BankChoice | null {
+  const word = storedChoiceName(String(a.choice ?? ""));
+  switch (word) {
+    case "matched":
+      return null;
+    case "cost":
+      return parseChoiceId(`cost:${a.bucket ?? ""}`);
+    case "supplier":
+      return parseChoiceId(`supplier:${a.supplier_account_id ?? ""}`);
+    case "crew":
+      return parseChoiceId(`crew:${a.profile_id ?? ""}`);
+    case "invoice":
+      return parseChoiceId(`invoice:${a.invoice_id ?? ""}`);
+    case "job":
+      return parseChoiceId(`job:${a.job_id ?? ""}`);
+    default:
+      return parseChoiceId(word);
+  }
+}
+
 // ── THE BOOKS IT IS COMPARED WITH ──────────────────────────────────────────────────────────────
 
 export type BooksPayment = { id: string; invoiceId: string; invoiceNumber: string; cents: number; day: string; method: string; feeCents: number | null; stripe: boolean };
@@ -1686,8 +1730,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     const hint = rule ? null : ruleHintFor(line, books.rules);
     const hinted = hint ? ruleChoice(hint, books) : null;
     const guess = onInvoice ? guessFor(line, books, used) : hinted && choiceFits(hinted, direction) ? hinted : guessFor(line, books, used);
-    const single =
-      isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || onInvoice || guess?.choice === "invoice" || (direction === "out" && !!line.check) || isCustomerMoneyIn(line);
+    const single = teachesNoRule(line) || onInvoice || guess?.choice === "invoice";
     asking.push({ line, direction, guess, single });
   }
   // ONE ROW PER MERCHANT, SPLIT BY AMOUNT: a merchant's lines far apart in size (a fill-up and a
@@ -2168,6 +2211,70 @@ export type BankRowView = {
   buttons: BankButton[];
 };
 
+/**
+ * ONE LINE A DOWNLOAD ALREADY COUNTED, as the card lists it under the applied pass (Change Answer,
+ * 2026-10-07): its day, what it says, its money, the answer it holds and how it got it. `current` is
+ * that answer's choice id (null for a matched line), so the picker never offers the answer it has.
+ */
+export type BankSortedLine = {
+  id: string;
+  day: string;
+  title: string;
+  money: string;
+  direction: "in" | "out";
+  answer: string;
+  by: string;
+  current: string | null;
+};
+
+/** A bank_lines row as the card's list reads it (job_id only where the database has it, 0375). */
+export type BankSortedRow = {
+  id: string;
+  posted_on: string;
+  amount: number | string;
+  description: string;
+  check_number: string | null;
+  choice: string;
+  bucket: string | null;
+  supplier_account_id: string | null;
+  profile_id: string | null;
+  invoice_id: string | null;
+  sorted_by: string;
+  job_id?: string | null;
+};
+
+/** What the card's Sorted Lines are made from: the rows, the names the books lack, or why none could be read. */
+export type BankSortedRead = { rows: readonly BankSortedRow[]; names?: Partial<BankNames>; problem?: string | null };
+
+/** The most sorted lines one card lists: a month is a few hundred; the rest are counted, never cut quietly. */
+export const BANK_SORTED_SHOWN = 1000;
+
+/** The lines a download counted, oldest first, each said the way the card says an answer. */
+export function sortedLinesOf(rows: readonly BankSortedRow[], names: BankNames, today?: string | null): { lines: BankSortedLine[]; more: number } {
+  const all = [...rows].sort(
+    (a, b) => String(a.posted_on).localeCompare(String(b.posted_on)) || String(a.description ?? "").localeCompare(String(b.description ?? "")) || String(a.id).localeCompare(String(b.id)),
+  );
+  const lines = all.slice(0, BANK_SORTED_SHOWN).map((r): BankSortedLine => {
+    const cents = centsOf(r.amount);
+    const direction = cents > 0 ? "in" : "out";
+    const word = storedChoiceName(String(r.choice ?? ""));
+    const c = word === "matched" ? null : answerOfStored(r);
+    // A bucket on money IN is a refund of that cost, in the words the card's own button uses.
+    const label = c ? (direction === "in" && COSTING_CHOICES.has(c.choice) ? `Refund: ${choiceLabel(c, names)}` : choiceLabel(c, names)) : null;
+    return {
+      id: String(r.id),
+      day: sayRange(String(r.posted_on), String(r.posted_on), today),
+      title: r.check_number && direction === "out" ? `Check ${r.check_number}` : String(r.description ?? "").trim() || (direction === "in" ? "Deposit" : "Withdrawal"),
+      money: sayDollars(Math.abs(cents) / 100),
+      direction,
+      answer: word === "matched" ? "Already In North (Matched)" : (label ?? word),
+      by: r.sorted_by === "match" ? "Matched" : r.sorted_by === "rule" ? "By Your Rule" : "Answered By You",
+      current: c ? choiceId(c) : null,
+    };
+  });
+  return { lines, more: Math.max(0, all.length - lines.length) };
+}
+
 export type BankView = {
   headline: string;
   fingerprint: string;
@@ -2210,6 +2317,15 @@ export type BankView = {
    *  could check them. Null on a download stored before the verification existed, and on the card a
    *  viewer who may not see owner money is handed. */
   readSaid?: string | null;
+  /**
+   * EVERY LINE THIS DOWNLOAD ALREADY COUNTED, each with Change Answer (2026-10-07): one line answered
+   * again without Undo taking the whole download back. Empty before the first Apply, and on the card a
+   * viewer who may not see owner money is handed. `sortedMore` counts any past BANK_SORTED_SHOWN, and
+   * `sortedProblem` says so when the lines couldn't be read, never an empty list that reads as none.
+   */
+  sortedLines: BankSortedLine[];
+  sortedMore: number;
+  sortedProblem?: string | null;
   problem: string | null;
 };
 
@@ -2247,7 +2363,18 @@ export function namesOf(books: Pick<BankBooks, "accounts" | "crew" | "invoices" 
 }
 
 /** The card, worked out from the plan: plain data only. */
-export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, opts: { today?: string | null; applied?: BankAppliedPass[] | null } = {}): BankView {
+export function bankViewOf(
+  dl: BankDownload,
+  plan: BankPlan,
+  books: BankBooks,
+  opts: {
+    today?: string | null;
+    applied?: BankAppliedPass[] | null;
+    /** The lines Apply already counted (bank_lines for this download), with the names of the invoices,
+     *  people and jobs they name that the books above don't carry (a paid invoice, a finished job). */
+    sorted?: BankSortedRead | null;
+  } = {},
+): BankView {
   const names = namesOf(books);
   const label = (id: string) => {
     const c = parseChoiceId(id);
@@ -2287,6 +2414,19 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
   const channels = channelViewOf(dl, books);
   const passes = opts.applied ?? [];
   const lastPass = passes[passes.length - 1];
+  /** The counted lines, said with the books' names and the extra ones the read brought along. */
+  const sortedOf = (): Pick<BankView, "sortedLines" | "sortedMore" | "sortedProblem"> => {
+    const s = opts.sorted;
+    if (!s) return { sortedLines: [], sortedMore: 0, sortedProblem: null };
+    const merged: BankNames = {
+      accounts: new Map([...(s.names?.accounts ?? []), ...names.accounts]),
+      crew: new Map([...(s.names?.crew ?? []), ...names.crew]),
+      invoices: new Map([...(s.names?.invoices ?? []), ...names.invoices]),
+      jobs: new Map([...(s.names?.jobs ?? []), ...names.jobs]),
+    };
+    const { lines, more } = sortedLinesOf(s.rows, merged, opts.today);
+    return { sortedLines: lines, sortedMore: more, sortedProblem: s.problem ?? null };
+  };
   const appliedSaid = lastPass
     ? `Applied ${sayRange(lastPass.at.slice(0, 10), lastPass.at.slice(0, 10), opts.today)}: ${plural(passes.reduce((n, p) => n + p.lines, 0), "line", "lines")} counted.` +
       (plan.counts.needRows ? ` ${plural(plan.counts.needLines, "line", "lines")} left for later ${plan.counts.needLines === 1 ? "is" : "are"} not counted yet.` : "")
@@ -2330,6 +2470,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     askAccount: passes.length === 0 && dl.lines.length > 0 && !dl.last4,
     rules: rulesUsed(plan, books, names),
     readSaid: dl.readSaid ?? null,
+    ...sortedOf(),
     problem: null,
   };
 }

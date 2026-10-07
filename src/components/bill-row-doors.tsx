@@ -1,14 +1,15 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2 } from "lucide-react";
+import { FilePlus2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { setBillStatus, deleteBill } from "@/app/(app)/jobs/actions";
 import { shortSupplierName } from "@/lib/supplier-name";
 import { billSettledLabel, billSettledTone, boughtHowFace, flipBoughtHow } from "@/lib/supplier-owed";
+import { CorrectBillModal, type CorrectableBill } from "@/components/correct-bill-modal";
 
 /**
  * A BILL ROW'S THREE DOORS, ONE COPY FOR EVERY SCREEN (audit v1018, class 13): how it was bought,
@@ -21,12 +22,19 @@ import { billSettledLabel, billSettledTone, boughtHowFace, flipBoughtHow } from 
  * so ticking a bill a cheque already covered takes the same dollar off twice. The control stays (a
  * counter receipt settled at the till is what it is for) and its face says how the bill was bought,
  * never "paid". Every door is 44px at 375px, and Delete asks first: there is no Undo behind it.
+ *
+ * CORRECT THIS BILL (0381) is the fourth door, on a bill that is not itself a correction and not set
+ * aside, where the page could read the column (`correct`). A CORRECTION's row has no toggle: it is
+ * settled with the bill it corrects (one purchase, one state, kept by the database), so its badge
+ * says how it stands and names that bill (`follows`) instead of offering a tap the database refuses.
  */
 export function BillRowDoors({
   bill,
   jobId,
   onEdit,
   disabled = false,
+  correct = null,
+  follows = null,
 }: {
   bill: {
     id: string;
@@ -46,10 +54,15 @@ export function BillRowDoors({
   jobId?: string | null;
   onEdit: () => void;
   disabled?: boolean;
+  /** Correct This Bill's bill, when this row may be corrected (lib/bill-correction canCorrect). */
+  correct?: CorrectableBill | null;
+  /** This row IS a correction: the number of the bill it is settled with. */
+  follows?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
+  const [correcting, setCorrecting] = useState(false);
   const busy = pending || disabled;
   const job = jobId ?? bill.job_id ?? "";
 
@@ -95,29 +108,42 @@ export function BillRowDoors({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={toggleStatus}
-        disabled={busy}
-        aria-label="How this bill was bought: tap to switch between Settled and On Account"
-        className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
-      >
-        {/* THE WORDS AND THE COLOUR FROM THE SAME THREE FACTS (8a982483): the tone used to come
-            from bills.status alone, so a ticket the supplier had settled read in the amber of
-            money still owed. */}
-        <Badge tone={billSettledTone(bill)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
-        {/* THE DEED, NOT "SWITCH" (ea2b7172): on a job page a bare "Switch" beside the badge read
-            as "switch the job". The face says what the tap does to THIS bill - and where the
-            supplier has already settled it, it names the register rather than offering to do the
-            thing the badge beside it says is done. */}
-        <span>{boughtHowFace(bill)}</span>
-      </button>
+      {follows ? (
+        <span className="flex min-h-11 items-center gap-2 px-2 text-xs font-medium text-slate-600">
+          <Badge tone={billSettledTone(bill)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
+          <span>Follows {follows}</span>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={toggleStatus}
+          disabled={busy}
+          aria-label="How this bill was bought: tap to switch between Settled and On Account"
+          className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
+        >
+          {/* THE WORDS AND THE COLOUR FROM THE SAME THREE FACTS (8a982483): the tone used to come
+              from bills.status alone, so a ticket the supplier had settled read in the amber of
+              money still owed. */}
+          <Badge tone={billSettledTone(bill)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
+          {/* THE DEED, NOT "SWITCH" (ea2b7172): on a job page a bare "Switch" beside the badge read
+              as "switch the job". The face says what the tap does to THIS bill - and where the
+              supplier has already settled it, it names the register rather than offering to do the
+              thing the badge beside it says is done. */}
+          <span>{boughtHowFace(bill)}</span>
+        </button>
+      )}
       <Button variant="outline" onClick={onEdit} disabled={busy}>
         <Pencil /> Edit
       </Button>
+      {correct && (
+        <Button variant="outline" onClick={() => setCorrecting(true)} disabled={busy}>
+          <FilePlus2 /> Correct This Bill
+        </Button>
+      )}
       <Button variant="outline" className="text-red-700" onClick={removeBill} disabled={busy}>
         <Trash2 /> Delete
       </Button>
+      {correct && correcting && <CorrectBillModal key={correct.id} bill={correct} onClose={() => setCorrecting(false)} />}
     </>
   );
 }

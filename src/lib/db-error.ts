@@ -56,6 +56,10 @@ const BY_CONSTRAINT: Record<string, string> = {
   job_panels_one_name_per_job: "This job already has a panel with that name. Give this one another name (Sub Panel, Garage Panel).",
   job_circuits_one_per_source_row: "That circuit from the estimate is already on this job.",
   job_circuits_half_needs_a_space: "Pick the space before the half (A or B).",
+  // 0381: a bill a correction is attached under cannot be deleted (ON DELETE RESTRICT). The delete
+  // doors say it first, naming the correction (readBillStanding); this is the floor under any door
+  // that did not ask.
+  bills_corrects_bill_id_fkey: "This bill carries a correction. Delete the correction first, then this bill. Nothing was deleted.",
 };
 
 /** Column names that read badly in a sentence. Anything else is title-cased as-is. */
@@ -93,7 +97,10 @@ export function dbError(err: unknown): string {
   if (/violates row-level security policy|permission denied/i.test(raw))
     return "You don't have access to change that. If you think you should, ask an owner or admin.";
 
-  // FOREIGN KEY — pointing at something that is gone, usually because it was deleted in another tab.
+  // FOREIGN KEY — a named rule first (a delete something still leans on), then the usual case:
+  // pointing at something that is gone, usually because it was deleted in another tab.
+  const fk = raw.match(/violates foreign key constraint "([^"]+)"/);
+  if (fk && BY_CONSTRAINT[fk[1]]) return BY_CONSTRAINT[fk[1]];
   if (/violates foreign key constraint/.test(raw))
     return "Something this is attached to no longer exists. Reload the page and try again.";
 

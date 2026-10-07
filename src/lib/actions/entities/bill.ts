@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createBill, updateBill, deleteBill, setBillStatus } from "@/app/(app)/jobs/actions";
+import { createBill, updateBill, deleteBill, setBillStatus, correctBill } from "@/app/(app)/jobs/actions";
 import { createClient } from "@/lib/supabase/server";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
@@ -93,6 +93,40 @@ export const billActions: Record<string, ActionDef> = {
           ? { scope: (scope_category ? { kind: "scope", scope: String(scope_category) } : { kind: "none" }) as BillScopeAnswer }
           : {}),
       }),
+  },
+  // CORRECT THIS BILL (0381): the supplier's later paper for the same purchase, attached UNDER the
+  // bill as its own bill with its own lines. The Bills list and the job's Costs tab open it from the
+  // bill row. Not offered to Nort (AGENT_WRITE_ALLOWED): a new money write clears the agent-write
+  // freeze first. Financial: it adds cost to a job, and the next invoice carries it.
+  "bill.correct": {
+    name: "bill.correct",
+    group: "bill",
+    label: "Correct this bill",
+    description:
+      "Attach the supplier's later paper for the same purchase under an existing bill: its own bill for the difference between what the paper says the purchase comes to and what the bill says, with its own lines. A credit's lines each name a line the bill already has.",
+    input: z.object({
+      bill_id: z.string(),
+      paper_number: z.string(),
+      paper_total: z.number(),
+      bill_date: z.string().nullable().optional(),
+      notes: z.string().nullable().optional(),
+      lines: z.array(z.object({ description: z.string(), amount: z.number().nullable().optional() })).min(1),
+    }),
+    auth: "staff",
+    effect: "write",
+    confirm: "financial", // adds a cost to a job that the next invoice bills → tier 2
+    handler: async (i) => {
+      const res = await correctBill({
+        billId: i.bill_id,
+        paperNumber: i.paper_number,
+        paperTotal: i.paper_total,
+        billDate: i.bill_date ?? null,
+        notes: i.notes ?? null,
+        lines: (i.lines as { description: string; amount?: number | null }[]).map((l) => ({ description: l.description, amount: l.amount ?? null })),
+      });
+      // ANNOUNCE THE DEED: the sentence is what the database now holds, said back by the surface.
+      return res.ok ? { ok: true, data: { id: res.id }, recorded: res.sentence } : { ok: false, error: res.error };
+    },
   },
   "bill.setStatus": {
     name: "bill.setStatus",

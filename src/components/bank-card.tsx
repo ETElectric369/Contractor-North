@@ -6,9 +6,11 @@ import { ArrowLeftRight, Check, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { sayDollars } from "@/lib/supplier-open-list";
-import type { BankRowView, BankView, FlowSegment } from "@/lib/bank-download";
+import type { BankRowView, BankSortedLine, BankView, FlowSegment } from "@/lib/bank-download";
 import type { MoneyInChannels } from "@/lib/bank-money-in";
-import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
+// Which answers a counted line may be changed TO: the same pure test the server refuses by.
+import { reanswerOffers } from "@/lib/bank-reanswer";
+import { applyBankDownload, forgetBankRule, reanswerBankLine, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
 // Putting the paper away goes through NotNowOrDelete, which owns both that write and Delete's confirm:
 // this card no longer calls keepPaperwork itself, so there is one put-away door per state and not two.
 import { NotNowOrDelete } from "@/components/not-now-or-delete";
@@ -236,6 +238,107 @@ export function othersFor(
   return row.single ? view.otherOutSingle : view.otherOut;
 }
 
+/**
+ * CHANGE ANSWER'S LIST FOR ONE COUNTED LINE: the card's own Other… list for a line of that direction
+ * (every bucket, Owner's Draw, a job on money out; the money-in words and a bucket's refund on money in),
+ * less the payment answers (a supplier, crew pay, an invoice: Undo and Apply again for those) and less
+ * the answer it already has.
+ */
+export function changeChoicesFor(
+  line: Pick<BankSortedLine, "direction" | "current">,
+  view: Pick<BankView, "otherOutSingle" | "otherInSingle">,
+): { id: string; label: string }[] {
+  const list = line.direction === "in" ? view.otherInSingle : view.otherOutSingle;
+  return list.filter((o) => reanswerOffers(o.id) && o.id !== line.current);
+}
+
+/** One line Apply already counted: what it says, the answer it holds, and Change Answer. */
+function SortedLineRow({ line, view, run, busy, working }: { line: BankSortedLine; view: BankView; run: Run; busy: string | null; working: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [pick, setPick] = useState("");
+  const key = `reanswer:${line.id}`;
+  const choices = changeChoicesFor(line, view);
+  return (
+    <li className="space-y-2 py-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
+        <span className="text-xs text-slate-500">{line.day}</span>
+        <span className="min-w-0 break-words font-medium text-slate-900">{line.title}</span>
+        <span className="tabular-nums text-slate-700">{line.money}</span>
+        {line.direction === "in" && <span className="text-xs text-green-700">Money In</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="min-w-0 break-words text-sm text-slate-800">{line.answer}</span>
+        <span className="text-xs text-slate-500">{line.by}</span>
+        <Button
+          variant="outline"
+          className="ml-auto"
+          onClick={() => {
+            setOpen((o) => !o);
+            setPick("");
+          }}
+          disabled={working}
+          aria-expanded={open}
+        >
+          Change Answer
+        </Button>
+      </div>
+      {open && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Select className="h-11 w-full sm:w-80" value={pick} aria-label={`The new answer for ${line.title}`} onChange={(e) => setPick(e.target.value)} disabled={working}>
+            <option value="">Choose…</option>
+            {choices.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+          <Button
+            onClick={() =>
+              run(key, async () => {
+                const res = await reanswerBankLine({ lineId: line.id, choice: pick });
+                if (res.ok) {
+                  setOpen(false);
+                  setPick("");
+                }
+                return res;
+              })
+            }
+            disabled={working || !pick}
+          >
+            {busy === key ? <Loader2 className="animate-spin" /> : <Check />} Save Answer
+          </Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * SORTED LINES (2026-10-07): every line this download already counted, under the applied pass, each
+ * with Change Answer — one line answered again without Undo taking the whole download back. Folded:
+ * a month is a hundred lines and the rows still asking come first. A read that failed says so.
+ */
+function SortedLines({ view, run, busy, working }: { view: BankView; run: Run; busy: string | null; working: boolean }) {
+  if (view.sortedProblem) return <p className="text-xs text-amber-800">{view.sortedProblem}</p>;
+  // A view built before this list existed (older callers, test fixtures) simply has no lines to show.
+  const lines = view.sortedLines ?? [];
+  if (!lines.length) return null;
+  return (
+    <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+      <summary className="flex min-h-11 cursor-pointer items-center font-medium text-slate-700">Sorted Lines</summary>
+      <p className="mt-1 text-xs text-slate-500">
+        Each line as it was counted. Change Answer moves one line to another answer: what its old answer wrote comes off, the new answer&apos;s is written, and what the old answer taught for next time is narrowed to match. Every other line stays as it is.
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {lines.map((l) => (
+          <SortedLineRow key={l.id} line={l} view={view} run={run} busy={busy} working={working} />
+        ))}
+      </ul>
+      {view.sortedMore > 0 && <p className="text-xs text-slate-500">And {view.sortedMore} more not listed here.</p>}
+    </details>
+  );
+}
+
 /** The picks for rows still on the card: a row the books took away since keeps no answer. */
 export function livePicks(picks: Record<string, string>, rows: readonly { id: string }[]): Record<string, string> {
   return Object.fromEntries(Object.entries(picks).filter(([id]) => rows.some((r) => r.id === id)));
@@ -349,6 +452,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
       {view.channels && <MoneyInBlock channels={view.channels} />}
       <FlowBar flow={view.flow} outCents={view.outCents} />
       {view.appliedSaid && <p className="text-xs text-slate-600">{view.appliedSaid}</p>}
+      <SortedLines view={view} run={run} busy={busy} working={working} />
       {view.rows.length > 0 && <p className="text-xs text-slate-500">A button marked Guess is the app&apos;s guess. Nothing counts until you tap one.</p>}
       {view.rows.length > 0 && (
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 px-3">

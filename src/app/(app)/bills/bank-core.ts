@@ -14,6 +14,8 @@ import { recalcInvoice } from "@/lib/invoice-recalc";
 import { afterPaymentLanded } from "@/lib/after-payment-landed";
 import { paymentMethodKey } from "@/lib/payment-method";
 import {
+  answerOfStored,
+  applyingNow,
   bankViewOf,
   billPlacement,
   branchFromNumbers,
@@ -30,14 +32,21 @@ import {
   sayBand,
   choiceLabel,
   dayDiff,
+  parseChoiceId,
   planBankDownload,
   readBankTable,
   sayRange,
   storedAnswer,
   storedChoice,
   storedChoiceName,
+  teachesNoRule,
   validPicks,
   type BankAppliedPass,
+  type BankNames,
+  type BankSortedRead,
+  type BankSortedRow,
+  type BooksJob,
+  type NeedGroup,
   type BankBooks,
   type BankRead,
   type BankChoice,
@@ -58,6 +67,9 @@ import { jobSaidLabel } from "@/lib/job-pick-label";
 // job credits the customer the whole amount, so this door asks before it writes one.
 import { jobCostRefusal } from "@/lib/job-cost-guard";
 import { customerNamePart } from "@/lib/schedule-options";
+import { sayDollars } from "@/lib/supplier-open-list";
+// CHANGE ANSWER'S PURE HALF: which answers a line may take now, the band a rule keeps, and the words.
+import { bandHolding, bandHolds, bandWithout, REANSWER_UNKNOWN, reanswerRefusal, sayBankLine, sayReanswer, type Band, type RuleChange } from "@/lib/bank-reanswer";
 
 /**
  * A BANK DOWNLOAD, ON THE SERVER (2026-09-27): the reads, the one Apply and its Undo. Not a
@@ -480,7 +492,9 @@ export async function bankViews(
       out[i.id] = problemView(dl, problem ?? "The books couldn't be read.", (stored.applied ?? []).reduce((n, a) => n + (Number(a?.lines) || 0), 0));
       continue;
     }
-    out[i.id] = bankViewOf(dl, planBankDownload(dl, books), books, { today, applied: stored.applied ?? null });
+    // WHAT IT ALREADY COUNTED, line by line, once anything is applied: each line can be answered again.
+    const sorted = (stored.applied ?? []).length > 0 ? await readSortedLines(supabase, orgId, i.id, books) : null;
+    out[i.id] = bankViewOf(dl, planBankDownload(dl, books), books, { today, applied: stored.applied ?? null, sorted });
   }
   return out;
 }
@@ -572,6 +586,41 @@ export function depositMethod(description: string): string {
   if (/stripe|square|card/.test(d)) return "card";
   if (/\bach\b|transfer|wire/.test(d)) return "transfer";
   return "check";
+}
+
+/** The note on every money row a download writes: which account and which days, never the file's name. */
+export function bankNote(dl: Pick<BankDownload, "last4" | "from" | "to">): string {
+  return `From the bank download${dl.last4 ? ` (••${dl.last4})` : ""} of ${sayRange(dl.from, dl.to)}.`;
+}
+
+/**
+ * THE BILLS ROW A SORTED LINE WRITES, for every answer that writes one (a business cost, a cost on a
+ * job): ONE shape, called by Apply's writeBills and by Change Answer, so a line answered again lands
+ * exactly where Apply would have put it. A bill is the line turned round: money OUT is a paid cost,
+ * money IN a refund of one (a negative amount). The job and the bucket come from the answer the line
+ * holds, through billPlacement — a job and no bucket beside it, or a bucket and no job — and Undo reads
+ * the same function to know the bill is still the one its line wrote.
+ *
+ * It asks no guard itself: each door that writes it asks jobCostRefusal at its own write.
+ */
+export function bankBillRow(
+  who: { orgId: string; userId: string },
+  line: { bankLineId: string | undefined; cents: number; description: string; check: string | null; postedOn: string },
+  choice: BankChoice | null,
+  note: string,
+) {
+  return {
+    org_id: who.orgId,
+    supplier: line.description.slice(0, 120),
+    bill_number: line.check ? `Check ${line.check}` : null,
+    amount: -line.cents / 100,
+    status: "paid",
+    bill_date: line.postedOn,
+    notes: note,
+    bank_line_id: line.bankLineId,
+    created_by: who.userId,
+    ...billPlacement(storedAnswer(choice)),
+  };
 }
 
 /**
@@ -727,7 +776,7 @@ export async function applyBankCore(
   // 3. WHAT THE ANSWERS WRITE.
   const today = todayStrInTz(tz);
   // The file's name never rides on a money row: only which account and which days.
-  const note = `From the bank download${dl.last4 ? ` (••${dl.last4})` : ""} of ${sayRange(dl.from, dl.to)}.`;
+  const note = bankNote(dl);
   const written = (w: Work) => lineId.has(w.line.key);
   /**
    * THE MONEY ROW A SORTED LINE WRITES, FOR EVERY ANSWER THAT WRITES A BILL — one function, called
@@ -749,20 +798,8 @@ export async function applyBankCore(
    */
   const writeBills = async (ws: Work[], what: { one: string; many: string }) => {
     if (!ws.length) return;
-    const all = ws.map((w) => ({
-      org_id: who.orgId,
-      supplier: w.line.description.slice(0, 120),
-      bill_number: w.line.check ? `Check ${w.line.check}` : null,
-      amount: -w.line.cents / 100,
-      status: "paid",
-      bill_date: w.line.postedOn,
-      notes: note,
-      bank_line_id: lineId.get(w.line.key),
-      created_by: who.userId,
-      // The job and the bucket, from the answer the line holds: a job (and no bucket beside it), or a
-      // bucket and no job. Undo reads the same function to know this bill is still the one it wrote.
-      ...billPlacement(storedAnswer(w.choice)),
-    }));
+    // THE ONE ROW SHAPE (bankBillRow), the same one Change Answer writes for a line answered again.
+    const all = ws.map((w) => bankBillRow(who, { ...w.line, bankLineId: lineId.get(w.line.key) }, w.choice, note));
     const stopped = new Map<Work, string>();
     ws.forEach((w, i) => {
       const why = jobCostRefusal({ jobId: all[i].job_id, amount: all[i].amount, lines: [] }, JOB_REFUND_NEXT);
@@ -1043,7 +1080,7 @@ export async function applyBankCore(
 
 // ── UNDO ───────────────────────────────────────────────────────────────────────────────────────
 
-type LineRow = {
+export type LineRow = {
   id: string;
   choice: string;
   amount: number | string;
@@ -1055,6 +1092,138 @@ type LineRow = {
    *  database without the column is. */
   job_id?: string | null;
 };
+
+/** One money row a line's unwinding found, and what it did to it (or, checking, would do). */
+export type UnwoundRow = { table: MatchTable; id: string; lineId: string; did: "unmark" | "delete" | "void" | "none" };
+/** A line whose row stays as it is, and why, in Undo's own words. */
+export type UnwindStay = { line: LineRow; table: MatchTable; why: string };
+
+/** The columns each money table is read with to know whether its row is still the one a line wrote. */
+const UNWIND_COLS: Record<MatchTable, string> = {
+  bills: "id, bank_line_id, amount, job_id, category",
+  payments: "id, bank_line_id, amount, invoice_id",
+  petty_cash: "id, bank_line_id, amount, kind",
+  supplier_payments: "id, bank_line_id, amount, voided_at",
+  pay_payments: "id, bank_line_id, amount, voided_at",
+};
+
+/**
+ * TAKE LINES' MONEY BACK, BY UNDO'S PER-LINE RULES — factored out of undoBankCore (2026-10-07) so
+ * Change Answer unwinds ONE line exactly the way Undo unwinds every line, and the two can never drift:
+ *   · a row the line only MATCHED keeps everything and loses the mark;
+ *   · a bill it wrote is deleted while it is still that bill (its money, and the job and bucket
+ *     billPlacement gave it), else it stays;
+ *   · a payment it put on an invoice is deleted while unchanged, and the invoice recomputed;
+ *   · a petty cash top-up it wrote (before W1-34) is deleted while it is still that top-up;
+ *   · a supplier or crew payment it wrote is voided, never deleted; one already void is left alone.
+ *
+ * `check: true` READS AND JUDGES AND WRITES NOTHING: `rows` is what it would do, `stays` what it would
+ * leave, so a door that must be all-or-nothing can refuse before its first write. `tables` reads only
+ * those tables. A failed read stops at once, with the rows it had already changed in `rows` so the
+ * caller can say or put back what it did.
+ */
+export async function unwindLineRows(
+  supabase: Db,
+  orgId: string,
+  userId: string,
+  lines: readonly LineRow[],
+  opts: { check?: boolean; tables?: readonly MatchTable[] } = {},
+): Promise<{ ok: true; stays: UnwindStay[]; rows: UnwoundRow[] } | { ok: false; table: MatchTable; error: unknown; rows: UnwoundRow[] }> {
+  const byId = new Map(lines.map((l) => [String(l.id), l]));
+  const stays: UnwindStay[] = [];
+  const rows: UnwoundRow[] = [];
+  const ids = lines.map((l) => String(l.id));
+  const recalc = new Set<string>();
+
+  for (const table of opts.tables ?? MATCH_TABLES) {
+    const say = (l: LineRow, why: string) => stays.push({ line: l, table, why });
+    for (const part of chunks(ids, 150)) {
+      const { data, error } = await supabase.from(table).select(UNWIND_COLS[table]).eq("org_id", orgId).in("bank_line_id", part);
+      if (error) return { ok: false, table, error, rows };
+      for (const row of (data ?? []) as any[]) {
+        const l = byId.get(String(row.bank_line_id));
+        if (!l) continue;
+        const did = (d: UnwoundRow["did"]) => rows.push({ table, id: String(row.id), lineId: String(l.id), did: d });
+        const cents = Math.abs(centsOf(l.amount));
+        if (l.choice === "matched") {
+          if (opts.check) {
+            did("unmark");
+            continue;
+          }
+          const { error: e } = await supabase.from(table).update({ bank_line_id: null }).eq("org_id", orgId).eq("id", row.id).select("id");
+          if (e) say(l, `its mark wouldn't come off: ${dbError(e)}`);
+          else did("unmark");
+          continue;
+        }
+        if (table === "bills") {
+          // The bill is the line turned round: a cost for money out, a refund (negative) for money in.
+          // STILL THE BILL THIS LINE WROTE? Its money, and the job and bucket Apply placed it with —
+          // from the SAME function Apply used (billPlacement), so a job line's bill comes off exactly
+          // as a business cost's does. Asked here by hand, a job line's bill was left behind for ever
+          // as "changed since", because the check said a bill on a job was somebody else's work.
+          const want = billPlacement(l);
+          const untouched =
+            String(row.job_id ?? "") === String(want.job_id ?? "") && centsOf(row.amount) === -centsOf(l.amount) && String(row.category ?? "") === String(want.category ?? "");
+          if (!untouched) {
+            say(l, "its bill was changed since, so it stays");
+            continue;
+          }
+          if (opts.check) {
+            did("delete");
+            continue;
+          }
+          const { data: gone, error: e } = await supabase.from("bills").delete().eq("org_id", orgId).eq("id", row.id).select("id");
+          if (e || !gone?.length) say(l, e ? dbError(e) : "its bill wouldn't come off");
+          else did("delete");
+        } else if (table === "payments") {
+          if (centsOf(row.amount) !== cents || String(row.invoice_id) !== String(l.invoice_id)) {
+            say(l, "its payment was changed since, so it stays");
+            continue;
+          }
+          if (opts.check) {
+            did("delete");
+            continue;
+          }
+          const { data: gone, error: e } = await supabase.from("payments").delete().eq("org_id", orgId).eq("id", row.id).select("id");
+          if (e || !gone?.length) say(l, e ? dbError(e) : "its payment wouldn't come off");
+          else {
+            recalc.add(String(row.invoice_id));
+            did("delete");
+          }
+        } else if (table === "petty_cash") {
+          // Petty cash rows can be edited (amount, kind, day): a top-up someone changed since stays.
+          if (centsOf(row.amount) !== cents || String(row.kind ?? "") !== "replenish") {
+            say(l, "its petty cash row was changed since, so it stays");
+            continue;
+          }
+          if (opts.check) {
+            did("delete");
+            continue;
+          }
+          const { data: gone, error: e } = await supabase.from("petty_cash").delete().eq("org_id", orgId).eq("id", row.id).select("id");
+          if (e || !gone?.length) say(l, e ? dbError(e) : "its petty cash row wouldn't come off");
+          else did("delete");
+        } else {
+          // ALREADY VOID IS FINE: the payment is already off the books (voided by hand since).
+          if (row.voided_at) {
+            did("none");
+            continue;
+          }
+          if (opts.check) {
+            did("void");
+            continue;
+          }
+          const patch = table === "pay_payments" ? { voided_at: new Date().toISOString(), voided_by: userId } : { voided_at: new Date().toISOString() };
+          const { data: v, error: e } = await supabase.from(table).update(patch).eq("org_id", orgId).eq("id", row.id).is("voided_at", null).select("id");
+          if (e || !v?.length) say(l, e ? dbError(e) : "its payment wouldn't void");
+          else did("void");
+        }
+      }
+    }
+  }
+  if (!opts.check) for (const id of recalc) await recalcInvoice(supabase, id);
+  return { ok: true, stays, rows };
+}
 
 /**
  * TAKE A WHOLE DOWNLOAD BACK: only what it wrote, and only what nobody has changed since.
@@ -1079,86 +1248,12 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
   );
   if (read.error) return { ok: false, error: isMissingBank(read.error) ? BANK_NEEDS_UPDATE : `The download's lines couldn't be read, so nothing was undone. ${dbError(read.error as never)}` };
   const lines = read.rows;
-  const byId = new Map(lines.map((l) => [String(l.id), l]));
-  const keep = new Set<string>();
-  const left: string[] = [];
-  const say = (l: LineRow, why: string) => left.push(`${l.description} ${l.posted_on} (${why})`);
   const ids = lines.map((l) => String(l.id));
-  const recalc = new Set<string>();
-
-  for (const table of MATCH_TABLES) {
-    const cols =
-      table === "bills" ? "id, bank_line_id, amount, job_id, category" : table === "payments" ? "id, bank_line_id, amount, invoice_id" : table === "petty_cash" ? "id, bank_line_id, amount, kind" : "id, bank_line_id, amount, voided_at";
-    for (const part of chunks(ids, 150)) {
-      const { data, error } = await supabase.from(table).select(cols).eq("org_id", orgId).in("bank_line_id", part);
-      if (error) return { ok: false, error: `${table.replace(/_/g, " ")} couldn't be read, so the rest wasn't undone. ${dbError(error)}` };
-      for (const row of (data ?? []) as any[]) {
-        const l = byId.get(String(row.bank_line_id));
-        if (!l) continue;
-        const cents = Math.abs(centsOf(l.amount));
-        if (l.choice === "matched") {
-          const { error: e } = await supabase.from(table).update({ bank_line_id: null }).eq("org_id", orgId).eq("id", row.id).select("id");
-          if (e) {
-            keep.add(l.id);
-            say(l, `its mark wouldn't come off: ${dbError(e)}`);
-          }
-          continue;
-        }
-        if (table === "bills") {
-          // The bill is the line turned round: a cost for money out, a refund (negative) for money in.
-          // STILL THE BILL THIS LINE WROTE? Its money, and the job and bucket Apply placed it with —
-          // from the SAME function Apply used (billPlacement), so a job line's bill comes off exactly
-          // as a business cost's does. Asked here by hand, a job line's bill was left behind for ever
-          // as "changed since", because the check said a bill on a job was somebody else's work.
-          const want = billPlacement(l);
-          const untouched =
-            String(row.job_id ?? "") === String(want.job_id ?? "") && centsOf(row.amount) === -centsOf(l.amount) && String(row.category ?? "") === String(want.category ?? "");
-          if (!untouched) {
-            keep.add(l.id);
-            say(l, "its bill was changed since, so it stays");
-            continue;
-          }
-          const { data: gone, error: e } = await supabase.from("bills").delete().eq("org_id", orgId).eq("id", row.id).select("id");
-          if (e || !gone?.length) {
-            keep.add(l.id);
-            say(l, e ? dbError(e) : "its bill wouldn't come off");
-          }
-        } else if (table === "payments") {
-          if (centsOf(row.amount) !== cents || String(row.invoice_id) !== String(l.invoice_id)) {
-            keep.add(l.id);
-            say(l, "its payment was changed since, so it stays");
-            continue;
-          }
-          const { data: gone, error: e } = await supabase.from("payments").delete().eq("org_id", orgId).eq("id", row.id).select("id");
-          if (e || !gone?.length) {
-            keep.add(l.id);
-            say(l, e ? dbError(e) : "its payment wouldn't come off");
-          } else recalc.add(String(row.invoice_id));
-        } else if (table === "petty_cash") {
-          // Petty cash rows can be edited (amount, kind, day): a top-up someone changed since stays.
-          if (centsOf(row.amount) !== cents || String(row.kind ?? "") !== "replenish") {
-            keep.add(l.id);
-            say(l, "its petty cash row was changed since, so it stays");
-            continue;
-          }
-          const { data: gone, error: e } = await supabase.from("petty_cash").delete().eq("org_id", orgId).eq("id", row.id).select("id");
-          if (e || !gone?.length) {
-            keep.add(l.id);
-            say(l, e ? dbError(e) : "its petty cash row wouldn't come off");
-          }
-        } else {
-          if (row.voided_at) continue;
-          const patch = table === "pay_payments" ? { voided_at: new Date().toISOString(), voided_by: userId } : { voided_at: new Date().toISOString() };
-          const { data: v, error: e } = await supabase.from(table).update(patch).eq("org_id", orgId).eq("id", row.id).is("voided_at", null).select("id");
-          if (e || !v?.length) {
-            keep.add(l.id);
-            say(l, e ? dbError(e) : "its payment wouldn't void");
-          }
-        }
-      }
-    }
-  }
-  for (const id of recalc) await recalcInvoice(supabase, id);
+  // EVERY LINE'S MONEY BY THE ONE PER-LINE RULE (unwindLineRows), which Change Answer unwinds one line by.
+  const un = await unwindLineRows(supabase, orgId, userId, lines);
+  if (!un.ok) return { ok: false, error: `${un.table.replace(/_/g, " ")} couldn't be read, so the rest wasn't undone. ${dbError(un.error as never)}` };
+  const keep = new Set(un.stays.map((s) => String(s.line.id)));
+  const left = un.stays.map((s) => `${s.line.description} ${s.line.posted_on} (${s.why})`);
 
   const { error: ruleErr } = await supabase.from("bank_rules").delete().eq("org_id", orgId).eq("learned_import_id", importId).select("id");
   if (ruleErr) left.push(`the answers it remembered (${dbError(ruleErr)})`);
@@ -1177,6 +1272,425 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
 export function proposalAfterUndo(p: PaperProposal): PaperProposal {
   const stored = p.bankImport as StoredBank | undefined;
   return { ...p, filed: null, ...(stored ? { bankImport: { download: stored.download, applied: null, pending: null } } : {}) };
+}
+
+// ── ONE LINE, ANSWERED AGAIN (CHANGE ANSWER) ───────────────────────────────────────────────────
+
+/** A bank_lines row as Change Answer reads it: what it needs to unwind, write, say and settle. */
+type ReanswerLine = LineRow & {
+  import_id: string;
+  line_key: string;
+  check_number: string | null;
+  merchant_key: string;
+  supplier_account_id: string | null;
+  profile_id: string | null;
+  sorted_by: string;
+};
+
+export type ReanswerResult = { ok: true; message: string; already?: boolean; jobs: string[] } | { ok: false; error: string };
+
+/** A money table as a sentence names its row. */
+const ROW_WORDS: Record<MatchTable, string> = {
+  bills: "bill",
+  payments: "payment",
+  petty_cash: "petty cash row",
+  supplier_payments: "supplier payment",
+  pay_payments: "crew payment",
+};
+
+/** An answer as one key (the stored word, its bucket, supplier, person): bank_rules' own `answer`. */
+const answerKey = (a: { choice: string; bucket?: string | null; supplier_account_id?: string | null; profile_id?: string | null }) =>
+  [storedChoiceName(String(a.choice ?? "")), a.bucket ?? "", a.supplier_account_id ?? "", a.profile_id ?? ""].join("|");
+
+/** The names a sentence or the card's list needs that the books don't carry (a paid invoice, a finished
+ *  job, a person no longer on the crew). This company's own rows only; a failed read names nothing. */
+async function namesFor(
+  supabase: Db,
+  orgId: string,
+  want: { jobs?: readonly string[]; accounts?: readonly string[]; crew?: readonly string[]; invoices?: readonly string[] },
+): Promise<BankNames> {
+  const ids = (x?: readonly string[]) => [...new Set((x ?? []).filter(Boolean).map(String))].slice(0, 500);
+  const [jobs, accounts, crew, invoices] = [ids(want.jobs), ids(want.accounts), ids(want.crew), ids(want.invoices)];
+  const none = Promise.resolve({ data: [] as any[], error: null });
+  const [jR, aR, cR, iR] = await Promise.all([
+    jobs.length ? supabase.from("jobs").select("id, job_number, name, customers(name, company_name)").eq("org_id", orgId).in("id", jobs) : none,
+    accounts.length ? supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).in("id", accounts) : none,
+    crew.length ? supabase.from("profiles").select("id, full_name").eq("org_id", orgId).in("id", crew) : none,
+    invoices.length ? supabase.from("invoices").select("id, invoice_number").eq("org_id", orgId).in("id", invoices) : none,
+  ]);
+  return {
+    jobs: new Map(
+      ((jR.data ?? []) as any[]).map((j): [string, string] => {
+        const c = Array.isArray(j.customers) ? j.customers[0] : j.customers;
+        return [String(j.id), jobSaidLabel({ job_number: j.job_number, name: j.name, customer: customerNamePart(c) })];
+      }),
+    ),
+    accounts: new Map(((aR.data ?? []) as any[]).map((a): [string, string] => [String(a.id), String(a.name ?? "")])),
+    crew: new Map(((cR.data ?? []) as any[]).map((p): [string, string] => [String(p.id), String(p.full_name ?? "").trim() || "Crew"])),
+    invoices: new Map(((iR.data ?? []) as any[]).map((i): [string, string] => [String(i.id), String(i.invoice_number ?? "Invoice")])),
+  };
+}
+
+/** The new answer as the sentence says it: "Business Cost · Auto", "Refund: Fuel", "a cost on 41
+ *  Larkspur · J-054 — Marla Finch", "Owner's Money In". */
+function answerWords(c: BankChoice, names: BankNames, direction: "in" | "out"): string {
+  if (c.choice === "cost") return direction === "in" ? `Refund: ${c.bucket}` : `Business Cost · ${c.bucket}`;
+  if (c.choice === "job") return `a cost on ${names.jobs.get(c.jobId) ?? "that job"}`;
+  return choiceLabel(c, names);
+}
+
+/**
+ * ONE SORTED LINE, ANSWERED AGAIN (Change Answer, correction door B, 2026-10-07): the line keeps its
+ * key, day and money; its old answer's money row comes off by Undo's own per-line rules
+ * (unwindLineRows); its new answer's row is written by Apply's own shape (bankBillRow); the line
+ * says the new answer, sorted by a person; and the rule the old answer taught is settled.
+ *
+ * THE NEW ANSWER is one that writes nothing (Owner's Draw, Cash Taken Out, Not A Cost, Not Income,
+ * Owner's Money In, Other Income) or one paid bill (a business cost, a cost on a job). A payment answer
+ * (matched, a supplier's, crew pay, an invoice) is refused in words: it ties the line to somebody
+ * else's money, and Undo and Apply again is the road for that today.
+ *
+ * NOTHING HALF-DONE. Every row is judged before the first write (unwindLineRows with check), so a bill
+ * somebody changed since refuses the whole change. Then, in the order that can always be put back:
+ *   1. the LINE takes its new answer, guarded by the answer it had (a second screen changing it at the
+ *      same moment changes nothing), and every later failure puts it back;
+ *   2. a MATCHED line's marks come off (put back on failure);
+ *   3. the NEW BILL is written — or, when the old answer's own bill is still the one it wrote, that
+ *      bill is MOVED to the new bucket or job in one guarded write rather than deleted and written
+ *      again, which is the same end with no moment in which neither exists (deleted on failure);
+ *   4. LAST, the old answer's one written row comes off (a bill deleted, a payment deleted and its
+ *      invoice worked out again, a supplier or crew payment voided; one already void stays void).
+ * Anything that cannot be put back is said by name, with the one road that sets it straight.
+ *
+ * THE RULES (settleRules): the old answer's rule, if THIS download taught it, keeps the band of the
+ * surviving lines a person answered that way, or goes if none survives; an existing rule for the new
+ * answer widens to hold this amount; no rule is ever MADE from one re-answer.
+ *
+ * ALREADY: a line that already says the asked answer (changed some other way) changes nothing, and a
+ * rule this download taught that still says another answer for its amount is settled all the same.
+ */
+export async function reanswerBankLineCore(
+  supabase: Db,
+  who: { orgId: string; userId: string },
+  lineId: string,
+  choice: string | BankChoice,
+): Promise<ReanswerResult> {
+  // THE ANSWER ASKED FOR, before anything is read.
+  const asked = typeof choice === "string" ? choice : choiceId(choice);
+  const notThat = reanswerRefusal(asked);
+  if (notThat) return { ok: false, error: notThat };
+  const c = parseChoiceId(asked);
+  if (!c || reanswerRefusal(c.choice)) return { ok: false, error: REANSWER_UNKNOWN };
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(lineId ?? ""))) return { ok: false, error: "That bank line isn't here any more. Refresh the page." };
+
+  // (1) THE LINE, this company's own. job_id only where the database has it (0375).
+  const namesJobs = await bankLinesNameJobs(supabase, who.orgId);
+  const cols = `id, import_id, line_key, posted_on, amount, description, check_number, merchant_key, choice, bucket, supplier_account_id, profile_id, invoice_id, sorted_by${namesJobs ? ", job_id" : ""}`;
+  const read = await supabase.from("bank_lines").select(cols).eq("org_id", who.orgId).eq("id", String(lineId)).maybeSingle();
+  if (read.error) return { ok: false, error: isMissingBank(read.error) ? BANK_NEEDS_UPDATE : `Nothing was changed: the line couldn't be read. ${dbError(read.error)}` };
+  const line = read.data as ReanswerLine | null;
+  if (!line) return { ok: false, error: "That bank line isn't here any more: its download may have been undone. Refresh the page." };
+  const cents = centsOf(line.amount);
+  const direction: "in" | "out" = cents > 0 ? "in" : "out";
+  const was = storedChoiceName(String(line.choice));
+  const old = was === "matched" ? null : answerOfStored(line);
+  const today = todayStrInTz(await orgTz(supabase, who.orgId));
+  const lineSaid = sayBankLine({ postedOn: String(line.posted_on), description: String(line.description ?? ""), check: line.check_number ?? null, cents }, today);
+
+  // ITS DOWNLOAD: an Apply still writing it holds every change back, and its account and days are the
+  // note a bill written for the line carries, word for word what Apply would have written.
+  const { data: item } = await supabase.from("organized_items").select("id, proposal").eq("org_id", who.orgId).eq("id", String(line.import_id)).maybeSingle();
+  const stored = item ? (proposalOf(item).bankImport as StoredBank | undefined) : undefined;
+  if (stored && applyingNow(stored)) return { ok: false, error: "This line's download is being applied right now. Wait a moment, then change it." };
+  const note = stored?.download ? bankNote(stored.download) : "From a bank line, answered again.";
+  const names = await namesFor(supabase, who.orgId, { jobs: [c.choice === "job" ? c.jobId : "", line.job_id ?? ""] });
+
+  // SAME ANSWER: the line is left as it is.
+  const nowId = was === "matched" ? "matched" : old ? choiceId(old) : `stored:${was}`;
+  if (nowId === choiceId(c)) {
+    const rules = await settleRules(supabase, who.orgId, line, { was: null, now: c, cents, direction });
+    return { ok: true, already: true, jobs: [], message: sayReanswer({ line: lineSaid, answer: answerWords(c, names, direction), already: true, rules }) };
+  }
+
+  // (2) DOES IT FIT, by the card's own rule (validPicks): money in is never a cost on a job, a job is
+  //     one of this company's, an answer fits the way the money went.
+  if (c.choice === "job" && !namesJobs) return { ok: false, error: "Putting a bank line on a job needs one database update first. Nothing was changed." };
+  const jobs: BooksJob[] = [];
+  if (c.choice === "job") {
+    const { data: j, error } = await supabase.from("jobs").select("id").eq("org_id", who.orgId).eq("id", c.jobId).in("status", PAPER_JOB_STATUSES).maybeSingle();
+    if (error) return { ok: false, error: `Nothing was changed: the job couldn't be read. ${dbError(error)}` };
+    if (j) jobs.push({ id: String(j.id), label: names.jobs.get(String(j.id)) ?? "Job" });
+  }
+  const asRow: NeedGroup = {
+    id: "line",
+    direction,
+    label: String(line.description ?? ""),
+    keys: [String(line.line_key)],
+    cents,
+    each: cents,
+    first: String(line.posted_on),
+    last: String(line.posted_on),
+    check: line.check_number ?? null,
+    single: true,
+    guess: null,
+    buttons: [],
+    learnable: false,
+    merchantKey: String(line.merchant_key ?? ""),
+  };
+  const fits = validPicks({ line: choiceId(c) }, { groups: [asRow] }, { accounts: [], crew: [], invoices: [], jobs });
+  if (fits.refused.length) return { ok: false, error: `Nothing was changed. ${fits.refused[0].replace(/\.$/, "")}.` };
+  // THE ROW THE NEW ANSWER WRITES, by Apply's one shape, and the cost guard asked at the write as well.
+  const newRow =
+    c.choice === "cost" || c.choice === "job"
+      ? bankBillRow(who, { bankLineId: String(line.id), cents, description: String(line.description ?? ""), check: line.check_number ?? null, postedOn: String(line.posted_on) }, c, note)
+      : null;
+  if (newRow) {
+    const why = jobCostRefusal({ jobId: newRow.job_id, amount: newRow.amount, lines: [] }, JOB_REFUND_NEXT);
+    if (why) return { ok: false, error: `Nothing was changed. ${why}` };
+  }
+
+  // (3) EVERY ROW THE OLD ANSWER WROTE OR MARKED, judged by Undo's rules before anything is written.
+  const look = await unwindLineRows(supabase, who.orgId, who.userId, [line], { check: true });
+  if (!look.ok) return { ok: false, error: `Nothing was changed: its ${ROW_WORDS[look.table]} couldn't be read. ${dbError(look.error as never)}` };
+  const stays = look.stays[0];
+  if (stays) return { ok: false, error: `${lineSaid} wasn't changed: its ${ROW_WORDS[stays.table]} was changed since. Open that ${ROW_WORDS[stays.table]} instead.` };
+  const found = look.rows;
+  const oldBill = was === "matched" ? undefined : found.find((r) => r.table === "bills");
+  const moveBill = !!(oldBill && newRow);
+  const tablesOf = (rs: readonly UnwoundRow[]) => [...new Set(rs.map((r) => r.table))];
+
+  // (5, done first) THE LINE TAKES ITS NEW ANSWER — guarded by the answer it had, so a second screen
+  // changing the same line at the same moment changes nothing. The CHECKs hold its shape (a cost names
+  // its bucket, a job its job, and nothing else rides along).
+  const answer = { ...storedAnswer(c), sorted_by: "person", ...(namesJobs ? { job_id: c.choice === "job" ? c.jobId : null } : {}) };
+  let lq = supabase.from("bank_lines").update(answer).eq("org_id", who.orgId).eq("id", String(line.id)).eq("choice", line.choice);
+  lq = line.bucket ? lq.eq("bucket", line.bucket) : lq.is("bucket", null);
+  if (namesJobs) lq = line.job_id ? lq.eq("job_id", line.job_id) : lq.is("job_id", null);
+  const moved = await lq.select("id");
+  if (moved.error) return { ok: false, error: `Nothing was changed. ${dbError(moved.error)}` };
+  if (!moved.data?.length) return { ok: false, error: "Nothing was changed: this line was answered from another screen a moment ago. Refresh the page." };
+
+  // WHAT TO PUT BACK if a later step fails, newest first.
+  let wroteBill: string | null = null;
+  const unmarked: UnwoundRow[] = [];
+  const fail = async (why: string): Promise<ReanswerResult> => {
+    const notBack: string[] = [];
+    if (wroteBill) {
+      const { data, error } = await supabase.from("bills").delete().eq("org_id", who.orgId).eq("id", wroteBill).select("id");
+      if (error || !data?.length) notBack.push("the bill it had just written");
+    }
+    for (const r of [...unmarked].reverse()) {
+      const { data, error } = await supabase.from(r.table).update({ bank_line_id: line.id }).eq("org_id", who.orgId).eq("id", r.id).is("bank_line_id", null).select("id");
+      if (error || !data?.length) notBack.push(`the mark on its ${ROW_WORDS[r.table]}`);
+    }
+    const back = {
+      choice: line.choice,
+      bucket: line.bucket,
+      supplier_account_id: line.supplier_account_id,
+      profile_id: line.profile_id,
+      invoice_id: line.invoice_id,
+      sorted_by: line.sorted_by,
+      ...(namesJobs ? { job_id: line.job_id ?? null } : {}),
+    };
+    const { data, error } = await supabase.from("bank_lines").update(back).eq("org_id", who.orgId).eq("id", String(line.id)).select("id");
+    if (error || !data?.length) notBack.push("the line's own answer");
+    if (notBack.length) {
+      reportError("bills:bank.reanswer.putBack", new Error(notBack.join("; ")), { lineId: line.id });
+      return { ok: false, error: `${lineSaid} wasn't changed: ${why} And ${notBack.join(" and ")} couldn't be put back, so Undo This Download sets it straight.` };
+    }
+    return { ok: false, error: `Nothing was changed: ${why}` };
+  };
+
+  // (3a) A MATCHED LINE: the rows it marked keep everything and lose the mark.
+  if (was === "matched" && found.length) {
+    const un = await unwindLineRows(supabase, who.orgId, who.userId, [line], { tables: tablesOf(found) });
+    unmarked.push(...un.rows.filter((r) => r.did === "unmark"));
+    if (!un.ok) return fail(`what it matched couldn't be read (${dbError(un.error as never)}).`);
+    if (un.stays.length) return fail(`${un.stays[0].why}.`);
+  }
+
+  // (4) THE NEW ANSWER'S BILL: the old answer's own bill moved, or a new one written.
+  if (newRow && moveBill && oldBill) {
+    const had = billPlacement(line);
+    let bq = supabase
+      .from("bills")
+      .update({ job_id: newRow.job_id, category: newRow.category })
+      .eq("org_id", who.orgId)
+      .eq("id", oldBill.id)
+      .eq("bank_line_id", String(line.id))
+      .eq("amount", newRow.amount);
+    bq = had.job_id ? bq.eq("job_id", had.job_id) : bq.is("job_id", null);
+    bq = had.category ? bq.eq("category", had.category) : bq.is("category", null);
+    const { data, error } = await bq.select("id");
+    if (error) return fail(`its bill couldn't move. ${dbError(error)}`);
+    if (!data?.length) return fail("its bill was changed a moment ago. Open that bill instead.");
+  } else if (newRow) {
+    const { data, error } = await supabase.from("bills").insert(newRow).select("id");
+    if (error || !data?.length) return fail(error ? `its bill wasn't written. ${dbError(error)}` : "its bill wasn't written. Try again.");
+    wroteBill = String(data[0].id);
+  }
+
+  // (3b, last) THE OLD ANSWER'S ONE WRITTEN ROW comes off, by Undo's rule.
+  const rest = was === "matched" ? [] : found.filter((r) => !(moveBill && r.table === "bills"));
+  if (rest.length) {
+    const un = await unwindLineRows(supabase, who.orgId, who.userId, [line], { tables: tablesOf(rest) });
+    if (!un.ok) return fail(`its ${ROW_WORDS[un.table]} couldn't be read (${dbError(un.error as never)}).`);
+    if (un.stays.length) return fail(`${un.stays[0].why}.`);
+  }
+
+  // WHAT HAPPENED TO ITS MONEY, in words.
+  const money: string[] = [];
+  if (was === "matched" && found.length) money.push("What it matched stays on the books as it was, without its mark.");
+  for (const r of rest) {
+    if (r.table === "bills") money.push("Its bill came off.");
+    else if (r.table === "payments") money.push("Its payment came off its invoice, and the invoice was worked out again.");
+    else if (r.table === "petty_cash") money.push("Its petty cash top-up came off.");
+    else money.push(r.did === "none" ? `Its ${ROW_WORDS[r.table]} stays void.` : `Its ${ROW_WORDS[r.table]} was voided.`);
+  }
+  if (newRow && moveBill) money.push(c.choice === "job" ? "Its bill moved onto that job." : `Its bill moved to ${newRow.category}.`);
+  else if (newRow) money.push(direction === "out" ? `A paid bill of ${sayDollars(Math.abs(newRow.amount))} is on the books for it.` : `A refund of ${sayDollars(Math.abs(newRow.amount))} comes off ${newRow.category}.`);
+
+  // (6) THE RULES.
+  const rules = await settleRules(supabase, who.orgId, line, { was: old, now: c, cents, direction });
+  // (7) ONE SENTENCE.
+  return {
+    ok: true,
+    jobs: [...new Set([line.job_id ?? "", c.choice === "job" ? c.jobId : ""].filter(Boolean))],
+    message: sayReanswer({ line: lineSaid, answer: answerWords(c, names, direction), money, rules }),
+  };
+}
+
+/**
+ * THE RULES ONE LINE ANSWERED AGAIN TOUCHES (Change Answer, step 6).
+ *
+ *   · THE OLD ANSWER'S RULE, when THIS line's download taught it: it keeps the band of the surviving
+ *     answers it holds — the other lines a person answered that way, for this merchant, the same way
+ *     round, that could have taught a rule at all (teachesNoRule) — or goes if none survives. Read
+ *     from every download of this company, not only this one, because Apply widens a rule from a LATER
+ *     download without changing whose it is (learned_import_id); only lines inside the band count, so
+ *     a rule forgotten and learned again is never widened back (lib/bank-reanswer bandWithout).
+ *   · ALREADY (a line changed some other way): there is no old answer to go by, so a rule this
+ *     download taught that still says another answer for this very amount is the one settled.
+ *   · THE NEW ANSWER'S RULE, if one exists, widens to hold this amount, exactly as Apply widens a rule
+ *     a person answers again — and only where Apply would (a line that could teach, an answer a rule
+ *     may hold). No rule is ever made from one re-answer.
+ *
+ * Every change is said; one that fails is said too, and the money above it stays done.
+ */
+async function settleRules(
+  supabase: Db,
+  orgId: string,
+  line: ReanswerLine,
+  a: { was: BankChoice | null; now: BankChoice; cents: number; direction: "in" | "out" },
+): Promise<RuleChange[]> {
+  const key = String(line.merchant_key ?? "");
+  if (key.length < 2) return [];
+  const { data, error } = await supabase
+    .from("bank_rules")
+    .select("id, direction, merchant_key, choice, bucket, supplier_account_id, profile_id, min_cents, max_cents, learned_import_id")
+    .eq("org_id", orgId)
+    .eq("direction", a.direction)
+    .eq("merchant_key", key);
+  if (error) return isMissingBank(error) ? [] : [{ kind: "unread", why: dbError(error) }];
+  const rules = (data ?? []) as any[];
+  if (!rules.length) return [];
+  const band = (r: any): Band => ({ minCents: r.min_cents == null ? null : Number(r.min_cents), maxCents: r.max_cents == null ? null : Number(r.max_cents) });
+  const nowKey = answerKey(storedAnswer(a.now));
+  const wasKey = a.was ? answerKey(storedAnswer(a.was)) : null;
+  const names = await namesFor(supabase, orgId, {
+    accounts: rules.map((r) => String(r.supplier_account_id ?? "")),
+    crew: rules.map((r) => String(r.profile_id ?? "")),
+  });
+  const said = (r: any) => {
+    const c = answerOfStored(r);
+    return c ? choiceLabel(c, names) : storedChoiceName(String(r.choice));
+  };
+  const out: RuleChange[] = [];
+
+  const stale = rules.filter(
+    (r) => String(r.learned_import_id ?? "") === String(line.import_id) && answerKey(r) !== nowKey && (answerKey(r) === wasKey || bandHolds(band(r), a.cents)),
+  );
+  for (const r of stale) {
+    const read = await readAllPages<any>(
+      (f, t) =>
+        supabase
+          .from("bank_lines")
+          .select("id, amount, description, check_number, merchant_key, choice, bucket, supplier_account_id, profile_id")
+          .eq("org_id", orgId)
+          .eq("merchant_key", key)
+          .eq("sorted_by", "person")
+          .eq("choice", String(r.choice))
+          .order("id")
+          .range(f, t),
+      10,
+    );
+    if (read.error) {
+      out.push({ kind: "failed", said: said(r), why: `its lines couldn't be read: ${dbError(read.error as never)}` });
+      continue;
+    }
+    const survivors = read.rows
+      .filter(
+        (l) =>
+          String(l.id) !== String(line.id) &&
+          centsOf(l.amount) > 0 === (a.direction === "in") &&
+          answerKey(l) === answerKey(r) &&
+          !teachesNoRule({ cents: centsOf(l.amount), description: String(l.description ?? ""), merchantKey: String(l.merchant_key ?? ""), check: l.check_number ?? null }),
+      )
+      .map((l) => centsOf(l.amount));
+    const next = bandWithout(band(r), survivors);
+    if (next.kind === "same") continue;
+    if (next.kind === "gone") {
+      const { error: e } = await supabase.from("bank_rules").delete().eq("org_id", orgId).eq("id", r.id).select("id");
+      out.push(e ? { kind: "failed", said: said(r), why: dbError(e) } : { kind: "gone", said: said(r) });
+      continue;
+    }
+    const { data: up, error: e } = await supabase
+      .from("bank_rules")
+      .update({ min_cents: next.minCents, max_cents: next.maxCents, updated_at: new Date().toISOString() })
+      .eq("org_id", orgId)
+      .eq("id", r.id)
+      .select("id");
+    if (e || !up?.length) out.push({ kind: "failed", said: said(r), why: e ? dbError(e) : "it was changed from another screen" });
+    else out.push({ kind: "narrowed", said: said(r), band: sayBand(next) });
+  }
+
+  const asLine = { cents: a.cents, description: String(line.description ?? ""), merchantKey: key, check: line.check_number ?? null };
+  const same = !teachesNoRule(asLine) && learnableAnswer(a.now, a.direction) ? rules.find((r) => answerKey(r) === nowKey) : undefined;
+  const grow = same ? bandHolding(band(same), a.cents) : null;
+  if (same && grow) {
+    const { data: up, error: e } = await supabase
+      .from("bank_rules")
+      .update({ min_cents: grow.minCents, max_cents: grow.maxCents, updated_at: new Date().toISOString() })
+      .eq("org_id", orgId)
+      .eq("id", same.id)
+      .select("id");
+    if (e || !up?.length) out.push({ kind: "failed", said: said(same), why: e ? dbError(e) : "it was changed from another screen" });
+    else out.push({ kind: "widened", said: said(same), band: sayBand(grow) });
+  }
+  return out;
+}
+
+/** The lines a download already counted, for the card's Sorted Lines (Change Answer), with the names
+ *  of the invoices, people, suppliers and jobs they hold that the books don't carry. A failed read is
+ *  said on the card, never an empty list that reads as nothing counted. */
+async function readSortedLines(supabase: Db, orgId: string, importId: string, books: BankBooks): Promise<BankSortedRead> {
+  const namesJobs = await bankLinesNameJobs(supabase, orgId);
+  const cols = `id, posted_on, amount, description, check_number, choice, bucket, supplier_account_id, profile_id, invoice_id, sorted_by${namesJobs ? ", job_id" : ""}`;
+  const read = await readAllPages<BankSortedRow>((f, t) => supabase.from("bank_lines").select(cols).eq("org_id", orgId).eq("import_id", importId).order("id").range(f, t), 10);
+  if (read.error) {
+    if (!isMissingBank(read.error)) reportError("bills:bank.sortedLines", read.error, { importId });
+    return { rows: [], problem: "The lines this download counted couldn't be read just now, so none can be changed here. Refresh the page." };
+  }
+  const known = namesOf(books);
+  const missing = (pick: (r: BankSortedRow) => string | null | undefined, have: Map<string, string>) =>
+    read.rows.map((r) => String(pick(r) ?? "")).filter((id) => id && !have.has(id));
+  const names = await namesFor(supabase, orgId, {
+    jobs: missing((r) => (storedChoiceName(r.choice) === "job" ? r.job_id : null), known.jobs),
+    accounts: missing((r) => r.supplier_account_id, known.accounts),
+    crew: missing((r) => r.profile_id, known.crew),
+    invoices: missing((r) => r.invoice_id, known.invoices),
+  });
+  return { rows: read.rows, names };
 }
 
 export { choiceId, groupTitle };

@@ -577,7 +577,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_bill",
     description:
-      `Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the business-cost buckets (${BUSINESS_COST_BUCKETS.join(", ")}; Fuel is its own, Auto is the truck's other costs; on the company's profit and loss ${bucketHalvesWords()}, all counted before ${PNL_WORDS.netProfit}): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag.`,
+      `Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the business-cost buckets (${BUSINESS_COST_BUCKETS.join(", ")}; Fuel is its own, Auto is the truck's other costs; on the company's profit and loss ${bucketHalvesWords()}, all counted before ${PNL_WORDS.netProfit}): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag. A bill may CORRECT an earlier bill (the supplier's later paper for the same purchase, filed as its own bill under it): corrects_bill_id names the bill it corrects, corrections lists the ones filed under this one, and together is what the whole purchase comes to. Each bill is its own cost: count each once, never the pair twice.`,
     input_schema: { type: "object", properties: { bill_id: { type: "string", description: "The bill's id (from list_bills)." } }, required: ["bill_id"] },
   },
   {
@@ -635,6 +635,38 @@ export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
 ]);
 
 /** Strip characters that would break a PostgREST `.or()` filter expression. */
+/**
+ * A BILL'S PAIR (0381): the bill it corrects, or the corrections filed under it, and what the whole
+ * purchase comes to. Null when the database has not got bills.corrects_bill_id yet (the read fails
+ * soft and get_bill answers without it) or the read failed. Pinned to the bill's own company.
+ */
+async function readBillPair(
+  supabase: any,
+  orgId: string,
+  billId: string,
+): Promise<{ correctsId: string | null; originalNumber: string | null; corrections: { id: string; bill_number: string | null; amount: number }[]; together: number } | null> {
+  if (!orgId) return null;
+  const family = (id: string) =>
+    supabase.from("bills").select("id, bill_number, amount, corrects_bill_id").eq("org_id", orgId).or(`id.eq.${id},corrects_bill_id.eq.${id}`).limit(50);
+  const first = await family(billId);
+  if (first.error) return null;
+  const self = ((first.data ?? []) as any[]).find((r) => String(r.id) === billId);
+  const correctsId = self?.corrects_bill_id ? String(self.corrects_bill_id) : null;
+  const rows = correctsId ? await family(correctsId) : first;
+  if (rows.error) return null;
+  const all = (rows.data ?? []) as any[];
+  const rootId = correctsId ?? billId;
+  const root = all.find((r) => String(r.id) === rootId);
+  const kids = all.filter((r) => String(r.corrects_bill_id ?? "") === rootId);
+  const cents = Math.round(Number(root?.amount ?? 0) * 100) + kids.reduce((t, k) => t + Math.round(Number(k.amount ?? 0) * 100), 0);
+  return {
+    correctsId,
+    originalNumber: correctsId ? (root?.bill_number ?? null) : null,
+    corrections: correctsId ? [] : kids.map((k) => ({ id: String(k.id), bill_number: k.bill_number ?? null, amount: Number(k.amount ?? 0) })),
+    together: cents / 100,
+  };
+}
+
 function sanitize(s: unknown): string {
   return String(s ?? "")
     .replace(/[,()%*]/g, " ")
@@ -2628,7 +2660,7 @@ export async function runDataTool(
           // or a container used in pieces — and this select list knew about none of them, so Nort
           // read the Kettle Chips and the whole 500ct Twister box back as the customer's cost.
           // The projection law: a field that is missing at runtime is missing from a select list.
-          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, job_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
+          .select("id, org_id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, job_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
           .eq("id", bid)
           .maybeSingle();
         if (error) throw error;
@@ -2693,6 +2725,18 @@ export async function runDataTool(
           moneyNote.push(
             "This receipt has been REPLACED by a later bill for the same purchase. It is kept for its history, it is not a second debt, and it must not be counted in what he owes.",
           );
+        // THE PAIR (0381): a bill may correct an earlier bill, the supplier's later paper for the same
+        // purchase filed as its own bill under it. Read apart from the bill so a database without the
+        // column (a push ahead of its migration) still answers everything else: that read fails soft.
+        const pair = await readBillPair(supabase, String(b.org_id ?? ""), String(b.id));
+        if (pair?.correctsId)
+          moneyNote.push(
+            `This bill is a CORRECTION of ${pair.originalNumber ?? "an earlier bill"}: the supplier's later paper for the same purchase, its own bill with its own lines, on that bill's job and settled with it. Together the purchase comes to $${pair.together.toFixed(2)}. Count this bill and that one each once.`,
+          );
+        else if (pair?.corrections.length)
+          moneyNote.push(
+            `This bill carries ${pair.corrections.length === 1 ? "a correction" : `${pair.corrections.length} corrections`} (${pair.corrections.map((c) => c.bill_number ?? "no number").join(", ")}): the supplier's later paper for the same purchase, each its own bill. Together the purchase comes to $${pair.together.toFixed(2)}. Count each bill once.`,
+          );
         return JSON.stringify({
           found: true,
           bill_id: b.id,
@@ -2703,6 +2747,13 @@ export async function runDataTool(
           ...(shelfAmount ? { shelf_amount: shelfAmount } : {}),
           pricing_provisional: b.pricing_provisional === true,
           superseded: b.superseded_by_bill_id != null,
+          ...(pair
+            ? {
+                corrects_bill_id: pair.correctsId,
+                corrections: pair.corrections.map((c) => ({ bill_id: c.id, bill_number: c.bill_number, amount: money(c.amount) })),
+                together: money(pair.together),
+              }
+            : {}),
           status: b.status,
           category: b.category,
           bill_date: b.bill_date,

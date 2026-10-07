@@ -19,6 +19,8 @@ import { BillPaperDoors } from "@/components/bill-paper-doors";
 import type { BillPaper } from "@/lib/job-photos";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import { executeAction } from "@/lib/actions/execute";
+import { canCorrect, correctionFaces, correctionsUnder } from "@/lib/bill-correction";
+import type { CorrectableBill } from "@/components/correct-bill-modal";
 
 /**
  * ALREADY BILLED ON THE COSTS TAB (0357). `open`: the Not Billed Yet rows the door can mark (a row
@@ -59,6 +61,10 @@ interface Bill {
    *  Bill box, so a cost that is under no part of the job says so instead of quietly reading
    *  "Uncategorized" on the budget sheet and nowhere else. */
   scope_category?: string | null;
+  /** THE BILL THIS ONE CORRECTS (0381): drawn under it when both are in one pile, and both say so. */
+  corrects_bill_id?: string | null;
+  /** Its lines, as the page reads them: what Correct This Bill offers a credit to take back. */
+  bill_line_items?: { description: string | null; amount: number | string; billable?: boolean | null; category?: string | null }[] | null;
 }
 
 export interface JobPo {
@@ -103,6 +109,7 @@ export function JobBills({
   handsNote,
   papers = null,
   settledSaysUnread = false,
+  correctionsReady = false,
 }: {
   jobId: string;
   bills: Bill[];
@@ -124,6 +131,8 @@ export function JobBills({
   /** The covering read failed, so no row may claim either way: it is SAID instead of a row quietly
    *  reading "On Account" for a ticket the supplier may already have settled. */
   settledSaysUnread?: boolean;
+  /** The page read bills.corrects_bill_id (0381 is on the database): Correct This Bill is drawn. */
+  correctionsReady?: boolean;
 }) {
   const [editBill, setEditBill] = useState<Bill | null>(null);
   // DOES THIS JOB HAVE PARTS AT ALL (item C1)? On a job whose estimate is broken into Framing and
@@ -138,6 +147,33 @@ export function JobBills({
 
   const billById = new Map(bills.map((b) => [b.id, b] as const));
   const poById = new Map(pos.map((p) => [p.id, p] as const));
+
+  // THE PAIR READS AS ONE PURCHASE (0381). Faces over every bill on the job: a correction says what
+  // it corrects, and the original says what corrects it and the purchase's figure. The two can sit in
+  // different piles (the original Billed on an invoice, its correction Not Billed Yet), which is
+  // right - one is on an invoice and the other is not - and each still names the other.
+  const faces = correctionFaces(bills.map((b) => ({ id: b.id, corrects_bill_id: b.corrects_bill_id ?? null, amount: b.amount, bill_number: b.bill_number })));
+  const correctionsOf = new Map<string, Bill[]>();
+  for (const b of bills) if (b.corrects_bill_id) correctionsOf.set(b.corrects_bill_id, [...(correctionsOf.get(b.corrects_bill_id) ?? []), b]);
+  const correctable = (b: Bill): CorrectableBill | null => {
+    if (!canCorrect(b, correctionsReady)) return null;
+    const under = correctionsOf.get(b.id) ?? [];
+    return {
+      id: b.id,
+      supplier: b.supplier,
+      amount: Number(b.amount) || 0,
+      bill_number: b.bill_number,
+      bill_date: b.bill_date,
+      lines: [b, ...under].flatMap((x) =>
+        (x.bill_line_items ?? []).map((l) => ({ description: l.description, amount: Number(l.amount) || 0, billable: l.billable ?? null, category: l.category ?? null })),
+      ),
+      corrections: under.map((u) => ({ billNumber: u.bill_number, amount: Number(u.amount) || 0 })),
+    };
+  };
+  const followsOf = (id: string) => {
+    const f = faces.get(id);
+    return f?.kind === "corrects" ? (f.originalNumber ?? "the bill it corrects") : null;
+  };
 
   /**
    * ALREADY BILLED'S DOORS ON A ROW (0357): on an open row, Already Billed (it charged on a sent
@@ -163,8 +199,8 @@ export function JobBills({
    *  on a phone. THE BILL OPENS (ea2b7172): a bill's detail (its lines, the receipt-billing card) lives
    *  only inside /bills's own fold (#bill-<id>), and this row had no way there, so the supplier line
    *  and an Open The Bill door both land on it, the way a PO row lands on its page. */
-  const billRow = (b: Bill, why: string | undefined, pile: Pile) => (
-    <li key={b.id} className="px-4 py-2.5 text-sm">
+  const billRow = (b: Bill, why: string | undefined, pile: Pile, underIt = false) => (
+    <li key={b.id} className={underIt ? "border-l-4 border-slate-200 bg-slate-50/40 py-2.5 pl-6 pr-4 text-sm" : "px-4 py-2.5 text-sm"}>
       <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center gap-3 rounded-md hover:bg-slate-50">
         <div className="min-w-0 flex-1">
           <div className="font-medium text-slate-900">{b.supplier}</div>
@@ -178,13 +214,14 @@ export function JobBills({
                 on the budget sheet. Edit sets it. */}
             {(b.scope_category || jobHasParts) && ` · ${scopeSaid(b.scope_category)}`}
           </div>
+          {faces.get(b.id) && <div className="text-xs font-medium text-slate-600">{faces.get(b.id)!.words}</div>}
           {why && <div className="text-xs text-slate-500">{why}</div>}
         </div>
         <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
       </Link>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <BillPaperDoors papers={papers?.[b.id]} />
-        <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} />
+        <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} correct={correctable(b)} follows={followsOf(b.id)} />
         <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
           Open The Bill
         </Link>
@@ -248,17 +285,23 @@ export function JobBills({
   // Marked hours on an invoice that holds none of the job's bills: their own line under Billed.
   const hoursLoose = billedHours.filter((h) => !h.invoiceId || !foldIds.has(h.invoiceId));
 
-  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined, pile: Pile = "plain") => (
-    <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-      {ids.map((id) => {
-        const b = billById.get(id);
-        if (b) return billRow(b, whyOf?.(id), pile);
-        const p = poById.get(id);
-        if (p) return poRow(p, whyOf?.(id), pile);
-        return stockRow(id, whyOf?.(id), pile);
-      })}
-    </ul>
-  );
+  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined, pile: Pile = "plain") => {
+    // A correction directly under its original when both are in this list; every other row keeps
+    // its place (orders and takes from stock never carry the column).
+    const ordered = correctionsUnder(ids.map((id) => ({ id, corrects_bill_id: billById.get(id)?.corrects_bill_id ?? null }))).map((r) => r.id);
+    const here = new Set(ordered);
+    return (
+      <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+        {ordered.map((id) => {
+          const b = billById.get(id);
+          if (b) return billRow(b, whyOf?.(id), pile, !!b.corrects_bill_id && here.has(b.corrects_bill_id));
+          const p = poById.get(id);
+          if (p) return poRow(p, whyOf?.(id), pile);
+          return stockRow(id, whyOf?.(id), pile);
+        })}
+      </ul>
+    );
+  };
 
   return (
     <div>
@@ -361,6 +404,7 @@ export function JobBills({
           jobId={jobId}
           pos={pos}
           onClose={() => setEditBill(null)}
+          follows={followsOf(editBill.id)}
         />
       )}
     </div>
@@ -374,12 +418,15 @@ function JobBillEditModal({
   jobId,
   pos = [],
   onClose,
+  follows = null,
 }: {
   bill: Bill;
   /** The job this tab is on — what the Part Of The Job control reads its options from (item C1). */
   jobId: string;
   pos?: JobPo[];
   onClose: () => void;
+  /** This bill is a correction (0381): how it was bought follows that bill, so it is not offered. */
+  follows?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -392,11 +439,11 @@ function JobBillEditModal({
   // WHICH PART OF THE JOB (item C1): the door that sets or changes it on a cost that already exists.
   const [scope, setScope] = useState(bill.scope_category ?? "");
   const [error, setError] = useState<string | null>(null);
-  // A save that WENT THROUGH and still has something to say: the receipt an invoice bills was
-  // re-priced, so the invoice and the receipt now describe the same purchase at two figures.
-  // It holds the modal open instead of riding a toast, for the same reason the timecard editor
-  // does it that way — this sentence names an invoice and two dollar amounts, and 2.8 seconds
-  // on a phone at a jobsite is not reading time.
+  // A save that WENT THROUGH and still has something to say (a roll in stock re-costed, a part of
+  // the job the estimate no longer has). It holds the modal open instead of riding a toast, for the
+  // same reason the timecard editor does it that way: 2.8 seconds on a phone at a jobsite is not
+  // reading time. A re-price on a receipt an invoice bills is refused now, and sent to Correct This
+  // Bill (0381).
   const [billedNote, setBilledNote] = useState<string | null>(null);
   // Offer the real orders, PLUS whichever PO this bill already claims even if it was since
   // cancelled — otherwise the picker would render blank and saving would silently drop the
@@ -467,7 +514,12 @@ function JobBillEditModal({
             <Label htmlFor="be-date">Bill date</Label>
             <Input id="be-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
           </div>
-          <div>
+          {follows && (
+            <p className="col-span-2 text-sm text-slate-600">
+              A correction of {follows}: how it was bought and its part of the job follow that bill. Change them on {follows} and this one follows.
+            </p>
+          )}
+          <div className={follows ? "hidden" : undefined}>
             <Label htmlFor="be-status">Status</Label>
             <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="unpaid">On Account</option>
@@ -475,7 +527,7 @@ function JobBillEditModal({
             </Select>
           </div>
           {/* The same control the Add Cost sheets draw; nothing when this job's estimate has no parts. */}
-          <JobScopePicker jobId={jobId} value={scope} onChange={setScope} id="be-scope" className="col-span-2" />
+          {!follows && <JobScopePicker jobId={jobId} value={scope} onChange={setScope} id="be-scope" className="col-span-2" />}
           {poOptions.length > 0 && (
             <div className="col-span-2">
               <Label htmlFor="be-po">Pays purchase order</Label>

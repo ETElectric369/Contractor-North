@@ -5,6 +5,7 @@ import { dbError } from "@/lib/db-error";
 import { AUTO_FILE_BUCKETS, BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobCostRefusal } from "@/lib/job-cost-guard";
+import { carriesCorrectionRefusal } from "@/lib/bill-correction";
 import { scopeForWrite, type BillScopeAnswer } from "@/lib/bill-scope";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -809,6 +810,12 @@ export type BillStanding = {
   onShelf: boolean;
   /** Lines with a roll on the shop shelf, on a bill that is NOT a shelf ticket. */
   stocked: string[];
+  /**
+   * Corrections attached UNDER this bill (0381, bills.corrects_bill_id): the supplier's later paper
+   * for the same purchase, each its own bill. The foreign key is ON DELETE RESTRICT, so the bill
+   * cannot come down while one stands; the doors say so first. Empty before 0381 is on the database.
+   */
+  corrections?: { id: string; number: string | null }[];
 };
 
 const jobSaid = (b: { job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null }) =>
@@ -825,26 +832,41 @@ export async function readBillStanding(
   billId: string,
 ): Promise<BillStanding | { error: string } | null> {
   const scoped = (q: any) => (orgId ? q.eq("org_id", orgId) : q);
-  const [billRead, copiesRead, tiedRead] = await Promise.all([
+  /**
+   * THE BILLS THAT LEAN ON THIS ONE, IN ONE READ: copies set aside as its duplicate (0271), and
+   * corrections attached under it (0381). One read, not two, so every door that tears a bill down
+   * asks the same number of questions it always did. Before 0381 is on the database the column is
+   * not there and the read is asked again for the copies alone: no bill carries a correction yet.
+   * The id goes into the filter only when it is an id (a uuid); anything else asks for copies alone.
+   */
+  const leaning = (withCorrections: boolean) => {
+    const q = supabase.from("bills").select(`id, supplier, amount, bill_date, job_id, jobs(job_number, name)${withCorrections ? ", bill_number, corrects_bill_id" : ""}`);
+    return scoped(withCorrections ? q.or(`superseded_by_bill_id.eq.${billId},corrects_bill_id.eq.${billId}`) : q.eq("superseded_by_bill_id", billId)).limit(40);
+  };
+  const askCorrections = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(billId));
+  const [billRead, firstLeaning, tiedRead] = await Promise.all([
     scoped(
       supabase
         .from("bills")
         .select("id, amount, on_shelf, bill_line_items(description, quantity, unit_price, amount, category, billable, billed_amount, is_stock, sort_order)")
         .eq("id", billId),
     ).maybeSingle(),
-    scoped(supabase.from("bills").select("id, supplier, amount, bill_date, job_id, jobs(job_number, name)").eq("superseded_by_bill_id", billId)).limit(20),
+    leaning(askCorrections),
     scoped(supabase.from("organized_items").select("id, title, vendor, proposal").eq("tied_bill_id", billId)).limit(50),
   ]);
+  const copiesRead = askCorrections && firstLeaning?.error && isMissingColumnError(firstLeaning.error) ? await leaning(false) : firstLeaning;
   if (billRead?.error || copiesRead?.error || tiedRead?.error) {
     reportError("organize:readBillStanding", billRead?.error ?? copiesRead?.error ?? tiedRead?.error, { billId });
     return { error: "Couldn't check what else stands on this bill, so nothing was changed. Try again." };
   }
+  const leaners = (copiesRead?.data ?? []) as any[];
+  const isCorrection = (c: any) => String(c?.corrects_bill_id ?? "") === String(billId);
   const bill = billRead?.data as any;
   if (!bill) return null;
   const raw = [...((bill.bill_line_items ?? []) as any[])].sort((a, b) => Number(a?.sort_order ?? 0) - Number(b?.sort_order ?? 0));
   const amount = bill.amount === null || bill.amount === undefined || !Number.isFinite(Number(bill.amount)) ? null : Number(bill.amount);
   return {
-    setAside: ((copiesRead?.data ?? []) as any[]).map((c) => ({
+    setAside: leaners.filter((c) => !isCorrection(c)).map((c) => ({
       id: String(c.id),
       label: `${jobSaid(c)} (${c.supplier ?? "a bill"}${Number.isFinite(Number(c.amount)) ? `, ${moneySaid(Number(c.amount))}` : ""}${c.bill_date ? `, ${String(c.bill_date).slice(0, 10)}` : ""})`,
     })),
@@ -853,6 +875,7 @@ export async function readBillStanding(
     amount,
     onShelf: bill.on_shelf === true,
     stocked: bill.on_shelf === true ? [] : raw.filter((l) => l?.is_stock === true).map((l) => String(l.description ?? "a line")),
+    corrections: leaners.filter(isCorrection).map((c) => ({ id: String(c.id), number: c.bill_number ?? null })),
   };
 }
 
@@ -864,8 +887,13 @@ export async function readBillStanding(
  *     copy (the column is ON DELETE SET NULL), so the copy would count on its job again, silently.
  *   · A line with a roll on the shop shelf, on a bill that is not a shelf ticket: the roll can't
  *     ride back onto the paper, and taking the bill down would take the roll off with no word.
+ *   · A correction attached under it (0381): the supplier's later paper for the same purchase,
+ *     which would be left correcting nothing. Its foreign key refuses the delete; this says why.
  */
 export function standingRefusal(st: BillStanding, then: string, nothing: string, opts: { shelf?: boolean } = {}): string | null {
+  // A CORRECTION STANDS UNDER IT (0381): the foreign key refuses the delete anyway, so it is said
+  // first, naming the correction to take down before this one.
+  if (st.corrections?.length) return carriesCorrectionRefusal(st.corrections.map((c) => c.number), then, nothing);
   if (st.setAside.length) {
     const c = st.setAside[0];
     const more = st.setAside.length > 1 ? ` and ${st.setAside.length - 1} more` : "";

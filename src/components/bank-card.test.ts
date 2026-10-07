@@ -14,10 +14,10 @@ import type { FuelTrend } from "@/lib/analytics/fuel-trend";
  */
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
-vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn(), swapBankDownload: vi.fn(), setBankAccount: vi.fn(), forgetBankRule: vi.fn() }));
+vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn(), swapBankDownload: vi.fn(), setBankAccount: vi.fn(), forgetBankRule: vi.fn(), reanswerBankLine: vi.fn() }));
 vi.mock("@/app/(app)/organize/paperwork-actions", () => ({ keepPaperwork: vi.fn() }));
 
-import { BankCard, livePicks, othersFor, toneOf } from "./bank-card";
+import { BankCard, changeChoicesFor, livePicks, othersFor, toneOf } from "./bank-card";
 import { FuelTrendCard } from "@/app/(app)/analytics/fuel-trend-card";
 
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -111,6 +111,8 @@ const VIEW: BankView = {
   canSwap: false,
   askAccount: false,
   rules: [{ id: "r1", label: "SHELL → Fuel ($40.00 to $140.00)", n: 26 }],
+  sortedLines: [],
+  sortedMore: 0,
   problem: null,
 };
 
@@ -293,6 +295,58 @@ describe("the bank card", () => {
     expect(nothing).toContain("NOTHING here checked it");
     // A DOWNLOAD IS ARITHMETIC END TO END and carries no such line, so the card says nothing extra.
     expect(textOf(render(VIEW))).not.toContain("checked it");
+  });
+
+  /**
+   * CHANGE ANSWER (2026-10-07): every line a pass counted is listed under it, folded, each with the
+   * answer it holds and one door to change it. The picker is the card's own Other… list for a line of
+   * that direction, less the payment answers and the answer it already has.
+   */
+  it("after a pass, every counted line is listed with Change Answer, and the picker offers no payment answer", () => {
+    const counted: BankView = {
+      ...VIEW,
+      appliedSaid: "Applied Sep 27: 2 lines counted.",
+      canUndo: true,
+      appliedLines: 2,
+      otherOutSingle: [
+        { id: "cost:Auto", label: "Auto" },
+        { id: "draw", label: "Owner's Draw" },
+        { id: "supplier:acct-1", label: "Pay Contractor Supply" },
+        { id: "crew:pat", label: "Pay Pat Crew" },
+        { id: "job:job-1", label: "On 41 Larkspur · J-054 — Marla Finch" },
+      ],
+      otherInSingle: [
+        { id: "invoice:inv-1", label: "On INV-1001" },
+        { id: "other_income", label: "Other Income" },
+        { id: "not_income", label: "Already Counted Or Not Income" },
+        { id: "owner_in", label: "Owner's Money In" },
+        { id: "cost:Fuel", label: "Refund: Fuel" },
+      ],
+      sortedLines: [
+        { id: "l1", day: "Sep 5", title: "Check 1043", money: "$640.00", direction: "out", answer: "Pay Pat Crew", by: "Answered By You", current: "crew:pat" },
+        { id: "l2", day: "Sep 3", title: "TRANSFER FROM 9876", money: "$5,000.00", direction: "in", answer: "Already Counted Or Not Income", by: "Answered By You", current: "not_income" },
+      ],
+      sortedMore: 0,
+    };
+    const html = render(counted);
+    const text = textOf(html);
+    expect(text).toContain("Sorted Lines");
+    expect(text).toContain("Check 1043 $640.00");
+    expect(text).toContain("Pay Pat Crew Answered By You");
+    // UNDER THE APPLIED PASS, where what was counted is said.
+    expect(html.indexOf("Applied Sep 27")).toBeLessThan(html.indexOf("Sorted Lines"));
+    const doors = buttons(html).filter((b) => b.text === "Change Answer");
+    expect(doors).toHaveLength(2);
+    for (const b of doors) expect(b.markup).toMatch(/h-11|min-h-11/);
+    // Money out: the buckets, the draw and a job; never a supplier or crew pay, never what it holds.
+    expect(changeChoicesFor(counted.sortedLines[0], counted).map((o) => o.id)).toEqual(["cost:Auto", "draw", "job:job-1"]);
+    // Money in: the money-in words and a bucket's refund; never an invoice, never what it holds.
+    expect(changeChoicesFor(counted.sortedLines[1], counted).map((o) => o.id)).toEqual(["other_income", "owner_in", "cost:Fuel"]);
+    // A card with nothing counted draws no list at all; a read that failed says so.
+    expect(textOf(render(VIEW))).not.toContain("Sorted Lines");
+    expect(textOf(render({ ...counted, sortedLines: [], sortedProblem: "The lines this download counted couldn't be read just now, so none can be changed here. Refresh the page." }))).toContain(
+      "couldn't be read just now",
+    );
   });
 
   it("after a pass, it says what was counted and offers Undo", () => {

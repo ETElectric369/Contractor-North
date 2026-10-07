@@ -281,3 +281,46 @@ describe("the Costs tab's Already Billed doors", () => {
     }
   });
 });
+
+/**
+ * CORRECT THIS BILL ON THE COSTS TAB (0381). The supplier's later paper for a purchase is its own bill
+ * under the original: the row says what it corrects, the original says what corrects it and what the
+ * purchase comes to, and the pair sits together. The door is on a bill that is not itself a correction,
+ * and only once the page could read the column; a correction's state follows its original, so its row
+ * names that bill instead of offering a toggle the database would refuse.
+ */
+describe("the Costs tab's correction pair", () => {
+  const PAIR = [
+    { id: "o", supplier: "CED", bill_number: "8802-SO-257899", amount: 613.19, status: "unpaid", bill_date: "2026-09-29", corrects_bill_id: null },
+    { id: "x", supplier: "OSH", bill_number: null, amount: 16.28, status: "paid", bill_date: "2026-09-18", corrects_bill_id: null },
+    { id: "c", supplier: "CED", bill_number: "8802-1109100", amount: 95.99, status: "unpaid", bill_date: "2026-09-30", corrects_bill_id: "o" },
+  ];
+  const draw = (ready: boolean) =>
+    renderToStaticMarkup(createElement(JobBills, { jobId: "j11", bills: PAIR as any, pos: [], correctionsReady: ready }));
+  const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const buttons = (html: string) => Array.from(html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)).map((m) => m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+
+  it("each half names the other, and the original says what the purchase comes to", () => {
+    const t = text(draw(true));
+    expect(t).toContain("Corrects 8802-SO-257899");
+    expect(t).toContain("Corrected by 8802-1109100 · $709.18 together");
+  });
+
+  it("the correction sits directly under its original, whatever order the page read them in", () => {
+    const html = draw(true);
+    const at = (id: string) => html.indexOf(`/bills#bill-${id}`);
+    expect(at("o")).toBeLessThan(at("c"));
+    expect(at("c")).toBeLessThan(at("x"));
+  });
+
+  it("Correct This Bill is on the bills that are not corrections, and only once the column is read", () => {
+    expect(buttons(draw(true)).filter((w) => w === "Correct This Bill")).toHaveLength(2);
+    expect(buttons(draw(false)).filter((w) => w === "Correct This Bill")).toHaveLength(0);
+  });
+
+  it("a correction's row names the bill it follows instead of a toggle the database would refuse", () => {
+    const html = draw(true);
+    expect(Array.from(html.matchAll(/aria-label="How this bill was bought/g))).toHaveLength(2);
+    expect(text(html)).toContain("Follows 8802-SO-257899");
+  });
+});

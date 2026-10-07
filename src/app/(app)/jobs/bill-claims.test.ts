@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   billMoveRefusal,
-  billRepricedWarning,
+  billRepricedRefusal,
   claimantLabel,
   guardedFieldsMoved,
   planBillEdit,
@@ -93,26 +95,48 @@ describe("planBillEdit — a claimed receipt may not change jobs", () => {
   });
 });
 
-describe("planBillEdit — a claimed receipt may be re-priced, but never in silence", () => {
-  it("saves and hands back both figures and the invoice", () => {
+/**
+ * A CLAIMED RECEIPT KEEPS ITS FIGURE (Erik, 2026-10-07, the correction door's question 4).
+ *
+ * The re-price used to save with a warning, and the difference reached no invoice ever: the importer
+ * skips a claimed id forever. On 10-04 a claimed CED bill on a finished job was edited in place and
+ * the paid invoice that bills it never heard. Now the edit is refused and sent to Correct This Bill,
+ * whose correction is its own bill with its own claimable id. The database refuses it too (0381's
+ * guard_claimed_bill_amount), in these words.
+ */
+describe("planBillEdit — a claimed receipt may not be re-priced", () => {
+  it("refuses, names the invoice and the figure it bills, and names the door that moves the difference", () => {
     const plan = planBillEdit({ storedJobId: CED_456.job, storedAmount: 456.02, nextAmount: 470 }, INV063);
-    expect(plan.ok).toBe(true);
-    if (!plan.ok) return;
-    expect(plan.warning).toContain("INV-063");
-    expect(plan.warning).toContain("$456.02");
-    expect(plan.warning).toContain("$470.00");
-    expect(plan.warning).toContain("The invoice keeps its figure.");
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.error).toContain("INV-063");
+    expect(plan.error).toContain("$456.02");
+    expect(plan.error).toContain("Correct This Bill");
+    expect(plan.error).toContain("Nothing was changed.");
+    // The new figure is not the invoice's and not written: it is not in the sentence.
+    expect(plan.error).not.toContain("$470.00");
   });
 
-  it("never points at Import Costs — a claimed bill is skipped by that importer, so it would be a dead end", () => {
+  it("never points at Import Costs or a hand edit: a claimed bill is skipped by that importer, and a hand edit is how the figure got lost", () => {
     const plan = planBillEdit({ storedJobId: CED_467.job, storedAmount: 467.87, nextAmount: 400 }, INV063);
-    expect(plan.ok).toBe(true);
-    if (!plan.ok) return;
-    expect(plan.warning?.toLowerCase()).not.toContain("import");
-    expect(plan.warning).toContain("by hand");
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.error.toLowerCase()).not.toContain("import");
+    expect(plan.error).not.toContain("by hand");
   });
 
-  it("says nothing when nothing bills it", () => {
+  it("refuses a DRAFT claimant too: the claim is by id, and the trigger asks the same question", () => {
+    const plan = planBillEdit({ storedJobId: "8760a051", storedAmount: 477.4, nextAmount: 480 }, INV068_DRAFT);
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.error).toContain("INV-068 already bills this receipt at $477.40");
+  });
+
+  it("a one cent change on a claimed receipt is still a re-price, and still refused", () => {
+    const plan = planBillEdit({ storedJobId: CED_456.job, storedAmount: 456.02, nextAmount: 456.03 }, INV063);
+    expect(plan.ok).toBe(false);
+  });
+
+  it("lets an UNCLAIMED receipt be re-priced, silently", () => {
     expect(planBillEdit({ storedJobId: CED_456.job, storedAmount: 456.02, nextAmount: 470 }, null)).toEqual({ ok: true });
   });
 
@@ -121,36 +145,44 @@ describe("planBillEdit — a claimed receipt may be re-priced, but never in sile
       ok: true,
     });
   });
-
-  it("a one cent correction on a claimed receipt is still said out loud", () => {
-    const plan = planBillEdit({ storedJobId: CED_456.job, storedAmount: 456.02, nextAmount: 456.03 }, INV063);
-    expect(plan.ok).toBe(true);
-    if (plan.ok) expect(plan.warning).toContain("$456.03");
-  });
 });
 
 describe("the sentences", () => {
   it("a draft with no number yet still reads as a sentence", () => {
     expect(claimantLabel(UNNUMBERED)).toBe("An invoice");
     expect(billMoveRefusal(UNNUMBERED).startsWith("An invoice already bills this receipt")).toBe(true);
-    expect(billRepricedWarning(UNNUMBERED, 456.02, 470).startsWith("An invoice bills this receipt")).toBe(true);
+    expect(billRepricedRefusal(UNNUMBERED, 456.02).startsWith("An invoice already bills this receipt at $456.02.")).toBe(true);
   });
 
   it("carry no em dashes — the copy rule for every surface", () => {
-    for (const sentence of [billMoveRefusal(INV063), billRepricedWarning(INV063, 456.02, 470)]) {
+    for (const sentence of [billMoveRefusal(INV063), billRepricedRefusal(INV063, 456.02)]) {
       expect(sentence).not.toContain("—");
       expect(sentence).not.toContain("–");
     }
   });
 
-  it("name only doors that exist: void, take the lines off, edit by hand", () => {
+  it("name only doors that exist: void, take the lines off, Correct This Bill", () => {
     expect(billMoveRefusal(INV063)).toBe(
       "INV-063 already bills this receipt on the job it is on now. " +
         "Void that invoice, or take its materials lines off, then move the receipt. Nothing was changed.",
     );
-    expect(billRepricedWarning(INV063, 456.02, 470)).toBe(
-      "INV-063 bills this receipt at $456.02 and it now reads $470.00. The invoice keeps its figure. " +
-        "Open that invoice and edit its materials lines by hand if the customer should pay the difference.",
+    expect(billRepricedRefusal(INV063, 456.02)).toBe(
+      "INV-063 already bills this receipt at $456.02. Its figure stays. " +
+        "Put the difference on a correction (Correct This Bill) and the next invoice carries it. Nothing was changed.",
     );
+  });
+
+  /**
+   * ONE SENTENCE, TWO PLACES. 0381's guard_claimed_bill_amount raises this refusal when an update
+   * reaches the database (Nort, or any door that skipped planBillEdit). If the two drifted, Erik would
+   * be taught two different ways out of the same wall. Read off the migration itself, with the
+   * trigger's two placeholders filled the way Postgres fills them (the holder; to_char of the figure).
+   */
+  it("is the database's own refusal, word for word (0381 guard_claimed_bill_amount)", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/0381_a_bill_may_correct_an_earlier_bill.sql"), "utf8");
+    const raised = sql.match(/raise exception '(% already bills this receipt at \$%\.[^']*)'/);
+    expect(raised, "0381 no longer raises the re-price refusal this door repeats").not.toBeNull();
+    const filled = raised![1].replace("%", "INV-063").replace("%", "456.02");
+    expect(billRepricedRefusal(INV063, 456.02)).toBe(filled);
   });
 });

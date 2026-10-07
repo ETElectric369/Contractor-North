@@ -107,7 +107,7 @@ export const maxDuration = 60;
  * as billed, which is what the column defaults to; a bill that comes back with no account reads as
  * unfiled, which is what every bill was the day before 0270.
  */
-type BillColumns = { billable: boolean; supplierAccount: boolean; supersede: boolean };
+type BillColumns = { billable: boolean; supplierAccount: boolean; supersede: boolean; corrects: boolean };
 
 /** The one error shape a column the database hasn't got yet makes. Matched on the code first,
  *  because the message wording is PostgREST's to change; the names are the fallback for a proxy
@@ -118,7 +118,7 @@ function isMissingColumn(err: unknown): boolean {
   return (
     code === "42703" ||
     /does not exist/i.test(message) ||
-    /\b(billable|supplier_account_id|supplier_invoice_number|is_statement|superseded_by_bill_id|pricing_provisional)\b/i.test(
+    /\b(billable|supplier_account_id|supplier_invoice_number|is_statement|superseded_by_bill_id|pricing_provisional|corrects_bill_id)\b/i.test(
       message,
     )
   );
@@ -130,7 +130,7 @@ function isMissingColumn(err: unknown): boolean {
  *  the part of the job somebody had set. */
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
-    `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
+    `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}${o.corrects ? ", corrects_bill_id" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
   /**
    * BY THE DAY ON THE PAPER, NEWEST FIRST (Erik, 2026-10-04: "everything has a date and should be
    * filtered that way anyway, that makes the newest bills on top of the list and oldest at the
@@ -155,20 +155,24 @@ async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
       .order("bill_date", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
 
-  // Newest columns fall off first. Four attempts is the worst case and it only happens on a
-  // database that is behind the deploy; the normal path is one query, same as before.
+  // Newest columns fall off first. Five attempts is the worst case and it only happens on a
+  // database that is behind the deploy; the normal path is one query, same as before. 0381's
+  // corrects_bill_id is the newest: without it no correction exists yet, and the page says
+  // Correct This Bill is not ready (`correctionsReady`) instead of offering a door that would refuse.
   const ladder: BillColumns[] = [
-    { billable: true, supplierAccount: true, supersede: true },
-    { billable: true, supplierAccount: true, supersede: false },
-    { billable: true, supplierAccount: false, supersede: false },
-    { billable: false, supplierAccount: false, supersede: false },
+    { billable: true, supplierAccount: true, supersede: true, corrects: true },
+    { billable: true, supplierAccount: true, supersede: true, corrects: false },
+    { billable: true, supplierAccount: true, supersede: false, corrects: false },
+    { billable: true, supplierAccount: false, supersede: false, corrects: false },
+    { billable: false, supplierAccount: false, supersede: false, corrects: false },
   ];
+  let rung = 0;
   let attempt = await read(ladder[0]);
-  for (let i = 1; i < ladder.length; i++) {
-    if (!attempt.error || !isMissingColumn(attempt.error)) return attempt;
-    attempt = await read(ladder[i]);
+  while (rung + 1 < ladder.length && attempt.error && isMissingColumn(attempt.error)) {
+    rung += 1;
+    attempt = await read(ladder[rung]);
   }
-  return attempt;
+  return { ...attempt, correctionsReady: !attempt.error && ladder[rung].corrects };
 }
 
 
@@ -209,7 +213,7 @@ export default async function BillsPage({
   // - which reads here as "no accounts yet", exactly the state Erik is in today.
   const [
     { data: pos },
-    { data: bills, error: billsErr },
+    { data: bills, error: billsErr, correctionsReady },
     { data: docRows },
     { data: jobs, error: jobsErr },
     { data: lists },
@@ -1026,7 +1030,16 @@ export default async function BillsPage({
     });
   }
   // EVERY ROW ALL BILLS HOLDS (W1-32): the box above it filters it in place, by any of these words.
-  // A set-aside duplicate is listed there too, so it is found too.
+  // A set-aside duplicate is listed there too, so it is found too. A CORRECTION AND ITS ORIGINAL
+  // (0381) are found by each other's numbers, so a search for either paper keeps the pair together.
+  const numberOfBill = new Map((billsWithLines as any[]).map((b) => [String(b.id), b.bill_number ? String(b.bill_number) : null] as const));
+  const pairNumbers = new Map<string, string[]>();
+  for (const b of billsWithLines as any[]) {
+    const of = b.corrects_bill_id ? String(b.corrects_bill_id) : "";
+    if (!of) continue;
+    pairNumbers.set(String(b.id), [...(pairNumbers.get(String(b.id)) ?? []), "correction", numberOfBill.get(of) ?? ""]);
+    pairNumbers.set(of, [...(pairNumbers.get(of) ?? []), "corrected", b.bill_number ? String(b.bill_number) : ""]);
+  }
   for (const b of billsWithLines as any[]) {
     const reading = readBillInvoice({ notes: b.notes ?? null, lineDescriptions: (b.line_items ?? []).map((l: any) => l.description) });
     const number = b.bill_number || b.supplier_invoice_number || reading.invoiceNumber || null;
@@ -1064,6 +1077,7 @@ export default async function BillsPage({
         b.jobs?.name,
         ...jobWords(b.job_id),
         String(b.notes ?? "").split(/\r?\n/)[0],
+        ...(pairNumbers.get(String(b.id)) ?? []),
       ),
       // Its own row in All Bills (FoldOpener opens the folds around it): the bill itself, with its
       // number, its lines and its doors, rather than the job page it sits on.
@@ -1338,6 +1352,7 @@ export default async function BillsPage({
             papersNote={billTiesErr ? "Couldn't load which receipt made each bill just now, so every receipt file is listed. Reload to try again." : null}
             switches={switches}
             alreadyBilled={billDoors}
+            correctionsReady={correctionsReady}
           />
         )}
       </BillsSearchProvider>

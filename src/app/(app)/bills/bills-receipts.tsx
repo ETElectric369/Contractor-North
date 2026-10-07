@@ -36,6 +36,8 @@ import { billSettledLabel } from "@/lib/supplier-owed";
 import { shortSupplierName } from "@/lib/supplier-name";
 import { useBillsSearch } from "./bills-search-box";
 import { JobScopePicker } from "@/components/job-scope-picker";
+import { canCorrect, correctionFaces, correctionsUnder } from "@/lib/bill-correction";
+import type { CorrectableBill } from "@/components/correct-bill-modal";
 
 interface JobOption {
   id: string;
@@ -60,6 +62,8 @@ interface BillLineRow {
   unit_price: number;
   amount: number;
   category: string | null;
+  /** 0268: billed to the customer or the company's own. A credit on a correction follows it. */
+  billable?: boolean | null;
 }
 export interface BillRow {
   id: string;
@@ -82,6 +86,12 @@ export interface BillRow {
   shownNumber?: string | null;
   /** Set aside as the duplicate of another bill (0271): still listed, never counted. */
   superseded?: boolean;
+  /**
+   * THE BILL THIS ONE CORRECTS (0381): the supplier's later paper for the same purchase, its own
+   * bill with its own lines. Drawn directly under its original ("Corrects 8802-SO-257899"), and the
+   * original says "Corrected by … · $… together". Absent before 0381 is on the database.
+   */
+  corrects_bill_id?: string | null;
   /**
    * Settled in the supplier's own books (8a982483): every document from its account that covers
    * this bill is closed (an applied open list). bills.status still says On Account, because that
@@ -164,6 +174,7 @@ export function BillsReceipts({
   papersNote = null,
   switches = { features: ALL_ON, isOwner: false },
   alreadyBilled = {},
+  correctionsReady = false,
 }: {
   orgId: string;
   jobs: JobOption[];
@@ -191,6 +202,8 @@ export function BillsReceipts({
    *  Already Billed where its job's sheet could hold it, or Billed By Hand On INV-x with Not Billed
    *  After All. A bill with no entry has neither. */
   alreadyBilled?: Record<string, BillAlreadyBilled>;
+  /** The page read bills.corrects_bill_id (0381 is on the database): Correct This Bill is drawn. */
+  correctionsReady?: boolean;
 }) {
   const poOn = featureOn(switches.features, "purchase_orders");
   const router = useRouter();
@@ -252,7 +265,31 @@ export function BillsReceipts({
   }, [lead]);
 
   const kept = (key: string) => !keys || keys.has(key);
-  const shownBills = bills.filter((b) => kept(`bill:${b.id}`));
+  // A CORRECTION SITS DIRECTLY UNDER ITS ORIGINAL (0381), in the paper order the page read them in
+  // (cn-v1063): the pair reads as one purchase. Faces are worked out over EVERY bill, so an original
+  // says its whole "together" figure even while the search hides one of its corrections.
+  const faces = correctionFaces(bills.map((b) => ({ id: b.id, corrects_bill_id: b.corrects_bill_id ?? null, amount: b.amount, bill_number: b.bill_number, shownNumber: b.shownNumber })));
+  const correctionsOf = new Map<string, BillRow[]>();
+  for (const b of bills) if (b.corrects_bill_id) correctionsOf.set(b.corrects_bill_id, [...(correctionsOf.get(b.corrects_bill_id) ?? []), b]);
+  const shownBills = correctionsUnder(bills.filter((b) => kept(`bill:${b.id}`)));
+  const shownIds = new Set(shownBills.map((b) => b.id));
+  /** Correct This Bill's bill: its lines and those of what is already under it, which a credit may take back. */
+  const correctable = (b: BillRow): CorrectableBill | null => {
+    if (!canCorrect(b, correctionsReady)) return null;
+    const under = correctionsOf.get(b.id) ?? [];
+    return {
+      id: b.id,
+      supplier: b.supplier,
+      amount: Number(b.amount) || 0,
+      bill_number: b.bill_number,
+      shownNumber: b.shownNumber ?? null,
+      bill_date: b.bill_date,
+      lines: [b, ...under].flatMap((x) =>
+        (x.line_items ?? []).map((l) => ({ description: l.description, amount: Number(l.amount) || 0, billable: l.billable ?? null, category: l.category })),
+      ),
+      corrections: under.map((u) => ({ billNumber: u.bill_number, amount: Number(u.amount) || 0 })),
+    };
+  };
   const shownPos = pos.filter((p) => kept(`po:${p.id}`));
   const shownDocs = docs.filter((d) => kept(`file:${d.id}`));
   const shownCount = shownBills.length + shownPos.length + shownDocs.length;
@@ -274,8 +311,11 @@ export function BillsReceipts({
     const lineCount = b.line_items?.length ?? 0;
     const split = b.receipt ? splitReceiptBilling(b.receipt.amount, b.receipt.lines) : null;
     const where = b.jobs?.name ?? (b.job_id ? "Job" : isShelfTicket(b) ? "Shop Stock" : `Business Cost · ${bucketOf(b.category)}`);
+    const face = faces.get(b.id);
+    // Indented only where it really sits under its original in this list (a search can hide one).
+    const underIt = face?.kind === "corrects" && shownIds.has(face.originalId);
     return (
-      <li key={`bill-${b.id}`}>
+      <li key={`bill-${b.id}`} className={underIt ? "border-l-4 border-slate-200 bg-slate-50/40 pl-4" : undefined}>
         {/* ONE ROW PER BILL; it opens to the bill's detail. `bill-<id>` is where the search box, a
             supplier's Open In All Bills and the stock's Put The Rest In Stock land. */}
         <details id={`bill-${b.id}`} className="scroll-mt-20">
@@ -291,6 +331,9 @@ export function BillsReceipts({
                 {lineCount > 0 ? ` · ${lineCount} ${lineCount === 1 ? "line" : "lines"}` : ""}
                 {b.superseded ? " · set aside as a duplicate" : ""}
               </span>
+              {/* THE PAIR READS AS ONE PURCHASE (0381): what this one corrects, or what corrects it
+                  and the purchase's figure with it. */}
+              {face && <span className="block truncate text-xs font-medium text-slate-600">{face.words}</span>}
               {split && split.notBilledCount > 0 && (
                 <span className="block text-xs font-medium text-amber-700">
                   {split.notBilledCount} {split.notBilledCount === 1 ? "line" : "lines"} not billed to the customer
@@ -318,7 +361,7 @@ export function BillsReceipts({
                   three doors are BillRowDoors, one copy with the job's Costs tab. */}
               {/* The receipt it was read from, with the bill instead of in a job's Photos. */}
               <BillPaperDoors papers={b.papers} />
-              <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} />
+              <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} correct={correctable(b)} follows={face?.kind === "corrects" ? (face.originalNumber ?? "the bill it corrects") : null} />
               <BillAlreadyBilledDoor bill={b} door={alreadyBilled[b.id]} />
               {b.job_id && (
                 <Link href={`/jobs/${b.job_id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
@@ -491,7 +534,18 @@ export function BillsReceipts({
           )}
         </div>
 
-        {editBill && <BillEditModal key={editBill.id} bill={editBill} jobs={jobs} onClose={() => setEditBill(null)} />}
+        {editBill && (
+          <BillEditModal
+            key={editBill.id}
+            bill={editBill}
+            jobs={jobs}
+            onClose={() => setEditBill(null)}
+            follows={(() => {
+              const f = faces.get(editBill.id);
+              return f?.kind === "corrects" ? (f.originalNumber ?? "the bill it corrects") : null;
+            })()}
+          />
+        )}
       </Fold>
     </Card>
   );
@@ -505,10 +559,14 @@ function BillEditModal({
   bill,
   jobs,
   onClose,
+  follows = null,
 }: {
   bill: BillRow;
   jobs: JobOption[];
   onClose: () => void;
+  /** This bill is a correction (0381): the number of the bill whose job and state it follows. The
+   *  database keeps the pair on one job in one state, so the two fields are not offered here. */
+  follows?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -550,11 +608,10 @@ function BillEditModal({
         scope_category: isOverhead ? null : scope || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      // THE SAME SENTENCE THE JOB PAGE HOLDS OPEN (review of the fix wave, 2026-09-20). A re-price
-      // on a receipt a live invoice is billing leaves the invoice on its old figure on purpose -
-      // the customer was told a number - so the two now describe one purchase at two prices, and
-      // that has to be said. This is the main door for editing a receipt, and it was closing clean
-      // on exactly that save. `warning` comes back through executeAction verbatim.
+      // A SAVE THAT LANDED AND STILL HAS SOMETHING TO SAY holds the modal open, the same way the job
+      // page does: a part of the job dropped by a move, a roll in stock re-costed. (A re-price on a
+      // receipt an invoice bills is no longer one of them: it is refused and sent to Correct This
+      // Bill, 0381.) `warning` comes back through executeAction verbatim.
       if (res.warning) {
         setBilledNote(res.warning);
         router.refresh();
@@ -588,7 +645,12 @@ function BillEditModal({
             <Label htmlFor="be-supplier">{companyLabel("bill", true)}</Label>
             <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
           </div>
-          <div className="col-span-2">
+          {follows && (
+            <p className="col-span-2 text-sm text-slate-600">
+              A correction of {follows}: its job, its bucket or part of the job, and how it was bought all follow that bill. Change them on {follows} and this one follows.
+            </p>
+          )}
+          <div className={follows ? "hidden" : "col-span-2"}>
             <Label htmlFor="be-job">Job</Label>
             <Select
               id="be-job"
@@ -607,8 +669,8 @@ function BillEditModal({
             </Select>
           </div>
           {/* The same control every other cost door draws; nothing when this job's estimate has no parts. */}
-          {!isOverhead && <JobScopePicker jobId={billJob} value={scope} onChange={setScope} id="be-scope" className="col-span-2" />}
-          {isOverhead && (
+          {!isOverhead && !follows && <JobScopePicker jobId={billJob} value={scope} onChange={setScope} id="be-scope" className="col-span-2" />}
+          {isOverhead && !follows && (
             <div className="col-span-2">
               <Label htmlFor="be-cat">Bucket</Label>
               <Select id="be-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
@@ -631,7 +693,7 @@ function BillEditModal({
             <Label htmlFor="be-date">Bill Date</Label>
             <Input id="be-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
           </div>
-          <div>
+          <div className={follows ? "hidden" : undefined}>
             <Label htmlFor="be-status">Status</Label>
             <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
               {/* The same two words as the add form and the badge: one vocabulary for one

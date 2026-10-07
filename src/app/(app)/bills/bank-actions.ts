@@ -5,7 +5,7 @@ import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { proposalOf } from "@/lib/paperwork";
 import { applyingNow, swapDownloadSigns, withAccountLast4, type BankDownload, type StoredBank } from "@/lib/bank-download";
-import { applyBankCore, proposalAfterUndo, sha256Hex, undoBankCore } from "./bank-core";
+import { applyBankCore, proposalAfterUndo, reanswerBankLineCore, sha256Hex, undoBankCore } from "./bank-core";
 import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 
 /**
@@ -69,6 +69,27 @@ export async function forgetBankRule(ruleId: string): Promise<Result> {
   if (!data?.length) return { ok: false, error: "That answer was already forgotten." };
   revalidateBank();
   return { ok: true, message: `Forgotten: ${String(data[0].merchant_key ?? "").toUpperCase()} is asked again from now on.` };
+}
+
+/**
+ * CHANGE ANSWER: ONE LINE a download already counted, answered again, without Undo taking the whole
+ * download back (2026-10-07). The check answered as crew pay that was the truck's repair becomes
+ * Business Cost · Auto; the transfer answered Not Income that was the owner's own money becomes Owner's
+ * Money In. The old answer's money row comes off by Undo's own rule, the new one is written by Apply's,
+ * and the rule the old answer taught is settled (bank-core reanswerBankLineCore). A payment answer is
+ * refused in words. The same gate as every other door on the card: staff, and whoever sorts the bank.
+ */
+export async function reanswerBankLine(input: { lineId: string; choice: string }): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
+  const res = await reanswerBankLineCore(ctx.supabase, { orgId: ctx.orgId, userId: ctx.userId }, String(input?.lineId ?? ""), String(input?.choice ?? ""));
+  revalidateBank();
+  if (!res.ok) return { ok: false, error: res.error };
+  // A cost moved onto or off a job is on that job's page too.
+  for (const jobId of res.jobs) revalidatePath(`/jobs/${jobId}`);
+  return { ok: true, message: res.message };
 }
 
 /**

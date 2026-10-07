@@ -1,5 +1,5 @@
 "use server";
-import { readUsualBillingKind } from "@/lib/schedule-options";
+import { jobLabelWithNumber, readUsualBillingKind } from "@/lib/schedule-options";
 import { dbError } from "@/lib/db-error";
 import { importExtras, extrasSentence, type ImportOutcomeLike } from "@/lib/import-extras";
 
@@ -37,7 +37,8 @@ import { jobCostRefusal } from "@/lib/job-cost-guard";
 import { scopeAfterJobMove, scopeForWrite, type BillScopeAnswer } from "@/lib/bill-scope";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { restampLotsForBill } from "@/lib/stock-ledger";
-import { exactAccountFor, papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
+import { exactAccountFor, isMissingColumnError, papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
+import { CORRECTIONS_NOT_READY, billLabel, correctionOfCorrectionRefusal, planBillCorrection, setAsideOriginalRefusal } from "@/lib/bill-correction";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -1716,22 +1717,22 @@ export async function updateBill(
     clean.category = !nextJobId ? bucketOf(patch.category) : (patch.category ?? null);
   }
 
-  // A RECEIPT AN INVOICE BILLS MAY NOT CHANGE JOBS, AND MAY NOT CHANGE PRICE IN SILENCE.
+  // A RECEIPT AN INVOICE BILLS MAY NOT CHANGE JOBS, AND MAY NOT CHANGE PRICE.
   // The claim is by id and survives the move (0255/0258), so a claimed receipt re-pointed at the
   // right job leaves the old invoice charging the old customer while importCostsIntoInvoice skips
   // that same id on the new job forever: one purchase billed to the wrong person and unbillable to
-  // the right one, out of a save that looked clean. The rule and both sentences live in
-  // bill-claims.ts (pure, unit-tested); this door does the two reads.
-  // The claim read only ever runs when one of the two guarded fields actually moved (`moved`, worked
-  // out once above), so a receipt nobody has billed, or an edit to the supplier / date / status /
-  // notes / PO link, costs nothing.
-  let warning: string | undefined;
+  // the right one, out of a save that looked clean. A re-price is refused the same way (Erik,
+  // 2026-10-07): the difference reaches no invoice from here, so the refusal sends it to Correct
+  // This Bill, whose correction is its own claimable bill. The rule and both sentences live in
+  // bill-claims.ts (pure, unit-tested) and match the triggers word for word (0280, 0381); this door
+  // does the two reads. The claim read only ever runs when one of the two guarded fields actually
+  // moved (`moved`, worked out once above), so a receipt nobody has billed, or an edit to the
+  // supplier / date / status / notes / PO link, costs nothing.
   if (moved.movingJob || moved.repricing) {
     const claim = await invoiceBillingBill(supabase, id);
     if ("error" in claim) return { ok: false, error: claim.error };
     const plan = planBillEdit(edit, claim.holder);
     if (!plan.ok) return { ok: false, error: plan.error };
-    warning = plan.warning;
   }
 
   // Linking/unlinking the PO this bill pays MOVES money: a linked PO stops being counted
@@ -1769,8 +1770,177 @@ export async function updateBill(
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // bill cost moves job profitability
-  const said = [warning, scopeSaidNote, shelfNote].filter(Boolean).join(" ");
+  const said = [scopeSaidNote, shelfNote].filter(Boolean).join(" ");
   return said ? { ok: true, warning: said } : { ok: true };
+}
+
+/**
+ * CORRECT THIS BILL (0381): THE SUPPLIER'S LATER PAPER FOR THE SAME PURCHASE, ATTACHED UNDER IT.
+ *
+ * Erik, 2026-10-04: "i cant find where to make a correction". A counter ticket an invoice already
+ * bills ($613.19) and the supplier's invoice for the same purchase ($709.18): the ticket stays as
+ * filed, and the difference goes in as its OWN bill row under it (bills.corrects_bill_id), with its
+ * own lines and its own claimable id, so the next invoice imports it like any bill on the job. A
+ * credit (the paper less than the ticket) rides the supplier-return path, which credits only what the
+ * customer was billed. The plan and every sentence are lib/bill-correction's (pure, unit-tested);
+ * this door reads the bill and what is already under it, then writes the row and its lines.
+ *
+ * ONE PURCHASE, ONE JOB, ONE STATE: 0381's guard_bill_correction gives the correction the original's
+ * job and status whatever is sent, and refuses a correction of a correction or of a bill set aside
+ * as a duplicate. The door says both first, in the trigger's own words.
+ *
+ * NOTHING HALF-DONE: if the lines do not land, the row comes back off and the refusal says so. If
+ * even that fails, the sentence names the correction to delete.
+ */
+export async function correctBill(input: {
+  billId: string;
+  /** The number printed on the supplier's later paper ("8802-1109100"). */
+  paperNumber: string;
+  /** What that paper says the whole purchase comes to ($709.18). */
+  paperTotal: number;
+  /** The paper's own date; the company's today when it is left out. */
+  billDate?: string | null;
+  notes?: string | null;
+  /** What the difference is for. A line with no amount takes what is left of it. */
+  lines: { description: string; amount?: number | null }[];
+}): Promise<Result & { id?: string; sentence?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  // EVERY READ PINNED TO THE COMPANY (three orgs, one database): a door with no company to pin to is
+  // refused, never run on RLS alone.
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet, so nothing was attached." };
+  const orgId = ctx.orgId;
+
+  const { data: orig, error: origErr } = await supabase
+    .from("bills")
+    .select(
+      "id, org_id, job_id, supplier, supplier_account_id, category, scope_category, status, amount, bill_number, bill_date, corrects_bill_id, superseded_by_bill_id, on_shelf, jobs(job_number, name), bill_line_items(description, amount, billable, category, sort_order)",
+    )
+    .eq("org_id", orgId)
+    .eq("id", input.billId)
+    .maybeSingle();
+  if (origErr) {
+    // BEFORE 0381 IS ON THE DATABASE the column is not there, and the door says what to do.
+    if (isMissingColumnError(origErr)) return { ok: false, error: CORRECTIONS_NOT_READY };
+    reportError("jobs.correctBill.read", origErr, { billId: input.billId });
+    return { ok: false, error: "Couldn't read that bill just now, so nothing was attached. Try again in a moment." };
+  }
+  if (!orig) return { ok: false, error: "That bill isn't here, or this login can't see it. Nothing was attached." };
+  const o = orig as any;
+  if (o.corrects_bill_id) return { ok: false, error: correctionOfCorrectionRefusal(o.bill_number) };
+  if (o.superseded_by_bill_id) return { ok: false, error: setAsideOriginalRefusal(o.bill_number) };
+
+  // WHAT IS ALREADY UNDER IT: part of the purchase the paper totals, the lines a credit may name, and
+  // the paper numbers already attached (the same paper twice is one tap too many, never a second row).
+  const { data: underRows, error: underErr } = await supabase
+    .from("bills")
+    .select("id, bill_number, amount, bill_line_items(description, amount, billable, category, sort_order)")
+    .eq("org_id", orgId)
+    .eq("corrects_bill_id", o.id)
+    .limit(50);
+  if (underErr) {
+    reportError("jobs.correctBill.under", underErr, { billId: o.id });
+    return { ok: false, error: "Couldn't read what is already attached to that bill, so nothing was attached. Try again in a moment." };
+  }
+  const under = (underRows ?? []) as any[];
+  const paperNumber = String(input.paperNumber ?? "").trim();
+  const sameKey = (n: unknown) => String(n ?? "").trim().toLowerCase();
+  if (paperNumber && under.some((u) => sameKey(u.bill_number) === sameKey(paperNumber))) {
+    return { ok: false, error: `${paperNumber} is already attached to ${billLabel(o.bill_number)}. Nothing was attached.` };
+  }
+  const byOrder = (a: any, b: any) => Number(a?.sort_order ?? 0) - Number(b?.sort_order ?? 0);
+  const lineOf = (l: any) => ({ description: l?.description ?? null, amount: l?.amount ?? null, billable: l?.billable ?? null, category: l?.category ?? null });
+  const job = Array.isArray(o.jobs) ? o.jobs[0] : o.jobs;
+  const plan = planBillCorrection({
+    original: {
+      amount: o.amount,
+      billNumber: o.bill_number ?? null,
+      lines: [
+        ...[...((o.bill_line_items ?? []) as any[])].sort(byOrder).map(lineOf),
+        ...under.flatMap((u) => [...((u.bill_line_items ?? []) as any[])].sort(byOrder).map(lineOf)),
+      ],
+      corrections: under.map((u) => ({ billNumber: u.bill_number ?? null, amount: u.amount })),
+    },
+    paperTotal: input.paperTotal,
+    paperNumber,
+    lines: input.lines ?? [],
+    jobLabel: o.job_id ? jobLabelWithNumber(job ?? {}) : null,
+  });
+  if (!plan.ok) return { ok: false, error: plan.error };
+
+  // THE ONE COST GUARD every bill writer asks (lib/job-cost-guard). A correction always carries its
+  // lines, so it never trips; asked anyway, because the rule lives at the write and not in a door's
+  // reasoning about why it is safe.
+  const noReturn = jobCostRefusal({ jobId: o.job_id ?? null, amount: plan.delta, lines: plan.lines }, "Give the credit its lines, then attach it.");
+  if (noReturn) return { ok: false, error: noReturn };
+  // The part of the job is the original's, kept as stored (one purchase, one part of the job).
+  const storedScope = o.scope_category ?? null;
+  const scope = scopeForWrite({
+    jobId: o.job_id ?? null,
+    answer: !o.job_id ? { kind: "noJob" } : storedScope ? { kind: "scope", scope: String(storedScope) } : { kind: "notAsked" },
+    jobScopes: [],
+    stored: storedScope,
+  });
+  if (scope.refusal) return { ok: false, error: scope.refusal };
+
+  let billDate = String(input.billDate ?? "").trim() || null;
+  if (!billDate) {
+    const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+    billDate = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
+  }
+
+  const { data: made, error: madeErr } = await supabase
+    .from("bills")
+    .insert({
+      org_id: orgId,
+      // The trigger sets these two from the original whatever is sent; sent anyway so the row reads
+      // right on its own.
+      job_id: o.job_id ?? null,
+      status: o.status,
+      supplier: o.supplier,
+      ...(o.supplier_account_id ? { supplier_account_id: o.supplier_account_id } : {}),
+      category: o.category ?? null,
+      scope_category: scope.value,
+      amount: plan.row.amount,
+      bill_number: plan.row.bill_number,
+      bill_date: billDate,
+      notes: String(input.notes ?? "").trim() || null,
+      corrects_bill_id: o.id,
+      on_shelf: o.on_shelf === true,
+      created_by: ctx.userId,
+    })
+    .select("id")
+    .single();
+  if (madeErr || !made?.id) {
+    if (madeErr && isMissingColumnError(madeErr)) return { ok: false, error: CORRECTIONS_NOT_READY };
+    reportError("jobs.correctBill.insert", madeErr ?? new Error("correction insert returned no row"), { billId: o.id });
+    return { ok: false, error: madeErr ? dbError(madeErr) : "The correction didn't save. Nothing was attached. Try again in a moment." };
+  }
+  const newId = String(made.id);
+
+  const { data: landed, error: linesErr } = await supabase
+    .from("bill_line_items")
+    .insert(plan.lines.map((l) => ({ bill_id: newId, ...l })))
+    .select("id");
+  if (linesErr || (landed ?? []).length !== plan.lines.length) {
+    reportError("jobs.correctBill.lines", linesErr ?? new Error("correction lines came back short"), { billId: newId, lines: plan.lines.length });
+    // NO HALF-CORRECTION: a correction without its lines is a lump the importer would bill blind.
+    const { data: gone, error: goneErr } = await supabase.from("bills").delete().eq("org_id", orgId).eq("id", newId).select("id");
+    if (goneErr || !gone?.length) {
+      reportError("jobs.correctBill.undo", goneErr ?? new Error("correction row did not come back off"), { billId: newId });
+      return {
+        ok: false,
+        error: `${plan.row.bill_number} went in without its lines and couldn't be taken back off. Delete the ${plan.row.bill_number} correction under ${billLabel(o.bill_number)}, then attach it again.`,
+      };
+    }
+    return { ok: false, error: "The correction's lines didn't save, so nothing was attached. Try again in a moment." };
+  }
+
+  if (o.job_id) revalidatePath(`/jobs/${o.job_id}`);
+  revalidatePath("/bills");
+  revalidatePath("/analytics"); // a correction moves job cost and profit
+  return { ok: true, id: newId, sentence: plan.sentence };
 }
 
 /**

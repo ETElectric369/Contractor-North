@@ -54,7 +54,7 @@ import { JobCustomerPage } from "./job-customer-page";
 import { JobPanelLoader } from "./job-panel-loader";
 import { JobBills } from "./job-bills";
 import { JobTaskList, type TaskPhotos } from "./job-task-list";
-import { jobTaskTally, readJobTasks, taskPhoto } from "@/lib/job-tasks";
+import { isMissingColumn as isMissingColumnError, jobTaskTally, readJobTasks, taskPhoto } from "@/lib/job-tasks";
 import { buyMaterials, openToBuyCount } from "@/lib/materials-checklist";
 import { countOpen, isOpenAppointment, isOpenChangeOrder, isOpenInvoice, isOpenPermit, isOpenQuote, isOpenWorkOrder } from "@/lib/open-counts";
 import { JobPermits } from "./job-permits";
@@ -122,6 +122,19 @@ import { shortSupplierName } from "@/lib/supplier-name";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * THE JOB'S BILLS, WITH THE COLUMN 0381 ADDED WHEN THE DATABASE HAS IT. A push deploys before its
+ * migration runs, and PostgREST refuses the WHOLE read for one unknown column: the Costs tab would
+ * lose every bill, and with them the job's cost and profit. So the one error shape a missing column
+ * makes falls back to the read without it, and the page knows Correct This Bill is not ready yet.
+ */
+async function readJobBills<R extends { data: unknown; error: unknown }>(read: (withCorrects: boolean) => PromiseLike<R>): Promise<R & { correctionsReady: boolean }> {
+  const first = await read(true);
+  if (!first.error) return { ...first, correctionsReady: true };
+  if (!isMissingColumnError(first.error)) return { ...first, correctionsReady: false };
+  return { ...(await read(false)), correctionsReady: false };
+}
+
 export default async function JobDetailPage({
   params,
 }: {
@@ -159,7 +172,7 @@ export default async function JobDetailPage({
     { data: ownEntries },
     { data: docRows, error: docsErr },
     { data: staff },
-    { data: bills },
+    { data: bills, correctionsReady },
     jobTasks,
     {
       data: { user },
@@ -189,32 +202,37 @@ export default async function JobDetailPage({
     j.assigned_to?.length
       ? supabase.from("profiles").select("id, full_name").in("id", j.assigned_to)
       : Promise.resolve({ data: [] as any[] }),
-    supabase
-      .from("bills")
-      // THE LINE STATE RIDES WITH THE BILL (review of the fix wave, 2026-09-20). computeJobProgress
-      // now nets a receipt down to what it can BILL - the snacks and the shop stock come off - and
-      // MaterialBill.bill_line_items is optional, so a row that arrives without them silently
-      // bills its whole amount exactly as it always did. job-financials went through
-      // readJobBillsWithLines; this read did not, so the hub's Work To Date and the draw modal
-      // that opens from it disagreed by $12.22 on the Wexley job while both claimed to be the
-      // same number. The projection law, on the one figure the two screens share.
-      // supplier_account_id, supplier_invoice_number, notes and is_statement ride along for the one
-      // covering walk (readSettledBySupplier, 8a982483): without them this tab could not be told
-      // that the supplier's own closed paper already covers a ticket, so the SAME ticket read
-      // "Settled · CED Says" on /bills and "On Account" here.
-      // scope_category (0105) rides along for item C1: which part of the job each cost counts under.
-      // Without it on the wire the Costs tab row would say no part is set on every cost, and the Edit
-      // Bill box would open empty and clear a part somebody had already set — THE PROJECTION LAW.
-      .select(
-        "id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, scope_category, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)",
-      )
-      .eq("job_id", id)
-      // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without
-      // this the hub counted the $95.27 duplicate on 13631 Nightshade in cost, in profit and in
-      // work-to-date, while /analytics and the job's own financials dropped it - the same job
-      // reading $1,990.57 on one screen and $1,895.30 on another.
-      .is("superseded_by_bill_id", null)
-      .order("created_at", { ascending: false }),
+    // corrects_bill_id (0381) rides along so a correction is drawn under its original and Correct This
+    // Bill is offered; readJobBills retries without it on a database that is behind the deploy.
+    readJobBills((withCorrects) =>
+        supabase
+        .from("bills")
+        // THE LINE STATE RIDES WITH THE BILL (review of the fix wave, 2026-09-20). computeJobProgress
+        // now nets a receipt down to what it can BILL - the snacks and the shop stock come off - and
+        // MaterialBill.bill_line_items is optional, so a row that arrives without them silently
+        // bills its whole amount exactly as it always did. job-financials went through
+        // readJobBillsWithLines; this read did not, so the hub's Work To Date and the draw modal
+        // that opens from it disagreed by $12.22 on the Wexley job while both claimed to be the
+        // same number. The projection law, on the one figure the two screens share.
+        // supplier_account_id, supplier_invoice_number, notes and is_statement ride along for the one
+        // covering walk (readSettledBySupplier, 8a982483): without them this tab could not be told
+        // that the supplier's own closed paper already covers a ticket, so the SAME ticket read
+        // "Settled · CED Says" on /bills and "On Account" here.
+        // scope_category (0105) rides along for item C1: which part of the job each cost counts under.
+        // Without it on the wire the Costs tab row would say no part is set on every cost, and the Edit
+        // Bill box would open empty and clear a part somebody had already set — THE PROJECTION LAW.
+        .select(
+          "id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, scope_category, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)" +
+            (withCorrects ? ", corrects_bill_id" : ""),
+        )
+        .eq("job_id", id)
+        // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without
+        // this the hub counted the $95.27 duplicate on 13631 Nightshade in cost, in profit and in
+        // work-to-date, while /analytics and the job's own financials dropped it - the same job
+        // reading $1,990.57 on one screen and $1,895.30 on another.
+        .is("superseded_by_bill_id", null)
+        .order("created_at", { ascending: false }),
+    ),
     // THE JOB'S ONE TASK LIST (0358): the Overview card, the Tasks chip's count and the Tasks tab
     // all read this. Safe on a database without 0358 (readJobTasks falls back to the old columns).
     readJobTasks(supabase, id),
@@ -1825,6 +1843,7 @@ export default async function JobDetailPage({
                 jobId={j.id}
                 bills={costBills as any}
                 settledSaysUnread={settledSays.unread}
+                correctionsReady={correctionsReady}
                 pos={(pos ?? []) as any}
                 groups={costGroups}
                 groupsNote={costGroupsNote}
