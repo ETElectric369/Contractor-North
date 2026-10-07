@@ -18,7 +18,8 @@ vi.mock("./new-invoice-button", () => ({
 }));
 vi.mock("./payment-schedule-card", () => ({ useRequestNextPayment: () => ({ pending: false, error: null, requestNext() {} }) }));
 
-import { LeftToBillCard, contractEstimates } from "./left-to-bill-card";
+import { LeftToBillCard } from "./left-to-bill-card";
+import { contractEstimates } from "./contract-estimates";
 
 const NEW_INVOICE = { jobId: "j-011" };
 const fold = (html: string) => html.slice(html.indexOf("<details"), html.indexOf("</details>") + "</details>".length);
