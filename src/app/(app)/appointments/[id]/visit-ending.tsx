@@ -13,15 +13,15 @@ import { setAppointmentOutcome } from "../actions";
  *
  * The visit page never read what it became: an estimate written up from it (capture.quote_id) was
  * nowhere on the page, Start The Estimate was offered again over a finished one, and the outcome
- * 0205 gave every visit (won / lost / nothing came of it) was written by the estimate's status and
+ * 0205 gave every visit (won / lost) was written by the estimate's status and
  * by Nort and shown by neither. Erik's two meetings "with nothing else to come of them" had no door
  * at all on the page: only Nort could close them.
  *
  *   Written up as EST-0042 · sent          the estimate, as a link; a dead one says so
  *   Won · Jun 14 · J-039 The Bayberry place  the outcome, with its day and the job when there is one
- *   [Lost] [Nothing Came Of It]            the office's door on a completed visit with a win or loss
- *                                          to record (a meeting too), still undecided, no job, no
- *                                          live estimate
+ *   [Lost]                                 the office's one door on a completed visit with a win or
+ *                                          loss to record (a meeting too), still undecided, no job,
+ *                                          no live estimate
  *
  * The outcome is the visit's own answer (setAppointmentOutcome), the same column the estimate's
  * Accepted / Declined and the Inspections tab's bucket read. Change re-opens the three words; Clear
@@ -30,7 +30,9 @@ import { setAppointmentOutcome } from "../actions";
 export type VisitEstimate = { id: string; number: string | null; status: string | null; live: boolean };
 export type VisitOutcomeWord = "won" | "lost" | "no_bid";
 
-const WORDS: Record<VisitOutcomeWord, string> = { won: "Won", lost: "Lost", no_bid: "Nothing Came Of It" };
+// ONE WORD FOR AN ENDING THAT ISN'T A WIN (Erik, 2026-10-08: "just keep Lost everywhere - KISS"). The
+// column still holds no_bid on a few old rows (Nort's tool can write it); every one of them reads Lost.
+const WORDS: Record<VisitOutcomeWord, string> = { won: "Won", lost: "Lost", no_bid: "Lost" };
 
 /** The outcome, in the page's words; an unknown stored word is shown as stored, never hidden. */
 export function outcomeWord(outcome: string | null | undefined): string | null {
@@ -99,7 +101,7 @@ export function VisitEnding({
 
   const choices = (
     <div className="mt-2 flex flex-wrap gap-2">
-      {(["lost", "no_bid", ...(changing ? ["won" as const] : [])] as VisitOutcomeWord[]).map((o) => (
+      {(["lost", ...(changing ? ["won" as const] : [])] as VisitOutcomeWord[]).map((o) => (
         <Button key={o} type="button" variant="secondary" disabled={pending} className={DOOR} onClick={() => decide(o)}>
           {WORDS[o]}
         </Button>

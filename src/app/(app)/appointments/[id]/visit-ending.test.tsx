@@ -40,14 +40,14 @@ describe("which visits have a win or a loss to record", () => {
 });
 
 describe("the ending doors are offered only where they apply", () => {
-  it("a completed estimate visit, undecided, no job, no live estimate: the office gets Lost and Nothing Came Of It", () => {
+  it("a completed visit with a loss to record, undecided, no job, no live estimate: the office gets ONE door, Lost (KISS)", () => {
     expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: false, estimateLive: false, decidable: true })).toBe(true);
     const s = html({});
     expect(s).toContain("How did this one end?");
     expect(s).toContain(">Lost<");
-    expect(s).toContain(">Nothing Came Of It<");
+    expect(s).not.toContain("Nothing Came Of It"); // Erik: "just keep Lost everywhere"
     expect(s).not.toContain(">Won<"); // a win is recorded by the job or the estimate, never typed here
-    expect(doors(s)).toBe(2);
+    expect(doors(s)).toBe(1);
     for (const m of s.match(/<button[^>]*>/g) ?? []) expect(m).toContain("min-h-[44px]");
   });
 
@@ -79,7 +79,7 @@ describe("what the visit became", () => {
   it("the outcome reads in plain words with its day, the won job linked, and the office can change it", () => {
     expect(outcomeWord("won")).toBe("Won");
     expect(outcomeWord("lost")).toBe("Lost");
-    expect(outcomeWord("no_bid")).toBe("Nothing Came Of It");
+    expect(outcomeWord("no_bid")).toBe("Lost"); // an old no_bid row reads the one word too
     expect(outcomeWord(null)).toBeNull();
     const s = html({ outcome: "won", outcomeAt: "2026-07-31T20:00:00.000Z", job: { id: "j1", job_number: "J-038", name: "The lake place" } });
     expect(s).toContain(">Won<");
