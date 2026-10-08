@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
@@ -325,6 +327,42 @@ d("a bill knows how much of it is paid (0383): the triggers, the replay and the 
     expect((await money(paid1)).paid).toBe(100);
     // Idempotent: a second run matches nothing new.
     expect(await one("select * from public.supplier_payments_match_oldest_first()")).toEqual({ payments_matched: 0, bills_matched: 0, left_ahead: 0 });
+  });
+
+  it("the backfill runs over a book that already has corrected purchases (what rolled the first live run back)", async () => {
+    needs();
+    // Two corrected purchases in the book: a paid pair ticked by his word, and an open pair.
+    const po = await bill({ amount: 300, status: "paid", number: "TEST-BF-PO", date: "2001-03-01" });
+    const pc = await bill({ amount: 25, corrects: po, number: "TEST-BF-PC", date: "2001-03-02" });
+    await c.query("update public.bills set status = 'paid' where id = $1", [po]);
+    const oo = await bill({ amount: 613.19, number: "TEST-BF-OO", date: "2001-03-03" });
+    const oc = await bill({ amount: 95.99, corrects: oo, number: "TEST-BF-OC", date: "2001-03-04" });
+    // (A paid bill with no number, as every bill before 0383, cannot be minted here: the trigger
+    // derives the word from the number on every write. Step a's own statement is plain SQL.)
+    // THE BACKFILL, verbatim from the migration file, inside this suite's transaction.
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/0383_a_bill_knows_how_much_of_it_is_paid.sql"), "utf8");
+    const start = sql.indexOf("do $$\ndeclare\n  n_word     int;");
+    const end = sql.indexOf("end $$;", start) + "end $$;".length;
+    expect(start, "the backfill block is where the suite expects it").toBeGreaterThan(0);
+    expect(await refused(sql.slice(start, end))).toBeNull();
+    expect(await money(po)).toEqual({ amount: 300, paid: 300, status: "paid" });
+    expect(await money(pc)).toEqual({ amount: 25, paid: 25, status: "paid" });
+    expect(await money(oo)).toEqual({ amount: 613.19, paid: 0, status: "unpaid" });
+    expect(await money(oc)).toEqual({ amount: 95.99, paid: 0, status: "unpaid" });
+    // Nothing in the book carries a number outside its amount or under its live payments.
+    expect(
+      await rows(
+        `select b.bill_number, b.amount, b.amount_paid, b.status, public.bill_live_allocated(b.id) as allocated
+           from public.bills b where b.org_id in ($1, $2)
+            and (b.amount_paid < least(0, b.amount) or b.amount_paid > greatest(0, b.amount) or (b.amount > 0 and b.amount_paid + 0.005 < public.bill_live_allocated(b.id)))`,
+        [orgId, otherOrgId],
+      ),
+    ).toEqual([]);
+    // And the file's own end-of-run checks pass over this book.
+    const checks = sql.indexOf("-- ── 8. VERIFY, OR FAIL THE RUN");
+    const cStart = sql.indexOf("do $$", checks);
+    const cEnd = sql.indexOf("end $$;", cStart) + "end $$;".length;
+    expect(await refused(sql.slice(cStart, cEnd))).toBeNull();
   });
 
   it("the skeptic's cases: the word is one of two, a $0 bill is paid, a paid bill cannot be set aside, void twice is void once, money ahead takes the next bill, nothing is an RPC", async () => {

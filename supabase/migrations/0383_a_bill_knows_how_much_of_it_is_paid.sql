@@ -784,8 +784,19 @@ do $$
 declare
   n_word     int;
   n_supplier int;
+  n_derived  int := 0;
   r          record;
+  f          record;
 begin
+  -- THE TWO NUMBER WRITES RUN WITH THE SYNC FLAG UP. With it down, the first member of a corrected
+  -- purchase that this statement touches re-derives the family and its AFTER trigger writes the
+  -- correction's status - and when the same statement then reaches that correction, Postgres refuses
+  -- it ("tuple to be updated was already modified by an operation triggered by the current command").
+  -- That is what rolled this file back on the live book on its first run: one corrected purchase was
+  -- enough. With the flag up the triggers only derive the row in hand; step e derives every purchase
+  -- afterwards, one purchase per statement, which can never visit a row a trigger already wrote.
+  perform set_config('cn.bill_money_sync', '1', true);
+
   -- a. HIS WORD: a bill marked paid is paid in full.
   update public.bills set amount_paid = amount where status = 'paid' and amount_paid is distinct from amount;
   get diagnostics n_word = row_count;
@@ -803,20 +814,26 @@ begin
                       where l.bill_id = bl.id and d.closed is distinct from true);
   get diagnostics n_supplier = row_count;
 
-  -- c. THE PAYMENTS ALREADY SENT, MATCHED OLDEST-FIRST the way the door does it, in date order.
+  perform set_config('cn.bill_money_sync', '', true);
+
+  -- c. THE PAYMENTS ALREADY SENT, MATCHED OLDEST-FIRST the way the door does it, in date order. Every
+  -- write inside is one row at a time, through the live triggers.
   select * into r from public.supplier_payments_match_oldest_first();
 
   -- d. WHAT IS STILL AHEAD COMES OFF THE OPEN BILLS, account by account (the rule 6b keeps from now on).
   perform public.supplier_apply_ahead(sp.org_id, sp.supplier_account_id)
      from (select distinct org_id, supplier_account_id from public.supplier_payments where voided_at is null) sp;
 
-  -- e. EVERY BILL'S WORD IS ITS NUMBER'S, from here on: a $0 bill, a purchase that nets to nothing, a
-  -- status spelled some other way - each re-derives through the trigger (UPDATE OF fires it whether
-  -- or not the value moved), so the checks below judge what the triggers keep, not what was stored.
-  update public.bills set amount_paid = amount_paid;
+  -- e. EVERY PURCHASE'S WORD IS ITS NUMBER'S, from here on: a $0 bill, a purchase that nets to
+  -- nothing, a status spelled some other way - each derives through the one function, one purchase
+  -- per statement, so the checks below judge what the triggers keep, not what was stored.
+  for f in select b.id from public.bills b where b.corrects_bill_id is null order by b.created_at, b.id loop
+    perform public.bill_family_sync(f.id);
+    n_derived := n_derived + 1;
+  end loop;
 
-  raise notice '0383 backfill: % bill(s) paid in full by his word, % by the supplier''s closed paper, % payment(s) matched to % bill(s), $% left ahead on the account(s).',
-    n_word, n_supplier, r.payments_matched, r.bills_matched, to_char(r.left_ahead, 'FM999,999,990.00');
+  raise notice '0383 backfill: % bill(s) paid in full by his word, % by the supplier''s closed paper, % payment(s) matched to % bill(s), $% left ahead on the account(s), % purchase(s) derived.',
+    n_word, n_supplier, r.payments_matched, r.bills_matched, to_char(r.left_ahead, 'FM999,999,990.00'), n_derived;
 end $$;
 
 -- ── 7b. NOTHING HERE IS FOR A SIGNED-IN USER TO CALL ────────────────────────────────────────────
@@ -884,10 +901,11 @@ begin
     end if;
   end loop;
 
-  -- The number is within the amount on every bill, and never under what the live payments pay.
+  -- The number is within the amount on every bill, and on a bill to pay (a positive one) never under
+  -- what the live payments pay. A credit carries a negative number and no payment, so it is not asked.
   select count(*) into n from public.bills b
    where b.amount_paid < least(0, b.amount) or b.amount_paid > greatest(0, b.amount)
-      or b.amount_paid + 0.005 < public.bill_live_allocated(b.id);
+      or (b.amount > 0 and b.amount_paid + 0.005 < public.bill_live_allocated(b.id));
   if n > 0 then
     raise exception '0383: % bill(s) carry a number outside their amount or under their payments. Nothing more was changed.', n;
   end if;
