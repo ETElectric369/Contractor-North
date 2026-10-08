@@ -15,7 +15,7 @@ import { SendSheet } from "@/components/send-sheet";
 import { useToast } from "@/components/toast";
 import { dispatchAction } from "@/lib/action-items/dispatch";
 import type { DispatchPayload } from "@/lib/action-items/dispatch-map";
-import { KIND_META, chipOf, type ActionItem, type Affordance } from "@/lib/action-items/types";
+import { KIND_META, WHEN_IS_A_DEADLINE, chipOf, type ActionItem, type Affordance } from "@/lib/action-items/types";
 import { rowButtons, type RowDoor } from "@/lib/action-items/row-buttons";
 import { pileAges, pileTitle, pileUnfoldsHere } from "@/lib/action-items/piles";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
@@ -32,7 +32,7 @@ import { AlreadyBilledButton } from "@/components/already-billed-sheet";
  * server-computed business-tz `todayStr` prop, date-only values are compared as noon-UTC
  * instants (tz-independent difference), and all display formatting pins the business timezone.
  */
-function prettyWhen(when: string | null | undefined, todayStr: string, tz: string): string | null {
+export function prettyWhen(when: string | null | undefined, todayStr: string, tz: string, deadline = true): string | null {
   if (!when) return null;
   const hasTime = when.includes("T");
   const d = hasTime ? new Date(when) : new Date(`${when}T12:00:00Z`);
@@ -41,9 +41,15 @@ function prettyWhen(when: string | null | undefined, todayStr: string, tz: strin
     ? d.toLocaleDateString("en-CA", { timeZone: tz }) // en-CA = YYYY-MM-DD
     : when;
   const diffDays = Math.round((Date.parse(`${dayStr}T12:00:00Z`) - Date.parse(`${todayStr}T12:00:00Z`)) / 86_400_000);
+  // A day already past is OVERDUE only when it was a deadline (WHEN_IS_A_DEADLINE); the day a thing
+  // happened is said as how long ago, so an inspection done yesterday never reads as a miss.
   const rel =
     diffDays < 0
-      ? `${-diffDays}d overdue`
+      ? deadline
+        ? `${-diffDays}d overdue`
+        : diffDays === -1
+          ? "Yesterday"
+          : `${-diffDays}d ago`
       : diffDays === 0
         ? "Today"
         : diffDays === 1
@@ -269,7 +275,7 @@ function Row(p: RowProps) {
   // The row's own words when its state has them, else its kind's; a request with Leads off
   // reads Request even on a row built without its chip.
   const chip = item.kind === "inquiry" && !leadsOn && !item.chip ? "Request" : chipOf(item);
-  const when = prettyWhen(item.when, todayStr, tz);
+  const when = prettyWhen(item.when, todayStr, tz, WHEN_IS_A_DEADLINE[item.kind]);
   const overdue = item.when && !item.when.includes("T") && item.when < todayStr;
   const doors = rowButtons(item, { leadsOn, isStaff: p.isStaff });
   const open = () => p.router.push(item.href);

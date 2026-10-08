@@ -84,6 +84,40 @@ export const STREAM_ORDER: Stream[] = ["money", "leads", "today", "other"];
 
 /** Which stream each kind belongs to — assigned per-kind in ONE place so the
  *  inbox and any digest/summary surface can never disagree. */
+/**
+ * WHAT A ROW'S `when` IS (cn-v1069 follow-up; Erik on an inspection he finished the day before:
+ * "1d overdue"?). Two different facts ride the one field: a DEADLINE (a follow-up day, a due date, a
+ * lien clock, the day the crew stands on the job) — past it the row is overdue — or the DAY IT
+ * HAPPENED (an inspection done, a visit over, a shift closed, a paper that arrived) — past it the row
+ * has simply been sitting, and the list says "2d ago", never "overdue". Exhaustive on purpose: a new
+ * kind does not compile until somebody says which its day is.
+ */
+export const WHEN_IS_A_DEADLINE: Record<ActionKind, boolean> = {
+  job_to_schedule: true, // its scheduled day
+  inquiry: true, // the follow-up day
+  appointment: false, // the visit's own day: over, not overdue
+  inspection_writeup: false, // the day the inspection happened
+  organize: false, // the day the paper arrived
+  invoice_overdue: true, // the due date
+  quote_awaiting: true, // valid-until / the follow-up day
+  quote_accepted: false, // the day they said yes
+  invoice_draft: false, // the day it was started
+  visit_unbilled: false, // the day the work happened
+  quote_draft: false, // the day it was started
+  lien_deadline: true, // the clock
+  contract_unsigned: false, // the day it was sent
+  time_stray: false, // the day of the shift
+  job_unbilled_work: false, // the day last worked
+  materials_needed: true, // the day the crew stands on it
+  job_on_hold: true, // the day the hold said
+  stock_short: false, // the day of the take
+  supplier_paper: false, // undated
+  supplier_pay: true, // the discount's last day
+  receipt_unbilled: false, // the day of the photo
+  permit_inspection: true, // the booked day
+  job_report_back: false, // the day last worked
+};
+
 export const KIND_STREAM: Record<ActionKind, Stream> = {
   job_to_schedule: "today",
   inquiry: "leads",

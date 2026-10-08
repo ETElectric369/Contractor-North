@@ -16,10 +16,10 @@ vi.mock("@/components/supplier-paper-cards", () => ({ SupplierPaperCards: () => 
 vi.mock("@/components/move-to-day", () => ({ MoveToDay: ({ children }: { children: unknown }) => children as never }));
 vi.mock("@/components/send-sheet", () => ({ SendSheet: () => null }));
 
-import { ActionList, ROW_BUTTON, keepInFlight, verbLanding } from "./action-list";
+import { ActionList, ROW_BUTTON, keepInFlight, prettyWhen, verbLanding } from "./action-list";
 import { WaitingFold, waitingLine } from "./waiting-fold";
 import { inquiryActionItem } from "@/lib/action-items/switches";
-import { AFFORDANCES, KIND_STREAM, sortActionItems, waitingForViewer, waitingRow, type ActionItem, type WaitingItem } from "@/lib/action-items/types";
+import { AFFORDANCES, KIND_STREAM, WHEN_IS_A_DEADLINE, sortActionItems, waitingForViewer, waitingRow, type ActionItem, type WaitingItem } from "@/lib/action-items/types";
 import { rollUpPiles } from "@/lib/action-items/piles";
 
 const row = { id: "i1", name: "Dana Reyes", status: "new", next_follow_up_at: null, phone: "(530) 555-0142" };
@@ -364,5 +364,34 @@ describe("ActionList — a shift on no job", () => {
 
   it("no door without it", () => {
     expect(html(stray())).not.toContain("Already Billed");
+  });
+});
+
+/**
+ * A DAY THAT HAPPENED IS NOT A DAY MISSED (cn-v1069 follow-up). An inspection done yesterday read
+ * "1d overdue" and a visit from June "115d overdue": the one `when` field carries a deadline on
+ * some kinds and the day the thing happened on others, and the list said overdue for both.
+ */
+describe("the when line: overdue for a deadline, ago for a day that happened", () => {
+  const TZ = "America/Los_Angeles";
+  it("a deadline past is overdue; a happened day past is yesterday or N days ago; today and the future read the same either way", () => {
+    expect(prettyWhen("2026-10-07", "2026-10-08", TZ, true)).toBe("1d overdue");
+    expect(prettyWhen("2026-10-07", "2026-10-08", TZ, false)).toBe("Yesterday");
+    expect(prettyWhen("2026-06-15", "2026-10-08", TZ, false)).toBe("115d ago");
+    expect(prettyWhen("2026-10-08", "2026-10-08", TZ, false)).toBe("Today");
+    expect(prettyWhen("2026-10-09", "2026-10-08", TZ, false)).toBe("Tomorrow");
+    // A timed value keeps its time: the inspection at 10 AM yesterday.
+    expect(prettyWhen("2026-10-07T17:00:00.000Z", "2026-10-08", TZ, false)).toBe("Yesterday · 10:00 AM");
+    expect(prettyWhen("2026-10-07T17:00:00.000Z", "2026-10-08", TZ, true)).toBe("1d overdue · 10:00 AM");
+  });
+  it("every kind says which its day is, and the happened-day kinds are the ones whose day is the deed", () => {
+    expect(Object.keys(WHEN_IS_A_DEADLINE).sort()).toEqual(Object.keys(KIND_STREAM).sort());
+    for (const k of ["inspection_writeup", "visit_unbilled", "time_stray", "job_unbilled_work", "job_report_back", "appointment", "receipt_unbilled"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(false);
+    for (const k of ["invoice_overdue", "inquiry", "lien_deadline", "supplier_pay", "job_on_hold", "permit_inspection"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(true);
+  });
+  it("the list reads it: an inspection done yesterday is Yesterday on the row, never overdue", () => {
+    const html = renderToStaticMarkup(createElement(ActionList, { items: [item({ id: "w", kind: "inspection_writeup", when: "2026-10-07T17:00:00.000Z" })], todayStr: "2026-10-08", isStaff: true }));
+    expect(html).toContain("Yesterday · 10:00 AM");
+    expect(html).not.toContain("overdue");
   });
 });
