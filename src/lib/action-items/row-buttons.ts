@@ -171,9 +171,15 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       return {
         primary: open("Write It Up", item.href),
         also: null,
-        more: has(item, "dismiss")
-          ? [ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The inspection is marked lost; you can change it back on its own page.`, "Mark It Lost")]
-          : [],
+        // Open The Visit (cn-v1071): the row's id IS the visit. Every door here used to lead to a
+        // NEW estimate, so a visit that had already become a job by another road (Lim: written up
+        // without the backlink) could only be called Lost; its page has the attach door (won).
+        more: [
+          open("Open The Visit", `/appointments/${item.id}`),
+          ...(has(item, "dismiss")
+            ? [ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The inspection is marked lost; you can change it back on its own page.`, "Mark It Lost")]
+            : []),
+        ],
       };
     case "job_to_schedule":
       return {

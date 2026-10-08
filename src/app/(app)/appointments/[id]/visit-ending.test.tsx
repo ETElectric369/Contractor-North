@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 
 /**
  * HOW THE VISIT ENDED, RENDERED (cn-v1069): the face says what the visit became and offers the two
@@ -9,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
-vi.mock("../actions", () => ({ setAppointmentOutcome: vi.fn() }));
+vi.mock("../actions", () => ({ setAppointmentOutcome: vi.fn(), linkAppointmentTo: vi.fn(), searchLinkTargets: vi.fn(async () => []) }));
 
 import { VisitEnding, endingOffered, outcomeWord } from "./visit-ending";
 import { DECIDABLE_VISIT_TYPES, isDecidableVisitType } from "@/lib/statuses";
@@ -46,8 +47,9 @@ describe("the ending doors are offered only where they apply", () => {
     expect(s).toContain("How did this one end?");
     expect(s).toContain(">Lost<");
     expect(s).not.toContain("Nothing Came Of It"); // Erik: "just keep Lost everywhere"
-    expect(s).not.toContain(">Won<"); // a win is recorded by the job or the estimate, never typed here
-    expect(doors(s)).toBe(1);
+    expect(s).not.toContain(">Won<"); // a win is never typed alone: it is the job the visit became
+    expect(s).toContain("Won · Pick The Job"); // the attach door, jobs only, right on the card
+    expect(doors(s)).toBe(2);
     for (const m of s.match(/<button[^>]*>/g) ?? []) expect(m).toContain("min-h-[44px]");
   });
 
@@ -90,5 +92,14 @@ describe("what the visit became", () => {
     expect(doors(s)).toBe(1);
     // A tech reads the answer and gets no Change.
     expect(doors(html({ isStaff: false, outcome: "lost", outcomeAt: "2026-07-31T20:00:00.000Z" }))).toBe(0);
+  });
+});
+
+
+describe("the Edit Details modal escapes the glass ⋯ panel", () => {
+  it("the row-triggered modal is portaled (the cn-v463 class: an in-place overlay inside a backdrop-filter panel clips to a sliver)", () => {
+    const src = readFileSync(new URL("../appointment-button.tsx", import.meta.url), "utf8");
+    expect(src).toContain("portal={!!rowLabel}");
+    expect(src).toContain('formId="appt-form"'); // portal-safe submit: the form is inside the modal
   });
 });

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { setAppointmentOutcome } from "../actions";
+import { LinkPicker } from "./link-picker";
 
 /**
  * HOW THE VISIT ENDED — said on the visit, with the door to say it (cn-v1069).
@@ -19,9 +20,12 @@ import { setAppointmentOutcome } from "../actions";
  *
  *   Written up as EST-0042 · sent          the estimate, as a link; a dead one says so
  *   Won · Jun 14 · J-039 The Bayberry place  the outcome, with its day and the job when there is one
- *   [Lost]                                 the office's one door on a completed visit with a win or
+ *   [Lost] [Won · Pick The Job]            the office's doors on a completed visit with a win or
  *                                          loss to record (a meeting too), still undecided, no job,
- *                                          no live estimate
+ *                                          no live estimate. The win is never typed alone: it is the
+ *                                          JOB the visit became (the attach door, linkAppointmentTo,
+ *                                          stamps won) — Lim's Jun 15 visit became E-007 → J-030
+ *                                          with no backlink, and the only word on offer was Lost.
  *
  * The outcome is the visit's own answer (setAppointmentOutcome), the same column the estimate's
  * Accepted / Declined and the Inspections tab's bucket read. Change re-opens the three words; Clear
@@ -65,6 +69,7 @@ export function VisitEnding({
   outcomeAt,
   job,
   tz,
+  seed = "",
 }: {
   appointmentId: string;
   isStaff: boolean;
@@ -76,6 +81,8 @@ export function VisitEnding({
   outcomeAt: string | null;
   job: { id: string; job_number: string | null; name: string | null } | null;
   tz: string;
+  /** What the job picker searches first: the visit's address (jobs are named by street). */
+  seed?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -100,12 +107,16 @@ export function VisitEnding({
   }
 
   const choices = (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {(["lost", ...(changing ? ["won" as const] : [])] as VisitOutcomeWord[]).map((o) => (
-        <Button key={o} type="button" variant="secondary" disabled={pending} className={DOOR} onClick={() => decide(o)}>
-          {WORDS[o]}
-        </Button>
-      ))}
+    <div className="mt-2 flex flex-wrap items-start gap-2">
+      <Button type="button" variant="secondary" disabled={pending} className={DOOR} onClick={() => decide("lost")}>
+        {WORDS.lost}
+      </Button>
+      {/* The win is the job it became: the attach door (jobs only, every status but cancelled). */}
+      {!job && (
+        <div className="min-w-[14rem] flex-1 [&>div]:mt-0">
+          <LinkPicker appointmentId={appointmentId} linked={null} seed={seed} kinds={["job"]} openLabel="Won · Pick The Job" label={null} />
+        </div>
+      )}
       {changing && (
         <>
           {outcome && (

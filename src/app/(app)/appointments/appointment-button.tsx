@@ -536,6 +536,12 @@ export function AppointmentButton({
       <Modal
         open={open}
         onClose={closeAll}
+        // THE ROW TRIGGER LIVES INSIDE A GLASS ⋯ PANEL (the visit page's SectionActionsMenu), whose
+        // backdrop-filter becomes the containing block for an in-place fixed overlay: the modal
+        // resolved to the panel's box and was clipped to a grey sliver — "freezes on Edit Details"
+        // (Erik, 2026-10-08; the cn-v463 job-hub class, lib memory modal-in-glass-menu-portal). The
+        // form is INSIDE this modal and submits by formId, so portaling to <body> is safe here.
+        portal={!!rowLabel}
         title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
         dirty={dirty}
         footer={

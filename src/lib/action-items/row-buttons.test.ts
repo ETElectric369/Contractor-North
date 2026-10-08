@@ -170,3 +170,13 @@ describe("the laws", () => {
     expect(rowButtons(row("receipt_unbilled", { id: "receipts-unread" }), staff)).toEqual({ primary: null, also: null, more: [] });
   });
 });
+
+
+describe("an inspection to write up can be OPENED, not only written up or called lost (cn-v1071)", () => {
+  it("⋯ holds Open The Visit (its own page, where the attach door marks it won) ahead of Lost", () => {
+    const b = rowButtons(row("inspection_writeup", { id: "appt-9" }), { leadsOn: true, isStaff: true });
+    expect(b.primary?.label).toBe("Write It Up");
+    expect(b.more.map((d) => d.label)).toEqual(["Open The Visit", "Lost"]);
+    expect(b.more[0].act).toEqual({ type: "open", href: "/appointments/appt-9" });
+  });
+});

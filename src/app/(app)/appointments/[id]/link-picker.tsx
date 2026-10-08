@@ -32,12 +32,21 @@ export function LinkPicker({
   appointmentId,
   linked,
   seed,
+  kinds = null,
+  openLabel = "Connect this to a lead, customer or job",
+  label = "For",
 }: {
   appointmentId: string;
   /** What it's already connected to, for the resting state. */
   linked: { kind: LinkTarget["kind"]; name: string } | null;
   /** The address typed on this visit — used to offer matches without anyone typing twice. */
   seed: string;
+  /** Only these kinds are offered (the ending card's "Won · Pick The Job" is jobs only). null: all three. */
+  kinds?: LinkTarget["kind"][] | null;
+  /** The words on the closed picker's one button. */
+  openLabel?: string;
+  /** The small label over the box; null draws none (inside a card that already says what it is). */
+  label?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -62,7 +71,7 @@ export function LinkPicker({
       const mine = ++reqId.current;
       searchLinkTargets(term)
         .then((r) => {
-          if (mine === reqId.current) setRows(r);
+          if (mine === reqId.current) setRows(kinds ? r.filter((x) => kinds.includes(x.kind)) : r);
         })
         .finally(() => {
           if (mine === reqId.current) setSearching(false);
@@ -71,6 +80,7 @@ export function LinkPicker({
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- kinds is a stable literal per mount
   }, [q, seed, open]);
 
   const TONE: Record<LinkTarget["kind"], string> = {
@@ -82,7 +92,7 @@ export function LinkPicker({
   if (linked && !open) {
     return (
       <div className="mt-3">
-        <Label className="mb-1.5">For</Label>
+        {label && <Label className="mb-1.5">{label}</Label>}
         <div className="flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3">
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[linked.kind]}`}>{linked.kind}</span>
           <span className="flex-1 truncate text-sm text-slate-700">{linked.name}</span>
@@ -97,7 +107,7 @@ export function LinkPicker({
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between">
-        <Label className="mb-1.5">For</Label>
+        {label ? <Label className="mb-1.5">{label}</Label> : <span />}
         {open && (
           <button type="button" onClick={() => setOpen(false)} className="mb-1.5 text-slate-400">
             <X className="h-4 w-4" />
@@ -113,7 +123,7 @@ export function LinkPicker({
         >
           <Link2 className="h-4 w-4" />
           {/* Says what it DOES, not what it is. "Link a record" means nothing at a job site. */}
-          Connect this to a lead, customer or job
+          {openLabel}
         </button>
       ) : (
         <>
@@ -136,7 +146,7 @@ export function LinkPicker({
             {!searching && rows.length === 0 && (q.trim() || seed.trim()).length >= 2 && (
               // Not an error. Working unattached is a legitimate outcome, not a failure state.
               <p className="px-1 py-2 text-xs text-slate-400">
-                Nothing matches yet — carry on, you can connect this later.
+                {kinds?.length === 1 && kinds[0] === "job" ? "No job matches yet — try the street or the customer's name." : "Nothing matches yet — carry on, you can connect this later."}
               </p>
             )}
             {rows.map((r) => (

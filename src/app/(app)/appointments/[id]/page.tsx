@@ -525,6 +525,7 @@ export default async function AppointmentCapturePage({
           outcomeAt={(a as { outcome_at?: string | null }).outcome_at ?? null}
           job={linkedJob ? { id: linkedJob.id, job_number: linkedJob.job_number, name: linkedJob.name } : null}
           tz={tz}
+          seed={a.location ?? who ?? ""}
         />
         {notesShown && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{notesShown}</p>}
         {/* The customer's own answers, as answers. See the block above for why this is read-only
