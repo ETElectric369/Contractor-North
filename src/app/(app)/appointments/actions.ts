@@ -1099,7 +1099,9 @@ export async function setAppointmentOutcome(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data, error } = await ctx.supabase
     .from("appointments")
-    .update({ outcome, outcome_at: outcome ? new Date().toISOString() : null })
+    // updated_at too: every other writer on this row stamps it, and this one left the visit reading
+    // as last touched months before the day its answer was given.
+    .update({ outcome, outcome_at: outcome ? new Date().toISOString() : null, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
