@@ -12,12 +12,13 @@ vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 vi.mock("../actions", () => ({ setAppointmentOutcome: vi.fn() }));
 
 import { VisitEnding, endingOffered, outcomeWord } from "./visit-ending";
+import { DECIDABLE_VISIT_TYPES, isDecidableVisitType } from "@/lib/statuses";
 
 const TZ = "America/Los_Angeles";
 const base = {
   appointmentId: "appt-1",
   isStaff: true,
-  estimateVisit: true,
+  decidable: true,
   status: "completed",
   estimate: null,
   outcome: null,
@@ -28,9 +29,19 @@ const base = {
 const html = (o: Partial<Parameters<typeof VisitEnding>[0]>) => renderToStaticMarkup(createElement(VisitEnding, { ...base, ...o }));
 const doors = (s: string) => (s.match(/<button[^>]*>/g) ?? []).length;
 
+describe("which visits have a win or a loss to record", () => {
+  it("a meeting, a call, an Other visit, an inspection, a quote visit — and an untyped one; never a work visit or a final inspection", () => {
+    // Erik's two meetings "with nothing else to come of them" are stored as the plain appointment type.
+    for (const t of ["appointment", "meeting", "call", "other", "inspection", "quote", null, ""]) expect(isDecidableVisitType(t), String(t)).toBe(true);
+    for (const t of ["job", "service_call", "final_inspection"]) expect(isDecidableVisitType(t), t).toBe(false);
+    expect(DECIDABLE_VISIT_TYPES).not.toContain("job");
+    expect(DECIDABLE_VISIT_TYPES).toContain("appointment");
+  });
+});
+
 describe("the ending doors are offered only where they apply", () => {
   it("a completed estimate visit, undecided, no job, no live estimate: the office gets Lost and Nothing Came Of It", () => {
-    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: false, estimateLive: false, estimateVisit: true })).toBe(true);
+    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: false, estimateLive: false, decidable: true })).toBe(true);
     const s = html({});
     expect(s).toContain("How did this one end?");
     expect(s).toContain(">Lost<");
@@ -41,12 +52,12 @@ describe("the ending doors are offered only where they apply", () => {
   });
 
   it("not for a tech, a booked visit, a visit with a job, one with a live estimate, a work visit, or one already decided", () => {
-    expect(endingOffered({ isStaff: false, status: "completed", outcome: null, hasJob: false, estimateLive: false, estimateVisit: true })).toBe(false);
-    expect(endingOffered({ isStaff: true, status: "scheduled", outcome: null, hasJob: false, estimateLive: false, estimateVisit: true })).toBe(false);
-    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: true, estimateLive: false, estimateVisit: true })).toBe(false);
-    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: false, estimateLive: true, estimateVisit: true })).toBe(false);
-    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: false, estimateLive: false, estimateVisit: false })).toBe(false);
-    expect(endingOffered({ isStaff: true, status: "completed", outcome: "lost", hasJob: false, estimateLive: false, estimateVisit: true })).toBe(false);
+    expect(endingOffered({ isStaff: false, status: "completed", outcome: null, hasJob: false, estimateLive: false, decidable: true })).toBe(false);
+    expect(endingOffered({ isStaff: true, status: "scheduled", outcome: null, hasJob: false, estimateLive: false, decidable: true })).toBe(false);
+    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: true, estimateLive: false, decidable: true })).toBe(false);
+    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: false, estimateLive: true, decidable: true })).toBe(false);
+    expect(endingOffered({ isStaff: true, status: "completed", outcome: null, hasJob: false, estimateLive: false, decidable: false })).toBe(false);
+    expect(endingOffered({ isStaff: true, status: "completed", outcome: "lost", hasJob: false, estimateLive: false, decidable: true })).toBe(false);
     // A visit with nothing to say draws nothing at all.
     expect(html({ status: "scheduled" })).toBe("");
     expect(html({ isStaff: false })).toBe("");

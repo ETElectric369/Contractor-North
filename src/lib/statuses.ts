@@ -109,6 +109,15 @@ export const ESTIMATE_VISIT_TYPES = [...INSPECTION_TYPES, "quote"] as const;
 export const isInspectionType = (t: string | null | undefined): boolean =>
   (INSPECTION_TYPES as readonly string[]).includes(t ?? "");
 
+/** The visit types with a WIN OR A LOSS to record (the 0205 outcome; cn-v1069): every kind but the
+ *  work visits (job, service_call — their answer is the invoice) and the final inspection (the
+ *  authority's answer, on the permit). Wider than ESTIMATE_VISIT_TYPES on purpose: a meeting, a call
+ *  or an Other visit that led nowhere is "nothing came of it", and one attached to a job is won.
+ *  An untyped visit is a site visit (schedule/work-shape workKind), so null counts. */
+export const DECIDABLE_VISIT_TYPES = APPOINTMENT_TYPES.filter((t) => t !== "job" && t !== "service_call" && t !== "final_inspection");
+export const isDecidableVisitType = (t: string | null | undefined): boolean =>
+  !t || (DECIDABLE_VISIT_TYPES as readonly string[]).includes(t);
+
 /* ONE WORD FOR THE SITE VISIT, AND IT IS THE STORED ONE. The visit before a price is an INSPECTION
    wherever staff or Nort read it, and this map is the only place that says so.
 

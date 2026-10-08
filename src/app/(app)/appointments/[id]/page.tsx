@@ -22,7 +22,7 @@ import type { NavTree } from "@/lib/nav-tree";
 import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
 import { captureQuoteId, hasCaptureData } from "@/lib/inspections";
 import { isLiveQuote } from "@/lib/invoice-import-rule";
-import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { isDecidableVisitType } from "@/lib/statuses";
 import { VisitEnding, type VisitEstimate } from "./visit-ending";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
@@ -214,9 +214,10 @@ export default async function AppointmentCapturePage({
   const estimate: VisitEstimate | null = quoteBehind
     ? { id: quoteBehind.id, number: quoteBehind.quote_number, status: quoteBehind.status, live: isLiveQuote(quoteBehind.status) }
     : null;
-  // The visits whose product is an estimate: the ones with a win or a loss to record (never a final
-  // inspection, whose answer is the authority's).
-  const estimateVisit = (ESTIMATE_VISIT_TYPES as readonly string[]).includes(a.type ?? "") && a.type !== "final_inspection";
+  // The visits with a win or a loss to record (lib/statuses DECIDABLE_VISIT_TYPES): a meeting or an
+  // Other visit too — never a work visit (its answer is the invoice) or a final inspection (the
+  // authority's).
+  const decidable = isDecidableVisitType(a.type);
 
   /* THE TOP CARD (Erik, 2026-09-25, Tom Goodman): "I just needed a job linked to that lead to start
      the clock, simple." What it needs: who is looking, their running clock, the linked job, and,
@@ -517,7 +518,7 @@ export default async function AppointmentCapturePage({
         <VisitEnding
           appointmentId={a.id}
           isStaff={viewerIsStaff}
-          estimateVisit={estimateVisit}
+          decidable={decidable}
           status={a.status ?? null}
           estimate={estimate}
           outcome={(a as { outcome?: string | null }).outcome ?? null}

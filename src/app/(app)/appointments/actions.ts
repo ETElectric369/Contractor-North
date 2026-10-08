@@ -21,7 +21,7 @@ import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
-import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, ESTIMATE_VISIT_TYPES, INSPECTION_TYPES, isPickableAppointmentType } from "@/lib/statuses";
+import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES, isDecidableVisitType, isPickableAppointmentType } from "@/lib/statuses";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -537,11 +537,11 @@ export async function linkAppointmentTo(
     if (!r) return { ok: false, error: "Job not found." };
     patch.job_id = r.id;
     if (r.customer_id) patch.customer_id = r.customer_id;
-    // AN ESTIMATE VISIT WITH A JOB IS WON (cn-v1069). The attach door set no outcome, so a visit
-    // connected to the job it led to still read "open business" on the Inspections tab. Only the
-    // visits whose product is an estimate (an inspection, a quote visit — never a final inspection,
-    // which has no win to record), and only where nothing is stamped yet.
-    if (WON_BY_ATTACH.includes(visitType ?? "") && !(appt as { outcome?: string | null }).outcome) {
+    // A VISIT WITH A JOB IS WON (cn-v1069). The attach door set no outcome, so a visit connected to
+    // the job it led to still read "open business" on the Inspections tab. Every visit with a win to
+    // record (lib/statuses DECIDABLE_VISIT_TYPES: an inspection, a quote visit, a meeting — never a
+    // work visit or a final inspection), and only where nothing is stamped yet.
+    if (isDecidableVisitType(visitType) && !(appt as { outcome?: string | null }).outcome) {
       patch.outcome = "won";
       patch.outcome_at = new Date().toISOString();
     }
@@ -586,10 +586,6 @@ export async function linkAppointmentTo(
   revalidatePath(`/appointments/${id}`);
   return { ok: true, id, ...(lead.warning ? { warning: lead.warning } : {}) };
 }
-
-/** The visit types whose attach to a job is a WIN: the ones whose product is an estimate
- *  (lib/statuses ESTIMATE_VISIT_TYPES) minus the final inspection, which records no win. */
-const WON_BY_ATTACH: readonly string[] = ESTIMATE_VISIT_TYPES.filter((t) => t !== "final_inspection");
 
 /**
  * WHERE THE VISIT IS — settable from the inspector itself.

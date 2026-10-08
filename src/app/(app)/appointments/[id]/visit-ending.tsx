@@ -19,8 +19,9 @@ import { setAppointmentOutcome } from "../actions";
  *
  *   Written up as EST-0042 · sent          the estimate, as a link; a dead one says so
  *   Won · Jun 14 · J-039 The Bayberry place  the outcome, with its day and the job when there is one
- *   [Lost] [Nothing Came Of It]            the office's door on a completed estimate visit that is
- *                                          still undecided, has no job and no live estimate
+ *   [Lost] [Nothing Came Of It]            the office's door on a completed visit with a win or loss
+ *                                          to record (a meeting too), still undecided, no job, no
+ *                                          live estimate
  *
  * The outcome is the visit's own answer (setAppointmentOutcome), the same column the estimate's
  * Accepted / Declined and the Inspections tab's bucket read. Change re-opens the three words; Clear
@@ -45,9 +46,9 @@ export function endingOffered(v: {
   outcome: string | null;
   hasJob: boolean;
   estimateLive: boolean;
-  estimateVisit: boolean;
+  decidable: boolean;
 }): boolean {
-  return v.isStaff && v.estimateVisit && v.status === "completed" && !v.outcome && !v.hasJob && !v.estimateLive;
+  return v.isStaff && v.decidable && v.status === "completed" && !v.outcome && !v.hasJob && !v.estimateLive;
 }
 
 const DOOR = "inline-flex min-h-[44px] items-center justify-center";
@@ -55,7 +56,7 @@ const DOOR = "inline-flex min-h-[44px] items-center justify-center";
 export function VisitEnding({
   appointmentId,
   isStaff,
-  estimateVisit,
+  decidable,
   status,
   estimate,
   outcome,
@@ -65,8 +66,8 @@ export function VisitEnding({
 }: {
   appointmentId: string;
   isStaff: boolean;
-  /** An inspection or a quote visit: the kinds whose product is an estimate. */
-  estimateVisit: boolean;
+  /** A visit with a win or a loss to record (lib/statuses DECIDABLE_VISIT_TYPES): not a work visit, not a final inspection. */
+  decidable: boolean;
   status: string | null;
   estimate: VisitEstimate | null;
   outcome: string | null;
@@ -80,7 +81,7 @@ export function VisitEnding({
   const [pending, start] = useTransition();
 
   const word = outcomeWord(outcome);
-  const offered = endingOffered({ isStaff, status, outcome, hasJob: !!job, estimateLive: !!estimate?.live, estimateVisit });
+  const offered = endingOffered({ isStaff, status, outcome, hasJob: !!job, estimateLive: !!estimate?.live, decidable });
   if (!estimate && !word && !offered) return null;
 
   function decide(next: VisitOutcomeWord | null) {
