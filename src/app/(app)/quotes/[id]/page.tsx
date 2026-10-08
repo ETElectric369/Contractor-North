@@ -89,7 +89,7 @@ export default async function QuoteDetailPage({
   // Has this quote already been turned into these records? (Drives idempotent UI:
   // the map shows "View …" instead of minting a duplicate.) Plus the org's
   // customers so the attached customer can be changed inline.
-  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: orgRow }] = await Promise.all([
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: orgRow }, { data: visitBehind }] = await Promise.all([
     supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
@@ -113,6 +113,15 @@ export default async function QuoteDetailPage({
     // either migration not having landed yet, so a linked kit line prices live for this customer.
     firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    // THE VISIT THIS WAS WRITTEN UP FROM (cn-v1069): the backlink saveQuote stamps inside the visit's
+    // capture, read back here so the two stay attached both ways. Newest first if ever two claim it.
+    supabase
+      .from("appointments")
+      .select("id, starts_at, title")
+      .eq("capture->>quote_id", id)
+      .order("starts_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   // The quote's seek door: what it can BECOME (idempotent conversion nodes —
@@ -201,6 +210,12 @@ export default async function QuoteDetailPage({
           {(q as any).inquiry && (
             <Link href={`/leads?focus=${(q as any).inquiry.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
               ← from lead: {(q as any).inquiry.name}
+            </Link>
+          )}
+          {/* Provenance backlink — the visit this estimate was written up from (capture.quote_id). */}
+          {visitBehind && (
+            <Link href={`/appointments/${(visitBehind as { id: string }).id}`} className="mt-1 block text-sm text-brand hover:underline">
+              ← from the visit{(visitBehind as { starts_at?: string | null }).starts_at ? ` on ${formatDate((visitBehind as { starts_at?: string | null }).starts_at)}` : ""}
             </Link>
           )}
           {/* What the customer attached at intake. The lead leaves the inbox on conversion, so

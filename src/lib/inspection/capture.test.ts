@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   adhocSizing,
   captureItemsToDraftLines,
+  measuredOnSiteBlock,
+  seedLinesFromCapture,
   fillFromAgent,
   inspectorReadiness,
   looseNumber,
@@ -80,6 +82,33 @@ describe("a quantity is null or a number, never a silent zero", () => {
       items: [{ id: "i1", description: "romex", quantity: "a while", unit: "ft" }],
     });
     expect(c.items![0].quantity).toBeNull();
+  });
+
+  it("the typed take-off follows the scope picks onto the estimate, unpriced (cn-v1069)", () => {
+    const scope = [{ description: "Service upgrade", quantity: 1, unit: "ea", unit_price: 1200 }];
+    const lines = seedLinesFromCapture(scope, [
+      { id: "a", description: "12-2 romex", quantity: 200, unit: "ft", code: "W12" },
+      { id: "b", description: "  ", quantity: 1, unit: "ea" },
+      { id: "c", description: "20A breaker", quantity: null, unit: "ea" },
+    ]);
+    expect(lines.map((l) => [l.description, l.quantity, l.unit, l.unit_price])).toEqual([
+      ["Service upgrade", 1, "ea", 1200],
+      ["12-2 romex", 200, "ft", 0],
+      ["20A breaker", 1, "ea", 0],
+    ]);
+    expect(seedLinesFromCapture(scope, undefined)).toEqual(scope);
+  });
+
+  it("the ad-hoc measures read as one Measured on site block, by name, as typed", () => {
+    expect(measuredOnSiteBlock(undefined)).toBe("");
+    expect(measuredOnSiteBlock([{ id: "m", label: "  ", value: 1, unit: "ft" }])).toBe("");
+    expect(
+      measuredOnSiteBlock([
+        { id: "m1", label: "Panel to garage", value: 85, unit: "ft" },
+        { id: "m2", label: "Attic run", value: null, unit: "ft" },
+        { id: "m3", label: "Breaker spaces", value: 4, unit: "" },
+      ]),
+    ).toBe("Measured on site:\n- Panel to garage: 85 ft\n- Attic run: (not measured)\n- Breaker spaces: 4");
   });
 
   it("an unpriced line still becomes a real estimate line with quantity 1, not 0", () => {

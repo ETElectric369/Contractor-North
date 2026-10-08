@@ -2221,6 +2221,33 @@ export async function updateJobNotes(
   return { ok: true };
 }
 
+/**
+ * TOLD THEM (cn-v1069): the office has told a time-and-materials customer where the job stands.
+ * Stamps jobs.report_back_at (0385) once — the Needs You Report Back row is gone with it and the job
+ * page's card reads "Told them <day>". `told` false takes the stamp back (an Undo). Each write is
+ * guarded by the column's state, so a second tap, or a tap on a job already stamped from another
+ * device, lands zero rows and is SAID (the silent-write law), never reported as saved.
+ */
+export async function markReportedBack(jobId: string, told: boolean): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  let q = ctx.supabase.from("jobs").update({ report_back_at: told ? new Date().toISOString() : null }).eq("id", jobId);
+  q = told ? q.is("report_back_at", null) : q.not("report_back_at", "is", null);
+  const { data, error } = await q.select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) {
+    return {
+      ok: false,
+      error: told
+        ? "Nothing saved — that job is already marked told, or this login can't edit it."
+        : "Nothing to take back — that job isn't marked told, or this login can't edit it.",
+    };
+  }
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/planner");
+  return { ok: true };
+}
+
 /** Inline-edit the job's description (scope) right on the Overview tab. */
 export async function updateJobDescription(
   jobId: string,

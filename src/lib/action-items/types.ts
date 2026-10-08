@@ -64,6 +64,10 @@ export type ActionKind =
   // A receipt or bill photo on a job that no bill, supplier document or petty cash accounts for (a
   // crew member's photo from Snap Or Note, or a staff snap whose read failed): lib/job-photos' own rule.
   | "receipt_unbilled"
+  // A time-and-materials job in progress whose customer has not been told where it stands since the
+  // first clocked day closed (lib/report-back): "Tell Dana Where It Stands · 6h in · guess was 8h".
+  // Bounded by the three-day worked window and ended by Told Them (jobs.report_back_at, 0385).
+  | "job_report_back"
   // A PERMIT STILL WAITING ON AN INSPECTION (0378): one row per permit, never one per visit, and only
   // where the next visit is HIS — to phone for, or to write up. One still waiting on the authority in
   // front of it is in no pile at all (permit-inspection-items has the gate's whole story).
@@ -111,6 +115,9 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   // NOT money — nothing is billed by it — and never "other": the utility will not set the meter until
   // it happens, so it is the thing standing between a finished job and a customer with power.
   permit_inspection: "today",
+  // A word the customer is owed about today's work: today's, like the materials run; not money (nothing
+  // is billed by it) and not "other" (it is the one thing the job promised at the start).
+  job_report_back: "today",
 };
 
 /** The canonical verbs. Each (kind, verb) a row can send maps to a registry action (dispatch-map.ts). */
@@ -303,6 +310,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   receipt_unbilled: { label: "Not On A Bill", tone: "amber" },
   // Row overrides say which: To Book, Not Written Up, Failed, Cancelled (permit-inspection-items).
   permit_inspection: { label: "Permit Inspection", tone: "amber" },
+  job_report_back: { label: "Report Back", tone: "blue" },
 };
 
 /** The words on a row's chip: its own, else its kind's. */
@@ -388,6 +396,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // one is a different authority and a different day — no generic verb here could name which. Nothing
   // to dismiss either: the row is derived from the permit's visits and goes when the last one passes.
   permit_inspection: ["open"],
+  // Tell Them opens the job's Report Back card (Text <First>, Told Them live there). Endless while
+  // it stands, so the build adds the Snooze that picks a day (needs_you_waits) once 0367 is on.
+  job_report_back: ["open"],
 };
 
 /**

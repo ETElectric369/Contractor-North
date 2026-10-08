@@ -8,8 +8,10 @@ import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/st
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
-import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
-import { tzDayStartUtc } from "@/lib/tz";
+import { DEFAULT_TIMEZONE, formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
+import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { reportBackDue } from "@/lib/report-back";
+import { reportBackActionItem } from "./report-back-item";
 import { clockDoorWords } from "@/lib/long-shift";
 import { SHORT_FIX } from "@/lib/stock-take";
 import { shortDay } from "@/lib/come-back-days";
@@ -1076,7 +1078,7 @@ async function buildActionItems(ctx: {
   const previewIds = [...new Set([...matCandidates.keys(), ...workedIds])];
   const countIds = [...new Set([...needDayIds, ...heldRows.map((j) => String(j.id))])].filter((id) => !previewIds.includes(id));
 
-  const [settledR, futureApptR, previewListsR, countListsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR] = await Promise.all([
+  const [settledR, futureApptR, previewListsR, countListsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR, rbJobsR] = await Promise.all([
     // The settled signal for done visits, BEFORE 0371 ONLY (the function asks it in SQL): an invoice
     // anchored to the visit (0233). amount_paid rides along because ANCHORED IS NOT PAID ("collect
     // later" anchors a bill with zero collected).
@@ -1145,6 +1147,19 @@ async function buildActionItems(ctx: {
       const ids = [...new Set([...receiptDocs.map((d) => d.uploaded_by), ...shortRows.map((r) => r.created_by)].filter(Boolean) as string[])];
       return ids.length ? inChunks(ids, (chunk) => supabase.from("profiles").select("id, full_name").in("id", chunk)) : empty;
     })(),
+    // THE T&M JOBS THAT OWE THEIR CUSTOMER A WORD (cn-v1069, lib/report-back): among the jobs worked in
+    // the last three days, the time-and-materials ones in progress nobody has told (0385's column; a
+    // database without it answers a missing column, and the row simply isn't there yet).
+    isStaff && workedIds.length
+      ? supabase
+          .from("jobs")
+          .select("id, job_number, name, status, billing_type, planned_minutes, report_back_at, customers(name)")
+          .in("id", workedIds)
+          .eq("billing_type", "tm")
+          .eq("status", "in_progress")
+          .is("report_back_at", null)
+          .limit(30)
+      : empty,
   ]);
   const nameOf = new Map(((peopleR.data ?? []) as any[]).map((p) => [String(p.id), String(p.full_name ?? "").trim()]));
 
@@ -1387,6 +1402,32 @@ async function buildActionItems(ctx: {
         affordances: waitsR.ready ? ["snooze", "open"] : AFFORDANCES.job_unbilled_work,
         ...(waitsR.ready ? { waitKey: waitKey("job_unbilled_work", f.job.id) } : {}),
       });
+    }
+  }
+
+  // 2c) REPORT BACK (cn-v1069) — a time-and-materials job in progress whose first clocked day has
+  // closed and whose customer has not been told where it stands (lib/report-back: the one rule).
+  // Bounded by the same three-day worked window as the reads above, ended by Told Them on the job.
+  // A failed read says nothing rather than something false; before 0385 the column is simply absent.
+  if (isStaff) {
+    const rbErr = (rbJobsR as Read).error;
+    if (rbErr && !isMissingColumn(rbErr)) reportError("needsYou.reportBack.jobs", rbErr);
+    const candidates = rbErr ? [] : ((rbJobsR.data ?? []) as any[]);
+    if (candidates.length) {
+      const { data: closed, error: cErr } = await supabase
+        .from("time_entries")
+        .select("job_id, status, clock_in, clock_out, lunch_minutes")
+        .in("job_id", candidates.map((j) => String(j.id)))
+        .eq("status", "closed")
+        .limit(2000);
+      if (cErr) reportError("needsYou.reportBack.time", cErr);
+      else {
+        const dayOf = (iso: string) => todayStrInTz(tz || DEFAULT_TIMEZONE, new Date(iso));
+        for (const j of candidates) {
+          const verdict = reportBackDue(j, (closed ?? []) as any[], { todayStr, dayOf, windowDays: NEEDS_RETURN_DAYS });
+          if (verdict.due) items.push(reportBackActionItem({ ...j, customer: one(j.customers as any) }, verdict.standing, waitsR.ready));
+        }
+      }
     }
   }
 

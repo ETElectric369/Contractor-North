@@ -34,6 +34,7 @@ const built = (kind: ActionKind, o: Partial<ActionItem> = {}): ActionItem => {
     job_on_hold: "onhold-job-1",
     job_unbilled_work: "nocosts-job-1",
     materials_needed: "materials-job-1",
+    job_report_back: "reportback-job-1",
   };
   return row(kind, { id: ids[kind] ?? `${kind}-rec-1`, ...o });
 };
@@ -79,6 +80,7 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       "job_on_hold:do",
       "job_unbilled_work:snooze",
       "materials_needed:snooze",
+      "job_report_back:snooze",
     ])
       expect(pairs, want).toContain(want);
   });

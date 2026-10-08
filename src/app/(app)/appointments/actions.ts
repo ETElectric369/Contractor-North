@@ -9,7 +9,8 @@ import { mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { jobStatusLabel } from "@/lib/job-status";
+import { stampLeadWonByJob } from "@/lib/appointments/lead-won";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { requireMember, requireStaff } from "@/lib/staff-guard";
@@ -20,7 +21,7 @@ import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
-import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES, isPickableAppointmentType } from "@/lib/statuses";
+import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, ESTIMATE_VISIT_TYPES, INSPECTION_TYPES, isPickableAppointmentType } from "@/lib/statuses";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -30,6 +31,8 @@ import { customerForInquiry } from "@/lib/actions/win-customer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
+import { addCaptureItemsToJobList } from "../materials/actions";
+import { reportError } from "@/lib/observe";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
  *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
@@ -49,7 +52,7 @@ async function resolveIso(
 
 /** `refused`: the database said no to WHO is asking, so trying again won't change it (the
  *  inspection's autosave stops retrying and says so instead). */
-export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean };
+export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean; /** Landed, with something to say (a lead that could not be marked). */ warning?: string };
 
 /** The one refusal for a kind nobody can pick (W2-06), in the picker's own words. (Not exported: a
  *  "use server" file exports only async functions.) */
@@ -422,13 +425,22 @@ export async function searchLinkTargets(q: string): Promise<LinkTarget[]> {
       .select("id, name, address, city, state, zip, phone")
       .or(`name.ilike.${like},address.ilike.${like}`)
       .limit(6),
+    // EVERY JOB BUT A CANCELLED ONE (cn-v1069). Active only hid the exact case the retro attach door
+    // exists for: a visit whose job was finished and paid before anybody came back to connect the
+    // two. Newest first, then the active ones ahead of the finished below; the status word rides on
+    // the row so a finished job is picked knowingly.
     supabase
       .from("jobs")
       .select("id, job_number, name, address, city, state, zip, status")
       .or(`name.ilike.${like},address.ilike.${like}`)
-      .in("status", ACTIVE_JOB_STATUSES)
-      .limit(6),
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: false })
+      .limit(12),
   ]);
+  const jobRows = ((jobs.data ?? []) as any[])
+    .map((r, i) => ({ r, i, finished: r.status === "complete" ? 1 : 0 }))
+    .sort((a, b) => a.finished - b.finished || a.i - b.i)
+    .map((x) => x.r);
 
   const full = (r: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null }) =>
     formatFullAddress(r.address ?? null, r.city ?? null, r.state ?? null, r.zip ?? null) || null;
@@ -442,8 +454,12 @@ export async function searchLinkTargets(q: string): Promise<LinkTarget[]> {
     ...(customers.data ?? []).map((r: any) => ({
       kind: "customer" as const, id: r.id, name: r.name, address: full(r), sub: r.phone ? `Customer · ${r.phone}` : "Customer",
     })),
-    ...(jobs.data ?? []).map((r: any) => ({
-      kind: "job" as const, id: r.id, name: r.name ?? r.job_number, address: full(r), sub: `Job · ${r.job_number}`,
+    ...jobRows.map((r: any) => ({
+      kind: "job" as const,
+      id: r.id,
+      name: r.name ?? r.job_number,
+      address: full(r),
+      sub: `Job · ${r.job_number}${r.status ? ` · ${jobStatusLabel(r.status)}` : ""}`,
     })),
   ];
 }
@@ -470,10 +486,13 @@ export async function linkAppointmentTo(
   const { data: appt } = await supabase
     .from("appointments")
     // type rides along (PROJECTION LAW): the new title follows the visit's kind, never a guess.
-    .select("id, title, location, type")
+    // outcome + inquiry_id (cn-v1069): attaching an estimate visit to a job IS its answer (won), and
+    // the lead it was booked from is won with it — both stamped only where nothing is stamped yet.
+    .select("id, title, location, type, outcome, inquiry_id")
     .eq("id", id)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
+  const visitType = (appt as { type?: string | null }).type ?? null;
 
   const patch: Record<string, unknown> = {};
   let name = "";
@@ -518,6 +537,14 @@ export async function linkAppointmentTo(
     if (!r) return { ok: false, error: "Job not found." };
     patch.job_id = r.id;
     if (r.customer_id) patch.customer_id = r.customer_id;
+    // AN ESTIMATE VISIT WITH A JOB IS WON (cn-v1069). The attach door set no outcome, so a visit
+    // connected to the job it led to still read "open business" on the Inspections tab. Only the
+    // visits whose product is an estimate (an inspection, a quote visit — never a final inspection,
+    // which has no win to record), and only where nothing is stamped yet.
+    if (WON_BY_ATTACH.includes(visitType ?? "") && !(appt as { outcome?: string | null }).outcome) {
+      patch.outcome = "won";
+      patch.outcome_at = new Date().toISOString();
+    }
     name = r.name ?? r.job_number;
     address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
     parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
@@ -547,13 +574,22 @@ export async function linkAppointmentTo(
   if (error) return { ok: false, error: dbError(error) };
   if (!linked?.length) return { ok: false, error: "That appointment could not be found." };
 
+  // The lead behind a visit that took a job is won, and the job carries it (lib/appointments/lead-won;
+  // it lived in Link To J-0xx Instead alone before cn-v1069, so this picker's attach never told it).
+  const lead = kind === "job" ? await stampLeadWonByJob(supabase, { jobId: targetId, inquiryId: (appt as { inquiry_id?: string | null }).inquiry_id }) : {};
+  if (kind === "job" && targetId) revalidatePath(`/jobs/${targetId}`);
+
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
   revalidatePath("/leads");
   revalidatePath(`/appointments/${id}`);
-  return { ok: true, id };
+  return { ok: true, id, ...(lead.warning ? { warning: lead.warning } : {}) };
 }
+
+/** The visit types whose attach to a job is a WIN: the ones whose product is an estimate
+ *  (lib/statuses ESTIMATE_VISIT_TYPES) minus the final inspection, which records no win. */
+const WON_BY_ATTACH: readonly string[] = ESTIMATE_VISIT_TYPES.filter((t) => t !== "final_inspection");
 
 /**
  * WHERE THE VISIT IS — settable from the inspector itself.
@@ -1231,7 +1267,8 @@ export async function createJobFromAppointment(
     // PROJECTION LAW: everything the job inherits has to be in the select list. planned_minutes,
     // ends_at and inquiry_id were all missing, which is why none of them survived the conversion.
     // `notes` too (209451e1): the lead's message rode the visit and never reached the job.
-    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
+    // `capture` (cn-v1069): the rows typed on site become the job's materials list.
+    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes, capture")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -1410,6 +1447,21 @@ export async function createJobFromAppointment(
       .is("converted_at", null); // idempotent — an already-stamped lead keeps its original stamp
     revalidatePath("/leads");
   }
+  /* THE TYPED TAKE-OFF TRAVELS TOO (cn-v1069). The rows typed on the inspection sheet
+     (capture.items) were saved and read by nothing; the crew's list on the new job started empty.
+     One row each onto the job's one list (materials/actions addCaptureItemsToJobList). The job is
+     made whatever this says; what could not be listed is said in the result, never swallowed. */
+  let materialsNote: string | undefined;
+  const typedItems = parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? [];
+  if (typedItems.length) {
+    try {
+      const listed = await addCaptureItemsToJobList(job.id, typedItems);
+      if (!listed.ok) materialsNote = `The job was made; its materials could not all be listed (${listed.error ?? "the list refused"}). Add them on the Materials tab.`;
+    } catch (e) {
+      reportError("createJobFromAppointment:materials", e, { jobId: job.id, appointmentId });
+      materialsNote = "The job was made; the materials typed on the visit could not be listed. Add them on the Materials tab.";
+    }
+  }
   // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
   // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
   // its provenance, and stops competing with the job for the same afternoon.
@@ -1420,7 +1472,8 @@ export async function createJobFromAppointment(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  return { ok: true, id: job.id, ...(absorbNote ? { note: absorbNote } : {}) };
+  const note = [absorbNote, materialsNote].filter(Boolean).join(" ");
+  return { ok: true, id: job.id, ...(note ? { note } : {}) };
 }
 
 export async function deleteAppointment(id: string): Promise<Result> {

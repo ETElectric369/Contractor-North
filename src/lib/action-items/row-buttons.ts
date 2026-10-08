@@ -203,6 +203,9 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       };
     case "job_unbilled_work":
       return { primary: open("Add Costs", item.href), also: null, more: endlessSnooze ? [endlessSnooze] : [] };
+    // Tell Them opens the job's Report Back card, where the text and the Told Them stamp are.
+    case "job_report_back":
+      return { primary: open("Tell Them", item.href), also: null, more: endlessSnooze ? [endlessSnooze] : [] };
     case "job_on_hold": {
       // Both visible (Erik's answer): the reminder's two real answers. The Snooze asks why only when
       // the hold has no reason saved.

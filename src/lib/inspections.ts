@@ -36,17 +36,15 @@ export function captureQuoteId(capture: unknown): string | null {
   return typeof q === "string" && q.length > 0 ? q : null;
 }
 
-/** True when the capture jsonb carries any real field data (text or photos). */
+/** True when the capture jsonb carries any real field data: the prose boxes, photos, or the typed
+ *  rows (a take-off item, an ad-hoc measure — lib/inspection/capture). The typed rows were not
+ *  counted before cn-v1069, so a visit with only a typed take-off read "no field notes". */
 export function hasCaptureData(capture: unknown): boolean {
   if (!capture || typeof capture !== "object") return false;
-  const c = capture as { notes?: unknown; measurements?: unknown; materials?: unknown; photos?: unknown };
+  const c = capture as { notes?: unknown; measurements?: unknown; materials?: unknown; photos?: unknown; items?: unknown; measures?: unknown };
   const filled = (v: unknown) => typeof v === "string" && v.trim().length > 0;
-  return (
-    filled(c.notes) ||
-    filled(c.measurements) ||
-    filled(c.materials) ||
-    (Array.isArray(c.photos) && c.photos.length > 0)
-  );
+  const some = (v: unknown) => Array.isArray(v) && v.length > 0;
+  return filled(c.notes) || filled(c.measurements) || filled(c.materials) || some(c.photos) || some(c.items) || some(c.measures);
 }
 
 /** One tag on an Inspections row: what it says, and the Badge tone it says it in. The tone names

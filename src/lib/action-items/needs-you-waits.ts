@@ -22,7 +22,7 @@ import { waitingRow } from "./types";
  */
 
 /** The kinds whose rows can be snoozed this way: the endless ones. */
-export const WAITABLE_KINDS = ["job_unbilled_work", "materials_needed"] as const;
+export const WAITABLE_KINDS = ["job_unbilled_work", "materials_needed", "job_report_back"] as const;
 export type WaitableKind = (typeof WAITABLE_KINDS)[number];
 
 export function isWaitableKind(kind: unknown): kind is WaitableKind {

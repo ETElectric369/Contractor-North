@@ -144,6 +144,7 @@ export function Inspector({
   orgId,
   userId,
   estimateHref,
+  estimate = null,
   initialLocation,
   linked,
   planBrief = null,
@@ -165,6 +166,9 @@ export function Inspector({
   /** Where "Start The Estimate" goes — built by the page so the capture/lead ids ride along. null =
    *  Estimates is switched off (0352), and the button isn't drawn. */
   estimateHref: string | null;
+  /** The estimate already written up from this visit (capture.quote_id), when one is: the door
+   *  reads Open The Estimate while it stands (live), Start The Estimate again once it is over. */
+  estimate?: { id: string; number: string | null; live: boolean } | null;
   /** appointments.location — the address, which is the fact that names everything downstream. */
   initialLocation: string;
   /** What this visit is already connected to — a lead, a customer or a job. */
@@ -1595,10 +1599,17 @@ export function Inspector({
           </Button>
           {/* Pricing is the office's: a crew lead fills the inspection in and the office starts the
               estimate from it. */}
-          {office && estimateHref && (
-            <Link href={estimateHref}>
-              <Button type="button">Start The Estimate</Button>
+          {office && estimate?.live ? (
+            // The write-up exists and stands: open it, never a second one beside it (cn-v1069).
+            <Link href={`/quotes/${estimate.id}`}>
+              <Button type="button">Open The Estimate</Button>
             </Link>
+          ) : (
+            office && estimateHref && (
+              <Link href={estimateHref}>
+                <Button type="button">Start The Estimate</Button>
+              </Link>
+            )
           )}
         </div>
       </div>}

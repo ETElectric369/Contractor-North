@@ -10,7 +10,7 @@ import type { ActionKind, Affordance } from "./types";
  * stripped HERE, to the record the verb writes, so a verb never writes zero rows and reports success
  * (the silent-write law): unbilled-<visit> / jdone-<job> (visit_unbilled), qdraft-<estimate>
  * (quote_draft), onhold-<job> (job_on_hold), nocosts-<job> (job_unbilled_work), materials-<job>
- * (materials_needed). A won estimate's day goes on its JOB, which the row names as `target`.
+ * (materials_needed), reportback-<job> (job_report_back). A won estimate's day goes on its JOB, which the row names as `target`.
  *
  * No task arms and no convert branch (Wave 1, W1-16): tasks and Reminders never reach Needs You
  * (0358). The registry keeps task.* and inquiry.convert for Nort; nothing here reaches them. Nor
@@ -77,6 +77,10 @@ export function resolveRowVerb(
     }
     if (kind === "materials_needed") {
       const job = recordId(id, "materials-");
+      return job ? { name: "job.snoozeNeedsYou", input: { id: job, kind, date, ...(reason ? { reason } : {}) } } : null;
+    }
+    if (kind === "job_report_back") {
+      const job = recordId(id, "reportback-");
       return job ? { name: "job.snoozeNeedsYou", input: { id: job, kind, date, ...(reason ? { reason } : {}) } } : null;
     }
     return null;

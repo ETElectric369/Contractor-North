@@ -17,6 +17,7 @@ import { reportError } from "@/lib/observe";
 import { sendPushToProfiles } from "@/lib/push";
 import { jobLabel } from "@/lib/schedule-options";
 import { askLine } from "@/lib/materials-checklist";
+import type { CaptureItem } from "@/lib/inspection/capture";
 
 export interface DraftMaterial {
   description: string;
@@ -328,6 +329,46 @@ async function insertMaterialLine(supabase: Db, actor: Actor, listId: string, it
   if (!inserted) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
   return { ok: true, id: (inserted as { id: string }).id, description };
+}
+
+/**
+ * THE TYPED TAKE-OFF REACHES THE JOB (cn-v1069). Start The Job (createJobFromAppointment) carried
+ * the visit's name, size and address and dropped the rows typed on site: "200 ft 12-2 romex" sat in
+ * the capture, read by nothing, while the crew's list on the new job started empty. One row per
+ * typed item onto the job's ONE list (ensureJobMaterialList), the book code as its part number, no
+ * price (the office prices; the inspector rarely knows one). Best-effort by contract: the job is
+ * made whatever happens here, and what could not be listed is SAID in the result, never swallowed.
+ */
+export async function addCaptureItemsToJobList(
+  jobId: string,
+  items: CaptureItem[],
+): Promise<Result & { added: number }> {
+  const rows = (items ?? []).filter((i) => String(i.description ?? "").trim());
+  if (!rows.length) return { ok: true, added: 0 };
+  const supabase = await createClient();
+  const actor = await actorOf(supabase);
+  if (!actor) return { ok: false, error: "Not signed in.", added: 0 };
+  const list = await ensureJobMaterialList(jobId);
+  if (!list.ok || !list.id) return { ok: false, error: list.error ?? "The job has no materials list.", added: 0 };
+  let added = 0;
+  const failed: string[] = [];
+  for (const i of rows) {
+    const line = await insertMaterialLine(supabase, actor, list.id, {
+      description: i.description,
+      part_number: i.code ?? null,
+      quantity: i.quantity ?? 1,
+      unit: i.unit || "ea",
+      vendor: null,
+      est_cost: null,
+    });
+    if (line.ok) added += 1;
+    else failed.push(i.description.trim());
+  }
+  revalidatePath(`/jobs/${jobId}`);
+  if (failed.length) {
+    return { ok: false, id: list.id, added, error: `${failed.length} of ${rows.length} could not be listed: ${failed.join(", ")}.` };
+  }
+  return { ok: true, id: list.id, added };
 }
 
 export async function addMaterialItem(

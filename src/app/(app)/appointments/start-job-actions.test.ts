@@ -591,21 +591,24 @@ describe("Link To J-055 Instead", () => {
     expect(res).toMatchObject({ ok: true, jobId: "job-55", message: "Linked this visit to J-055. Nothing new was made." });
   });
 
-  it("finds the customer through the lead when the visit has none, and the lead is won", async () => {
+  it("finds the customer through the lead when the visit has none; the lead's win is the attach door's deed, not this one's", async () => {
     state.visit = { ...tomVisit, customer_id: null, inquiry_id: "lead-tom" };
     state.inquiryCustomer = "cust-tom";
     state.jobs = [j55];
     const res = await linkVisitInstead("appt-tom", "job-55");
     expect(res.ok).toBe(true);
-    // The job carries the lead, only when it carries none.
-    const jobWrite = state.writes.find((w) => w.table === "jobs");
-    expect(jobWrite?.patch).toEqual({ inquiry_id: "lead-tom" });
-    expect(jobWrite?.filters).toEqual(expect.arrayContaining([["eq", "id", "job-55"], ["is", "inquiry_id", null]]));
-    // The lead is stamped won, only when nobody stamped it yet.
-    const leadWrite = state.writes.find((w) => w.table === "inquiries");
-    expect(leadWrite?.patch).toMatchObject({ status: "won" });
-    expect(leadWrite?.filters).toEqual(expect.arrayContaining([["eq", "id", "lead-tom"], ["is", "converted_at", null]]));
-    expect(spies.revalidate).toHaveBeenCalledWith("/leads");
+    // ONE DOOR (cn-v1069): linkAppointmentTo stamps the job's lead and the lead's win itself
+    // (lib/appointments/lead-won), so this button writes nothing to jobs or inquiries of its own —
+    // the visit's Connect picker and this button cannot disagree about what attaching a job means.
+    expect(spies.link).toHaveBeenCalledWith("appt-tom", "job", "job-55");
+    expect(state.writes.filter((w) => w.table === "jobs" || w.table === "inquiries")).toEqual([]);
+  });
+
+  it("what the attach door could not stamp rides back as the warning, never swallowed", async () => {
+    state.jobs = [j55];
+    spies.link.mockResolvedValueOnce({ ok: true, id: "appt-tom", warning: "The lead behind this visit could not be marked won. Mark it on Leads." });
+    const res = await linkVisitInstead("appt-tom", "job-55");
+    expect(res).toMatchObject({ ok: true, warning: "The lead behind this visit could not be marked won. Mark it on Leads." });
   });
 
   it("a visit with no lead writes nothing to leads or the job", async () => {

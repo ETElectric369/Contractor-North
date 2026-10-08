@@ -51,7 +51,7 @@ function fake(answers: { select?: { data?: unknown; error?: unknown }; upsert?: 
 describe("the key", () => {
   it("is the row's kind and its record, for the endless kinds only", () => {
     expect(waitKey("materials_needed", "j1")).toBe("materials_needed:j1");
-    expect(WAITABLE_KINDS).toEqual(["job_unbilled_work", "materials_needed"]);
+    expect(WAITABLE_KINDS).toEqual(["job_unbilled_work", "materials_needed", "job_report_back"]);
     // Money and legal clocks are never snoozed this way: they aren't endless, they have endings.
     for (const k of ["invoice_overdue", "lien_deadline", "contract_unsigned", "time_stray", "visit_unbilled"]) expect(WAITABLE_KINDS as readonly string[]).not.toContain(k);
     expect(AFFORDANCES.job_unbilled_work).toEqual(["open"]);

@@ -34,6 +34,9 @@ import {
 import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, UnbilledDoorButton, type UnbilledView } from "./unbilled-card";
+import { ReportBackCard } from "./report-back-card";
+import { reportBackStanding } from "@/lib/report-back";
+import { firstNameOf } from "@/lib/action-items/words";
 import { LeftToBillCard } from "./left-to-bill-card";
 import { contractEstimates } from "./contract-estimates";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
@@ -869,6 +872,8 @@ export default async function JobDetailPage({
     uncostedOwnerHours,
   } = laborCostForJob(entries ?? [], id);
   const crewHours = Math.max(0, Math.round((laborHours - ownerHours) * 100) / 100);
+  // Where a T&M job stands against its guess (lib/report-back): this job's closed rows, lunch out.
+  const reportBack = reportBackStanding({ planned_minutes: (j as any).planned_minutes ?? null }, entries as any[], id);
   const crewLabor = Math.round((laborCost - ownerCost) * 100) / 100;
   // WHOSE HOURS THOSE ARE, BY THE SAME TEST THAT COSTED THEM (isOwnerShift). This asked
   // `e?.profiles?.paid_by_draw === true` by hand, which is only HALF of isOwnerShift - it misses the
@@ -1316,6 +1321,21 @@ export default async function JobDetailPage({
               additional steps are unnecessary"). "Tasks: 7 of 12 done", every open task, the Add
               line and the Done fold — the same list the Tasks chip opens, not a three-row summary
               of it with a "+2 more" line. The same card for the crew (no prices on a task). */}
+          {/* REPORT BACK (cn-v1069): where a T&M job stands against its guess, the Text and Told Them doors.
+              The office's, on a job billed by its work, once there is closed time to report (or a stamp). */}
+          {viewerIsStaff && importsActuals && (j as any).billing_type === "tm" && (reportBack.hoursIn > 0 || j.report_back_at) && (
+            <ReportBackCard
+              jobId={j.id}
+              jobName={j.name ?? j.job_number ?? "the job"}
+              customerFirst={firstNameOf(j.customers?.name)}
+              phone={j.customers?.phone ?? null}
+              sentence={reportBack.sentence}
+              hoursIn={reportBack.hoursIn}
+              guessHours={reportBack.guessHours}
+              reportedAt={j.report_back_at ?? null}
+              tz={tz}
+            />
+          )}
           <JobTaskList {...taskListProps} />
           <Card>
             <CardContent className="space-y-4 py-5">

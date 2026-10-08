@@ -40,6 +40,11 @@ describe("hasCaptureData", () => {
     expect(hasCaptureData({ notes: "attic access over garage" })).toBe(true);
     expect(hasCaptureData({ photos: ["org/appointments/a/1.jpg"] })).toBe(true);
   });
+  it("a typed take-off row or an ad-hoc measure is data too (cn-v1069): the sheet is not blank", () => {
+    expect(hasCaptureData({ items: [{ id: "i", description: "12-2 romex", quantity: 200, unit: "ft" }] })).toBe(true);
+    expect(hasCaptureData({ measures: [{ id: "m", label: "Panel to garage", value: 85, unit: "ft" }] })).toBe(true);
+    expect(hasCaptureData({ items: [], measures: [] })).toBe(false);
+  });
 });
 
 describe("bucketInspections", () => {

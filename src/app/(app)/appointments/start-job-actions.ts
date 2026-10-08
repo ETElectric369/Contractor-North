@@ -315,27 +315,12 @@ export async function linkVisitInstead(appointmentId: string, jobId: string): Pr
   const res = await linkAppointmentTo(appointmentId, "job", jobId);
   if (!res.ok) return { ok: false, error: res.error ?? "The visit could not be linked. Nothing was changed." };
 
-  /* STAMP FOLLOWS DEED, the lead too (review, 2026-09-25). A visit booked from a lead that takes the
-     existing job has converted that lead exactly as createJobFromAppointment would: the job carries
-     the lead (only when it carries none), and the lead is won (only when nobody stamped it yet). */
+  /* STAMP FOLLOWS DEED, the lead too (review, 2026-09-25) — done INSIDE the one attach door now
+     (linkAppointmentTo → lib/appointments/lead-won, cn-v1069), so the visit's own Connect picker and
+     this button cannot disagree about what attaching a job means. Its sentence rides back as the
+     warning. */
   const warnings: string[] = [];
-  if (visit.inquiry_id) {
-    const nowIso = new Date().toISOString();
-    const { error: jErr } = await supabase
-      .from("jobs")
-      .update({ inquiry_id: visit.inquiry_id })
-      .eq("id", jobId)
-      .is("inquiry_id", null)
-      .select("id");
-    const { error: lErr } = await supabase
-      .from("inquiries")
-      .update({ status: "won", converted_at: nowIso, updated_at: nowIso })
-      .eq("id", visit.inquiry_id)
-      .is("converted_at", null)
-      .select("id");
-    if (jErr || lErr) warnings.push("The lead behind this visit could not be marked won. Mark it on Leads.");
-    revalidatePath("/leads");
-  }
+  if (res.warning) warnings.push(res.warning);
 
   const jobNumber = jobShort(pick);
   const running = await openEntryOf(supabase, ctx.userId);

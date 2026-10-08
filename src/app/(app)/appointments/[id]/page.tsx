@@ -20,7 +20,10 @@ import { MarkDoneRow, PutBackRow, WontHappenRow } from "./visit-header-actions";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import type { NavTree } from "@/lib/nav-tree";
 import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
-import { hasCaptureData } from "@/lib/inspections";
+import { captureQuoteId, hasCaptureData } from "@/lib/inspections";
+import { isLiveQuote } from "@/lib/invoice-import-rule";
+import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { VisitEnding, type VisitEstimate } from "./visit-ending";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -85,7 +88,7 @@ export default async function AppointmentCapturePage({
         // jobs(...) is the linked job the top card names ("Clock In On J-055"), and its status is
         // whether a visit that is over still offers a clock on it (a finished job does not); the lead's
         // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, unit, city, state, zip, notes, customer_id, inquiry_id, capture, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, unit, city, state, zip, notes, customer_id, inquiry_id, capture, outcome, outcome_at, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -197,6 +200,23 @@ export default async function AppointmentCapturePage({
 
   const dayStr = a.starts_at ? todayStrInTz(tz, new Date(a.starts_at)) : "";
   const who = a.customers?.name ?? a.inquiries?.name ?? null;
+
+  /* WHAT THE VISIT BECAME (cn-v1069). The estimate written up from it is linked INSIDE the capture
+     (capture.quote_id, saveQuote's backlink); this page never read it, so a visit whose estimate was
+     sent, declined or turned into a job still offered Start The Estimate as if nothing had happened.
+     One read, RLS-scoped; a quote that can't be read is simply not there. */
+  const behindQuoteId = captureQuoteId(a.capture);
+  const quoteBehind = behindQuoteId
+    ? ((await supabase.from("quotes").select("id, quote_number, status, job_id").eq("id", behindQuoteId).maybeSingle()).data as
+        | { id: string; quote_number: string | null; status: string | null; job_id: string | null }
+        | null)
+    : null;
+  const estimate: VisitEstimate | null = quoteBehind
+    ? { id: quoteBehind.id, number: quoteBehind.quote_number, status: quoteBehind.status, live: isLiveQuote(quoteBehind.status) }
+    : null;
+  // The visits whose product is an estimate: the ones with a win or a loss to record (never a final
+  // inspection, whose answer is the authority's).
+  const estimateVisit = (ESTIMATE_VISIT_TYPES as readonly string[]).includes(a.type ?? "") && a.type !== "final_inspection";
 
   /* THE TOP CARD (Erik, 2026-09-25, Tom Goodman): "I just needed a job linked to that lead to start
      the clock, simple." What it needs: who is looking, their running clock, the linked job, and,
@@ -492,6 +512,19 @@ export default async function AppointmentCapturePage({
             />
           </div>
         )}
+        {/* HOW IT ENDED (cn-v1069): the estimate it became, the outcome with its day, and for the office on
+            a completed estimate visit nobody has decided, the two honest endings. */}
+        <VisitEnding
+          appointmentId={a.id}
+          isStaff={viewerIsStaff}
+          estimateVisit={estimateVisit}
+          status={a.status ?? null}
+          estimate={estimate}
+          outcome={(a as { outcome?: string | null }).outcome ?? null}
+          outcomeAt={(a as { outcome_at?: string | null }).outcome_at ?? null}
+          job={linkedJob ? { id: linkedJob.id, job_number: linkedJob.job_number, name: linkedJob.name } : null}
+          tz={tz}
+        />
         {notesShown && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{notesShown}</p>}
         {/* The customer's own answers, as answers. See the block above for why this is read-only
             and why it is attributed out loud. */}
@@ -588,6 +621,9 @@ export default async function AppointmentCapturePage({
             }
             // Pricing is the office's: nobody else is handed the door to the estimator.
             estimateHref={viewerIsStaff && estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
+            // The estimate already written up from this visit: its door reads Open The Estimate while
+            // it stands; a declined or expired one hands Start The Estimate back (cn-v1069).
+            estimate={estimate}
             nortOn={featureOn(orgSettings.features, "nort")}
             buildOwn={featureOn(orgSettings.features, "safety_log")}
             // The linked lead's preliminary plan report — parsed server-side so the card is in the

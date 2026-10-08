@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
 import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
@@ -94,6 +95,10 @@ export default async function NewQuotePage({
   // with the numbers the inspector already took.
   let measured: { sqft: number | null; linearFt: number | null; byKey?: Record<string, number | null> } | undefined;
   const pickedScopes: { label: string; picks: ScopePick[] }[] = [];
+  // The rows typed on site (capture.items) and the numbers measured there (capture.measures), read
+  // tolerantly (parseInspectorCapture). Saved since the typed inspector shipped, read by nothing until
+  // cn-v1069: the items follow the scope picks onto the estimate, the measures join the scope text.
+  let typedCapture: ReturnType<typeof parseInspectorCapture> | null = null;
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
   // The inspection already knows WHOSE house this is. Without carrying these through, a repeat
@@ -112,6 +117,7 @@ export default async function NewQuotePage({
       | null
       | undefined;
     if (appt) {
+      typedCapture = parseInspectorCapture((appt as any).capture);
       // THE TYPED ANSWERS GO FIRST, and are labelled as MEASURED (0165). The inspector already
       // stood in front of these numbers; making the estimator re-extract "85 ft" from a sentence
       // is a re-derivation that can silently come back with a different number. Facts above prose.
@@ -201,6 +207,8 @@ export default async function NewQuotePage({
           : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
+        // The numbers typed as measures on site, by name (never re-extracted from the prose above).
+        measuredOnSiteBlock(typedCapture?.measures),
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
         // WHAT'S ATTACHED, BY NAME. Erik, estimating Sara Dale: "the estimator said it didnt have
         // the file even though its there." It was there — a home-inspection PDF sitting in the
@@ -364,8 +372,12 @@ export default async function NewQuotePage({
   // dropped rather than rendered as a bare code with a price beside it.
   const book = new Map((priceItems ?? []).map((p: any) => [p.code as string, { description: p.description, unit: p.unit }]));
   const bookCodes = new Set(book.keys());
-  const seededLines: DraftLineItem[] = pickedScopes.flatMap((g) =>
-    scopeLines(ownScopes(g.picks, bookCodes), book, g.label),
+  // …THEN THE ROWS TYPED ON SITE, unpriced (cn-v1069, lib/inspection/capture seedLinesFromCapture):
+  // "200 ft 12-2 romex" typed standing at the panel is a line Erik prices, never a sentence he
+  // re-reads to make one.
+  const seededLines: DraftLineItem[] = seedLinesFromCapture(
+    pickedScopes.flatMap((g) => scopeLines(ownScopes(g.picks, bookCodes), book, g.label)),
+    typedCapture?.items,
   );
 
   // The lead this page was opened for ALWAYS appears, even if it has since been won or lost or

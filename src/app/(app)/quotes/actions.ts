@@ -38,6 +38,7 @@ import { jobNameFrom } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
+import { closeVisitsBehindQuote, outcomeForQuoteStatus } from "@/lib/appointments/behind-quote";
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
@@ -715,6 +716,16 @@ export async function setQuoteJob(
     .update({ job_id: jobId, updated_at: new Date().toISOString() })
     .eq("id", quoteId);
   if (error) return { ok: false, error: dbError(error) };
+  // Pinning an estimate to a job is the same win as making the job from it: the visit it was written
+  // up from gets the job (where it has none) and reads won (cn-v1069, lib/appointments/behind-quote).
+  if (jobId) {
+    const { data: ql } = await supabase.from("quotes").select("inquiry_id").eq("id", quoteId).maybeSingle();
+    await closeVisitsBehindQuote(
+      supabase,
+      { id: quoteId, inquiry_id: (ql as { inquiry_id?: string | null } | null)?.inquiry_id ?? null, job_id: jobId },
+      { jobId, outcome: "won" },
+    );
+  }
   // The job is where the printed "Job site" address comes from (pickSite on the print page), so
   // re-pointing it must drop the stored PDF or a sent estimate keeps serving the old address
   // while /q shows the new one (audit v921, same reason as setQuoteCustomer above).
@@ -1293,6 +1304,11 @@ export async function createJobFromQuote(
   if (error) return { ok: false, error: dbError(error) };
 
   await supabase.from("quotes").update({ job_id: job.id }).eq("id", quoteId);
+  // THE VISIT BEHIND THIS ESTIMATE IS WON, AND ATTACHED TO THE JOB IT BECAME (cn-v1069). This door
+  // touched no appointment at all, so the inspection an estimate was written up from stayed "still
+  // open business" after the job it priced was finished and paid. Attached, not absorbed (0237): the
+  // visit keeps its own calendar life. Best-effort: the job is made whatever the visit says.
+  await closeVisitsBehindQuote(supabase, { id: quoteId, inquiry_id: q.inquiry_id ?? null, job_id: job.id }, { jobId: job.id, outcome: "won" });
 
   // Winning a quote spins up the field paperwork — a work order + a material
   // take-off (both idempotent) — and the job lands in the scheduler as
@@ -1389,19 +1405,13 @@ export async function updateQuoteStatus(id: string, status: string) {
    * fact that matters, and a missing appointment link must never fail the save.
    */
   try {
-    const outcome = status === "accepted" ? "won" : status === "declined" || status === "expired" ? "lost" : null;
+    const outcome = outcomeForQuoteStatus(status);
     if (outcome) {
-      const { data: q } = await supabase.from("quotes").select("inquiry_id, job_id").eq("id", id).maybeSingle();
-      const links = q as { inquiry_id?: string | null; job_id?: string | null } | null;
-      if (links?.inquiry_id || links?.job_id) {
-        let upd = supabase.from("appointments").update({ outcome, outcome_at: new Date().toISOString() }).is("outcome", null);
-        upd = links.inquiry_id && links.job_id
-          ? upd.or(`inquiry_id.eq.${links.inquiry_id},job_id.eq.${links.job_id}`)
-          : links.inquiry_id
-            ? upd.eq("inquiry_id", links.inquiry_id)
-            : upd.eq("job_id", links.job_id as string);
-        await upd;
-      }
+      const { data: q } = await supabase.from("quotes").select("id, inquiry_id, job_id").eq("id", id).maybeSingle();
+      // By the lead, the job AND the capture's own backlink (lib/appointments/behind-quote): the
+      // two-key match this replaced never read capture.quote_id, so a lead-less visit whose estimate
+      // was declined stayed open on the Inspections tab for good (cn-v1069).
+      if (q) await closeVisitsBehindQuote(supabase, q as { id: string; inquiry_id?: string | null; job_id?: string | null }, { outcome });
     }
   } catch {
     /* the estimate's status is the decision; stamping the visit is a courtesy */

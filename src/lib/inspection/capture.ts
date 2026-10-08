@@ -350,6 +350,24 @@ export function captureItemsToDraftLines(items: CaptureItem[] | undefined): Draf
     }));
 }
 
+/**
+ * THE TYPED TAKE-OFF REACHES THE ESTIMATE (cn-v1069). The scope picks (priced from the book) lead;
+ * the rows typed on site follow them, unpriced. captureItemsToDraftLines had no caller before this:
+ * the rows were saved and read by nothing.
+ */
+export function seedLinesFromCapture(scopeLines: DraftLineItem[], items: CaptureItem[] | undefined): DraftLineItem[] {
+  return [...scopeLines, ...captureItemsToDraftLines(items)];
+}
+
+/** The ad-hoc measures as one block for the estimator's scope text ("Measured on site:" then one
+ *  line per measure, value and unit as typed; an unvalued one is listed by name). Empty: "". */
+export function measuredOnSiteBlock(measures: CaptureMeasure[] | undefined): string {
+  const lines = (measures ?? [])
+    .filter((m) => m.label.trim())
+    .map((m) => `- ${m.label.trim()}: ${m.value === null ? "(not measured)" : `${m.value}${m.unit ? ` ${m.unit}` : ""}`}`);
+  return lines.length ? `Measured on site:\n${lines.join("\n")}` : "";
+}
+
 /** Sizing from ad-hoc measures — deliberately narrow. */
 export function adhocSizing(measures: CaptureMeasure[] | undefined): { sqft: number | null; linearFt: number | null } {
   let sqft: number | null = null;
