@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
 import { bucketInspections } from "@/lib/inspections";
+import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
@@ -772,28 +773,11 @@ async function buildActionItems(ctx: {
     counts.won_needs_a_day = {};
   }
 
-  // ── LEADS. One projection (action-items/switches): with Leads off the same request reads "New
-  // Request From …" and carries the number its Call Back dials.
-  for (const q of (inqR.data ?? []) as any[]) items.push({ ...inquiryActionItem(q, todayStr, leadsOn), since: q.created_at ?? null });
-  counts.leads_to_call = sqlCount(inqR);
-  for (const q of (inqLaterR.data ?? []) as any[]) {
-    const name = String(q.name ?? "").trim() || "Someone";
-    const row = waitingRow({
-      id: q.id,
-      kind: "inquiry",
-      title: leadsOn ? name : `Request From ${name}`,
-      why: q.status === "new" ? "Snoozed" : "Follow Up",
-      backOn: q.next_follow_up_at,
-      href: `/leads?focus=${q.id}`,
-    });
-    if (row) waiting.push(row);
-  }
-  // A visit with a lead rides the lead's row (one fact, one row).
-  const leadIds = new Set<string>([...((inqR.data ?? []) as any[]), ...((inqLaterR.data ?? []) as any[])].map((q) => String(q.id)));
-
   // ── A finished inspection, waiting to become money. bucketInspections is the SAME function
   // /inspections uses, so the inbox and the list can never disagree about what is outstanding.
   const writeUpApptIds = new Set<string>();
+  // The leads those visits came from: each rides its write-up row (leadRidesItsWriteUp).
+  const writeUpLeadIds = new Set<string>();
   {
     const qs = (inspQuoteR.data ?? []) as any[];
     const { toWriteUp } = bucketInspections(
@@ -826,9 +810,44 @@ async function buildActionItems(ctx: {
         affordances: AFFORDANCES.inspection_writeup,
       });
       writeUpApptIds.add(a.id);
+      if (a.inquiry_id) writeUpLeadIds.add(String(a.inquiry_id));
     }
     counts.inspections_to_write_up = codeCount(inspR);
   }
+
+  // ── LEADS. One projection (action-items/switches): with Leads off the same request reads "New
+  // Request From …" and carries the number its Call Back dials.
+  // ONE PERSON, ONE ROW (Erik: "the same fact never shows as two rows"). A lead whose visit happened
+  // and is waiting to be written up is past calling back: the write-up row above IS its next step,
+  // so the lead's Call Back row (and its fold row) stays out, and the pile counts what is drawn.
+  let leadsRidden = 0;
+  for (const q of (inqR.data ?? []) as any[]) {
+    if (leadRidesItsWriteUp(q.id, writeUpLeadIds)) {
+      leadsRidden++;
+      continue;
+    }
+    items.push({ ...inquiryActionItem(q, todayStr, leadsOn), since: q.created_at ?? null });
+  }
+  counts.leads_to_call = lessRidden(sqlCount(inqR), leadsRidden);
+  for (const q of (inqLaterR.data ?? []) as any[]) {
+    if (leadRidesItsWriteUp(q.id, writeUpLeadIds)) continue;
+    const name = String(q.name ?? "").trim() || "Someone";
+    const row = waitingRow({
+      id: q.id,
+      kind: "inquiry",
+      title: leadsOn ? name : `Request From ${name}`,
+      why: q.status === "new" ? "Snoozed" : "Follow Up",
+      backOn: q.next_follow_up_at,
+      href: `/leads?focus=${q.id}`,
+    });
+    if (row) waiting.push(row);
+  }
+  // A visit with a lead rides the lead's row (one fact, one row) — the leads DRAWN, so a lead kept
+  // out by its write-up never hides a second visit of its own.
+  const leadIds = new Set<string>(
+    [...((inqR.data ?? []) as any[]), ...((inqLaterR.data ?? []) as any[])].map((q) => String(q.id)).filter((id) => !writeUpLeadIds.has(id)),
+  );
+
 
   // ── VISITS NOBODY CLOSED OUT.
   for (const a of (apptR.data ?? []) as any[]) {
