@@ -46,6 +46,8 @@ import {
   last4FromName,
   withAccountLast4,
   validPicks,
+  lineIdOf,
+  identityToLearn,
   type BankBooks,
   type BankDownload,
   type BooksPayment,
@@ -789,6 +791,50 @@ describe("matching what is already on the books (exact cents, each row once)", (
  * for an ATM, and has its own segment in Where The Money Went. A top-up someone already wrote still
  * matches, so it counts once.
  */
+/**
+ * THE MERCHANT'S IDENTITY, LEARNED AT APPLY (2026-10-07). The sure bill match reads the account a
+ * bill sits on (name, number, branch, aliases) beside the bill's typed name; and a match the typed
+ * name made, on an account whose spellings do not yet name the line, hands Apply the store's words
+ * to remember as that account's alias. Nothing is learned from a bill on no account, a bare check,
+ * a loose match, or a line the account already names.
+ */
+describe("the merchant's identity, learned at Apply", () => {
+  const HD = `Date,Description,Amount\n09/02/2026,THE HOME DEPOT #4421 ANYTOWN,-88.45\n`;
+  const account = (over: Partial<BankBooks["accounts"][number]> = {}) => ({ id: "acct-hd", name: "HD Pro Desk", number: null, branch: null, onAccount: false, aliases: [], ...over });
+  const bill = (over: Partial<BankBooks["bills"][number]> = {}) => ({ id: "b-hd", cents: 8845, day: "2026-09-02", supplier: "Home Depot", jobId: null, category: "Tools & Supplies", onAccount: false, supplierAccountId: "acct-hd", ...over });
+
+  it("the sure bill match accepts the account's own spellings, not only the bill's typed name", () => {
+    const dl = download(HD, "Card1234.csv");
+    const line = dl.lines[0];
+    // Typed wrong on the bill, but the account carries the store's words: matched, sure.
+    const known = ORG_BOOKS({ accounts: [account({ aliases: ["home depot"] })], bills: [bill({ supplier: "Typed Wrong Co" })] });
+    expect(planBankDownload(dl, known).dispositions.get(line.key)).toMatchObject({ how: "match", table: "bills", ids: ["b-hd"] });
+    // Neither the typed name nor the account names the line: it is asked, not taken by amount alone.
+    const unknown = ORG_BOOKS({ accounts: [account()], bills: [bill({ supplier: "Typed Wrong Co" })] });
+    expect(planBankDownload(dl, unknown).dispositions.get(line.key)).toMatchObject({ how: "need" });
+  });
+
+  it("hands Apply the store's words for the account the typed name proved, and nothing otherwise", () => {
+    const dl = download(HD, "Card1234.csv");
+    const line = dl.lines[0];
+    const matched = { how: "match" as const, table: "bills" as const, ids: ["b-hd"], said: "" };
+    // The typed name made the match; the account doesn't know these words yet: learn them, Title Case,
+    // the first two merchant words (never the bare key).
+    expect(identityToLearn(line, matched, ORG_BOOKS({ accounts: [account()], bills: [bill()] }))).toEqual({ accountId: "acct-hd", accountName: "HD Pro Desk", alias: "Home Depot" });
+    // The account already names the line (by name or alias): nothing new.
+    expect(identityToLearn(line, matched, ORG_BOOKS({ accounts: [account({ name: "Home Depot" })], bills: [bill()] }))).toBeNull();
+    expect(identityToLearn(line, matched, ORG_BOOKS({ accounts: [account({ aliases: ["HOME DEPOT"] })], bills: [bill()] }))).toBeNull();
+    // A bill on no account: no identity to attach.
+    expect(identityToLearn(line, matched, ORG_BOOKS({ accounts: [account()], bills: [bill({ supplierAccountId: null })] }))).toBeNull();
+    // A loose match (the typed name does not name the line): amount alone proves no name.
+    expect(identityToLearn(line, matched, ORG_BOOKS({ accounts: [account()], bills: [bill({ supplier: "Nobody Named" })] }))).toBeNull();
+    // A line that teaches no rule, and a match on anything but a bill.
+    expect(identityToLearn({ ...line, check: "1043", description: "CHECK 1043" }, matched, ORG_BOOKS({ accounts: [account()], bills: [bill()] }))).toBeNull();
+    expect(identityToLearn(line, { ...matched, table: "payments" }, ORG_BOOKS({ accounts: [account()], bills: [bill()] }))).toBeNull();
+    expect(identityToLearn(line, { how: "need", group: "x" }, ORG_BOOKS({ accounts: [account()], bills: [bill()] }))).toBeNull();
+  });
+});
+
 describe("Cash Taken Out (Not A Cost)", () => {
   const names = { accounts: new Map(), crew: new Map(), invoices: new Map(), jobs: new Map() };
 
@@ -1284,6 +1330,46 @@ describe("a bank line on a job", () => {
     expect(noJobs.view.otherOutSingle.some((b) => b.id.startsWith("job:"))).toBe(false);
     expect(JSON.stringify(noJobs.view)).not.toContain("job:");
     expect(validPicks({ [noJobs.group.id]: "job:job-kitchen" }, noJobs.plan, noJobs.books).ok.size).toBe(0);
+  });
+
+  /**
+   * A MERCHANT'S ROW OPENS (2026-10-07). Three trips to the supply house in one row: the row's tap
+   * still answers all three, and each line can also be answered on its own under `lineIdOf(key)` -
+   * the id grammar a row of one line already has - with the checks a row of one line gets: a job
+   * fits one line. Before this, a job on one of three lines meant Apply the row as Fuel, then
+   * Change Answer under Sorted Lines, three times.
+   */
+  it("opens: each line of a merchant's row can take its own answer, a job among them", () => {
+    const { dl, plan, group, books, view } = sortOf(THREE_TRIPS);
+    expect(group.keys).toHaveLength(3);
+    // The card's row carries its lines, oldest first, each said on its own.
+    const lines = view.rows[0].lines!;
+    expect(lines.map((l) => [l.day, l.money])).toEqual([
+      ["Sep 2", "$100.00"],
+      ["Sep 9", "$120.00"],
+      ["Sep 16", "$110.00"],
+    ]);
+    expect(lines.map((l) => l.id)).toEqual(dl.lines.map((l) => lineIdOf(l.key)));
+    expect(lines.every((l) => l.id.startsWith("line:") && l.title === "ANYTOWN ELECTRIC SUPPLY #4")).toBe(true);
+    // The grammar is the one a row that is one line by nature (a check, a deposit) already has.
+    expect(sortOf(`Date,Description,Amount\n09/04/2026,DEPOSIT,1275.00\n`).group.id).toBe(lineIdOf(sortOf(`Date,Description,Amount\n09/04/2026,DEPOSIT,1275.00\n`).dl.lines[0].key));
+    // A job on ONE line is accepted; on the whole row it is still refused in the same words.
+    const one = validPicks({ [lines[0].id]: "job:job-kitchen" }, plan, books);
+    expect(one.refused).toEqual([]);
+    expect(one.ok.get(lines[0].id)).toEqual({ choice: "job", jobId: "job-kitchen" });
+    expect(validPicks({ [group.id]: "job:job-kitchen" }, plan, books).refused[0]).toMatch(/a job goes on one line at a time$/);
+    // The row's answer and a line's own may both stand: Apply gives the line its own first.
+    const both = validPicks({ [group.id]: "cost:Tools & Supplies", [lines[1].id]: "job:job-kitchen" }, plan, books);
+    expect(both.refused).toEqual([]);
+    expect([...both.ok.keys()].sort()).toEqual([group.id, lines[1].id].sort());
+    // A line is held to the same checks as a row of one, said with the line's own words.
+    const stranger = validPicks({ [lines[2].id]: "job:another-companys-job" }, plan, books);
+    expect(stranger.ok.size).toBe(0);
+    expect(stranger.refused[0]).toBe("ANYTOWN ELECTRIC SUPPLY #4: that job isn't one of yours");
+    // A line that is no line of this plan is refused like any row that isn't on the card.
+    expect(validPicks({ "line:0000000000000000": "cost:Fuel" }, plan, books).refused[0]).toMatch(/no longer on the card/);
+    // A row of one line carries no lines: there is nothing to open.
+    expect(sortOf(BOUGHT).view.rows[0].lines).toBeUndefined();
   });
 
   it("puts the money on the job with no bucket beside it, and draws it where job money is drawn", () => {

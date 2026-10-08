@@ -462,14 +462,19 @@ export async function POST(req: Request) {
         }
         if (orgId) {
           const disputed = event.type === "charge.dispute.created";
+          const invoiceId = (pay as { invoice_id?: string } | null)?.invoice_id ?? null;
+          // ONE TAP TO RECORD IT (item C, 2026-10-07): the refund notice carries the charge and the
+          // amount Stripe refunded, and its link opens the invoice with Record This Refund drawn.
+          // The office still owns the call; the charge id is what makes recording it once possible
+          // (recordStripeRefund reads the amount back from Stripe, never from the link).
+          const refunded = Number((charge as { amount_refunded?: number }).amount_refunded ?? 0) / 100;
+          const chargeId = !disputed && /^ch_[A-Za-z0-9]+$/.test(String(charge.id ?? "")) ? String(charge.id) : null;
           await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
             title: disputed ? "A card payment was disputed" : "An online payment was refunded",
             body: disputed
               ? "The customer's bank opened a dispute — the invoice still reads paid until you decide how to record it."
-              : "The refund left Stripe — the invoice still reads paid until you record it here.",
-            url: (pay as { invoice_id?: string } | null)?.invoice_id
-              ? `/billing/${(pay as { invoice_id?: string }).invoice_id}`
-              : "/billing",
+              : `${refunded > 0 ? `${formatCurrency(refunded)} left Stripe` : "The refund left Stripe"} — the invoice still reads paid until you record it here. Open it and press Record This Refund.`,
+            url: invoiceId ? `/billing/${invoiceId}${chargeId ? `?refund=${encodeURIComponent(chargeId)}` : ""}` : "/billing",
           });
         }
       } catch {

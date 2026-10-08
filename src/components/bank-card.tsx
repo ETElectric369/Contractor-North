@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, Check, Loader2, Undo2 } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronDown, ChevronUp, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { sayDollars } from "@/lib/supplier-open-list";
@@ -145,34 +145,36 @@ function MoneyInBlock({ channels }: { channels: MoneyInChannels }) {
   );
 }
 
-function Row({
-  row,
+/**
+ * THE ANSWER BUTTONS one row, or one line of an opened row, draws: the quick answers (the guess
+ * first), a pick off the list shown pressed, and Other… with the longer list.
+ */
+function Answers({
+  title,
+  guess,
+  buttons,
+  others,
   picked,
   onPick,
-  others,
   working,
+  after,
 }: {
-  row: BankRowView;
+  title: string;
+  guess: string | null;
+  buttons: { id: string; label: string }[];
+  others: { id: string; label: string }[];
   picked: string | undefined;
   onPick: (id: string | undefined) => void;
-  others: { id: string; label: string }[];
   working: boolean;
+  after?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const pickedLabel = picked ? (row.buttons.find((b) => b.id === picked)?.label ?? others.find((o) => o.id === picked)?.label ?? picked) : null;
-  const offList = picked && !row.buttons.some((b) => b.id === picked);
+  const pickedLabel = picked ? (buttons.find((b) => b.id === picked)?.label ?? others.find((o) => o.id === picked)?.label ?? picked) : null;
+  const offList = picked && !buttons.some((b) => b.id === picked);
   return (
-    <li className="space-y-2 py-2">
-      <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
-        <span className="min-w-0 break-words font-medium text-slate-900">{row.title}</span>
-        <span className="tabular-nums text-slate-700">{row.money}</span>
-        <span className="text-xs text-slate-500">{row.dates}</span>
-        {row.direction === "in" && <span className="text-xs text-green-700">Money In</span>}
-        {!row.guess && <span className="text-xs text-slate-500">No guess</span>}
-      </div>
-      {row.hint && <p className="text-xs text-slate-600">{row.hint}</p>}
+    <>
       <div className="flex flex-wrap gap-2">
-        {row.buttons.map((b) => (
+        {buttons.map((b) => (
           <Button
             key={b.id}
             className={ANSWER}
@@ -180,10 +182,10 @@ function Row({
             aria-pressed={picked === b.id}
             onClick={() => onPick(picked === b.id ? undefined : b.id)}
             disabled={working}
-            title={b.id === row.guess ? "The app's guess. Tap it if it's right." : undefined}
+            title={b.id === guess ? "The app's guess. Tap it if it's right." : undefined}
           >
             {picked === b.id && <Check />} {b.label}
-            {b.id === row.guess && (
+            {b.id === guess && (
               <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-900">
                 Guess
               </span>
@@ -198,12 +200,13 @@ function Row({
         <Button variant="outline" onClick={() => setOpen((o) => !o)} disabled={working} aria-expanded={open}>
           Other…
         </Button>
+        {after}
       </div>
       {open && (
         <Select
           className="h-11 w-full sm:w-80"
           value={picked ?? ""}
-          aria-label={`Where ${row.title} goes`}
+          aria-label={`Where ${title} goes`}
           onChange={(e) => {
             onPick(e.target.value || undefined);
             setOpen(false);
@@ -217,6 +220,86 @@ function Row({
             </option>
           ))}
         </Select>
+      )}
+    </>
+  );
+}
+
+/**
+ * ONE QUESTION ROW. A merchant's row holding several lines OPENS (2026-10-07): "3 Charges" lists
+ * each line with its day and money and its own answer buttons, with the longer Other… list (a job
+ * on money out, an invoice on money in) because each line is one line. A line's own answer wins
+ * over the row's, and both may stand: the row answered Fuel with one line put on a job is one
+ * Apply, "the rest are Fuel, this one goes on the job". The row stays open while any line holds an
+ * answer, so nothing picked is ever out of sight.
+ */
+function Row({
+  row,
+  picks,
+  onPick,
+  others,
+  lineOthers,
+  working,
+}: {
+  row: BankRowView;
+  picks: Record<string, string>;
+  onPick: (id: string, choice: string | undefined) => void;
+  others: { id: string; label: string }[];
+  lineOthers: { id: string; label: string }[];
+  working: boolean;
+}) {
+  const [linesOpen, setLinesOpen] = useState(false);
+  const lines = row.lines ?? [];
+  const linePicked = lines.filter((l) => picks[l.id]).length;
+  const open = lines.length > 0 && (linesOpen || linePicked > 0);
+  const word = row.direction === "in" ? "Deposits" : "Charges";
+  return (
+    <li className="space-y-2 py-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
+        <span className="min-w-0 break-words font-medium text-slate-900">{row.title}</span>
+        <span className="tabular-nums text-slate-700">{row.money}</span>
+        <span className="text-xs text-slate-500">{row.dates}</span>
+        {row.direction === "in" && <span className="text-xs text-green-700">Money In</span>}
+        {!row.guess && <span className="text-xs text-slate-500">No guess</span>}
+      </div>
+      {row.hint && <p className="text-xs text-slate-600">{row.hint}</p>}
+      <Answers
+        title={row.title}
+        guess={row.guess}
+        buttons={row.buttons}
+        others={others}
+        picked={picks[row.id]}
+        onPick={(id) => onPick(row.id, id)}
+        working={working}
+        after={
+          lines.length > 0 ? (
+            <Button variant="outline" onClick={() => setLinesOpen(!open)} disabled={working} aria-expanded={open} title="Answer each line on its own">
+              {lines.length} {word} {open ? <ChevronUp /> : <ChevronDown />}
+            </Button>
+          ) : null
+        }
+      />
+      {open && (
+        <ul className="ml-2 divide-y divide-slate-100 border-l-2 border-slate-200 pl-3" aria-label={`The ${lines.length} ${word.toLowerCase()} of ${row.title}`}>
+          {lines.map((l) => (
+            <li key={l.id} className="space-y-2 py-2">
+              <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="text-xs text-slate-500">{l.day}</span>
+                <span className="min-w-0 break-words text-slate-900">{l.title}</span>
+                <span className="tabular-nums text-slate-700">{l.money}</span>
+              </div>
+              <Answers
+                title={`${l.title} of ${l.day}`}
+                guess={row.guess}
+                buttons={row.buttons}
+                others={lineOthers}
+                picked={picks[l.id]}
+                onPick={(id) => onPick(l.id, id)}
+                working={working}
+              />
+            </li>
+          ))}
+        </ul>
       )}
     </li>
   );
@@ -339,9 +422,27 @@ function SortedLines({ view, run, busy, working }: { view: BankView; run: Run; b
   );
 }
 
-/** The picks for rows still on the card: a row the books took away since keeps no answer. */
-export function livePicks(picks: Record<string, string>, rows: readonly { id: string }[]): Record<string, string> {
-  return Object.fromEntries(Object.entries(picks).filter(([id]) => rows.some((r) => r.id === id)));
+/** The picks for rows still on the card (and the lines of those rows): a row the books took away
+ *  since keeps no answer. */
+export function livePicks(picks: Record<string, string>, rows: readonly { id: string; lines?: readonly { id: string }[] }[]): Record<string, string> {
+  const here = new Set(rows.flatMap((r) => [r.id, ...(r.lines ?? []).map((l) => l.id)]));
+  return Object.fromEntries(Object.entries(picks).filter(([id]) => here.has(id)));
+}
+
+/**
+ * HOW MANY ROWS ARE ANSWERED, by the rule Apply counts with: a row is answered when it holds an
+ * answer itself or every one of its lines does; a row with some lines answered is PARTLY answered -
+ * Apply has something to write, and the row still waits on the card for the rest.
+ */
+export function rowsAnswered(live: Record<string, string>, rows: readonly { id: string; lines?: readonly { id: string }[] }[]): { answered: number; partly: number } {
+  let answered = 0;
+  let partly = 0;
+  for (const r of rows) {
+    const lines = r.lines ?? [];
+    if (live[r.id] || (lines.length > 0 && lines.every((l) => live[l.id]))) answered++;
+    else if (lines.some((l) => live[l.id])) partly++;
+  }
+  return { answered, partly };
 }
 
 export function BankCard({ itemId, view, run, busy, working }: { itemId: string; view: BankView | null | undefined; run: Run; busy: string | null; working: boolean }) {
@@ -416,10 +517,10 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
   // deposit matched the payment just recorded). Its pick would refuse every later Apply, and there
   // is no row left on screen to clear it.
   const live = livePicks(picks, view.rows);
-  const answered = view.rows.filter((r) => live[r.id]).length;
+  const { answered, partly } = rowsAnswered(live, view.rows);
   const leftRows = view.rows.length - answered;
   const sorted = view.counts.matched + view.counts.ruled;
-  const canApply = sorted + answered > 0;
+  const canApply = sorted + answered + partly > 0;
   const apply = () =>
     run(
       "apply",
@@ -460,16 +561,17 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
             <Row
               key={r.id}
               row={r}
-              picked={picks[r.id]}
-              onPick={(id) =>
+              picks={picks}
+              onPick={(id, choice) =>
                 setPicks((all) => {
                   const next = { ...all };
-                  if (id) next[r.id] = id;
-                  else delete next[r.id];
+                  if (choice) next[id] = choice;
+                  else delete next[id];
                   return next;
                 })
               }
               others={othersFor(r, view)}
+              lineOthers={r.direction === "in" ? view.otherInSingle : view.otherOutSingle}
               working={working}
             />
           ))}

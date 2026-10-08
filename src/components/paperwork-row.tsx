@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
+import { SupplierInput } from "@/components/supplier-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -268,7 +269,7 @@ function FixDetails({ item, onClose, onSaved }: { item: PaperRowItem; onClose: (
             {/* One word for one box (W1): this said "Supplier Or Store" while the drop box
                 above it said "Vendor" and the bill door said "Supplier". */}
             <Label htmlFor={`fd-vendor-${item.id}`}>{COMPANY_FIELD.paperwork_line.label}</Label>
-            <Input id={`fd-vendor-${item.id}`} value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-11" />
+            <SupplierInput id={`fd-vendor-${item.id}`} value={vendor} onValueChange={setVendor} className="h-11" />
           </div>
           <div>
             <Label htmlFor={`fd-amount-${item.id}`}>Total</Label>

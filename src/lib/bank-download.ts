@@ -1149,6 +1149,10 @@ export type BooksBill = {
   jobId: string | null;
   category: string | null;
   onAccount: boolean;
+  /** The supplier account the bill was filed on, if any (2026-10-07): the sure bill match reads the
+   *  account's spellings too, and a match on the bill's typed name alone teaches the account the
+   *  store's words (identityToLearn). */
+  supplierAccountId?: string | null;
 };
 export type BooksPetty = { id: string; cents: number; day: string; kind: string };
 export type BooksAccount = { id: string; name: string; number: string | null; branch: string | null; onAccount: boolean; aliases: string[] };
@@ -1238,7 +1242,31 @@ export type NeedGroup = {
    *  INV-1001 of Sep 1, already in North"), or null. */
   hint?: string | null;
   merchantKey: string;
+  /**
+   * EACH LINE THE ROW HOLDS (2026-10-07), so a merchant's row can OPEN and take an answer PER LINE:
+   * three trips to the supply house can be three jobs, and before this the only way was Apply the
+   * row as Fuel, then Change Answer three times. validPicks checks a line's pick as a row of one
+   * (`lineIdOf(key)`), by the same rule a single-line row already lives by. Absent on a row made by
+   * hand (Change Answer's synthetic row): such a row is one line already.
+   */
+  lines?: NeedLine[];
 };
+
+/** One line of a question row, as much as a per-line answer needs to be checked and said. */
+export type NeedLine = {
+  key: string;
+  cents: number;
+  postedOn: string;
+  description: string;
+  check: string | null;
+};
+
+/** The id a line answers under: the grammar a row that is one line by nature (a check, a deposit an
+ *  invoice may take) already uses (`line:` + the key's last 16). A merchant's row of one line keeps
+ *  its merchant id and takes no line picks: there is nothing to open. */
+export function lineIdOf(key: string): string {
+  return `line:${key.slice(-16)}`;
+}
 
 export type BankPlan = {
   dispositions: Map<string, Disposition>;
@@ -1595,7 +1623,10 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
       const namesNobody = isBareCheck(line) || !merchantWords(line.description).some((w) => w.length >= 3);
       if (pass === "loose" && !namesNobody) return null;
       const near = books.bills.filter((b) => !used.has(b.id) && !b.onAccount && b.cents === amount && b.day && Math.abs(dayDiff(line.postedOn, b.day)) <= 3);
-      const hits = pass === "sure" ? near.filter((b) => lineNamesSupplier(line.description, b.supplier)) : near;
+      // SURE: the line names the bill's supplier as typed, OR the account the bill was filed on (its
+      // name, number, branch or any alias, 2026-10-07): "HOME DEPOT #4421" on the bank and "HD" typed
+      // on the bill agree once the account remembers both spellings.
+      const hits = pass === "sure" ? near.filter((b) => lineNamesSupplier(line.description, b.supplier) || namesBillsAccount(line.description, b, books.accounts)) : near;
       if (!hits.length) return null;
       hits.sort(byDistance(line.postedOn));
       const b = hits[0];
@@ -1761,7 +1792,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     // A QUESTION: one row per merchant (and amount band); a check, a deposit an invoice may be, or a
     // line with no merchant words is a row of its own.
     const k = `${direction}:${line.merchantKey}`;
-    const id = single ? `line:${line.key.slice(-16)}` : (bandsPer.get(k) ?? 1) > 1 ? `${k}#${(bandOf.get(`${k}|${Math.abs(line.cents)}`) ?? 0) + 1}` : k;
+    const id = single ? lineIdOf(line.key) : (bandsPer.get(k) ?? 1) > 1 ? `${k}#${(bandOf.get(`${k}|${Math.abs(line.cents)}`) ?? 0) + 1}` : k;
     let g = groups.get(id);
     if (!g) {
       g = {
@@ -1779,6 +1810,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
         buttons: [],
         learnable: !single && !!line.merchantKey && !isGenericKey(line.merchantKey),
         merchantKey: line.merchantKey,
+        lines: [],
         /**
          * WHY, IN ONE SHORT LINE, OR NOTHING AT ALL. Erik, on a $7,714.09 deposit offered a bare "Already
          * Counted Or Not Income": the guess asked him to take its word. Two reasons can actually be
@@ -1800,6 +1832,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
       groups.set(id, g);
     }
     g.keys.push(line.key);
+    (g.lines ??= []).push({ key: line.key, cents: line.cents, postedOn: line.postedOn, description: line.description, check: line.check });
     g.cents += line.cents;
     if (g.each !== line.cents) g.each = null;
     if (line.postedOn < g.first) g.first = line.postedOn;
@@ -1824,6 +1857,50 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     }),
   );
   return { dispositions, groups: out, counts, fingerprint };
+}
+
+/** The account a bill was filed on, from the books; null when it has none or the books lack it. */
+function accountOfBill(b: Pick<BooksBill, "supplierAccountId">, accounts: readonly BooksAccount[]): BooksAccount | null {
+  return b.supplierAccountId ? (accounts.find((a) => a.id === b.supplierAccountId) ?? null) : null;
+}
+
+function namesBillsAccount(description: string, b: Pick<BooksBill, "supplierAccountId">, accounts: readonly BooksAccount[]): boolean {
+  const a = accountOfBill(b, accounts);
+  return !!a && lineNamesAccount(description, a);
+}
+
+/**
+ * THE IDENTITY A MATCH PROVED (2026-10-07): a bank line matched to a bill by amount, day and the
+ * bill's TYPED supplier name, where the bill sits on a supplier account whose own spellings do not
+ * yet name the line. The store's words on the statement ("home depot", the first two merchant words,
+ * never the bare key: "home" as a whole word would also hit "the home hardware") become an alias of
+ * that account, so the next statement's line names the account outright and every reader of the
+ * account's aliases (the supplier-payment match, the open list, Record It As A Bill) knows the store.
+ *
+ * Learn nothing from a bill on no account (there is no identity to attach it to), from a line that
+ * teaches no rule (a bare check, a transfer, a generic key), from a match the account's own spellings
+ * already made (nothing new), or from a loose match (amount alone proves no name). An answer is
+ * remembered as a rule; this is identity, and Undo of the download leaves it.
+ */
+export function identityToLearn(
+  line: Pick<BankLine, "cents" | "description" | "merchantKey" | "check">,
+  d: Disposition | null | undefined,
+  books: Pick<BankBooks, "bills" | "accounts">,
+): { accountId: string; accountName: string; alias: string } | null {
+  if (!d || d.how !== "match" || d.table !== "bills" || d.ids.length !== 1) return null;
+  if (teachesNoRule(line)) return null;
+  const b = books.bills.find((x) => x.id === d.ids[0]);
+  const a = b ? accountOfBill(b, books.accounts) : null;
+  if (!b || !a) return null;
+  if (!lineNamesSupplier(line.description, b.supplier)) return null;
+  if (lineNamesAccount(line.description, a)) return null;
+  // The store's own words: the bank's lead words off the front (as the key does), then "the" and a
+  // lone letter dropped as well, then two words, Title Case ("Home Depot", never "The Home").
+  const words = merchantWords(line.description);
+  while (words.length > 1 && (DROP_LEAD.has(words[0]) || STOP_FIRST.has(words[0]) || words[0].length === 1)) words.shift();
+  const alias = words.slice(0, 2).join(" ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  if (alias.replace(/[^a-z0-9]/gi, "").length < 3) return null;
+  return { accountId: a.id, accountName: a.name, alias };
 }
 
 /** The buttons on a question row: the guess first, then the usual answers for that kind of line. */
@@ -2095,7 +2172,15 @@ export function validPicks(
 ): { ok: Map<string, BankChoice>; refused: string[] } {
   const ok = new Map<string, BankChoice>();
   const refused: string[] = [];
-  const byId = new Map(plan.groups.map((g) => [g.id, g]));
+  const byId = new Map<string, NeedGroup>();
+  for (const g of plan.groups) {
+    byId.set(g.id, g);
+    // A LINE OF A MERCHANT'S ROW ANSWERS AS A ROW OF ONE (2026-10-07): the same checks a single-line
+    // row gets - a job or an invoice fit one line, the invoice must be open for that line's money -
+    // and the same refusal words, with the line's own description. A group pick and a line pick may
+    // both arrive; Apply gives a line its own answer first, then the row's (applyBankCore).
+    if (g.keys.length > 1) for (const l of g.lines ?? []) byId.set(lineIdOf(l.key), lineRowOf(g, l));
+  }
   for (const [gid, raw] of Object.entries(picks ?? {})) {
     const g = byId.get(gid);
     if (!g) {
@@ -2149,6 +2234,26 @@ export function validPicks(
     refused.push(`${gids.length} deposits (${sayDollars(total / 100)}) are more than the ${sayDollars((inv?.balanceCents ?? 0) / 100)} open on ${inv?.number ?? "that invoice"}`);
   }
   return { ok, refused };
+}
+
+/** One line of a merchant's row as a row of one, for validPicks: what a single-line row is. */
+function lineRowOf(g: NeedGroup, l: NeedLine): NeedGroup {
+  return {
+    id: lineIdOf(l.key),
+    direction: g.direction,
+    label: l.description,
+    keys: [l.key],
+    cents: l.cents,
+    each: l.cents,
+    first: l.postedOn,
+    last: l.postedOn,
+    check: l.check,
+    single: true,
+    guess: g.guess,
+    buttons: g.buttons,
+    learnable: false,
+    merchantKey: g.merchantKey,
+  };
 }
 
 /** The same bucket words the business-cost list uses, for a check in the migration tests. */
@@ -2209,7 +2314,13 @@ export type BankRowView = {
   single: boolean;
   guess: string | null;
   buttons: BankButton[];
+  /** A merchant's several lines, oldest first, so the row can open and take an answer per line
+   *  (each under `lineIdOf(key)`, in the same picks as the rows). Absent on a row of one line. */
+  lines?: BankLineView[];
 };
+
+/** One line of an open row: its day, what it says, its money. */
+export type BankLineView = { id: string; day: string; title: string; money: string };
 
 /**
  * ONE LINE A DOWNLOAD ALREADY COUNTED, as the card lists it under the applied pass (Change Answer,
@@ -2450,6 +2561,18 @@ export function bankViewOf(
         hint: g.hint ?? null,
         buttons: g.buttons.map((id) => ({ id, label: label(id) })),
         ...(g.direction === "in" && g.single ? { others: othersForDeposit(g.cents) } : {}),
+        ...(g.keys.length > 1 && g.lines?.length
+          ? {
+              lines: [...g.lines]
+                .sort((a, b) => a.postedOn.localeCompare(b.postedOn) || a.key.localeCompare(b.key))
+                .map((l): BankLineView => ({
+                  id: lineIdOf(l.key),
+                  day: sayRange(l.postedOn, l.postedOn, opts.today),
+                  title: groupTitle({ label: l.description, check: l.check, direction: g.direction, first: l.postedOn }, opts.today),
+                  money: sayDollars(Math.abs(l.cents) / 100),
+                })),
+            }
+          : {}),
       };
     }),
     otherOut: everyChoice("out", books, false).map(button),

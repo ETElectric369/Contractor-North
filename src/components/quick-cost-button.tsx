@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Wallet, DollarSign, Camera, Check, Paperclip, Keyboard } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Input, Label, Select } from "@/components/ui/input";
+import { SupplierInput } from "@/components/supplier-input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -730,7 +731,7 @@ function SnapCostButton({
                 reads it (Read the Receipt) or the bill says "From receipt — add supplier"
                 (Type It In), so a greyed, starred field was a demand the form never made. */}
             <Label htmlFor="qc-supplier">{companyLabel(costCompanyField(!targetJob), !receipt)}</Label>
-            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? (nortOn ? "Nort reads it off the receipt" : "Read off the receipt") : COMPANY_FIELD[costCompanyField(!targetJob)].placeholder} autoFocus={!snapTop} disabled={costSaved || useReader} />
+            <SupplierInput id="qc-supplier" value={supplier} onValueChange={setSupplier} quiet={!targetJob} placeholder={useReader ? (nortOn ? "Nort reads it off the receipt" : "Read off the receipt") : COMPANY_FIELD[costCompanyField(!targetJob)].placeholder} autoFocus={!snapTop} disabled={costSaved || useReader} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1320,7 +1321,7 @@ function TypeItInButton({
                 (typedCostProblem: a job's cost and a stock purchase both do); a business cost's may be
                 left blank and says so. */}
             <Label htmlFor="ti-where">{companyLabel(costCompanyField(target === BUSINESS), target === BUSINESS ? "optional" : !!target)}</Label>
-            <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder={COMPANY_FIELD[costCompanyField(target === BUSINESS)].placeholder} />
+            <SupplierInput id="ti-where" value={where} onValueChange={setWhere} quiet={target === BUSINESS} placeholder={COMPANY_FIELD[costCompanyField(target === BUSINESS)].placeholder} />
           </div>
 
           <div>

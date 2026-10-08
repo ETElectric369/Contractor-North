@@ -7,6 +7,7 @@ import Link from "next/link";
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { SupplierInput } from "@/components/supplier-input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -632,7 +633,7 @@ function BillEditModal({
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <Label htmlFor="be-supplier">{companyLabel("bill", true)}</Label>
-            <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
+            <SupplierInput id="be-supplier" value={supplier} onValueChange={setSupplier} autoFocus />
           </div>
           {follows && (
             <p className="col-span-2 text-sm text-slate-600">

@@ -60,7 +60,22 @@ vi.mock("next/navigation", () => ({
 }));
 // The page's own client doors, drawn as markers: this is about what the page hands them.
 vi.mock("./new-invoice-button", () => ({ NewInvoiceButton: () => createElement("button", null, "New Invoice") }));
-vi.mock("./invoice-job-button", () => ({ InvoiceJobButton: () => createElement("button", null, "Bill It") }));
+vi.mock("./invoice-job-button", () => ({ InvoiceJobButton: ({ label }: { label?: string }) => createElement("button", null, label ?? "Bill It") }));
+// THE ONE FUNCTION behind Waiting To Be Billed, answered per job here: job-1's oldest work is newer
+// than job-2's, so job-2 lists first.
+vi.mock("@/lib/unbilled-work", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/unbilled-work")>()),
+  unbilledWorkForJob: vi.fn(async (_sb: unknown, jobId: string) => ({
+    schemaReady: true,
+    hours: jobId === "job-1" ? 3.5 : 12,
+    billsCount: 1,
+    stockCount: 0,
+    billsBilled: jobId === "job-1" ? 120 : 80,
+    stockBilled: 0,
+    total: jobId === "job-1" ? 500 : 1400,
+    oldestAt: jobId === "job-1" ? "2026-09-20T15:00:00Z" : "2026-09-02",
+  })),
+}));
 vi.mock("./record-payment-button", () => ({
   GetPaidPickButton: ({ invoices }: { invoices: unknown[] }) => createElement("button", { "data-get-paid": invoices.length }, "Get Paid…"),
 }));
@@ -126,6 +141,7 @@ beforeEach(() => {
 const render = async (search: Record<string, string> = {}) =>
   renderToStaticMarkup((await BillingPage({ searchParams: Promise.resolve(search) })) as React.ReactElement);
 const ledgerAsked = () => state.selects.some((s) => s.table === "payments" && s.cols.includes("method"));
+const waitingAsked = () => state.selects.some((s) => s.table === "jobs" && s.cols.includes("billing_type"));
 
 describe("Owed To You: one figure, what's late, one bar", () => {
   it("the pipeline's outstanding (sent or partly paid, never a draft), the late part in red, and the bar", async () => {
@@ -221,6 +237,40 @@ describe("Payments In: a link, and the ledger only when open", () => {
     expect(html).toContain('data-get-paid="3"');
     const pay = readFileSync(join(process.cwd(), "src/app/(app)/payments/page.tsx"), "utf8");
     expect(pay).toContain('redirect("/billing?open=payments")');
+  });
+});
+
+/**
+ * WAITING TO BE BILLED (2026-10-07): the T&M jobs with work no invoice holds, oldest first, on the
+ * same link shape as Payments In - read only when open, no count on the closed line.
+ */
+describe("Waiting To Be Billed: a link, and the list only when open", () => {
+  it("closed: a 44px LINK with no count and no read of the jobs' work", async () => {
+    const html = await render();
+    const link = html.match(/<a[^>]*href="\/billing\?open=waiting#waiting"[^>]*>([\s\S]*?)<\/a>/);
+    expect(link).not.toBeNull();
+    expect(link![0]).toContain("min-h-11");
+    expect(text(link![1])).toContain("Waiting To Be Billed");
+    expect(text(link![1])).not.toMatch(/\d/);
+    expect(waitingAsked()).toBe(false);
+    expect(text(html)).not.toContain("Oldest work");
+  });
+
+  it("open (?open=waiting): the jobs are read, oldest work first, each with its figures and Bill It, and the line closes back", async () => {
+    // Both fixture jobs are time & material for this one (the fake ignores filters; the rule reads the field).
+    state.tables.jobs = (state.tables.jobs as Record<string, unknown>[]).map((j) => ({ ...j, billing_type: "tm" }));
+    const html = await render({ open: "waiting" });
+    expect(waitingAsked()).toBe(true);
+    expect(html).toMatch(/<a[^>]*href="\/billing"[^>]*>[\s\S]*?Waiting To Be Billed/);
+    const t = text(html);
+    const second = t.indexOf("13897 Honeysuckle · J-011 — Sam Roe");
+    const first = t.indexOf("41 Larkspur Place · J-028 — Pat Lee");
+    expect(second).toBeGreaterThan(-1);
+    expect(first).toBeGreaterThan(second);
+    expect(t).toContain("Oldest work Sep 2, 2026 · 12 h · Bills $80.00 · $1,400.00");
+    expect(t).toContain("Oldest work Sep 20, 2026 · 3.5 h · Bills $120.00 · $500.00");
+    expect(t).toContain("Finished");
+    expect((html.match(/>Bill It</g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 });
 

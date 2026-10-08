@@ -122,6 +122,14 @@ export type UnbilledWork = {
    * It carries its own words, because no bill row stands behind it on the tab.
    */
   costRows: CostRowVerdict[];
+  /**
+   * THE OLDEST OPEN WORK ON THE JOB (Waiting To Be Billed, 2026-10-07): the earliest clock-in of an
+   * unclaimed billable hour, the earliest supplier day (bill_date, else when it was filed) of an open
+   * bill, the earliest day an open order was raised, the earliest open take from stock - whichever
+   * is first, as the database wrote it (an ISO time or a YYYY-MM-DD day). Null when nothing is open.
+   * Decided in the same loop as the figures, so "oldest first" lists exactly the rows that count.
+   */
+  oldestAt: string | null;
 };
 
 /** One bill or live purchase order, and what the claims rule says about it (UnbilledWork.costRows). */
@@ -397,6 +405,16 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   const { lines, total: laborAmount } = computeJobLaborBilling(free.jobEntries, input.defaultRate, input.levelRate, input.nonBillableCodes);
   const laborByPerson = lines.map((l) => ({ name: l.name, hours: l.quantity, amount: l.amount }));
   const hours = cents(lines.reduce((s, l) => s + l.quantity, 0));
+  // The oldest open thing, compared by its first ten characters (a day), so an ISO time and a
+  // bare day order together.
+  let oldestAt: string | null = null;
+  const older = (at: unknown) => {
+    const day = String(at ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+    if (!oldestAt || day < oldestAt.slice(0, 10)) oldestAt = String(at);
+  };
+  const entryAt = new Map<string, unknown>((input.jobEntries ?? []).map((e: any) => [String(e?.id ?? ""), e?.clock_in]));
+  for (const id of lines.flatMap((l) => l.sourceIds)) older(entryAt.get(id));
 
   const markupPct = Number.isFinite(Number(input.markupPct)) && Number(input.markupPct) >= 0 ? Number(input.markupPct) : 0;
   const mk = (cost: number) => cents(cost * (1 + markupPct / 100));
@@ -424,6 +442,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
     costRows.push({ id: p.id, kind: "po", state: "open", cost });
+    older(p.created_at);
   }
   let returnsAmount = 0;
   let returnsCredit = 0;
@@ -468,6 +487,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
       returnsCredit = cents(returnsCredit + mk(back));
       returnsCount += 1;
       costRows.push({ id: b.id, kind: "bill", state: "open", cost: -back });
+      older(b.bill_date ?? b.created_at);
       continue;
     }
     /**
@@ -495,6 +515,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
     costRows.push({ id: b.id, kind: "bill", state: "open", cost });
+    older(b.bill_date ?? b.created_at);
   }
 
   // PIECES TAKEN FROM STOCK (Shop Stock, Phase 3): each take no invoice holds, at the same markup
@@ -516,12 +537,11 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   const stock = stockTotals(takes.free, markupPct);
   // The same test stockTotals and the importer make (markStock > 0), per take, so the open rows are
   // exactly the ones stockCount counted and the zero-cost ones are the ones the importer names.
-  for (const t of takes.free)
-    costRows.push(
-      markStock(t.cost, markupPct) > 0
-        ? { ...stockVerdict(t, true), state: "open" }
-        : { ...stockVerdict(t, false), state: "nothing", why: stockWholeNoCost(t) ? "stock_no_cost" : "stock_cost_used" },
-    );
+  for (const t of takes.free) {
+    const open = markStock(t.cost, markupPct) > 0;
+    costRows.push(open ? { ...stockVerdict(t, true), state: "open" } : { ...stockVerdict(t, false), state: "nothing", why: stockWholeNoCost(t) ? "stock_no_cost" : "stock_cost_used" });
+    if (open) older(t.takenAt);
+  }
   const shorts = input.stock?.shorts ?? [];
 
   const last = input.claims.invoices[0] ?? null;
@@ -552,6 +572,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     claimedOn: claimantNumbers(input.claims, skippedIds),
     schemaReady: input.claims.schemaReady,
     costRows,
+    oldestAt,
   };
 }
 
@@ -642,7 +663,7 @@ export async function readJobBillsWithLines(
       .from("bills")
       // `description` matches a supplier return to the purchase it reverses, and `created_at` is
       // the order returns spend it in (returnLinesAgainstPurchases).
-      .select(`id, amount, po_id, created_at, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
+      .select(`id, amount, po_id, created_at, bill_date, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
       .eq("job_id", jobId)
       .is("superseded_by_bill_id", null);
     return scope?.orgId ? q.eq("org_id", scope.orgId) : q;
@@ -675,7 +696,7 @@ export async function unbilledWorkForJob(
   scope?: { orgId: string },
 ): Promise<UnbilledWork> {
   const orgId = scope?.orgId ?? null;
-  let posQ = supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId);
+  let posQ = supabase.from("purchase_orders").select("id, total, status, created_at").eq("job_id", jobId);
   if (orgId) posQ = posQ.eq("org_id", orgId);
   const [labor, orgRead, levelRate, posRead, billsRead, stock] = await Promise.all([
     fetchJobLaborRows(supabase, jobId, scope),

@@ -59,7 +59,7 @@ import {
   cleanLines,
   copyToJobFolder,
   documentInUse,
-  exactAccountFor,
+  exactSupplierFor,
   filingDocument,
   insertItemizedBill,
   insertPaperRow,
@@ -554,7 +554,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
   // A return read here (a negative total) keeps its lines pointing the same way (linesPointWithTotal).
   const lines = linesPointWithTotal(aiAmount, cleanLines(parsed.line_items));
-  const vendor = parsed.vendor ? String(parsed.vendor).slice(0, 200) : doc.name || "Receipt";
+  const vendorTyped = parsed.vendor ? String(parsed.vendor).slice(0, 200) : doc.name || "Receipt";
   const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
   // Trust the AI's scope only if it's one of THIS job's real scopes (never let it invent one);
   // else leave null → Uncategorized. This is what makes budget and actual join by scope.
@@ -592,7 +592,10 @@ ${MASKED_PRICE_PROMPT_RULE}`,
   const provisional =
     parsed?.pricing_provisional === true || lines.some((l) => looksProvisionallyPriced(l?.description));
   const docNumber = cleanDocNumber(parsed?.document_number);
-  const accountId = await exactAccountFor(supabase, ctx.orgId, vendor);
+  // An exact known spelling is kept as the supplier's one name (item D, 2026-10-07).
+  const exactVendor = await exactSupplierFor(supabase, ctx.orgId, vendorTyped);
+  const accountId = exactVendor.accountId;
+  const vendor = exactVendor.name || vendorTyped;
 
   // IS THIS PURCHASE ALREADY ON THE BOOKS? (audit v994, DB1.) This door never asked. A CED ticket
   // filed from the tray, then snapped again on the job page, is a new photo, so a new document and
@@ -1184,7 +1187,9 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   let jobId: string | null = null;
   let category: string | null = item.category;
   const paperCategory = billCategoryFor(item);
-  const vendor = item.vendor ?? item.title;
+  // An exact known spelling is kept as the supplier's one name (item D, 2026-10-07).
+  const exactVendor = await exactSupplierFor(supabase, ctx.orgId, item.vendor ?? item.title);
+  const vendor = exactVendor.name || (item.vendor ?? item.title);
   // What a person said at the "already on the books" question rides on the bill, so the next
   // person who sees two bills with one number knows it was decided, not missed.
   const decided =
@@ -1196,7 +1201,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     ? {
         pricing_provisional: item.pricing_provisional === true,
         bill_number: item.doc_number ? String(item.doc_number) : undefined,
-        supplier_account_id: (await exactAccountFor(supabase, ctx.orgId, vendor)) ?? undefined,
+        supplier_account_id: exactVendor.accountId ?? undefined,
       }
     : {};
 
@@ -1838,7 +1843,7 @@ export async function updateOrganizedItem(
   const amount =
     fields.amount != null && !isNaN(Number(fields.amount)) ? Number(fields.amount) : null;
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(fields.item_date ?? "")) ? fields.item_date : null;
-  const vendor = fields.vendor ? String(fields.vendor).slice(0, 200) : null;
+  const vendor = fields.vendor ? (await exactSupplierFor(supabase, ctx.orgId, String(fields.vendor).slice(0, 200))).name || null : null;
   const category = fields.category ? String(fields.category).slice(0, 60) : null;
   const summary = fields.summary ? String(fields.summary).slice(0, 4000) : null;
 

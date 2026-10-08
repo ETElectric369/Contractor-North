@@ -48,6 +48,7 @@ import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/p
 import { formatCurrency } from "@/lib/utils";
 import { paymentMethodKey } from "@/lib/payment-method";
 import { reportError } from "@/lib/observe";
+import { getStripe } from "@/lib/stripe";
 import { ticketsAlsoOnAnotherJob } from "./ticket-on-two-jobs";
 import {
   readJobStock,
@@ -99,6 +100,101 @@ export async function createCustomerCredit(
   revalidateMoney();
   if (inv?.customer_id) revalidatePath(`/crm/${inv.customer_id}`);
   return { ok: true };
+}
+
+/**
+ * RECORD THIS REFUND (Wednesday task 4, item C, 2026-10-07). The charge.refunded webhook used to
+ * say only "the refund left Stripe" and leave the office to open Credit / Refund and type the
+ * figure in by hand. This is the one tap behind that notice.
+ *
+ * THE AMOUNT COMES FROM STRIPE, NEVER FROM THE LINK: the charge is read back on the company's own
+ * connected account (so another company's charge id reads as nothing), its refunded total is the
+ * figure, capped at what the payment on THIS invoice was - a full Stripe refund can exceed the
+ * invoice portion by the card fee, and the card fee was never the customer's money on the books.
+ * The row is a customer_credits refund, already resolved (the money has gone back), carrying the
+ * charge id (0384) so a second tap, a second open of the notice or a second tab records nothing
+ * twice; a later, larger refund of the same charge raises that one row to the new total. The
+ * invoice STAYS paid with the refund shown beside it, as a hand-recorded refund does: Collected
+ * comes down by it (money-metrics, the billing page, the job's own figures).
+ */
+export async function recordStripeRefund(input: { invoiceId: string; chargeId: string }): Promise<{ ok: boolean; error?: string; message?: string; amount?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  const invoiceId = String(input?.invoiceId ?? "");
+  const chargeId = String(input?.chargeId ?? "");
+  if (!orgId) return { ok: false, error: "Couldn't tell which company this is." };
+  if (!/^ch_[A-Za-z0-9]+$/.test(chargeId)) return { ok: false, error: "That notice doesn't name a Stripe charge, so nothing was recorded." };
+  const { data: inv, error: invErr } = await supabase.from("invoices").select("id, customer_id, invoice_number").eq("id", invoiceId).maybeSingle();
+  if (invErr) return { ok: false, error: dbError(invErr) };
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  const number = String((inv as { invoice_number?: string | null }).invoice_number ?? "this invoice");
+
+  const { data: org, error: orgErr } = await supabase.from("organizations").select("stripe_account_id").eq("id", orgId).maybeSingle();
+  if (orgErr) return { ok: false, error: dbError(orgErr) };
+  const accountId = (org as { stripe_account_id?: string | null } | null)?.stripe_account_id ?? null;
+  if (!accountId) return { ok: false, error: "This company isn't set up to take card payments, so there is no Stripe refund to read." };
+
+  let charge: { payment_intent?: string | { id?: string } | null; amount_refunded?: number | null };
+  try {
+    charge = (await getStripe().charges.retrieve(chargeId, {}, { stripeAccount: accountId })) as typeof charge;
+  } catch (e) {
+    reportError("recordStripeRefund.retrieve", e, { invoiceId, chargeId });
+    return { ok: false, error: "Couldn't read that refund from Stripe just now. Nothing was recorded; try again in a moment." };
+  }
+  const pi = typeof charge.payment_intent === "string" ? charge.payment_intent : (charge.payment_intent?.id ?? null);
+  const { data: pays, error: payErr } = pi
+    ? await supabase.from("payments").select("id, amount, invoice_id").eq("stripe_payment_intent", pi).limit(50)
+    : { data: [] as { id: string; amount: number; invoice_id: string | null }[], error: null };
+  if (payErr) return { ok: false, error: dbError(payErr) };
+  const pay = ((pays ?? []) as { id: string; amount: number | string; invoice_id: string | null }[]).find((p) => String(p.invoice_id) === invoiceId);
+  if (!pay) return { ok: false, error: `That Stripe charge isn't a payment on ${number}, so nothing was recorded.` };
+  const refundedCents = Math.round(Number(charge.amount_refunded ?? 0));
+  if (!(refundedCents > 0)) return { ok: false, error: "Stripe says nothing has been refunded on that charge yet, so nothing was recorded." };
+  const paid = Math.round((Number(pay.amount) || 0) * 100);
+  const amount = Math.min(refundedCents, paid) / 100;
+
+  // ONCE PER CHARGE: a row already there is the answer, raised only when Stripe's total grew.
+  const { data: had, error: hadErr } = await supabase.from("customer_credits").select("id, amount").eq("stripe_refund_id", chargeId).limit(1);
+  if (hadErr) return { ok: false, error: dbError(hadErr) };
+  const existing = (had ?? [])[0] as { id: string; amount: number | string } | undefined;
+  const finish = async (said: string) => {
+    revalidateMoney(invoiceId);
+    revalidateMoney();
+    const customerId = (inv as { customer_id?: string | null }).customer_id;
+    if (customerId) revalidatePath(`/crm/${customerId}`);
+    return { ok: true, message: said, amount };
+  };
+  if (existing) {
+    const was = Number(existing.amount) || 0;
+    if (was + 0.005 >= amount) return { ok: true, message: `Already recorded: ${formatCurrency(was)} refunded on ${number}.`, amount: was };
+    const { data: raised, error: raiseErr } = await supabase.from("customer_credits").update({ amount }).eq("id", existing.id).eq("stripe_refund_id", chargeId).select("id");
+    if (raiseErr) return { ok: false, error: dbError(raiseErr) };
+    if (!raised?.length) return { ok: false, error: "That refund row changed a moment ago. Reload and look again." };
+    return finish(`Updated: ${formatCurrency(amount)} refunded on ${number} now (it was ${formatCurrency(was)}). The invoice stays paid; Collected comes down by it.`);
+  }
+  const { data: wrote, error } = await supabase
+    .from("customer_credits")
+    .insert({
+      customer_id: (inv as { customer_id?: string | null }).customer_id ?? null,
+      invoice_id: invoiceId,
+      amount,
+      disposition: "refund",
+      status: "resolved",
+      note: `Refunded in Stripe (${chargeId})`,
+      stripe_refund_id: chargeId,
+      created_by: ctx.userId,
+    })
+    .select("id");
+  if (error) {
+    // Two tabs, one charge: the unique index (0384) decided, and the other tab's row stands.
+    if (String((error as { code?: string }).code ?? "") === "23505" || /duplicate key/i.test(String(error.message ?? ""))) {
+      return { ok: true, message: `Already recorded: ${formatCurrency(amount)} refunded on ${number}.`, amount };
+    }
+    return { ok: false, error: dbError(error) };
+  }
+  if (!wrote?.length) return { ok: false, error: "The refund didn't save. Try it again." };
+  return finish(`Recorded: ${formatCurrency(amount)} refunded on ${number}. The invoice stays paid; Collected comes down by it.`);
 }
 
 /**

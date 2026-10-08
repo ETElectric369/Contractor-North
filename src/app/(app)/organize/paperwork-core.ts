@@ -222,7 +222,23 @@ export async function tradeOf(supabase: any, orgId: string | null | undefined): 
  * A miss, or a read that fails, is still "not on an account": never a guess and never a refusal.
  */
 export async function exactAccountFor(supabase: any, orgId: string | null | undefined, supplier: string | null | undefined): Promise<string | null> {
-  if (!orgId || !String(supplier ?? "").trim()) return null;
+  return (await exactSupplierFor(supabase, orgId, supplier)).accountId;
+}
+
+/**
+ * THE SUPPLIER AS TYPED, SNAPPED TO ITS ONE NAME (item D, 2026-10-07): when the spelling is exactly
+ * a known account's name or alias (case and punctuation aside), the account's id AND its one name,
+ * so "ced" and "C.E.D." both land as the account spells itself; otherwise the spelling as typed,
+ * trimmed, and no account. Exact only: a fuzzy write is never made for him (the box only asks).
+ * Best-effort like exactAccountFor: a failed read keeps what was typed.
+ */
+export async function exactSupplierFor(
+  supabase: any,
+  orgId: string | null | undefined,
+  supplier: string | null | undefined,
+): Promise<{ accountId: string | null; name: string }> {
+  const typed = String(supplier ?? "").trim();
+  if (!orgId || !typed) return { accountId: null, name: typed };
   // EACH READ STANDS ALONE. One try around both would mean a failed accounts read also lost the
   // aliases, so a spelling somebody had already filed by hand would stop resolving - a fix that
   // widened the reach and then narrowed it on the unhappy path.
@@ -240,8 +256,10 @@ export async function exactAccountFor(supabase: any, orgId: string | null | unde
     ),
     read<{ id: string; name: string }>(() => supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).limit(500)),
   ]);
-  if (!aliases.length && !accounts.length) return null;
-  return supplierAccountForPaper({ supplier }, indexSupplierIdentity({ accounts, aliases })).accountId;
+  if (!aliases.length && !accounts.length) return { accountId: null, name: typed };
+  const accountId = supplierAccountForPaper({ supplier: typed }, indexSupplierIdentity({ accounts, aliases })).accountId;
+  const name = accountId ? String(accounts.find((a) => String(a.id) === String(accountId))?.name ?? "").trim() : "";
+  return { accountId, name: name || typed };
 }
 
 /** The printed number, cleaned for storage: no longer than a bill label can carry. */

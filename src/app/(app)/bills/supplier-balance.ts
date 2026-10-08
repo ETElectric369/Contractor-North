@@ -14,8 +14,9 @@
  * reason: OWED = the account's unpaid bills MINUS its live payments. A payment is a chunk of
  * money, not a tick against a ticket, and recording one does not flip a single bill.
  *
- * `bills.status` keeps the meaning it has always had - HOW the thing was bought: 'unpaid' is on
- * account, 'paid' is settled at the register on the spot. A register receipt is not part of a
+ * Since 0383 `bills.status` is DERIVED from amount_paid: 'unpaid' is still owed (bought on account,
+ * nothing allocated to it yet), 'partial' is part-paid, 'paid' is paid - at the register on the spot
+ * or by a payment allocated to it. A register receipt is not part of a
  * running balance and never was, but it is still money he spent there, so it is reported beside
  * the balance rather than swallowed. A figure that quietly disappears is the thing that makes a
  * man stop trusting a screen.

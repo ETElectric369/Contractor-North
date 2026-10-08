@@ -10,7 +10,7 @@ import { formatDate } from "@/lib/utils";
 import { linesPointWithTotal, paperTypeOf, proposalOf, readinessOf, type PaperProposal } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
 import { isStoredPaperPath } from "@/lib/ced-pdf-store";
-import { cleanDocNumber, insertPaperRow, updateItemTolerant } from "./paperwork-core";
+import { cleanDocNumber, exactSupplierFor, insertPaperRow, updateItemTolerant } from "./paperwork-core";
 import { looksLikeStatementText, openListFromStatementText } from "@/lib/supplier-open-list";
 import { createOpenListPaper, openListLine } from "@/app/(app)/bills/open-list-core";
 
@@ -269,8 +269,10 @@ export async function updatePaperwork(
     };
   }
 
+  // An exact known spelling is kept as the supplier's one name (item D, 2026-10-07).
+  const vendorTyped = fields.vendor ? String(fields.vendor).trim().slice(0, 200) : "";
   const patch: Record<string, unknown> = {
-    vendor: fields.vendor ? String(fields.vendor).trim().slice(0, 200) || null : null,
+    vendor: vendorTyped ? (await exactSupplierFor(ctx.supabase, ctx.orgId, vendorTyped)).name : null,
     amount,
     item_date: itemDate,
     doc_number: cleanDocNumber(fields.doc_number),

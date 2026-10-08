@@ -722,6 +722,63 @@ describe("a line put on the job it was for", () => {
     expect(db.bills).toHaveLength(0);
     expect(db.bank_lines).toHaveLength(0);
   });
+
+  /**
+   * A MERCHANT'S ROW OPENS (2026-10-07): three trips to the wire house in one row, one of them for
+   * the kitchen job. Each line answered on its own writes its own answer; a line answered on its own
+   * teaches no rule; and a row answered on two lines of three keeps the third WAITING ON THE CARD -
+   * a count by row called the row done and filed the card with the third line never asked.
+   */
+  const TRIPS = `Date,Description,Amount\n09/02/2026,ANYTOWN WIRE HOUSE #4,-100.00\n09/09/2026,ANYTOWN WIRE HOUSE #4,-120.00\n09/16/2026,ANYTOWN WIRE HOUSE #4,-110.00\n`;
+
+  it("one line of three on the job, one a cost: each its own, no rule learned, and the third still waits", async () => {
+    const id = await drop(TRIPS, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows).toHaveLength(1);
+    const lines = v.rows[0].lines!;
+    expect(lines.map((l) => l.money)).toEqual(["$100.00", "$120.00", "$110.00"]);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [lines[0].id]: "job:job-kitchen", [lines[1].id]: "cost:Tools & Supplies" } });
+    expect(res.ok).toBe(true);
+    expect(res.message).toMatch(/^Applied: 2 lines counted, 2 you answered\. 1 left for later is not counted yet/);
+    expect(res.message).not.toContain("Remembered");
+    expect(db.bank_lines.map((l) => [l.amount, l.choice, l.job_id ?? null, l.bucket ?? null]).sort()).toEqual([
+      [-100, "job", "job-kitchen", null],
+      [-120, "cost", null, "Tools & Supplies"],
+    ]);
+    expect(db.bills.map((b) => [b.amount, b.job_id, b.category]).sort()).toEqual([
+      [100, "job-kitchen", null],
+      [120, null, "Tools & Supplies"],
+    ]);
+    expect(db.bank_rules).toHaveLength(0);
+    // THE THIRD LINE WAITS: the card stays, now a row of one line, and the pass counted one left.
+    expect(db.organized_items[0].status).toBe("needs_review");
+    const again = await view(id);
+    expect(again.rows.map((r) => [r.money, r.single, r.lines])).toEqual([["$110.00", true, undefined]]);
+    expect(again.appliedSaid).toContain("1 line left for later is not counted yet");
+    // Answered on the row now (a row of one), the card is done.
+    const rest = await applyBankDownload(id, { fingerprint: again.fingerprint, picks: { [again.rows[0].id]: "cost:Tools & Supplies" } });
+    expect(rest.ok).toBe(true);
+    expect(db.organized_items[0].status).toBe("filed");
+    expect(db.bank_lines).toHaveLength(3);
+  });
+
+  it("the row's answer with one line's own: the rest are the cost, that one goes on the job, and the rule learns the cost lines only", async () => {
+    const id = await drop(TRIPS, "Card1234.csv");
+    const v = await view(id);
+    const [row] = v.rows;
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "cost:Tools & Supplies", [row.lines![0].id]: "job:job-kitchen" } });
+    expect(res.ok).toBe(true);
+    expect(res.message).toMatch(/^Applied: 3 lines counted, 3 you answered\./);
+    expect(db.bills.map((b) => [b.amount, b.job_id, b.category]).sort()).toEqual([
+      [100, "job-kitchen", null],
+      [110, null, "Tools & Supplies"],
+      [120, null, "Tools & Supplies"],
+    ]);
+    // The rule remembers the row's answer for the amounts the row's answer placed: never the job line's.
+    expect(db.bank_rules.map((r) => [r.choice, r.bucket, r.min_cents, r.max_cents])).toEqual([["cost", "Tools & Supplies", 11000, 12000]]);
+    expect(res.message).toContain("Remembered for next time: ANYTOWN WIRE HOUSE #4 → Tools & Supplies ($110.00 to $120.00)");
+    expect(db.organized_items[0].status).toBe("filed");
+  });
 });
 
 describe("the next download", () => {
@@ -935,6 +992,59 @@ XXXXX1234,10/04/2026,,1111-CORNER STORE ANYTOWN,40.00,,Posted,650.20
     const after = await view(next);
     expect(after.rules).toHaveLength(0);
     expect(after.rows.some((r) => r.title.includes("SHELL"))).toBe(true);
+  });
+});
+
+/**
+ * THE MERCHANT'S IDENTITY, LEARNED AT APPLY (2026-10-07): a line matched to a bill by the bill's typed
+ * name teaches the bill's supplier account the store's words as an alias, said in the apply message
+ * and removable on the supplier's card. The next statement's line names the account outright. A
+ * spelling another account owns is said, never taken. Undo leaves identity alone.
+ */
+describe("the merchant's identity", () => {
+  const HD = `Date,Description,Amount\n09/02/2026,THE HOME DEPOT #4421 ANYTOWN,-88.45\n`;
+  const HD_NEXT = `Date,Description,Amount\n09/10/2026,THE HOME DEPOT #4421 ANYTOWN,-40.00\n`;
+  const counterStore = () => {
+    db.supplier_accounts.push({ id: "acct-hd", org_id: "org-1", name: "HD Pro Desk", account_number: null, branch_code: null, on_account: false });
+    db.bills.push({ id: "b-hd", org_id: "org-1", job_id: null, supplier: "Home Depot", supplier_account_id: "acct-hd", amount: 88.45, bill_date: "2026-09-02", category: "Tools & Supplies", bank_line_id: null, superseded_by_bill_id: null });
+  };
+
+  it("remembers the store's words for the account the match proved, once, and the next line names the account outright", async () => {
+    counterStore();
+    const id = await drop(HD, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows).toHaveLength(0);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: {} });
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Applied: 1 line counted, 1 matched to what was already here. Remembered "Home Depot" as HD Pro Desk (a spelling on the supplier\'s card).');
+    expect(db.supplier_aliases).toEqual([expect.objectContaining({ org_id: "org-1", supplier_account_id: "acct-hd", alias: "Home Depot", branch_label: null })]);
+    expect(db.bills.find((b) => b.id === "b-hd")!.bank_line_id).not.toBeNull();
+    // Undo takes the mark off and leaves what the match proved.
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.supplier_aliases).toHaveLength(1);
+    // The next statement: the bill typed "HD" names nothing on the line; the alias does. Matched, sure,
+    // and nothing is remembered twice.
+    db.bills.push({ id: "b-hd2", org_id: "org-1", job_id: null, supplier: "HD", supplier_account_id: "acct-hd", amount: 40, bill_date: "2026-09-10", category: "Tools & Supplies", bank_line_id: null, superseded_by_bill_id: null });
+    const next = await drop(HD_NEXT, "Card1234-next.csv");
+    const nv = await view(next);
+    expect(nv.rows).toHaveLength(0);
+    const again = await applyBankDownload(next, { fingerprint: nv.fingerprint, picks: {} });
+    expect(again.ok).toBe(true);
+    expect(again.message).not.toContain("Remembered");
+    expect(db.supplier_aliases).toHaveLength(1);
+    expect(db.bills.find((b) => b.id === "b-hd2")!.bank_line_id).not.toBeNull();
+  });
+
+  it("a spelling another supplier already owns is said, not taken", async () => {
+    counterStore();
+    db.supplier_accounts.push({ id: "acct-other", org_id: "org-1", name: "Other Co", account_number: null, branch_code: null, on_account: true });
+    db.supplier_aliases.push({ id: "al-1", org_id: "org-1", supplier_account_id: "acct-other", alias: "home depot", branch_label: null });
+    const id = await drop(HD, "Card1234.csv");
+    const v = await view(id);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: {} });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain('"Home Depot" already names Other Co, so it wasn\'t remembered for HD Pro Desk.');
+    expect(db.supplier_aliases).toHaveLength(1);
   });
 });
 

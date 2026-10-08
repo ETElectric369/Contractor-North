@@ -45,7 +45,7 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 // the customer for anything the office left in draft (audit re-review 2026-07-20).
 const NON_COST_PO_STATUSES = new Set(["cancelled"]);
 
-export type MaterialPo = { id?: string | null; total: number | null; status?: string | null };
+export type MaterialPo = { id?: string | null; total: number | null; status?: string | null; /** When it was raised: the oldest open work on a job (UnbilledWork.oldestAt). */ created_at?: string | null };
 /** A supplier bill as the money readers see it. `bill_line_items` is what the receipt was read
  *  into: it decides how much of `amount` reaches the customer (0268/0272), and a row that carries
  *  none - a hand-entered bill, or a caller whose select list has not been widened - bills its
@@ -57,6 +57,8 @@ export type MaterialBill = {
   bill_line_items?: BillLine[] | null;
   /** When it was filed: the order supplier returns spend a purchase in (returnLinesAgainstPurchases). */
   created_at?: string | null;
+  /** The supplier's day on the paper: the oldest open work on a job (UnbilledWork.oldestAt). */
+  bill_date?: string | null;
 };
 
 /**

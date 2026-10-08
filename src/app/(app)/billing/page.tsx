@@ -28,6 +28,7 @@ import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { smsReadiness } from "@/lib/sms";
 import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
 import { GetPaidPickButton } from "./record-payment-button";
+import { readWaitingToBeBilled } from "@/lib/waiting-to-be-billed";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,7 @@ function LateChip({ days }: { days: number }) {
 export default async function BillingPage({ searchParams }: { searchParams?: Promise<{ open?: string }> }) {
   const { open } = (await searchParams) ?? {};
   const paymentsOpen = open === "payments";
+  const waitingOpen = open === "waiting";
   const supabase = await createClient();
 
   // THE ORG, READ ONCE HERE: its timezone dates "This Month", and its card, texting and Venmo facts
@@ -83,7 +85,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
     }
   })();
 
-  const [staff, pipeline, { data: customers }, { data: jobRows }, { data: allInv }, { data: revisedInv }, viewer, { data: org }, monthTotal, ledgerRead] =
+  const [staff, pipeline, { data: customers }, { data: jobRows }, { data: allInv }, { data: revisedInv }, viewer, { data: org }, monthTotal, ledgerRead, waiting] =
     await Promise.all([
       // Accounts Receivable's door, kept: this page is the office's (a tech lands on My Day).
       (async () => {
@@ -136,6 +138,9 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
             .order("paid_at", { ascending: false })
             .limit(500)
         : Promise.resolve(null),
+      // WAITING TO BE BILLED, ONLY WITH ITS LINE OPEN (2026-10-07): a dozen reads per T&M job, so
+      // never on the way to anything else. No count on the closed line for the same reason.
+      waitingOpen ? readWaitingToBeBilled(supabase) : Promise.resolve(null),
     ]);
   if (!staff) redirect("/planner");
 
@@ -412,6 +417,65 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
           ))}
         </Stage>
       )}
+
+      {/* WAITING TO BE BILLED (2026-10-07): every Time & Material job, open or finished, holding hours,
+          receipts or stock no invoice claims yet, oldest work first - the T&M job with one invoice and
+          three more weeks of hours that Done - Not Invoiced leaves out by design. The same link shape
+          as Payments In: the list is read only when its line is open, and the line carries no count
+          (the count IS the read). Each row's figure is the job card's own (unbilledWorkForJob). */}
+      <Card id="waiting" className="mb-4 mt-6 scroll-mt-20 overflow-hidden">
+        <Link
+          href={waitingOpen ? "/billing" : "/billing?open=waiting#waiting"}
+          scroll={!waitingOpen}
+          aria-expanded={waitingOpen}
+          className="flex min-h-11 items-center gap-2 px-4 py-2 text-sm hover:bg-slate-50"
+        >
+          {waitingOpen ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />}
+          <span className="min-w-0 flex-1 font-semibold text-slate-900">
+            Waiting To Be Billed
+            <span className="font-normal text-slate-600"> · Time &amp; material work no invoice holds yet, oldest first</span>
+          </span>
+        </Link>
+        {waitingOpen && waiting && (
+          <div className="border-t border-slate-100">
+            {waiting.problem ? (
+              <p className="px-4 py-4 text-sm text-amber-800" role="alert">
+                {waiting.problem}
+              </p>
+            ) : waiting.rows.length === 0 ? (
+              <p className="px-4 py-4 text-sm text-slate-500">Nothing is waiting: every hour, receipt and take on your time &amp; material jobs is on an invoice.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {waiting.rows.map((r) => (
+                  <li key={r.jobId} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                    <Link href={`/jobs/${r.jobId}`} className="min-w-0 hover:underline">
+                      <div className="truncate text-sm font-medium text-slate-900">
+                        {r.label}
+                        {r.status === "complete" && <span className="ml-2 text-xs font-normal text-slate-500">Finished</span>}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">
+                        {r.unread
+                          ? "Its work couldn't be read just now. Open the job to see it."
+                          : [
+                              r.oldestAt ? `Oldest work ${formatDate(r.oldestAt)}` : null,
+                              r.hours > 0 ? `${r.hours} h` : null,
+                              r.billsBilled > 0 ? `Bills ${money(r.billsBilled)}` : null,
+                              r.stockBilled > 0 ? `Stock ${money(r.stockBilled)}` : null,
+                              money(r.total),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                      </div>
+                    </Link>
+                    {!r.unread && <InvoiceJobButton jobId={r.jobId} label="Bill It" />}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {waiting.more > 0 && <p className="px-4 pb-3 text-xs text-slate-500">And {waiting.more} older time &amp; material jobs not checked here.</p>}
+          </div>
+        )}
+      </Card>
 
       {/* PAYMENTS IN (the old /payments, folded in). A LINK, never a <details>: a server page can't
           see a fold open, so its line opens ?open=payments (and closes back to /billing), and only

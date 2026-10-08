@@ -122,6 +122,44 @@ describe("the webhook and a bank transfer", () => {
     expect(state.pushes).toHaveLength(0);
   });
 
+  /**
+   * A REFUND'S NOTICE CARRIES THE CHARGE AND THE AMOUNT (item C, 2026-10-07): its link opens the
+   * invoice with Record This Refund drawn for that charge. A dispute's notice is as it was.
+   */
+  describe("a refund's notice leads to Record This Refund", () => {
+    const paid = () => ({
+      ...tables(),
+      payments: [{ id: "pay-1", org_id: ORG, invoice_id: "inv-78", amount: 100, stripe_payment_intent: "pi_card", stripe_event_id: "evt_paid" }],
+      notifications: [] as any[],
+    });
+
+    it("says the amount Stripe refunded and links the invoice with the charge", async () => {
+      state.db = fakeDb(paid());
+      expect((await deliver("charge.refunded", { id: "ch_1", payment_intent: "pi_card", amount_refunded: 2500 })).status).toBe(200);
+      expect(state.pushes).toHaveLength(1);
+      const notice = state.pushes[0][2];
+      expect(notice.title).toBe("An online payment was refunded");
+      expect(notice.body).toContain("$25.00 left Stripe");
+      expect(notice.body).toContain("Record This Refund");
+      expect(notice.url).toBe("/billing/inv-78?refund=ch_1");
+    });
+
+    it("a dispute's notice links the invoice plain, with no charge to record", async () => {
+      state.db = fakeDb(paid());
+      await deliver("charge.dispute.created", { id: "dp_1", charge: "ch_1", payment_intent: "pi_card" });
+      expect(state.pushes).toHaveLength(1);
+      expect(state.pushes[0][2].title).toBe("A card payment was disputed");
+      expect(state.pushes[0][2].url).toBe("/billing/inv-78");
+    });
+
+    it("a refund of a payment North never recorded still tells the office, at the billing board", async () => {
+      state.db = fakeDb({ ...tables(), notifications: [] });
+      await deliver("charge.refunded", { id: "ch_9", payment_intent: "pi_unknown", amount_refunded: 500 });
+      expect(state.pushes).toHaveLength(1);
+      expect(state.pushes[0][2].url).toBe("/billing");
+    });
+  });
+
   describe("the Bell records what the office is told, once (0366 wave, W1-10)", () => {
     const lines = () => (state.db.tables.notifications ?? []) as any[];
 

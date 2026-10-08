@@ -90,7 +90,7 @@ export interface SuppliersCardActions {
 const METHOD_LABELS: Record<SupplierPayMethod, string> = {
   cash: "Cash",
   check: "Check",
-  transfer: "Transfer",
+  transfer: "ACH / Transfer",
   card: "Card",
   other: "Other",
 };
@@ -982,7 +982,7 @@ export function SuppliersCard({
                               <li key={p.id} className="flex items-start justify-between gap-3 px-3 py-2">
                                 <span className="min-w-0">
                                   <span className={`block truncate text-sm ${p.voided ? "text-slate-400 line-through" : "text-slate-800"}`}>
-                                    {formatDate(p.paidOn)} · {formatCurrency(p.amount)} · {p.method}
+                                    {formatDate(p.paidOn)} · {formatCurrency(p.amount)} · {METHOD_LABELS[p.method as SupplierPayMethod] ?? p.method}
                                     {/* WHICH BILLS IT PAID (0383): said on the row, so a chunk is never a mystery. */}
                                     {p.bills !== undefined && !p.voided
                                       ? p.bills > 0

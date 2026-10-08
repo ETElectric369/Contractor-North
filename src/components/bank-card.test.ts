@@ -17,7 +17,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn(), swapBankDownload: vi.fn(), setBankAccount: vi.fn(), forgetBankRule: vi.fn(), reanswerBankLine: vi.fn() }));
 vi.mock("@/app/(app)/organize/paperwork-actions", () => ({ keepPaperwork: vi.fn() }));
 
-import { BankCard, changeChoicesFor, livePicks, othersFor, toneOf } from "./bank-card";
+import { BankCard, changeChoicesFor, livePicks, othersFor, rowsAnswered, toneOf } from "./bank-card";
 import { FuelTrendCard } from "@/app/(app)/analytics/fuel-trend-card";
 
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -394,6 +394,49 @@ describe("the fuel card", () => {
     const html = renderToStaticMarkup(createElement(FuelTrendCard, { trend }));
     expect(html).toContain("bg-pink-800");
     expect(toneOf("fuel")).toBe("bg-pink-800");
+  });
+});
+
+/**
+ * A MERCHANT'S ROW OPENS (2026-10-07): a row holding three of a merchant's lines draws "3 Charges",
+ * and open, each line takes its own answer under its own id, with the longer Other… list (a job
+ * among them). Closed, the row is as it was: the same four buttons first, nothing pressed.
+ */
+describe("a row that opens", () => {
+  const LINES = [
+    { id: "line:aaaaaaaaaaaaaaa1", day: "Sep 2", title: "SHELL 123 ANYTOWN", money: "$88.45" },
+    { id: "line:aaaaaaaaaaaaaaa2", day: "Sep 9", title: "SHELL 123 ANYTOWN", money: "$100.00" },
+    { id: "line:aaaaaaaaaaaaaaa3", day: "Sep 16", title: "SHELL 123 ANYTOWN", money: "$100.00" },
+  ];
+  const withLines = (): BankView => ({ ...VIEW, rows: [{ ...VIEW.rows[0], lines: LINES }, ...VIEW.rows.slice(1)] });
+
+  it("draws the open control after Other…, closed, a thumb tall and Title Case; a row of one line draws none", () => {
+    const html = render(withLines());
+    const labels = buttons(html).map((b) => b.text);
+    expect(labels.slice(0, 5)).toEqual(["Fuel Guess", "Auto", "Owner's Draw", "Other…", "3 Charges"]);
+    const control = buttons(html).find((b) => b.text === "3 Charges")!;
+    expect(control.markup).toContain('aria-expanded="false"');
+    expect(control.markup).toMatch(/h-11|min-h-11/);
+    // Closed, the lines are not drawn: no line's day is on the card.
+    expect(textOf(html)).not.toContain("Sep 9");
+    for (const b of buttons(html)) expect(titleCase(b.text.replace("…", ""))).toBe(true);
+    // The rows of one line draw no control.
+    expect(labels.filter((l) => /Charges|Deposits/.test(l))).toEqual(["3 Charges"]);
+    expect(buttons(render(VIEW)).some((b) => /Charges|Deposits/.test(b.text))).toBe(false);
+  });
+
+  it("keeps a line's pick while its row is on the card, and counts a row answered only by the row or by every line", () => {
+    const rows = withLines().rows;
+    const picks = { "out:shell": "cost:Fuel", [LINES[0].id]: "job:job-1", "line:abc": "other_income", "line:gone1234567890": "draw" };
+    expect(livePicks(picks, rows)).toEqual({ "out:shell": "cost:Fuel", [LINES[0].id]: "job:job-1", "line:abc": "other_income" });
+    // The row gone, its line's pick goes with it.
+    expect(livePicks(picks, rows.slice(1))).toEqual({ "line:abc": "other_income" });
+    // One line of three answered: the row is partly answered - Apply has work, and the row waits.
+    expect(rowsAnswered({ [LINES[0].id]: "job:job-1" }, rows)).toEqual({ answered: 0, partly: 1 });
+    // Every line answered, or the row itself: answered.
+    expect(rowsAnswered(Object.fromEntries(LINES.map((l) => [l.id, "cost:Fuel"])), rows)).toEqual({ answered: 1, partly: 0 });
+    expect(rowsAnswered({ "out:shell": "cost:Fuel", [LINES[1].id]: "job:job-1" }, rows)).toEqual({ answered: 1, partly: 0 });
+    expect(rowsAnswered({ "line:abc": "other_income" }, rows)).toEqual({ answered: 1, partly: 0 });
   });
 });
 

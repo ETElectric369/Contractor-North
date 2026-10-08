@@ -12,7 +12,7 @@ export const billActions: Record<string, ActionDef> = {
     name: "bill.create",
     group: "bill",
     label: "Add supplier bill",
-    description: `Record a supplier bill / receipt as a job cost, or as a business cost when no job is given. A business cost's category is one of: ${BUSINESS_COST_BUCKETS.join(", ")}.`,
+    description: `Record a supplier bill / receipt as a job cost, or as a business cost when no job is given. A business cost's category is one of: ${BUSINESS_COST_BUCKETS.join(", ")}. Write the supplier the way supplier_balances / list_bills show it: an exact spelling of a known supplier (its name or alias) is kept as that supplier's one name; a new spelling makes a new supplier.`,
     input: z.object({
       job_id: z.string().nullable().optional(),
       supplier: z.string(),
@@ -65,7 +65,7 @@ export const billActions: Record<string, ActionDef> = {
     name: "bill.update",
     group: "bill",
     label: "Edit bill",
-    description: `Edit a supplier bill's supplier, amount, bill number, date, status, category or notes. A business cost's (a bill with no job) category is one of: ${BUSINESS_COST_BUCKETS.join(", ")}.`,
+    description: `Edit a supplier bill's supplier, amount, bill number, date, status, category or notes. A business cost's (a bill with no job) category is one of: ${BUSINESS_COST_BUCKETS.join(", ")}. Write the supplier the way supplier_balances / list_bills show it: an exact spelling of a known supplier is kept as that supplier's one name and moves the bill onto that supplier's account.`,
     input: z.object({
       id: z.string(),
       supplier: z.string().optional(),

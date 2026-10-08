@@ -13,6 +13,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { clockDoorWords } from "@/lib/long-shift";
 import { InvoiceDetail, InvoiceStatusMenuItems, SetAsideButton } from "./invoice-detail";
 import { CreditButton } from "./credit-button";
+import { RecordRefundButton } from "./record-refund-button";
 import { ShareIconButton } from "@/components/share-icon-button";
 import { SendButton } from "@/components/send-sheet";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
@@ -58,11 +59,28 @@ const GETTING_PAID_NOW_LINK = true;
 
 export default async function InvoicePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  /** `refund=ch_…` from the refund notice (item C): draws Record This Refund for that charge. */
+  searchParams?: Promise<{ refund?: string }>;
 }) {
   const { id } = await params;
+  const refundCharge = String((await searchParams)?.refund ?? "");
   const supabase = await createClient();
+  // THE REFUND THE NOTICE NAMED (item C, 2026-10-07): only with ?refund= on the link, and only the
+  // charge id's shape. Whether it is already recorded decides which sentence is drawn, never silence.
+  const refundP: Promise<{ chargeId: string; recorded: number | null } | null> = /^ch_[A-Za-z0-9]+$/.test(refundCharge)
+    ? (async () => {
+        try {
+          const r = await supabase.from("customer_credits").select("amount").eq("stripe_refund_id", refundCharge).limit(1);
+          const row = (r.data ?? [])[0] as { amount?: number | string } | undefined;
+          return { chargeId: refundCharge, recorded: !r.error && row ? Number(row.amount) || 0 : null };
+        } catch {
+          return { chargeId: refundCharge, recorded: null };
+        }
+      })()
+    : Promise.resolve(null);
 
   /* THE PROJECTION IS WHERE THIS PAGE'S TRUTH COMES FROM (the projection law). `*` means the two
      delivery stamps ride along without being named: 0267's `sent_at` (a real send, never a pay
@@ -366,9 +384,25 @@ export default async function InvoicePage({
     transferPending: inFlight.length > 0 ? transferOnItsWaySentence(inFlight, orgSettings.timezone) : null,
   };
 
+  const refund = await refundP;
+
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/billing" fallbackLabel="Back To Invoices" />
+      {refund && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+          {refund.recorded != null ? (
+            <p>This Stripe refund is already recorded: {formatCurrency(refund.recorded)} refunded on {inv.invoice_number}.</p>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p>
+                An online payment on {inv.invoice_number} was refunded in Stripe. Record it here and the invoice stays paid with the refund shown beside it; Collected comes down by it.
+              </p>
+              <RecordRefundButton invoiceId={inv.id} chargeId={refund.chargeId} />
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">

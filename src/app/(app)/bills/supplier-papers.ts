@@ -288,8 +288,9 @@ export function supplierDocumentRows(input: {
 /**
  * THE BILLS THE SUPPLIER'S OWN BOOKS CALL SETTLED (8a982483). Pure.
  *
- * bills.status says HOW a bill was bought (on the account, or paid at the counter), never whether
- * the supplier has since been paid: applying a CED open list closes CED's DOCUMENTS
+ * Before 0383, bills.status said only HOW a bill was bought (on the account, or paid at the
+ * register), never whether the supplier had since been paid (since 0383 it is derived from
+ * amount_paid: a payment allocated to the bill pays it): applying a CED open list closed CED's DOCUMENTS
  * (supplier_invoices.closed) and touches no bill. So every ticket ever bought on account read
  * "Unpaid" under All Bills forever - "$10k Unpaid" over a Suppliers card saying "$5k Owed", the
  * same tickets twice, with the only explanation behind a Why? fold.

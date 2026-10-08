@@ -23,9 +23,11 @@ import {
   lookalikePayment,
   choiceId,
   groupTitle,
+  identityToLearn,
   inPayWindow,
   JOB_REFUND_NEXT,
   learnableAnswer,
+  lineIdOf,
   namesOf,
   PAY_WINDOW,
   ruleChoice,
@@ -391,6 +393,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       jobId: b.job_id ?? null,
       category: b.category ?? null,
       onAccount: !!b.supplier_account_id && onAccount.has(String(b.supplier_account_id)),
+      supplierAccountId: b.supplier_account_id ? String(b.supplier_account_id) : null,
     })),
     pettyCash: (pettyR.rows as any[]).map((p) => ({ id: String(p.id), cents: centsOf(p.amount), day: String(p.tx_date), kind: String(p.kind ?? "") })),
     accounts,
@@ -565,6 +568,8 @@ type Work = {
   match?: { table: MatchTable; ids: string[] };
   ruleId?: string;
   group?: string;
+  /** The line was answered on its own, inside an opened row (2026-10-07): it teaches no rule. */
+  own?: boolean;
 };
 
 const MATCH_TABLES: MatchTable[] = ["payments", "bills", "supplier_payments", "pay_payments", "petty_cash"];
@@ -663,8 +668,11 @@ export async function applyBankCore(
     if (d.how === "match") work.push({ line, sortedBy: "match", choice: null, match: { table: d.table, ids: d.ids } });
     else if (d.how === "rule") work.push({ line, sortedBy: "rule", choice: d.choice, ruleId: d.ruleId });
     else {
-      const c = picks.ok.get(d.group);
-      if (c) work.push({ line, sortedBy: "person", choice: c, group: d.group });
+      // A LINE'S OWN ANSWER FIRST (an opened row, 2026-10-07), then the row's: "the rest are Fuel, this
+      // one goes on the job" is one Apply.
+      const own = picks.ok.get(lineIdOf(line.key));
+      const c = own ?? picks.ok.get(d.group);
+      if (c) work.push({ line, sortedBy: "person", choice: c, group: d.group, own: !!own });
     }
   }
   if (!work.length) return { ok: false, error: "Nothing to apply yet: answer a row first, or press Set Aside." };
@@ -935,7 +943,9 @@ export async function applyBankCore(
   const learned = new Map<string, { direction: "in" | "out"; key: string; c: BankChoice; min: number; max: number; title: string }>();
   const groupsById = new Map(plan.groups.map((g) => [g.id, g]));
   for (const w of work) {
-    if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice) continue;
+    // A LINE ANSWERED ON ITS OWN teaches nothing: a row with two answers has no answer worth
+    // remembering (one trip on a job, the others Fuel), and the whole-row tap keeps teaching as before.
+    if (w.sortedBy !== "person" || !w.group || w.own || !written(w) || !w.choice) continue;
     const g = groupsById.get(w.group);
     if (!g?.learnable || g.merchantKey.length < 2) continue;
     // ONLY AN ANSWER A RULE MAY HOLD, FOR THIS DIRECTION (learnableAnswer): never a job (0375: a rule
@@ -1020,6 +1030,41 @@ export async function applyBankCore(
       problems.push("Your answers weren't remembered for next time, so the next download may ask again.");
     }
   }
+  // 4b. THE MERCHANT'S IDENTITY (2026-10-07): a line matched to a bill by the bill's typed name, where
+  //     the bill sits on a supplier account that does not yet know the store's words, teaches the
+  //     account that spelling - an alias, removable on the supplier's card like any other. Apply is
+  //     the whole prompt: the match proved it. A spelling another account already owns is said, not
+  //     taken. Undo leaves it: it is identity the match proved, not an answer.
+  const identities = new Map<string, { accountId: string; accountName: string; alias: string }>();
+  for (const w of work) {
+    if (w.sortedBy !== "match" || !w.match || !written(w)) continue;
+    const learnt = identityToLearn(w.line, { how: "match", table: w.match.table, ids: w.match.ids, said: "" }, books);
+    if (learnt) identities.set(`${learnt.accountId}|${learnt.alias.toLowerCase()}`, learnt);
+  }
+  const rememberedWho: string[] = [];
+  for (const l of identities.values()) {
+    const spelt = l.alias.toLowerCase();
+    const owner = books.accounts.find((a) => a.name.trim().toLowerCase() === spelt || a.aliases.some((x) => x.trim().toLowerCase() === spelt));
+    if (owner && owner.id !== l.accountId) {
+      problems.push(`"${l.alias}" already names ${owner.name}, so it wasn't remembered for ${l.accountName}.`);
+      continue;
+    }
+    if (owner) continue;
+    const { data, error } = await supabase
+      .from("supplier_aliases")
+      .insert({ org_id: who.orgId, supplier_account_id: l.accountId, alias: l.alias, branch_label: null })
+      .select("id");
+    if (error) {
+      // Two tabs, one spelling: the unique index (supplier_aliases_one_per_spelling) decided, and the
+      // other tab's row stands. Anything else is said.
+      if (!/duplicate key|23505/i.test(`${(error as { code?: string }).code ?? ""} ${error.message ?? ""}`)) {
+        reportError("bills:bank.apply.identity", error, { itemId, accountId: l.accountId });
+        problems.push(`"${l.alias}" wasn't remembered for ${l.accountName}. ${dbError(error)}`);
+      }
+      continue;
+    }
+    if (data?.length) rememberedWho.push(`"${l.alias}" as ${l.accountName}`);
+  }
   // Each rule that sorted a line counts the use (best effort: a count, not money).
   const uses = new Map<string, number>();
   for (const w of work) if (w.ruleId && written(w)) uses.set(w.ruleId, (uses.get(w.ruleId) ?? 0) + 1);
@@ -1032,8 +1077,11 @@ export async function applyBankCore(
 
   // 5. RELEASE THE CLAIM: rows left for later wait on the card again.
   const wrote = work.filter(written);
-  const pickedGroups = new Set(work.filter((w) => w.sortedBy === "person" && written(w)).map((w) => w.group));
-  const leftLines = plan.groups.filter((g) => !pickedGroups.has(g.id)).reduce((n, g) => n + g.keys.length, 0);
+  // COUNTED BY LINE, NOT BY ROW: a row answered on two of its three lines keeps one line waiting,
+  // and that line must hold the card open (a count by row called the row done and filed the card
+  // with the third line never asked).
+  const answeredKeys = new Set(work.filter((w) => w.sortedBy === "person" && written(w)).map((w) => w.line.key));
+  const leftLines = plan.groups.reduce((n, g) => n + g.keys.filter((k) => !answeredKeys.has(k)).length, 0);
   const pass: BankAppliedPass = {
     at: new Date().toISOString(),
     by: who.userId,
@@ -1074,7 +1122,8 @@ export async function applyBankCore(
     (crewMarked ? ` ${crewMarked === 1 ? "1 crew payment was" : `${crewMarked} crew payments were`} already recorded, so ${crewMarked === 1 ? "it was" : "they were"} marked, never written twice.` : "") +
     (paymentsMarked ? ` ${paymentsMarked === 1 ? "1 deposit was" : `${paymentsMarked} deposits were`} already a payment on ${paymentsMarked === 1 ? "its" : "their"} invoice, so ${paymentsMarked === 1 ? "that payment was" : "those payments were"} marked, never written twice.` : "") +
     (leftLines ? ` ${leftLines} left for later ${leftLines === 1 ? "is" : "are"} not counted yet and wait${leftLines === 1 ? "s" : ""} on the card.` : "") +
-    (remembered.length ? ` Remembered for next time: ${remembered.join("; ")}. Forget one under See How It Sorted.` : "");
+    (remembered.length ? ` Remembered for next time: ${remembered.join("; ")}. Forget one under See How It Sorted.` : "") +
+    (rememberedWho.length ? ` Remembered ${rememberedWho.join(", ")} (a spelling on the supplier's card).` : "");
   return problems.length ? { ok: true, message: `${said} But: ${problems.join(" ")}` } : { ok: true, message: said };
 }
 

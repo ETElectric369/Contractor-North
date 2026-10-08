@@ -37,7 +37,7 @@ import { jobCostRefusal } from "@/lib/job-cost-guard";
 import { scopeAfterJobMove, scopeForWrite, type BillScopeAnswer } from "@/lib/bill-scope";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { restampLotsForBill } from "@/lib/stock-ledger";
-import { exactAccountFor, isMissingColumnError, papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
+import { exactSupplierFor, isMissingColumnError, papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 import { CORRECTIONS_NOT_READY, billLabel, correctionOfCorrectionRefusal, planBillCorrection, setAsideOriginalRefusal, toCents } from "@/lib/bill-correction";
 import { normalizeDocNumber, SAME_PURCHASE_DAYS } from "@/lib/same-purchase";
 import { samePurchaseFor } from "@/app/(app)/bills/same-purchase-read";
@@ -1374,7 +1374,10 @@ export async function createBill(input: {
   // by hand, and every cost Nort recorded, minted a fresh unaccounted spelling that the Suppliers
   // card then had to explain away. Best-effort and never a refusal: a miss leaves the column null
   // and read-time resolution still places the paper, this just saves it from having to.
-  const supplierAccountId = await exactAccountFor(supabase, ctx.orgId, input.supplier);
+  // AND THE SPELLING SNAPS TO THE ACCOUNT'S ONE NAME (item D, 2026-10-07): an exact known spelling
+  // is stored as the account spells itself, never as a sixth way of writing CED.
+  const exactSupplier = await exactSupplierFor(supabase, ctx.orgId, input.supplier);
+  const supplierAccountId = exactSupplier.accountId;
 
   // A RETURN WITH NO LINES NEVER GOES ON A JOB (item C2). This door writes a lump with NO lines
   // at all, so a negative typed onto a job is always the INV-078 housings: the importer credits the
@@ -1399,7 +1402,7 @@ export async function createBill(input: {
     .insert({
       job_id: jobId,
       po_id: poId,
-      supplier: input.supplier.trim(),
+      supplier: exactSupplier.name,
       ...(supplierAccountId ? { supplier_account_id: supplierAccountId } : {}),
       bill_number: input.bill_number.trim() || null,
       amount: input.amount || 0,
@@ -1613,7 +1616,13 @@ export async function updateBill(
   const clean: Record<string, unknown> = {};
   if (patch.supplier !== undefined) {
     if (!patch.supplier.trim()) return { ok: false, error: "Supplier is required." };
-    clean.supplier = patch.supplier.trim();
+    // THE NAME DECIDES THE ACCOUNT (item D, 2026-10-07): an exact known spelling snaps to the
+    // account's one name and the bill moves onto that account; a spelling on no account takes
+    // the bill off whatever account the old spelling named. This door never re-resolved before,
+    // so a bill edited from "CED" to "Home Depot" stayed CED's.
+    const exact = await exactSupplierFor(supabase, ctx.orgId, patch.supplier);
+    clean.supplier = exact.name;
+    clean.supplier_account_id = exact.accountId;
   }
   if (patch.bill_number !== undefined) clean.bill_number = patch.bill_number?.trim() || null;
   if (patch.amount !== undefined) clean.amount = patch.amount || 0;
@@ -1662,7 +1671,7 @@ export async function updateBill(
   //
   // THE CHANGE IS WHAT IS HELD TO THE RULE, NOT THE RESTING STATE (item C1-5). Asked of the resting
   // state, this refused EVERY save on a lineless credit already sitting on a job — rows the code
-  // before item C2 was free to create — so marking one Settled At The Counter, or fixing its date,
+  // before item C2 was free to create — so marking one Paid, or fixing its date,
   // or setting its Part Of The Job came back refused, and the Costs tab's Edit Bill box has no Job
   // field with which to take the only way out it was offered. A save that moves neither the job nor
   // the figure cannot put a credit anywhere it is not already, so it goes through.
