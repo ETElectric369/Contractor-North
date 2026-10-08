@@ -889,11 +889,13 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         await c.query(
           `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
             where n.nspname = 'public'
-              and p.proname ilike '%alloc%'`,
+              and (p.proname ilike '%' || $1 || '%' or p.proname ilike '%legacy_alloc%')`,
+          [["time", "alloc"].join("_")],
         )
       ).rows.map((r) => r.proname);
       // guard_time_allocation, guard_billed_time_allocation, refuse_time_allocation_insert, the frozen
-      // replace RPC and carve_legacy_allocations: nothing else in public was ever named for them.
+      // replace RPC and carve_legacy_allocations: every function that served the old table carried its
+      // name. Supplier payment allocations (0383) are a different thing and keep their own functions.
       expect(served).toEqual([]);
       expect((await one("select to_regclass($1) is not null as kept", [`archive.${oldTable}`])).kept).toBe(true);
     });
