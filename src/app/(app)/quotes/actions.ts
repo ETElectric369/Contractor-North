@@ -1110,12 +1110,15 @@ export async function duplicateQuote(
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
 
-  const { data: items } = await supabase
+  const { data: items, error: itemsErr } = await supabase
     .from("quote_line_items")
     // detail (0386): a copied task line keeps the hours and parts behind it.
     .select("description, quantity, unit, unit_price, category, detail")
     .eq("quote_id", id)
     .order("sort_order");
+  // A read that failed must not become a copy with no lines and a green tick (projection law:
+  // the failure is always a select list, and it used to be swallowed right here).
+  if (itemsErr) return { ok: false, error: dbError(itemsErr) };
 
   const res = await saveQuote({
     customer_id: quote.customer_id ?? null,

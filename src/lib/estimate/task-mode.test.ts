@@ -32,7 +32,8 @@ describe("taskModePrompt", () => {
     expect(prompt).toContain("copied VERBATIM");
     expect(prompt).toContain("A time he gave for the whole job is nobody's task's hours: null");
     expect(prompt).toContain("Days are never converted to hours: null");
-    expect(prompt).toContain("a part he named without a number is 1");
+    expect(prompt).toContain('("a", "an" or "one" in front of it is 1); no count said: null');
+    expect(prompt).toContain("A fragment is ONE line of his scope, never several");
     expect(prompt).toContain("NEVER: a price, a catalog code, a labor rate, a part he did not name, a task he did not describe");
   });
 

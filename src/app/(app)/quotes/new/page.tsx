@@ -15,7 +15,7 @@ import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
 import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
-import { coerceTaskDetail, taskLines, type TaskBookRow } from "@/lib/estimate/task-lines";
+import { coerceTaskDetail, taskFlags, taskLines, type TaskBookRow } from "@/lib/estimate/task-lines";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -83,7 +83,12 @@ export default async function NewQuotePage({
         items: (ex.quote_line_items ?? [])
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
           // detail (0386): the task behind a line rides the adoption, or the first autosave drops it.
-          .map((li) => ({ description: li.description, quantity: li.quantity, unit: li.unit, unit_price: li.unit_price, group: li.category ?? undefined, detail: coerceTaskDetail(li.detail) })),
+          .map((li) => {
+            const d = coerceTaskDetail(li.detail);
+            // The flag is build-time only, so it is rebuilt from the breakdown: an adopted "hours?" line
+            // still says so instead of reading as a $0 somebody chose.
+            return { description: li.description, quantity: li.quantity, unit: li.unit, unit_price: li.unit_price, group: li.category ?? undefined, detail: d, ...(d ? { flag: taskFlags(d) } : {}) };
+          }),
       };
     }
   }

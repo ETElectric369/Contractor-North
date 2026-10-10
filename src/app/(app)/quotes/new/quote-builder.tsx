@@ -20,6 +20,7 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { detailExplains, lineFromDetail, repriceTaskLine, taskMoney } from "@/lib/estimate/task-lines";
+import { sameTask } from "@/lib/playbook/tasks";
 import type { TaskDetail, TaskDetailMaterial } from "@/lib/estimate/line-map";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
@@ -222,8 +223,9 @@ function LineDescInput({
  * company's cost and the sell at THIS customer's markup (priceBookLine) — the one price. A part in
  * his own words stays at "price?" until he picks it from the book or types what it sells for.
  *
- * A part he adds and leaves nameless is dropped when he leaves the box: it was never a part, and
- * coerceTaskDetail would drop it on the next read anyway — better here, where he can see it go.
+ * A part he adds and leaves nameless prices nothing and flags nothing (taskMoney/taskFlags skip it)
+ * and is dropped by the save (coerceTaskDetail); it stays on screen until he names it or removes it,
+ * so tapping into its count box never deletes the row under his finger.
  *
  * Lines without a breakdown never render this; nothing changes for them.
  */
@@ -274,9 +276,6 @@ function TaskBreakdown({
                 // in front — the customer may read this part under the task.
                 const choice = priceBookLine(pi, pricing);
                 setPart(i, { code: pi.code, name: describeChoice(pi.description, pi, choice), cost: choice.buyPrice, sell: choice.unitPrice });
-              }}
-              onBlur={() => {
-                if (!m.name.trim()) dropPart(i);
               }}
               priceItems={priceItems}
               pricing={pricing}
@@ -719,14 +718,21 @@ export function QuoteBuilder({
   // at all, which is what keeps a line he typed during the thirty seconds the model was thinking.
   // A second generate replaces the proposals rather than stacking a duplicate set on the estimate.
   function applyDraft(res: { items: DraftLineItem[]; questions: string[]; description?: string }) {
-    setQuestions(res.questions ?? []);
-    setProposed(
-      res.items
-        // A line with no description cannot be read, priced or corrected, and saveQuote drops it
-        // silently at save — so it would leave as a number in the subtotal and arrive as nothing.
-        .filter((i) => i.description.trim())
-        .map((i, n) => ({ ...i, pid: n, keep: true })),
-    );
+    // A TASK ALREADY ON THE ESTIMATE IS NOT PROPOSED AGAIN. An inspection's tasks arrive twice: as
+    // lines (the seed) and as words in the scope box; a generate on that scope would offer the same
+    // tasks back and a tap would double them. Dropped here, and SAID in the questions list.
+    const already: string[] = [];
+    const fresh = res.items
+      // A line with no description cannot be read, priced or corrected, and saveQuote drops it
+      // silently at save — so it would leave as a number in the subtotal and arrive as nothing.
+      .filter((i) => i.description.trim())
+      .filter((i) => {
+        const dup = !!i.detail && items.some((it) => it.detail && it.description.trim() && sameTask(it.description, i.description));
+        if (dup) already.push(i.description);
+        return !dup;
+      });
+    setQuestions([...(res.questions ?? []), ...already.map((n) => `Already on the estimate: ${n}`)]);
+    setProposed(fresh.map((i, n) => ({ ...i, pid: n, keep: true })));
     // THE SCOPE, POLISHED — as a DEFAULT, which means it fills a hole and never overwrites a hand.
     // Erik: "the description is the scope polished / by default and editable." If he has already
     // written the paragraph he wants the customer to read, a generate must not take it away from
@@ -984,9 +990,12 @@ export function QuoteBuilder({
   const rateSeen = useRef(rate);
   useEffect(() => {
     if (rateSeen.current === rate) return;
+    const prevRate = rateSeen.current;
     rateSeen.current = rate;
     const prev = itemsRef.current;
-    const next = prev.map((l) => (l.detail && l.detail.rate !== rate && detailExplains(l.detail, l) ? repriceTaskLine(l, rate) : l));
+    // Only a line priced at the rate that just changed follows the new one. A line built at a rate
+    // he DICTATED in the scope, or priced by hand, keeps its own (never overwrite a hand).
+    const next = prev.map((l) => (l.detail && l.detail.rate === prevRate && detailExplains(l.detail, l) ? repriceTaskLine(l, rate) : l));
     if (next.some((l, i) => l !== prev[i])) {
       dirtyRef.current = true;
       setItems(next);
@@ -1050,7 +1059,7 @@ export function QuoteBuilder({
             {/* THE SENTENCE MATCHES THE DOOR (onboarding-truth-law). In task mode nothing is priced for
                 him: the model splits his words into tasks, his hours and parts price them, a hole asks. */}
             <p className="text-xs text-slate-500">
-              {estimatorTaskMode
+              {estimatorTaskMode && !plansForLead.length
                 ? "Splits your scope into tasks, one line each, with the hours and parts you wrote. Nothing is priced for you: a task without hours asks for them."
                 : "Priced from your price book (your net cost + markup). Items not in the book come in at a Home Depot estimate, flagged to confirm."}
             </p>

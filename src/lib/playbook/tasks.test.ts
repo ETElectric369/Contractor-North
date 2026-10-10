@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { coerceByPlaybook, answerText, factsForEstimator, retiredAnswers } from "./answers";
 import { applyHeard, hearRequest, parseHeard } from "./hear";
 import { parsePlaybook } from "./parse";
-import { applyFills, hoursIn, isAnswered, numbersIn } from "./resolve";
+import { applyFills, countsIn, hoursIn, isAnswered, numbersIn } from "./resolve";
 import { coerceTasks, mergeHeardTasks, saidIn, sameTask, screenHeardTask, taskAsking, taskLine, taskText } from "./tasks";
 import type { Fill, Playbook, TaskValue } from "./types";
 
@@ -130,10 +130,54 @@ describe("hoursIn: a figure counts as hours only when he said it as hours", () =
     expect(hoursIn("60 feet of 6/3")).toEqual([]);
     expect(numbersIn("Whole thing is 4 full days")).toEqual([4]);
   });
+
+  it("the sentence's full stop is not part of the word, and minutes are hours too", () => {
+    expect(hoursIn("Install the breaker, 3 hours.")).toEqual([3]);
+    expect(hoursIn("3 hrs.")).toEqual([3]);
+    expect(hoursIn("1.5 hours.")).toEqual([1.5]);
+    expect(hoursIn("an hour.")).toEqual([1]);
+    expect(hoursIn("30 mins on that")).toEqual([0.5]);
+    expect(hoursIn("45 minutes")).toEqual([0.75]);
+  });
+
+  it("a rate, a pace, a rating and a fraction are NOT a task's hours", () => {
+    expect(hoursIn("$85/hr")).toEqual([]);
+    expect(hoursIn("200 per hour")).toEqual([]);
+    expect(hoursIn("4 days at 8 hours a day")).toEqual([]);
+    expect(hoursIn("a 2 hour rated wall")).toEqual([]);
+    expect(hoursIn("3/4 hour")).toEqual([]);
+    expect(hoursIn("2 hours per unit")).toEqual([]);
+  });
+});
+
+describe("countsIn: a count is a number he did not say as hours or money", () => {
+  it("keeps the counts and drops the hours figure", () => {
+    expect(countsIn("2 fans, 2 hours")).toEqual([2]);
+    expect(countsIn("Replace the outlet in the hall, 3 hours total")).toEqual([]);
+    expect(countsIn("60 feet of 6/3 and a 50 amp breaker")).toEqual([60, 6, 3, 50]);
+    expect(countsIn("two and a half hours for four fans")).toEqual([4]);
+    expect(countsIn("call it 3 hours. $85/hr")).toEqual([]);
+  });
 });
 
 describe("screenHeardTask: the model only structures", () => {
-  const said = (heard: string) => ({ hours: hoursIn(heard), counts: numbersIn(heard) });
+  const said = (heard: string) => ({ hours: hoursIn(heard), counts: countsIn(heard) });
+
+  it("one of a part is said by its article; a part named without a count asks, and the hours figure is never a count", () => {
+    const article = "Install a transfer switch and an outlet below the panel, 3 hours";
+    const [t] = coerceTasks([{ name: "Install transfer switch and outlet", hours: 3, materials: [{ words: "transfer switch", qty: 1 }, { words: "outlet", qty: 1 }] }])!;
+    expect(screenHeardTask(t, article, said(article)).task!.materials.map((m) => m.qty)).toEqual([1, 1]);
+    const bare = "Install receptacles in the kitchen, 2 hours";
+    const [u] = coerceTasks([{ name: "Install receptacles in the kitchen", hours: 2, materials: [{ words: "receptacles", qty: 1 }] }])!;
+    const r = screenHeardTask(u, bare, said(bare));
+    expect(r.task!.materials).toEqual([{ code: null, words: "receptacles", qty: null }]);
+    expect(r.dropped).toEqual(["Install receptacles in the kitchen: receptacles ×1 — the count was not said"]);
+    const hoursAsCount = "Replace the outlet in the hall, 3 hours total";
+    const [v] = coerceTasks([{ name: "Replace the outlet in the hall", hours: 3, materials: [{ words: "outlet", qty: 3 }] }])!;
+    const q = screenHeardTask(v, hoursAsCount, said(hoursAsCount));
+    expect(q.task!.hours).toBe(3);
+    expect(q.task!.materials[0].qty).toBeNull();
+  });
 
   it("keeps a task he named, with the hours he said AS hours, and strips what is not his", () => {
     const heard = "Generator plug needs a manual transfer switch, call it 3 hours";

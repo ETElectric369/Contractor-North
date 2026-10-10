@@ -93,10 +93,29 @@ export function coerceTaskDetail(raw: unknown): TaskDetail | null {
   };
 }
 
+/** A part the builder added and nobody named yet is not a part: it prices nothing and asks nothing
+ *  (coerceTaskDetail drops it on save, so what the screen sums is what the row will hold). */
+const named = (m: TaskDetailMaterial): boolean => m.name.trim().length > 0;
+
+/**
+ * THE SAME NUMBERS THE SAVE WILL KEEP. coerceTaskDetail rounds to cents on the way back in; if the
+ * builder priced raw "1.333" hours the reloaded breakdown would no longer explain the line and the
+ * paper would drop it as "set by hand". So every edit is rounded here first, the one way.
+ */
+export function normalizeTaskDetail(d: TaskDetail): TaskDetail {
+  return {
+    ...d,
+    hours: positive(d.hours),
+    rate: nonNegative(d.rate) ?? 0,
+    units: positive(d.units),
+    materials: d.materials.map((m) => ({ ...m, qty: positive(m.qty), cost: nonNegative(m.cost), sell: nonNegative(m.sell) })),
+  };
+}
+
 /** The arithmetic behind a task line, in cents: labor = hours × rate, parts = Σ qty × sell. */
 export function taskMoney(d: TaskDetail): { labor: number; parts: number; total: number } {
   const labor = d.hours === null ? 0 : round2(d.hours * d.rate);
-  const parts = round2(d.materials.reduce((t, m) => t + (m.qty ?? 0) * (m.sell ?? 0), 0));
+  const parts = round2(d.materials.filter(named).reduce((t, m) => t + (m.qty ?? 0) * (m.sell ?? 0), 0));
   return { labor, parts, total: round2(labor + parts) };
 }
 
@@ -108,9 +127,11 @@ export function taskFlags(d: TaskDetail): string | undefined {
   const flags: string[] = [];
   if (d.hours === null) flags.push("hours?");
   else if (d.rate <= 0) flags.push("no company labor rate set");
-  for (const m of d.materials) {
+  for (const m of d.materials.filter(named)) {
     if (m.qty === null) flags.push(`how many? ${m.name}`);
-    if (m.sell === null) flags.push(m.code ? `not in the price book: ${m.code}` : `price? ${m.name}`);
+    // A coded part the book priced at $0 has a cost (0) and asks for a price; a code the book does
+    // not carry has no cost at all and says so.
+    if (m.sell === null) flags.push(m.code && m.cost === null ? `not in the price book: ${m.code}` : `price? ${m.name}`);
   }
   return flags.length ? flags.join(" · ") : undefined;
 }
@@ -163,7 +184,8 @@ export function expandTaskKit(task: TaskValue, kit: TaskKit, pricing: KitPricing
       name,
       qty: kitQty(each * units, it),
       cost: view.cost,
-      sell: round2(view.unit_price),
+      // A $0 kit line is not a price, it is a line nobody priced: it asks ("price?").
+      sell: view.unit_price > 0 ? round2(view.unit_price) : null,
     });
   }
   return { hours, materials };
@@ -184,7 +206,8 @@ function materialDetail(m: TaskMaterial, ctx: TaskLineContext): TaskDetailMateri
       name: describeChoice(item.description, item, choice).trim() || m.words || row.code,
       qty: m.qty,
       cost: round2(choice.buyPrice),
-      sell: round2(choice.unitPrice),
+      // A book code at $0 (an allowance nobody has filled in) is not a price: the part asks.
+      sell: choice.unitPrice > 0 ? round2(choice.unitPrice) : null,
     };
   }
   // His words, or a code the book does not carry: named, counted if he counted it, unpriced.
@@ -207,7 +230,8 @@ export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDeta
 
 /** The line a breakdown prices to: the customer's numbers follow the arithmetic, the flag says what
  *  is still asking. The builder calls this after every edit to the hours or a count. */
-export function lineFromDetail(line: DraftLineItem, d: TaskDetail): DraftLineItem {
+export function lineFromDetail(line: DraftLineItem, raw: TaskDetail): DraftLineItem {
+  const d = normalizeTaskDetail(raw);
   return { ...line, unit_price: taskMoney(d).total, flag: taskFlags(d), detail: d };
 }
 

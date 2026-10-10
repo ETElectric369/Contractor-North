@@ -227,4 +227,23 @@ describe("the breakdown, read back and kept honest", () => {
     const plain = { description: "Permit", quantity: 1, unit: "ea", unit_price: 250 };
     expect(repriceTaskLine(plain, 125)).toBe(plain);
   });
+
+  it("a book code at $0 and a $0 kit line are not prices: the part asks", () => {
+    const [line] = taskLines([task({ hours: null, materials: [{ code: "ALLOW", words: null, qty: 1 }] })], ctx({ book: book({ code: "ALLOW", description: "Fixture allowance", unit: "ea", buy_price: 0, markup_pct: 0 }) }));
+    expect(line.unit_price).toBe(0);
+    expect(line.detail?.materials[0].sell).toBeNull();
+    expect(line.flag).toBe("hours? · price? Fixture allowance");
+    const out = expandTaskKit(task({ units: 2 }), { id: "k", name: "K", labor_minutes: null, unit: null, items: [{ description: "Unpriced thing", quantity: 1, unit: "ea", unit_price: 0 }] }, { orgDefaultPct: 0 });
+    expect(out.materials[0].sell).toBeNull();
+  });
+
+  it("what the builder prices is what the save keeps: hours round the one way, a nameless part counts for nothing", () => {
+    const typed = lineFromDetail({ description: "Fan", quantity: 1, unit: "ea", unit_price: 0 }, { ...stored, hours: 1.333, materials: [{ code: null, name: "", qty: 2, cost: null, sell: 50 }] });
+    expect(typed.detail?.hours).toBe(1.33);
+    expect(typed.unit_price).toBe(192.85); // 1.33 × $145; the nameless part prices nothing
+    expect(typed.flag).toBeUndefined(); // and asks nothing
+    const back = coerceTaskDetail(JSON.parse(JSON.stringify(typed.detail)))!;
+    expect(back.materials).toEqual([]);
+    expect(detailExplains(back, typed)).toBe(true);
+  });
 });

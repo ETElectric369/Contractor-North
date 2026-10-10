@@ -128,6 +128,18 @@ export function saidIn(words: string, heard: string, share = 1): boolean {
   return hit >= Math.ceil(want.length * share);
 }
 
+/**
+ * "A 50 amp breaker", "an outlet", "one transfer switch": ONE of a part is said by the article in
+ * front of it (up to three words may sit between, "a manual transfer switch"). Without the article
+ * — "install receptacles in the kitchen" — no count was said, and the part asks "how many?".
+ */
+export function saidOne(words: string, heard: string): boolean {
+  const first = contentWords(words)[0];
+  if (!first) return false;
+  const re = new RegExp(`\\b(a|an|one|1)\\s+(?:[a-z0-9/]+\\s+){0,3}${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  return re.test(heard.toLowerCase().replace(/[^a-z0-9/\s]/g, " "));
+}
+
 /** One material as a person reads it: "14/2 romex ×100", "R142 ×2", "a box". */
 export function materialText(m: TaskMaterial): string {
   const name = m.words || m.code || "";
@@ -191,7 +203,7 @@ export function mergeHeardTasks(
 export interface HeardNumbers {
   /** The figures he said AS HOURS — "3 hours", "an hour and a half". "4 days" is not among them. */
   hours: readonly number[];
-  /** Every number in the fragment, for counts. */
+  /** The numbers said as COUNTS (resolve.countsIn): not the hours figure, not money. */
   counts: readonly number[];
 }
 
@@ -204,8 +216,9 @@ export interface HeardNumbers {
  *   · `hours` must be a figure he said AS HOURS. "Whole thing is 4 full days" and "4 receptacles"
  *     both contain a 4 and neither is 4 hours; a day is not converted (that is arithmetic, and
  *     somebody else's). Otherwise null: the task stays and ASKS;
- *   · a part's `qty` must be a number in the fragment, or 1 — one of a part is said by naming it
- *     ("a 50 amp breaker"), and the digit never appears in those words;
+ *   · a part's `qty` must be a COUNT in the fragment (countsIn: not the hours figure, not money),
+ *     or 1 when the article says so ("a 50 amp breaker", "one switch") — "install receptacles" names
+ *     a part and no count, so it asks "how many?";
  *   · `units`, `kit_id`, a material `code` and the `id` are never the model's: wiped. The kit and
  *     the book are his to pick; an id the model invents could shadow a task he typed.
  *
@@ -223,7 +236,8 @@ export function screenHeardTask(t: TaskValue, heard: string, said: HeardNumbers)
       dropped.push(`${t.name}: a part he did not name: ${name}`);
       continue;
     }
-    const qty = m.qty === null || m.qty === 1 || said.counts.includes(m.qty) ? m.qty : (dropped.push(`${t.name}: ${materialText(m)} — the count was not said`), null);
+    const counted = m.qty === null || said.counts.includes(m.qty) || (m.qty === 1 && saidOne(name, heard));
+    const qty = counted ? m.qty : (dropped.push(`${t.name}: ${materialText(m)} — the count was not said`), null);
     materials.push({ code: null, words: name, qty });
   }
   return { task: { id: captureId(), name: t.name, hours, units: null, kit_id: null, materials }, dropped };

@@ -195,21 +195,50 @@ export function numbersIn(text: string): number[] {
 }
 
 /**
- * THE FIGURES HE SAID AS HOURS — and only those. "3 hours", "3 hrs", "an hour", "half an hour",
- * "an hour and a half", "two and a half hours", "1.5h". A bare number is not hours; "4 days" is
- * not hours (and is not converted — that is arithmetic). This is what lets a task's hours be
- * traced to his words without a "4" from "4 receptacles" or "4 full days" sliding in.
+ * RATE TALK AND FRACTIONS that look like hours and are not: "$85/hr", "200 per hour", "3/4 hour", and
+ * any money figure. Scrubbed before either tracer looks, so a rate he typed never becomes a task's
+ * hours or a part's count (statedLaborRate reads rates on its own).
+ */
+const NOT_HOURS: RegExp[] = [
+  /\$\s*[\d.,]+\s*(?:\/|per)?\s*(?:hours?|hrs?|h)?\b/gi,
+  /[\d.]+\s*(?:\/|per)\s*(?:hours?|hrs?|h)\b/gi,
+  /\d+\/\d+\s*(?:hours?|hrs?|h)\b/gi,
+];
+const scrubNotHours = (text: string): string => NOT_HOURS.reduce((acc, re) => acc.replace(re, " "), text);
+
+/**
+ * THE FIGURES HE SAID AS HOURS — and only those. "3 hours", "3 hrs", "3 hours.", "an hour", "half an
+ * hour", "an hour and a half", "two and a half hours", "1.5h", "30 mins" (= 0.5). A bare number is
+ * not hours; "4 days" is not hours (and is not converted — that is arithmetic); "8 hours a day" is a
+ * pace, not a task's time; "$85/hr" and "200 per hour" are rates; "a 2 hour rated wall" is a wall.
+ * This is what lets a task's hours be traced to his words without a "4" from "4 receptacles" or
+ * "4 full days" sliding in.
  */
 export function hoursIn(text: string): number[] {
   const out: number[] = [];
-  const toks = text
+  const toks = scrubNotHours(text)
     .toLowerCase()
     .replace(/(\d)h\b/g, "$1 h")
     .split(/[^a-z0-9.]+/)
+    // "3 hours." — the sentence's full stop is not part of the word.
+    .map((t) => t.replace(/\.+$/, ""))
     .filter(Boolean);
   const isHour = (t: string | undefined) => !!t && /^(hours?|hrs?|h)$/.test(t);
+  const isMinute = (t: string | undefined) => !!t && /^(minutes?|mins?|min)$/.test(t);
+  // "8 hours a day", "2 hours per unit", "2 hour rated": a pace or a rating, not his time on a task.
+  const paced = (i: number) => {
+    const a = toks[i + 1];
+    const b = toks[i + 2];
+    return a === "per" || a === "each" || a === "every" || a === "daily" || a === "rated" || (a === "a" && (b === "day" || b === "week" || b === "shift" || b === "unit"));
+  };
   for (let i = 0; i < toks.length; i++) {
-    if (!isHour(toks[i])) continue;
+    if (isMinute(toks[i])) {
+      if (paced(i)) continue;
+      const nums = numbersIn(toks[i - 1] ?? "");
+      if (nums.length) out.push(Math.round((nums[0] / 60) * 100) / 100);
+      continue;
+    }
+    if (!isHour(toks[i]) || paced(i)) continue;
     // "… hour and a half" — the half rides on the number before the hour word.
     const halfAfter = toks[i + 1] === "and" && toks[i + 2] === "a" && toks[i + 3] === "half";
     let j = i - 1;
@@ -233,6 +262,20 @@ export function hoursIn(text: string): number[] {
     if (nums.length) out.push(nums[nums.length - 1] + (half ? 0.5 : 0));
   }
   return out;
+}
+
+/**
+ * THE NUMBERS HE SAID AS COUNTS: every number in the words, minus the ones said as hours or minutes
+ * and minus any money. "2 fans, 2 hours" → [2] (the fans); "replace the outlet in the hall, 3 hours
+ * total" → [] (the 3 was his time, not a count of outlets). The skeptic's probe: a part's count
+ * must never be the task's hours figure wearing a different hat.
+ */
+export function countsIn(text: string): number[] {
+  const cleaned = scrubNotHours(text)
+    .toLowerCase()
+    .replace(/(\d)h\b/g, "$1 h")
+    .replace(/\b([a-z]+|\d+(?:\.\d+)?)(\s+and\s+a\s+half)?\s*(hours?|hrs?|h|minutes?|mins?|min)\b\.?/g, " ");
+  return numbersIn(cleaned);
 }
 
 /**
@@ -298,7 +341,7 @@ export function applyFills(
         if (f.heard) unplaced.push(f.heard);
         continue;
       }
-      const said = { hours: hoursIn(f.heard), counts: numbersIn(f.heard) };
+      const said = { hours: hoursIn(f.heard), counts: countsIn(f.heard) };
       const screened = heard.map((t) => screenHeardTask(t, f.heard!, said));
       const dropped = screened.some((s) => s.dropped.length);
       const kept = screened.map((s) => s.task).filter((t): t is NonNullable<typeof t> => !!t);

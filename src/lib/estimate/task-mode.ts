@@ -53,6 +53,10 @@ export function taskModePrompt({ trade, playbook }: TaskModePromptInput): string
     // THE FRAGMENT IS THE EVIDENCE. Code folds case and spacing and checks that `heard` is a
     // substring of the scope; a paraphrase fails the check and the whole task is dropped.
     '"heard" = the exact fragment of the scope that task came from, copied VERBATIM, punctuation and all — it is checked by code, and a task whose fragment is not in the scope is thrown away. ' +
+    // ONE LINE, ONE TASK'S EVIDENCE. A fragment spanning several lines would let any figure in the
+    // scope attach to any task, and two tasks sharing one fragment would both take its hours; the
+    // gate refuses both, so the prompt says so.
+    'A fragment is ONE line of his scope, never several, and two tasks never share a fragment: if he gave one time for two pieces of work, neither has hours. ' +
     // HOURS ARE HIS NUMBER OR NOTHING. A whole-job time is nobody's task's hours; a day is not
     // converted (that is arithmetic, and somebody else's). Null is the honest answer and the app
     // asks "hours?" on that line.
@@ -60,7 +64,7 @@ export function taskModePrompt({ trade, playbook }: TaskModePromptInput): string
     "A time he gave for the whole job is nobody's task's hours: null. Days are never converted to hours: null. No hours said: null. " +
     // PARTS HE NAMED, COUNTED AS HE COUNTED. Naming a part is one of it; a count he did not say
     // is null, never a typical quantity.
-    '"materials" = ONLY the parts he named in that fragment, in his words ("50 amp breaker", "6/3"). "qty" = the count he gave for it in that fragment; a part he named without a number is 1; never a quantity you worked out. ' +
+    '"materials" = ONLY the parts he named in that fragment, in his words ("50 amp breaker", "6/3"). "qty" = the count he gave for it in that fragment ("a", "an" or "one" in front of it is 1); no count said: null; never a quantity you worked out. ' +
     "NEVER: a price, a catalog code, a labor rate, a part he did not name, a task he did not describe, a typical figure for anything. A hole in his words is a hole in the answer, not a guess. " +
     // THE SCOPE, POLISHED — the same rule the priced-lines prompt carries (quotes/actions.ts).
     '"description" = HIS OWN SCOPE, rewritten as 2-5 sentences a homeowner reads above the line items. Plain, calm, specific about rooms and what gets done. ' +
