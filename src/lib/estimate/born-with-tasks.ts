@@ -3,6 +3,7 @@ import type { CaptureItem } from "@/lib/inspection/capture";
 import type { Answers, Playbook } from "@/lib/playbook/types";
 import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
+import { dbError } from "@/lib/db-error";
 import { coerceTaskDetail } from "./task-lines";
 
 /**
@@ -151,7 +152,9 @@ export function tasksAnswered(pb: Playbook, answers: Record<string, unknown>): T
 }
 
 /** A visit task's parts as rows for the job's list, through the same door the typed take-off uses
- *  (addCaptureItemsToJobList): a part without a count rides as "I need this, I haven't counted it". */
+ *  (addCaptureItemsToJobList): a part without a count rides as quantity null — "I need this, I
+ *  haven't counted it" — and that door writes it as one that SAYS "how many?". Nothing has priced a
+ *  visit's part yet, so it lands by its code and words, unit "ea", no vendor, no cost. */
 export function partsAsCaptureItems(parts: ReadonlyArray<BornPart>): CaptureItem[] {
   return parts.map((p, i) => ({ id: `${p.source_key}:${i}`, description: p.name, quantity: p.qty, unit: "ea", code: p.code }));
 }
@@ -177,16 +180,19 @@ export interface BornResult {
  * fills planned_minutes only where the job has none. Returns what it did; never throws for a
  * database answer (the job is already made — the door says what could not be listed).
  */
+/** The keys the job already has (its born tasks). */
+async function keysOnJob(sb: SupabaseClient, jobId: string): Promise<{ keys: Set<string | null>; error?: string }> {
+  const { data, error } = await sb.from("tasks").select("source_key").eq("job_id", jobId).not("source_key", "is", null);
+  if (error) return { keys: new Set(), error: dbError(error) };
+  return { keys: new Set(((data ?? []) as Array<{ source_key: string | null }>).map((r) => r.source_key)) };
+}
+
 export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth): Promise<BornResult> {
   let inserted = 0;
   if (birth.tasks.length) {
-    const { data: have, error: haveErr } = await sb
-      .from("tasks")
-      .select("source_key")
-      .eq("job_id", who.jobId)
-      .not("source_key", "is", null);
-    if (haveErr) return { inserted: 0, plannedSet: false, error: haveErr.message };
-    const seen = new Set(((have ?? []) as Array<{ source_key: string | null }>).map((r) => r.source_key));
+    const have = await keysOnJob(sb, who.jobId);
+    if (have.error) return { inserted: 0, plannedSet: false, error: have.error };
+    const seen = have.keys;
     const rows = birth.tasks
       .filter((t) => !seen.has(t.source_key))
       .map((t) => ({
@@ -201,10 +207,19 @@ export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth):
       }));
     if (rows.length) {
       const { data, error } = await sb.from("tasks").insert(rows).select("id");
-      if (error) return { inserted: 0, plannedSet: false, error: error.message };
-      inserted = data?.length ?? 0;
-      if (inserted !== rows.length) {
-        return { inserted, plannedSet: false, error: `${rows.length - inserted} of ${rows.length} tasks did not save.` };
+      if (error) {
+        // TWO DOORS IN THE SAME SECOND (the customer's Accept and the office's): the loser's insert
+        // hits tasks_job_source_key_uq (23505). The winner's rows ARE the birth, so re-read and, when
+        // every key is now on the job, this call did its work by doing nothing. Any other refusal is said.
+        const raced = (error as { code?: string }).code === "23505" && (await keysOnJob(sb, who.jobId)).keys;
+        if (!raced || !birth.tasks.every((t) => raced.has(t.source_key))) {
+          return { inserted: 0, plannedSet: false, error: dbError(error) };
+        }
+      } else {
+        inserted = data?.length ?? 0;
+        if (inserted !== rows.length) {
+          return { inserted, plannedSet: false, error: `${rows.length - inserted} of ${rows.length} tasks did not save.` };
+        }
       }
     }
   }
@@ -213,7 +228,7 @@ export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth):
     let q = sb.from("jobs").update({ planned_minutes: birth.plannedMinutes }).eq("id", who.jobId).is("planned_minutes", null);
     if (who.orgId) q = q.eq("org_id", who.orgId);
     const { data, error } = await q.select("id");
-    if (error) return { inserted, plannedSet: false, error: error.message };
+    if (error) return { inserted, plannedSet: false, error: dbError(error) };
     plannedSet = (data?.length ?? 0) > 0; // zero rows = the job already had a size: his box wins
   }
   return { inserted, plannedSet };
@@ -227,7 +242,7 @@ export async function bornWithTasks(
   let q = sb.from("quote_line_items").select("id, description, sort_order, detail").eq("quote_id", who.quoteId);
   if (who.orgId) q = q.eq("org_id", who.orgId);
   const { data, error } = await q.order("sort_order");
-  if (error) return { inserted: 0, plannedSet: false, error: error.message, birth: EMPTY_BIRTH };
+  if (error) return { inserted: 0, plannedSet: false, error: dbError(error), birth: EMPTY_BIRTH };
   const birth = tasksFromLines((data ?? []) as LineRow[]);
   const res = await bornTasks(sb, who, birth);
   return { ...res, birth };

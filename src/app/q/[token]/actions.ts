@@ -46,17 +46,30 @@ export async function notifyQuoteAccepted(token: string): Promise<void> {
   }
 }
 
+/** How long after the customer's tap the finishing call is honoured. Wider than the ping's two
+ *  minutes (the birth is heavier and a slow phone must not lose it), narrow enough that the link
+ *  cannot be used weeks later to re-make a work order or a list the office has since removed. */
+export const FINISH_WINDOW_MS = 10 * 60_000;
+
 /**
  * FINISH WHAT THE CUSTOMER'S ACCEPT STARTED (W3, cn-v1075). accept_public_quote (SQL, 0369) makes
  * the job and nothing else, while the office's accept (createJobFromQuote) also births the job's
  * tasks, its work order and its materials take-off. Two doors, one thing: this runs the same three
  * rules behind the public door, with the service client and the company's own id, so a job is the
- * same job whichever door it came through.
+ * same job whichever door it came through — and THEN rings the office (notifyQuoteAccepted), in one
+ * server call, so the push's link opens a job that already has its list and nothing waits on the
+ * customer's tab staying open.
  *
- * SAFE TO CALL BY ANYONE WHO HOLDS THE LINK: it reads the quote by its unguessable token, does
- * nothing unless the quote is accepted and already has its job, and every piece is idempotent by
- * key (tasks by source_key, one work order and one list per quote) — a replay births nothing twice.
- * Best-effort and never silent: a piece that fails is reported to the ops sink; the job stands.
+ * WHAT HOLDING THE LINK LETS YOU DO: nothing but this, once, soon. It reads the quote by its
+ * unguessable token, does nothing unless the quote is accepted, has its job and was accepted within
+ * FINISH_WINDOW_MS, and every piece is idempotent by key (tasks by source_key, one work order and
+ * one list per quote). The window is what bounds a replay: without it the link could re-make a
+ * work order or a list the office had deleted, months later. (The skeptic's note stands: nothing
+ * but tasks_job_source_key_uq is a database-level guard, so two calls in the same instant could
+ * still make two work orders — the same race the office door has today.)
+ *
+ * Best-effort and never silent: a piece that fails is reported to the ops sink; the job stands and
+ * the office is rung regardless.
  */
 export async function finishPublicAcceptance(token: string): Promise<void> {
   try {
@@ -64,22 +77,26 @@ export async function finishPublicAcceptance(token: string): Promise<void> {
     const sb = createServiceClient();
     const { data: q } = await sb
       .from("quotes")
-      .select("id, status, org_id, job_id, created_by")
+      .select("id, status, org_id, job_id, created_by, accepted_at")
       .eq("public_token", token)
       .maybeSingle();
     if (!q || q.status !== "accepted" || !q.org_id || !q.job_id) return;
+    if (!q.accepted_at || Date.now() - new Date(q.accepted_at).getTime() > FINISH_WINDOW_MS) return;
     const who = { orgId: q.org_id as string, userId: (q.created_by as string | null) ?? null };
     const jobId = q.job_id as string;
     const born = await bornWithTasks(sb, { jobId, quoteId: q.id, orgId: who.orgId, createdBy: who.userId });
     if (born.error) reportError("finishPublicAcceptance:tasks", new Error(born.error), { quoteId: q.id, jobId });
-    const wo = await workOrderFromQuote(sb, { quoteId: q.id, ...who });
+    const wo = await workOrderFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!wo.ok) reportError("finishPublicAcceptance:workOrder", new Error(wo.error ?? "refused"), { quoteId: q.id, jobId });
-    const list = await takeOffFromQuote(sb, { quoteId: q.id, ...who });
+    const list = await takeOffFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!list.ok) reportError("finishPublicAcceptance:materials", new Error(list.error ?? "refused"), { quoteId: q.id, jobId });
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/work-orders");
     revalidatePath("/materials");
   } catch (e) {
     reportError("finishPublicAcceptance", e);
+  } finally {
+    // The office hears either way (its own guards: accepted, within two minutes of the tap).
+    await notifyQuoteAccepted(token);
   }
 }

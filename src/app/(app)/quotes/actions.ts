@@ -1452,6 +1452,8 @@ export async function updateQuoteStatus(id: string, status: string) {
     try {
       const jobRes = await createJobFromQuote(id); // links quotes.job_id + spins up WO/materials
       if (jobRes && jobRes.ok === false) jobWarn = jobRes.error ?? "The job wasn't created.";
+      // The job was made and something it should carry (its tasks) could not be listed: said, not sunk.
+      else if (jobRes?.note) jobWarn = jobRes.note;
     } catch (e) {
       jobWarn = "The job wasn't created.";
       reportError("updateQuoteStatus:createJob", e, { quoteId: id });

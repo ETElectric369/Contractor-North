@@ -6,7 +6,7 @@ import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { mergeCaptureSections, parseInspectorCapture, type CaptureItem, type CapturePatch } from "@/lib/inspection/capture";
-import { bornTasks, partsAsCaptureItems, tasksAnswered, tasksFromVisit } from "@/lib/estimate/born-with-tasks";
+import { EMPTY_BIRTH, bornTasks, partsAsCaptureItems, tasksAnswered, tasksFromVisit, type Birth } from "@/lib/estimate/born-with-tasks";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
@@ -1334,7 +1334,46 @@ export async function createJobFromAppointment(
     todayStr: todayStrInTz(tz),
   });
 
-  const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0);
+  /* THE VISIT'S TASKS ARE READ BEFORE THE JOB IS SIZED (W3b, cn-v1075). The tasks he typed on the
+     inspection — his name for each piece of work, his hours, his parts — were read by the estimate
+     seed and by nothing else, so a job started straight from the visit had an empty task list and a
+     crew's list missing the parts he had already named. Read HERE, before the insert, because the
+     job's length is decided in one place below (planned_minutes, the drawn end, the multi-day
+     segments) and must agree with itself: the skeptic's case was an unsized visit with 20 h of
+     tasks drawn as a two-hour block with no Tuesday. The visit's own size WINS; with none, the sum
+     of his task hours is the length — his figures, never a made-up number. The read is the estimate
+     seed's (tasksAnswered, through the 0366 views); a failed read is said in the result and the job
+     is made without its tasks. */
+  let visitBirth: Birth = EMPTY_BIRTH;
+  let tasksNote: string | undefined;
+  try {
+    const ans = await readViaView<{ inspection_answers: unknown; inspection_template_id: string | null }>(
+      supabase,
+      "answers",
+      (from) => from.select("inspection_answers, inspection_template_id").eq("id", appointmentId).maybeSingle(),
+    );
+    // Pre-0165 (no answers column on the table) is simply no tasks; any other failed read is said.
+    if (ans.error && !(ans.via === "table" && String((ans.error as { code?: string }).code ?? "") === "42703")) throw ans.error;
+    // The sheet through form_playbooks (0366), as every tech-facing read does; a failed read is said.
+    const sheetRead = ans.data?.inspection_template_id
+      ? await readViaView<{ schema?: unknown; playbook?: unknown }>(
+          supabase,
+          "sheets",
+          (from) => from.select("schema, playbook").eq("id", ans.data!.inspection_template_id!).maybeSingle(),
+        )
+      : null;
+    if (sheetRead?.error) throw sheetRead.error;
+    const sheet = sheetRead?.data ?? null;
+    if (ans.data && sheet) {
+      visitBirth = tasksFromVisit(tasksAnswered(playbookForForm(sheet), (ans.data.inspection_answers ?? {}) as Record<string, unknown>));
+    }
+  } catch (e) {
+    reportError("createJobFromAppointment:tasks", e, { appointmentId });
+    tasksNote = "The job was made; the tasks typed on the visit could not be read. Add them on the job.";
+  }
+
+  // The visit's own size, else the sum of his task hours; neither → 0, unsized, as before.
+  const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0) || (visitBirth.plannedMinutes ?? 0);
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
   const scheduledEnd = sized > 0 && appt.starts_at
     ? new Date(new Date(appt.starts_at).getTime() + Math.min(sized, WORK_DAY_MINUTES) * 60_000).toISOString()
@@ -1450,43 +1489,15 @@ export async function createJobFromAppointment(
      (capture.items) were saved and read by nothing; the crew's list on the new job started empty.
      One row each onto the job's one list (materials/actions addCaptureItemsToJobList). The job is
      made whatever this says; what could not be listed is said in the result, never swallowed. */
-  /* THE VISIT'S TASKS TRAVEL TOO (W3b, cn-v1075). The tasks he typed on the inspection — his name
-     for each piece of work, his hours, his parts — were read by the estimate seed and by nothing
-     else, so a job started straight from the visit had an empty task list and a crew's materials
-     list missing the parts he had already named. The same rule the estimate doors use
-     (lib/estimate/born-with-tasks): each task becomes a task on the job's one list, in his order,
-     and its parts join the typed take-off below. planned_minutes: the visit's own size was written
-     above and WINS (bornTasks fills only a blank); with no size, the sum of his task hours is the
-     job's length — his figures, never a made-up number. Best-effort, never silent. */
-  let tasksNote: string | undefined;
-  let taskParts: CaptureItem[] = [];
-  try {
-    const ans = await readViaView<{ inspection_answers: unknown; inspection_template_id: string | null }>(
-      supabase,
-      "answers",
-      (from) => from.select("inspection_answers, inspection_template_id").eq("id", appointmentId).maybeSingle(),
-    );
-    // Pre-0165 (no answers column on the table) is simply no tasks; any other failed read is said.
-    if (ans.error && !(ans.via === "table" && String((ans.error as { code?: string }).code ?? "") === "42703")) throw ans.error;
-    // The sheet through form_playbooks (0366), as every tech-facing read does; a failed read is said.
-    const sheetRead = ans.data?.inspection_template_id
-      ? await readViaView<{ schema?: unknown; playbook?: unknown }>(
-          supabase,
-          "sheets",
-          (from) => from.select("schema, playbook").eq("id", ans.data!.inspection_template_id!).maybeSingle(),
-        )
-      : null;
-    if (sheetRead?.error) throw sheetRead.error;
-    const sheet = sheetRead?.data ?? null;
-    if (ans.data && sheet) {
-      const birth = tasksFromVisit(tasksAnswered(playbookForForm(sheet), ((ans.data.inspection_answers ?? {}) as Record<string, unknown>)));
-      taskParts = partsAsCaptureItems(birth.parts);
-      const born = await bornTasks(supabase, { jobId: job.id, orgId: ctx.orgId, createdBy: ctx.userId }, birth);
-      if (born.error) tasksNote = `The job was made; its tasks could not all be listed (${born.error}). Add them on the job.`;
-    }
-  } catch (e) {
-    reportError("createJobFromAppointment:tasks", e, { jobId: job.id, appointmentId });
-    tasksNote = "The job was made; the tasks typed on the visit could not be read. Add them on the job.";
+  /* …AND BORN ONTO THE JOB'S ONE LIST, through the same rule the estimate doors use
+     (lib/estimate/born-with-tasks): each task in his order, keyed "task:<id>" so a retry births
+     nothing twice; its parts join the typed take-off below. The job's length was decided above (the
+     visit's size, else the sum of his task hours), so bornTasks' own fill — only ever a blank — is a
+     no-op here. Best-effort, never silent. */
+  const taskParts: CaptureItem[] = partsAsCaptureItems(visitBirth.parts);
+  if (visitBirth.tasks.length) {
+    const born = await bornTasks(supabase, { jobId: job.id, orgId: ctx.orgId, createdBy: ctx.userId }, visitBirth);
+    if (born.error) tasksNote = `The job was made; its tasks could not all be listed (${born.error}). Add them on the job.`;
   }
   let materialsNote: string | undefined;
   const typedItems = [...(parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? []), ...taskParts];

@@ -69,12 +69,13 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     .maybeSingle();
   if (existingList) return { ok: true, id: existingList.id, jobId: quote.job_id ?? null };
 
-  const { data: items, error: iErr } = await supabase
+  let linesQ = supabase
     .from("quote_line_items")
     // `detail` (0386): the task behind a line, when it was built from one — its parts are the rows.
     .select("id, description, quantity, unit, unit_price, sort_order, detail")
-    .eq("quote_id", quoteId)
-    .order("sort_order");
+    .eq("quote_id", quoteId);
+  if (orgId) linesQ = linesQ.eq("org_id", orgId); // the same rows the birth read (born-with-tasks)
+  const { data: items, error: iErr } = await linesQ.order("sort_order");
   if (iErr) return { ok: false, error: iErr.message };
   if (!items || items.length === 0)
     return { ok: false, error: "This quote has no line items to build from." };
@@ -167,7 +168,8 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   let so = 0;
   const stamp = orgId ? { org_id: orgId } : {};
   for (const it of items as any[]) {
-    if (isLabor(it)) continue; // an order sheet carries materials, never labor
+    // THE TASK FIRST (the skeptic's case): "Labor to relocate meter" with a breakdown is a task with
+    // parts to buy, not a labor line to drop. Only a line that is not a task is tested for labor.
     const task = coerceTaskDetail(it.detail);
     if (task) {
       // THE TASK'S PARTS, NEVER THE TASK. Each named part is a row by its code; the book names the
@@ -191,6 +193,7 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
       }
       continue;
     }
+    if (isLabor(it)) continue; // an order sheet carries materials, never labor
     const m = String(it.description ?? "").match(CODE_RE);
     const code = m ? m[1].trim() : null;
     const cleanDesc = String(it.description ?? "").replace(CODE_RE, "").trim();

@@ -4,7 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
+import { HOW_MANY, takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
@@ -351,7 +351,10 @@ export async function addCaptureItemsToJobList(
   const failed: string[] = [];
   for (const i of rows) {
     const line = await insertMaterialLine(supabase, actor, list.id, {
-      description: i.description,
+      // A row he never counted (quantity null: "I need this, I haven't counted it") rides as one so
+      // the row can exist, and SAYS SO — the same words the estimate's take-off uses — instead of
+      // landing on the crew's list as a count of one nobody chose ([[no-speculation]]).
+      description: i.quantity === null ? `${i.description}${HOW_MANY}` : i.description,
       part_number: i.code ?? null,
       quantity: i.quantity ?? 1,
       unit: i.unit || "ea",

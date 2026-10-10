@@ -40,11 +40,9 @@ export async function workOrderFromQuote(supabase: SupabaseClient, who: WorkOrde
     .maybeSingle();
   if (existing) return { ok: true, id: existing.id, jobId: quote.job_id ?? null };
 
-  const { data: items, error: iErr } = await supabase
-    .from("quote_line_items")
-    .select("description, quantity, unit, sort_order")
-    .eq("quote_id", quoteId)
-    .order("sort_order");
+  let linesQ = supabase.from("quote_line_items").select("description, quantity, unit, sort_order").eq("quote_id", quoteId);
+  if (orgId) linesQ = linesQ.eq("org_id", orgId);
+  const { data: items, error: iErr } = await linesQ.order("sort_order");
   if (iErr) return { ok: false, error: iErr.message };
 
   const scope = (items ?? [])

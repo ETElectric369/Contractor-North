@@ -8,72 +8,10 @@ import { HOW_MANY, takeOffFromQuote } from "./take-off-from-quote";
  * switch" landing on the order sheet as a $X part while its real parts never arrived — is the first
  * case here.
  *
- * The database is a fake: a thenable query builder over plain rows, recording every insert. It
- * applies eq/is filters by column (an embedded-table filter like "price_list_item_options.archived"
- * is ignored, as the real one is satisfied by the embed), answers single()/maybeSingle() with the
- * first row, and answers an insert's .select("id") with one id per row.
+ * The database is src/test/fake-supabase (a thenable builder over rows, recording inserts).
  */
 
-type Row = Record<string, any>;
-
-function fakeDb(tables: Record<string, Row[]>) {
-  const inserted: Record<string, Row[]> = {};
-  let seq = 0;
-  const from = (table: string) => {
-    const filters: Array<(r: Row) => boolean> = [];
-    let mode: "select" | "insert" | "update" = "select";
-    let single = false;
-    let pending: Row[] = [];
-    const b: any = {
-      select: () => b,
-      order: () => b,
-      limit: () => b,
-      not: () => b,
-      eq(col: string, v: unknown) {
-        if (!col.includes(".")) filters.push((r) => r[col] === v);
-        return b;
-      },
-      is(col: string, v: unknown) {
-        filters.push((r) => r[col] === v);
-        return b;
-      },
-      insert(rows: Row | Row[]) {
-        mode = "insert";
-        pending = (Array.isArray(rows) ? rows : [rows]).map((r) => ({ ...r, id: `${table}-${++seq}` }));
-        inserted[table] = [...(inserted[table] ?? []), ...pending];
-        return b;
-      },
-      update(patch: Row) {
-        mode = "update";
-        pending = [patch];
-        return b;
-      },
-      maybeSingle() {
-        single = true;
-        return b;
-      },
-      single() {
-        single = true;
-        return b;
-      },
-      then(resolve: (v: unknown) => void) {
-        let data: unknown;
-        if (mode === "insert") data = single ? pending[0] : pending.map((r) => ({ id: r.id }));
-        else if (mode === "update") {
-          const hit = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
-          for (const r of hit) Object.assign(r, pending[0]);
-          data = hit.map((r) => ({ id: r.id }));
-        } else {
-          const hit = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
-          data = single ? (hit[0] ?? null) : hit;
-        }
-        resolve({ data, error: null });
-      },
-    };
-    return b;
-  };
-  return { sb: { from } as any, inserted };
-}
+import { fakeDb, type Row } from "@/test/fake-supabase";
 
 const ORG = "org-1";
 const BOOK = [
@@ -86,7 +24,7 @@ const BOOK = [
 
 const taskLine = (id: string, description: string, sort_order: number, hours: number | null, materials: unknown[]) => ({
   id,
-  quote_id: "q-1",
+  quote_id: "q-1", org_id: ORG,
   description,
   quantity: 1,
   unit: "ea",
@@ -110,13 +48,13 @@ function world(lines: Row[], opts: { settings?: Row; everyOrg?: boolean } = {}) 
 
 describe("takeOffFromQuote — a task line puts its PARTS on the sheet, never itself", () => {
   const lines = [
-    { id: "l1", quote_id: "q-1", description: "14/2 romex [W142]", quantity: 2, unit: "roll", unit_price: 125, sort_order: 0, detail: null },
+    { id: "l1", quote_id: "q-1", org_id: ORG, description: "14/2 romex [W142]", quantity: 2, unit: "roll", unit_price: 125, sort_order: 0, detail: null },
     taskLine("l2", "Install transfer switch", 1, 3, [
       { code: "R1", name: "Transfer switch, 200A", qty: 1, cost: 400, sell: 500 },
       { code: null, name: "Bayberry clips", qty: null, cost: null, sell: null },
       { code: "BRK50", name: "50A breaker", qty: 2, cost: null, sell: null }, // the line didn't price it: the book does
     ]),
-    { id: "l3", quote_id: "q-1", description: "Labor — rough-in", quantity: 4, unit: "hr", unit_price: 120, sort_order: 2, detail: null },
+    { id: "l3", quote_id: "q-1", org_id: ORG, description: "Labor — rough-in", quantity: 4, unit: "hr", unit_price: 120, sort_order: 2, detail: null },
     taskLine("l4", "Pull the permit", 3, 1, []), // labor only: nothing to buy
   ];
 
@@ -175,8 +113,17 @@ describe("takeOffFromQuote — a task line puts its PARTS on the sheet, never it
     expect(db.inserted).toEqual({});
   });
 
+  it("a task named like labor, or sold by the hour, is still a task: its parts land, it does not", async () => {
+    const { sb, inserted } = world([
+      { ...taskLine("l5", "Labor to relocate the meter", 0, 2, [{ code: "R1", name: "Transfer switch, 200A", qty: 1, cost: 400, sell: 500 }]), unit: "hr" },
+    ]);
+    const res = await takeOffFromQuote(sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res.ok).toBe(true);
+    expect(inserted.material_list_items.map((r) => r.description)).toEqual(["Transfer switch, 200A"]);
+  });
+
   it("an off-book plain line still backs the markup out of the estimate price (unchanged)", async () => {
-    const { sb, inserted } = world([{ id: "l9", quote_id: "q-1", description: "Mystery bracket", quantity: 1, unit: "ea", unit_price: 125, sort_order: 0, detail: null }]);
+    const { sb, inserted } = world([{ id: "l9", quote_id: "q-1", org_id: ORG, description: "Mystery bracket", quantity: 1, unit: "ea", unit_price: 125, sort_order: 0, detail: null }]);
     await takeOffFromQuote(sb, { quoteId: "q-1", userId: "u-1", orgId: null });
     expect(inserted.material_list_items[0]).toMatchObject({ description: "Mystery bracket", part_number: null, est_cost: 100 });
   });
