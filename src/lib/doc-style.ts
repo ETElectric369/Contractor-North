@@ -36,6 +36,14 @@ export interface DocStyle {
   /** The company's own line under its name on the letterhead and in document emails. "" prints
    *  none: there is no default, because a default is some other company's words. */
   tagline: string;
+  /**
+   * HOW AN ESTIMATE BUILT FROM TASKS READS (0386). Erik: the customer sees the estimate "in a
+   * per-company format". "tasks" = one line per task, the price beside it (the default: a customer
+   * buys the outcome). "detailed" = the same line with his hours, the rate and the parts printed
+   * beneath it, from the line's `detail`. Only a line that WAS built from a task has a breakdown to
+   * print, so a hand-typed estimate looks the same under either setting.
+   */
+  estimate_format: "tasks" | "detailed";
 }
 
 /** The longest tagline a letterhead prints (one line under the name). */
@@ -51,6 +59,7 @@ export const DEFAULT_DOC_STYLE: DocStyle = {
   margin_x: 0.75, // = globals.css .print-page 0.6in 0.75in
   margin_y: 0.6,
   tagline: "",
+  estimate_format: "tasks",
 };
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number): number => {
@@ -71,6 +80,7 @@ export function normalizeDocStyle(raw: unknown): DocStyle {
     margin_x: clamp(r.margin_x, 0.3, 1.5, d.margin_x),
     margin_y: clamp(r.margin_y, 0.3, 1.5, d.margin_y),
     tagline: typeof r.tagline === "string" ? r.tagline.trim().slice(0, TAGLINE_MAX).trim() : "",
+    estimate_format: r.estimate_format === "detailed" ? "detailed" : "tasks",
   };
 }
 

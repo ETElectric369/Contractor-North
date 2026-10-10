@@ -378,6 +378,23 @@ export function DocStudio({
             Labor / Materials Box
           </label>
         )}
+        {/* HOW A TASK LINE READS (0386). Erik: the customer sees the estimate "in a per-company
+            format". Tasks Only prints each task with its price; Tasks With Labor And Parts prints
+            his hours at the rate and each part beneath it. Only a line BUILT from a task has a
+            breakdown — the sample's last line is one, so the switch is visible in the preview. */}
+        {docKind === "quote" && (
+          <div>
+            <Label>Estimate Lines</Label>
+            <SegmentedControl
+              activeId={style.estimate_format}
+              onSelect={(id) => apply({ ...style, estimate_format: id as DocStyle["estimate_format"] })}
+              items={[
+                { id: "tasks", label: "Tasks Only" },
+                { id: "detailed", label: "Tasks With Labor And Parts" },
+              ]}
+            />
+          </div>
+        )}
       </div>
 
       {/* ── The page itself ─────────────────────────────────────────────────── */}

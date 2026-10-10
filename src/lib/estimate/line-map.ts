@@ -20,11 +20,48 @@ import { describeChoice, priceBookLine, type OptionedPriceItem, type PriceItemOp
  * flagged for a human rather than silently multiplied into a confident wrong number.
  */
 
+/**
+ * ONE PART BEHIND A TASK LINE (0386). `name` is what the customer may read (the book's description,
+ * or his words); `code` ties it to the book; `cost` is the company's net and NEVER leaves the org
+ * (public_quote strips it); `sell` is the part's price at this customer's markup, null when nobody
+ * has priced it yet (words only, or a code the book no longer carries). `qty` null = "I need it, I
+ * haven't counted it" — never a silent 0.
+ */
+export interface TaskDetailMaterial {
+  code: string | null;
+  name: string;
+  qty: number | null;
+  cost: number | null;
+  sell: number | null;
+}
+
+/**
+ * HOW A TASK LINE WAS BUILT (quote_line_items.detail, 0386). The line's description / quantity /
+ * unit_price stay the customer-facing numbers; this is the arithmetic behind them, so the document
+ * can print labor and parts beneath the task when the company's format says so, the builder can
+ * re-price the line when he types the hours, and the job can be born with its tasks and parts.
+ *
+ * `hours` null = HE HAS NOT GIVEN THEM: the line prices $0 and carries the "hours?" flag. It is
+ * never a typical figure ([[no-speculation]]). `rate` is the $/h the hours were priced at
+ * (laborRateFor), kept so a stored line still explains itself after the rate card changes.
+ */
+export interface TaskDetail {
+  task_id: string;
+  hours: number | null;
+  rate: number;
+  /** How many of the unit when the task is a per-unit kit ("7 footings"); null = one. */
+  units: number | null;
+  kit_id: string | null;
+  materials: TaskDetailMaterial[];
+}
+
 export interface DraftLineItem {
   description: string;
   quantity: number;
   unit: string;
   unit_price: number;
+  /** The task behind this line (0386), when it was built from one. Persisted. */
+  detail?: TaskDetail | null;
   /** Optional group this line belongs to (a kit/"job code group" like Stairs, Decking) — a
    *  build-time organizer so the estimate reads as collapsible groups. Not persisted yet. */
   group?: string;

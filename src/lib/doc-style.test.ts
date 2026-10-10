@@ -44,3 +44,22 @@ describe("normalizeDocStyle: the tagline", () => {
     expect(Object.keys(normalizeDocStyle({})).sort()).toEqual(Object.keys(DEFAULT_DOC_STYLE).sort());
   });
 });
+
+/**
+ * doc_style.estimate_format (0386): how an estimate built from tasks reads to the customer. Rides
+ * the public /q projection inside doc_style, so the one normalizer is its boundary: exactly two
+ * words, and "tasks" (one line per task, the price beside it) for anything else.
+ */
+describe("normalizeDocStyle: the estimate format", () => {
+  it("defaults to one line per task", () => {
+    expect(DEFAULT_DOC_STYLE.estimate_format).toBe("tasks");
+    expect(normalizeDocStyle(undefined).estimate_format).toBe("tasks");
+    expect(normalizeDocStyle({}).estimate_format).toBe("tasks");
+    expect(normalizeDocStyle({ estimate_format: "itemized" }).estimate_format).toBe("tasks");
+    expect(normalizeDocStyle({ estimate_format: 1 }).estimate_format).toBe("tasks");
+  });
+
+  it("keeps the detailed format when the company chose it", () => {
+    expect(normalizeDocStyle({ estimate_format: "detailed" }).estimate_format).toBe("detailed");
+  });
+});

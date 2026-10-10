@@ -42,6 +42,8 @@ import { closeVisitsBehindQuote, outcomeForQuoteStatus } from "@/lib/appointment
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
+import { coerceTaskDetail } from "@/lib/estimate/task-lines";
+import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms, smsReadiness } from "@/lib/sms";
@@ -938,6 +940,8 @@ export async function saveQuote(input: SaveQuoteInput) {
         unit_price: it.unit_price,
         category: it.group ?? null,
         sort_order: idx,
+        // The task behind the line (0386) rides every save, or the first autosave would drop it.
+        detail: it.detail ?? null,
       })),
     });
     if (rpcErr) {
@@ -989,6 +993,7 @@ export async function saveQuote(input: SaveQuoteInput) {
       // so they survive a save/reload, and forms the estimate's per-category budget buckets.
       category: it.group ?? null,
       sort_order: idx,
+      detail: it.detail ?? null,
     }));
     const { error: itemsErr } = await supabase
       .from("quote_line_items")
@@ -1105,7 +1110,8 @@ export async function duplicateQuote(
 
   const { data: items } = await supabase
     .from("quote_line_items")
-    .select("description, quantity, unit, unit_price, category")
+    // detail (0386): a copied task line keeps the hours and parts behind it.
+    .select("description, quantity, unit, unit_price, category, detail")
     .eq("quote_id", id)
     .order("sort_order");
 
@@ -1123,6 +1129,7 @@ export async function duplicateQuote(
       quantity: Number(it.quantity) || 1,
       unit: it.unit || "ea",
       unit_price: Number(it.unit_price) || 0,
+      detail: coerceTaskDetail(it.detail),
       group: it.category ?? undefined, // keep the scope group on a duplicate
     })),
   });
@@ -1472,7 +1479,7 @@ async function runEstimator(
   ]);
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
-  const rate = laborRate != null && laborRate > 0 ? laborRate : orgS.default_labor_rate;
+  const rate = laborRateFor(laborRate, orgS.default_labor_rate); // THE one rule (lib/pricing/labor-rate)
   // A RATE HE TYPED. `content` is his scope on the text path and a content-block array on the plan
   // path; only the text he wrote is searched, never a PDF's contents — a number lifted out of
   // somebody else's drawing is not his instruction.

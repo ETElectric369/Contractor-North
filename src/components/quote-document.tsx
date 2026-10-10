@@ -3,6 +3,7 @@ import type { ResolvedSite } from "@/lib/site-address";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { CSSProperties } from "react";
 import { normalizeDocStyle, sheetStyleVars, type DocStyle } from "@/lib/doc-style";
+import { coerceTaskDetail, detailExplains, taskMoney } from "@/lib/estimate/task-lines";
 
 // The quote table's rhythm is a step tighter than the invoice's at every density.
 const QUOTE_DENSITY_ROW: Record<DocStyle["density"], string> = {
@@ -36,6 +37,10 @@ export type QuoteDocItem = {
   unit?: string | null;
   unit_price: number;
   line_total: number;
+  /** The task behind the line (0386), when it was built from one: the office's full breakdown, or
+   *  the redacted shape public_quote ships. Read through coerceTaskDetail; printed only when the
+   *  company's doc_style.estimate_format says "detailed". */
+  detail?: unknown;
 };
 
 export function QuoteDocument({
@@ -165,6 +170,13 @@ export function QuoteDocument({
             const headerStyle = /\n/.test(raw) || parts.length <= 1;
             const head = headerStyle ? parts[0] ?? "" : "";
             const subs = head ? parts.slice(1) : parts.length > 1 ? parts : [];
+            // THE BREAKDOWN BEHIND A TASK LINE (0386). Erik: the customer sees the estimate "in a
+            // per-company format" — "tasks" prints the line alone; "detailed" prints his hours at the
+            // rate and each part with its count beneath it. Only while it still ADDS UP to the line:
+            // a price edited by hand afterwards has no breakdown to show, and printing one that
+            // disagrees with the figure beside it would be a second number on the customer's paper.
+            const d = ds.estimate_format === "detailed" ? coerceTaskDetail(it.detail) : null;
+            const breakdown = d && (d.hours !== null || d.materials.length > 0) && detailExplains(d, it) ? d : null;
             return (
               <tr key={it.id ?? i} className="border-b border-slate-100 align-top [break-inside:avoid]">
                 <td className={`${rowPad} pr-2 text-slate-800`}>
@@ -173,6 +185,22 @@ export function QuoteDocument({
                     <ul className="ml-3 mt-0.5 list-disc text-[11px] text-slate-500 marker:text-slate-300">
                       {subs.map((s, j) => (
                         <li key={j}>{s}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {breakdown && (
+                    <ul className="ml-3 mt-0.5 list-disc text-[11px] text-slate-500 marker:text-slate-300">
+                      {breakdown.hours !== null && (
+                        <li>
+                          Labor · {breakdown.hours} h × {formatCurrency(breakdown.rate)} = {formatCurrency(taskMoney(breakdown).labor)}
+                        </li>
+                      )}
+                      {breakdown.materials.map((m, j) => (
+                        <li key={j}>
+                          {m.name}
+                          {m.qty !== null ? ` × ${m.qty}` : ""}
+                          {m.qty !== null && m.sell !== null ? ` · ${formatCurrency(Math.round(m.qty * m.sell * 100) / 100)}` : ""}
+                        </li>
                       ))}
                     </ul>
                   )}

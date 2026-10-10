@@ -14,7 +14,9 @@ describe("Start The Estimate seeds the typed rows", () => {
   const src = read("src/app/(app)/quotes/new/page.tsx");
   it("reads the capture tolerantly, puts the typed rows AFTER the scope picks, and the measures into the scope text", () => {
     expect(src).toContain("typedCapture = parseInspectorCapture((appt as any).capture);");
-    expect(src).toMatch(/const seededLines: DraftLineItem\[\] = seedLinesFromCapture\(\s*pickedScopes\.flatMap/);
+    // The scope picks first, then HIS TASKS as lines (cn-v1074, one per task), then the typed rows.
+    expect(src).toMatch(/const seededLines: DraftLineItem\[\] = seedLinesFromCapture\(\s*\[\.\.\.pickedScopes\.flatMap/);
+    expect(src).toMatch(/\.\.\.taskSeed\],\s*typedCapture\?\.items,/);
     expect(src).toContain("typedCapture?.items,");
     expect(src).toContain("measuredOnSiteBlock(typedCapture?.measures),");
   });

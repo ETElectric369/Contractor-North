@@ -13,7 +13,10 @@ import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
 import { intakeAnswerLines, intakeProvenanceKeys } from "@/lib/inquiries/carry-intake-answers";
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
+import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
+import { coerceTaskDetail, taskLines, type TaskBookRow } from "@/lib/estimate/task-lines";
+import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
@@ -47,7 +50,7 @@ export default async function NewQuotePage({
     notes?: string | null;
     taxRate?: number | null;
     validUntil?: string | null;
-    items?: { description: string; quantity: number; unit: string; unit_price: number; group?: string }[];
+    items?: DraftLineItem[];
   } | null = null;
   if (inquiry) {
     // The id alone is NOT an adoption (review of the Q-001/E-001 flap): a builder seeded with
@@ -56,7 +59,7 @@ export default async function NewQuotePage({
     // one exists, still restores over this (it may be newer).
     const { data: existing } = await supabase
       .from("quotes")
-      .select("id, customer_id, doc_type, title, description, notes, tax_rate, valid_until, quote_line_items(description, quantity, unit, unit_price, category, sort_order)")
+      .select("id, customer_id, doc_type, title, description, notes, tax_rate, valid_until, quote_line_items(description, quantity, unit, unit_price, category, sort_order, detail)")
       .eq("inquiry_id", inquiry)
       .eq("status", "draft")
       .order("created_at", { ascending: false })
@@ -66,7 +69,7 @@ export default async function NewQuotePage({
       const ex = existing as {
         id: string; customer_id: string | null; doc_type: string | null; title: string | null;
         description: string | null; notes: string | null; tax_rate: number | null; valid_until: string | null;
-        quote_line_items?: { description: string; quantity: number; unit: string; unit_price: number; category: string | null; sort_order: number | null }[];
+        quote_line_items?: { description: string; quantity: number; unit: string; unit_price: number; category: string | null; sort_order: number | null; detail?: unknown }[];
       };
       adoptedDraftId = ex.id;
       adoptedSeed = {
@@ -79,7 +82,8 @@ export default async function NewQuotePage({
         validUntil: ex.valid_until,
         items: (ex.quote_line_items ?? [])
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-          .map((li) => ({ description: li.description, quantity: li.quantity, unit: li.unit, unit_price: li.unit_price, group: li.category ?? undefined })),
+          // detail (0386): the task behind a line rides the adoption, or the first autosave drops it.
+          .map((li) => ({ description: li.description, quantity: li.quantity, unit: li.unit, unit_price: li.unit_price, group: li.category ?? undefined, detail: coerceTaskDetail(li.detail) })),
       };
     }
   }
@@ -95,6 +99,9 @@ export default async function NewQuotePage({
   // with the numbers the inspector already took.
   let measured: { sqft: number | null; linearFt: number | null; byKey?: Record<string, number | null> } | undefined;
   const pickedScopes: { label: string; picks: ScopePick[] }[] = [];
+  // A `tasks` answer (cn-v1073): HIS tasks, each with his hours and his parts. Priced below, once
+  // the book and the customer's rate card have loaded — one line per task (lib/estimate/task-lines).
+  const pickedTasks: { label: string; tasks: TaskValue[] }[] = [];
   // The rows typed on site (capture.items) and the numbers measured there (capture.measures), read
   // tolerantly (parseInspectorCapture). Saved since the typed inspector shipped, read by nothing until
   // cn-v1069: the items follow the scope picks onto the estimate, the measures join the scope text.
@@ -230,6 +237,11 @@ export default async function NewQuotePage({
       // picks must not become lines on an estimate nobody can see them on the inspection of.
       const liveAnswers = clearInapplicable(pb, answers);
       for (const n of applicableNeeds(pb, liveAnswers)) {
+        if (n.slot?.type === "tasks") {
+          const tasks = coerceTasks((liveAnswers as Record<string, unknown>)[n.key]);
+          if (tasks?.length) pickedTasks.push({ label: n.label, tasks });
+          continue;
+        }
         if (n.slot?.type !== "scopes") continue;
         const picks = coerceScopes((liveAnswers as Record<string, unknown>)[n.key]);
         if (picks?.length) pickedScopes.push({ label: n.label, picks });
@@ -370,13 +382,24 @@ export default async function NewQuotePage({
   // THE INSPECTION'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
   // (the answer stores codes, never prose), and a code that has since left the price list is
   // dropped rather than rendered as a bare code with a price beside it.
+  const settings = getOrgSettings((org as any)?.settings);
   const book = new Map((priceItems ?? []).map((p: any) => [p.code as string, { description: p.description, unit: p.unit }]));
   const bookCodes = new Set(book.keys());
+  // HIS TASKS, AS LINES: one per task, priced from his hours at THE labor rate (the inspection's
+  // customer's level rate, else the org default: laborRateFor) and his parts at the book's cost
+  // through THE markup rule for that customer. A task without hours is a $0 line that asks.
+  const taskBook = new Map<string, TaskBookRow>(
+    (priceItems ?? []).filter((p: any) => p.code).map((p: any) => [String(p.code), p as TaskBookRow]),
+  );
+  const seedCustomer = captureCustomerId ? ((customers ?? []) as any[]).find((c) => c.id === captureCustomerId) : undefined;
+  const seedPricing = { levelPct: seedCustomer?.pricing_levels?.markup_pct ?? null, orgDefaultPct: settings.default_markup_pct };
+  const seedRate = laborRateFor(seedCustomer?.pricing_levels?.labor_rate, settings.default_labor_rate);
+  const taskSeed = pickedTasks.flatMap((g) => taskLines(g.tasks, { book: taskBook, rate: seedRate, pricing: seedPricing, group: g.label }));
   // …THEN THE ROWS TYPED ON SITE, unpriced (cn-v1069, lib/inspection/capture seedLinesFromCapture):
   // "200 ft 12-2 romex" typed standing at the panel is a line Erik prices, never a sentence he
   // re-reads to make one.
   const seededLines: DraftLineItem[] = seedLinesFromCapture(
-    pickedScopes.flatMap((g) => scopeLines(ownScopes(g.picks, bookCodes), book, g.label)),
+    [...pickedScopes.flatMap((g) => scopeLines(ownScopes(g.picks, bookCodes), book, g.label)), ...taskSeed],
     typedCapture?.items,
   );
 
@@ -391,7 +414,6 @@ export default async function NewQuotePage({
   const opened = openedForLead;
   if (opened && !leadOptions.some((l) => l.id === opened.id)) leadOptions.unshift(opened);
 
-  const settings = getOrgSettings((org as any)?.settings);
   const expiryDays = settings.quote_expiry_days;
   // Catalog-mode orgs (Tahoe Deck) estimate from TWO scope kits — "Decks" and "Remodels".
   // The granular material kits (Framing, Hardware, Decking…) are the POST-acceptance job
