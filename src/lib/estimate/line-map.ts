@@ -33,6 +33,10 @@ export interface TaskDetailMaterial {
   qty: number | null;
   cost: number | null;
   sell: number | null;
+  /** THE KIT PUT IT HERE (W4): present only while the part is the kit's own, so a change of units
+   *  re-derives it (reexpandTaskDetail) and a part he added or edited by hand is left alone. A hand
+   *  edit clears it. Never on the public wire (0387 names its keys). */
+  from_kit?: true;
 }
 
 /**
@@ -53,6 +57,9 @@ export interface TaskDetail {
   units: number | null;
   kit_id: string | null;
   materials: TaskDetailMaterial[];
+  /** THE KIT GAVE THE HOURS (W4): minutes per unit × units, not his typed figure — so a change of
+   *  units re-derives them; typing hours clears it. Absent = his hours (or none). */
+  hours_from_kit?: true;
 }
 
 export interface DraftLineItem {

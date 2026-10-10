@@ -31,7 +31,7 @@ describe("the door on the estimate", () => {
   });
   it("the page hands the builder the task kits by name", () => {
     const page = src("src/app/(app)/quotes/new/page.tsx");
-    expect(page).toContain("taskKits={taskKits.map(({ id, name, unit }) => ({ id, name, unit }))}");
+    expect(page).toContain("taskKits={taskKits}");
   });
 });
 
@@ -93,6 +93,13 @@ describe("the plain kit pickers never offer a task kit", () => {
     const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
     expect(builder).toContain("key={it.detail.task_id || `line-${idx}`}");
     expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("kitsOn={kitDoors}");
+  });
+  it("the units box on a kit-built line re-derives the kit through the one rule and renames the line", () => {
+    const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
+    const breakdown = builder.slice(builder.indexOf("function TaskBreakdown("), builder.indexOf("export function QuoteBuilder("));
+    expect(breakdown).toContain("reexpandTaskDetail(d, n > 0 ? n : null, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct })");
+    expect(breakdown).toContain("description: lineNameWithUnits(line.description, next.units)");
+    expect(breakdown).toContain('aria-label="Units"');
   });
 });
 

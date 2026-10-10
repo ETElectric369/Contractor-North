@@ -111,10 +111,20 @@ describe("Remember As A Kit (W4)", () => {
     expect(text(html)).toContain("Remember As A Kit");
     const fromKit = builder({
       seededLines: [{ ...taskLine, description: "Footings ×7", unit_price: 2510, detail: { ...taskLine.detail, hours: 14, units: 7, kit_id: "k1" } }],
-      taskKits: [{ id: "k1", name: "Footing", unit: "footing" }],
+      taskKits: [{ id: "k1", name: "Footing", labor_minutes: 120, unit: "footing", items: [] }],
     });
-    expect(text(fromKit)).toContain("From the kit Footing · ×7 footing");
+    expect(text(fromKit)).toContain("From the kit Footing · Units");
+    expect(fromKit).toContain('aria-label="Units"');
+    expect(fromKit).toContain('value="7"');
+    expect(text(fromKit)).toContain("footing");
     expect(text(fromKit)).not.toContain("Remember As A Kit");
+    // The kit left the price list: the line still says where it came from, with no box to re-derive it.
+    const gone = builder({
+      seededLines: [{ ...taskLine, description: "Footings ×7", unit_price: 2510, detail: { ...taskLine.detail, hours: 14, units: 7, kit_id: "k1" } }],
+      taskKits: [],
+    });
+    expect(text(gone)).toContain("From the kit it was built from (no longer in your kits) · ×7");
+    expect(gone).not.toContain('aria-label="Units"');
   });
 
   it("a plain line has no door, and the company's Kits switch off hides it", () => {

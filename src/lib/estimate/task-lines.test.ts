@@ -6,6 +6,9 @@ import {
   coerceTaskDetail,
   detailExplains,
   expandTaskKit,
+  lineNameWithUnits,
+  reexpandTaskDetail,
+  stripUnits,
   lineFromDetail,
   repriceTaskLine,
   taskFlags,
@@ -255,5 +258,60 @@ describe("the breakdown, read back and kept honest", () => {
     const back = coerceTaskDetail(JSON.parse(JSON.stringify(typed.detail)))!;
     expect(back.materials).toEqual([]);
     expect(detailExplains(back, typed)).toBe(true);
+  });
+});
+
+describe("reexpandTaskDetail — the builder's units box on a kit-built line (W4)", () => {
+  const kit = {
+    id: "k1", name: "Footing", labor_minutes: 120, unit: "footing",
+    items: [{ description: "Concrete, 80 lb", quantity: 4, unit: "ea", unit_price: 9.5, qty_round: "none", sort_order: 0 }],
+  };
+  const pricing = { orgDefaultPct: 0 };
+  const built = buildTaskDetail({ id: "t1", name: "Footings", hours: null, units: 7, kit_id: "k1", materials: [{ code: null, words: "Rebar stake", qty: 14 }] }, {
+    book: new Map(), rate: 100, pricing: { levelPct: null, orgDefaultPct: 0 }, kits: new Map([[kit.id, kit]]),
+  });
+
+  it("buildTaskDetail marks what the kit gave: its hours and its parts, never his", () => {
+    expect(built.hours).toBe(14);
+    expect(built.hours_from_kit).toBe(true);
+    expect(built.materials.map((m) => [m.name, m.qty, m.from_kit ?? false])).toEqual([["Concrete, 80 lb", 28, true], ["Rebar stake", 14, false]]);
+    const his = buildTaskDetail({ id: "t2", name: "Footings", hours: 3, units: 7, kit_id: "k1", materials: [] }, { book: new Map(), rate: 100, pricing: { levelPct: null, orgDefaultPct: 0 }, kits: new Map([[kit.id, kit]]) });
+    expect(his.hours).toBe(3);
+    expect(his.hours_from_kit).toBeUndefined();
+  });
+
+  it("another count re-derives the kit's hours and parts and leaves his own alone", () => {
+    const eight = reexpandTaskDetail(built, 8, kit, pricing);
+    expect(eight.units).toBe(8);
+    expect(eight.hours).toBe(16);
+    expect(eight.hours_from_kit).toBe(true);
+    expect(eight.materials.map((m) => [m.name, m.qty])).toEqual([["Concrete, 80 lb", 32], ["Rebar stake", 14]]);
+  });
+
+  it("his typed hours and a kit part he edited by hand stand through a change of units", () => {
+    const { hours_from_kit: _h, ...typed } = { ...built, hours: 10 };
+    const { from_kit: _k, ...edited } = typed.materials[0];
+    const his = { ...typed, materials: [{ ...edited, qty: 30 }, typed.materials[1]] };
+    const nine = reexpandTaskDetail(his, 9, kit, pricing);
+    expect(nine.hours).toBe(10);
+    expect(nine.hours_from_kit).toBeUndefined();
+    // The kit's concrete comes back for nine AND his hand-counted 30 stays: both are on the line, his marked as his.
+    expect(nine.materials.map((m) => [m.name, m.qty, m.from_kit ?? false])).toEqual([["Concrete, 80 lb", 36, true], ["Concrete, 80 lb", 30, false], ["Rebar stake", 14, false]]);
+  });
+
+  it("with no kit to expand only the count changes; the flags survive a save round trip only when true", () => {
+    expect(reexpandTaskDetail(built, 3, null, pricing)).toEqual({ ...built, units: 3 });
+    const back = coerceTaskDetail(JSON.parse(JSON.stringify(built)))!;
+    expect(back.hours_from_kit).toBe(true);
+    expect(back.materials[0].from_kit).toBe(true);
+    expect("from_kit" in back.materials[1]).toBe(false);
+    expect("hours_from_kit" in coerceTaskDetail({ ...built, hours_from_kit: false })!).toBe(false);
+  });
+
+  it("the line's name carries the count: stripUnits / lineNameWithUnits", () => {
+    expect(stripUnits("Footings ×7")).toBe("Footings");
+    expect(lineNameWithUnits("Footings ×7", 8)).toBe("Footings ×8");
+    expect(lineNameWithUnits("Footings ×7", 1)).toBe("Footings");
+    expect(lineNameWithUnits("Footings", null)).toBe("Footings");
   });
 });

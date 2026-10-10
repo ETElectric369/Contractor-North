@@ -505,7 +505,7 @@ export default async function NewQuotePage({
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}
-        taskKits={taskKits.map(({ id, name, unit }) => ({ id, name, unit }))}
+        taskKits={taskKits}
         kitsOn={kitDoors}
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}

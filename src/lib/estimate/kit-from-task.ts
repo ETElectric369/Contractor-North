@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
 import type { TaskDetail } from "./line-map";
+import { stripUnits } from "./task-lines";
 
 /**
  * REMEMBER A PRICED TASK AS A KIT (W4, cn-v1076). Erik (2026-10-09, his fourth answer): a task he
@@ -50,10 +51,7 @@ const refuse = (error: string): KitFromTaskResult => ({ ok: false, error });
 
 /** The task's name without the units the line's description carries ("Footings ×7" → "Footings"). */
 export function kitNameFromLine(description: string): string {
-  return description
-    .replace(/\s*×\s*\d+(?:[.,]\d+)?\s*$/u, "")
-    .trim()
-    .slice(0, MAX_KIT_NAME);
+  return stripUnits(description).slice(0, MAX_KIT_NAME);
 }
 
 export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; unit: string }): KitFromTaskResult {

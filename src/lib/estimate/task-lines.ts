@@ -81,16 +81,35 @@ export function coerceTaskDetail(raw: unknown): TaskDetail | null {
     const code = str(x.code, 64) || null;
     const name = str(x.name, 300) || str(x.words, 300) || code || "";
     if (!name) continue;
-    materials.push({ code, name, qty: positive(x.qty), cost: nonNegative(x.cost), sell: nonNegative(x.sell) });
+    materials.push({
+      code,
+      name,
+      qty: positive(x.qty),
+      cost: nonNegative(x.cost),
+      sell: nonNegative(x.sell),
+      ...(x.from_kit === true ? { from_kit: true as const } : {}),
+    });
   }
+  const hours = positive(o.hours);
   return {
     task_id: str(o.task_id, 80),
-    hours: positive(o.hours),
+    hours,
     rate: nonNegative(o.rate) ?? 0,
     units: positive(o.units),
     kit_id: str(o.kit_id, 64) || null,
     materials,
+    ...(hours !== null && o.hours_from_kit === true ? { hours_from_kit: true as const } : {}),
   };
+}
+
+/** A line's task name without the units it carries ("Footings ×7" → "Footings"). */
+export function stripUnits(description: string): string {
+  return description.replace(/\s*×\s*\d+(?:[.,]\d+)?\s*$/u, "").trim();
+}
+
+/** The line's name for these units: the task's words, " ×N" when N is not one (taskLine's rule). */
+export function lineNameWithUnits(description: string, units: number | null): string {
+  return `${stripUnits(description)}${units !== null && units !== 1 ? ` ×${units}` : ""}`;
 }
 
 /** A part the builder added and nobody named yet is not a part: it prices nothing and asks nothing
@@ -221,13 +240,40 @@ function materialDetail(m: TaskMaterial, ctx: TaskLineContext): TaskDetailMateri
 export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDetail {
   const kit = task.kit_id ? ctx.kits?.get(task.kit_id) ?? null : null;
   const fromKit = kit ? expandTaskKit(task, kit, { orgDefaultPct: ctx.pricing.orgDefaultPct ?? 0, levelPct: ctx.pricing.levelPct }) : null;
+  const kitHours = task.hours === null && fromKit?.hours !== null && fromKit?.hours !== undefined;
   return {
     task_id: task.id,
     hours: task.hours ?? fromKit?.hours ?? null,
     rate: ctx.rate,
     units: task.units,
     kit_id: kit ? kit.id : null,
-    materials: [...(fromKit?.materials ?? []), ...task.materials.map((m) => materialDetail(m, ctx))],
+    // The kit's parts are marked as the kit's, so a change of units re-derives them and leaves
+    // his own alone (reexpandTaskDetail).
+    materials: [...(fromKit?.materials ?? []).map((m) => ({ ...m, from_kit: true as const })), ...task.materials.map((m) => materialDetail(m, ctx))],
+    ...(kitHours ? { hours_from_kit: true as const } : {}),
+  };
+}
+
+/**
+ * THE SAME TASK, FOR OTHER UNITS (W4, the builder's units box). The kit's own figures — the hours
+ * it gave and the parts it put there — are derived again for the new count through THE one
+ * expandTaskKit; his typed hours and every part he added or edited by hand stand as they are. With
+ * no kit to expand, only the count changes (it rides the name).
+ */
+export function reexpandTaskDetail(d: TaskDetail, units: number | null, kit: TaskKit | null, pricing: KitPricing): TaskDetail {
+  const next = positive(units);
+  if (!kit) return { ...d, units: next };
+  const probe: TaskValue = { id: d.task_id, name: "", hours: null, units: next, kit_id: kit.id, materials: [] };
+  const fromKit = expandTaskKit(probe, kit, pricing);
+  const { hours_from_kit: _h, ...rest } = d;
+  const kitHours = d.hours_from_kit === true || d.hours === null;
+  return {
+    ...rest,
+    units: next,
+    kit_id: kit.id,
+    hours: kitHours ? fromKit.hours : d.hours,
+    materials: [...fromKit.materials.map((m) => ({ ...m, from_kit: true as const })), ...d.materials.filter((m) => m.from_kit !== true)],
+    ...(kitHours && fromKit.hours !== null ? { hours_from_kit: true as const } : {}),
   };
 }
 

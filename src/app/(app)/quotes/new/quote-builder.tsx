@@ -19,7 +19,7 @@ import { formatCurrency } from "@/lib/utils";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
-import { detailExplains, lineFromDetail, repriceTaskLine, taskMoney } from "@/lib/estimate/task-lines";
+import { detailExplains, lineFromDetail, lineNameWithUnits, reexpandTaskDetail, repriceTaskLine, taskMoney, type TaskKit } from "@/lib/estimate/task-lines";
 import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";
 import { rememberTaskAsKit } from "../../price-list/kit-actions";
 import { sameTask } from "@/lib/playbook/tasks";
@@ -69,8 +69,7 @@ interface TaxRateLite {
   is_default: boolean;
 }
 type KitLite = { id: string; name: string; kit_items: unknown[] };
-/** A TASK kit (0386) by name, so a line built from one can say which (W4). */
-type TaskKitLite = { id: string; name: string; unit: string | null };
+
 
 /**
  * One line the estimator PROPOSED. `keep` starts true on purpose.
@@ -246,16 +245,37 @@ function TaskBreakdown({
   detail: TaskDetail;
   priceItems: PriceItemLite[];
   pricing: BookPricing;
-  /** The org's task kits by name, so a line built from one says which (W4). */
-  taskKits?: TaskKitLite[];
+  /** The org's task kits with their lines (W4): a line built from one says which, and its units
+   *  box re-derives the kit's hours and parts for another count (reexpandTaskDetail). */
+  taskKits?: TaskKit[];
   /** The company's Kits switch (0352): off hides the door, as it hides every other kit door. */
   kitsOn?: boolean;
   /** The whole re-priced line (lineFromDetail): unit_price, flag and detail move together. */
   onChange: (next: DraftLineItem) => void;
 }) {
   const set = (next: TaskDetail) => onChange(lineFromDetail(line, next));
+  // A HAND EDIT IS HIS: a kit part he changes stops being the kit's (from_kit off), so a later
+  // change of units leaves it alone; typed hours likewise stop being the kit's.
   const setPart = (i: number, patch: Partial<TaskDetailMaterial>) =>
-    set({ ...d, materials: d.materials.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
+    set({
+      ...d,
+      materials: d.materials.map((m, j) => {
+        if (j !== i) return m;
+        const { from_kit: _k, ...rest } = m;
+        return { ...rest, ...patch };
+      }),
+    });
+  const setHours = (n: number) => {
+    const { hours_from_kit: _h, ...rest } = d;
+    set({ ...rest, hours: n > 0 ? n : null });
+  };
+  // THE UNITS BOX on a kit-built line: the kit's hours and parts are derived again for the new
+  // count through THE one expandTaskKit, his own stand, and the count rides the line's name.
+  const setUnits = (n: number) => {
+    if (!fromKit) return;
+    const next = reexpandTaskDetail(d, n > 0 ? n : null, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct });
+    onChange(lineFromDetail({ ...line, description: lineNameWithUnits(line.description, next.units) }, next));
+  };
   const dropPart = (i: number) => set({ ...d, materials: d.materials.filter((_, j) => j !== i) });
   const money = taskMoney(d);
   const box = "h-7 px-2 text-xs";
@@ -307,7 +327,7 @@ function TaskBreakdown({
           placeholder="hours?"
           className={`${box} w-20`}
           value={d.hours ?? 0}
-          onValueChange={(n) => set({ ...d, hours: n > 0 ? n : null })}
+          onValueChange={setHours}
         />
         <span className="whitespace-nowrap">× {formatCurrency(d.rate)}/h</span>
         <span className="ml-auto tabular-nums text-slate-700">{formatCurrency(money.labor)}</span>
@@ -370,10 +390,18 @@ function TaskBreakdown({
       </div>
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         {d.kit_id ? (
-          <span className="text-slate-500">
-            From the kit {fromKit ? fromKit.name : "it was built from (no longer in your kits)"}
-            {d.units !== null && d.units !== 1 ? ` · ×${d.units}${fromKit?.unit ? ` ${fromKit.unit}` : ""}` : ""}
-          </span>
+          <>
+            <span className="text-slate-500">From the kit {fromKit ? fromKit.name : "it was built from (no longer in your kits)"}</span>
+            {fromKit ? (
+              <>
+                <span className="text-slate-500">· Units</span>
+                <NumberInput aria-label="Units" placeholder="units" className={`${box} w-20`} value={d.units ?? 1} onValueChange={setUnits} />
+                {fromKit.unit && <span className="text-slate-500">{fromKit.unit}</span>}
+              </>
+            ) : (
+              d.units !== null && d.units !== 1 && <span className="text-slate-500">· ×{d.units}</span>
+            )}
+          </>
         ) : !kitsOn ? null : kitOpen ? (
           <>
             <Input aria-label="Kit name" placeholder="Kit name" className={`${box} w-40`} value={kitName} onChange={(e) => setKitName(e.target.value)} />
@@ -485,8 +513,9 @@ export function QuoteBuilder({
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
-  /** The org's TASK kits (0386) by name — a line built from one says which (W4). */
-  taskKits?: TaskKitLite[];
+  /** The org's TASK kits (0386) with their lines — a line built from one says which, and its
+   *  units box re-derives the kit for another count (W4). */
+  taskKits?: TaskKit[];
   /** The company's Kits switch (0352, page.tsx kitDoors): off hides Remember As A Kit too. */
   kitsOn?: boolean;
   quoteExpiryDays?: number;
