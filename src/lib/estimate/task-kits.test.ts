@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { kitsWithoutMoney, taskKitSelectRungs, taskKitsFrom, TASK_KIT_COLS } from "./task-kits";
+import { kitsWithoutMoney, partsKitsOnly, taskKitSelectRungs, taskKitsFrom, TASK_KIT_COLS } from "./task-kits";
 import { expandTaskKit, type TaskKit } from "./task-lines";
 
 /**
@@ -51,7 +51,20 @@ describe("kitsWithoutMoney", () => {
     const json = JSON.stringify(stripped);
     for (const money of ["unit_price", "buy_price", "markup_pct", "price_list_item_options", "9.5", "1.25"]) expect(json).not.toContain(money);
     expect(stripped[0].items[0]).toMatchObject({ description: "Concrete (snapshot)", quantity: 4, price_list_items: { code: "C80", description: "Concrete, 80 lb", qty_round: "up" } });
-    expect(stripped[0].items[1]).toEqual({ id: "i2", description: "Rebar stake", quantity: 2, unit: "ea", sort_order: 1 });
+    expect(stripped[0].items[1]).toEqual({
+      id: "i2", description: "Rebar stake", quantity: 2, unit: "ea", sort_order: 1,
+      qty_per_sqft: null, qty_per_lf: null, qty_min: null, qty_round: null, price_list_item_id: null,
+    });
+    // An ALLOW-list: a money column nobody has thought of yet never rides through.
+    const sneaky = kitsWithoutMoney([{ ...FULL, items: [{ ...FULL.items[1], cost: 5, markup: 30 } as never] }]);
+    expect(JSON.stringify(sneaky)).not.toMatch(/cost|markup/);
+    expect(Object.keys(stripped[0])).toEqual(["id", "name", "labor_minutes", "unit", "items"]);
+  });
+
+  it("partsKitsOnly keeps the ordinary kits out of a task kit's way, and task kits out of the plain pickers", () => {
+    const rows = [{ id: "a", name: "Decks" }, { id: "b", name: "Footing", labor_minutes: 120 }, { id: "c", name: "Parts", labor_minutes: null }];
+    expect(partsKitsOnly(rows).map((k) => k.id)).toEqual(["a", "c"]);
+    expect(partsKitsOnly(null)).toEqual([]);
   });
 
   it("expands to the same names and counts as the full kit, with no price in sight", () => {

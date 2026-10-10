@@ -7,6 +7,8 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { mergeCaptureSections, parseInspectorCapture, type CaptureItem, type CapturePatch } from "@/lib/inspection/capture";
 import { EMPTY_BIRTH, bornTasks, partsAsCaptureItems, tasksAnswered, tasksFromVisit, type Birth } from "@/lib/estimate/born-with-tasks";
+import { firstThatWorks } from "@/lib/kit-line";
+import { taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
@@ -1365,7 +1367,17 @@ export async function createJobFromAppointment(
     if (sheetRead?.error) throw sheetRead.error;
     const sheet = sheetRead?.data ?? null;
     if (ans.data && sheet) {
-      visitBirth = tasksFromVisit(tasksAnswered(playbookForForm(sheet), (ans.data.inspection_answers ?? {}) as Record<string, unknown>));
+      const answered = tasksAnswered(playbookForForm(sheet), (ans.data.inspection_answers ?? {}) as Record<string, unknown>);
+      // THE TASK KITS (0386, W4): a task that picked one takes its hours and parts from it, as the
+      // estimate seed does. A failed kits read is said, and the job is sized from what he typed.
+      const kitsRead = answered.some((t) => t.kit_id)
+        ? await firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name")))
+        : null;
+      visitBirth = tasksFromVisit(answered, new Map(taskKitsFrom(kitsRead?.data).map((k) => [k.id, k])));
+      if (kitsRead?.error) {
+        reportError("createJobFromAppointment:kits", kitsRead.error, { appointmentId });
+        tasksNote = "The job was made; the kits its tasks picked could not be read, so it was sized from the hours typed. Check the job's tasks.";
+      }
     }
   } catch (e) {
     reportError("createJobFromAppointment:tasks", e, { appointmentId });

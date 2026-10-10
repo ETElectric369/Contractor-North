@@ -117,7 +117,8 @@ describe("Remember As A Kit (W4)", () => {
     expect(text(fromKit)).not.toContain("Remember As A Kit");
   });
 
-  it("a plain line has no door", () => {
+  it("a plain line has no door, and the company's Kits switch off hides it", () => {
     expect(text(builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] }))).not.toContain("Remember As A Kit");
+    expect(text(builder({ seededLines: [taskLine], kitsOn: false }))).not.toContain("Remember As A Kit");
   });
 });

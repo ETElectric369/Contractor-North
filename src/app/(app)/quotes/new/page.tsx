@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
 import { firstThatWorks } from "@/lib/kit-line";
-import { taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
+import { partsKitsOnly, taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -440,7 +440,9 @@ export default async function NewQuotePage({
     ? []
     : catalogMode
       ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
-      : (kits ?? []);
+      : // A TASK kit (0386) is a task's, not the plain picker's: dropped in there it would add one
+        // unit's parts and lose his hours without a word. It is offered on a task (the Inspector).
+        partsKitsOnly(kits ?? []);
   // Deck generator rows (catalog orgs) — the deck price codes as RAW {code, buy, markup_pct}
   // rows. The office builder prices them client-side through THE markup rule (effectiveMarkupPct
   // with the selected customer's level + org default), so generator lines re-price when the
@@ -504,6 +506,7 @@ export default async function NewQuotePage({
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}
         taskKits={taskKits.map(({ id, name, unit }) => ({ id, name, unit }))}
+        kitsOn={kitDoors}
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
         defaultLaborRate={settings.default_labor_rate}

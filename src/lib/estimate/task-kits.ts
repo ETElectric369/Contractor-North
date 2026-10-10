@@ -62,17 +62,36 @@ const linkedWithoutMoney = (it: KitLinkedItem): KitLinkedItem => ({
   qty_per: it.qty_per ?? null,
 });
 
+/** The keys of a kit line that are NOT money: what it needs to name, count and size itself. An
+ *  ALLOW-list, so a money column added to the select later never rides through unnoticed. */
+const lineWithoutMoney = (it: KitLineRaw): KitLineRaw => {
+  const linked = Array.isArray(it.price_list_items) ? it.price_list_items[0] : it.price_list_items;
+  return {
+    ...(it.id !== undefined ? { id: it.id } : {}),
+    description: it.description,
+    quantity: it.quantity,
+    unit: it.unit ?? null,
+    sort_order: it.sort_order ?? null,
+    qty_per_sqft: it.qty_per_sqft ?? null,
+    qty_per_lf: it.qty_per_lf ?? null,
+    qty_min: it.qty_min ?? null,
+    qty_round: it.qty_round ?? null,
+    price_list_item_id: it.price_list_item_id ?? null,
+    ...(linked ? { price_list_items: linkedWithoutMoney(linked) } : {}),
+  };
+};
+
 /** THE SAME KITS WITH EVERY MONEY FIELD DROPPED — what the Inspector is handed. It previews a
  *  kit's hours and parts by name and count and never a price (a crew lead fills the visit in,
  *  0356), so the page sends nothing a price could be read from: no line snapshot price, no item
- *  buy price or markup, no vendor options. */
+ *  buy price or markup, no vendor options. Both levels are allow-lists. */
 export function kitsWithoutMoney(kits: TaskKit[]): TaskKit[] {
-  return kits.map((k) => ({
-    ...k,
-    items: k.items.map((it) => {
-      const { unit_price: _price, price_list_items, ...rest } = it;
-      const linked = Array.isArray(price_list_items) ? price_list_items[0] : price_list_items;
-      return linked ? { ...rest, price_list_items: linkedWithoutMoney(linked) } : rest;
-    }),
-  }));
+  return kits.map((k) => ({ id: k.id, name: k.name, labor_minutes: k.labor_minutes, unit: k.unit, items: k.items.map(lineWithoutMoney) }));
+}
+
+/** The ORDINARY kits — everything but the task kits. The plain kit pickers (an estimate's or an
+ *  invoice's Add From Kit) drop a kit's lines in as they are, with no hours and no units, so a
+ *  task kit offered there would add one unit's parts and lose his hours without a word. */
+export function partsKitsOnly<T>(rows: ReadonlyArray<T> | null | undefined): T[] {
+  return (rows ?? []).filter((k) => !(Number((k as { labor_minutes?: unknown } | null)?.labor_minutes) > 0));
 }

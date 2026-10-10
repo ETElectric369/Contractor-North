@@ -1013,7 +1013,19 @@ export function Inspector({
                 const kit = t.kit_id ? taskKits.find((k) => k.id === t.kit_id) ?? null : null;
                 const kitGone = !!t.kit_id && !kit;
                 const preview = kit ? expandTaskKit(t, kit, KIT_PREVIEW_PRICING) : null;
+                // HIS HOURS WIN over the kit's (buildTaskDetail: task.hours ?? the kit's): the
+                // preview says which figure the estimate will take.
+                const previewHours =
+                  preview && t.hours !== null && preview.hours !== null
+                    ? `your ${t.hours} h stand (the kit says ${preview.hours} h)`
+                    : preview?.hours !== null && preview?.hours !== undefined
+                      ? `${preview.hours} h`
+                      : "hours?";
+                // Units count a KIT's units; his hours are the whole task's. The box appears with a
+                // kit (or where a count already stands), never beside hand-typed hours alone.
+                const showUnits = !!t.kit_id || t.units !== null;
                 const label = "text-[11px] font-semibold uppercase tracking-wide text-slate-400";
+                if (!(taskKits.length > 0 || t.kit_id || showUnits)) return null;
                 return (
                   <>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1030,20 +1042,24 @@ export function Inspector({
                               onChange={(e) => patchTask(i, { kit_id: e.target.value || null })}
                               className="min-h-[44px] max-w-[14rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
                             >
-                              <option value="">No kit</option>
+                              <option value="">No Kit</option>
                               {taskKits.map((k) => (
                                 <option key={k.id} value={k.id}>
                                   {k.name}
                                 </option>
                               ))}
-                              {kitGone && <option value={t.kit_id ?? ""}>A kit no longer in the price list</option>}
+                              {kitGone && <option value={t.kit_id ?? ""}>Kit No Longer In The Price List</option>}
                             </select>
                           )}
                         </>
                       )}
-                      <span className={label}>Units</span>
-                      <NumBox value={t.units} className="w-20" placeholder="units" {...focus} onValue={(x) => patchTask(i, { units: x })} />
-                      {kit?.unit && <span className="text-sm text-slate-500">{kit.unit}</span>}
+                      {showUnits && (
+                        <>
+                          <span className={label}>Units</span>
+                          <NumBox value={t.units} className="w-20" placeholder="units" {...focus} onValue={(x) => patchTask(i, { units: x })} />
+                          {kit?.unit && <span className="text-sm text-slate-500">{kit.unit}</span>}
+                        </>
+                      )}
                       {kitGone && (
                         <span
                           className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
@@ -1056,7 +1072,7 @@ export function Inspector({
                     {preview && (
                       <p className="mt-1 text-xs text-slate-500">
                         From the kit, for ×{t.units ?? 1}
-                        {kit?.unit ? ` ${kit.unit}` : ""}: {preview.hours !== null ? `${preview.hours} h` : "hours?"}
+                        {kit?.unit ? ` ${kit.unit}` : ""}: {previewHours}
                         {preview.materials.length ? ` · ${preview.materials.map((m) => `${m.name} ×${m.qty}`).join(", ")}` : ""}
                       </p>
                     )}

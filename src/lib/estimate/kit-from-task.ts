@@ -28,9 +28,14 @@ export interface KitFromTaskItem {
   /** Per ONE unit of the kit (the task's count ÷ its units), to the cent. */
   quantity: number;
   unit: string;
-  /** The sell the task priced the part at; 0 = it had none, and a $0 kit line asks ("price?"). */
+  /** A hand-typed part keeps the sell he typed; a coded part carries 0 — it prices LIVE from the
+   *  book when the code links (0240), and an orphaned code asks ("price?") rather than carrying
+   *  one customer's marked-up number into every other customer's estimate. */
   unit_price: number;
   sort_order: number;
+  /** Exact arithmetic on the way back out (kitQty): a per-unit count × the units is the count he
+   *  gave, to the cent, never rounded up to the next whole one. */
+  qty_round: "none";
 }
 
 export interface KitFromTask {
@@ -58,8 +63,15 @@ export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; uni
   const hours = detail.hours;
   if (hours === null || !(hours > 0)) return refuse("Give the task its hours first — a kit remembers your hours per unit.");
   const units = detail.units !== null && detail.units > 0 ? detail.units : 1;
+  // THE ROUND TRIP MUST HOLD (the skeptic's probe): the kit stores whole minutes per unit and
+  // counts to the cent, and the next task multiplies them back. What would come back different
+  // from what he gave is refused, not rounded — 1 h across 100 units is not "1 minute each".
   const labor_minutes = Math.round((hours * 60) / units);
-  if (labor_minutes < 1) return refuse("The hours come to less than a minute per unit — give the task more hours or fewer units.");
+  if (labor_minutes < 1) return refuse("The hours come to less than a minute per unit — give the task more hours.");
+  const hoursBack = (labor_minutes * units) / 60;
+  if (Math.abs(hoursBack - hours) > hours * 0.02) {
+    return refuse(`${hours} h does not split into whole minutes across ${units} — give the task hours that do.`);
+  }
 
   const named = detail.materials.filter((m) => m.name.trim());
   const uncounted = named.filter((m) => m.qty === null || !(m.qty > 0));
@@ -67,18 +79,30 @@ export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; uni
 
   const items: KitFromTaskItem[] = [];
   for (const m of named) {
-    const quantity = round2((m.qty as number) / units);
-    if (quantity <= 0) return refuse(`${m.name.trim()} comes to nothing per unit — give it a bigger count or the task fewer units.`);
+    const qty = m.qty as number;
+    const quantity = round2(qty / units);
+    if (quantity <= 0 || round2(quantity * units) !== round2(qty)) {
+      return refuse(`${m.name.trim()}: ${qty} does not split evenly across ${units} — give it a count that does.`);
+    }
     items.push({
       code: m.code,
       description: m.name.trim(),
       quantity,
       unit: "ea",
-      unit_price: m.sell !== null && m.sell > 0 ? round2(m.sell) : 0,
+      unit_price: m.code ? 0 : m.sell !== null && m.sell > 0 ? round2(m.sell) : 0,
       sort_order: items.length,
+      qty_round: "none",
     });
   }
   return { ok: true, value: { kit: { name, unit, labor_minutes }, items } };
+}
+
+/** What the kit will say, in his words, before he saves it: "2 h and Concrete ×4 per footing". */
+export function kitSummary(v: KitFromTask, fromUnits: number | null): string {
+  const labor = v.kit.labor_minutes % 60 === 0 ? `${v.kit.labor_minutes / 60} h` : `${v.kit.labor_minutes} min`;
+  const parts = v.items.map((i) => `${i.description} ×${i.quantity}`).join(", ");
+  const from = fromUnits !== null && fromUnits !== 1 ? ` (from this line's ×${fromUnits})` : " (this line is one unit)";
+  return `${labor}${parts ? ` and ${parts}` : ""} per ${v.kit.unit}${from}`;
 }
 
 export interface RememberResult {
@@ -88,9 +112,6 @@ export interface RememberResult {
   error?: string;
 }
 
-/** A LIKE pattern that matches the text itself, not what its wildcards would. */
-const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (m) => `\\${m}`);
-
 /**
  * WRITE THE KIT. The caller's client (RLS scopes the org; set_org_id stamps it). One name, one kit:
  * a second "Footing" would make the picker a coin toss. The parts' codes become 0240 links to the
@@ -99,9 +120,13 @@ const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (m) => `\\${m}`)
  * failed is taken away again — half a kit would price every future task short.
  */
 export async function rememberKit(sb: SupabaseClient, value: KitFromTask): Promise<RememberResult> {
-  const dup = await sb.from("kits").select("id").ilike("name", likeLiteral(value.kit.name)).limit(1).maybeSingle();
-  if (dup.error) return { ok: false, error: dbError(dup.error) };
-  if (dup.data) return { ok: false, error: `A kit named ${value.kit.name} already exists — pick another name.` };
+  // Case-blind, in code: a LIKE pattern would read his "*" or "%" as wildcards.
+  const names = await sb.from("kits").select("id, name");
+  if (names.error) return { ok: false, error: dbError(names.error) };
+  const wanted = value.kit.name.trim().toLowerCase();
+  if (((names.data ?? []) as { name: string | null }[]).some((k) => String(k.name ?? "").trim().toLowerCase() === wanted)) {
+    return { ok: false, error: `A kit named ${value.kit.name} already exists — pick another name.` };
+  }
 
   const codes = [...new Set(value.items.map((i) => i.code).filter((c): c is string => !!c))];
   const byCode = new Map<string, string>();
@@ -131,14 +156,21 @@ export async function rememberKit(sb: SupabaseClient, value: KitFromTask): Promi
         unit: i.unit,
         unit_price: i.unit_price,
         sort_order: i.sort_order,
+        qty_round: i.qty_round,
         ...(linkId ? { price_list_item_id: linkId } : {}),
       };
     });
     const ins = await sb.from("kit_items").insert(rows).select("id");
     const n = ins.data?.length ?? 0;
     if (ins.error || n !== rows.length) {
-      await sb.from("kits").delete().eq("id", kitId);
-      return { ok: false, error: ins.error ? dbError(ins.error) : `Only ${n} of ${rows.length} parts were saved, so the kit was not kept.` };
+      // The clean-up is a write too: read it back, and if the kit could not be taken away, say
+      // exactly what is left and the one thing to do about it.
+      const gone = await sb.from("kits").delete().eq("id", kitId).select("id");
+      const why = ins.error ? dbError(ins.error) : `only ${n} of ${rows.length} parts were saved`;
+      if (gone.error || !gone.data?.length) {
+        return { ok: false, error: `The kit ${value.kit.name} was saved without its parts (${why}) — delete it from the Price List.` };
+      }
+      return { ok: false, error: `The kit was not kept (${why}) — press Save The Kit again.` };
     }
   }
   return { ok: true, id: kitId, name: value.kit.name };

@@ -20,7 +20,7 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { detailExplains, lineFromDetail, repriceTaskLine, taskMoney } from "@/lib/estimate/task-lines";
-import { kitFromTaskDetail, kitNameFromLine } from "@/lib/estimate/kit-from-task";
+import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";
 import { rememberTaskAsKit } from "../../price-list/kit-actions";
 import { sameTask } from "@/lib/playbook/tasks";
 import type { TaskDetail, TaskDetailMaterial } from "@/lib/estimate/line-map";
@@ -239,6 +239,7 @@ function TaskBreakdown({
   priceItems,
   pricing,
   taskKits = [],
+  kitsOn = true,
   onChange,
 }: {
   line: DraftLineItem;
@@ -247,6 +248,8 @@ function TaskBreakdown({
   pricing: BookPricing;
   /** The org's task kits by name, so a line built from one says which (W4). */
   taskKits?: TaskKitLite[];
+  /** The company's Kits switch (0352): off hides the door, as it hides every other kit door. */
+  kitsOn?: boolean;
   /** The whole re-priced line (lineFromDetail): unit_price, flag and detail move together. */
   onChange: (next: DraftLineItem) => void;
 }) {
@@ -286,10 +289,15 @@ function TaskBreakdown({
       } else {
         setKitSaid({ ok: false, text: r.error ?? "Could not remember the kit." });
       }
+    } catch {
+      setKitSaid({ ok: false, text: "Could not reach the server — press Save The Kit again." });
     } finally {
       setKitBusy(false);
     }
   };
+  // WHAT WILL BE SAVED, before he saves it: the per-unit figures the rule will write, or the one
+  // thing still in the way. Nothing is divided by a count he cannot see.
+  const planned = kitOpen ? kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit }) : null;
   return (
     <div className="mt-1.5 space-y-1 rounded-md border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
       <div className="flex items-center gap-1.5">
@@ -366,14 +374,14 @@ function TaskBreakdown({
             From the kit {fromKit ? fromKit.name : "it was built from (no longer in your kits)"}
             {d.units !== null && d.units !== 1 ? ` · ×${d.units}${fromKit?.unit ? ` ${fromKit.unit}` : ""}` : ""}
           </span>
-        ) : kitOpen ? (
+        ) : !kitsOn ? null : kitOpen ? (
           <>
             <Input aria-label="Kit name" placeholder="Kit name" className={`${box} w-40`} value={kitName} onChange={(e) => setKitName(e.target.value)} />
             <span>per</span>
             <Input aria-label="Unit" placeholder="ea" className={`${box} w-20`} value={kitUnit} onChange={(e) => setKitUnit(e.target.value)} />
             <button
               type="button"
-              disabled={kitBusy || !kitName.trim()}
+              disabled={kitBusy || !kitName.trim() || !planned?.ok}
               onClick={() => void remember()}
               className="font-medium text-brand hover:underline disabled:opacity-50"
             >
@@ -389,6 +397,11 @@ function TaskBreakdown({
           </button>
         )}
       </div>
+      {planned && (
+        <p className={planned.ok ? "text-slate-500" : "text-amber-700"}>
+          {planned.ok ? `Will save: ${kitSummary(planned.value, d.units)}` : planned.error}
+        </p>
+      )}
       {kitSaid && <p className={kitSaid.ok ? "text-emerald-700" : "text-amber-700"}>{kitSaid.text}</p>}
       {/* A Unit $ typed over the sum is HIS price and stands; the breakdown then describes a number
           the customer is not being asked for, so the document leaves it off (quote-document.tsx
@@ -414,6 +427,7 @@ export function QuoteBuilder({
   taxRates = [],
   kits = [],
   taskKits = [],
+  kitsOn = true,
   quoteExpiryDays = 30,
   defaultMarkupPct = 0,
   defaultLaborRate = 0,
@@ -473,6 +487,8 @@ export function QuoteBuilder({
   kits?: KitLite[];
   /** The org's TASK kits (0386) by name — a line built from one says which (W4). */
   taskKits?: TaskKitLite[];
+  /** The company's Kits switch (0352, page.tsx kitDoors): off hides Remember As A Kit too. */
+  kitsOn?: boolean;
   quoteExpiryDays?: number;
   /** Org Settings default_markup_pct — the last fallback in effectiveMarkupPct's chain. */
   defaultMarkupPct?: number;
@@ -1519,11 +1535,15 @@ export function QuoteBuilder({
                                   hours and parts here, and the Unit $ follows them. */}
                               {it.detail && (
                                 <TaskBreakdown
+                                  // Keyed by the TASK, not the row: a line deleted above must not
+                                  // hand its kit panel and its "Remembered as…" to the next line.
+                                  key={it.detail.task_id || `line-${idx}`}
                                   line={it}
                                   detail={it.detail}
                                   priceItems={priceItems}
                                   pricing={pricing}
                                   taskKits={taskKits}
+                                  kitsOn={kitsOn}
                                   onChange={(next) => updateItem(idx, next)}
                                 />
                               )}

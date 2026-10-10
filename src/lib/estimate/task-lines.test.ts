@@ -146,6 +146,16 @@ describe("expandTaskKit: a task per unit", () => {
     expect(out.materials[0].qty).toBe(5);
   });
 
+  it("a LINKED kit line is named without its code in front — the code rides in `code`, the name may reach the paper", () => {
+    const linked = {
+      id: "k2", name: "Footing", labor_minutes: 60, unit: "footing",
+      items: [{ description: "C80 — Concrete (snapshot)", quantity: 2, unit: "ea", unit_price: 0, price_list_item_id: "pli-1",
+        price_list_items: { id: "pli-1", code: "C80", description: "Concrete, 80 lb", unit: "ea", buy_price: 6, markup_pct: 0 } }],
+    };
+    const out = expandTaskKit(task({ units: 3, kit_id: "k2" }), linked, { orgDefaultPct: 0 });
+    expect(out.materials).toEqual([{ code: "C80", name: "Concrete, 80 lb", qty: 6, cost: 6, sell: 6 }]);
+  });
+
   it("a kit with no minutes gives no hours — the task still asks", () => {
     expect(expandTaskKit(task({ units: 3, hours: null }), { ...kit, labor_minutes: null }, { orgDefaultPct: 0 }).hours).toBeNull();
   });

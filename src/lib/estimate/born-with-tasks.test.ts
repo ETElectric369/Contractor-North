@@ -139,6 +139,24 @@ describe("tasksFromVisit — Start The Job on an inspection", () => {
     ]);
   });
 
+  it("a task that picked a KIT (W4) takes its hours and parts from it through expandTaskKit; his own hours win", () => {
+    const kit = {
+      id: "k1", name: "Footing", labor_minutes: 120, unit: "footing",
+      items: [{ description: "Concrete, 80 lb", quantity: 4, unit: "ea", unit_price: 9.5, qty_round: "none", sort_order: 0 }],
+    };
+    const kits = new Map([[kit.id, kit]]);
+    const b = tasksFromVisit([visit("t1", "Footings", null, { units: 7, kit_id: "k1", materials: [{ code: null, words: "Rebar stake", qty: 14 }] })], kits);
+    expect(b.tasks).toEqual([{ source_key: "task:t1", title: "Footings ×7", sort_order: 0 }]);
+    expect(b.plannedMinutes).toBe(840);
+    expect(b.parts).toEqual([
+      { source_key: "task:t1", code: null, name: "Concrete, 80 lb", qty: 28, cost: null },
+      { source_key: "task:t1", code: null, name: "Rebar stake", qty: 14, cost: null },
+    ]);
+    expect(tasksFromVisit([visit("t1", "Footings", 3, { units: 7, kit_id: "k1" })], kits).plannedMinutes).toBe(180);
+    // A kit nobody handed in (or one that left the price list) answers nothing: the job asks.
+    expect(tasksFromVisit([visit("t1", "Footings", null, { units: 7, kit_id: "k1" })]).plannedMinutes).toBeNull();
+  });
+
   it("no tasks, or no hours → no length", () => {
     expect(tasksFromVisit([]).plannedMinutes).toBeNull();
     expect(tasksFromVisit([visit("t1", "Set panel", null)]).plannedMinutes).toBeNull();

@@ -91,7 +91,8 @@ describe("doors outside the job page", () => {
   it("the invoice page's kit chips follow Kits, except in catalog mode (as on the estimate pages)", () => {
     const src = read("billing/[id]/page.tsx");
     expect(src).toContain('const kitDoors = featureOn(orgSettings.features, "kits") || orgSettings.estimating_mode === "catalog";');
-    expect(src).toContain("kits={(kitDoors ? kits ?? [] : []) as any}");
+    // W4: the plain picker never offers a TASK kit (partsKitsOnly) — the switch still gates the door.
+    expect(src).toContain("kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as any}");
     // The kits are still read: a switch never gates a read.
     expect(src).toContain('supabase.from("kits").select(sel)');
   });

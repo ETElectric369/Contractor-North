@@ -314,7 +314,9 @@ describe("a task kit on the visit (W4): picked by name, counted in units, previe
     expect(html).toContain('aria-label="Kit"');
     expect(html).toContain('<option value="k1"');
     expect(html).toContain(">Footing<");
-    expect((html.match(/placeholder="units"/g) ?? []).length).toBe(2);
+    expect(html).toContain(">No Kit<");
+    // Units count a KIT's units: the box stands beside the kit task, not beside hand-typed hours.
+    expect((html.match(/placeholder="units"/g) ?? []).length).toBe(1);
     expect(html).toContain('value="7"');
     expect(textOf(html)).toContain(PREVIEW);
     // Only the hot tub task asks: the footings take their hours from the kit.
@@ -338,10 +340,16 @@ describe("a task kit on the visit (W4): picked by name, counted in units, previe
     expect(textOf(html)).not.toMatch(PRICE);
   });
 
-  it("without a task kit in the org there is no picker, and the units box still counts", () => {
+  it("without a task kit in the org there is no picker and no units box — his hours are the whole task's", () => {
     const html = render("office");
     expect(html).not.toContain('aria-label="Kit"');
-    expect((html.match(/placeholder="units"/g) ?? []).length).toBe(2);
+    expect(html).not.toContain('placeholder="units"');
+  });
+
+  it("his own hours win over the kit's, and the preview says so", () => {
+    const answers = { ...KIT_ANSWERS, tasks: [{ ...KIT_ANSWERS.tasks[0], hours: 3 }, KIT_ANSWERS.tasks[1]] };
+    const html = render("office", { taskKits: [KIT], initialAnswers: answers });
+    expect(textOf(html)).toContain("From the kit, for ×7 footing: your 3 h stand (the kit says 14 h) · Concrete, 80 lb ×28, Rebar stake ×14");
   });
 
   it("a kit that left the price list is said, not hidden", () => {

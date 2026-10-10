@@ -150,12 +150,10 @@ export function materialText(m: TaskMaterial): string {
 /** One task as one line. The estimator, the hear prompt and the retired-answers block all read
  *  this; "hours?" is the asking state said out loud, never a number. */
 export function taskLine(t: TaskValue): string {
-  const hours =
-    t.hours === null
-      ? t.kit_id
-        ? `hours from its kit${t.units !== null && t.units !== 1 ? ` × ${t.units}` : ""}`
-        : "hours?"
-      : `${t.hours} h${t.units !== null && t.units !== 1 ? ` × ${t.units}` : ""}`;
+  // His hours are the WHOLE task's; the units count a kit's units. "2 h for ×7" cannot be read
+  // as fourteen (the skeptic's probe of "2 h × 7").
+  const forUnits = t.units !== null && t.units !== 1 ? ` for ×${t.units}` : "";
+  const hours = t.hours === null ? (t.kit_id ? `hours from its kit${forUnits}` : "hours?") : `${t.hours} h${forUnits}`;
   const parts = t.materials.length ? `: ${t.materials.map(materialText).join(", ")}` : "";
   return `${t.name} — ${hours}${parts}`;
 }

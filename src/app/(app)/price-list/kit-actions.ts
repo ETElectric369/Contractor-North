@@ -308,8 +308,9 @@ export async function updateKit(
   const patch: Record<string, unknown> = { name: input.name.trim(), category: input.category?.trim() || null };
   if ("labor_minutes" in input) {
     const m = input.labor_minutes;
-    if (m !== null && m !== undefined && (!Number.isFinite(m) || m <= 0)) return { ok: false, error: "Hours per unit must be above zero, or empty for a parts-only kit." };
-    patch.labor_minutes = m === null || m === undefined ? null : Math.round(m);
+    const minutes = m === null || m === undefined ? null : Math.round(Number(m));
+    if (minutes !== null && (!Number.isFinite(minutes) || minutes < 1)) return { ok: false, error: "Hours per unit must come to at least a minute, or be empty for a parts-only kit." };
+    patch.labor_minutes = minutes;
   }
   if ("unit" in input) patch.unit = input.unit?.trim() || null;
   // Org-safe: RLS scopes the row to the caller's org; .select("id") after the write catches the

@@ -22,7 +22,7 @@ describe("the door on the estimate", () => {
   const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
   it("sits inside the task breakdown and calls the one action with the line's own breakdown", () => {
     expect(builder).toContain('import { rememberTaskAsKit } from "../../price-list/kit-actions";');
-    expect(builder).toContain('import { kitFromTaskDetail, kitNameFromLine } from "@/lib/estimate/kit-from-task";');
+    expect(builder).toContain('import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";');
     const breakdown = builder.slice(builder.indexOf("function TaskBreakdown("), builder.indexOf("export function QuoteBuilder("));
     expect(breakdown).toContain("Remember As A Kit");
     expect(breakdown).toContain("rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d })");
@@ -52,7 +52,9 @@ describe("the rule writes nothing silently", () => {
     expect(rule).toMatch(/\.insert\(\{ name: value\.kit\.name, unit: value\.kit\.unit, labor_minutes: value\.kit\.labor_minutes \}\)\s*\.select\("id"\)/);
     expect(rule).toContain('from("kit_items").insert(rows).select("id")');
     expect(rule).toContain('.in("code", codes).eq("archived", false)');
-    expect(rule).toContain('.ilike("name", likeLiteral(value.kit.name))');
+    // One name, one kit — compared in code, case-blind, so his "*" is a star and not a wildcard.
+    expect(rule).toContain('await sb.from("kits").select("id, name")');
+    expect(rule).toContain("String(k.name ?? \"\").trim().toLowerCase() === wanted");
     expect(rule).toContain('from("kits").delete().eq("id", kitId)');
   });
 });
@@ -61,7 +63,7 @@ describe("the inspector", () => {
   it("loads the task kits with the tolerant rungs and hands them over with every money field dropped", () => {
     const page = src("src/app/(app)/appointments/[id]/page.tsx");
     expect(page).toContain('firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name")))');
-    expect(page).toContain("taskKits={kitsWithoutMoney(taskKitsFrom(taskKitsRead.data))}");
+    expect(page).toContain('taskKits={featureOn(orgSettings.features, "kits") ? kitsWithoutMoney(taskKitsFrom(taskKitsRead.data)) : []}');
   });
   it("previews a picked kit through THE expandTaskKit the estimate seeds from", () => {
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
@@ -69,6 +71,28 @@ describe("the inspector", () => {
     expect(inspector).toContain("expandTaskKit(t, kit, KIT_PREVIEW_PRICING)");
     expect(inspector).toContain('aria-label="Kit"');
     expect(inspector).toContain('placeholder="units"');
+  });
+});
+
+describe("Start The Job on a visit", () => {
+  it("reads the task kits when a task picked one and births through the same expansion", () => {
+    const fn = body(src("src/app/(app)/appointments/actions.ts"), "export async function createJobFromAppointment(");
+    expect(fn).toContain('firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name")))');
+    expect(fn).toContain("tasksFromVisit(answered, new Map(taskKitsFrom(kitsRead?.data).map((k) => [k.id, k])))");
+    expect(fn).toContain('reportError("createJobFromAppointment:kits"');
+  });
+});
+
+describe("the plain kit pickers never offer a task kit", () => {
+  it("the new estimate, the estimate editor and the invoice keep task kits out of Add From Kit", () => {
+    expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("partsKitsOnly(kits ?? [])");
+    expect(src("src/app/(app)/quotes/[id]/page.tsx")).toContain("kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as never}");
+    expect(src("src/app/(app)/billing/[id]/page.tsx")).toContain("kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as any}");
+  });
+  it("the builder keys a task's breakdown by the task, not the row, and takes the Kits switch", () => {
+    const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
+    expect(builder).toContain("key={it.detail.task_id || `line-${idx}`}");
+    expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("kitsOn={kitDoors}");
   });
 });
 

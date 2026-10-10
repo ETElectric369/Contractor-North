@@ -7,7 +7,8 @@ import { GetPaidButton } from "@/components/settle-up-button";
 import { qboConnected } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
-import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
+import { firstThatWorks } from "@/lib/kit-line";
+import { partsKitsOnly, taskKitSelectRungs } from "@/lib/estimate/task-kits";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { clockDoorWords } from "@/lib/long-shift";
@@ -137,7 +138,7 @@ export default async function InvoicePage({
       // THE SHARED SELECT SHAPE (kit-line.ts): sizing + the 0240 price-list link, tolerant of
       // either migration not having landed — so a linked kit line prices live for this customer
       // here exactly as it does in the quote composer, never from its frozen snapshot.
-      firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+      firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase.from("organizations").select("settings, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
       isDraft
@@ -626,7 +627,7 @@ export default async function InvoicePage({
         items={(items ?? []) as InvoiceItem[]}
         payments={(payments ?? []) as Payment[]}
         priceItems={(priceItems ?? []) as any}
-        kits={(kitDoors ? kits ?? [] : []) as any}
+        kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as any}
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
         markupSeed={markupSeed}

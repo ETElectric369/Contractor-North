@@ -608,7 +608,8 @@ export default async function AppointmentCapturePage({
               unit: p.unit ?? "EA",
               price: Number(p.buy_price ?? 0),
             }))}
-            taskKits={kitsWithoutMoney(taskKitsFrom(taskKitsRead.data))}
+            // The company's Kits switch (0352) hides the picker as it hides every other kit door.
+            taskKits={featureOn(orgSettings.features, "kits") ? kitsWithoutMoney(taskKitsFrom(taskKitsRead.data)) : []}
             initialTemplateId={inspection?.inspection_template_id ?? null}
             // A scope pick stores its price: the office's answers go as they are; nobody else's page
             // carries one (and a crew lead's save can't change a priced answer anyway: 0356).

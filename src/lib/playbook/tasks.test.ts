@@ -73,7 +73,7 @@ describe("the slot parses and coerces like every other answer", () => {
     expect(taskAsking(a)).toBe(false);
     expect(taskAsking(b)).toBe(true);
     expect(taskAsking(c)).toBe(false);
-    expect(taskLine(c)).toBe("C — hours from its kit × 7");
+    expect(taskLine(c)).toBe("C — hours from its kit for ×7");
     expect(isAnswered(coerceTasks([{ name: "A" }]))).toBe(true);
     expect(isAnswered(coerceTasks([]))).toBe(false);
   });
@@ -89,7 +89,7 @@ describe("what the estimator, the retired block and the prompt read", () => {
   it("one line per task: his hours or hours?, his parts", () => {
     expect(taskLine(tasks[0])).toBe("Transfer switch — 3 h: 6/3 ×60, BRK50");
     expect(taskLine(tasks[1])).toBe("Hot tub wires — hours?");
-    expect(taskLine(tasks[2])).toBe("Footings — 1.5 h × 7");
+    expect(taskLine(tasks[2])).toBe("Footings — 1.5 h for ×7");
     expect(taskText(tasks).split("\n")).toHaveLength(3);
   });
 
@@ -105,7 +105,7 @@ describe("what the estimator, the retired block and the prompt read", () => {
     const without: Playbook = { needs: PB.needs.filter((n) => n.key !== "tasks") };
     const kept = retiredAnswers(without, { tasks });
     expect(kept.tasks).toContain("Transfer switch — 3 h: 6/3 ×60, BRK50");
-    expect(kept.tasks).toContain("Footings — 1.5 h × 7");
+    expect(kept.tasks).toContain("Footings — 1.5 h for ×7");
   });
 
   it("a scope-pick list still says its codes, never [object Object]", () => {

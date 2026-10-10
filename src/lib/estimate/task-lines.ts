@@ -177,7 +177,10 @@ export function expandTaskKit(task: TaskValue, kit: TaskKit, pricing: KitPricing
     const each = base === null ? 1 : base;
     if (each <= 0) continue;
     const view = kitLineView(it, pricing);
-    const name = view.description.trim();
+    // The part's words without the code in front (a linked line reads "C80 — Concrete"): the code
+    // rides in `code`, and the name may reach the customer's paper — never a book code (0387).
+    const lead = view.code ? `${view.code} — ` : "";
+    const name = (lead && view.description.startsWith(lead) ? view.description.slice(lead.length) : view.description).trim();
     if (!name) continue;
     materials.push({
       code: view.code,

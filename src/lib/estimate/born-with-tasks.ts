@@ -4,7 +4,7 @@ import type { Answers, Playbook } from "@/lib/playbook/types";
 import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { dbError } from "@/lib/db-error";
-import { coerceTaskDetail } from "./task-lines";
+import { coerceTaskDetail, expandTaskKit, type TaskKit } from "./task-lines";
 
 /**
  * A JOB IS BORN WITH ITS TASKS (W3, cn-v1075).
@@ -117,21 +117,28 @@ export function tasksFromLines(rows: ReadonlyArray<LineRow>): Birth {
  * The Inspector's TaskValue: his name, his hours, his parts by words and/or code. A part's cost is
  * unknown here (nothing priced it), so the list asks for it.
  */
-export function tasksFromVisit(tasks: ReadonlyArray<TaskValue>): Birth {
+export function tasksFromVisit(tasks: ReadonlyArray<TaskValue>, kits?: ReadonlyMap<string, TaskKit>): Birth {
   const out: BornTask[] = [];
   const parts: BornPart[] = [];
+  const hours: (number | null)[] = [];
   tasks.forEach((t, i) => {
     const name = t.name.trim();
     if (!name) return;
     const source_key = `task:${t.id}`;
     out.push({ source_key, title: `${name}${unitsSuffix(t.units)}`, sort_order: i });
+    // A TASK KIT (0386, W4): his minutes per unit × the units and the kit's parts × the units,
+    // through THE one expandTaskKit the estimate seeds from. His own hours win over the kit's.
+    const kit = t.kit_id && kits ? kits.get(t.kit_id) ?? null : null;
+    const fromKit = kit ? expandTaskKit(t, kit, { orgDefaultPct: 0 }) : null;
+    hours.push(t.hours ?? fromKit?.hours ?? null);
+    for (const m of fromKit?.materials ?? []) parts.push({ source_key, code: m.code, name: m.name, qty: m.qty, cost: m.cost });
     for (const m of t.materials) {
       const words = (m.words ?? "").trim() || (m.code ?? "").trim();
       if (!words) continue;
       parts.push({ source_key, code: m.code, name: words, qty: m.qty, cost: null });
     }
   });
-  return { tasks: out, plannedMinutes: minutesOf(tasks.map((t) => (t.name.trim() ? t.hours : null))), parts };
+  return { tasks: out, plannedMinutes: minutesOf(hours), parts };
 }
 
 /**

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { smsReadiness } from "@/lib/sms";
-import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
+import { firstThatWorks } from "@/lib/kit-line";
+import { partsKitsOnly, taskKitSelectRungs } from "@/lib/estimate/task-kits";
 import { BackLink } from "@/components/back-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -111,7 +112,7 @@ export default async function QuoteDetailPage({
       .limit(2000),
     // THE SHARED SELECT SHAPE (kit-line.ts) — sizing + the 0240 price-list link, tolerant of
     // either migration not having landed yet, so a linked kit line prices live for this customer.
-    firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+    firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     // THE VISIT THIS WAS WRITTEN UP FROM (cn-v1069): the backlink saveQuote stamps inside the visit's
     // capture, read back here so the two stay attached both ways. Newest first if ever two claim it.
@@ -272,7 +273,7 @@ export default async function QuoteDetailPage({
         lock={lock}
         items={lineItems}
         priceItems={(priceItems ?? []) as never}
-        kits={(kitDoors ? kits ?? [] : []) as never}
+        kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as never}
         defaultMarkupPct={orgS.default_markup_pct}
         salesTax={featureOn(orgS.features, "sales_tax")}
         // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
