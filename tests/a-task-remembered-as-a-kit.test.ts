@@ -97,9 +97,12 @@ describe("the plain kit pickers never offer a task kit", () => {
   it("the units box on a kit-built line re-derives the kit through the one rule and renames the line", () => {
     const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
     const breakdown = builder.slice(builder.indexOf("function TaskBreakdown("), builder.indexOf("export function QuoteBuilder("));
-    expect(breakdown).toContain("reexpandTaskDetail(d, n > 0 ? n : null, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct })");
-    expect(breakdown).toContain("description: lineNameWithUnits(line.description, next.units)");
+    expect(breakdown).toContain("reexpandTaskDetail(d, n, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct })");
+    expect(breakdown).toContain("description: lineNameWithUnits(line.description, d.units, next.units)");
     expect(breakdown).toContain('aria-label="Units"');
+    // A blank mid-typing is not a count; a hand-typed Unit $ stands through the change.
+    expect(breakdown).toContain("if (!fromKit || !(n > 0)) return;");
+    expect(breakdown).toContain("onChange(hand ? { ...priced, unit_price: line.unit_price } : priced);");
   });
 });
 

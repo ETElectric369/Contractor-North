@@ -107,9 +107,15 @@ export function stripUnits(description: string): string {
   return description.replace(/\s*×\s*\d+(?:[.,]\d+)?\s*$/u, "").trim();
 }
 
-/** The line's name for these units: the task's words, " ×N" when N is not one (taskLine's rule). */
-export function lineNameWithUnits(description: string, units: number | null): string {
-  return `${stripUnits(description)}${units !== null && units !== 1 ? ` ×${units}` : ""}`;
+/** The suffix a count writes on a line's name: " ×N" when N is not one (taskLine's rule). */
+const unitsSuffix = (units: number | null): string => (units !== null && units !== 1 ? ` ×${units}` : "");
+
+/** The line's name for another count: ONLY the suffix the previous count wrote is replaced, so a
+ *  name that ends in his own "4×4" (or one he edited by hand) is never rewritten under him. */
+export function lineNameWithUnits(description: string, prevUnits: number | null, units: number | null): string {
+  const prev = unitsSuffix(prevUnits);
+  const base = prev && description.endsWith(prev) ? description.slice(0, -prev.length) : description;
+  return `${base}${unitsSuffix(units)}`;
 }
 
 /** A part the builder added and nobody named yet is not a part: it prices nothing and asks nothing
@@ -260,19 +266,59 @@ export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDeta
  * expandTaskKit; his typed hours and every part he added or edited by hand stand as they are. With
  * no kit to expand, only the count changes (it rides the name).
  */
+export const MAX_UNITS = 100_000;
+
+/** A part's identity on the line: the code when it has one, else its words. */
+const partKey = (m: { code: string | null; name: string }): string => (m.code ?? "").trim().toLowerCase() || m.name.trim().toLowerCase();
+
 export function reexpandTaskDetail(d: TaskDetail, units: number | null, kit: TaskKit | null, pricing: KitPricing): TaskDetail {
-  const next = positive(units);
+  const raw = positive(units);
+  const next = raw === null ? null : Math.min(raw, MAX_UNITS);
   if (!kit) return { ...d, units: next };
-  const probe: TaskValue = { id: d.task_id, name: "", hours: null, units: next, kit_id: kit.id, materials: [] };
-  const fromKit = expandTaskKit(probe, kit, pricing);
+  const probe = (u: number | null): TaskValue => ({ id: d.task_id, name: "", hours: null, units: u, kit_id: kit.id, materials: [] });
+  const fromKit = expandTaskKit(probe(next), kit, pricing);
+
+  // A LINE SAVED BEFORE THE MARKS (cn-v1076), or one he has edited all over: nothing on it is
+  // flagged. The kit's parts are then recognised only where they still read EXACTLY as the kit put
+  // them for the old count (same code or words, same count), and its hours only when they equal
+  // what the kit gave — anything else on such a line is his and stands.
+  const legacy = !d.materials.some((m) => m.from_kit === true) && d.hours_from_kit !== true;
+  const asWas = legacy ? expandTaskKit(probe(d.units), kit, pricing) : null;
+  const kitHours = d.hours_from_kit === true || (asWas !== null && d.hours !== null && d.hours === asWas.hours);
+  const untouched = new Map<string, number[]>();
+  for (const m of asWas?.materials ?? []) untouched.set(partKey(m), [...(untouched.get(partKey(m)) ?? []), m.qty ?? -1]);
+  const stillTheKits = (m: TaskDetailMaterial): boolean => {
+    const q = untouched.get(partKey(m));
+    const at = q ? q.indexOf(m.qty ?? -1) : -1;
+    if (at < 0) return false;
+    q!.splice(at, 1);
+    return true;
+  };
+
+  // THE KIT'S PARTS ARE REPLACED IN PLACE — never appended. A part he removed stays removed, a
+  // part he edited by hand (the mark cleared) stays his and gets no twin, and a kit part keeps
+  // the sell and cost it was built with (the rate rule: parts keep their price) — only the count
+  // follows the units; a hole ("price?") takes the kit's price when the kit has one now.
+  const fresh = new Map<string, TaskDetailMaterial[]>();
+  for (const m of fromKit.materials) fresh.set(partKey(m), [...(fresh.get(partKey(m)) ?? []), m]);
+  const materials: TaskDetailMaterial[] = [];
+  for (const m of d.materials) {
+    const kits = m.from_kit === true || (legacy && stillTheKits(m));
+    if (!kits) {
+      materials.push(m);
+      continue;
+    }
+    const take = fresh.get(partKey(m))?.shift();
+    if (!take) continue; // the kit no longer carries it: the kit's part follows the kit
+    materials.push({ ...take, sell: m.sell ?? take.sell, cost: m.cost ?? take.cost, from_kit: true as const });
+  }
   const { hours_from_kit: _h, ...rest } = d;
-  const kitHours = d.hours_from_kit === true || d.hours === null;
   return {
     ...rest,
     units: next,
     kit_id: kit.id,
     hours: kitHours ? fromKit.hours : d.hours,
-    materials: [...fromKit.materials.map((m) => ({ ...m, from_kit: true as const })), ...d.materials.filter((m) => m.from_kit !== true)],
+    materials,
     ...(kitHours && fromKit.hours !== null ? { hours_from_kit: true as const } : {}),
   };
 }

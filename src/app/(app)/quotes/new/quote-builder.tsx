@@ -272,9 +272,15 @@ function TaskBreakdown({
   // THE UNITS BOX on a kit-built line: the kit's hours and parts are derived again for the new
   // count through THE one expandTaskKit, his own stand, and the count rides the line's name.
   const setUnits = (n: number) => {
-    if (!fromKit) return;
-    const next = reexpandTaskDetail(d, n > 0 ? n : null, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct });
-    onChange(lineFromDetail({ ...line, description: lineNameWithUnits(line.description, next.units) }, next));
+    // A blank or a 0 mid-typing is not a count: the line waits for a real one.
+    if (!fromKit || !(n > 0)) return;
+    const next = reexpandTaskDetail(d, n, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct });
+    const renamed = { ...line, description: lineNameWithUnits(line.description, d.units, next.units) };
+    // A Unit $ he typed over the sum is HIS price and stands (the rate rule): the parts and hours
+    // follow the count beneath it, and the amber note keeps saying the paper leaves them off.
+    const hand = !detailExplains(d, line);
+    const priced = lineFromDetail(renamed, next);
+    onChange(hand ? { ...priced, unit_price: line.unit_price } : priced);
   };
   const dropPart = (i: number) => set({ ...d, materials: d.materials.filter((_, j) => j !== i) });
   const money = taskMoney(d);
@@ -289,7 +295,8 @@ function TaskBreakdown({
   const [kitUnit, setKitUnit] = useState("ea");
   const [kitBusy, setKitBusy] = useState(false);
   const [kitSaid, setKitSaid] = useState<{ ok: boolean; text: string } | null>(null);
-  const fromKit = d.kit_id ? taskKits.find((k) => k.id === d.kit_id) ?? null : null;
+  // The kit behind the line, while the company's Kits switch is on (off = no kit door, as everywhere).
+  const fromKit = kitsOn && d.kit_id ? taskKits.find((k) => k.id === d.kit_id) ?? null : null;
   const openKit = () => {
     const probe = kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit });
     if (!probe.ok) {
@@ -391,12 +398,17 @@ function TaskBreakdown({
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         {d.kit_id ? (
           <>
-            <span className="text-slate-500">From the kit {fromKit ? fromKit.name : "it was built from (no longer in your kits)"}</span>
+            <span className="text-slate-500">
+              From the kit {fromKit ? fromKit.name : kitsOn ? "it was built from (no longer in your kits)" : "it was built from"}
+            </span>
             {fromKit ? (
               <>
                 <span className="text-slate-500">· Units</span>
                 <NumberInput aria-label="Units" placeholder="units" className={`${box} w-20`} value={d.units ?? 1} onValueChange={setUnits} />
                 {fromKit.unit && <span className="text-slate-500">{fromKit.unit}</span>}
+                {d.hours !== null && d.hours_from_kit !== true && Number(fromKit.labor_minutes) > 0 && (
+                  <span className="text-slate-400">· your hours stand; the kit&rsquo;s parts follow the units</span>
+                )}
               </>
             ) : (
               d.units !== null && d.units !== 1 && <span className="text-slate-500">· ×{d.units}</span>

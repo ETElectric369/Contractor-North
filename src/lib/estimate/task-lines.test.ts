@@ -288,15 +288,47 @@ describe("reexpandTaskDetail — the builder's units box on a kit-built line (W4
     expect(eight.materials.map((m) => [m.name, m.qty])).toEqual([["Concrete, 80 lb", 32], ["Rebar stake", 14]]);
   });
 
-  it("his typed hours and a kit part he edited by hand stand through a change of units", () => {
+  it("his typed hours and a kit part he edited by hand stand through a change of units — no twin, nothing appended", () => {
     const { hours_from_kit: _h, ...typed } = { ...built, hours: 10 };
     const { from_kit: _k, ...edited } = typed.materials[0];
     const his = { ...typed, materials: [{ ...edited, qty: 30 }, typed.materials[1]] };
     const nine = reexpandTaskDetail(his, 9, kit, pricing);
     expect(nine.hours).toBe(10);
     expect(nine.hours_from_kit).toBeUndefined();
-    // The kit's concrete comes back for nine AND his hand-counted 30 stays: both are on the line, his marked as his.
-    expect(nine.materials.map((m) => [m.name, m.qty, m.from_kit ?? false])).toEqual([["Concrete, 80 lb", 36, true], ["Concrete, 80 lb", 30, false], ["Rebar stake", 14, false]]);
+    expect(nine.materials.map((m) => [m.name, m.qty, m.from_kit ?? false])).toEqual([["Concrete, 80 lb", 30, false], ["Rebar stake", 14, false]]);
+  });
+
+  it("a kit part he removed stays removed; a hole he left in the hours stays a hole", () => {
+    const dropped = { ...built, materials: built.materials.slice(1) };
+    expect(reexpandTaskDetail(dropped, 8, kit, pricing).materials.map((m) => m.name)).toEqual(["Rebar stake"]);
+    expect(reexpandTaskDetail(dropped, 7, kit, pricing).materials.map((m) => m.name)).toEqual(["Rebar stake"]);
+    const { hours_from_kit: _h, ...cleared } = { ...built, hours: null };
+    const eight = reexpandTaskDetail(cleared, 8, kit, pricing);
+    expect(eight.hours).toBeNull();
+    expect(eight.hours_from_kit).toBeUndefined();
+  });
+
+  it("a kit part keeps the price it was built with; only its count follows — a hole takes the kit's price", () => {
+    const priced = { ...built, materials: [{ ...built.materials[0], sell: 9, cost: 7 }, built.materials[1]] };
+    const eight = reexpandTaskDetail(priced, 8, kit, pricing);
+    expect(eight.materials[0]).toEqual({ code: null, name: "Concrete, 80 lb", qty: 32, cost: 7, sell: 9, from_kit: true });
+    const hole = { ...built, materials: [{ ...built.materials[0], sell: null, cost: null }, built.materials[1]] };
+    expect(reexpandTaskDetail(hole, 8, kit, pricing).materials[0].sell).toBe(9.5);
+  });
+
+  it("a line saved before the marks (cn-v1076) is recognised by code or words, and its hours are the kit's only when they were", () => {
+    const legacy = JSON.parse(JSON.stringify({ ...built, hours_from_kit: undefined, materials: built.materials.map(({ from_kit: _f, ...m }) => m) }));
+    const eight = reexpandTaskDetail(legacy, 8, kit, pricing);
+    expect(eight.hours).toBe(16);
+    expect(eight.hours_from_kit).toBe(true);
+    expect(eight.materials.map((m) => [m.name, m.qty, m.from_kit ?? false])).toEqual([["Concrete, 80 lb", 32, true], ["Rebar stake", 14, false]]);
+    const hisHours = reexpandTaskDetail({ ...legacy, hours: 5 }, 8, kit, pricing);
+    expect(hisHours.hours).toBe(5);
+    expect(hisHours.hours_from_kit).toBeUndefined();
+  });
+
+  it("the count is capped where the Inspector caps it", () => {
+    expect(reexpandTaskDetail(built, 9_999_999, kit, pricing).units).toBe(100_000);
   });
 
   it("with no kit to expand only the count changes; the flags survive a save round trip only when true", () => {
@@ -308,10 +340,13 @@ describe("reexpandTaskDetail — the builder's units box on a kit-built line (W4
     expect("hours_from_kit" in coerceTaskDetail({ ...built, hours_from_kit: false })!).toBe(false);
   });
 
-  it("the line's name carries the count: stripUnits / lineNameWithUnits", () => {
+  it("the line's name carries the count: only the suffix the last count wrote is replaced", () => {
     expect(stripUnits("Footings ×7")).toBe("Footings");
-    expect(lineNameWithUnits("Footings ×7", 8)).toBe("Footings ×8");
-    expect(lineNameWithUnits("Footings ×7", 1)).toBe("Footings");
-    expect(lineNameWithUnits("Footings", null)).toBe("Footings");
+    expect(lineNameWithUnits("Footings ×7", 7, 8)).toBe("Footings ×8");
+    expect(lineNameWithUnits("Footings ×7", 7, 1)).toBe("Footings");
+    expect(lineNameWithUnits("Footings", null, 3)).toBe("Footings ×3");
+    // His own "4×4" and a hand-edited name are never rewritten under him.
+    expect(lineNameWithUnits("Install 4×4", null, 8)).toBe("Install 4×4 ×8");
+    expect(lineNameWithUnits("Footings ×7 (north)", 7, 8)).toBe("Footings ×7 (north) ×8");
   });
 });
