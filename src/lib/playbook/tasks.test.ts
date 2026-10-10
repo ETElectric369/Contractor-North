@@ -68,10 +68,12 @@ describe("the slot parses and coerces like every other answer", () => {
     expect(got!.map((t) => t.name)).toEqual(["One"]);
   });
 
-  it("a task without hours is ASKING; a list with one task is answered", () => {
-    const [a, b] = coerceTasks([{ name: "A", hours: 2 }, { name: "B" }])!;
+  it("a task without hours is ASKING — unless a kit answers them (W4); a list with one task is answered", () => {
+    const [a, b, c] = coerceTasks([{ name: "A", hours: 2 }, { name: "B" }, { name: "C", kit_id: "k1", units: 7 }])!;
     expect(taskAsking(a)).toBe(false);
     expect(taskAsking(b)).toBe(true);
+    expect(taskAsking(c)).toBe(false);
+    expect(taskLine(c)).toBe("C — hours from its kit × 7");
     expect(isAnswered(coerceTasks([{ name: "A" }]))).toBe(true);
     expect(isAnswered(coerceTasks([]))).toBe(false);
   });

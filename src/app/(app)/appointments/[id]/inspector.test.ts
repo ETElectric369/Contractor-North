@@ -63,6 +63,22 @@ const BOOK = [
   { code: "R2", description: "Demo", unit: "EA", price: 243.5 },
 ];
 const PHOTO = { path: "org-1/appointments/appt-1/1-panel.jpg", url: "https://example.invalid/1-panel.jpg" };
+// A TASK KIT (0386, W4) as the page hands it over: minutes for one unit, lines by name and count,
+// no money field anywhere (kitsWithoutMoney). The first task picked it for seven footings.
+const KIT = {
+  id: "k1",
+  name: "Footing",
+  labor_minutes: 120,
+  unit: "footing",
+  items: [
+    { id: "i1", description: "Concrete, 80 lb", quantity: 4, unit: "ea", sort_order: 0 },
+    { id: "i2", description: "Rebar stake", quantity: 2, unit: "ea", sort_order: 1 },
+  ],
+};
+const KIT_ANSWERS = {
+  ...ANSWERS,
+  tasks: [{ id: "t1", name: "Footings", hours: null, units: 7, kit_id: "k1", materials: [] }, ANSWERS.tasks[1]],
+};
 
 const render = (access: InspectionAccess, over: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
@@ -284,5 +300,54 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
     expect(doors).not.toContain("Add A Material");
     expect(html).not.toContain('aria-label="Remove This Task"');
     expect(textOf(html)).not.toMatch(PRICE);
+  });
+});
+
+describe("a task kit on the visit (W4): picked by name, counted in units, previewed without a price", () => {
+  const pills = (html: string) => (html.match(/>hours\?</g) ?? []).length;
+  const PREVIEW = "From the kit, for ×7 footing: 14 h · Concrete, 80 lb ×28, Rebar stake ×14";
+  // The office's page carries the scope prices above; the TASKS block itself must never carry one.
+  const tasksBlock = (html: string) => html.slice(html.indexOf(">Tasks<"), html.indexOf("Measurements"));
+
+  it("the office: the kit picker, the units box with the kit's word, the preview from the kit; the kit task no longer asks", () => {
+    const html = render("office", { taskKits: [KIT], initialAnswers: KIT_ANSWERS });
+    expect(html).toContain('aria-label="Kit"');
+    expect(html).toContain('<option value="k1"');
+    expect(html).toContain(">Footing<");
+    expect((html.match(/placeholder="units"/g) ?? []).length).toBe(2);
+    expect(html).toContain('value="7"');
+    expect(textOf(html)).toContain(PREVIEW);
+    // Only the hot tub task asks: the footings take their hours from the kit.
+    expect(pills(html)).toBe(1);
+    expect(tasksBlock(html)).not.toMatch(PRICE);
+  });
+
+  it("a crew lead: the same picker and preview, never a price", () => {
+    const html = render("crewLead", { taskKits: [KIT], initialAnswers: KIT_ANSWERS });
+    expect(html).toContain('aria-label="Kit"');
+    expect(html).toContain('<option value="k1"');
+    expect(textOf(html)).toContain(PREVIEW);
+    expect(textOf(html)).not.toMatch(PRICE);
+  });
+
+  it("a plain tech reads the kit's name; no picker", () => {
+    const html = render("view", { taskKits: [KIT], initialAnswers: KIT_ANSWERS });
+    expect(html).not.toContain("<select");
+    expect(textOf(html)).toContain("Kit Footing");
+    expect(textOf(html)).toContain(PREVIEW);
+    expect(textOf(html)).not.toMatch(PRICE);
+  });
+
+  it("without a task kit in the org there is no picker, and the units box still counts", () => {
+    const html = render("office");
+    expect(html).not.toContain('aria-label="Kit"');
+    expect((html.match(/placeholder="units"/g) ?? []).length).toBe(2);
+  });
+
+  it("a kit that left the price list is said, not hidden", () => {
+    const html = render("office", { taskKits: [], initialAnswers: KIT_ANSWERS });
+    expect(html).toContain('aria-label="Kit"');
+    expect(textOf(html)).toContain("kit?");
+    expect(tasksBlock(html)).not.toMatch(PRICE);
   });
 });

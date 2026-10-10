@@ -15,6 +15,7 @@ import { coerceByPlaybook, retiredAnswers, retiredLabel } from "@/lib/playbook/a
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { taskAsking, type TaskMaterial, type TaskValue } from "@/lib/playbook/tasks";
+import { expandTaskKit, type TaskKit } from "@/lib/estimate/task-lines";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
@@ -136,6 +137,10 @@ export interface CapturePhoto {
 export type InspectionTemplate = { id: string; name: string; schema: unknown; playbook?: unknown };
 export type BookRow = { code: string; description: string; unit: string; price: number };
 
+/** The kit preview prices nothing: the kits arrive with every money field dropped, and the
+ *  preview reads names and counts only. */
+const KIT_PREVIEW_PRICING = { orgDefaultPct: 0 };
+
 /**
  * ONE SMART INSPECTOR.
  *
@@ -187,6 +192,7 @@ export function Inspector({
   appointmentId,
   templates,
   priceBook,
+  taskKits = [],
   initialTemplateId,
   initialAnswers,
   initialCapture,
@@ -207,6 +213,9 @@ export function Inspector({
   templates: InspectionTemplate[];
   /** The org's own price list, for `scopes` questions. Empty is fine — the picker says so. */
   priceBook: BookRow[];
+  /** The org's TASK kits (0386, W4) with every money field dropped (lib/estimate/task-kits
+   *  kitsWithoutMoney): a task's kit picker offers them by name; the preview reads hours and counts. */
+  taskKits?: TaskKit[];
   initialTemplateId: string | null;
   initialAnswers: Answers;
   initialCapture: unknown;
@@ -996,6 +1005,64 @@ export function Inspector({
                   <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">hours?</span>
                 )}
               </div>
+              {/* THE KIT AND THE UNITS (W4): a task kit is his minutes and his parts for ONE unit
+                  (0386), picked by name; the units box counts them ("7 footings"). The preview comes
+                  from THE SAME expandTaskKit the estimate seeds from, so the two never disagree —
+                  names and counts only, never a price (the page drops every money field). */}
+              {(() => {
+                const kit = t.kit_id ? taskKits.find((k) => k.id === t.kit_id) ?? null : null;
+                const kitGone = !!t.kit_id && !kit;
+                const preview = kit ? expandTaskKit(t, kit, KIT_PREVIEW_PRICING) : null;
+                const label = "text-[11px] font-semibold uppercase tracking-wide text-slate-400";
+                return (
+                  <>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {(taskKits.length > 0 || !!t.kit_id) && (
+                        <>
+                          <span className={label}>Kit</span>
+                          {readOnly ? (
+                            <span className="text-sm text-slate-700">{kit ? kit.name : kitGone ? "a kit no longer in the price list" : "none"}</span>
+                          ) : (
+                            <select
+                              aria-label="Kit"
+                              value={t.kit_id ?? ""}
+                              {...focus}
+                              onChange={(e) => patchTask(i, { kit_id: e.target.value || null })}
+                              className="min-h-[44px] max-w-[14rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
+                            >
+                              <option value="">No kit</option>
+                              {taskKits.map((k) => (
+                                <option key={k.id} value={k.id}>
+                                  {k.name}
+                                </option>
+                              ))}
+                              {kitGone && <option value={t.kit_id ?? ""}>A kit no longer in the price list</option>}
+                            </select>
+                          )}
+                        </>
+                      )}
+                      <span className={label}>Units</span>
+                      <NumBox value={t.units} className="w-20" placeholder="units" {...focus} onValue={(x) => patchTask(i, { units: x })} />
+                      {kit?.unit && <span className="text-sm text-slate-500">{kit.unit}</span>}
+                      {kitGone && (
+                        <span
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                          title="That kit is no longer in the price list — pick another or give the task its hours"
+                        >
+                          kit?
+                        </span>
+                      )}
+                    </div>
+                    {preview && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        From the kit, for ×{t.units ?? 1}
+                        {kit?.unit ? ` ${kit.unit}` : ""}: {preview.hours !== null ? `${preview.hours} h` : "hours?"}
+                        {preview.materials.length ? ` · ${preview.materials.map((m) => `${m.name} ×${m.qty}`).join(", ")}` : ""}
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
               <div className="mt-2 space-y-2">
                 <SectionLabel>Materials</SectionLabel>
                 {t.materials.map((m, mi) => (

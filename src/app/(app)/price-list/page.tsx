@@ -5,7 +5,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { measurementOptions } from "@/lib/playbook/measurements";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { UNIT_DATALIST_ID, UNIT_SUGGESTIONS } from "@/lib/pricing/units";
-import { firstThatWorks, kitsSelectRungs, type KitLineRaw } from "@/lib/kit-line";
+import { firstThatWorks, type KitLineRaw } from "@/lib/kit-line";
+import { taskKitSelectRungs } from "@/lib/estimate/task-kits";
 import type { PriceItem } from "./price-list-math";
 import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
@@ -34,7 +35,15 @@ const ITEM_SIZING_V2 = `${ITEM_SIZING}, sized_by, qty_per`;
 
 /** A kit as THE SHARED SELECT SHAPE (lib/kit-line.ts) hands it over — the same three-rung select
  *  the quote pages run, so a kit line prices identically here and on an estimate. */
-type KitRow = { id: string; name: string; category: string | null; kit_items: (KitLineRaw & { id: string })[] };
+type KitRow = {
+  id: string;
+  name: string;
+  category: string | null;
+  /** 0386: a TASK kit's minutes for one unit and his word for it (W4); absent before the migration. */
+  labor_minutes?: number | null;
+  unit?: string | null;
+  kit_items: (KitLineRaw & { id: string })[];
+};
 
 /** 0282's vendor options, as the screen classifies them. THE PROJECTION LAW: every field the
  *  option row, the modal and the sell-price resolution read has to be named right here, or it is
@@ -70,7 +79,7 @@ export default async function PriceListPage() {
       return { data: base.data, sizingAvailable: false };
     })(),
     // Three rungs of tolerance: (1) full, (2) without the 0240 link, (3) the pre-0166 base.
-    firstThatWorks(kitsSelectRungs("id, name, category").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+    firstThatWorks(taskKitSelectRungs("category").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
     // default_markup_pct rides to both tabs so a row's Sell and a kit line picked from the book
     // price through THE markup rule (item → org default), not the item's raw markup alone.
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),

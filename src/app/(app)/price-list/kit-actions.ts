@@ -7,6 +7,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { normalizeUnit } from "@/lib/pricing/units";
 import { firstThatWorks, KIT_BOOK_OPTIONS_EMBED, kitLineSnapshot, type KitSizing } from "@/lib/kit-line";
 import type { PriceItemOptionRow } from "@/lib/pricing/item-options";
+import { coerceTaskDetail } from "@/lib/estimate/task-lines";
+import { kitFromTaskDetail, rememberKit, type RememberResult } from "@/lib/estimate/kit-from-task";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -289,23 +291,55 @@ export async function createKit(input: { name: string; category?: string | null 
 
 export async function updateKit(
   id: string,
-  input: { name: string; category?: string | null },
+  input: {
+    name: string;
+    category?: string | null;
+    /** 0386: his minutes for ONE unit makes the kit a TASK kit; null makes it an ordinary kit
+     *  again. Absent = untouched. */
+    labor_minutes?: number | null;
+    /** His word for the unit ("footing"); null = none. Absent = untouched. */
+    unit?: string | null;
+  },
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   if (!input.name.trim()) return { ok: false, error: "Name is required." };
+  const patch: Record<string, unknown> = { name: input.name.trim(), category: input.category?.trim() || null };
+  if ("labor_minutes" in input) {
+    const m = input.labor_minutes;
+    if (m !== null && m !== undefined && (!Number.isFinite(m) || m <= 0)) return { ok: false, error: "Hours per unit must be above zero, or empty for a parts-only kit." };
+    patch.labor_minutes = m === null || m === undefined ? null : Math.round(m);
+  }
+  if ("unit" in input) patch.unit = input.unit?.trim() || null;
   // Org-safe: RLS scopes the row to the caller's org; .select("id") after the write catches the
   // zero-row 204 a hidden/foreign id would otherwise turn into a silent "saved".
   const { data, error } = await supabase
     .from("kits")
-    .update({ name: input.name.trim(), category: input.category?.trim() || null })
+    .update(patch)
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Kit not found." };
   revalidatePath("/price-list");
   return { ok: true };
+}
+
+/**
+ * REMEMBER AS A KIT (W4): a priced task line's breakdown becomes a task kit — his hours per unit,
+ * his parts per unit — so the next visit's Inspector offers it by name. The rule is
+ * lib/estimate/kit-from-task (pure + one database rule); this is the office's door onto it.
+ */
+export async function rememberTaskAsKit(input: { name: string; unit: string; detail: unknown }): Promise<RememberResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const detail = coerceTaskDetail(input?.detail);
+  if (!detail) return { ok: false, error: "That line has no breakdown to remember." };
+  const made = kitFromTaskDetail(detail, { name: input?.name ?? "", unit: input?.unit ?? "" });
+  if (!made.ok) return { ok: false, error: made.error };
+  const res = await rememberKit(ctx.supabase, made.value);
+  if (res.ok) revalidatePath("/price-list");
+  return res;
 }
 
 export async function deleteKit(id: string): Promise<Result> {

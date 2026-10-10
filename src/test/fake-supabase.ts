@@ -7,7 +7,9 @@
  * first row, answers an insert's .select("id") with one id per row (and ADDS the rows to the table,
  * so a later read in the same test sees them, as the database would), and applies an update's patch
  * to the rows the filters hit, returning their ids. `onInsert` lets a test refuse one insert the way
- * Postgres would (a unique violation), optionally planting the winner's rows first.
+ * Postgres would (a unique violation), optionally planting the winner's rows first. `in` filters by
+ * a list, `ilike` by a literal (the pattern's escapes undone, case folded — the rules here only ever
+ * pass a literal), and a delete takes the rows it hits out of the table and returns their ids.
  */
 export type Row = Record<string, any>;
 
@@ -21,7 +23,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
   let seq = 0;
   const from = (table: string) => {
     const filters: Array<(r: Row) => boolean> = [];
-    let mode: "select" | "insert" | "update" = "select";
+    let mode: "select" | "insert" | "update" | "delete" = "select";
     let single = false;
     let pending: Row[] = [];
     let refused: { code?: string; message: string } | undefined;
@@ -36,6 +38,19 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
       },
       is(col: string, v: unknown) {
         filters.push((r) => r[col] === v);
+        return b;
+      },
+      in(col: string, vals: unknown[]) {
+        filters.push((r) => vals.includes(r[col]));
+        return b;
+      },
+      ilike(col: string, pattern: string) {
+        const literal = pattern.replace(/\\([\\%_])/g, "$1").toLowerCase();
+        filters.push((r) => String(r[col] ?? "").toLowerCase() === literal);
+        return b;
+      },
+      delete() {
+        mode = "delete";
         return b;
       },
       insert(rows: Row | Row[]) {
@@ -68,6 +83,10 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
         else if (mode === "update") {
           const hit = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
           for (const r of hit) Object.assign(r, pending[0]);
+          data = hit.map((r) => ({ id: r.id }));
+        } else if (mode === "delete") {
+          const hit = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+          tables[table] = (tables[table] ?? []).filter((r) => !hit.includes(r));
           data = hit.map((r) => ({ id: r.id }));
         } else {
           const hit = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));

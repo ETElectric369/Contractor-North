@@ -32,7 +32,10 @@ import { ImportKitsButton } from "./import-kits-button";
 
 /** A kit_items row as THE SHARED SELECT SHAPE hands it over (kit-line.ts). */
 type KitItem = KitLineRaw & { id: string };
-interface Kit { id: string; name: string; category: string | null; kit_items: KitItem[]; }
+interface Kit { id: string; name: string; category: string | null; labor_minutes?: number | null; unit?: string | null; kit_items: KitItem[]; }
+
+/** A task kit's minutes for one unit, as hours ("2 h per footing"). */
+const hoursPerUnitText = (minutes: number): string => `${Math.round((minutes / 60) * 100) / 100} h`;
 interface PriceItem {
   id: string; code: string | null; description: string; category?: string | null; supplier?: string | null;
   unit: string; buy_price: number; markup_pct: number;
@@ -152,14 +155,23 @@ function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
   const toast = useToast();
   const [name, setName] = useState(kit.name);
   const [category, setCategory] = useState(kit.category ?? "");
+  // A TASK KIT (0386, W4): hours for ONE unit and his word for the unit. Empty hours = an ordinary
+  // parts kit, which the Inspector's task picker leaves out.
+  const [hoursPerUnit, setHoursPerUnit] = useState(Number(kit.labor_minutes) > 0 ? String(Math.round((Number(kit.labor_minutes) / 60) * 100) / 100) : "");
+  const [unit, setUnit] = useState(kit.unit ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   function save() {
     if (!name.trim()) return;
     setErr(null);
+    const hours = hoursPerUnit.trim() ? Number(hoursPerUnit) : null;
+    if (hours !== null && (!Number.isFinite(hours) || hours <= 0)) {
+      setErr("Hours per unit must be a number above zero, or empty for a parts-only kit.");
+      return;
+    }
     start(async () => {
-      const res = await updateKit(kit.id, { name, category });
+      const res = await updateKit(kit.id, { name, category, labor_minutes: hours === null ? null : Math.round(hours * 60), unit: unit.trim() || null });
       if (!res.ok) { setErr(res.error ?? "Could not save kit."); toast(res.error ?? "Could not save kit.", "error"); return; }
       toast("Kit saved.", "success");
       router.refresh();
@@ -178,6 +190,11 @@ function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
       <div className="space-y-3">
         <div><Label htmlFor="ek-name">Kit name</Label><Input id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="A name for the whole assembly" /></div>
         <div><Label htmlFor="ek-cat">Category</Label><Input id="ek-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label htmlFor="ek-hours">Hours Per Unit</Label><Input id="ek-hours" inputMode="decimal" value={hoursPerUnit} onChange={(e) => setHoursPerUnit(e.target.value)} placeholder="empty = parts only" /></div>
+          <div><Label htmlFor="ek-unit">Unit</Label><Input id="ek-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="footing, step, opening" /></div>
+        </div>
+        <p className="text-xs text-slate-500">With hours per unit this is a task kit: the Inspector offers it on a task, and the estimate prices your hours × the units.</p>
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
     </Modal>
@@ -541,6 +558,13 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
                     <Package className="h-4 w-4 text-brand" />
                     <span className="text-sm font-semibold text-slate-900">{k.name}</span>
                     {k.category && <span className="text-xs text-slate-400">· {k.category}</span>}
+                    {/* A TASK KIT (0386, W4): his minutes for one unit. The Inspector offers it on a
+                        task and the estimate prices hours × units — said here, never silent. */}
+                    {Number(k.labor_minutes) > 0 && (
+                      <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand">
+                        Task · {hoursPerUnitText(Number(k.labor_minutes))} per {k.unit || "ea"}
+                      </span>
+                    )}
                     {linkedCount > 0 && (
                       <span className="text-xs text-slate-400" title="Lines priced live from the price list">
                         · {linkedCount} of {k.kit_items.length} from the book

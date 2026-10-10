@@ -98,8 +98,9 @@ export function isTaskList(v: unknown): v is TaskValue[] {
   return Array.isArray(v) && v.length > 0 && v.every((t) => t && typeof t === "object" && typeof (t as TaskValue).name === "string");
 }
 
-/** A task that is still ASKING: no hours from him yet. It prices nothing until he answers. */
-export const taskAsking = (t: TaskValue): boolean => t.hours === null;
+/** A task is ASKING while it has no hours of its own and no kit to take them from (a task kit
+ *  carries his minutes per unit, 0386: picking one answers the hours at the seed, expandTaskKit). */
+export const taskAsking = (t: TaskValue): boolean => t.hours === null && !t.kit_id;
 
 /** The words that carry meaning in a phrase: lowercased, plurals folded, the glue dropped. */
 const GLUE = new Set(["the", "a", "an", "of", "in", "on", "to", "for", "and", "with", "at", "by", "from", "up", "is", "it", "its", "or", "into", "onto", "off", "out", "per", "all", "that", "this", "new"]);
@@ -149,7 +150,12 @@ export function materialText(m: TaskMaterial): string {
 /** One task as one line. The estimator, the hear prompt and the retired-answers block all read
  *  this; "hours?" is the asking state said out loud, never a number. */
 export function taskLine(t: TaskValue): string {
-  const hours = t.hours === null ? "hours?" : `${t.hours} h${t.units !== null && t.units !== 1 ? ` × ${t.units}` : ""}`;
+  const hours =
+    t.hours === null
+      ? t.kit_id
+        ? `hours from its kit${t.units !== null && t.units !== 1 ? ` × ${t.units}` : ""}`
+        : "hours?"
+      : `${t.hours} h${t.units !== null && t.units !== 1 ? ` × ${t.units}` : ""}`;
   const parts = t.materials.length ? `: ${t.materials.map(materialText).join(", ")}` : "";
   return `${t.name} — ${hours}${parts}`;
 }

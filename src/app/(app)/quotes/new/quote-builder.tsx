@@ -20,6 +20,8 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { detailExplains, lineFromDetail, repriceTaskLine, taskMoney } from "@/lib/estimate/task-lines";
+import { kitFromTaskDetail, kitNameFromLine } from "@/lib/estimate/kit-from-task";
+import { rememberTaskAsKit } from "../../price-list/kit-actions";
 import { sameTask } from "@/lib/playbook/tasks";
 import type { TaskDetail, TaskDetailMaterial } from "@/lib/estimate/line-map";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
@@ -67,6 +69,8 @@ interface TaxRateLite {
   is_default: boolean;
 }
 type KitLite = { id: string; name: string; kit_items: unknown[] };
+/** A TASK kit (0386) by name, so a line built from one can say which (W4). */
+type TaskKitLite = { id: string; name: string; unit: string | null };
 
 /**
  * One line the estimator PROPOSED. `keep` starts true on purpose.
@@ -234,12 +238,15 @@ function TaskBreakdown({
   detail: d,
   priceItems,
   pricing,
+  taskKits = [],
   onChange,
 }: {
   line: DraftLineItem;
   detail: TaskDetail;
   priceItems: PriceItemLite[];
   pricing: BookPricing;
+  /** The org's task kits by name, so a line built from one says which (W4). */
+  taskKits?: TaskKitLite[];
   /** The whole re-priced line (lineFromDetail): unit_price, flag and detail move together. */
   onChange: (next: DraftLineItem) => void;
 }) {
@@ -249,6 +256,40 @@ function TaskBreakdown({
   const dropPart = (i: number) => set({ ...d, materials: d.materials.filter((_, j) => j !== i) });
   const money = taskMoney(d);
   const box = "h-7 px-2 text-xs";
+  // REMEMBER AS A KIT (W4): the breakdown becomes a task kit — his hours and parts PER UNIT — so
+  // the next visit's Inspector offers it by name (lib/estimate/kit-from-task). The pure rule says
+  // BEFORE the round trip what is still missing (the hours, a part's count) with the one action
+  // that would let the kit be made; the server applies the same rule again and writes. A line
+  // already built from a kit names it instead — no kit is made from a kit.
+  const [kitOpen, setKitOpen] = useState(false);
+  const [kitName, setKitName] = useState(() => kitNameFromLine(line.description));
+  const [kitUnit, setKitUnit] = useState("ea");
+  const [kitBusy, setKitBusy] = useState(false);
+  const [kitSaid, setKitSaid] = useState<{ ok: boolean; text: string } | null>(null);
+  const fromKit = d.kit_id ? taskKits.find((k) => k.id === d.kit_id) ?? null : null;
+  const openKit = () => {
+    const probe = kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit });
+    if (!probe.ok) {
+      setKitSaid({ ok: false, text: probe.error });
+      return;
+    }
+    setKitSaid(null);
+    setKitOpen(true);
+  };
+  const remember = async () => {
+    setKitBusy(true);
+    try {
+      const r = await rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d });
+      if (r.ok) {
+        setKitOpen(false);
+        setKitSaid({ ok: true, text: `Remembered as the kit ${r.name ?? kitName} — it's under Kits on the Price List and in the Inspector's kit picker.` });
+      } else {
+        setKitSaid({ ok: false, text: r.error ?? "Could not remember the kit." });
+      }
+    } finally {
+      setKitBusy(false);
+    }
+  };
   return (
     <div className="mt-1.5 space-y-1 rounded-md border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
       <div className="flex items-center gap-1.5">
@@ -319,6 +360,36 @@ function TaskBreakdown({
         </button>
         {d.materials.length > 0 && <span className="tabular-nums text-slate-500">Parts {formatCurrency(money.parts)}</span>}
       </div>
+      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+        {d.kit_id ? (
+          <span className="text-slate-500">
+            From the kit {fromKit ? fromKit.name : "it was built from (no longer in your kits)"}
+            {d.units !== null && d.units !== 1 ? ` · ×${d.units}${fromKit?.unit ? ` ${fromKit.unit}` : ""}` : ""}
+          </span>
+        ) : kitOpen ? (
+          <>
+            <Input aria-label="Kit name" placeholder="Kit name" className={`${box} w-40`} value={kitName} onChange={(e) => setKitName(e.target.value)} />
+            <span>per</span>
+            <Input aria-label="Unit" placeholder="ea" className={`${box} w-20`} value={kitUnit} onChange={(e) => setKitUnit(e.target.value)} />
+            <button
+              type="button"
+              disabled={kitBusy || !kitName.trim()}
+              onClick={() => void remember()}
+              className="font-medium text-brand hover:underline disabled:opacity-50"
+            >
+              {kitBusy ? "Saving…" : "Save The Kit"}
+            </button>
+            <button type="button" onClick={() => setKitOpen(false)} className="text-slate-500 hover:underline">
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={openKit} className="font-medium text-brand hover:underline">
+            Remember As A Kit
+          </button>
+        )}
+      </div>
+      {kitSaid && <p className={kitSaid.ok ? "text-emerald-700" : "text-amber-700"}>{kitSaid.text}</p>}
       {/* A Unit $ typed over the sum is HIS price and stands; the breakdown then describes a number
           the customer is not being asked for, so the document leaves it off (quote-document.tsx
           prints it only while detailExplains). Nothing is deleted: the job still reads the hours. */}
@@ -342,6 +413,7 @@ export function QuoteBuilder({
   priceItems = [],
   taxRates = [],
   kits = [],
+  taskKits = [],
   quoteExpiryDays = 30,
   defaultMarkupPct = 0,
   defaultLaborRate = 0,
@@ -399,6 +471,8 @@ export function QuoteBuilder({
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
+  /** The org's TASK kits (0386) by name — a line built from one says which (W4). */
+  taskKits?: TaskKitLite[];
   quoteExpiryDays?: number;
   /** Org Settings default_markup_pct — the last fallback in effectiveMarkupPct's chain. */
   defaultMarkupPct?: number;
@@ -1449,6 +1523,7 @@ export function QuoteBuilder({
                                   detail={it.detail}
                                   priceItems={priceItems}
                                   pricing={pricing}
+                                  taskKits={taskKits}
                                   onChange={(next) => updateItem(idx, next)}
                                 />
                               )}

@@ -15,6 +15,8 @@ import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
+import { firstThatWorks } from "@/lib/kit-line";
+import { kitsWithoutMoney, taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
 import { MarkCompleteButton } from "./mark-complete-button";
 import { MarkDoneRow, PutBackRow, WontHappenRow } from "./visit-header-actions";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
@@ -77,7 +79,7 @@ export default async function AppointmentCapturePage({
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
 
-  const [{ data: appt }, { data: org }, picker, sheetsRead, answersRead, priceBook, intakeRead, { data: meRow }, { data: openRow }, { data: lastClosedRow }] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker, sheetsRead, answersRead, priceBook, taskKitsRead, intakeRead, { data: meRow }, { data: openRow }, { data: lastClosedRow }] = await Promise.all([
     supabase
       .from("appointments")
       .select(
@@ -123,6 +125,11 @@ export default async function AppointmentCapturePage({
           .eq("archived", false)
           .order("code"),
     ),
+    // THE TASK KITS (0386, W4), for a task's kit picker: by name, with their lines. Every money
+    // field is dropped before they reach the browser (kitsWithoutMoney): the preview reads names
+    // and counts, and a crew lead fills the visit in without ever seeing a price. Tolerant rungs,
+    // as the kits queries everywhere: a deploy lands before its migration.
+    firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
     // THE FORM THE CUSTOMER FILLED IN. Its playbook is the only place the LABELS for
     // `intake.intake_answers` exist — the answers themselves are a bag of keys, and `q_mst1drw8`
     // is not a question. Through form_playbooks like the sheets (0366), org-scoped; an org with no
@@ -601,6 +608,7 @@ export default async function AppointmentCapturePage({
               unit: p.unit ?? "EA",
               price: Number(p.buy_price ?? 0),
             }))}
+            taskKits={kitsWithoutMoney(taskKitsFrom(taskKitsRead.data))}
             initialTemplateId={inspection?.inspection_template_id ?? null}
             // A scope pick stores its price: the office's answers go as they are; nobody else's page
             // carries one (and a crew lead's save can't change a priced answer anyway: 0356).

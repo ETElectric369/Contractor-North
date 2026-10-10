@@ -30,6 +30,7 @@ vi.mock("./actions", () => ({
   generateQuoteDraftFromSupplier: vi.fn(),
 }));
 vi.mock("../price-list/actions", () => ({ applyPriceBookReview: vi.fn() }));
+vi.mock("../../price-list/kit-actions", () => ({ rememberTaskAsKit: vi.fn() }));
 vi.mock("@/components/new-customer-inline", () => ({ NewCustomerInline: () => null }));
 
 const { QuoteBuilder } = await import("./quote-builder");
@@ -101,5 +102,22 @@ describe("the rate reaches the builder through the one rule", () => {
     // repriceTaskLine, and never over a hand-set price.
     expect(src).toContain("onChange(lineFromDetail(line, next))");
     expect(src).toContain("detailExplains(l.detail, l) ? repriceTaskLine(l, rate) : l");
+  });
+});
+
+describe("Remember As A Kit (W4)", () => {
+  it("a task line offers the door; a line built from a kit names the kit and its units instead", () => {
+    const html = builder({ seededLines: [taskLine] });
+    expect(text(html)).toContain("Remember As A Kit");
+    const fromKit = builder({
+      seededLines: [{ ...taskLine, description: "Footings ×7", unit_price: 2510, detail: { ...taskLine.detail, hours: 14, units: 7, kit_id: "k1" } }],
+      taskKits: [{ id: "k1", name: "Footing", unit: "footing" }],
+    });
+    expect(text(fromKit)).toContain("From the kit Footing · ×7 footing");
+    expect(text(fromKit)).not.toContain("Remember As A Kit");
+  });
+
+  it("a plain line has no door", () => {
+    expect(text(builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] }))).not.toContain("Remember As A Kit");
   });
 });

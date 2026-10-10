@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
-import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
+import { firstThatWorks } from "@/lib/kit-line";
+import { taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -381,7 +382,7 @@ export default async function NewQuotePage({
       // the picker. Three rungs, most capable first — a deploy precedes its migration, and naming
       // an absent column fails the whole query rather than degrading, which would empty the kit
       // picker until the migration landed.
-      firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+      firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
   // THE INSPECTION'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
@@ -399,7 +400,14 @@ export default async function NewQuotePage({
   const seedCustomer = captureCustomerId ? ((customers ?? []) as any[]).find((c) => c.id === captureCustomerId) : undefined;
   const seedPricing = { levelPct: seedCustomer?.pricing_levels?.markup_pct ?? null, orgDefaultPct: settings.default_markup_pct };
   const seedRate = laborRateFor(seedCustomer?.pricing_levels?.labor_rate, settings.default_labor_rate);
-  const taskSeed = pickedTasks.flatMap((g) => taskLines(g.tasks, { book: taskBook, rate: seedRate, pricing: seedPricing, group: g.label }));
+  // HIS TASK KITS (0386, W4): a task that picked one expands here — his minutes per unit × the
+  // units, the kit's parts × the units — through THE one expandTaskKit (task-lines.ts), the same
+  // function the Inspector previewed it with.
+  const taskKits = taskKitsFrom(kits);
+  const taskKitMap = new Map(taskKits.map((k) => [k.id, k]));
+  const taskSeed = pickedTasks.flatMap((g) =>
+    taskLines(g.tasks, { book: taskBook, rate: seedRate, pricing: seedPricing, kits: taskKitMap, group: g.label }),
+  );
   // …THEN THE ROWS TYPED ON SITE, unpriced (cn-v1069, lib/inspection/capture seedLinesFromCapture):
   // "200 ft 12-2 romex" typed standing at the panel is a line Erik prices, never a sentence he
   // re-reads to make one.
@@ -495,6 +503,7 @@ export default async function NewQuotePage({
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}
+        taskKits={taskKits.map(({ id, name, unit }) => ({ id, name, unit }))}
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
         defaultLaborRate={settings.default_labor_rate}
