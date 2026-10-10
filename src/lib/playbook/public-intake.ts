@@ -29,7 +29,8 @@ export interface PublicNeed {
  * never the machinery behind the price.
  */
 export function publicIntakeNeeds(pb: Playbook): PublicNeed[] {
-  const kept = pb.needs.filter((n) => n.slot?.type !== "scopes");
+  // A task list (hours and parts) is the contractor's estimating, pointed at a stranger: dropped too.
+  const kept = pb.needs.filter((n) => n.slot?.type !== "scopes" && n.slot?.type !== "tasks");
   // PRUNE THE RULES THAT NAME WHAT WE JUST DROPPED. A `when` clause pointing at a scopes need can
   // never resolve on a page where that need does not exist, so the question it gated either never
   // appears (a question the contractor wrote, silently missing from his own form) or appears

@@ -91,7 +91,15 @@ export type NeedSlot =
    * `codes` narrows the menu to a family (Chris's R1–R8 remodel scopes); omit it and the whole
    * price list is offered. The answer is a ScopePick[] and it maps 1:1 onto quote lines.
    */
-  | { type: "scopes"; codes?: string[] };
+  | { type: "scopes"; codes?: string[] }
+  /**
+   * A LIST OF TASKS — the unit of an estimate and of a job (lib/playbook/tasks.ts). Each task is
+   * his name for a piece of work, HIS hours for it (null = not given yet, drawn asking, priced
+   * never) and its materials (book codes or his words, with a count or null). Erik: "each task
+   * carries its own labor and materials." The answer is a TaskValue[] and it maps 1:1 onto
+   * estimate lines, each carrying its breakdown.
+   */
+  | { type: "tasks" };
 
 /** One condition. ALL of a need's clauses must hold for it to apply. */
 export type Clause =
@@ -207,7 +215,28 @@ export interface ScopePickValue {
   price: number;
 }
 
-export type AnswerValue = string | number | boolean | string[] | ScopePickValue[] | null;
+/** One part under a task: a price-list code OR his words, and how many (null = uncounted). */
+export interface TaskMaterial {
+  code: string | null;
+  words: string | null;
+  qty: number | null;
+}
+
+/** One task on the sheet. Declared here (like ScopePickValue) so types.ts stays the leaf. */
+export interface TaskValue {
+  id: string;
+  /** His name for the piece of work, verbatim. */
+  name: string;
+  /** HIS hours. null = not given → the task is ASKING and prices nothing. Never a guess. */
+  hours: number | null;
+  /** How many of the unit when the task is a per-unit kit ("7 footings"). null = one. */
+  units: number | null;
+  /** A task kit from his own book (0386), or null when typed. */
+  kit_id: string | null;
+  materials: TaskMaterial[];
+}
+
+export type AnswerValue = string | number | boolean | string[] | ScopePickValue[] | TaskValue[] | null;
 export type Answers = Record<string, AnswerValue>;
 
 /**

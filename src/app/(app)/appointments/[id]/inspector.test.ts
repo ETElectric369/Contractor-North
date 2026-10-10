@@ -44,11 +44,20 @@ const SHEET = {
       { key: "work", label: "Work", ask: "What kind of work is this?", slot: { type: "select", options: ["Deck", "Remodel"], other: true } },
       { key: "scope", label: "Scope", ask: "Which scopes?", slot: { type: "scopes" } },
       { key: "panel", label: "Panel", ask: "Which panel is it?", slot: { type: "text" } },
+      { key: "tasks", label: "Tasks", ask: "What are the tasks?", slot: { type: "tasks" } },
     ],
   },
 };
 // A price, handed in as if it leaked: the crew's and the tech's inspection must not draw it.
-const ANSWERS = { work: "Remodel", scope: [{ code: "R1", qty: 2, price: 517.25 }] };
+// The tasks are his: one with his hours and a coded part, one still asking.
+const ANSWERS = {
+  work: "Remodel",
+  scope: [{ code: "R1", qty: 2, price: 517.25 }],
+  tasks: [
+    { id: "t1", name: "Transfer switch", hours: 3, units: null, kit_id: null, materials: [{ code: "R1", words: null, qty: 2 }] },
+    { id: "t2", name: "Hot tub wires", hours: null, units: null, kit_id: null, materials: [] },
+  ],
+};
 const BOOK = [
   { code: "R1", description: "Remodel scope", unit: "EA", price: 517.25 },
   { code: "R2", description: "Demo", unit: "EA", price: 243.5 },
@@ -226,5 +235,54 @@ describe("a plain tech: reads it", () => {
     const before = textOf(render("view", { viewNote: "Crew leads can fill this in once the office finishes an update. Until then only the office can change it." }));
     expect(before).toContain("Crew leads can fill this in once the office finishes an update.");
     expect(before).not.toContain("Only the office can change the inspection.");
+  });
+});
+
+describe("a tasks question: his tasks, his hours, his parts — never a price", () => {
+  const pills = (html: string) => (html.match(/>hours\?</g) ?? []).length;
+
+  it("the office: both tasks, the coded part as the book names it, one task asking, both add doors, the book as a list", () => {
+    const html = render("office");
+    expect(html).toContain('value="Transfer switch"');
+    expect(html).toContain('value="Hot tub wires"');
+    // A part picked from the book is a chip, not a box: a keystroke must not unlink the code.
+    expect(html).toContain('title="R1 — Remodel scope">R1 — Remodel scope</span>');
+    expect(pills(html)).toBe(1);
+    const doors = buttons(html).map((b) => b.text);
+    expect(doors).toContain("Add A Task");
+    expect(doors).toContain("Add A Material");
+    expect(html).toContain('aria-label="Remove This Task"');
+    const list = html.match(/<datalist id="tasks-book-tasks">[\s\S]*?<\/datalist>/)?.[0] ?? "";
+    expect(list).toContain('value="R1 — Remodel scope"');
+    expect(list).toContain('value="R2 — Demo"');
+    expect(list).not.toMatch(PRICE);
+  });
+
+  it("a crew lead: the same live control, the coded part by its code (no book), and never a price", () => {
+    const html = render("crewLead");
+    expect(html).toContain('value="Transfer switch"');
+    expect(html).toContain('value="Hot tub wires"');
+    expect(html).toContain('title="R1">R1</span>');
+    expect(html).not.toContain("Remodel scope");
+    expect(html).not.toContain("<datalist");
+    expect(pills(html)).toBe(1);
+    const doors = buttons(html).map((b) => b.text);
+    expect(doors).toContain("Add A Task");
+    expect(doors).toContain("Add A Material");
+    expect(html).toContain('aria-label="Remove This Task"');
+    expect(html).toContain('aria-label="Remove This Material"');
+    expect(textOf(html)).not.toMatch(PRICE);
+  });
+
+  it("a plain tech: the tasks, read; no door that would only fail", () => {
+    const html = render("view");
+    expect(html).toContain('value="Transfer switch"');
+    expect(html).toContain('value="Hot tub wires"');
+    expect(pills(html)).toBe(1);
+    const doors = buttons(html).map((b) => b.text);
+    expect(doors).not.toContain("Add A Task");
+    expect(doors).not.toContain("Add A Material");
+    expect(html).not.toContain('aria-label="Remove This Task"');
+    expect(textOf(html)).not.toMatch(PRICE);
   });
 });

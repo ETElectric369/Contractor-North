@@ -2,8 +2,8 @@
  * ONE PERSON, ONE ROW on Needs You (Erik, 2026-09-26: "the same fact never shows as two rows").
  *
  * A lead gets a Call Back row while its follow-up day is today or past. When that lead's visit has
- * already HAPPENED and is waiting to be written up, Needs You drew two rows for one person (Macey
- * Dade, 2026-10-08: "Macey Dade · Call Back · 7d overdue" and "Inspection · Macey Dade · Write It
+ * already HAPPENED and is waiting to be written up, Needs You drew two rows for one person (a
+ * lead, 2026-10-08: "<lead> · Call Back · 7d overdue" and "Inspection · <lead> · Write It
  * Up"). The call-back was for booking the visit; the visit is done, so the write-up IS the next
  * step. The lead rides its write-up row: its own row (Now or the Waiting fold) stays out until the
  * write-up is settled, and the pile counts only what is drawn.

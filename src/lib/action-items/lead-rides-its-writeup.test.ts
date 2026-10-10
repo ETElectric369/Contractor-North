@@ -4,9 +4,9 @@ import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 
 describe("a lead whose visit is waiting to be written up rides the write-up row", () => {
   it("keeps the lead's own row out only when its visit is on the write-up list", () => {
-    const writeUps = new Set(["lead-macey"]);
-    expect(leadRidesItsWriteUp("lead-macey", writeUps)).toBe(true);
-    expect(leadRidesItsWriteUp("lead-braden", writeUps)).toBe(false);
+    const writeUps = new Set(["lead-tilda"]);
+    expect(leadRidesItsWriteUp("lead-tilda", writeUps)).toBe(true);
+    expect(leadRidesItsWriteUp("lead-rowan", writeUps)).toBe(false);
     expect(leadRidesItsWriteUp(null, writeUps)).toBe(false);
     expect(leadRidesItsWriteUp(undefined, writeUps)).toBe(false);
   });

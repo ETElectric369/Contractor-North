@@ -67,7 +67,7 @@ async function writeBrief(
 /** The question list the model answers — the org's own inspection, typed. */
 function questionLines(needs: Need[]): string {
   return needs
-    .filter((n) => n.slot?.type !== "scopes" && n.slot?.type !== "file")
+    .filter((n) => n.slot?.type !== "scopes" && n.slot?.type !== "file" && n.slot?.type !== "tasks")
     .map((n) => {
       const s = n.slot;
       const kind =

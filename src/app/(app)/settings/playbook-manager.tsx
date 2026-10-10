@@ -48,7 +48,7 @@ import { clearPlaybook, installPlaybookStarter, savePlaybook } from "./playbook-
  * and the need has no slot, which is what makes it a sentence Nort has to phrase rather than a box.
  */
 
-type Kind = "one" | "many" | "number" | "text" | "long" | "file" | "scopes" | "open";
+type Kind = "one" | "many" | "number" | "text" | "long" | "file" | "scopes" | "tasks" | "open";
 
 const KIND_LABEL: Record<Kind, string> = {
   one: "Pick one",
@@ -58,6 +58,7 @@ const KIND_LABEL: Record<Kind, string> = {
   long: "Typed in — a paragraph",
   file: "Files — plans, drawings, photos",
   scopes: "Pick line items off your price list and price them on site",
+  tasks: "A list of tasks — each with its hours and its materials",
   open: "Anything you say (no box until it's answered)",
 };
 
@@ -70,6 +71,8 @@ const kindOf = (n: Need): Kind =>
         ? "file"
         : n.slot.type === "scopes"
           ? "scopes"
+        : n.slot.type === "tasks"
+          ? "tasks"
         : n.slot.type === "select"
           ? n.slot.multi
             ? "many"
@@ -110,6 +113,8 @@ function slotForKind(kind: Kind, prev: NeedSlot | undefined, remembered?: string
     case "scopes":
       // No `codes` = the whole price list is on offer. Narrow it per question by hand.
       return { type: "scopes" };
+    case "tasks":
+      return { type: "tasks" };
     default:
       return { type: "text" };
   }
@@ -819,7 +824,7 @@ export function PlaybookManager({
               // files" and "Photo files", the two uploads he filed bugs about this week, and
               // the button that deletes them said only "Your playbook is removed."
               const gone = needs
-                .filter((n) => !n.slot || n.slot.type === "file" || n.slot.type === "scopes")
+                .filter((n) => !n.slot || n.slot.type === "file" || n.slot.type === "scopes" || n.slot.type === "tasks")
                 .map((n) => n.label);
               const whys = needs.filter((n) => n.why || n.note).length;
               const losses = [

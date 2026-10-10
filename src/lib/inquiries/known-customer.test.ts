@@ -20,7 +20,7 @@ describe("matchKnownCustomer — does the app already know this person?", () => 
   });
 
   it("says nothing when there is no match", () => {
-    expect(matchKnownCustomer("Braden Lang", [cust()]).kind).toBe("none");
+    expect(matchKnownCustomer("Rowan Vale", [cust()]).kind).toBe("none");
   });
 
   it("REFUSES TO GUESS between two people with the same name", () => {

@@ -143,7 +143,7 @@ describe("every kind the app offers survives the round trip", () => {
     for (const k of WORK_KINDS) {
       expect(KIND_LABEL[k]).toBeTruthy();
       expect(KIND_TONE[k]).toBeTruthy();
-      expect(bookingTitle(k, "Braden Lang")).toContain("Braden Lang");
+      expect(bookingTitle(k, "Rowan Vale")).toContain("Rowan Vale");
     }
   });
 
@@ -197,7 +197,7 @@ describe("the four kinds a person picks survive the round trip, Other included",
   it("Other books as Other, never an inspection (and never the inspection's title)", () => {
     expect(appointmentTypeFor("other")).toBe("other");
     expect(workKind({ kind: "appointment", type: "other" })).toBe("other");
-    expect(bookingTitle("other", "Braden Lang")).toBe("Braden Lang");
+    expect(bookingTitle("other", "Rowan Vale")).toBe("Rowan Vale");
     // …while a lead nobody tagged still books the inspection it always did.
     expect(appointmentTypeFor(null)).toBe("inspection");
     expect(appointmentTypeFor("")).toBe("inspection");

@@ -94,6 +94,12 @@ const SCRUBBED = new Map<string, string>([
   ["2b08ac91902bd001", "Mallow Springs"],
   ["701b3f9add48dd8f", "Larch Terrace"],
   ["19eeaef25d254943", "Wild Plum"],
+  // Found 2026-10-09 in two comments and a fixture after the scrub (the gate had no stamp for it).
+  ["025e00877c041831", "Tilda Quill"],
+  ["3e39781674cdd0ab", "Tilda"],
+  ["8aa5c278f72902ff", "Quill"],
+  ["dd495d2a129adeae", "Rowan Vale"],
+  ["84d54e1543675fce", "Rowan"],
   ["b2b8af67fcea71e6", "AC-10427"],
   ["a8c1620cacf89427", "555-0147"],
   ["0de33fd657274723", "555-0133"],
@@ -178,6 +184,8 @@ const PAIR_STARTS = new Set<string>([
   "33ae3723b6683f3f",
   "40b649abbb26b876",
   "435bb1648b1161d2",
+  "84d54e1543675fce",
+  "3e39781674cdd0ab",
 ]);
 
 /**

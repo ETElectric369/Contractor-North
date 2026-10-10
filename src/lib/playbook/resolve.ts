@@ -1,4 +1,5 @@
 import type { Answers, AnswerValue, Clause, Fill, Need, Playbook } from "./types";
+import { coerceTasks, mergeHeardTasks, screenHeardTask } from "./tasks";
 
 /**
  * THE RESOLVER — pure functions over a playbook and what is known so far.
@@ -194,6 +195,47 @@ export function numbersIn(text: string): number[] {
 }
 
 /**
+ * THE FIGURES HE SAID AS HOURS — and only those. "3 hours", "3 hrs", "an hour", "half an hour",
+ * "an hour and a half", "two and a half hours", "1.5h". A bare number is not hours; "4 days" is
+ * not hours (and is not converted — that is arithmetic). This is what lets a task's hours be
+ * traced to his words without a "4" from "4 receptacles" or "4 full days" sliding in.
+ */
+export function hoursIn(text: string): number[] {
+  const out: number[] = [];
+  const toks = text
+    .toLowerCase()
+    .replace(/(\d)h\b/g, "$1 h")
+    .split(/[^a-z0-9.]+/)
+    .filter(Boolean);
+  const isHour = (t: string | undefined) => !!t && /^(hours?|hrs?|h)$/.test(t);
+  for (let i = 0; i < toks.length; i++) {
+    if (!isHour(toks[i])) continue;
+    // "… hour and a half" — the half rides on the number before the hour word.
+    const halfAfter = toks[i + 1] === "and" && toks[i + 2] === "a" && toks[i + 3] === "half";
+    let j = i - 1;
+    let half = halfAfter;
+    // "two and a half hours"
+    if (toks[j] === "half" && toks[j - 1] === "a" && toks[j - 2] === "and") {
+      half = true;
+      j -= 3;
+    }
+    // "half an hour", "a half hour"
+    if (toks[j] === "half" || (toks[j] === "an" && toks[j - 1] === "half")) {
+      out.push(0.5);
+      continue;
+    }
+    // "an hour", "a hour"
+    if (toks[j] === "an" || toks[j] === "a") {
+      out.push(1 + (half ? 0.5 : 0));
+      continue;
+    }
+    const nums = numbersIn(toks.slice(Math.max(0, j - 1), j + 1).join(" "));
+    if (nums.length) out.push(nums[nums.length - 1] + (half ? 0.5 : 0));
+  }
+  return out;
+}
+
+/**
  * May this proposed value be written?
  *
  * A number a CALCULATOR will consume must be traceable to words a human actually said. This is the
@@ -229,14 +271,54 @@ export function applyFills(
   answers: Answers,
   fills: Fill[],
   transcript: string,
-): { answers: Answers; rejected: Fill[] } {
+): { answers: Answers; rejected: Fill[]; unplaced: string[] } {
   const byKey = new Map(pb.needs.map((n) => [n.key, n]));
   const next = { ...answers };
   const rejected: Fill[] = [];
+  // HIS WORDS THAT DID NOT LAND, verbatim, for the note — a task fill can half-land (the task is
+  // kept, a number or a part is not), and the half that was refused is never silent.
+  const unplaced: string[] = [];
+  const isObj = (x: unknown) => !!x && typeof x === "object";
   for (const f of fills) {
     const need = byKey.get(f.key);
     // A key the playbook never declared is not a fill, it is an invention.
     if (!need) {
+      rejected.push(f);
+      continue;
+    }
+    // A TASK LIST FILLS BY MERGING, not by replacing (lib/playbook/tasks.ts). He may have named
+    // three tasks by hand and then said two more: the new ones are added, a hand-set hour is never
+    // touched, and every task, part and number in the fill is screened against the fragment it
+    // came from (screenHeardTask) — what he did not say is dropped and SAID, never stored.
+    if (need.slot?.type === "tasks") {
+      const heard = coerceTasks(Array.isArray(f.value) ? f.value : [f.value]);
+      if (!heard || !f.heard || !transcript.includes(f.heard)) {
+        rejected.push(f);
+        // Said where every other refused fill is said (applyHeard's note), never dropped.
+        if (f.heard) unplaced.push(f.heard);
+        continue;
+      }
+      const said = { hours: hoursIn(f.heard), counts: numbersIn(f.heard) };
+      const screened = heard.map((t) => screenHeardTask(t, f.heard!, said));
+      const dropped = screened.some((s) => s.dropped.length);
+      const kept = screened.map((s) => s.task).filter((t): t is NonNullable<typeof t> => !!t);
+      const existing = coerceTasks(next[f.key]) ?? [];
+      const merged = mergeHeardTasks(existing, kept);
+      // Anything refused — a number not said as hours, a part or a task he did not name, hours
+      // that disagree with the ones he typed — puts his fragment in the note, verbatim.
+      if (dropped || merged.skipped.length || !kept.length) unplaced.push(f.heard);
+      if (!merged.added.length) {
+        // Nothing new in it: his answer stands.
+        rejected.push(f);
+        continue;
+      }
+      next[f.key] = merged.tasks;
+      continue;
+    }
+    // AN OBJECT IS ONLY EVER A TASK. For every other need a fill is a scalar or a list of words; an
+    // object here is a model writing a scopes pick (with a price nobody said) or "[object Object]"
+    // into a text box. Refused whole.
+    if (isObj(f.value) && (!Array.isArray(f.value) || f.value.some(isObj))) {
       rejected.push(f);
       continue;
     }
@@ -248,5 +330,5 @@ export function applyFills(
     if (acceptFill(need, f, transcript) === "accept") next[f.key] = f.value;
     else rejected.push(f);
   }
-  return { answers: next, rejected };
+  return { answers: next, rejected, unplaced };
 }

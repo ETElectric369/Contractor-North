@@ -1,5 +1,6 @@
 import { applyFills, clearInapplicable, isAnswered } from "./resolve";
 import { answerText } from "./answers";
+import { isTaskList, taskText } from "./tasks";
 import type { Answers, Fill, Playbook } from "./types";
 
 /**
@@ -56,7 +57,17 @@ export const HEAR_SYSTEM =
   "it in the precise one. A catch-all is for what nothing else covers.\n" +
   "- Put anything he said that mattered but did not fit a question into `leftover`, in his words. " +
   "Do not summarise it and do not throw it away — the sentence nobody's template anticipated is " +
-  "half of what goes wrong on a job.\n\n" +
+  "half of what goes wrong on a job.\n" +
+  "- A TASK LIST question wants the separate pieces of work he named, ONE FILL PER TASK, with value " +
+  '{ "name": "his words for that piece", "hours": a number or null, "materials": [ { "words": "the part, his words", "qty": a number or null } ] }. ' +
+  "`hours` is the time HE gave for THAT task, and the digits must appear in `heard`; when he gave " +
+  "no time for a task, hours is null — never a typical figure, never a guess, never a share of a " +
+  "total. He must have said it AS hours: a time in days is not hours (do not convert it). A time " +
+  "he gave for the WHOLE job is not any task's hours: leave every task's hours null and put his " +
+  "words about the total in `leftover`. The same for every `qty`: his count or null. Every part " +
+  "must be a thing he NAMED in `heard`. A task that is already on the list (shown under the " +
+  "question) is only worth a fill when he gave a number or a part for it that the list does not " +
+  "have — and then use its name EXACTLY as listed.\n\n" +
   'Return ONLY a JSON object: { "fills": [ { "key": "...", "value": ..., "heard": "..." } ], ' +
   '"leftover": "..." }. No prose around it. If you can fill nothing, return an empty fills array.';
 
@@ -77,7 +88,9 @@ export const HEAR_SYSTEM =
  * if he had tapped it and then changed the work type. One call, and the rules still decide.
  */
 export function hearRequest(pb: Playbook, answers: Answers, transcript: string): string {
-  const lines = pb.needs.filter((n) => !isAnswered(answers[n.key])).map((n) => {
+  // A TASK LIST IS NEVER "DONE": three tasks on the sheet and he names a fourth. So a tasks need is
+  // offered whether or not it is answered, with what it already holds, and the fill path merges.
+  const lines = pb.needs.filter((n) => n.slot?.type === "tasks" || !isAnswered(answers[n.key])).map((n) => {
     const bits = [`- key: ${n.key}`, `  question: ${n.ask}`];
     if (n.slot?.type === "select")
       bits.push(
@@ -92,7 +105,11 @@ export function hearRequest(pb: Playbook, answers: Answers, transcript: string):
           (n.slot.other ? "\n  — or, if none of those fit, his own words: this question accepts an answer that is not on the list" : ""),
       );
     else if (n.slot?.type === "number") bits.push(`  a number${n.slot.unit ? ` in ${n.slot.unit}` : ""}`);
-    else if (n.slot) bits.push("  text");
+    else if (n.slot?.type === "tasks") {
+      bits.push("  A TASK LIST — one fill per task (see the rules); hours and every qty are HIS numbers, digits in `heard`, or null");
+      const have = answers[n.key];
+      if (isTaskList(have)) bits.push(`  already on the list:\n    ${taskText(have).split("\n").join("\n    ")}`);
+    } else if (n.slot) bits.push("  text");
     else bits.push("  anything he said, in his words");
     if (n.measured) bits.push("  MEASURED — the digits must appear verbatim in `heard`");
     if (n.why) bits.push(`  where the answer lands (his words): ${n.why}`);
@@ -104,8 +121,9 @@ export function hearRequest(pb: Playbook, answers: Answers, transcript: string):
   });
 
   // What is ALREADY known goes in too, so the model doesn't re-answer it and doesn't contradict it.
+  // (A task list is listed above, under its own question, because it is still open to additions.)
   const known = pb.needs
-    .filter((n) => isAnswered(answers[n.key]))
+    .filter((n) => n.slot?.type !== "tasks" && isAnswered(answers[n.key]))
     .map((n) => `- ${n.label}: ${answerText(answers[n.key])}`);
 
   return [
@@ -145,12 +163,20 @@ export function parseHeard(text: string): Heard {
       const key = typeof r.key === "string" ? r.key.trim() : "";
       if (!key) continue;
       const v = r.value;
+      // A task fill is an OBJECT (one task) or a list of them; everything else is scalar or a list
+      // of strings. Shape is proved later by coerceNeed — this only keeps the object from being
+      // flattened to "[object Object]" on the way in.
+      const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
       const value =
         typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v === null
           ? v
-          : Array.isArray(v)
-            ? v.map(String)
-            : undefined;
+          : isObj(v) && typeof v.name === "string"
+            ? ([v] as unknown as Fill["value"])
+            : Array.isArray(v)
+              ? v.every(isObj)
+                ? (v as unknown as Fill["value"])
+                : v.map(String)
+              : undefined;
       if (value === undefined) continue;
       fills.push({ key, value, ...(typeof r.heard === "string" ? { heard: r.heard } : {}) });
     }
@@ -174,16 +200,17 @@ export interface Applied {
  */
 export function applyHeard(pb: Playbook, answers: Answers, transcript: string, heard: Heard): Applied {
   const byKey = new Map(pb.needs.map((n) => [n.key, n]));
-  const { answers: next, rejected } = applyFills(pb, answers, heard.fills, transcript);
+  const { answers: next, rejected, unplaced } = applyFills(pb, answers, heard.fills, transcript);
 
-  const filled = heard.fills
-    .filter((f) => !rejected.includes(f))
-    .map((f) => byKey.get(f.key)?.label ?? f.key);
+  // One label per need, however many fills landed in it (a task list takes one fill per task).
+  const filled = [...new Set(heard.fills.filter((f) => !rejected.includes(f)).map((f) => byKey.get(f.key)?.label ?? f.key))];
 
   // A fill refused because he'd ALREADY answered it isn't a loss and isn't worth a note — his
-  // answer stands, which is the rule working. Everything else is words we failed to place.
-  const lost = rejected.filter((f) => !isAnswered(answers[f.key]));
-  const parts = [heard.leftover, ...lost.map((f) => f.heard ?? "").filter(Boolean)]
+  // answer stands, which is the rule working. Everything else is words we failed to place. A task
+  // list accounts for itself (applyFills says, per fill, what it could not keep), so its refusals
+  // are not double-counted here.
+  const lost = rejected.filter((f) => byKey.get(f.key)?.slot?.type !== "tasks" && !isAnswered(answers[f.key]));
+  const parts = [heard.leftover, ...lost.map((f) => f.heard ?? "").filter(Boolean), ...unplaced]
     .map((s) => s.trim())
     .filter(Boolean);
 

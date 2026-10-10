@@ -117,7 +117,7 @@ export function answersFromBrief(pb: Playbook, raw: unknown): Answers {
   const coerced = coerceByPlaybook(pb, raw);
   const kept: Answers = {};
   for (const n of pb.needs) {
-    if (n.slot?.type === "scopes" || n.slot?.type === "file") continue;
+    if (n.slot?.type === "scopes" || n.slot?.type === "file" || n.slot?.type === "tasks") continue;
     const v = coerced[n.key];
     if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) continue;
     kept[n.key] = v;

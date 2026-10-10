@@ -87,6 +87,10 @@ function parseSlot(raw: unknown): NeedSlot | undefined {
           ? { codes: s.codes.map((x) => str(x, 40)).filter(Boolean) }
           : {}),
       };
+    case "tasks":
+      // THE PARSER IS THE GATE: an unknown type makes the need OPEN, so forgetting this line would
+      // render a task list as one prose box and lose every hour and part on the next autosave.
+      return { type: "tasks" };
     default:
       return undefined;
   }

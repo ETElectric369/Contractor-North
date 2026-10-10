@@ -17,10 +17,10 @@ const lead = (name: string, city: string | null, over: Partial<Placeable> = {}):
 const REAL = [
   lead("Eileen", "Truckee"),
   lead("Erik Norrel", "Truckee"),
-  lead("Macey Dade", "Truckee"),
+  lead("Tilda Quill", "Truckee"),
   lead("Matt Warren", "Truckee"),
   lead("Steph McCafee", "Truckee"),
-  lead("Braden Lang", "Tahoe City"),
+  lead("Rowan Vale", "Tahoe City"),
   lead("Remy Dunsmore", "Tahoe City"),
   lead("Karen Willet", "Tahoe City"),
   lead("Nora & Fermin Avocet", "Tahoe City"),

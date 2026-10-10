@@ -2,6 +2,7 @@ import { looseNumber } from "@/lib/inspection/capture";
 import { applicableNeeds, clearInapplicable } from "./resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "./types";
 import { coerceScopes, scopeText } from "./scopes";
+import { coerceTasks, isTaskList, taskText } from "./tasks";
 import { uploadDisplayName } from "./uploads";
 
 /**
@@ -90,6 +91,10 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
       // Shape only. Whether a CODE is really in this org's book is checked at the write boundary,
       // which is the only place the catalogue is known — same split as the file slot's paths.
       return coerceScopes(v);
+    case "tasks":
+      // Shape only, same split: hours and counts are HIS numbers or null (never 0), a code's
+      // membership in the book and a kit's in this org are checked where the book is known.
+      return coerceTasks(v);
     default:
       return String(v).slice(0, n.slot.long ? 8000 : 500);
   }
@@ -281,7 +286,12 @@ export const retiredLabel = (key: string): string => {
 /** One answer as a person would say it. An array is a list, because "outlets AND lights" is one answer. */
 export function answerText(v: AnswerValue): string {
   if (v === null || v === undefined) return "";
-  if (Array.isArray(v)) return v.join(", ");
+  // A TASK LIST FLATTENS TO ITS LINES — name, hours, parts — because this is what retiredAnswers
+  // and orphanedAnswers store under a retired key: names alone would destroy every hour and part
+  // the moment the question was edited. Any other array of objects (scope picks) says its codes,
+  // never "[object Object]".
+  if (isTaskList(v)) return taskText(v);
+  if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? String((x as { code?: unknown }).code ?? "") : String(x))).filter(Boolean).join(", ");
   if (typeof v === "boolean") return v ? "Yes" : "No";
   return String(v);
 }
@@ -305,6 +315,9 @@ export function answerText(v: AnswerValue): string {
  * calls that scope anyway — and the picks reach the draft as real line items separately.
  */
 function needText(n: Need, v: AnswerValue): string {
+  // TASKS — one line per task, his hours or "hours?", his parts. The estimator is told the list
+  // as given; a task without hours is told as asking, never as a figure (no-speculation).
+  if (n.slot?.type === "tasks") return isTaskList(v) ? taskText(v) : "";
   if (n.slot?.type === "scopes") {
     const picks = coerceScopes(v);
     return picks?.length ? scopeText(picks, new Map()) : "";

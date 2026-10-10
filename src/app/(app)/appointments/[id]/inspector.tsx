@@ -14,6 +14,7 @@ import { prepareImageForUpload } from "@/lib/image-prep";
 import { coerceByPlaybook, retiredAnswers, retiredLabel } from "@/lib/playbook/answers";
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
+import { taskAsking, type TaskMaterial, type TaskValue } from "@/lib/playbook/tasks";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
@@ -43,6 +44,7 @@ function NumBox({
   className,
   onFocus,
   onBlur,
+  placeholder,
 }: {
   value: number | null;
   onValue: (n: number | null) => void;
@@ -52,18 +54,66 @@ function NumBox({
    *  rarely one digit. */
   onFocus?: () => void;
   onBlur?: () => void;
+  placeholder?: string;
 }) {
+  // WHAT HE IS TYPING, until he leaves the box. Controlled straight off the number, "1." became
+  // 1 on the keystroke and the dot was gone before the 5 arrived: a half hour typed as 0.5 landed
+  // as 5, and 1.5 as 15. The number still updates on every key (the autosave sees 1, then 1.5);
+  // only what the box SHOWS is his text, and it lets go on blur.
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <Input
       autoComplete="off"
       inputMode="decimal"
-      value={value === null ? "" : String(value)}
+      value={draft ?? (value === null ? "" : String(value))}
       className={className}
+      placeholder={placeholder}
       onFocus={onFocus}
-      onBlur={onBlur}
-      onChange={(e) => onValue(looseNumber(e.target.value))}
+      onBlur={() => {
+        setDraft(null);
+        onBlur?.();
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onValue(looseNumber(e.target.value));
+      }}
     />
   );
+}
+
+/**
+ * A tasks answer AS TYPED — the shape the tasks control edits, with nothing dropped and nothing
+ * trimmed. Deliberately not coerceTasks at render: the coercer trims a name while he is still
+ * typing it (the trailing space before the next word would vanish under his thumb) and drops a
+ * card or a part row the moment it is empty, which would make Add A Task a door onto nothing. It
+ * runs where the answer SAVES (coerceByPlaybook) and on the hear path, which is where an empty row
+ * stops being a row. The stored answer has already been through it, so this only guards garbage.
+ */
+function liveTasks(v: unknown): TaskValue[] {
+  if (!Array.isArray(v)) return [];
+  const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  const text = (x: unknown) => (typeof x === "string" && x ? x : null);
+  return (v as unknown[]).flatMap((raw, i): TaskValue[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const o = raw as Record<string, unknown>;
+    const materials: TaskMaterial[] = Array.isArray(o.materials)
+      ? (o.materials as unknown[]).flatMap((m): TaskMaterial[] => {
+          if (!m || typeof m !== "object") return [];
+          const p = m as Record<string, unknown>;
+          return [{ code: text(p.code), words: typeof p.words === "string" ? p.words : null, qty: num(p.qty) }];
+        })
+      : [];
+    return [{
+      // A stored task always carries an id (coerceTask gives it one); the seeded fallback keeps the
+      // React key stable across renders if one ever arrives without.
+      id: text(o.id) ?? captureId(`t${i}`),
+      name: typeof o.name === "string" ? o.name : "",
+      hours: num(o.hours),
+      units: num(o.units),
+      kit_id: text(o.kit_id),
+      materials,
+    }];
+  });
 }
 
 /** Which chips are lit, whatever shape the answer is stored in.
@@ -879,6 +929,144 @@ export function Inspector({
             <p className="text-xs text-slate-400">
               {priceBook.length ? "That's all of them." : "Add items to your price list and they'll show up here."}
             </p>
+          )}
+        </div>
+      );
+    }
+
+    // TASKS — the unit of an estimate and of a job (lib/playbook/tasks.ts). One card per piece of
+    // work in his words, HIS hours for it, and its parts underneath. NO SPECULATION: a task without
+    // hours draws "hours?" and prices nothing, a part without a count stays uncounted, and nothing
+    // here fills a default for him. NO PRICE, for anyone: the office picks a part from its book by
+    // code and description, never a figure — the estimate prices, the inspection records. A crew
+    // lead gets the same live control with no book (the page hands him an empty one).
+    if (n.slot.type === "tasks") {
+      const tasks = liveTasks(v);
+      // Every edit saves through here and nowhere else; an emptied list is null, never [] (an
+      // empty array reads as answered-with-nothing — see the select branch).
+      const setTasks = (next: TaskValue[]) => setAnswer(n.key, next.length ? (next as never) : null);
+      const patchTask = (i: number, patch: Partial<TaskValue>) => setTasks(tasks.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+      const patchPart = (i: number, mi: number, patch: Partial<TaskMaterial>) =>
+        patchTask(i, { materials: tasks[i].materials.map((m, j) => (j === mi ? { ...m, ...patch } : m)) });
+      const hasBook = office && priceBook.length > 0;
+      const bookId = `tasks-book-${n.key}`;
+      const bookText = (b: BookRow) => `${b.code} — ${b.description}`;
+      // A coded part reads as the book names it; without the book (a crew lead), as the words the
+      // office's pick stored beside the code; the code alone only when there are none.
+      const partText = (m: TaskMaterial) => {
+        if (!m.code) return m.words ?? "";
+        const row = priceBook.find((b) => b.code === m.code);
+        return row ? bookText(row) : m.words ? `${m.code} — ${m.words}` : m.code;
+      };
+      // The field you are typing in does not move (see editingKey): same wiring as every box here.
+      const focus = { onFocus: () => focusNeed(n.key), onBlur: () => setEditingKey((k) => (k === n.key ? null : k)) };
+      const removeClass = "flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100";
+      return (
+        <div className="space-y-2">
+          {tasks.map((t, i) => (
+            <div key={t.id} className="rounded-lg border border-slate-200 p-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  autoComplete="off"
+                  value={t.name}
+                  placeholder="The piece of work, in your words"
+                  {...focus}
+                  onChange={(e) => patchTask(i, { name: e.target.value })}
+                />
+                {/* A task with no name is not saved (coerceTasks drops it): say so where he can see it. */}
+                {!t.name.trim() && (
+                  <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">name?</span>
+                )}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
+                    aria-label="Remove This Task"
+                    className={removeClass}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Hours</span>
+                <NumBox value={t.hours} className="w-20" {...focus} onValue={(x) => patchTask(i, { hours: x })} />
+                {/* THE ASKING STATE: his number or a question, never an average filled in for him. */}
+                {taskAsking(t) && (
+                  <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">hours?</span>
+                )}
+              </div>
+              <div className="mt-2 space-y-2">
+                <SectionLabel>Materials</SectionLabel>
+                {t.materials.map((m, mi) => (
+                  <div key={mi} className="flex items-center gap-2">
+                    {m.code ? (
+                      // A PART PICKED FROM THE BOOK stays the book's: a keystroke in a free box would
+                      // turn the office's code into words without anyone meaning to. To change it, take
+                      // it off and add the right one.
+                      <span className="flex min-h-[44px] min-w-0 flex-1 items-center truncate rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700" title={partText(m)}>
+                        {partText(m)}
+                      </span>
+                    ) : (
+                      <Input
+                        autoComplete="off"
+                        list={hasBook ? bookId : undefined}
+                        value={m.words ?? ""}
+                        placeholder="A part, in your words"
+                        {...focus}
+                        onChange={(e) => {
+                          // Typed exactly as the book lists it → the CODE; anything else is his words.
+                          const typed = e.target.value;
+                          const hit = hasBook ? priceBook.find((b) => bookText(b) === typed) : undefined;
+                          patchPart(i, mi, hit ? { code: hit.code, words: hit.description } : { code: null, words: typed });
+                        }}
+                      />
+                    )}
+                    <NumBox value={m.qty} className="w-20" placeholder="how many" {...focus} onValue={(x) => patchPart(i, mi, { qty: x })} />
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => patchTask(i, { materials: t.materials.filter((_, j) => j !== mi) })}
+                        aria-label="Remove This Material"
+                        className={removeClass}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {/* A new row holds "" until he types. coerceTasks drops it at save if it is still
+                    empty, which is right: an empty row is not a part. */}
+                {!readOnly && (
+                  <AddRow
+                    label="Add A Material"
+                    onClick={() => patchTask(i, { materials: [...t.materials, { code: null, words: "", qty: null }] })}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+          {!readOnly && (
+            <AddRow
+              label="Add A Task"
+              onClick={() => {
+                // HOLD THE QUESTION STILL. One task, even nameless, reads as answered, and without
+                // the hold the card he just made would leave the ask list before he could type in
+                // it — the multi-select's bug on a different door. Released the way a chip grid's
+                // hold is: by the next need he touches.
+                takeHold(n.key);
+                setMultiKey(n.key);
+                setTasks([...tasks, { id: captureId(), name: "", hours: null, units: null, kit_id: null, materials: [] }]);
+              }}
+            />
+          )}
+          {/* ONE list per control: the office's book by code and description — never a price. */}
+          {hasBook && (
+            <datalist id={bookId}>
+              {priceBook.map((b) => (
+                <option key={b.code} value={bookText(b)} />
+              ))}
+            </datalist>
           )}
         </div>
       );

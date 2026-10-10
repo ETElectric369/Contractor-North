@@ -95,7 +95,7 @@ export function sheetFromPlaybook(pb: Playbook): InspectionField[] {
     // to one — a sheet that claimed a file question was a text box would lose the uploads.
     // Neither a file nor a scope picker has an equivalent in the OLD sheet shape, so neither is
     // exported back to one — a sheet claiming a scope picker was a text box would lose the money.
-    if (n.slot.type === "file" || n.slot.type === "scopes") continue;
+    if (n.slot.type === "file" || n.slot.type === "scopes" || n.slot.type === "tasks") continue;
     const type =
       n.slot.type === "number" ? "number" : n.slot.type === "select" ? "select" : n.slot.long ? "textarea" : "text";
     out.push({
