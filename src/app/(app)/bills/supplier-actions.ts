@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { readClaimsOnCosts } from "@/lib/claims-on-costs";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { requireStaff } from "@/lib/staff-guard";
@@ -1125,15 +1126,11 @@ export async function resolveDuplicateBill(input: {
    * rather than a refusal over a supersede that has already landed.
    */
   const claimants = new Map<string, string>();
-  const lostJobIds = [...new Set((moved as any[]).map((m) => m.job_id).filter(Boolean))].map(String);
-  if (lostJobIds.length) {
+  if (movedIds.length) {
     const lost = new Set(movedIds);
-    const { data: claimRows, error: claimErr } = await supabase
-      .from("invoice_items")
-      .select("import_key, source_ids, invoices!inner(invoice_number, status, job_id)")
-      .in("invoices.job_id", lostJobIds)
-      .neq("invoices.status", "void")
-      .limit(5000);
+    // BY THE BILL, ORG-WIDE (lib/claims-on-costs): the losing copy is named wherever it was billed,
+    // even on a job it has since left.
+    const { rows: claimRows, error: claimErr } = await readClaimsOnCosts(supabase, movedIds, { drafts: true });
     if (claimErr) reportError("bills:resolveDuplicate.claims", claimErr, { billIds: movedIds });
     for (const r of (claimRows ?? []) as any[]) {
       const claims = claimedIdsOfLines([{ import_key: r.import_key, source_ids: r.source_ids }]);

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { readClaimsOnCosts } from "@/lib/claims-on-costs";
 import { redirect } from "next/navigation";
 import { Boxes, Search } from "lucide-react";
 import { requireStaff } from "@/lib/staff-guard";
@@ -140,9 +141,6 @@ export default async function ShopStockPage({
   // Which receipts an invoice the customer holds already bills (the receipt, or the order it
   // delivered): the same claim read the Bills page makes, scoped the same way, by job. On those the
   // receipt card has no Put The Rest On The Shelf, so the Waiting card must not send anyone to it.
-  const receiptJobIds = Array.from(
-    new Set(((receiptLines.error ? [] : receiptLines.data) ?? []).map((l: any) => l?.bills?.job_id).filter(Boolean).map(String)),
-  );
   const [bills, profiles, claimRows] = await Promise.all([
     billIds.length
       ? supabase.from("bills").select("id, supplier, bill_date, job_id, on_shelf").eq("org_id", orgId).in("id", billIds)
@@ -150,17 +148,12 @@ export default async function ShopStockPage({
     people.length
       ? supabase.from("profiles").select("id, full_name").in("id", people)
       : Promise.resolve({ data: [] as any[], error: null }),
-    receiptJobIds.length
-      ? supabase
-          .from("invoice_items")
-          .select("import_key, source_ids, invoices!inner(invoice_number, status, created_at, job_id)")
-          .in("invoices.job_id", receiptJobIds)
-          .not("invoices.status", "in", "(void,draft)")
-          .limit(5000)
-      : Promise.resolve({ data: [] as any[], error: null }),
+    // BY THE BILL, ORG-WIDE (lib/claims-on-costs): a lot's bill billed on one job and moved to
+    // another is still held. Drafts stay out here, as before: a draft's lines are still editable.
+    billIds.length ? readClaimsOnCosts(supabase, billIds, { drafts: false }) : Promise.resolve({ rows: [] as any[], error: null }),
   ]);
   const heldBy = new Map<string, string>();
-  for (const row of [...((claimRows.error ? [] : claimRows.data) ?? [])].sort((a: any, b: any) =>
+  for (const row of [...(claimRows.error ? [] : claimRows.rows)].sort((a: any, b: any) =>
     String(a.invoices?.created_at ?? "").localeCompare(String(b.invoices?.created_at ?? "")),
   ) as any[]) {
     const label = `${row.invoices?.invoice_number || "an invoice"} (${String(row.invoices?.status ?? "sent")})`;

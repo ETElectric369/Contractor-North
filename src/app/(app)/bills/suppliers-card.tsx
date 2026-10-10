@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { SUPPLIER_PAY_METHOD_LABELS } from "@/lib/supplier-pay-words";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Undo2 } from "lucide-react";
@@ -87,13 +88,8 @@ export interface SuppliersCardActions {
   stopWaitingOnCredit?: SupplierInvoiceActions["stopWaitingOnCredit"];
 }
 
-const METHOD_LABELS: Record<SupplierPayMethod, string> = {
-  cash: "Cash",
-  check: "Check",
-  transfer: "ACH / Transfer",
-  card: "Card",
-  other: "Other",
-};
+/** One set of words for the five methods (lib/supplier-pay-words), shared with the bill row. */
+const METHOD_LABELS = SUPPLIER_PAY_METHOD_LABELS;
 
 /** How many bills or payments one account shows before it says how many more there are. */
 const LIST_LIMIT = 8;

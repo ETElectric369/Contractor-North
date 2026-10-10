@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { paidByOfBills } from "@/lib/supplier-pay-words";
+import { readClaimsOnCosts } from "@/lib/claims-on-costs";
 import { PageHeader } from "@/components/page-header";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -373,7 +375,6 @@ export default async function BillsPage({
    */
   const liveBills = (billsWithLines as any[]).filter((b) => !b.superseded_by_bill_id);
   const receiptBills = liveBills.filter((b: any) => b.job_id && (b.line_items?.length ?? 0) > 0);
-  const receiptJobIds = Array.from(new Set(receiptBills.map((b: any) => String(b.job_id))));
 
   /**
    * Which of those receipts an invoice already holds. The importer skips a bill that is already
@@ -392,13 +393,10 @@ export default async function BillsPage({
   // page over.
   const billedOn = new Map<string, { label: string; status: string }>();
   const readClaims = async () => {
-    if (!receiptJobIds.length) return;
-    const { data: claimRows } = await supabase
-      .from("invoice_items")
-      .select("import_key, source_ids, invoices!inner(invoice_number, status, created_at, job_id)")
-      .in("invoices.job_id", receiptJobIds)
-      .neq("invoices.status", "void")
-      .limit(5000);
+    if (!receiptBills.length) return;
+    // BY THE RECEIPT, ORG-WIDE (lib/claims-on-costs): a receipt billed on one job and moved to
+    // another is still claimed; a read scoped to its jobs' invoices used to call it free.
+    const { rows: claimRows } = await readClaimsOnCosts(supabase, receiptBills.map((b: any) => String(b.id)), { drafts: true });
     // Earliest invoice wins a contested bill, so the sentence on the card is stable no matter what
     // order PostgREST hands the rows back.
     const oldestFirst = [...((claimRows ?? []) as any[])].sort((a, b) =>
@@ -1152,6 +1150,7 @@ export default async function BillsPage({
   const receiptById = new Map(receiptsForBilling.map((r) => [r.id, r]));
   const supplierOfBill = new Map((billsWithLines as any[]).map((b) => [String(b.id), String(b.supplier || "Receipt")]));
   const paperOfBill = billPapers({}, billTies, billPaperUrls, (billId) => supplierOfBill.get(billId) ?? "Receipt");
+  const paidByOfBill = paidByOfBills(allocationRows as any, paymentRows as any);
   const ledgerBills = (billsWithLines as any[]).map((b) => {
     const reading = readBillInvoice({ notes: b.notes ?? null, lineDescriptions: (b.line_items ?? []).map((l: any) => l.description) });
     return {
@@ -1161,6 +1160,10 @@ export default async function BillsPage({
       // ONE NUMBER PER BILL (0383): the row's badge and the Unpaid filter read amount_paid, which
       // rides on `...b`; a ladder rung without it leaves the status word to decide.
       amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0,
+      // HOW AND WHEN IT WAS PAID, when a recorded payment paid it (task 4, release 2): the row says
+      // "Paid by ACH / Transfer on Oct 3" under its badge. A bill marked paid by hand says nothing
+      // more, because nothing more is known.
+      paid_by: paidByOfBill.get(String(b.id)) ?? null,
       receipt: receiptById.get(String(b.id)) ?? null,
       papers: paperOfBill[String(b.id)] ?? null,
     };

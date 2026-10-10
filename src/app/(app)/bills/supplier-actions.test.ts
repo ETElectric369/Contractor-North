@@ -48,6 +48,7 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
         neq() { return chain; },
         is() { return chain; },
         in() { return chain; },
+        or() { return chain; },
         not() { return chain; },
         order() { return chain; },
         limit() { return chain; },

@@ -17,6 +17,7 @@ import { Fold, WhyFold } from "@/components/why-fold";
 import { openFoldsTo } from "@/components/fold-opener";
 import { RowMoreSheet, SHEET_ROW } from "@/components/row-more-sheet";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { paidByLine } from "@/lib/supplier-pay-words";
 import { deleteDocument } from "../jobs/actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
 import { BillPaperDoors } from "@/components/bill-paper-doors";
@@ -95,6 +96,8 @@ export interface BillRow {
   corrects_bill_id?: string | null;
   /** ONE NUMBER PER BILL (0383): how much of it is paid. The badge and Unpaid read what is open. */
   amount_paid?: number | null;
+  /** The recorded payment that paid it, when one did (lib/supplier-pay-words): "Paid by ACH / Transfer on Oct 3". */
+  paid_by?: { method: string; paidOn: string } | null;
   /**
    * The receipt's per-line billing switches (0268/0272), when this bill is a live receipt on a job
    * with lines. They live in the bill's own detail now: one place per bill, no second list.
@@ -342,6 +345,11 @@ export function BillsReceipts({
               <span className="block max-w-[9rem] truncate text-xs text-slate-400">
                 {billSettledLabel({ status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null, superseded: b.superseded }, formatCurrency)}
               </span>
+              {/* HOW AND WHEN, when a recorded payment paid it. Nothing is said for a bill marked paid
+                  by hand, because nothing more is known. */}
+              {b.paid_by && !b.superseded && (b.amount_paid ?? 0) > 0 && (
+                <span className="block max-w-[9rem] truncate text-xs text-slate-400">{paidByLine(b.paid_by, formatDate)}</span>
+              )}
             </span>
           </summary>
 
