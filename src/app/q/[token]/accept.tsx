@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { notifyQuoteAccepted } from "./actions";
+import { finishPublicAcceptance, notifyQuoteAccepted } from "./actions";
 
 type Outcome = "open" | "accepted" | "declined";
 
@@ -38,7 +38,12 @@ export function PublicQuoteAccept({
     }
     setOutcome("accepted");
     setBusy(null);
-    void notifyQuoteAccepted(token); // fire-and-forget office ping (best-effort)
+    // The job's tasks, work order and materials list are born first (the same rules as the office's
+    // accept), THEN the office is pinged — so the push's link opens a job that already has its
+    // list. Both best-effort and fire-and-forget: the acceptance itself is already saved.
+    void finishPublicAcceptance(token)
+      .catch(() => undefined) // a dropped call must not keep the office from hearing
+      .then(() => notifyQuoteAccepted(token));
   }
 
   async function decline() {

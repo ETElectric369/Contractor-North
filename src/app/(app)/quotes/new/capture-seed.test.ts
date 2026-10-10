@@ -26,10 +26,11 @@ describe("Start The Job lists the typed rows on the job", () => {
   const src = read("src/app/(app)/appointments/actions.ts");
   it("selects the capture (projection law), writes through the one list writer, and says what could not be listed", () => {
     expect(src).toContain("inquiry_id, notes, capture\")");
-    expect(src).toContain("const typedItems = parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? [];");
+    // W3b: the visit's task parts join the typed rows on the same call.
+    expect(src).toContain("const typedItems = [...(parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? []), ...taskParts];");
     expect(src).toContain("await addCaptureItemsToJobList(job.id, typedItems)");
     expect(src).toContain("Add them on the Materials tab.");
-    expect(src).toContain("const note = [absorbNote, materialsNote].filter(Boolean).join(\" \");");
+    expect(src).toContain("const note = [absorbNote, tasksNote, materialsNote].filter(Boolean).join(\" \");");
   });
   it("the list writer proves every row, prices nothing, and carries the book code as the part number", () => {
     const m = read("src/app/(app)/materials/actions.ts");

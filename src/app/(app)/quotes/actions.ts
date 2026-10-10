@@ -43,6 +43,7 @@ import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
+import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
 import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
@@ -1192,7 +1193,7 @@ async function materializeQuoteCustomer(
 
 export async function createJobFromQuote(
   quoteId: string,
-): Promise<{ ok: boolean; error?: string; id?: string }> {
+): Promise<{ ok: boolean; error?: string; id?: string; /** The job was made, and something it should carry could not be listed. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -1322,6 +1323,18 @@ export async function createJobFromQuote(
   // visit keeps its own calendar life. Best-effort: the job is made whatever the visit says.
   await closeVisitsBehindQuote(supabase, { id: quoteId, inquiry_id: q.inquiry_id ?? null, job_id: job.id }, { jobId: job.id, outcome: "won" });
 
+  // THE JOB IS BORN WITH ITS TASKS (W3, cn-v1075): every task line becomes a task on the job's
+  // one list, in estimate order, and the job's planned length is the sum of HIS hours. One rule
+  // (lib/estimate/born-with-tasks), shared with the customer's own Accept link. Before the take-off,
+  // so the crew's list and the task list are made from the same lines. Best-effort, never silent:
+  // the job stands, what could not be listed is reported and said.
+  let note: string | undefined;
+  const born = await bornWithTasks(supabase, { jobId: job.id, quoteId, orgId: ctx.orgId, createdBy: ctx.userId });
+  if (born.error) {
+    reportError("createJobFromQuote:tasks", new Error(born.error), { jobId: job.id, quoteId });
+    note = `The job was made; its tasks could not all be listed (${born.error}). Add them on the job.`;
+  }
+
   // Winning a quote spins up the field paperwork — a work order + a material
   // take-off (both idempotent) — and the job lands in the scheduler as
   // "scheduled" (pending). Best-effort: a job is still created if these no-op.
@@ -1330,7 +1343,7 @@ export async function createJobFromQuote(
 
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/schedule");
-  return { ok: true, id: job.id };
+  return { ok: true, id: job.id, ...(note ? { note } : {}) };
 }
 
 /**

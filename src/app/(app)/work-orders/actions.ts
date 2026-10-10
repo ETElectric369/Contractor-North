@@ -4,6 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
+import { workOrderFromQuote } from "@/lib/estimate/work-order-from-quote";
 import { WORK_ORDER_STATUSES } from "@/lib/statuses";
 import { localToInstant, orgTimezone } from "@/lib/org-local-time";
 
@@ -67,68 +68,18 @@ export async function createWorkOrder(formData: FormData): Promise<Result> {
   return { ok: true, id: data.id };
 }
 
-/** Generate a work order straight from a quote: the scope/description is built
- *  from the quote's line items (quantity + description, no prices — a WO is the
- *  field crew's instruction sheet, not a price sheet). Inherits job + customer. */
+/** Generate a work order straight from a quote. THE RULE IS lib/estimate/work-order-from-quote
+ *  (W3): this is the signed-in door onto it; the customer's own Accept link reaches the same rule
+ *  through finishPublicAcceptance. Idempotent: one work order per quote. */
 export async function createWorkOrderFromQuote(quoteId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const { supabase, userId } = ctx;
-
-  const { data: quote, error: qErr } = await supabase
-    .from("quotes")
-    .select("id, quote_number, title, job_id, customer_id, notes")
-    .eq("id", quoteId)
-    .maybeSingle();
-  if (qErr) return { ok: false, error: qErr.message };
-  if (!quote) return { ok: false, error: "Quote not found." };
-
-  // Idempotent: one work order per quote — re-running opens the existing one
-  // instead of minting a duplicate WO (mirrors createInvoiceFromQuote).
-  const { data: existing } = await supabase
-    .from("work_orders")
-    .select("id")
-    .eq("quote_id", quoteId)
-    .limit(1)
-    .maybeSingle();
-  if (existing) return { ok: true, id: existing.id };
-
-  const { data: items, error: iErr } = await supabase
-    .from("quote_line_items")
-    .select("description, quantity, unit, sort_order")
-    .eq("quote_id", quoteId)
-    .order("sort_order");
-  if (iErr) return { ok: false, error: iErr.message };
-
-  const scope = (items ?? [])
-    .map((it: any) => `• ${Number(it.quantity) || 1} ${it.unit || "ea"} — ${it.description}`)
-    .join("\n");
-  const description = [
-    `Scope from ${quote.quote_number}:`,
-    scope || "(no line items)",
-    quote.notes ? `\nNotes:\n${quote.notes}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const { data, error } = await supabase
-    .from("work_orders")
-    .insert({
-      title: quote.title?.trim() || `Work order for ${quote.quote_number}`,
-      description,
-      job_id: quote.job_id,
-      customer_id: quote.customer_id,
-      quote_id: quote.id,
-      status: "draft",
-      created_by: userId,
-    })
-    .select("id")
-    .single();
-  if (error) return { ok: false, error: dbError(error) };
-
-  revalidatePath("/work-orders");
-  if (quote.job_id) revalidatePath(`/jobs/${quote.job_id}`);
-  return { ok: true, id: data.id };
+  const res = await workOrderFromQuote(ctx.supabase, { quoteId, userId: ctx.userId, orgId: ctx.orgId });
+  if (res.ok) {
+    revalidatePath("/work-orders");
+    if (res.jobId) revalidatePath(`/jobs/${res.jobId}`);
+  }
+  return { ok: res.ok, ...(res.error ? { error: res.error } : {}), ...(res.id ? { id: res.id } : {}) };
 }
 
 /** Edit a work order's core fields; customer follows the linked job.

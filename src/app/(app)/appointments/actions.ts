@@ -5,7 +5,8 @@ import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
+import { mergeCaptureSections, parseInspectorCapture, type CaptureItem, type CapturePatch } from "@/lib/inspection/capture";
+import { bornTasks, partsAsCaptureItems, tasksAnswered, tasksFromVisit } from "@/lib/estimate/born-with-tasks";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
@@ -1449,8 +1450,46 @@ export async function createJobFromAppointment(
      (capture.items) were saved and read by nothing; the crew's list on the new job started empty.
      One row each onto the job's one list (materials/actions addCaptureItemsToJobList). The job is
      made whatever this says; what could not be listed is said in the result, never swallowed. */
+  /* THE VISIT'S TASKS TRAVEL TOO (W3b, cn-v1075). The tasks he typed on the inspection — his name
+     for each piece of work, his hours, his parts — were read by the estimate seed and by nothing
+     else, so a job started straight from the visit had an empty task list and a crew's materials
+     list missing the parts he had already named. The same rule the estimate doors use
+     (lib/estimate/born-with-tasks): each task becomes a task on the job's one list, in his order,
+     and its parts join the typed take-off below. planned_minutes: the visit's own size was written
+     above and WINS (bornTasks fills only a blank); with no size, the sum of his task hours is the
+     job's length — his figures, never a made-up number. Best-effort, never silent. */
+  let tasksNote: string | undefined;
+  let taskParts: CaptureItem[] = [];
+  try {
+    const ans = await readViaView<{ inspection_answers: unknown; inspection_template_id: string | null }>(
+      supabase,
+      "answers",
+      (from) => from.select("inspection_answers, inspection_template_id").eq("id", appointmentId).maybeSingle(),
+    );
+    // Pre-0165 (no answers column on the table) is simply no tasks; any other failed read is said.
+    if (ans.error && !(ans.via === "table" && String((ans.error as { code?: string }).code ?? "") === "42703")) throw ans.error;
+    // The sheet through form_playbooks (0366), as every tech-facing read does; a failed read is said.
+    const sheetRead = ans.data?.inspection_template_id
+      ? await readViaView<{ schema?: unknown; playbook?: unknown }>(
+          supabase,
+          "sheets",
+          (from) => from.select("schema, playbook").eq("id", ans.data!.inspection_template_id!).maybeSingle(),
+        )
+      : null;
+    if (sheetRead?.error) throw sheetRead.error;
+    const sheet = sheetRead?.data ?? null;
+    if (ans.data && sheet) {
+      const birth = tasksFromVisit(tasksAnswered(playbookForForm(sheet), ((ans.data.inspection_answers ?? {}) as Record<string, unknown>)));
+      taskParts = partsAsCaptureItems(birth.parts);
+      const born = await bornTasks(supabase, { jobId: job.id, orgId: ctx.orgId, createdBy: ctx.userId }, birth);
+      if (born.error) tasksNote = `The job was made; its tasks could not all be listed (${born.error}). Add them on the job.`;
+    }
+  } catch (e) {
+    reportError("createJobFromAppointment:tasks", e, { jobId: job.id, appointmentId });
+    tasksNote = "The job was made; the tasks typed on the visit could not be read. Add them on the job.";
+  }
   let materialsNote: string | undefined;
-  const typedItems = parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? [];
+  const typedItems = [...(parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? []), ...taskParts];
   if (typedItems.length) {
     try {
       const listed = await addCaptureItemsToJobList(job.id, typedItems);
@@ -1470,7 +1509,7 @@ export async function createJobFromAppointment(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  const note = [absorbNote, materialsNote].filter(Boolean).join(" ");
+  const note = [absorbNote, tasksNote, materialsNote].filter(Boolean).join(" ");
   return { ok: true, id: job.id, ...(note ? { note } : {}) };
 }
 

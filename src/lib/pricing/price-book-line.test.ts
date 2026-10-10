@@ -229,8 +229,8 @@ describe("every picker takes the one pricing input, and every picker page reads 
       // runEstimator's book read (VP2): lose the embed here and every estimator line silently
       // goes back to the allowance, because the estimator test feeds options in by hand.
       "src/app/(app)/quotes/actions.ts",
-      // The order sheet: lose it and a Marvin line is bought at $830 again.
-      "src/app/(app)/materials/actions.ts",
+      // The order sheet (the rule moved to lib in W3): lose it and a Marvin line is bought at $830 again.
+      "src/lib/estimate/take-off-from-quote.ts",
     ]) {
       const src = read(p);
       expect(src, p).toContain("ITEM_OPTIONS_EMBED}");
@@ -249,7 +249,7 @@ describe("every picker takes the one pricing input, and every picker page reads 
   });
 
   it("the order sheet costs a book line through bookLineBuy, never the item's bare buy_price", () => {
-    const src = read("src/app/(app)/materials/actions.ts");
+    const src = read("src/lib/estimate/take-off-from-quote.ts");
     expect(src).toContain("bookLineBuy(pl, cleanDesc)");
     expect(src).not.toContain("est_cost: pl ? Number(pl.buy_price)");
   });

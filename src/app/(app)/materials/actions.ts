@@ -4,10 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getOrgSettings } from "@/lib/org-settings";
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
-import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
-import { firstThatWorks, kitsSelectRungs, kitLineView, linkedItemOf } from "@/lib/kit-line";
+import { takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
@@ -528,192 +525,22 @@ export async function deleteMaterialList(listId: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Build a material take-off list straight from a quote's line items, attached
- *  to the quote's job. A material list is an ORDER sheet, so it: DROPS labor lines,
- *  pulls each item's real BUY cost + catalog # + vendor from the price book (not the
- *  marked-up estimate price), and reads the catalog # from a "…[CODE]" tag in the
- *  description when present. Unmatched lines keep the estimate price as a fallback.
- *  Returns the new list id. */
+/** Build a material take-off list straight from a quote's line items, attached to the quote's
+ *  job. THE RULE IS lib/estimate/take-off-from-quote (W3): this is the signed-in door onto it; the
+ *  customer's own Accept link reaches the same rule through finishPublicAcceptance. Returns the
+ *  list id (the existing one when the quote already has a list). */
 export async function createMaterialListFromQuote(quoteId: string): Promise<Result> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-
-  const { data: quote, error: qErr } = await supabase
-    .from("quotes")
-    .select("id, quote_number, job_id, title, customer_id")
-    .eq("id", quoteId)
-    .maybeSingle();
-  if (qErr) return { ok: false, error: qErr.message };
-  if (!quote) return { ok: false, error: "Quote not found." };
-
-  // Idempotent: one material list per quote — re-running opens the existing one.
-  const { data: existingList } = await supabase
-    .from("material_lists")
-    .select("id")
-    .eq("quote_id", quoteId)
-    .limit(1)
-    .maybeSingle();
-  if (existingList) return { ok: true, id: existingList.id };
-
-  const { data: items, error: iErr } = await supabase
-    .from("quote_line_items")
-    .select("description, quantity, unit, unit_price, sort_order")
-    .eq("quote_id", quoteId)
-    .order("sort_order");
-  if (iErr) return { ok: false, error: iErr.message };
-  if (!items || items.length === 0)
-    return { ok: false, error: "This quote has no line items to build from." };
-
-  const { data: list, error } = await supabase
-    .from("material_lists")
-    .insert({
-      name: `Materials — ${quote.quote_number}`,
-      job_id: quote.job_id,
-      quote_id: quote.id,
-      created_by: user.id,
-    })
-    .select("id")
-    .single();
-  if (error) return { ok: false, error: dbError(error) };
-
-  // The price book (RLS-scoped to this org) → resolve each material line to its REAL buy cost,
-  // catalog #, and vendor. Match on the "[CODE]" tag in the description first, then on the
-  // normalized description. Tools are archived, so they never land on an order sheet.
-  // The vendors under each code ride along (THE PROJECTION LAW): a line the estimator, Nort or a
-  // picker priced at a vendor names it ("Replace windows (Marvin) [830]"), and bookLineBuy costs it
-  // at THAT vendor, not at the code's own $830 allowance the customer was never quoted.
-  const { data: book } = await supabase
-    .from("price_list_items")
-    .select(`code, description, supplier, buy_price, unit, ${ITEM_OPTIONS_EMBED}`)
-    .eq("archived", false)
-    .eq("price_list_item_options.archived", false);
-  const normDesc = (s: string) => (s ?? "").toLowerCase().replace(/\[[^\]]*\]/g, "").replace(/[^a-z0-9]/g, "");
-  const byCode = new Map<string, any>();
-  const byDesc = new Map<string, any>();
-  for (const b of (book ?? []) as any[]) {
-    if (b.code) byCode.set(String(b.code).toUpperCase(), b);
-    const k = normDesc(b.description);
-    if (k && !byDesc.has(k)) byDesc.set(k, b);
+  const res = await takeOffFromQuote(supabase, { quoteId, userId: user.id, orgId: null });
+  if (res.ok) {
+    revalidatePath("/materials");
+    if (res.jobId) revalidatePath(`/jobs/${res.jobId}`);
   }
-  // An order sheet is a BUY list. Lines that don't match the price book carry the estimate's SELL
-  // price, so back the markup out to get cost — through the SAME rule that built the sell:
-  // runEstimator prices off-book lines at customer level → default_markup_pct (the item rung is
-  // vacuous off-book), so the reverse must read the same knobs. material_markup_percent is a
-  // DIFFERENT lane (the job-cost → invoice import in billing) and must not leak in here — with
-  // the two Settings fields set differently it would over/understate cost on every unmatched line.
-  const { data: orgS } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  let levelPct: number | null = null;
-  if (quote.customer_id) {
-    const { data: cust } = await supabase
-      .from("customers")
-      .select("pricing_levels(markup_pct)")
-      .eq("id", quote.customer_id)
-      .maybeSingle();
-    const lvl = (cust as any)?.pricing_levels?.markup_pct;
-    if (lvl != null) levelPct = Number(lvl);
-  }
-  const markup = effectiveMarkupPct({
-    levelPct,
-    itemPct: 0, // off-book: no item markup exists
-    orgDefaultPct: getOrgSettings((orgS as any)?.settings).default_markup_pct,
-  });
-  const costFromSell = (p: number) => Math.round((p / (1 + markup / 100)) * 100) / 100;
-
-  const CODE_RE = /\[([^\]]+)\]/;
-  const isLabor = (it: any) =>
-    String(it.unit ?? "").toLowerCase() === "hr" || /^\s*labor\b/i.test(String(it.description ?? ""));
-  // Match "[CODE]" exactly, then its last token ("[RACO 936]" → "936"), then the cleaned description.
-  const findPl = (code: string | null, cleanDesc: string): any => {
-    if (code) {
-      const up = code.toUpperCase();
-      if (byCode.has(up)) return byCode.get(up);
-      const last = up.split(/\s+/).pop();
-      if (last && byCode.has(last)) return byCode.get(last);
-    }
-    return byDesc.get(normDesc(cleanDesc)) ?? null;
-  };
-
-  const rows = (items as any[])
-    .filter((it) => !isLabor(it)) // an order sheet carries materials, never labor
-    .map((it, idx) => {
-      const m = String(it.description ?? "").match(CODE_RE);
-      const code = m ? m[1].trim() : null;
-      const cleanDesc = String(it.description ?? "").replace(CODE_RE, "").trim();
-      const pl = findPl(code, cleanDesc);
-      return {
-        list_id: list.id,
-        description: cleanDesc || it.description,
-        part_number: pl?.code ?? code ?? null,
-        quantity: Number(it.quantity) || 1,
-        unit: it.unit || pl?.unit || "ea",
-        vendor: pl?.supplier ?? null,
-        // matched → the book's real buy price, at the vendor the line names when it names one;
-        // unmatched → estimate price with the markup removed. `vendor` stays the item's supplier:
-        // a vendor option is the BRAND (Marvin), the supplier is where it is bought, and the brand
-        // is already in the description.
-        est_cost: pl ? bookLineBuy(pl, cleanDesc).buyPrice : it.unit_price != null ? costFromSell(Number(it.unit_price)) : null,
-        sort_order: it.sort_order ?? idx,
-      };
-    });
-
-  // Catalog orgs (Tahoe Deck): the granular MATERIAL kits (Framing, Hardware, Decking…) are
-  // the POST-ACCEPTANCE purchasing breakdown — deliberately kept OFF the estimate, seeded onto
-  // the job's materials list here so the crew has the buy-list grouped by scope. Prefixed with
-  // the kit name (material_list_items has no group column). Only on first creation (idempotent
-  // return above), so re-running never duplicates the groups. RLS scopes kits to this org.
-  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  if (getOrgSettings((orgRow as any)?.settings).estimating_mode === "catalog") {
-    // THE SHARED SELECT SHAPE (kit-line.ts), tolerant of 0166/0240 not having landed. A LINKED
-    // line (0240) puts the ITEM on the order sheet: its description, catalog #, unit, vendor and
-    // — the whole point — its BUY price as est_cost, not a sell price to back a markup out of.
-    // A frozen line keeps today's behaviour (its unit_price as the estimate).
-    const { data: matKits } = await firstThatWorks(
-      kitsSelectRungs("name").map(
-        (sel) => () => supabase.from("kits").select(sel).not("name", "in", '("Decks","Remodels")').order("name"),
-      ),
-    );
-    let so = rows.length;
-    for (const k of (matKits ?? []) as any[]) {
-      const kitItems = [...(k.kit_items ?? [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      for (const it of kitItems) {
-        const item = linkedItemOf(it);
-        // ONE RESOLUTION (audit v994 VP2): a code with a default vendor is BOUGHT at that vendor,
-        // so the words, the unit and est_cost all come from the same kitLineView the kit priced
-        // the line with. A vendor can carry its own unit (a supplier quoting by the pair); taking
-        // the item's unit beside the vendor's per-pair cost made the buy list and the quote
-        // disagree about what one of it is. Markup doesn't touch any of the three, so any pricing
-        // will do. The code rides in part_number, so the words drop the "CODE — " the view leads
-        // with and keep the vendor and its part number ("Windows (Marvin, #M-1)").
-        const view = item ? kitLineView(it, { orgDefaultPct: 0 }) : null;
-        const lead = view?.code ? `${view.code} — ` : "";
-        const words = view ? (lead && view.description.startsWith(lead) ? view.description.slice(lead.length) : view.description) : it.description;
-        rows.push({
-          list_id: list.id,
-          description: `${k.name} — ${words}`,
-          part_number: item?.code ?? null,
-          quantity: Number(it.quantity) || 1,
-          unit: view ? view.unit : it.unit || "ea",
-          vendor: item?.supplier ?? null,
-          est_cost: view ? view.cost : it.unit_price != null ? Number(it.unit_price) : null,
-          sort_order: so++,
-        });
-      }
-    }
-  }
-
-  if (rows.length) {
-    const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
-    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
-    if ((seeded?.length ?? 0) !== rows.length)
-      return { ok: false, error: "The list was created but its lines didn't save. Open it and try again." };
-  }
-
-  revalidatePath("/materials");
-  if (quote.job_id) revalidatePath(`/jobs/${quote.job_id}`);
-  return { ok: true, id: list.id };
+  return { ok: res.ok, ...(res.error ? { error: res.error } : {}), ...(res.id ? { id: res.id } : {}) };
 }
 
 /** Tolerant parse of a JSON array the model emitted: strips any code fences,
