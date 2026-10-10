@@ -492,6 +492,8 @@ export default async function NewQuotePage({
         kits={estimateKits as any}
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
+        defaultLaborRate={settings.default_labor_rate}
+        estimatorTaskMode={settings.estimating_mode !== "catalog"}
         deckRateRows={deckRateRows}
         salesTax={featureOn(settings.features, "sales_tax")}
       />

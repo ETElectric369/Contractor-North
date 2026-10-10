@@ -43,6 +43,7 @@ import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
+import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
@@ -940,8 +941,9 @@ export async function saveQuote(input: SaveQuoteInput) {
         unit_price: it.unit_price,
         category: it.group ?? null,
         sort_order: idx,
-        // The task behind the line (0386) rides every save, or the first autosave would drop it.
-        detail: it.detail ?? null,
+        // The task behind the line (0386) rides every save, or the first autosave would drop it —
+        // coerced, so a part he added and never named is not stored (coerceTaskDetail drops it).
+        detail: coerceTaskDetail(it.detail),
       })),
     });
     if (rpcErr) {
@@ -993,7 +995,7 @@ export async function saveQuote(input: SaveQuoteInput) {
       // so they survive a save/reload, and forms the estimate's per-category budget buckets.
       category: it.group ?? null,
       sort_order: idx,
-      detail: it.detail ?? null,
+      detail: coerceTaskDetail(it.detail),
     }));
     const { error: itemsErr } = await supabase
       .from("quote_line_items")
@@ -1453,6 +1455,65 @@ export async function updateQuoteStatus(id: string, status: string) {
 }
 
 /**
+ * TASK MODE — his typed scope becomes a TASK LIST, never priced lines the model decided on.
+ *
+ * Erik (2026-10-09): Draft With Estimator "is the speculation" — it read his punch list and came
+ * back with crew-hours it had chosen, parts it had picked and a retail guess on each. "The
+ * foundation underlying the ability to estimate a project … is pretty much always broken down into
+ * tasks … each task carries its own labor and materials." So here the model only SPLITS: one task
+ * per piece of work he named, with the hours HE gave for it and the parts HE named in it, plus the
+ * fragment of his text each came from. Code checks every claim against his words
+ * (screenEstimatorTasks, the inspector's own gate), taskLines prices the survivors from HIS hours
+ * at THE rate and HIS parts, and a hole asks ("hours?", "how many?", "price?") instead of being
+ * filled ([[no-speculation]]). Whatever the gate refused rides back as a "Not taken: …" question,
+ * so nothing is lost silently.
+ *
+ * NO PRICE BOOK, NO CALCULATORS, NO RATE go to the model. There is nothing for it to price with,
+ * which is the point; the prompt and the pricing are pure and tested (lib/estimate/task-mode).
+ *
+ * Only the free-text path of a research org comes here (runEstimator branches on
+ * `typeof content === "string" && !catalogMode`). A catalog org (Tahoe Deck bids from its kits),
+ * the plan paths and the supplier-quote path keep the priced-lines prompt below, untouched.
+ */
+async function runEstimatorTasks(opts: {
+  client: ReturnType<typeof getAnthropic>;
+  orgId: string | null;
+  scope: string;
+  trade: string;
+  playbook: string | undefined;
+  rows: unknown[];
+  /** The rate his hours price at: the one he TYPED in the scope, else laborRateFor's answer. */
+  rate: number;
+  levelPct: number | null;
+  orgDefaultPct: number;
+}): Promise<{ items: DraftLineItem[]; questions: string[]; description: string }> {
+  const { client, orgId, scope, trade, playbook, rows } = opts;
+  const msg = await client.messages.create({
+    model: DEFAULT_MODEL,
+    max_tokens: 8192,
+    system: taskModePrompt({ trade, playbook }),
+    messages: [{ role: "user", content: scope }],
+  });
+  // METERED (0162), into the same ledger and surface as the priced-lines path: one estimate is
+  // one estimate on the bill whichever prompt it ran.
+  void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "estimator", usage: msg.usage as never });
+  const text = msg.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { text: string }).text)
+    .join("\n");
+  // TRUNCATION IS CHECKED FIRST AND NEVER SALVAGED (the rule the priced-lines parse runs under): a
+  // task list that quietly lost its last tasks is a wrong estimate wearing a finished one's face.
+  if (msg.stop_reason === "max_tokens")
+    throw new Error("That take-off ran longer than one pass — trim the scope and try again.");
+  const parsed = (await parseAiJson(client, text, orgId)) as TaskModeParsed;
+  return taskModeDraft(scope, parsed, {
+    book: taskBookFromRows(rows),
+    rate: opts.rate,
+    pricing: { levelPct: opts.levelPct, orgDefaultPct: opts.orgDefaultPct },
+  });
+}
+
+/**
  * The estimator CORE. Takes the Anthropic user `content` — a free-text scope OR a PDF plan document
  * (+ instruction) — and returns priced line items + review questions from the org's OWN price book
  * (single source of truth, never web prices). Book items carry a "[CODE]" catalog tag (so the CED
@@ -1460,6 +1521,9 @@ export async function updateQuoteStatus(id: string, status: string) {
  * `markupPct` and `laborRate` come from the customer's pricing level; material sell resolves per
  * item through THE one markup rule (effectiveMarkupPct: level → item markup > 0 → org
  * default_markup_pct → 0), and labor $/hr falls back to the org default rate.
+ *
+ * A FREE-TEXT scope on a research org does not take this prompt at all: it goes to runEstimatorTasks
+ * above, where the model splits his words into tasks and prices nothing.
  */
 async function runEstimator(
   content: any,
@@ -1508,6 +1572,23 @@ async function runEstimator(
   const trade = tradeWordsOr(orgS);
 
   const client = getAnthropic();
+  // TASK MODE for his typed scope (runEstimatorTasks, above): the model splits, code checks, his
+  // numbers price. A rate he TYPED wins over the resolved one here exactly as it does on the
+  // priced-lines path (mapEstimatorLine's labor branch) — a dictated rate is an instruction.
+  if (typeof content === "string" && !catalogMode) {
+    return runEstimatorTasks({
+      client,
+      orgId: (org as { id?: string } | null)?.id ?? null,
+      scope: content,
+      trade,
+      playbook,
+      rows,
+      rate: stated ?? rate,
+      levelPct: markupPct ?? null,
+      orgDefaultPct: orgS.default_markup_pct,
+    });
+  }
+
   const system: Anthropic.MessageCreateParams["system"] = [
       {
         type: "text" as const,

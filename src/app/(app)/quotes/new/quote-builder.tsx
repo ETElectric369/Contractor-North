@@ -17,7 +17,10 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import { formatCurrency } from "@/lib/utils";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
-import { priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
+import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
+import { laborRateFor } from "@/lib/pricing/labor-rate";
+import { detailExplains, lineFromDetail, repriceTaskLine, taskMoney } from "@/lib/estimate/task-lines";
+import type { TaskDetail, TaskDetailMaterial } from "@/lib/estimate/line-map";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
@@ -91,16 +94,25 @@ function LineDescInput({
   value,
   onText,
   onPick,
+  onBlur,
   priceItems,
   pricing,
+  placeholder = "Description",
+  className,
 }: {
   value: string;
   onText: (v: string) => void;
   onPick: (p: PriceItemLite) => void;
+  /** After the box loses focus (the dropdown's own close still runs). A task's part uses it to
+   *  drop a row he left nameless. */
+  onBlur?: () => void;
   priceItems: PriceItemLite[];
   /** The document's pricing (customer level + org default): each row shows priceBookLine's price,
    *  the same number the pick writes. */
   pricing: BookPricing;
+  /** The same box, standing in for something smaller than a line: a task's PART. */
+  placeholder?: string;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   // BROWSE, DON'T GUESS — the same rule the Add picker above it runs on (add-line-items.tsx).
@@ -118,7 +130,8 @@ function LineDescInput({
   return (
     <div className="relative">
       <Input
-        placeholder="Description"
+        placeholder={placeholder}
+        className={className}
         value={value}
         onChange={(e) => {
           onText(e.target.value);
@@ -137,7 +150,10 @@ function LineDescInput({
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false);
         }}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onBlur={() => {
+          setTimeout(() => setOpen(false), 150);
+          onBlur?.();
+        }}
       />
       {open && priceItems.length === 0 && (
         <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
@@ -194,6 +210,124 @@ function LineDescInput({
   );
 }
 
+/**
+ * THE TASK BEHIND A LINE, EDITABLE (0386). A line built from a task carries its breakdown: HIS hours
+ * at the rate, and his parts, each with a count and a price. The line's Unit $ is the SUM, so every
+ * edit here goes through lineFromDetail and the flag follows it (taskFlags): a task with no hours
+ * reads "hours?", a part with no count "how many?", a part nobody priced "price?" — a $0 that ASKS,
+ * never a figure typed for him ([[no-speculation]]).
+ *
+ * A part is picked from the price book through the same autocomplete the line's description uses
+ * (LineDescInput), so a pick lands the book's words with the vendor named (describeChoice), the
+ * company's cost and the sell at THIS customer's markup (priceBookLine) — the one price. A part in
+ * his own words stays at "price?" until he picks it from the book or types what it sells for.
+ *
+ * A part he adds and leaves nameless is dropped when he leaves the box: it was never a part, and
+ * coerceTaskDetail would drop it on the next read anyway — better here, where he can see it go.
+ *
+ * Lines without a breakdown never render this; nothing changes for them.
+ */
+function TaskBreakdown({
+  line,
+  detail: d,
+  priceItems,
+  pricing,
+  onChange,
+}: {
+  line: DraftLineItem;
+  detail: TaskDetail;
+  priceItems: PriceItemLite[];
+  pricing: BookPricing;
+  /** The whole re-priced line (lineFromDetail): unit_price, flag and detail move together. */
+  onChange: (next: DraftLineItem) => void;
+}) {
+  const set = (next: TaskDetail) => onChange(lineFromDetail(line, next));
+  const setPart = (i: number, patch: Partial<TaskDetailMaterial>) =>
+    set({ ...d, materials: d.materials.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
+  const dropPart = (i: number) => set({ ...d, materials: d.materials.filter((_, j) => j !== i) });
+  const money = taskMoney(d);
+  const box = "h-7 px-2 text-xs";
+  return (
+    <div className="mt-1.5 space-y-1 rounded-md border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
+      <div className="flex items-center gap-1.5">
+        <span className="w-12 shrink-0 text-slate-500">Hours</span>
+        <NumberInput
+          aria-label="Hours"
+          placeholder="hours?"
+          className={`${box} w-20`}
+          value={d.hours ?? 0}
+          onValueChange={(n) => set({ ...d, hours: n > 0 ? n : null })}
+        />
+        <span className="whitespace-nowrap">× {formatCurrency(d.rate)}/h</span>
+        <span className="ml-auto tabular-nums text-slate-700">{formatCurrency(money.labor)}</span>
+      </div>
+      {d.materials.map((m, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-1.5">
+          <div className="min-w-[8rem] flex-1">
+            <LineDescInput
+              placeholder="Part"
+              className={box}
+              value={m.name}
+              onText={(v) => setPart(i, { name: v })}
+              onPick={(pi) => {
+                // THE ONE PRICE (priceBookLine) and the book's words with the vendor named, no code
+                // in front — the customer may read this part under the task.
+                const choice = priceBookLine(pi, pricing);
+                setPart(i, { code: pi.code, name: describeChoice(pi.description, pi, choice), cost: choice.buyPrice, sell: choice.unitPrice });
+              }}
+              onBlur={() => {
+                if (!m.name.trim()) dropPart(i);
+              }}
+              priceItems={priceItems}
+              pricing={pricing}
+            />
+          </div>
+          <NumberInput
+            aria-label="How many"
+            placeholder="how many"
+            className={`${box} w-20`}
+            value={m.qty ?? 0}
+            onValueChange={(n) => setPart(i, { qty: n > 0 ? n : null })}
+          />
+          <span>×</span>
+          <NumberInput
+            aria-label="Price each"
+            placeholder="price?"
+            className={`${box} w-20`}
+            value={m.sell ?? 0}
+            onValueChange={(n) => setPart(i, { sell: n > 0 ? n : null })}
+          />
+          <span className="ml-auto tabular-nums text-slate-700">
+            {m.qty !== null && m.sell !== null ? formatCurrency(m.qty * m.sell) : "—"}
+          </span>
+          <button
+            type="button"
+            onClick={() => dropPart(i)}
+            className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+            aria-label="Remove This Part"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+        <button
+          type="button"
+          onClick={() => set({ ...d, materials: [...d.materials, { code: null, name: "", qty: null, cost: null, sell: null }] })}
+          className="font-medium text-brand hover:underline"
+        >
+          Add A Part
+        </button>
+        {d.materials.length > 0 && <span className="tabular-nums text-slate-500">Parts {formatCurrency(money.parts)}</span>}
+      </div>
+      {/* A Unit $ typed over the sum is HIS price and stands; the breakdown then describes a number
+          the customer is not being asked for, so the document leaves it off (quote-document.tsx
+          prints it only while detailExplains). Nothing is deleted: the job still reads the hours. */}
+      {!detailExplains(d, line) && <p className="text-amber-700">Price set by hand — the breakdown stays off the paper</p>}
+    </div>
+  );
+}
+
 export function QuoteBuilder({
   customers,
   leads = [],
@@ -211,6 +345,8 @@ export function QuoteBuilder({
   kits = [],
   quoteExpiryDays = 30,
   defaultMarkupPct = 0,
+  defaultLaborRate = 0,
+  estimatorTaskMode = false,
   deckRateRows,
   measured,
   orgId = "",
@@ -267,6 +403,13 @@ export function QuoteBuilder({
   quoteExpiryDays?: number;
   /** Org Settings default_markup_pct — the last fallback in effectiveMarkupPct's chain. */
   defaultMarkupPct?: number;
+  /** Org Settings default_labor_rate — laborRateFor's fallback when the customer's level has no
+   *  rate of its own. A task line's hours price at the resolved rate; 0 = no rate set, and the line
+   *  says so rather than guessing one. */
+  defaultLaborRate?: number;
+  /** Draft With Estimator SPLITS the scope into tasks (research orgs' typed scope, quotes/actions.ts
+   *  runEstimatorTasks) instead of pricing lines — the sentence under the button must say which. */
+  estimatorTaskMode?: boolean;
   /** Deck price-code rows (catalog orgs), NEWEST-FIRST — priced here client-side through THE
    *  markup rule so generator lines re-price with the selected customer, like the hand-picker. */
   deckRateRows?: DeckRateRow[];
@@ -337,6 +480,11 @@ export function QuoteBuilder({
   // `?? null`, never `?? 0`: a level ALWAYS wins, so a 0 here would sell every customer without a
   // level at net cost.
   const pricing: BookPricing = { levelPct: levelMarkup ?? null, orgDefaultPct: defaultMarkupPct ?? null };
+  // THE ONE LABOR RATE for the hours on this screen (laborRateFor): the customer's level rate when
+  // the level has one, else the org default, else 0 — which a task line reads as "no rate set" and
+  // SAYS, never a guessed hourly. The same function the server seed and the estimator price with,
+  // so a task's hours cost the same on every door ([[two-doors-one-thing]]).
+  const rate = laborRateFor(levelRate, defaultLaborRate);
 
   /* ── WHO'S THIS FOR: one picker, two kinds of person, and it never confuses them ────────── */
   // The attached lead ALWAYS has a row to sit on, even if it's been won/lost or aged out of the
@@ -825,6 +973,25 @@ export function QuoteBuilder({
   itemsRef.current = items;
   const runAutosaveRef = useRef(runAutosave);
   runAutosaveRef.current = runAutosave;
+
+  // THE RATE FOLLOWS THE CUSTOMER (0386). When the picker lands on a customer whose level carries
+  // its own rate, every task line's LABOR re-prices (repriceTaskLine: the parts keep the sell they
+  // were built with — their item markup is not in the breakdown, so re-marking them would guess).
+  // Not on the first render — the seed and a restored draft already carry their rate — and never
+  // over a line he priced by hand (detailExplains false): a customer switch is arithmetic, his
+  // typed Unit $ is a decision, and arithmetic does not overwrite a hand. dirtyRef only moves when
+  // a line actually changed, so a rate that equals the stored one costs no autosave.
+  const rateSeen = useRef(rate);
+  useEffect(() => {
+    if (rateSeen.current === rate) return;
+    rateSeen.current = rate;
+    const prev = itemsRef.current;
+    const next = prev.map((l) => (l.detail && l.detail.rate !== rate && detailExplains(l.detail, l) ? repriceTaskLine(l, rate) : l));
+    if (next.some((l, i) => l !== prev[i])) {
+      dirtyRef.current = true;
+      setItems(next);
+    }
+  }, [rate]);
   useEffect(() => {
     const cleaned = items.filter((i) => i.description.trim());
     if (!cleaned.length && !quoteIdRef.current) return; // nothing worth a row yet
@@ -880,8 +1047,12 @@ export function QuoteBuilder({
                 Draft with Estimator
               </h3>
             </div>
+            {/* THE SENTENCE MATCHES THE DOOR (onboarding-truth-law). In task mode nothing is priced for
+                him: the model splits his words into tasks, his hours and parts price them, a hole asks. */}
             <p className="text-xs text-slate-500">
-              Priced from your price book (your net cost + markup). Items not in the book come in at a Home Depot estimate, flagged to confirm.
+              {estimatorTaskMode
+                ? "Splits your scope into tasks, one line each, with the hours and parts you wrote. Nothing is priced for you: a task without hours asks for them."
+                : "Priced from your price book (your net cost + markup). Items not in the book come in at a Home Depot estimate, flagged to confirm."}
             </p>
             <Textarea
               rows={3}
@@ -1260,6 +1431,17 @@ export function QuoteBuilder({
                                 <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
                                   {it.flag}
                                 </span>
+                              )}
+                              {/* THE TASK IS THE LINE (0386): a line built from a task shows its
+                                  hours and parts here, and the Unit $ follows them. */}
+                              {it.detail && (
+                                <TaskBreakdown
+                                  line={it}
+                                  detail={it.detail}
+                                  priceItems={priceItems}
+                                  pricing={pricing}
+                                  onChange={(next) => updateItem(idx, next)}
+                                />
                               )}
                             </div>
                             <div className="col-span-3 sm:col-span-2">
