@@ -91,7 +91,15 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    // TWO DOORS IN THE SAME SECOND: both read "no list yet"; the second insert is refused by
+    // material_lists_one_per_quote_uq (0388). The other door's list IS the list — open it.
+    if ((error as { code?: string }).code === "23505") {
+      const { data: won } = await supabase.from("material_lists").select("id").eq("quote_id", quoteId).limit(1).maybeSingle();
+      if (won) return { ok: true, id: won.id, jobId: quote.job_id ?? null };
+    }
+    return { ok: false, error: dbError(error) };
+  }
 
   // The price book (RLS-scoped to this org, or scoped here) → resolve each material line to its REAL
   // buy cost, catalog #, and vendor. Match on the "[CODE]" tag in the description first, then on the

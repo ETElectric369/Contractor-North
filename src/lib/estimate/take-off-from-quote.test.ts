@@ -122,6 +122,29 @@ describe("takeOffFromQuote — a task line puts its PARTS on the sheet, never it
     expect(inserted.material_list_items.map((r) => r.description)).toEqual(["Transfer switch, 200A"]);
   });
 
+  it("two doors in the same second: the index's refusal (0388) opens the other door's list", async () => {
+    const db = fakeDb(
+      {
+        quotes: [{ id: "q-1", quote_number: "Q-0041", job_id: "job-1", title: "", customer_id: null }],
+        material_lists: [],
+        quote_line_items: lines,
+        price_list_items: BOOK.filter((b) => b.org_id === ORG),
+        organizations: [{ id: ORG, settings: {} }],
+        customers: [],
+      },
+      {
+        onInsert: (table) => {
+          if (table !== "material_lists") return undefined;
+          db.tables.material_lists.push({ id: "ml-winner", quote_id: "q-1" });
+          return { code: "23505", message: 'duplicate key value violates unique constraint "material_lists_one_per_quote_uq"' };
+        },
+      },
+    );
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res).toEqual({ ok: true, id: "ml-winner", jobId: "job-1" });
+    expect(db.inserted.material_list_items).toBeUndefined(); // nothing written onto the other door's list
+  });
+
   it("an off-book plain line still backs the markup out of the estimate price (unchanged)", async () => {
     const { sb, inserted } = world([{ id: "l9", quote_id: "q-1", org_id: ORG, description: "Mystery bracket", quantity: 1, unit: "ea", unit_price: 125, sort_order: 0, detail: null }]);
     await takeOffFromQuote(sb, { quoteId: "q-1", userId: "u-1", orgId: null });

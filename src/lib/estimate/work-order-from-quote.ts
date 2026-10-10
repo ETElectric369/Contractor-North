@@ -70,7 +70,15 @@ export async function workOrderFromQuote(supabase: SupabaseClient, who: WorkOrde
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    // TWO DOORS IN THE SAME SECOND: the second insert is refused by work_orders_one_per_quote_uq
+    // (0388). The other door's work order IS the work order — open it.
+    if ((error as { code?: string }).code === "23505") {
+      const { data: won } = await supabase.from("work_orders").select("id").eq("quote_id", quoteId).limit(1).maybeSingle();
+      if (won) return { ok: true, id: won.id, jobId: quote.job_id ?? null };
+    }
+    return { ok: false, error: dbError(error) };
+  }
 
   return { ok: true, id: data.id, jobId: quote.job_id ?? null };
 }

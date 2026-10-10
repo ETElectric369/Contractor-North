@@ -64,9 +64,10 @@ export const FINISH_WINDOW_MS = 10 * 60_000;
  * unguessable token, does nothing unless the quote is accepted, has its job and was accepted within
  * FINISH_WINDOW_MS, and every piece is idempotent by key (tasks by source_key, one work order and
  * one list per quote). The window is what bounds a replay: without it the link could re-make a
- * work order or a list the office had deleted, months later. (The skeptic's note stands: nothing
- * but tasks_job_source_key_uq is a database-level guard, so two calls in the same instant could
- * still make two work orders — the same race the office door has today.)
+ * work order or a list the office had deleted, months later. Two calls in the same instant are
+ * settled by the database: tasks_job_source_key_uq (0358), work_orders_one_per_quote_uq and
+ * material_lists_one_per_quote_uq (0388) refuse the second, and each rule reads that as "the other
+ * door won".
  *
  * Best-effort and never silent: a piece that fails is reported to the ops sink; the job stands and
  * the office is rung regardless.
