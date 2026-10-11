@@ -64,7 +64,8 @@ const BOOK = [
 ];
 const PHOTO = { path: "org-1/appointments/appt-1/1-panel.jpg", url: "https://example.invalid/1-panel.jpg" };
 // A TASK KIT (0386, W4) as the page hands it over: minutes for one unit, lines by name and count,
-// no money field anywhere (kitsWithoutMoney). The first task picked it for seven footings.
+// no money field anywhere (kitsWithoutMoney) — the vendors under a code ride by NAME only, so a part
+// previews under the words the estimate will write (item 2, 2026-10-10). Seven footings.
 const KIT = {
   id: "k1",
   name: "Footing",
@@ -73,6 +74,9 @@ const KIT = {
   items: [
     { id: "i1", description: "Concrete, 80 lb", quantity: 4, unit: "ea", sort_order: 0 },
     { id: "i2", description: "Rebar stake", quantity: 2, unit: "ea", sort_order: 1 },
+    { id: "i3", description: "Window (snapshot)", quantity: 1, unit: "ea", sort_order: 2, price_list_item_id: "pli-830",
+      price_list_items: { id: "pli-830", code: "830", description: "Windows (Allowance)", unit: "ea", archived: false,
+        price_list_item_options: [{ id: "o-mar", vendor: "Marvin", label: null, part_number: "M-1", unit: "ea", buy_price: null, is_default: true, sort_order: 0, archived: false }] } },
   ],
 };
 const KIT_ANSWERS = {
@@ -305,7 +309,8 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
 
 describe("a task kit on the visit (W4): picked by name, counted in units, previewed without a price", () => {
   const pills = (html: string) => (html.match(/>hours\?</g) ?? []).length;
-  const PREVIEW = "From the kit, for ×7 footing: 14 h · Concrete, 80 lb ×28, Rebar stake ×14";
+  // The window names its default vendor — the same words the estimate line and the job's list will carry.
+  const PREVIEW = "From the kit, for ×7 footing: 14 h · Concrete, 80 lb ×28, Rebar stake ×14, Windows (Allowance) (Marvin, #M-1) ×7";
   // The office's page carries the scope prices above; the TASKS block itself must never carry one.
   const tasksBlock = (html: string) => html.slice(html.indexOf(">Tasks<"), html.indexOf("Measurements"));
 
@@ -349,7 +354,7 @@ describe("a task kit on the visit (W4): picked by name, counted in units, previe
   it("his own hours win over the kit's, and the preview says so", () => {
     const answers = { ...KIT_ANSWERS, tasks: [{ ...KIT_ANSWERS.tasks[0], hours: 3 }, KIT_ANSWERS.tasks[1]] };
     const html = render("office", { taskKits: [KIT], initialAnswers: answers });
-    expect(textOf(html)).toContain("From the kit, for ×7 footing: your 3 h stand (the kit says 14 h) · Concrete, 80 lb ×28, Rebar stake ×14");
+    expect(textOf(html)).toContain("From the kit, for ×7 footing: your 3 h stand (the kit says 14 h) · Concrete, 80 lb ×28, Rebar stake ×14, Windows (Allowance) (Marvin, #M-1) ×7");
   });
 
   it("a kit that left the price list is said, not hidden", () => {

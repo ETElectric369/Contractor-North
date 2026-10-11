@@ -60,6 +60,9 @@ export type PriceItemOptionRow = {
   markup_pct?: number | string | null;
   is_default?: boolean | null;
   sort_order?: number | null;
+  /** Carried by the kit reads' embed (KIT_BOOK_OPTIONS_EMBED) so normalizeItemOptions can drop a
+   *  maker the org stopped carrying without a nested filter; absent on the pickers' own embed. */
+  archived?: boolean | null;
 };
 
 /** The price-list item the options hang under — the fields the line takes from it. */

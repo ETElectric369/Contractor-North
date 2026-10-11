@@ -1,5 +1,6 @@
 import { kitsSelectRungs, type KitLineRaw, type KitLinkedItem } from "@/lib/kit-line";
 import type { TaskKit } from "./task-lines";
+import type { PriceItemOptionRow } from "@/lib/pricing/item-options";
 
 /**
  * TASK KITS, READ (W4, cn-v1076). A kit with `labor_minutes` (0386) is a TASK PER UNIT — "Footing":
@@ -47,6 +48,28 @@ export function taskKitsFrom(rows: unknown): TaskKit[] {
   return out;
 }
 
+/** A vendor under a code (0282) with its NAMING fields only — vendor, label, part number, unit, the
+ *  default flag and the order — and never its buy price or markup. The Inspector's preview names a
+ *  kit part through THE SAME expandTaskKit the estimate seeds from, and that names a linked part after
+ *  the org's default vendor ("Windows (Allowance) (Marvin, #M-1)"); dropping the vendors wholesale
+ *  made the preview fall back to the item's own words and disagree with the estimate and the job's
+ *  list (item 2 of the deferred four, 2026-10-10). A vendor's name is not a price: the crew orders by it. */
+const optionsWithoutMoney = (raw: KitLinkedItem["price_list_item_options"]): PriceItemOptionRow[] =>
+  (raw == null ? [] : Array.isArray(raw) ? raw : [raw])
+    .filter((o): o is PriceItemOptionRow => !!o && typeof o === "object" && typeof o.id === "string")
+    .map((o) => ({
+      id: o.id,
+      vendor: o.vendor,
+      label: o.label ?? null,
+      part_number: o.part_number ?? null,
+      unit: o.unit ?? null,
+      // The type names buy_price; the money is NOT carried — null is "no price here", which prices at 0 (a hole).
+      buy_price: null,
+      is_default: o.is_default ?? null,
+      sort_order: o.sort_order ?? null,
+      archived: o.archived ?? null,
+    }));
+
 /** The keys of a linked item that are NOT money: what a line needs to name and size itself. */
 const linkedWithoutMoney = (it: KitLinkedItem): KitLinkedItem => ({
   id: it.id,
@@ -60,6 +83,7 @@ const linkedWithoutMoney = (it: KitLinkedItem): KitLinkedItem => ({
   qty_round: it.qty_round ?? null,
   sized_by: it.sized_by ?? null,
   qty_per: it.qty_per ?? null,
+  price_list_item_options: optionsWithoutMoney(it.price_list_item_options),
 });
 
 /** The keys of a kit line that are NOT money: what it needs to name, count and size itself. An
@@ -84,7 +108,8 @@ const lineWithoutMoney = (it: KitLineRaw): KitLineRaw => {
 /** THE SAME KITS WITH EVERY MONEY FIELD DROPPED — what the Inspector is handed. It previews a
  *  kit's hours and parts by name and count and never a price (a crew lead fills the visit in,
  *  0356), so the page sends nothing a price could be read from: no line snapshot price, no item
- *  buy price or markup, no vendor options. Both levels are allow-lists. */
+ *  buy price or markup, no vendor buy price or markup (the vendors' NAMES ride, so the preview
+ *  names a part as the estimate will). All three levels are allow-lists. */
 export function kitsWithoutMoney(kits: TaskKit[]): TaskKit[] {
   return kits.map((k) => ({ id: k.id, name: k.name, labor_minutes: k.labor_minutes, unit: k.unit, items: k.items.map(lineWithoutMoney) }));
 }
