@@ -1,4 +1,5 @@
 "use server";
+import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
@@ -422,7 +423,7 @@ export async function deleteTask(
   // THE DELETE RULE (Erik, 2026-09-26): a job's task is deleted by the office or whoever added it; a
   // tech checks an office task off, never deletes it. 0358's tasks_delete policy is the boundary;
   // this says it first, and holds on a database without 0358.
-  const { data: row } = await supabase.from("tasks").select("id, job_id, created_by").eq("id", id).maybeSingle();
+  const { data: row } = await supabase.from("tasks").select("id, job_id, created_by, source_key").eq("id", id).maybeSingle();
   if (!row) return { ok: false, error: await zeroRowsReason(supabase, id, "delete") };
   if (row.job_id && row.created_by !== user.id) {
     const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
@@ -433,6 +434,26 @@ export async function deleteTask(
   const { data: gone, error } = await supabase.from("tasks").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "delete") };
+  // A TASK HE DELETED STAYS GONE (2026-10-10). A task an estimate line put on the job (source_key
+  // "line:…", 0358) would be born again by the next sync of the job with its estimate
+  // (lib/estimate/sync-job-tasks) — so its key goes on jobs.dismissed_task_keys, the column 0358 made
+  // for exactly this, and the sync never re-inserts a dismissed key. Best-effort: the delete stands;
+  // a failure here is reported, never a refusal of what already happened.
+  const key = (row as { source_key?: string | null }).source_key;
+  if (row.job_id && key) {
+    const { data: job } = await supabase.from("jobs").select("dismissed_task_keys").eq("id", row.job_id).maybeSingle();
+    const had = Array.isArray((job as { dismissed_task_keys?: unknown } | null)?.dismissed_task_keys)
+      ? ((job as { dismissed_task_keys: unknown[] }).dismissed_task_keys.filter((k): k is string => typeof k === "string"))
+      : [];
+    if (!had.includes(key)) {
+      const { data: marked, error: markErr } = await supabase
+        .from("jobs")
+        .update({ dismissed_task_keys: [...had, key] })
+        .eq("id", row.job_id)
+        .select("id");
+      if (markErr || !marked?.length) reportError("deleteTask:dismissKey", markErr ?? new Error("zero rows"), { taskId: id, jobId: row.job_id, key });
+    }
+  }
   revalidateTaskViews(opts?.category, opts?.jobId);
   return { ok: true };
 }

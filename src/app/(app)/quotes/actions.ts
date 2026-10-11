@@ -44,6 +44,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
 import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
+import { estimateLines, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
 import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
@@ -407,6 +408,49 @@ export async function quoteEditLock(quoteId: string): Promise<{ reason: string }
   return editable.ok ? null : { reason: editable.error };
 }
 
+/** The job an estimate is linked to, whatever its status — null when it has none. (A rename follows the
+ *  job's task at ANY status: the task's own old-title guard is what protects a hand rename, and a task
+ *  renamed only while accepted would otherwise disagree with its line for good after a walk-back.) */
+async function jobOf(supabase: any, quoteId: string): Promise<string | null> {
+  const { data: q } = await supabase.from("quotes").select("job_id").eq("id", quoteId).maybeSingle();
+  return (q as { job_id?: string | null } | null)?.job_id ?? null;
+}
+
+/**
+ * THE JOB BEHIND AN ACCEPTED ESTIMATE, AND THE ESTIMATE'S FIGURE BEFORE A CHANGE (item 1, 2026-10-10).
+ * jobs.planned_minutes carries no "came from the estimate" mark (0229), so the figure is read BEFORE
+ * the change: the size follows only while the box still holds it (lib/estimate/sync-job-tasks).
+ * sizeBefore undefined = the figure could not be read, so the size is left alone.
+ */
+async function jobBehindQuote(
+  supabase: any,
+  quoteId: string,
+  orgId: string | null,
+): Promise<{ jobId: string; sizeBefore: number | null | undefined } | null> {
+  const { data: q } = await supabase.from("quotes").select("job_id, status").eq("id", quoteId).maybeSingle();
+  const jobId = (q as { job_id?: string | null } | null)?.job_id ?? null;
+  if (!jobId || (q as { status?: string } | null)?.status !== "accepted") return null;
+  const est = await estimateLines(supabase, { jobId, orgId });
+  return { jobId, sizeBefore: est.error ? undefined : est.minutes };
+}
+
+/** Run the one rule (lib/estimate/sync-job-tasks) and say what the job's list did — or that it could not. */
+async function jobFollows(
+  supabase: any,
+  who: { jobId: string; sizeBefore?: number | null },
+  ctx: { orgId: string | null; userId: string },
+): Promise<{ said?: string; note?: string }> {
+  const res = await syncJobTasks(supabase, { jobId: who.jobId, orgId: ctx.orgId, createdBy: ctx.userId, sizeBefore: who.sizeBefore });
+  revalidatePath(`/jobs/${who.jobId}`);
+  revalidatePath("/schedule");
+  if (res.error) {
+    reportError("jobFollowsEstimate", new Error(res.error), { jobId: who.jobId });
+    return { note: `The job's list could not follow this change (${res.error}). Check its tasks.` };
+  }
+  const said = syncWords(res);
+  return said ? { said } : {};
+}
+
 /** Recompute subtotal/tax/total from the quote's line items. */
 async function recalcQuote(supabase: any, quoteId: string) {
   // A FAILED READ IS NOT AN EMPTY QUOTE (audit v800 — the audit-8 guard that already protects
@@ -572,7 +616,7 @@ export async function updateQuoteItem(
   itemId: string,
   quoteId: string,
   item: { description?: string; quantity?: number; unit?: string; unit_price?: number },
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -589,6 +633,12 @@ export async function updateQuoteItem(
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
+  // THE JOB FOLLOWS A RENAME (item 1, 2026-10-10): what the line said BEFORE, so the job's task is
+  // renamed only while it still reads exactly that way — a task he renamed by hand on the job stands.
+  const { data: was } =
+    clean.description !== undefined
+      ? await supabase.from("quote_line_items").select("description, detail").eq("id", itemId).eq("quote_id", quoteId).maybeSingle()
+      : { data: null };
   // SCOPE THE WRITE TO THE DOCUMENT WE AUTHORIZED (audit v800). The editable check ran against
   // quoteId, but the update matched on itemId ALONE — so a caller (Nort included) could pass a
   // draft's id to pass the lock and an itemId belonging to a DIFFERENT quote, and rewrite a line
@@ -602,20 +652,40 @@ export async function updateQuoteItem(
   if (error) return { ok: false, error: dbError(error) };
   if (!touched?.length) return { ok: false, error: "That line isn't on this estimate." };
   await recalcQuote(supabase, quoteId);
+  let follow: { said?: string; note?: string } = {};
+  const before = (was as { description?: string | null; detail?: unknown } | null) ?? null;
+  if (before && clean.description !== undefined && coerceTaskDetail(before.detail)) {
+    const jobId = await jobOf(supabase, quoteId);
+    if (jobId) {
+      const r = await retitleLineTask(supabase, { jobId, orgId: ctx.orgId, lineId: itemId, from: String(before.description ?? ""), to: String(clean.description) });
+      if (r.error) {
+        reportError("updateQuoteItem:retitle", new Error(r.error), { jobId, itemId });
+        follow = { note: `The job's task could not be renamed (${r.error}).` };
+      } else if (r.renamed) {
+        follow = { said: "The job's task is renamed too." };
+        revalidatePath(`/jobs/${jobId}`);
+      }
+    }
+  }
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
-  return { ok: true };
+  return { ok: true, ...follow };
 }
 
 export async function deleteQuoteItem(
   itemId: string,
   quoteId: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
+  // THE JOB FOLLOWS (item 1, 2026-10-10): when a TASK line goes (a plain line has no task on the job),
+  // the estimate's figure is read BEFORE the delete, so the size can tell "still the estimate's" from
+  // his; the sync itself runs after the delete lands.
+  const { data: line } = await supabase.from("quote_line_items").select("detail").eq("id", itemId).eq("quote_id", quoteId).maybeSingle();
+  const behind = coerceTaskDetail((line as { detail?: unknown } | null)?.detail) ? await jobBehindQuote(supabase, quoteId, ctx.orgId) : null;
   // Same scoping law as updateQuoteItem (audit v800): the delete must belong to the document
   // the editable check authorized, and a zero-row delete is a failure, not a success.
   const { data: gone, error } = await supabase
@@ -627,9 +697,10 @@ export async function deleteQuoteItem(
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length) return { ok: false, error: "That line isn't on this estimate." };
   await recalcQuote(supabase, quoteId);
+  const follow = behind ? await jobFollows(supabase, behind, ctx) : {};
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
-  return { ok: true };
+  return { ok: true, ...follow };
 }
 
 /** Edit quote header fields: title, notes, tax rate (fraction), valid-until.
@@ -705,7 +776,7 @@ export async function setQuoteCustomer(
 export async function setQuoteJob(
   quoteId: string,
   jobId: string | null,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -715,11 +786,26 @@ export async function setQuoteJob(
     if (!data) return { ok: false, error: "That job isn't available." };
   }
 
-  const { error } = await supabase
+  // THE JOB FOLLOWS (item 1, 2026-10-10): an ACCEPTED estimate pinned to a job puts its task lines on
+  // that job's list. The job's figure is read BEFORE the pin counts this estimate's lines, so a job
+  // that already has its own length keeps it.
+  let pinned: { sizeBefore: number | null | undefined } | null = null;
+  if (jobId) {
+    const { data: qs } = await supabase.from("quotes").select("status").eq("id", quoteId).maybeSingle();
+    if ((qs as { status?: string } | null)?.status === "accepted") {
+      const est = await estimateLines(supabase, { jobId, orgId: ctx.orgId });
+      pinned = { sizeBefore: est.error ? undefined : est.minutes };
+    }
+  }
+
+  // .select("id") — the silent-write law: a zero-row update (not ours, or gone) is said, not a quiet ok.
+  const { data: moved, error } = await supabase
     .from("quotes")
     .update({ job_id: jobId, updated_at: new Date().toISOString() })
-    .eq("id", quoteId);
+    .eq("id", quoteId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!moved?.length) return { ok: false, error: "That estimate could not be found." };
   // Pinning an estimate to a job is the same win as making the job from it: the visit it was written
   // up from gets the job (where it has none) and reads won (cn-v1069, lib/appointments/behind-quote).
   if (jobId) {
@@ -734,10 +820,11 @@ export async function setQuoteJob(
   // re-pointing it must drop the stored PDF or a sent estimate keeps serving the old address
   // while /q shows the new one (audit v921, same reason as setQuoteCustomer above).
   await bustDocPdf("quote", quoteId);
+  const follow = jobId && pinned ? await jobFollows(supabase, { jobId, sizeBefore: pinned.sizeBefore }, ctx) : {};
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
-  return { ok: true };
+  return { ok: true, ...follow };
 }
 
 /**
@@ -1193,7 +1280,18 @@ async function materializeQuoteCustomer(
 
 export async function createJobFromQuote(
   quoteId: string,
-): Promise<{ ok: boolean; error?: string; id?: string; /** The job was made, and something it should carry could not be listed. */ note?: string }> {
+  /** From updateQuoteStatus on an estimate already linked to a job: the estimate's figure as it stood
+   *  BEFORE the status write counted this estimate's lines (lib/estimate/sync-job-tasks). */
+  opts?: { sizeBefore?: number | null },
+): Promise<{
+  ok: boolean;
+  error?: string;
+  id?: string;
+  /** The job was made, and something it should carry could not be listed. */
+  note?: string;
+  /** The job already existed and its list followed this estimate: what it did. */
+  said?: string;
+}> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -1203,11 +1301,27 @@ export async function createJobFromQuote(
     // address/city/state/zip (0177) so the job can inherit the site typed on the ESTIMATE. A
     // column you don't select is a column you can't inherit — the specific way the address kept
     // dying at every stage, and it is a `select` list every time, never a missing column.
-    .select("id, job_id, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip")
+    .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip")
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: "Quote not found." };
-  if (q.job_id) return { ok: true, id: q.job_id };
+  if (q.job_id) {
+    // THE JOB CATCHES UP (item 1, 2026-10-10). This used to stop here, so an estimate already linked
+    // to a job — accepted again after a walk-back to edit it, a second estimate born from the job
+    // page, one pinned with Attach — gave the job nothing: no tasks, no work order, no take-off. (The
+    // customer's own Accept link already did all three, finishPublicAcceptance.) One rule for the
+    // tasks (lib/estimate/sync-job-tasks) and the same two idempotent paperwork doors as a first
+    // acceptance, each for THIS estimate (one work order + one list per estimate, 0388).
+    // ONLY FOR AN ACCEPTED ESTIMATE: a linked estimate that is sent or draft (Nort's convertToJob on
+    // one, a walk-back) has no tasks on the job yet, and the sync on its job would read its lines as
+    // gone. The old answer stands for it.
+    if ((q as { status?: string }).status !== "accepted") return { ok: true, id: q.job_id };
+    const follow = await jobFollows(supabase, { jobId: q.job_id, sizeBefore: opts?.sizeBefore }, ctx);
+    await createWorkOrderFromQuote(quoteId);
+    await createMaterialListFromQuote(quoteId);
+    revalidatePath(`/quotes/${quoteId}`);
+    return { ok: true, id: q.job_id, ...follow };
+  }
 
   // Deferred-customer estimate won → create/link the Contact now, before the job (so the job gets it).
   const resolvedCustomerId = await materializeQuoteCustomer(supabase, q, ctx.userId);
@@ -1414,12 +1528,26 @@ export async function updateQuoteStatus(id: string, status: string) {
   // alerts the office in-app (the My Day feeder catches status='accepted') AND by push.
   const patch: Record<string, unknown> =
     status === "accepted" ? { status, accepted_at: new Date().toISOString() } : { status };
+  // THE JOB CATCHES UP (item 1, 2026-10-10): an estimate already linked to a job and accepted (again)
+  // hands createJobFromQuote the estimate's figure as it stood BEFORE this write makes its lines
+  // count — the only way the size can tell "still the estimate's" from his (sync-job-tasks).
+  let linked: { jobId: string; sizeBefore: number | null | undefined } | null = null;
+  if (status === "accepted") {
+    const { data: was } = await supabase.from("quotes").select("job_id").eq("id", id).maybeSingle();
+    const jobId = (was as { job_id?: string | null } | null)?.job_id ?? null;
+    if (jobId) {
+      const est = await estimateLines(supabase, { jobId, orgId: ctx.orgId });
+      linked = { jobId, sizeBefore: est.error ? undefined : est.minutes };
+    }
+  }
   // .select("id") so a zero-row write is caught (silent-write law). quotes_write is org-scoped,
   // so a foreign-org quote id matches nothing here — without the row check the function sailed
   // on to read the quote and ring THAT org's bell (audit v921 high). No rows = not ours = stop.
   const { data: updated, error } = await supabase.from("quotes").update(patch).eq("id", id).select("id");
   if (error) return { ok: false as const, error: dbError(error) };
   if (!updated?.length) return { ok: false as const, error: "That estimate could not be found." };
+  /** What the job's list did when a linked estimate was accepted (shown under the status, not as a warning). */
+  let said: string | undefined;
 
   /**
    * ONE DECISION, RECORDED WHEREVER IT IS MADE (Erik, 8/19: "it would be the one in the same
@@ -1450,10 +1578,12 @@ export async function updateQuoteStatus(id: string, status: string) {
     // so the office knows to finish the hand-off instead of believing the work is scheduled.
     let jobWarn: string | null = null;
     try {
-      const jobRes = await createJobFromQuote(id); // links quotes.job_id + spins up WO/materials
+      // links quotes.job_id + spins up WO/materials; on a linked estimate, the job catches up
+      const jobRes = await createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore } : undefined);
       if (jobRes && jobRes.ok === false) jobWarn = jobRes.error ?? "The job wasn't created.";
       // The job was made and something it should carry (its tasks) could not be listed: said, not sunk.
       else if (jobRes?.note) jobWarn = jobRes.note;
+      if (jobRes?.said) said = jobRes.said;
     } catch (e) {
       jobWarn = "The job wasn't created.";
       reportError("updateQuoteStatus:createJob", e, { quoteId: id });
@@ -1464,12 +1594,12 @@ export async function updateQuoteStatus(id: string, status: string) {
     revalidatePath(`/quotes/${id}`);
     revalidatePath("/quotes");
     if (jobWarn) {
-      return { ok: true as const, warning: `Estimate accepted, but the job needs attention: ${jobWarn}` };
+      return { ok: true as const, warning: `Estimate accepted, but the job needs attention: ${jobWarn}`, ...(said ? { said } : {}) };
     }
   }
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
-  return { ok: true as const };
+  return { ok: true as const, ...(said ? { said } : {}) };
 }
 
 /**

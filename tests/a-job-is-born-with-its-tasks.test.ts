@@ -25,7 +25,9 @@ describe("the office's accept", () => {
   it("births the tasks after the job is made and before the paperwork", () => {
     const insert = fn.indexOf('from("jobs")');
     const born = fn.indexOf("bornWithTasks(");
-    const paperwork = fn.indexOf("createWorkOrderFromQuote(");
+    // The paperwork AFTER the birth: the linked-estimate catch-up above the insert runs its own copy
+    // (a-job-follows-its-estimate), so look past the birth, not for the first mention.
+    const paperwork = fn.indexOf("createWorkOrderFromQuote(", born);
     expect(insert).toBeGreaterThan(-1);
     expect(born).toBeGreaterThan(insert);
     expect(paperwork).toBeGreaterThan(born);
@@ -45,10 +47,15 @@ describe("the customer's own Accept link", () => {
     expect(finish).toContain('q.status !== "accepted"');
     expect(finish).toContain("!q.job_id");
     expect(finish).toMatch(/new Date\(q\.accepted_at\)\.getTime\(\) > FINISH_WINDOW_MS/);
-    expect(actions).toMatch(/export const FINISH_WINDOW_MS = 10 \* 60_000/);
+    // The window lives in lib: a "use server" file exports only async functions (the skeptic's catch, 2026-10-10).
+    expect(actions).not.toMatch(/export const FINISH_WINDOW_MS/);
+    expect(actions).toContain('import { FINISH_WINDOW_MS } from "@/lib/estimate/finish-window"');
+    expect(src("src/lib/estimate/finish-window.ts")).toMatch(/export const FINISH_WINDOW_MS = 10 \* 60_000/);
   });
-  it("runs the same three rules the office's accept runs, each with the company's id", () => {
-    expect(finish).toMatch(/bornWithTasks\(sb, \{ jobId, quoteId: q\.id, orgId: who\.orgId, createdBy: who\.userId \}\)/);
+  it("runs the same three rules the office's accept runs, each with the company's id — the tasks through the one sync rule, sized by the job's OTHER estimates", () => {
+    expect(finish).toMatch(/estimateLines\(sb, \{ jobId, orgId: who\.orgId, except: q\.id \}\)/);
+    expect(finish).toMatch(/syncJobTasks\(sb, \{ jobId, orgId: who\.orgId, createdBy: who\.userId, sizeBefore: before\.error \? undefined : before\.minutes \}\)/);
+    expect(finish).not.toContain("bornWithTasks(");
     expect(finish).toMatch(/workOrderFromQuote\(sb, \{ quoteId: q\.id, orgId: who\.orgId, userId: who\.userId \}\)/);
     expect(finish).toMatch(/takeOffFromQuote\(sb, \{ quoteId: q\.id, orgId: who\.orgId, userId: who\.userId \}\)/);
   });

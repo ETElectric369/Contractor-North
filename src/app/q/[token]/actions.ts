@@ -5,7 +5,8 @@ import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { createNotifications } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { reportError } from "@/lib/observe";
-import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
+import { estimateLines, syncJobTasks } from "@/lib/estimate/sync-job-tasks";
+import { FINISH_WINDOW_MS } from "@/lib/estimate/finish-window";
 import { workOrderFromQuote } from "@/lib/estimate/work-order-from-quote";
 import { takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
 
@@ -46,10 +47,8 @@ export async function notifyQuoteAccepted(token: string): Promise<void> {
   }
 }
 
-/** How long after the customer's tap the finishing call is honoured. Wider than the ping's two
- *  minutes (the birth is heavier and a slow phone must not lose it), narrow enough that the link
- *  cannot be used weeks later to re-make a work order or a list the office has since removed. */
-export const FINISH_WINDOW_MS = 10 * 60_000;
+/* How long after the customer's tap the finishing call is honoured: FINISH_WINDOW_MS, in
+   lib/estimate/finish-window — a "use server" file exports only async functions. */
 
 /**
  * FINISH WHAT THE CUSTOMER'S ACCEPT STARTED (W3, cn-v1075). accept_public_quote (SQL, 0369) makes
@@ -85,7 +84,13 @@ export async function finishPublicAcceptance(token: string): Promise<void> {
     if (!q.accepted_at || Date.now() - new Date(q.accepted_at).getTime() > FINISH_WINDOW_MS) return;
     const who = { orgId: q.org_id as string, userId: (q.created_by as string | null) ?? null };
     const jobId = q.job_id as string;
-    const born = await bornWithTasks(sb, { jobId, quoteId: q.id, orgId: who.orgId, createdBy: who.userId });
+    // THE ONE RULE, not the bare birth (item 1, 2026-10-10): the customer may accept a REBUILT estimate
+    // (walked back to sent, lines re-written with new ids) or a second estimate on the job — the rule
+    // matches orphans by name, offsets a later estimate's order and lets the size follow. The status
+    // has already flipped (accept_public_quote), so "the figure before this acceptance" is the job's
+    // OTHER accepted estimates: none on a first birth, which is the birth's own rule (null → set).
+    const before = await estimateLines(sb, { jobId, orgId: who.orgId, except: q.id });
+    const born = await syncJobTasks(sb, { jobId, orgId: who.orgId, createdBy: who.userId, sizeBefore: before.error ? undefined : before.minutes });
     if (born.error) reportError("finishPublicAcceptance:tasks", new Error(born.error), { quoteId: q.id, jobId });
     const wo = await workOrderFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!wo.ok) reportError("finishPublicAcceptance:workOrder", new Error(wo.error ?? "refused"), { quoteId: q.id, jobId });

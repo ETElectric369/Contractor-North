@@ -18,6 +18,8 @@ import { QUOTE_STATUSES } from "@/lib/statuses";
 export function StatusControl({ id, status }: { id: string; status: string }) {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  /** What the job's list did when a linked estimate was accepted — news, not a warning. */
+  const [said, setSaid] = useState<string | null>(null);
   const [shown, setShown] = useState(status);
   const router = useRouter();
   return (
@@ -31,6 +33,7 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
         const prev = shown;
         setShown(next);
         setErr(null);
+        setSaid(null);
         start(async () => {
           const res = await updateQuoteStatus(id, next);
           if (!res?.ok) {
@@ -40,6 +43,8 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
           }
           // Accepted, but the job didn't spin up — say so instead of a silent "done".
           if ("warning" in res && res.warning) setErr(res.warning);
+          // A linked estimate accepted again: the job's list followed it. Said, under the status.
+          if ("said" in res && res.said) setSaid(res.said);
           router.refresh();
         });
       }}
@@ -52,6 +57,7 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
       ))}
     </Select>
     {err && <p className="mt-1 text-xs text-rose-600">{err}</p>}
+    {said && <p className="mt-1 text-xs text-slate-500">{said}</p>}
     </>
   );
 }

@@ -101,10 +101,13 @@ export function QuoteItemsEditor({
   const [taxPct, setTaxPct] = useState(Number(quote.tax_rate) * 100);
   const [validUntil, setValidUntil] = useState(quote.valid_until?.slice(0, 10) ?? "");
   const [error, setError] = useState<string | null>(null);
+  /** What the job's list did after a line changed on an accepted estimate (news, not an error). */
+  const [said, setSaid] = useState<string | null>(null);
 
   function addItem() {
     if (!desc.trim()) return;
     setError(null);
+    setSaid(null);
     start(async () => {
       const res = await addQuoteItem(quote.id, { description: desc.trim(), quantity: qty, unit: unit.trim() || "ea", unit_price: price });
       if (!res.ok) return setError(res.error ?? "Couldn't add the item.");
@@ -127,9 +130,13 @@ export function QuoteItemsEditor({
   function saveEdit() {
     if (!editId) return;
     setError(null);
+    setSaid(null);
     start(async () => {
       const res = await updateQuoteItem(editId, quote.id, { description: editDesc, quantity: editQty, unit: editUnit.trim() || "ea", unit_price: editPrice });
       if (!res.ok) return setError(res.error ?? "Couldn't save the item.");
+      // The job behind an accepted estimate followed the rename — or could not. Said either way.
+      setSaid(res.said ?? null);
+      if (res.note) setError(res.note);
       setEditId(null);
       refresh();
     });
@@ -208,6 +215,7 @@ export function QuoteItemsEditor({
         {error && !detailsOpen && (
           <div className="mx-5 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
         )}
+        {said && !detailsOpen && <p className="mx-5 mt-3 text-sm text-slate-500">{said}</p>}
         <ul className="divide-y divide-slate-100">
           {items.map((it) =>
             editId === it.id ? (
@@ -273,7 +281,18 @@ export function QuoteItemsEditor({
                   <Pencil className="h-4 w-4" />
                 </button>
                 <button
-                  onClick={() => start(async () => { setError(null); const res = await deleteQuoteItem(it.id, quote.id); if (!res.ok) return setError(res.error ?? "Couldn't remove the item."); refresh(); })}
+                  onClick={() =>
+                    start(async () => {
+                      setError(null);
+                      setSaid(null);
+                      const res = await deleteQuoteItem(it.id, quote.id);
+                      if (!res.ok) return setError(res.error ?? "Couldn't remove the item.");
+                      // The job behind an accepted estimate followed (its task went, or stayed for a reason) — said.
+                      setSaid(res.said ?? null);
+                      if (res.note) setError(res.note);
+                      refresh();
+                    })
+                  }
                   disabled={pending}
                   className="shrink-0 text-slate-500 hover:text-red-600"
                   aria-label="Remove"
