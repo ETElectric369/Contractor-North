@@ -62,8 +62,12 @@ describe("the rule writes nothing silently", () => {
 describe("the inspector", () => {
   it("loads the task kits with the tolerant rungs and hands them over with every money field dropped", () => {
     const page = src("src/app/(app)/appointments/[id]/page.tsx");
-    expect(page).toContain('firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name")))');
-    expect(page).toContain('taskKits={featureOn(orgSettings.features, "kits") ? kitsWithoutMoney(taskKitsFrom(taskKitsRead.data)) : []}');
+    // The read SAYS how it went (item 3): readTaskKits over the same rungs, its state on the page, a failure in the ops sink.
+    expect(page).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"))');
+    expect(page).toContain("taskKits={kitsOn ? kitsWithoutMoney(taskKitsRead.kits) : []}");
+    expect(page).toContain("kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state) : null}");
+    expect(page).toContain('kitsUnread={kitsOn && taskKitsRead.state === "failed"}');
+    expect(page).toContain('reportError("appointment:kits"');
   });
   it("previews a picked kit through THE expandTaskKit the estimate seeds from", () => {
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
@@ -77,9 +81,10 @@ describe("the inspector", () => {
 describe("Start The Job on a visit", () => {
   it("reads the task kits when a task picked one and births through the same expansion", () => {
     const fn = body(src("src/app/(app)/appointments/actions.ts"), "export async function createJobFromAppointment(");
-    expect(fn).toContain('firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name")))');
-    expect(fn).toContain("tasksFromVisit(answered, new Map(taskKitsFrom(kitsRead?.data).map((k) => [k.id, k])))");
+    expect(fn).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"))');
+    expect(fn).toContain("tasksFromVisit(answered, new Map((kitsRead?.kits ?? []).map((k) => [k.id, k])))");
     expect(fn).toContain('reportError("createJobFromAppointment:kits"');
+    expect(fn).toContain("kitsReadWords(kitsRead.state)"); // the same words every page says
   });
 });
 
@@ -109,7 +114,10 @@ describe("the plain kit pickers never offer a task kit", () => {
 describe("the seed", () => {
   it("hands the task kits to taskLines, so a task with a kit prices from it", () => {
     const page = src("src/app/(app)/quotes/new/page.tsx");
-    expect(page).toContain('firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name")))');
+    expect(page).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"))');
+    expect(page).toContain("const taskKits = kitsRead.kits;");
+    expect(page).toContain("kitDoors && kitsReadWords(kitsRead.state) && ("); // the banner beside the price list's
+    expect(page).toContain('reportError("quotes/new:kits"');
     expect(page).toContain("const taskKitMap = new Map(taskKits.map((k) => [k.id, k]));");
     expect(page).toMatch(/taskLines\(g\.tasks, \{ book: taskBook, rate: seedRate, pricing: seedPricing, kits: taskKitMap, group: g\.label \}\)/);
   });

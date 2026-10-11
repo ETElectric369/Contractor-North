@@ -15,8 +15,8 @@ import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
-import { firstThatWorks } from "@/lib/kit-line";
-import { kitsWithoutMoney, taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
+import { kitsReadWords, kitsWithoutMoney, readTaskKits } from "@/lib/estimate/task-kits";
+import { reportError } from "@/lib/observe";
 import { MarkCompleteButton } from "./mark-complete-button";
 import { MarkDoneRow, PutBackRow, WontHappenRow } from "./visit-header-actions";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
@@ -128,8 +128,10 @@ export default async function AppointmentCapturePage({
     // THE TASK KITS (0386, W4), for a task's kit picker: by name, with their lines. Every money
     // field is dropped before they reach the browser (kitsWithoutMoney): the preview reads names
     // and counts, and a crew lead fills the visit in without ever seeing a price. Tolerant rungs,
-    // as the kits queries everywhere: a deploy lands before its migration.
-    firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+    // as the kits queries everywhere: a deploy lands before its migration — and the read SAYS how it
+    // went (readTaskKits): a failed or pre-0386 read is a sentence on the page, never an empty picker
+    // and a false "no longer in the price list" (item 3, 2026-10-10).
+    readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
     // THE FORM THE CUSTOMER FILLED IN. Its playbook is the only place the LABELS for
     // `intake.intake_answers` exist — the answers themselves are a bag of keys, and `q_mst1drw8`
     // is not a question. Through form_playbooks like the sheets (0366), org-scoped; an org with no
@@ -171,6 +173,9 @@ export default async function AppointmentCapturePage({
   const intakeUnread = unread(intakeRead);
 
   const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  // The company's Kits switch (0352); and a kits read that failed outright goes to the ops sink as well as the page.
+  const kitsOn = featureOn(orgSettings.features, "kits");
+  if (kitsOn && taskKitsRead.state === "failed") reportError("appointment:kits", taskKitsRead.error, { appointmentId: id });
   const tz = orgSettings.timezone;
   // THE SWITCH BOARD (0352). On an inspection the Inspector below is Leads & Inspections': off, it
   // shows only on a visit that already captured something, never as a blank sheet to start. Every
@@ -609,7 +614,11 @@ export default async function AppointmentCapturePage({
               price: Number(p.buy_price ?? 0),
             }))}
             // The company's Kits switch (0352) hides the picker as it hides every other kit door.
-            taskKits={featureOn(orgSettings.features, "kits") ? kitsWithoutMoney(taskKitsFrom(taskKitsRead.data)) : []}
+            taskKits={kitsOn ? kitsWithoutMoney(taskKitsRead.kits) : []}
+            // How the kits read went, said once above the tasks (no money in it, so every role reads it);
+            // on a failed read a task that picked a kit says "not read", never that the kit left the list.
+            kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state) : null}
+            kitsUnread={kitsOn && taskKitsRead.state === "failed"}
             initialTemplateId={inspection?.inspection_template_id ?? null}
             // A scope pick stores its price: the office's answers go as they are; nobody else's page
             // carries one (and a crew lead's save can't change a priced answer anyway: 0356).

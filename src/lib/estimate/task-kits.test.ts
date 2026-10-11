@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { kitsWithoutMoney, partsKitsOnly, taskKitSelectRungs, taskKitsFrom, TASK_KIT_COLS } from "./task-kits";
+import { kitsReadWords, kitsWithoutMoney, partsKitsOnly, readTaskKits, taskKitSelectRungs, taskKitsFrom, TASK_KIT_COLS } from "./task-kits";
 import { expandTaskKit, type TaskKit } from "./task-lines";
 
 /**
@@ -94,5 +94,71 @@ describe("kitsWithoutMoney", () => {
     expect(bare.materials[2].code).toBe("830");
     // No sell at all, and no cost above nothing: a linked line without its buy price prices at 0.
     expect(bare.materials.every((m) => m.sell === null && !(Number(m.cost) > 0))).toBe(true);
+  });
+});
+
+describe("readTaskKits — the read says how it went (item 3)", () => {
+  const ROW = { id: "k1", name: "Footing", labor_minutes: 120, unit: "footing", kit_items: [] };
+  const BARE = { id: "k1", name: "Footing", kit_items: [] };
+  const missing = { code: "42703", message: "column kits.labor_minutes does not exist" };
+  /** A fake database that refuses every select naming a column in `absent`, answers the rest with `rows`. */
+  const dbMissing = (absent: string[], rows: unknown) => {
+    const asked: string[] = [];
+    const run = async (sel: string) => {
+      asked.push(sel);
+      return absent.some((c) => sel.includes(c)) ? { data: null, error: missing } : { data: rows, error: null };
+    };
+    return { run, asked };
+  };
+
+  it("ok: the first rung answers, the task kits are coerced, nothing to say", async () => {
+    const { run, asked } = dbMissing([], [ROW]);
+    const r = await readTaskKits(run);
+    expect(r.state).toBe("ok");
+    expect(r.rung).toBe(0);
+    expect(r.kits.map((k) => k.name)).toEqual(["Footing"]);
+    expect(r.rows).toEqual([ROW]);
+    expect(asked).toHaveLength(1);
+    expect(kitsReadWords(r.state)).toBeNull();
+  });
+
+  it("thin: a lower item rung wins (no vendors / no link) — the kits still come, and the page says names may be short", async () => {
+    const { run } = dbMissing(["price_list_item_options"], [ROW]);
+    const r = await readTaskKits(run);
+    expect(r.state).toBe("thin");
+    expect(r.rung).toBe(1);
+    expect(r.kits).toHaveLength(1);
+    expect(kitsReadWords(r.state)).toBe("The kits were read without their vendors or part links — part names may differ from the estimate's.");
+    const noLink = await readTaskKits(dbMissing(["price_list_item_options", "price_list_item_id"], [ROW]).run);
+    expect(noLink.state).toBe("thin");
+    expect(noLink.rung).toBe(3);
+  });
+
+  it("pre-0386: only a bare rung answers — no task kit can exist yet, and the page says the database needs its update", async () => {
+    const { run, asked } = dbMissing(["labor_minutes"], [BARE]);
+    const r = await readTaskKits(run);
+    expect(r.state).toBe("pre-0386");
+    expect(r.rung).toBe(5);
+    expect(r.kits).toEqual([]);
+    expect(r.rows).toEqual([BARE]); // the plain pickers still get the ordinary kits
+    expect(asked).toHaveLength(6);
+    expect(kitsReadWords(r.state)).toBe("Kits need the database update before a task can pick one.");
+  });
+
+  it("failed: every rung refused — the LAST error is kept, no kits, and the page says the picker is off", async () => {
+    const refused = { code: "42501", message: "permission denied for table kits" };
+    const r = await readTaskKits(async () => ({ data: null, error: refused }));
+    expect(r.state).toBe("failed");
+    expect(r.rung).toBeNull();
+    expect(r.kits).toEqual([]);
+    expect(r.rows).toBeNull();
+    expect(r.error).toBe(refused);
+    expect(kitsReadWords(r.state)).toBe("The kits could not be read — a task's kit picker is off until you reload; its own hours stand.");
+  });
+
+  it("asks the same select strings taskKitSelectRungs names, in order, with extra kit columns when given", async () => {
+    const { run, asked } = dbMissing(["kit_items"], null); // refuse everything, to see every rung
+    await readTaskKits(run, "category");
+    expect(asked).toEqual(taskKitSelectRungs("category"));
   });
 });

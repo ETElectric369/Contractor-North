@@ -1,4 +1,4 @@
-import { kitsSelectRungs, type KitLineRaw, type KitLinkedItem } from "@/lib/kit-line";
+import { KIT_ITEM_SELECT_RUNGS, kitsSelectRungs, type KitLineRaw, type KitLinkedItem } from "@/lib/kit-line";
 import type { TaskKit } from "./task-lines";
 import type { PriceItemOptionRow } from "@/lib/pricing/item-options";
 
@@ -28,6 +28,64 @@ const num = (v: unknown): number | null => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+/**
+ * HOW THE KITS READ WENT (item 3 of the deferred four, 2026-10-10). firstThatWorks hands back the
+ * first rung without an error and never says which — so a read that fell to a BARE rung (no 0386
+ * columns: no task kit can exist) or failed on every rung emptied the Inspector's kit picker in
+ * silence, and a task that had picked a kit then read "Kit No Longer In The Price List", which was
+ * false. The read now carries its state, and every page says it in the same words.
+ *   ok        the first rung: everything the kits know
+ *   thin      a lower item rung won: no vendors and/or no part links — names may be short
+ *   pre-0386  a bare rung won: the database has no labor_minutes yet, so there are no task kits
+ *   failed    every rung refused (RLS, a timeout, a dropped connection): the LAST error is kept
+ */
+export type KitsReadState = "ok" | "thin" | "pre-0386" | "failed";
+
+export interface TaskKitsRead {
+  /** The task kits as read (empty on pre-0386 and failed). */
+  kits: TaskKit[];
+  /** The raw rows the winning rung returned (every kit, task or not), for the plain pickers. */
+  rows: unknown;
+  /** The index of the rung that won, null when none did. */
+  rung: number | null;
+  state: KitsReadState;
+  error?: unknown;
+}
+
+/** Read the kits through the tolerant rungs and SAY how it went. `run` builds one query per select
+ *  string (`(sel) => sb.from("kits").select(sel).order("name")`), so every page keeps one read and
+ *  the rule is testable without a database. */
+export async function readTaskKits(
+  run: (select: string) => PromiseLike<{ data: unknown; error: unknown }>,
+  extraKitCols = "",
+): Promise<TaskKitsRead> {
+  const rungs = taskKitSelectRungs(extraKitCols);
+  let last: { data: unknown; error: unknown } | undefined;
+  for (let i = 0; i < rungs.length; i++) {
+    const r = await run(rungs[i]);
+    if (!r.error) {
+      const state: KitsReadState = i === 0 ? "ok" : i < KIT_ITEM_SELECT_RUNGS.length ? "thin" : "pre-0386";
+      return { kits: state === "pre-0386" ? [] : taskKitsFrom(r.data), rows: r.data, rung: i, state };
+    }
+    last = r;
+  }
+  return { kits: [], rows: null, rung: null, state: "failed", error: last?.error ?? new Error("kits: no rung answered") };
+}
+
+/** The one sentence a page says for a read that was not whole — null when it was. */
+export function kitsReadWords(state: KitsReadState): string | null {
+  switch (state) {
+    case "ok":
+      return null;
+    case "thin":
+      return "The kits were read without their vendors or part links — part names may differ from the estimate's.";
+    case "pre-0386":
+      return "Kits need the database update before a task can pick one.";
+    case "failed":
+      return "The kits could not be read — a task's kit picker is off until you reload; its own hours stand.";
+  }
+}
 
 /** Only the kits that are TASKS, coerced. Rows without minutes (ordinary kits, or a database
  *  before 0386) are not task kits, whatever else they carry. */

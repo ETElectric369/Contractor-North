@@ -193,6 +193,8 @@ export function Inspector({
   templates,
   priceBook,
   taskKits = [],
+  kitsNote = null,
+  kitsUnread = false,
   initialTemplateId,
   initialAnswers,
   initialCapture,
@@ -216,6 +218,12 @@ export function Inspector({
   /** The org's TASK kits (0386, W4) with every money field dropped (lib/estimate/task-kits
    *  kitsWithoutMoney): a task's kit picker offers them by name; the preview reads hours and counts. */
   taskKits?: TaskKit[];
+  /** How the kits read went, when it was not whole (lib/estimate/task-kits kitsReadWords): said once
+   *  above the tasks. No money in it, so every role reads it. */
+  kitsNote?: string | null;
+  /** The kits could not be read at all: a task that picked one says "not read" and offers no picker —
+   *  never "no longer in the price list", which would be false. */
+  kitsUnread?: boolean;
   initialTemplateId: string | null;
   initialAnswers: Answers;
   initialCapture: unknown;
@@ -972,6 +980,8 @@ export function Inspector({
       const removeClass = "flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100";
       return (
         <div className="space-y-2">
+          {/* HOW THE KITS READ WENT (item 3): one sentence, once, when it was not whole. */}
+          {kitsNote && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{kitsNote}</p>}
           {tasks.map((t, i) => (
             <div key={t.id} className="rounded-lg border border-slate-200 p-2">
               <div className="flex items-center gap-2">
@@ -1011,7 +1021,10 @@ export function Inspector({
                   names and counts only, never a price (the page drops every money field). */}
               {(() => {
                 const kit = t.kit_id ? taskKits.find((k) => k.id === t.kit_id) ?? null : null;
-                const kitGone = !!t.kit_id && !kit;
+                // A picked kit that is not in the list: NOT READ when the read failed (the kit may well be
+                // there), GONE only when the kits were read and it was not among them.
+                const kitUnread = !!t.kit_id && !kit && kitsUnread;
+                const kitGone = !!t.kit_id && !kit && !kitsUnread;
                 const preview = kit ? expandTaskKit(t, kit, KIT_PREVIEW_PRICING) : null;
                 // HIS HOURS WIN over the kit's (buildTaskDetail: task.hours ?? the kit's): the
                 // preview says which figure the estimate will take.
@@ -1032,8 +1045,10 @@ export function Inspector({
                       {(taskKits.length > 0 || !!t.kit_id) && (
                         <>
                           <span className={label}>Kit</span>
-                          {readOnly ? (
-                            <span className="text-sm text-slate-700">{kit ? kit.name : kitGone ? "a kit no longer in the price list" : "none"}</span>
+                          {readOnly || kitUnread ? (
+                            <span className="text-sm text-slate-700">
+                              {kit ? kit.name : kitUnread ? "not read" : kitGone ? "a kit no longer in the price list" : "none"}
+                            </span>
                           ) : (
                             <select
                               aria-label="Kit"
@@ -1066,6 +1081,14 @@ export function Inspector({
                           title="That kit is no longer in the price list — pick another or give the task its hours"
                         >
                           kit?
+                        </span>
+                      )}
+                      {kitUnread && (
+                        <span
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                          title="The kits could not be read — reload to see this task's kit; its own hours stand"
+                        >
+                          kit not read
                         </span>
                       )}
                     </div>

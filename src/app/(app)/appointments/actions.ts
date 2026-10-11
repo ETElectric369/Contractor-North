@@ -7,8 +7,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { mergeCaptureSections, parseInspectorCapture, type CaptureItem, type CapturePatch } from "@/lib/inspection/capture";
 import { EMPTY_BIRTH, bornTasks, partsAsCaptureItems, tasksAnswered, tasksFromVisit, type Birth } from "@/lib/estimate/born-with-tasks";
-import { firstThatWorks } from "@/lib/kit-line";
-import { taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
+import { kitsReadWords, readTaskKits } from "@/lib/estimate/task-kits";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
@@ -1370,13 +1369,13 @@ export async function createJobFromAppointment(
       const answered = tasksAnswered(playbookForForm(sheet), (ans.data.inspection_answers ?? {}) as Record<string, unknown>);
       // THE TASK KITS (0386, W4): a task that picked one takes its hours and parts from it, as the
       // estimate seed does. A failed kits read is said, and the job is sized from what he typed.
-      const kitsRead = answered.some((t) => t.kit_id)
-        ? await firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name")))
-        : null;
-      visitBirth = tasksFromVisit(answered, new Map(taskKitsFrom(kitsRead?.data).map((k) => [k.id, k])));
-      if (kitsRead?.error) {
-        reportError("createJobFromAppointment:kits", kitsRead.error, { appointmentId });
-        tasksNote = "The job was made; the kits its tasks picked could not be read, so it was sized from the hours typed. Check the job's tasks.";
+      const kitsRead = answered.some((t) => t.kit_id) ? await readTaskKits((sel) => supabase.from("kits").select(sel).order("name")) : null;
+      visitBirth = tasksFromVisit(answered, new Map((kitsRead?.kits ?? []).map((k) => [k.id, k])));
+      // The same words every page says for a read that was not whole (item 3); a thin read still
+      // names and counts the parts, so only a failed or pre-0386 read is a note on the job.
+      if (kitsRead && (kitsRead.state === "failed" || kitsRead.state === "pre-0386")) {
+        if (kitsRead.state === "failed") reportError("createJobFromAppointment:kits", kitsRead.error, { appointmentId });
+        tasksNote = `The job was made, sized from the hours typed. ${kitsReadWords(kitsRead.state)} Check the job's tasks.`;
       }
     }
   } catch (e) {

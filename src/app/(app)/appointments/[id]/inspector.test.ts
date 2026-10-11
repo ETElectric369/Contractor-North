@@ -364,3 +364,36 @@ describe("a task kit on the visit (W4): picked by name, counted in units, previe
     expect(tasksBlock(html)).not.toMatch(PRICE);
   });
 });
+
+describe("the kits read says how it went (item 3): a sentence once, and never a false 'no longer in the price list'", () => {
+  const NOTE = "The kits could not be read — a task's kit picker is off until you reload; its own hours stand.";
+  it("every role reads the note once above the tasks (no money in it)", () => {
+    for (const access of ["office", "crewLead", "view"] as const) {
+      const html = render(access, { taskKits: [], kitsNote: NOTE, kitsUnread: true, initialAnswers: KIT_ANSWERS });
+      expect((textOf(html).match(/The kits could not be read/g) ?? []).length).toBe(1);
+      // The office's page carries the scope prices above the tasks by design; the TASKS block never does.
+      const tasks = html.slice(html.indexOf(">Tasks<"), html.indexOf("Measurements"));
+      expect(textOf(tasks)).not.toMatch(PRICE);
+      if (access !== "office") expect(textOf(html)).not.toMatch(PRICE);
+    }
+  });
+  it("a task that picked a kit says 'not read' with no picker — not that the kit left the price list", () => {
+    const html = render("office", { taskKits: [], kitsNote: NOTE, kitsUnread: true, initialAnswers: KIT_ANSWERS });
+    expect(textOf(html)).toContain("kit not read");
+    expect(html).not.toContain("No Longer In The Price List");
+    expect(html).not.toContain(">kit?<");
+    expect(html).not.toContain('aria-label="Kit"'); // nothing to pick from
+    expect(textOf(html)).toContain("Kit");
+    expect(textOf(html)).toContain("not read");
+  });
+  it("a kit that is truly gone (the kits were read, it was not among them) still says so", () => {
+    const html = render("office", { taskKits: [], initialAnswers: KIT_ANSWERS });
+    expect(textOf(html)).toContain("kit?");
+    expect(html).toContain("Kit No Longer In The Price List");
+    expect(textOf(html)).not.toContain("not read");
+  });
+  it("a whole read says nothing", () => {
+    const html = render("office", { taskKits: [KIT], kitsNote: null, initialAnswers: KIT_ANSWERS });
+    expect(textOf(html)).not.toContain("could not be read");
+  });
+});

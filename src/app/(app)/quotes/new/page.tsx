@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
-import { firstThatWorks } from "@/lib/kit-line";
-import { partsKitsOnly, taskKitSelectRungs, taskKitsFrom } from "@/lib/estimate/task-kits";
+import { kitsReadWords, partsKitsOnly, readTaskKits } from "@/lib/estimate/task-kits";
+import { reportError } from "@/lib/observe";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -342,7 +342,7 @@ export default async function NewQuotePage({
       if (parts.length > 1) initialScope = parts.join("\n\n");
     }
   }
-  const [{ data: customers }, { data: leadRows }, { data: priceItems, error: priceItemsErr }, { data: taxRates }, { data: kits }, { data: org }] =
+  const [{ data: customers }, { data: leadRows }, { data: priceItems, error: priceItemsErr }, { data: taxRates }, kitsRead, { data: org }] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
       // AN ESTIMATE IS OFTEN FOR A LEAD, NOT A CUSTOMER (Erik: "I should be able to select from
@@ -382,9 +382,13 @@ export default async function NewQuotePage({
       // the picker. Three rungs, most capable first — a deploy precedes its migration, and naming
       // an absent column fails the whole query rather than degrading, which would empty the kit
       // picker until the migration landed.
-      firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+      // … and the read SAYS how it went (readTaskKits, item 3): a failed or thin read is a banner
+      // beside the price list's, never a quietly kit-less estimate.
+      readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
+  const kits = kitsRead.rows as Array<Record<string, unknown>> | null;
+  if (kitsRead.state === "failed") reportError("quotes/new:kits", kitsRead.error, { inquiry: inquiry ?? null, capture: capture ?? null });
   // THE INSPECTION'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
   // (the answer stores codes, never prose), and a code that has since left the price list is
   // dropped rather than rendered as a bare code with a price beside it.
@@ -403,7 +407,7 @@ export default async function NewQuotePage({
   // HIS TASK KITS (0386, W4): a task that picked one expands here — his minutes per unit × the
   // units, the kit's parts × the units — through THE one expandTaskKit (task-lines.ts), the same
   // function the Inspector previewed it with.
-  const taskKits = taskKitsFrom(kits);
+  const taskKits = kitsRead.kits;
   const taskKitMap = new Map(taskKits.map((k) => [k.id, k]));
   const taskSeed = pickedTasks.flatMap((g) =>
     taskLines(g.tasks, { book: taskBook, rate: seedRate, pricing: seedPricing, kits: taskKitMap, group: g.label }),
@@ -479,6 +483,14 @@ export default async function NewQuotePage({
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
           <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
+        </div>
+      )}
+      {/* THE KITS READ, SAID (item 3): a kit-built task would otherwise seed as a bare task with no
+          hours and no parts, and nobody would know why. Same banner as the price list's. */}
+      {kitDoors && kitsReadWords(kitsRead.state) && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Kits didn&apos;t load whole</p>
+          <p className="mt-0.5 text-sm text-amber-800">{kitsReadWords(kitsRead.state)}</p>
         </div>
       )}
       <QuoteBuilder
