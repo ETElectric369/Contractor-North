@@ -335,7 +335,12 @@ async function requireEditableQuote(
   // revision standing (deleted, or walked back) the estimate is his again: editable, and its status
   // may be set back by hand (updateQuoteStatus applies the same test).
   if ((quote as any).status === "superseded") {
-    const rev = await revisionOf(supabase, { quoteId, orgId: null });
+    let rev: { id: string; quote_number: string | null } | null;
+    try {
+      rev = await revisionOf(supabase, { quoteId, orgId: null });
+    } catch (e) {
+      return { ok: false, error: `Couldn't check whether a revision replaced this estimate (${e instanceof Error ? e.message : String(e)}) — try again.` }; // fail closed, said
+    }
     if (rev) return { ok: false, error: `${(quote as any).quote_number || "This estimate"} is superseded by ${rev.quote_number ?? "its revision"} — edit that one instead.` };
     return { ok: true };
   }
@@ -1653,7 +1658,12 @@ export async function updateQuoteStatus(id: string, status: string) {
   if (status === "superseded") return { ok: false as const, error: "Superseded is set by accepting a revision — Revise this estimate instead." };
   const { data: was } = await supabase.from("quotes").select("job_id, status").eq("id", id).maybeSingle();
   if ((was as { status?: string } | null)?.status === "superseded") {
-    const rev = await revisionOf(supabase, { quoteId: id, orgId: ctx.orgId });
+    let rev: { id: string; quote_number: string | null } | null;
+    try {
+      rev = await revisionOf(supabase, { quoteId: id, orgId: ctx.orgId });
+    } catch (e) {
+      return { ok: false as const, error: `Couldn't check whether a revision replaced this estimate (${e instanceof Error ? e.message : String(e)}) — try again.` };
+    }
     if (rev) return { ok: false as const, error: `${rev.quote_number ?? "A revision"} replaced this estimate — change that one instead.` };
   }
   if (status === "accepted") {

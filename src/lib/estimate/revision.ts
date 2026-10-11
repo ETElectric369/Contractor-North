@@ -78,6 +78,8 @@ export async function revisionOf(
 ): Promise<{ id: string; quote_number: string | null } | null> {
   let q = sb.from("quotes").select("id, quote_number, accepted_at").eq("revises_quote_id", who.quoteId).in("status", ["accepted", "superseded"]);
   if (who.orgId) q = q.eq("org_id", who.orgId);
-  const { data } = await q.order("accepted_at", { ascending: false }).limit(1).maybeSingle();
+  // NULLS LAST (audit v1085): Postgres puts nulls first on DESC, which named a never-accepted sibling.
+  const { data, error } = await q.order("accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`revisionOf: ${dbError(error)}`); // a failed read must not lift a lock
   return (data as { id: string; quote_number: string | null } | null) ?? null;
 }

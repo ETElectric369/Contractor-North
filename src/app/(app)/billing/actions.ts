@@ -1,4 +1,6 @@
 "use server";
+import { revisionOf } from "@/lib/estimate/revision";
+import { revisedOriginalBilled } from "@/lib/billing/revision-billed";
 import { dbError } from "@/lib/db-error";
 import { importExtras, extrasSentence } from "@/lib/import-extras";
 import QRCode from "qrcode";
@@ -838,21 +840,19 @@ async function defaultDueDateIso(supabase: { from: (t: string) => any }): Promis
 }
 
 /** Convert an accepted (or any) quote into a draft invoice, copying line items. */
-/** THE ORIGINAL A REVISION REPLACES IS ALREADY BILLED (0391): the refusal, or null. `exceptInvoiceId`
- *  leaves the invoice being worked on out of the test. */
-async function revisedOriginalBilled(
+/** The accepted revision that replaced an estimate, or none — a failed read is a SAID refusal, never a
+ *  lifted guard (revisionOf throws on a read error). */
+async function standingRevision(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
-  quote: { revises_quote_id?: string | null },
-  exceptInvoiceId?: string,
-): Promise<string | null> {
-  const original = quote.revises_quote_id ?? null;
-  if (!original) return null;
-  const { data: rows } = await supabase.from("invoices").select("id, invoice_number, status, quotes:quote_id(quote_number)").eq("quote_id", original).neq("status", "void");
-  const live = ((rows ?? []) as Array<{ id: string; invoice_number: string | null; quotes?: { quote_number?: string | null } | null }>).filter((r) => r.id !== exceptInvoiceId);
-  if (!live.length) return null;
-  const inv = live[0];
-  const num = inv.quotes?.quote_number ?? "The estimate this revises";
-  return `${num} is already billed on ${inv.invoice_number ?? "an invoice"} — add the change to that invoice instead.`;
+  quoteId: string,
+  orgId: string | null,
+): Promise<{ rev: { id: string; quote_number: string | null } | null } | { error: string }> {
+  try {
+    return { rev: await revisionOf(supabase, { quoteId, orgId }) };
+  } catch (e) {
+    return { error: `Couldn't check whether a revision replaced this estimate (${e instanceof Error ? e.message : String(e)}) — try again.` };
+  }
 }
 
 export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
@@ -866,10 +866,18 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     .eq("id", quoteId)
     .maybeSingle();
   if (qErr || !quote) return { ok: false, error: "Quote not found." };
-  // A REVISION OF A BILLED ESTIMATE (0391): its lines carry NEW ids, so the claims on the original's
-  // lines do not carry — billing the revision whole would bill the work twice. Until the claims are
-  // remapped, this refuses and names the one action.
-  const billed = await revisedOriginalBilled(supabase, quote as { revises_quote_id?: string | null });
+  // A REPLACED ESTIMATE IS NEVER BILLED while its revision stands (0391; audit v1085): the revision is
+  // the price for the work. With no revision standing (deleted, walked back) it is his again. A failed
+  // check refuses and says so (fail closed).
+  if ((quote as { status?: string }).status === "superseded") {
+    const standing = await standingRevision(supabase, quoteId, ctx.orgId);
+    if ("error" in standing) return { ok: false, error: standing.error };
+    if (standing.rev) return { ok: false, error: `${(quote as { quote_number?: string | null }).quote_number ?? "This estimate"} was replaced by ${standing.rev.quote_number ?? "its revision"} — bill from that one.` };
+  }
+  // A REVISION OF A BILLED ESTIMATE: its lines carry NEW ids, so the claims on the lines it replaces do
+  // not carry — billing the revision whole would bill the work twice. The guard walks the family and
+  // fails closed.
+  const billed = await revisedOriginalBilled(supabase, quote as { revises_quote_id?: string | null; job_id?: string | null });
   if (billed) return { ok: false, error: billed };
 
   // Idempotent: a quote maps to one LIVE invoice. Re-tapping "Create invoice" returns the
@@ -1441,8 +1449,21 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   {
     // The same guard as createInvoiceFromQuote (0391): a revision's lines are new ids; the original's claims
     // do not carry, so importing the revision whole next to the original's invoice bills the work twice.
-    const { data: picked } = await supabase.from("quotes").select("revises_quote_id").eq("id", quoteId).maybeSingle();
-    const billed = await revisedOriginalBilled(supabase, (picked ?? {}) as { revises_quote_id?: string | null }, invoiceId);
+    let { data: picked, error: pErr } = await supabase.from("quotes").select("id, revises_quote_id, job_id, status").eq("id", quoteId).maybeSingle();
+    if (pErr) return { ok: false, error: dbError(pErr) };
+    if ((picked as { status?: string } | null)?.status === "superseded") {
+      // THE INVOICE FOLLOWS THE REVISION (audit v1085 skeptic): an invoice cut from the original, then
+      // the estimate revised — From Estimate imports the REVISION's lines (the importer replaces the
+      // unedited quote lines), not a dead end pointing back at Create Invoice.
+      const standing = await standingRevision(supabase, quoteId, null);
+      if ("error" in standing) return { ok: false, error: standing.error };
+      if (standing.rev) {
+        quoteId = standing.rev.id;
+        ({ data: picked, error: pErr } = await supabase.from("quotes").select("id, revises_quote_id, job_id, status").eq("id", quoteId).maybeSingle());
+        if (pErr) return { ok: false, error: dbError(pErr) };
+      }
+    }
+    const billed = await revisedOriginalBilled(supabase, (picked ?? {}) as { revises_quote_id?: string | null; job_id?: string | null }, invoiceId);
     if (billed) return { ok: false, error: billed };
   }
 

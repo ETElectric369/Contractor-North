@@ -1,3 +1,4 @@
+import { readAllPages } from "@/lib/read-all-pages";
 import { revisionOf } from "@/lib/estimate/revision";
 import { notFound } from "next/navigation";
 import { SettleUpButton } from "@/components/settle-up-button";
@@ -118,13 +119,11 @@ export default async function AppointmentCapturePage({
     // codes in the org's own words, which is what makes it a scope picker rather than a text box.
     // Read tolerantly and unconditionally: it's a small table, and branching the query on whether
     // the playbook happens to contain a scopes need would break the moment somebody adds one.
-    tolerateMissingColumns<{ code: string; description: string | null; unit: string | null; buy_price: number | null }[]>(
-      () =>
-        supabase
-          .from("price_list_items")
-          .select("code, description, unit, buy_price")
-          .eq("archived", false)
-          .order("code"),
+    // Paged (audit v1085): PostgREST caps a read at 1,000 rows, and a big book lost its tail in silence.
+    tolerateMissingColumns<{ code: string; description: string | null; unit: string | null; buy_price: number | null }[]>(() =>
+      readAllPages<{ code: string; description: string | null; unit: string | null; buy_price: number | null }>((from, to) =>
+        supabase.from("price_list_items").select("code, description, unit, buy_price").eq("archived", false).order("code").order("id").range(from, to),
+      ).then((r) => ({ data: r.error ? null : r.rows, error: r.error })),
     ),
     // THE TASK KITS (0386, W4), for a task's kit picker: by name, with their lines. Every money
     // field is dropped before they reach the browser (kitsWithoutMoney): the preview reads names

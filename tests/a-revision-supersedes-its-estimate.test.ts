@@ -97,12 +97,13 @@ describe("the doors", () => {
     expect(status).toContain("if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), said].filter(Boolean).join(\" \");");
   });
   it("a revision of a BILLED estimate is not billed whole again: both invoice doors refuse, naming the invoice", () => {
+    const guard = src("src/lib/billing/revision-billed.ts"); // a lib rule, never a server action
+    expect(guard).toContain("export async function revisedOriginalBilled(");
+    expect(guard).toContain("— add the change to that invoice instead.");
     const billing = src("src/app/(app)/billing/actions.ts");
-    expect(billing).toContain("async function revisedOriginalBilled(");
-    expect(billing).toContain("is already billed on ${inv.invoice_number ?? \"an invoice\"} — add the change to that invoice instead.");
     const create = body(billing, "export async function createInvoiceFromQuote(");
-    expect(create).toContain("revisedOriginalBilled(supabase, quote as { revises_quote_id?: string | null })");
-    expect(billing).toContain("revisedOriginalBilled(supabase, (picked ?? {}) as { revises_quote_id?: string | null }, invoiceId)");
+    expect(create).toContain("revisedOriginalBilled(supabase, quote as { revises_quote_id?: string | null; job_id?: string | null })");
+    expect(billing).toContain("revisedOriginalBilled(supabase, (picked ?? {}) as { revises_quote_id?: string | null; job_id?: string | null }, invoiceId)");
   });
   it("the visit behind a superseded estimate shows the revision, not a dead estimate", () => {
     const page = src("src/app/(app)/appointments/[id]/page.tsx");
@@ -123,7 +124,7 @@ describe("the doors", () => {
   it("a superseded estimate is locked while its revision stands, naming it — and his again when none does; the lock's old words now name the Revise door", () => {
     const guard = body(actions, "async function requireEditableQuote(");
     expect(guard).toContain('if ((quote as any).status === "superseded") {');
-    expect(guard).toContain("const rev = await revisionOf(supabase, { quoteId, orgId: null });");
+    expect(guard).toContain("rev = await revisionOf(supabase, { quoteId, orgId: null });"); // inside a try: a failed read is a said refusal
     expect(guard).toContain("— edit that one instead.");
     expect(actions).toContain("Revise it instead (or void the contract).");
     expect(actions).toContain("Revise it instead (or void the draw).");

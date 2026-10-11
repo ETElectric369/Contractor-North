@@ -6,6 +6,7 @@ import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
 import { firstThatWorks, kitsSelectRungs, kitLineView, linkedItemOf } from "@/lib/kit-line";
 import { coerceTaskDetail } from "./task-lines";
 import { keyParts, materialKey } from "./born-with-tasks";
+import { readAllPages } from "@/lib/read-all-pages";
 import { reportError } from "@/lib/observe";
 
 /**
@@ -60,17 +61,27 @@ export const HOW_MANY = " · how many?";
 /** The company's price book as the take-off looks things up: by "[CODE]" (then its last token), then
  *  by the normalized description. One read, shared by the birth (takeOffFromQuote) and the sync
  *  (sync-job-materials), so a part is matched the same way whichever door lists it. */
-export async function readPriceBook(supabase: SupabaseClient, orgId: string | null): Promise<{ findPl: (code: string | null, cleanDesc: string) => any | null }> {
+export async function readPriceBook(
+  supabase: SupabaseClient,
+  orgId: string | null,
+): Promise<{ findPl: (code: string | null, cleanDesc: string) => any | null; /** The read failed: nothing priced from it is true. */ error?: string }> {
   // The vendors under each code ride along (THE PROJECTION LAW): a line the estimator, Nort or a
   // picker priced at a vendor names it ("Replace windows (Marvin) [830]"), and bookLineBuy costs it
   // at THAT vendor, not at the code's own $830 allowance the customer was never quoted.
-  let bookQ = supabase
-    .from("price_list_items")
-    .select(`code, description, supplier, buy_price, unit, ${ITEM_OPTIONS_EMBED}`)
-    .eq("archived", false)
-    .eq("price_list_item_options.archived", false);
-  if (orgId) bookQ = bookQ.eq("org_id", orgId);
-  const { data: book } = await bookQ;
+  // A LOST OR CUT READ IS SAID, NEVER PRICED AROUND (audit v1085): the error used to be dropped and
+  // PostgREST's 1,000-row cap silently truncated a big book, so every part past the cap — or every
+  // part on a bad connection — went on the buy list unpriced and un-vendored as if the book had no
+  // such item. Paged by id, and the error comes back to the caller.
+  const { rows: book, error: bErr } = await readAllPages<any>((from, to) => {
+    let bookQ = supabase
+      .from("price_list_items")
+      .select(`id, code, description, supplier, buy_price, unit, ${ITEM_OPTIONS_EMBED}`)
+      .eq("archived", false)
+      .eq("price_list_item_options.archived", false);
+    if (orgId) bookQ = bookQ.eq("org_id", orgId);
+    return bookQ.order("code").order("id").range(from, to); // stable: byDesc's first-wins never flips between reads
+  });
+  if (bErr) return { findPl: () => null, error: dbError(bErr) };
   const normDesc = (x: string) => (x ?? "").toLowerCase().replace(/\[[^\]]*\]/g, "").replace(/[^a-z0-9]/g, "");
   const byCode = new Map<string, any>();
   const byDesc = new Map<string, any>();
@@ -163,6 +174,11 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   if (!items || items.length === 0)
     return { ok: false, error: "This quote has no line items to build from." };
 
+  // THE PRICE BOOK FIRST (audit v1085): read before any list row exists, so a failed read leaves no
+  // empty list behind that the idempotent return above would hand back as "the list" for good.
+  const { findPl, error: bookErr } = await readPriceBook(supabase, orgId);
+  if (bookErr) return { ok: false, error: `The price book could not be read (${bookErr}) — nothing was taken off. Try again.` };
+
   // THE JOB'S OWN LIST IS THE LIST (cn-v1084). A job born from a visit already has a list — the
   // visit's parts, keyed "task:<id>#…" (addCaptureItemsToJobList) — and the estimate drafted from
   // that same visit used to get a SECOND list here; the job tab then showed the newest as the one
@@ -223,10 +239,9 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     list = made as { id: string };
   }
 
-  // The price book (RLS-scoped to this org, or scoped here) → resolve each material line to its REAL
-  // buy cost, catalog #, and vendor (readPriceBook: "[CODE]" first, then the normalized description;
-  // tools are archived, so they never land on an order sheet).
-  const { findPl } = await readPriceBook(supabase, orgId);
+  // The price book (read above; RLS-scoped to this org, or scoped here) resolves each material line to
+  // its REAL buy cost, catalog #, and vendor (readPriceBook: "[CODE]" first, then the normalized
+  // description; tools are archived, so they never land on an order sheet).
   // An order sheet is a BUY list. Lines that don't match the price book carry the estimate's SELL
   // price, so back the markup out to get cost — through the SAME rule that built the sell:
   // runEstimator prices off-book lines at customer level → default_markup_pct (the item rung is

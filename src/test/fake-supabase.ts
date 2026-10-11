@@ -29,6 +29,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
     let single = false;
     let pending: Row[] = [];
     let refused: { code?: string; message: string } | undefined;
+    let win: [number, number] | null = null;
     const b: any = {
       select: () => b,
       order: () => b,
@@ -40,6 +41,16 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
       },
       is(col: string, v: unknown) {
         filters.push((r) => r[col] === v);
+        return b;
+      },
+      neq(col: string, v: unknown) {
+        filters.push((r) => r[col] != null && r[col] !== v); // Postgres <> is false for NULL
+        return b;
+      },
+      // Paging is honoured (readAllPages asks page by page and stops on an empty one): a slice of the
+      // hits in table order, so a paged reader terminates here as it does against PostgREST.
+      range(from: number, to: number) {
+        win = [from, to];
         return b;
       },
       in(col: string, vals: unknown[]) {
@@ -93,7 +104,8 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
           data = hit.map((r) => ({ id: r.id }));
         } else {
           const hit = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
-          data = single ? (hit[0] ?? null) : hit;
+          const page = win ? hit.slice(win[0], win[1] + 1) : hit;
+          data = single ? (page[0] ?? null) : page;
         }
         resolve({ data, error: null });
       },

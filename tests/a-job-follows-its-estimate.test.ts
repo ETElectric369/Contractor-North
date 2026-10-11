@@ -256,7 +256,8 @@ describe("the deferred items (cn-v1084)", () => {
     const mats = src("src/lib/estimate/sync-job-materials.ts");
     expect(mats).toContain("p.taskId === t && partHalf(p.key) === partHalf(r.source_key)");
     expect(mats).toContain("tombstone: kept.map((r) => ({ id: r.id, source_key: `${GONE_KEY}${r.source_key}` }))");
-    expect(mats).toContain("const hand: HandRow[] = all.filter((r) => !r.source_key && !isHisRow(r));");
+    expect(mats).toContain("const hand: HandRow[] = all.filter((r) => {"); // unkeyed, not his, and not the estimate's own plain-line row (audit v1085)
+    expect(mats).toContain("if (r.source_key || isHisRow(r)) return false;");
     expect(mats).toContain("const next = [...now.filter((k) => !consumed.has(k)), ...plan.redismiss.filter((k) => !now.includes(k))];");
   });
 });

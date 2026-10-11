@@ -62,6 +62,9 @@ export interface ListPartRow {
   is_tool: boolean | null;
   /** True when the stored key is "gone:<source_key>": an orphan kept earlier, said then. */
   gone?: boolean;
+  vendor?: string | null;
+  est_cost?: number | null;
+  unit?: string | null;
 }
 
 /** A row with no key that is not his (not bought, not a tool): typed by hand, or taken off before 0390. */
@@ -284,11 +287,18 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
   );
   const dismissed = new Set<string>(dismissedList);
 
-  const { data: lines, error: qErr } = await org(sb.from("quote_line_items").select("id, description, sort_order, detail").eq("quote_id", who.quoteId), who.orgId).order("sort_order");
+  const { data: lines, error: qErr } = await org(sb.from("quote_line_items").select("id, description, sort_order, detail, unit").eq("quote_id", who.quoteId), who.orgId).order("sort_order");
   if (qErr) return { ...NONE, error: dbError(qErr) };
   const wanted = partsFromLines((lines ?? []) as LineRow[]);
 
-  const { data: rows, error: rErr } = await org(sb.from("material_list_items").select("id, source_key, description, part_number, quantity, purchased, is_tool").eq("list_id", listId), who.orgId).order("sort_order");
+  // THE BOOK, once, first (audit v1085): it names the estimate's own plain-line rows below (the take-off
+  // wrote their part number from the book), prices a claimed visit row's blanks and the rows inserted.
+  // A lost read is an error here — the list is left exactly as it was, never priced around.
+  const book = await readPriceBook(sb, who.orgId);
+  if (book.error) return { ...NONE, error: `The price book could not be read (${book.error}); the list was left as it was.` };
+  const findPl = book.findPl;
+
+  const { data: rows, error: rErr } = await org(sb.from("material_list_items").select("id, source_key, description, part_number, quantity, purchased, is_tool, vendor, est_cost, unit").eq("list_id", listId), who.orgId).order("sort_order");
   if (rErr) return { ...NONE, error: dbError(rErr) };
   const all = (rows ?? []) as Array<Omit<ListPartRow, "source_key"> & { source_key: string | null }>;
   // The estimate's rows — live ("line:") and tombstoned ("gone:line:", kept earlier) — AND the visit's
@@ -302,13 +312,57 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
       const k = r.source_key as string;
       return k.startsWith(GONE_KEY) ? { ...r, source_key: k.slice(GONE_KEY.length), gone: true } : { ...r, source_key: k };
     });
-  const hand: HandRow[] = all.filter((r) => !r.source_key && !isHisRow(r));
+  // THE ESTIMATE'S OWN PLAIN-LINE ROWS ARE NOT HAND ROWS (audit v1085): the take-off wrote them
+  // unkeyed (a plain line is not a task), and a task part with the same code would otherwise claim
+  // one — and the sync remove it when the task line went. One row per plain line, by code else words.
+  // Exactly as the take-off wrote the row (take-off-from-quote): the FIRST "[CODE]" is the code, the words
+  // are the text without it, the row's part number is the book's code when the book knows it, and a
+  // labor line never made a row.
+  const plainHalves = new Map<string, number>();
+  const CODE_RE = /\[([^\]]+)\]/;
+  for (const l of (lines ?? []) as Array<{ description: string | null; detail: unknown; unit?: string | null }>) {
+    if (coerceTaskDetail(l.detail)) continue;
+    const text = String(l.description ?? "");
+    if (String(l.unit ?? "").toLowerCase() === "hr" || /^\s*labor\b/i.test(text)) continue;
+    const m = text.match(CODE_RE);
+    const code = m ? m[1].trim() : null;
+    const cleanDesc = text.replace(CODE_RE, "").trim();
+    const pl = findPl(code, cleanDesc);
+    const half = unkeyedHalf({ part_number: pl?.code ?? code ?? null, description: cleanDesc || text });
+    plainHalves.set(half, (plainHalves.get(half) ?? 0) + 1);
+  }
+  const hand: HandRow[] = all.filter((r) => {
+    if (r.source_key || isHisRow(r)) return false;
+    const half = unkeyedHalf(r);
+    const n = plainHalves.get(half) ?? 0;
+    if (!n) return true;
+    plainHalves.set(half, n - 1);
+    return false; // the estimate's own plain row: left exactly as it is
+  });
 
   const plan = planPartSync(wanted, have, dismissed, hand);
 
+  // THE BOOK, once, when anything needs pricing: a claimed visit or hand row with no vendor or cost
+  // takes the book's (audit v1085: a PO seeded from such a row read $0), never a value someone set.
+  // A lost book read is an error here, not an unpriced row.
+  const byId = new Map(all.map((r) => [r.id, r]));
+  const wantedByKey = new Map(wanted.map((p) => [p.key, p]));
+
   let rekeyed = 0;
   for (const r of plan.rekey) {
-    const { data, error } = await org(sb.from("material_list_items").update({ source_key: r.source_key }).eq("id", r.id).eq("list_id", listId), who.orgId).select("id");
+    const row = byId.get(r.id);
+    const part = wantedByKey.get(r.source_key);
+    const patch: Record<string, unknown> = { source_key: r.source_key };
+    if (row && part && (row.vendor == null || row.est_cost == null)) {
+      const fresh = taskPartRow(listId, who.orgId, { code: part.code, name: part.name, qty: part.qty, cost: part.cost, source_key: part.key }, findPl(part.code, part.name));
+      if (row.vendor == null && fresh.vendor != null) patch.vendor = fresh.vendor;
+      if (row.est_cost == null && fresh.est_cost != null) {
+        patch.est_cost = fresh.est_cost;
+        // The unit rides ONLY with the cost it prices (a $45 roll is "2 ea", never "2 ft" at $45).
+        if ((row.unit == null || row.unit === "ea") && fresh.unit && fresh.unit !== "ea") patch.unit = fresh.unit;
+      }
+    }
+    const { data, error } = await org(sb.from("material_list_items").update(patch).eq("id", r.id).eq("list_id", listId), who.orgId).select("id");
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
     if (!data?.length) return { ...NONE, rekeyed, error: "A part could not be matched to its line." };
     rekeyed++;
@@ -354,7 +408,6 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
 
   let inserted = 0;
   if (plan.insert.length) {
-    const { findPl } = await readPriceBook(sb, who.orgId);
     const { data: last } = await org(sb.from("material_list_items").select("sort_order").eq("list_id", listId), who.orgId).order("sort_order", { ascending: false }).limit(1).maybeSingle();
     let so = ((last as { sort_order?: number } | null)?.sort_order ?? -1) + 1;
     const newRows = plan.insert.map((p) => ({

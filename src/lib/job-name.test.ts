@@ -305,7 +305,9 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
       .filter((n) => /\.sql$/.test(n) && /function public\.accept_public_quote/.test(readFileSync(join(dir, n), "utf8")))
       .sort()
       .pop()!;
-    expect(latest).toMatch(/^0369_/);
+    // 0369 named it; 0392 redefined the function from that body (a revision takes the original's job) and
+    // must still name it the same way — so the LATEST definition is what is read, whichever file it is.
+    expect(Number(latest.slice(0, 4))).toBeGreaterThanOrEqual(369);
     const sql = readFileSync(join(dir, latest), "utf8");
     // No typed name; the estimate's title as the source's words; the street's own unit.
     expect(sql).toMatch(/public\.job_name_from\(null, q\.title,/);

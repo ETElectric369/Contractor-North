@@ -309,6 +309,15 @@ export function isLaborBudgetLine(line: { unit?: string | null; description?: st
   return /\blabou?rs?\b/i.test(String(line.description ?? ""));
 }
 
+/** Which of a job's quotes the budget is read from: the accepted ones, else the newest that still
+ *  stands (sent). Drafts, declined, expired and superseded never count. Pure, so it is pinned. */
+export function budgetQuoteIds(quotes: ReadonlyArray<{ id: string; status?: string | null; created_at?: string | null }>): string[] {
+  const accepted = quotes.filter((q) => q.status === "accepted");
+  if (accepted.length) return accepted.map((q) => q.id);
+  const standing = quotes.filter((q) => q.status === "sent").sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+  return standing.length ? [standing[0].id] : [];
+}
+
 /**
  * The estimate's budget broken out by SCOPE category (Framing, Decking, Electrical…) from the
  * job's quote line items' `category` (cn-v420) — summed across ALL the job's quotes, so an
@@ -319,8 +328,13 @@ export function isLaborBudgetLine(line: { unit?: string | null; description?: st
  * first. Empty when the job has no quote (nothing to budget against).
  */
 export async function getJobBudgetByCategory(supabase: any, jobId: string): Promise<BudgetCategory[]> {
-  const { data: quotes } = await supabase.from("quotes").select("id").eq("job_id", jobId);
-  const quoteIds = (quotes ?? []).map((q: { id: string }) => q.id);
+  const { data: quotes } = await supabase.from("quotes").select("id, status, created_at").eq("job_id", jobId);
+  // WHICH ESTIMATES THE BUDGET IS READ FROM (audit v1085): the accepted ones — a change order adds to
+  // the deal — else the newest SENT one. Never a draft (Revise makes one on the job the moment it is
+  // tapped), a declined or expired one, or an estimate a revision superseded (0391). This reader used to
+  // sum EVERY quote on the job, so a revision doubled every scope's budget. It is an advisory figure for
+  // Nort, stricter than contractTotalFromQuotes' fallback (the newest of all) by design: a draft is no budget.
+  const quoteIds = budgetQuoteIds((quotes ?? []) as { id: string; status?: string | null; created_at?: string | null }[]);
   if (quoteIds.length === 0) return [];
   const { data: lines } = await supabase
     .from("quote_line_items")
