@@ -24,6 +24,8 @@ export interface QuoteLinks {
   id: string;
   inquiry_id?: string | null;
   job_id?: string | null;
+  /** The estimate this one REVISES (0391): a visit written up into the original stands behind the revision too. */
+  revises_quote_id?: string | null;
 }
 
 export interface VisitBehind {
@@ -54,6 +56,7 @@ export function outcomeForQuoteStatus(status: string | null | undefined): VisitO
  *  backlink always, by the lead and the job when the estimate has them. */
 export function visitsBehindQuoteFilter(q: QuoteLinks): string {
   const arms = [`capture->>quote_id.eq.${q.id}`];
+  if (q.revises_quote_id) arms.push(`capture->>quote_id.eq.${q.revises_quote_id}`);
   if (q.inquiry_id) arms.push(`inquiry_id.eq.${q.inquiry_id}`);
   if (q.job_id) arms.push(`job_id.eq.${q.job_id}`);
   return arms.join(",");

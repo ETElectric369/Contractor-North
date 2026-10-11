@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { HOW_MANY, takeOffFromQuote } from "./take-off-from-quote";
 
 /**
@@ -75,6 +77,21 @@ describe("takeOffFromQuote — the job's own list is the list (cn-v1084)", () =>
     const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
     expect(res).toMatchObject({ ok: true, adopted: true, skipped: 0 });
     expect(db.inserted.material_list_items.map((r) => [r.description, r.sort_order, r.source_key ?? null])).toEqual([["14/2 romex", 5, null]]);
+  });
+  it("a REVISION (0391) adopts the list of the estimate it revises — compare-and-set on that estimate's id — and leaves the task parts to the sync", async () => {
+    const db = accepted(world(lines));
+    db.tables.quotes[0].revises_quote_id = "q-orig";
+    db.tables.material_lists.push({ id: "ml-orig", job_id: "job-1", quote_id: "q-orig", org_id: ORG, created_at: "2026-10-01" });
+    db.tables.material_list_items = [{ id: "o1", list_id: "ml-orig", org_id: ORG, source_key: "line:oldline#R1", description: "Transfer switch, 200A", part_number: "R1", quantity: 1, purchased: true, sort_order: 0 }];
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res).toMatchObject({ ok: true, id: "ml-orig", adopted: true });
+    expect(db.inserted.material_lists).toBeUndefined();
+    expect(db.tables.material_lists[0].quote_id).toBe("q-1");
+    expect(db.inserted.material_list_items.map((r) => r.description)).toEqual(["14/2 romex"]); // the plain line; the R1 is the sync's to re-key
+  });
+  it("a catalog org's kit groups are not seeded again onto an adopted list (the crew's bought marks are on them)", () => {
+    const takeOff = fs.readFileSync(path.join(process.cwd(), "src/lib/estimate/take-off-from-quote.ts"), "utf8");
+    expect(takeOff).toContain('if (settings.estimating_mode === "catalog" && !adopted) {');
   });
   it("a DRAFT or sent estimate never adopts (nothing would add its parts): a fresh list, as before", async () => {
     const db = world(lines); // status undefined: not accepted

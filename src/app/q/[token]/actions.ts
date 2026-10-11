@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { reportError } from "@/lib/observe";
 import { estimateLines, syncJobTasks } from "@/lib/estimate/sync-job-tasks";
 import { syncJobMaterials } from "@/lib/estimate/sync-job-materials";
+import { supersedeRevised } from "@/lib/estimate/revision";
 import { FINISH_WINDOW_MS } from "@/lib/estimate/finish-window";
 import { workOrderFromQuote } from "@/lib/estimate/work-order-from-quote";
 import { takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
@@ -91,16 +92,28 @@ export async function finishPublicAcceptance(token: string): Promise<void> {
     // has already flipped (accept_public_quote), so "the figure before this acceptance" is the job's
     // OTHER accepted estimates: none on a first birth, which is the birth's own rule (null → set).
     const before = await estimateLines(sb, { jobId, orgId: who.orgId, except: q.id });
-    const born = await syncJobTasks(sb, { jobId, orgId: who.orgId, createdBy: who.userId, sizeBefore: before.error ? undefined : before.minutes });
-    if (born.error) reportError("finishPublicAcceptance:tasks", new Error(born.error), { quoteId: q.id, jobId });
+    // A REVISION SUPERSEDES THE ESTIMATE IT REVISES (0391): after the figure before is read (the
+    // original's hours are what the box held, so the size can follow), before the sync (so the job's
+    // accepted estimates are one price for the work when its tasks and list are brought in step).
+    const sup = await supersedeRevised(sb, { revisionId: q.id, orgId: who.orgId });
+    if (sup.error) {
+      // The original still counts as accepted: a sync now would double the job's tasks and hours. The
+      // paperwork below is per estimate (safe); the office's Accept runs the sync when it retries.
+      reportError("finishPublicAcceptance:supersede", new Error(sup.error), { quoteId: q.id, jobId });
+    } else {
+      const born = await syncJobTasks(sb, { jobId, orgId: who.orgId, createdBy: who.userId, sizeBefore: before.error ? undefined : before.minutes });
+      if (born.error) reportError("finishPublicAcceptance:tasks", new Error(born.error), { quoteId: q.id, jobId });
+    }
     const wo = await workOrderFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!wo.ok) reportError("finishPublicAcceptance:workOrder", new Error(wo.error ?? "refused"), { quoteId: q.id, jobId });
     const list = await takeOffFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!list.ok) reportError("finishPublicAcceptance:materials", new Error(list.error ?? "refused"), { quoteId: q.id, jobId });
     // A rebuilt or second estimate accepted through the link: its list follows its lines (0390) — on a
     // first birth the take-off just wrote every keyed row and this changes nothing.
-    const mats = await syncJobMaterials(sb, { jobId, orgId: who.orgId, userId: who.userId });
-    if (mats.error) reportError("finishPublicAcceptance:materialsSync", new Error(mats.error), { quoteId: q.id, jobId });
+    if (!sup.error) {
+      const mats = await syncJobMaterials(sb, { jobId, orgId: who.orgId, userId: who.userId });
+      if (mats.error) reportError("finishPublicAcceptance:materialsSync", new Error(mats.error), { quoteId: q.id, jobId });
+    }
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/work-orders");
     revalidatePath("/materials");

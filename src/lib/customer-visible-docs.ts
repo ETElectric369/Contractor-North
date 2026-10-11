@@ -34,6 +34,7 @@ export type CustomerDoc = "invoice" | "quote";
 /** The only statuses a customer may open, per kind of paper. Exhaustive by type. */
 export const CUSTOMER_VISIBLE_STATUSES: Record<CustomerDoc, readonly string[]> = {
   invoice: ["sent", "partial", "paid", "overdue"],
+  // A superseded estimate (0391) is not the customer's paper any more — its revision is.
   quote: ["sent", "accepted", "declined", "expired"],
 };
 

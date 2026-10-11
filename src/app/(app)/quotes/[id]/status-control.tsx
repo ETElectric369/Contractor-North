@@ -49,9 +49,11 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
         });
       }}
     >
-      {/* Options come from the spine (same set updateQuoteStatus validates against). */}
-      {QUOTE_STATUSES.map((s) => (
-        <option key={s} value={s}>
+      {/* Options come from the spine (same set updateQuoteStatus validates against). "Superseded" is
+          set by accepting a revision, never by hand (0391): shown only when it IS the status, and
+          then as the one thing the select can say. */}
+      {QUOTE_STATUSES.filter((s) => s !== "superseded" || shown === "superseded").map((s) => (
+        <option key={s} value={s} disabled={s === "superseded"}>
           {s[0].toUpperCase() + s.slice(1)}
         </option>
       ))}

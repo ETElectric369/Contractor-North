@@ -385,7 +385,7 @@ export async function createInvoiceForJob(
     .eq("job_id", jobId)
     .order("created_at", { ascending: false });
   const usableQuotes = ((quoteRows ?? []) as { id: string; status: string | null }[]).filter(
-    (q) => q.status !== "declined" && q.status !== "expired",
+    (q) => q.status !== "declined" && q.status !== "expired" && q.status !== "superseded", // replaced by its revision (0391)
   );
   const estimate = usableQuotes.find((q) => q.status === "accepted") ?? usableQuotes[0] ?? null;
   // ON A TIME & MATERIAL JOB THE ESTIMATE IS A GUIDE, NEVER THE CONTRACT (Erik, 2026-09-26, Tess

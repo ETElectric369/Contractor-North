@@ -242,6 +242,7 @@ export function computeQuoteStats(quotes: any[]): QuoteStats {
     else if (x.status === "declined") declined++;
     else if (x.status === "expired") expired++;
     else if (x.status === "sent") { sent++; pipeline += Number(x.total); }
+    else if (x.status === "superseded") continue; // replaced by its revision (0391): neither a draft nor a decision
     else draft++;
   }
   const decided = accepted + declined + expired;

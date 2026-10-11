@@ -67,6 +67,7 @@ export function statusTone(status: string): Tone {
     case "sent":
     case "assigned":
       return "blue";
+    case "superseded": // replaced by a revision (0391): settled, like declined
     case "declined":
     case "rejected":
     case "cancelled":

@@ -1,3 +1,4 @@
+import { revisionOf } from "@/lib/estimate/revision";
 import { notFound } from "next/navigation";
 import { SettleUpButton } from "@/components/settle-up-button";
 import { smsReadiness } from "@/lib/sms";
@@ -223,8 +224,14 @@ export default async function AppointmentCapturePage({
         | { id: string; quote_number: string | null; status: string | null; job_id: string | null }
         | null)
     : null;
-  const estimate: VisitEstimate | null = quoteBehind
-    ? { id: quoteBehind.id, number: quoteBehind.quote_number, status: quoteBehind.status, live: isLiveQuote(quoteBehind.status) }
+  // A SUPERSEDED estimate (0391) was replaced by its revision: the visit's estimate is the revision —
+  // the work was won (or is still offered) through it, not "over".
+  const liveBehind = quoteBehind?.status === "superseded" ? (await revisionOf(supabase, { quoteId: quoteBehind.id, orgId: null })) ?? null : null;
+  const shown = liveBehind
+    ? ((await supabase.from("quotes").select("id, quote_number, status, job_id").eq("id", liveBehind.id).maybeSingle()).data as typeof quoteBehind) ?? quoteBehind
+    : quoteBehind;
+  const estimate: VisitEstimate | null = shown
+    ? { id: shown.id, number: shown.quote_number, status: shown.status, live: isLiveQuote(shown.status) }
     : null;
   // The visits with a win or a loss to record (lib/statuses DECIDABLE_VISIT_TYPES): a meeting or an
   // Other visit too — never a work visit (its answer is the invoice) or a final inspection (the

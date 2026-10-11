@@ -35,7 +35,7 @@ describe("the per-kind 'still needs someone' rules", () => {
   it("estimates: a draft to send or one waiting on the customer", () => {
     expect(isOpenQuote("draft")).toBe(true);
     expect(isOpenQuote("sent")).toBe(true);
-    for (const s of ["accepted", "declined", "expired"]) expect(isOpenQuote(s)).toBe(false);
+    for (const s of ["accepted", "declined", "expired", "superseded"]) expect(isOpenQuote(s)).toBe(false); // superseded (0391): replaced by its revision, settled
   });
 
   it("invoices: an unsent draft or a sent bill with a balance; paid, void, and paid-with-a-lagging-status never", () => {

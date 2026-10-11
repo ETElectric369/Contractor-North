@@ -98,7 +98,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_quotes",
     description:
-      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the <customer> job'. To pull up a SPECIFIC customer's estimate (e.g. 'the estimate we started for <customer>'), FIRST call list_customers to get their customer_id, then pass it here (optionally with status='draft') — don't rely on a text search of the title. Common statuses: draft, sent, accepted, declined, expired.",
+      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the <customer> job'. To pull up a SPECIFIC customer's estimate (e.g. 'the estimate we started for <customer>'), FIRST call list_customers to get their customer_id, then pass it here (optionally with status='draft') — don't rely on a text search of the title. Common statuses: draft, sent, accepted, declined, expired, superseded (replaced by a revision).",
     input_schema: {
       type: "object",
       properties: {

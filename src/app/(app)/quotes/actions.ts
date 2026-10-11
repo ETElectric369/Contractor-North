@@ -46,6 +46,7 @@ import { coerceTaskDetail } from "@/lib/estimate/task-lines";
 import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
 import { estimateLines, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
 import { materialsWords, syncJobMaterials } from "@/lib/estimate/sync-job-materials";
+import { revisionOf, supersedeRevised, supersededWords } from "@/lib/estimate/revision";
 import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
@@ -330,6 +331,14 @@ async function requireEditableQuote(
     .eq("id", quoteId)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
+  // SUPERSEDED (0391): replaced by its revision — the revision is the paper to edit now. With no
+  // revision standing (deleted, or walked back) the estimate is his again: editable, and its status
+  // may be set back by hand (updateQuoteStatus applies the same test).
+  if ((quote as any).status === "superseded") {
+    const rev = await revisionOf(supabase, { quoteId, orgId: null });
+    if (rev) return { ok: false, error: `${(quote as any).quote_number || "This estimate"} is superseded by ${rev.quote_number ?? "its revision"} — edit that one instead.` };
+    return { ok: true };
+  }
   if ((quote as any).status !== "accepted") return { ok: true };
   const jobId = (quote as any).job_id as string | null;
   if (!jobId) return { ok: true }; // accepted but no job yet → no schedule to shift
@@ -365,7 +374,7 @@ async function requireEditableQuote(
     const num = (signed as { contract_number?: string | null }).contract_number;
     return {
       ok: false,
-      error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} priced ${num ? `contract ${num}` : "a contract"}, which the customer has already signed — changing it now would re-price the draws against a total they never agreed to. Duplicate it as a revision (or void the contract) instead.`,
+      error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} priced ${num ? `contract ${num}` : "a contract"}, which the customer has already signed — changing it now would re-price the draws against a total they never agreed to. Revise it instead (or void the contract).`,
     };
   }
 
@@ -382,7 +391,7 @@ async function requireEditableQuote(
 
   return {
     ok: false,
-    error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} is accepted and ${live.length} scheduled payment${live.length === 1 ? " has" : "s have"} already been billed against it — changing it now would re-price the remaining draws. Duplicate it as a revision (or void the draw) instead.`,
+    error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} is accepted and ${live.length} scheduled payment${live.length === 1 ? " has" : "s have"} already been billed against it — changing it now would re-price the remaining draws. Revise it instead (or void the draw).`,
   };
 }
 
@@ -399,7 +408,7 @@ async function requireEditableQuote(
  * takes two more queries to know. A gate that disagrees with the server rule is the same bug
  * moved, so this asks the rule itself rather than approximating it, and hands back the very
  * sentence the server would have refused with — including the way out it already names
- * ("Duplicate it as a revision"). One extra read on a page that already makes several, in exchange
+ * ("Revise it instead"). One extra read on a page that already makes several, in exchange
  * for a gate that cannot drift.
  */
 export async function quoteEditLock(quoteId: string): Promise<{ reason: string } | null> {
@@ -1227,20 +1236,28 @@ export async function saveQuote(input: SaveQuoteInput) {
  */
 export async function duplicateQuote(
   id: string,
+  /** `revision` (0391): the copy REVISES this estimate — it keeps the job, the customer and the lead,
+   *  the title stays (the number tells them apart), and it remembers what it revises, so accepting it
+   *  supersedes the original. A plain duplicate stands on its own, as before. */
+  opts?: { revision?: boolean },
 ): Promise<{ ok: boolean; error?: string; id?: string; warning?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const revision = !!opts?.revision;
 
   // circuits rides along (Panel plan, phase 0): the copy used to drop the circuit schedule without
   // saying so, so a copied estimate printed no second page and had nothing for a job's Panel tab
   // to bring in.
   const { data: quote } = await supabase
     .from("quotes")
-    .select("customer_id, title, notes, tax_rate, valid_until, doc_type, circuits")
+    .select("customer_id, title, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
+  // Only an offer or a won estimate can be revised: a draft is edited, a declined one is over.
+  if (revision && !["sent", "accepted"].includes(String((quote as { status?: string }).status)))
+    return { ok: false, error: "Only a sent or accepted estimate can be revised — edit this one instead." };
 
   const { data: items, error: itemsErr } = await supabase
     .from("quote_line_items")
@@ -1254,11 +1271,16 @@ export async function duplicateQuote(
 
   const res = await saveQuote({
     customer_id: quote.customer_id ?? null,
-    job_id: null, // a copy stands on its own — it isn't tied to the original's job
-    title: `${quote.title ?? "Quote"} (copy)`,
+    // A copy stands on its own — it isn't tied to the original's job. A REVISION is the same work: it
+    // keeps the job and the lead, so accepting it brings that job in step and closes that lead's visit.
+    job_id: revision ? ((quote as { job_id?: string | null }).job_id ?? null) : null,
+    ...(revision ? { inquiry_id: (quote as { inquiry_id?: string | null }).inquiry_id ?? null } : {}),
+    title: revision ? (quote.title ?? "Quote") : `${quote.title ?? "Quote"} (copy)`,
     notes: quote.notes ?? "",
     tax_rate: Number(quote.tax_rate) || 0,
-    valid_until: quote.valid_until ?? null,
+    // A revision is a fresh offer: the original's validity (often past, on an accepted estimate) would
+    // make it read as expired to the reminders. The builder's default applies.
+    valid_until: revision ? null : quote.valid_until ?? null,
     // A copy keeps the customer-facing word — a fixed-price Quote doesn't revert to Estimate.
     doc_type: quote.doc_type === "quote" ? "quote" : "estimate",
     items: (items ?? []).map((it: any) => ({
@@ -1271,6 +1293,20 @@ export async function duplicateQuote(
     })),
   });
   if (!res.ok) return { ok: false, error: res.error };
+
+  // THE REVISION REMEMBERS WHAT IT REVISES (0391): saveQuote has no such field (the builder's autosave
+  // never sets it), so it is stamped on the row just made and read back. Without the stamp the copy is
+  // a plain duplicate and would ADD to the original on acceptance — so a lost stamp is a refusal here,
+  // with the way out named: the copy exists, delete it and revise again.
+  if (revision && res.id) {
+    const { data: stamped, error: sErr } = await supabase.from("quotes").update({ revises_quote_id: id }).eq("id", res.id).select("id");
+    if (sErr || !stamped?.length) {
+      reportError("quotes.duplicateQuote.revises", sErr ?? new Error("zero rows"), { from: id, to: res.id });
+      // No half-made revision left behind: the copy goes (a draft with no children), and one action is named.
+      await supabase.from("quotes").delete().eq("id", res.id).eq("status", "draft").select("id");
+      return { ok: false, error: `The revision could not be made${sErr ? ` (${dbError(sErr)})` : ""} — Revise again.` };
+    }
+  }
 
   // THE CIRCUIT SCHEDULE COMES WITH IT. saveQuote has no circuits field (it is the builder's
   // autosave, and the builder never edits circuits), so the copy's schedule is written here, onto
@@ -1335,6 +1371,8 @@ export async function createJobFromQuote(
   note?: string;
   /** The job already existed and its list followed this estimate: what it did. */
   said?: string;
+  /** The estimates this one REVISES (and their chain / siblings), now superseded by this acceptance (0391). */
+  superseded?: string[];
 }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1345,10 +1383,23 @@ export async function createJobFromQuote(
     // address/city/state/zip (0177) so the job can inherit the site typed on the ESTIMATE. A
     // column you don't select is a column you can't inherit — the specific way the address kept
     // dying at every stage, and it is a `select` list every time, never a missing column.
-    .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip")
+    .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id")
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: "Quote not found." };
+  // A REVISION TAKES THE ORIGINAL'S JOB (0391): born while the original was only sent (so with no
+  // job), the revision would make a SECOND job when the customer accepted the original in between.
+  // The work is one job: the revision is pinned to it (read back) and catches it up below.
+  const revises = (q as { revises_quote_id?: string | null }).revises_quote_id ?? null;
+  if (!q.job_id && revises) {
+    const { data: orig } = await supabase.from("quotes").select("job_id").eq("id", revises).maybeSingle();
+    const origJob = (orig as { job_id?: string | null } | null)?.job_id ?? null;
+    if (origJob) {
+      const { data: pinned, error: pinErr } = await supabase.from("quotes").update({ job_id: origJob }).eq("id", quoteId).is("job_id", null).select("id");
+      if (pinErr) return { ok: false, error: dbError(pinErr) };
+      if (pinned?.length) q.job_id = origJob;
+    }
+  }
   if (q.job_id) {
     // THE JOB CATCHES UP (item 1, 2026-10-10). This used to stop here, so an estimate already linked
     // to a job — accepted again after a walk-back to edit it, a second estimate born from the job
@@ -1360,6 +1411,15 @@ export async function createJobFromQuote(
     // one, a walk-back) has no tasks on the job yet, and the sync on its job would read its lines as
     // gone. The old answer stands for it.
     if ((q as { status?: string }).status !== "accepted") return { ok: true, id: q.job_id };
+    // A REVISION SUPERSEDES THE ESTIMATE IT REVISES (0391) — before the follow, so the job's accepted
+    // estimates are already one price for the work when its tasks and list are brought in step.
+    const sup = await supersedeRevised(supabase, { revisionId: quoteId, orgId: ctx.orgId });
+    if (sup.error) {
+      // The original still counts: a follow now would double the job's tasks and hours. Nothing more is
+      // done; the way back is to accept again (supersede is idempotent).
+      reportError("createJobFromQuote:supersede", new Error(sup.error), { quoteId });
+      return { ok: true, id: q.job_id, note: `The estimate this revises could not be marked superseded (${sup.error}). Accept it again to retry.` };
+    }
     // THE PAPERWORK FIRST, THEN THE FOLLOW (cn-v1084): the take-off may ADOPT the job's own list (a
     // visit-born job's), seeding its plain lines and leaving the task parts to the materials sync,
     // which finds the visit's rows and re-keys them rather than adding them again. On a fresh list the
@@ -1368,8 +1428,13 @@ export async function createJobFromQuote(
     await createMaterialListFromQuote(quoteId);
     const follow = await jobFollows(supabase, { jobId: q.job_id, sizeBefore: opts?.sizeBefore }, ctx);
     revalidatePath(`/quotes/${quoteId}`);
-    return { ok: true, id: q.job_id, ...follow };
+    return { ok: true, id: q.job_id, ...follow, ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
   }
+
+  // A REVISION of an estimate that never had a job (a sent original) supersedes it on acceptance too
+  // (nothing to double here: the original had no job). A failure is reported and said.
+  const sup = await supersedeRevised(supabase, { revisionId: quoteId, orgId: ctx.orgId });
+  if (sup.error) reportError("createJobFromQuote:supersede", new Error(sup.error), { quoteId });
 
   // Deferred-customer estimate won → create/link the Contact now, before the job (so the job gets it).
   const resolvedCustomerId = await materializeQuoteCustomer(supabase, q, ctx.userId);
@@ -1483,7 +1548,7 @@ export async function createJobFromQuote(
   // touched no appointment at all, so the inspection an estimate was written up from stayed "still
   // open business" after the job it priced was finished and paid. Attached, not absorbed (0237): the
   // visit keeps its own calendar life. Best-effort: the job is made whatever the visit says.
-  await closeVisitsBehindQuote(supabase, { id: quoteId, inquiry_id: q.inquiry_id ?? null, job_id: job.id }, { jobId: job.id, outcome: "won" });
+  await closeVisitsBehindQuote(supabase, { id: quoteId, inquiry_id: q.inquiry_id ?? null, job_id: job.id, revises_quote_id: revises }, { jobId: job.id, outcome: "won" });
 
   // THE JOB IS BORN WITH ITS TASKS (W3, cn-v1075): every task line becomes a task on the job's
   // one list, in estimate order, and the job's planned length is the sum of HIS hours. One rule
@@ -1505,7 +1570,8 @@ export async function createJobFromQuote(
 
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/schedule");
-  return { ok: true, id: job.id, ...(note ? { note } : {}) };
+  const notes = [note, sup.error ? `The estimate this revises could not be marked superseded (${sup.error}). Accept it again to retry.` : null].filter(Boolean);
+  return { ok: true, id: job.id, ...(notes.length ? { note: notes.join(" ") } : {}), ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
 }
 
 /**
@@ -1565,7 +1631,7 @@ export async function setQuoteFollowUp(quoteId: string, date: string): Promise<{
 
 export async function updateQuoteStatus(id: string, status: string) {
   if (!(QUOTE_STATUSES as readonly string[]).includes(status))
-    return { ok: false as const, error: `Status must be one of: ${QUOTE_STATUSES.join(", ")}.` };
+    return { ok: false as const, error: `Status must be one of: ${QUOTE_STATUSES.filter((s) => s !== "superseded").join(", ")}.` };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const supabase = ctx.supabase;
@@ -1580,8 +1646,17 @@ export async function updateQuoteStatus(id: string, status: string) {
   // hands createJobFromQuote the estimate's figure as it stood BEFORE this write makes its lines
   // count — the only way the size can tell "still the estimate's" from his (sync-job-tasks).
   let linked: { jobId: string; sizeBefore: number | null | undefined } | null = null;
+  // SUPERSEDED is a fact the revision's acceptance records (0391), never a choice made by hand — and
+  // not undone by hand while the revision stands: set back to accepted, the original would count
+  // beside its revision (tasks, hours, buy list, contract total all doubled). With no revision standing
+  // (deleted, or walked back) the estimate is his again and may move.
+  if (status === "superseded") return { ok: false as const, error: "Superseded is set by accepting a revision — Revise this estimate instead." };
+  const { data: was } = await supabase.from("quotes").select("job_id, status").eq("id", id).maybeSingle();
+  if ((was as { status?: string } | null)?.status === "superseded") {
+    const rev = await revisionOf(supabase, { quoteId: id, orgId: ctx.orgId });
+    if (rev) return { ok: false as const, error: `${rev.quote_number ?? "A revision"} replaced this estimate — change that one instead.` };
+  }
   if (status === "accepted") {
-    const { data: was } = await supabase.from("quotes").select("job_id").eq("id", id).maybeSingle();
     const jobId = (was as { job_id?: string | null } | null)?.job_id ?? null;
     if (jobId) {
       const est = await estimateLines(supabase, { jobId, orgId: ctx.orgId });
@@ -1632,6 +1707,8 @@ export async function updateQuoteStatus(id: string, status: string) {
       // The job was made and something it should carry (its tasks) could not be listed: said, not sunk.
       else if (jobRes?.note) jobWarn = jobRes.note;
       if (jobRes?.said) said = jobRes.said;
+      // A REVISION accepted: the original it revises stopped counting — said first, it is the news.
+      if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), said].filter(Boolean).join(" ");
     } catch (e) {
       jobWarn = "The job wasn't created.";
       reportError("updateQuoteStatus:createJob", e, { quoteId: id });

@@ -54,7 +54,8 @@ export function jobBillsItsActuals(
 /** A quote that still stands: not declined, not expired (the customer said no, or it lapsed).
  *  createInvoiceForJob's own test for which quote could be the contract. */
 export function isLiveQuote(status: string | null | undefined): boolean {
-  return status !== "declined" && status !== "expired";
+  // A superseded estimate (0391) was replaced by its revision: not the work's price any more.
+  return status !== "declined" && status !== "expired" && status !== "superseded";
 }
 
 /**

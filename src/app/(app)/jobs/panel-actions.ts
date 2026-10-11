@@ -382,7 +382,8 @@ async function findEstimates(
     .select("id, quote_number, job_id, customer_id, circuits, address, created_at, status")
     .eq("org_id", m.orgId)
     .not("circuits", "is", null)
-    .neq("status", "declined");
+    .neq("status", "declined")
+    .neq("status", "superseded"); // replaced by its revision (0391): its circuits are the revision's now
   q = job.customer_id ? q.or(`job_id.eq.${job.id},and(job_id.is.null,customer_id.eq.${job.customer_id})`) : q.eq("job_id", job.id);
   const { data: qs, error: qErr } = await q.order("created_at", { ascending: false }).limit(20);
   if (qErr) reportError("panel.findEstimates", qErr, { jobId: job.id });

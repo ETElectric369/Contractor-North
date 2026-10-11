@@ -7,7 +7,9 @@
 export const WORK_ORDER_STATUSES = ["draft", "assigned", "in_progress", "complete", "cancelled"] as const;
 export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
 
-export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined", "expired"] as const;
+/** "superseded" (0391) is set only by accepting a REVISION of the estimate (lib/estimate/revision), never
+ *  by hand: a superseded estimate keeps its lines and history and stops counting as the work's price. */
+export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined", "expired", "superseded"] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
 
 /** Inquiry (lead) pipeline statuses. inquiries.status is FREE TEXT in the DB (0034 —
@@ -191,4 +193,5 @@ export const QUOTE_STATUS_PRIORITY: Record<QuoteStatus, number> = {
   accepted: 2,  // won — lives on as a job now
   declined: 3,
   expired: 4,
+  superseded: 5, // replaced by its revision — settled paperwork, filed under the rest
 };

@@ -1,3 +1,4 @@
+import { revisionOf } from "@/lib/estimate/revision";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -177,6 +178,24 @@ export default async function QuoteDetailPage({
   // live. Read once: the editor shows its reason, and the Duplicate door below follows it.
   const lock = await quoteEditLock(q.id);
   const kitsNote = kitDoors && !lock ? plainKitsReadWords(kitsRead) : null; // only where the picker is
+  // The revision chain (0391): what this estimate revises, and — when it is superseded — the accepted
+  // revision that replaced it (newest, if ever two).
+  const revisesId = ((q as { revises_quote_id?: string | null }).revises_quote_id ?? null) as string | null;
+  const [{ data: revisesRow }, { data: supersededRow }] = await Promise.all([
+    revisesId ? supabase.from("quotes").select("id, quote_number, status").eq("id", revisesId).maybeSingle() : Promise.resolve({ data: null }),
+    q.status === "superseded" ? revisionOf(supabase, { quoteId: q.id, orgId: null }).then((r) => ({ data: r })) : Promise.resolve({ data: null }),
+  ]);
+  const revises = revisesRow as { id: string; quote_number: string | null; status: string | null } | null;
+  const supersededBy = supersededRow as { id: string; quote_number: string | null } | null;
+  const revisesWords = !revises
+    ? ""
+    : revises.status === "superseded"
+      ? " — which it superseded when accepted."
+      : q.status === "accepted"
+        ? ` — that estimate stands as ${revises.status ?? "it was"}, not superseded.`
+        : q.status === "draft" || q.status === "sent"
+          ? " — accepting this one supersedes it."
+          : ".";
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -211,6 +230,26 @@ export default async function QuoteDetailPage({
             <ShareIconButton load={quoteShareText.bind(null, q.id)} className="ml-auto shrink-0" />
           </div>
           {q.title && <p className="mt-1 text-slate-600">{q.title}</p>}
+          {/* REVISIONS (0391), both ways: a superseded estimate names the revision that replaced it (its
+              lines and history stay; the price is the revision's now); a revision names what it revises. */}
+          {supersededBy && (
+            <p className="mt-1 text-sm text-slate-600">
+              Superseded by{" "}
+              <Link href={`/quotes/${supersededBy.id}`} className="text-brand hover:underline">
+                {supersededBy.quote_number ?? "its revision"}
+              </Link>
+              {" "}— that estimate is the price for this work now.
+            </p>
+          )}
+          {revises && (
+            <p className="mt-1 text-sm text-slate-600">
+              Revises{" "}
+              <Link href={`/quotes/${revises.id}`} className="text-brand hover:underline">
+                {revises.quote_number ?? "an earlier estimate"}
+              </Link>
+              {revisesWords}
+            </p>
+          )}
           {/* Provenance backlink — the lead this estimate was seeded from. */}
           {(q as any).inquiry && (
             <Link href={`/leads?focus=${(q as any).inquiry.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
@@ -240,8 +279,11 @@ export default async function QuoteDetailPage({
           <StatusControl id={q.id} status={q.status} />
           {/* Duplicate makes a new estimate: a door Estimates off takes away. The rest of the row
               works this one, which still opens from its link under the Off line. A LOCKED estimate
-              keeps it: the lock's own words send him to "Duplicate it as a revision". */}
+              keeps it: the lock's own words send him to "Revise it instead". */}
           {(featureOn(orgS.features, "estimates") || lock) && <DuplicateQuoteButton id={q.id} />}
+          {/* REVISE (0391): a sent or accepted estimate gets a second door — a copy that keeps the job and
+              the lead and SUPERSEDES this one when accepted, so the job's price is never both added up. */}
+          {(featureOn(orgS.features, "estimates") || lock) && (q.status === "sent" || q.status === "accepted") && <DuplicateQuoteButton id={q.id} revision />}
           <SectionActionsMenu tree={quoteMap} />
         </div>
       </div>

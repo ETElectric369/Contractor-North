@@ -137,7 +137,7 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
 
   const { data: quote, error: qErr } = await supabase
     .from("quotes")
-    .select("id, quote_number, job_id, title, customer_id, status")
+    .select("id, quote_number, job_id, title, customer_id, status, revises_quote_id")
     .eq("id", quoteId)
     .maybeSingle();
   if (qErr) return { ok: false, error: qErr.message };
@@ -175,16 +175,22 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   // line's breakdown remembers and re-keys them instead of adding them again — so the caller runs the
   // sync after an adoption (the acceptance doors do; so does Create Material List). A draft or sent
   // estimate never adopts: nothing would add its parts. A refused adoption is reported and falls
-  // through to a fresh list — what happened before.
+  // through to a fresh list — what happened before. A REVISION (0391) adopts the list of the estimate
+  // it revises the same way (compare-and-set on that estimate's id): the crew's list — bought marks
+  // and all — becomes the revision's, and the sync re-keys the original's rows to the revision's lines.
   let list: { id: string } | null = null;
   let adopted = false;
+  const revises = (quote as { revises_quote_id?: string | null }).revises_quote_id ?? null;
   if (quote.job_id && (quote as { status?: string }).status === "accepted") {
     let ownQ = supabase.from("material_lists").select("id, quote_id").eq("job_id", quote.job_id);
     if (orgId) ownQ = ownQ.eq("org_id", orgId);
     const { data: own } = await ownQ.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle();
     const canonical = own as { id: string; quote_id: string | null } | null;
-    if (canonical && canonical.quote_id === null) {
-      const { data: took, error: tErr } = await supabase.from("material_lists").update({ quote_id: quote.id }).eq("id", canonical.id).is("quote_id", null).select("id");
+    const fromOriginal = !!(canonical && revises && canonical.quote_id === revises);
+    if (canonical && (canonical.quote_id === null || fromOriginal)) {
+      let tq = supabase.from("material_lists").update({ quote_id: quote.id }).eq("id", canonical.id);
+      tq = fromOriginal ? tq.eq("quote_id", revises as string) : tq.is("quote_id", null);
+      const { data: took, error: tErr } = await tq.select("id");
       if (tErr) reportError("takeOffFromQuote:adopt", tErr, { quoteId, listId: canonical.id });
       if (took?.length) {
         list = { id: canonical.id };
@@ -334,7 +340,8 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   // the kit name (material_list_items has no group column). Only on first creation (idempotent
   // return above), so re-running never duplicates the groups. RLS scopes kits to this org on a
   // user client; the company's id scopes them on the service client.
-  if (settings.estimating_mode === "catalog") {
+  // On an ADOPTED list (cn-v1084/0391) the groups are there already — the crew's bought marks on them.
+  if (settings.estimating_mode === "catalog" && !adopted) {
     // THE SHARED SELECT SHAPE (kit-line.ts), tolerant of 0166/0240 not having landed. A LINKED
     // line (0240) puts the ITEM on the order sheet: its description, catalog #, unit, vendor and
     // — the whole point — its BUY price as est_cost, not a sell price to back a markup out of.

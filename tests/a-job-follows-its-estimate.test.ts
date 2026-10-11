@@ -79,7 +79,7 @@ describe("accepting an estimate that already has its job", () => {
     // The paperwork FIRST (cn-v1084): the take-off may adopt a visit-born job's list and leave its task
     // parts to the materials sync, which must therefore run after it.
     expect(branch.indexOf("createMaterialListFromQuote(quoteId)")).toBeLessThan(branch.indexOf("jobFollows("));
-    expect(branch).toContain("return { ok: true, id: q.job_id, ...follow }");
+    expect(branch).toContain("return { ok: true, id: q.job_id, ...follow,"); // + the superseded original (0391)
     expect(create).not.toContain("if (q.job_id) return { ok: true, id: q.job_id };");
   });
 });
@@ -123,7 +123,7 @@ describe("the one rule, and nothing silent", () => {
   });
   it("declining never runs the sync (deliberate: no churn, no photo loss on open tasks)", () => {
     const status = body(actions, "export async function updateQuoteStatus(");
-    expect(status).toContain('if (status === "accepted") {\n    const { data: was }');
+    expect(status).toContain('if (status === "accepted") {\n    const jobId = (was'); // the figure is read only on the way to accepted
   });
   it("the size write is compare-and-set on the figure just read, and a lost race is his figure winning", () => {
     const rule = src("src/lib/estimate/sync-job-tasks.ts");
@@ -218,8 +218,10 @@ describe("the deferred items (cn-v1084)", () => {
     const takeOff = src("src/lib/estimate/take-off-from-quote.ts");
     expect(takeOff).toContain('if (quote.job_id && (quote as { status?: string }).status === "accepted") {'); // a draft never adopts
     expect(takeOff).toContain('.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle()'); // the canonical pick, as canonicalListIdForJob makes it
-    expect(takeOff).toContain("if (canonical && canonical.quote_id === null) {");
-    expect(takeOff).toContain('.update({ quote_id: quote.id }).eq("id", canonical.id).is("quote_id", null).select("id")');
+    expect(takeOff).toContain("if (canonical && (canonical.quote_id === null || fromOriginal)) {"); // or the list of the estimate it revises (0391)
+    expect(takeOff).toContain('let tq = supabase.from("material_lists").update({ quote_id: quote.id }).eq("id", canonical.id);');
+    expect(takeOff).toContain('tq = fromOriginal ? tq.eq("quote_id", revises as string) : tq.is("quote_id", null);'); // compare-and-set either way
+    expect(takeOff).toContain('const { data: took, error: tErr } = await tq.select("id");');
     expect(takeOff).toContain('reportError("takeOffFromQuote:adopt"');
     expect(takeOff).toContain("if (adopted) continue;");
     // The Create Material List door runs the sync after an adoption, as the acceptance doors do.

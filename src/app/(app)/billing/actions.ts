@@ -838,6 +838,23 @@ async function defaultDueDateIso(supabase: { from: (t: string) => any }): Promis
 }
 
 /** Convert an accepted (or any) quote into a draft invoice, copying line items. */
+/** THE ORIGINAL A REVISION REPLACES IS ALREADY BILLED (0391): the refusal, or null. `exceptInvoiceId`
+ *  leaves the invoice being worked on out of the test. */
+async function revisedOriginalBilled(
+  supabase: any,
+  quote: { revises_quote_id?: string | null },
+  exceptInvoiceId?: string,
+): Promise<string | null> {
+  const original = quote.revises_quote_id ?? null;
+  if (!original) return null;
+  const { data: rows } = await supabase.from("invoices").select("id, invoice_number, status, quotes:quote_id(quote_number)").eq("quote_id", original).neq("status", "void");
+  const live = ((rows ?? []) as Array<{ id: string; invoice_number: string | null; quotes?: { quote_number?: string | null } | null }>).filter((r) => r.id !== exceptInvoiceId);
+  if (!live.length) return null;
+  const inv = live[0];
+  const num = inv.quotes?.quote_number ?? "The estimate this revises";
+  return `${num} is already billed on ${inv.invoice_number ?? "an invoice"} — add the change to that invoice instead.`;
+}
+
 export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -849,6 +866,11 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     .eq("id", quoteId)
     .maybeSingle();
   if (qErr || !quote) return { ok: false, error: "Quote not found." };
+  // A REVISION OF A BILLED ESTIMATE (0391): its lines carry NEW ids, so the claims on the original's
+  // lines do not carry — billing the revision whole would bill the work twice. Until the claims are
+  // remapped, this refuses and names the one action.
+  const billed = await revisedOriginalBilled(supabase, quote as { revises_quote_id?: string | null });
+  if (billed) return { ok: false, error: billed };
 
   // Idempotent: a quote maps to one LIVE invoice. Re-tapping "Create invoice" returns the
   // existing one instead of billing the customer twice. A VOID one is not "the" invoice — voiding
@@ -1416,6 +1438,13 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
     quoteId = q?.id ?? null;
   }
   if (!quoteId) return { ok: false, error: "No quote found on this invoice's job." };
+  {
+    // The same guard as createInvoiceFromQuote (0391): a revision's lines are new ids; the original's claims
+    // do not carry, so importing the revision whole next to the original's invoice bills the work twice.
+    const { data: picked } = await supabase.from("quotes").select("revises_quote_id").eq("id", quoteId).maybeSingle();
+    const billed = await revisedOriginalBilled(supabase, (picked ?? {}) as { revises_quote_id?: string | null }, invoiceId);
+    if (billed) return { ok: false, error: billed };
+  }
 
   const { data: items } = await supabase
     .from("quote_line_items")
