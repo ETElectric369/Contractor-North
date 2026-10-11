@@ -59,7 +59,7 @@ describe("the doors", () => {
   it("Revise: a copy that keeps the job, the customer and the lead, keeps the title, and remembers what it revises — read back, or refused with the way out", () => {
     const fn = body(actions, "export async function duplicateQuote(");
     expect(fn).toContain("opts?: { revision?: boolean }");
-    expect(fn).toContain('.select("customer_id, title, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status")');
+    expect(fn).toContain('.select("customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status")');
     expect(fn).toContain('"Only a sent or accepted estimate can be revised — edit this one instead."');
     expect(fn).toContain("job_id: revision ? ((quote as { job_id?: string | null }).job_id ?? null) : null,");
     expect(fn).toContain("title: revision ? (quote.title ?? \"Quote\") : `${quote.title ?? \"Quote\"} (copy)`,");
@@ -132,8 +132,8 @@ describe("the doors", () => {
   });
   it("a revision adopts the original's materials list (compare-and-set on the original's id), so the crew's bought marks carry over", () => {
     const takeOff = src("src/lib/estimate/take-off-from-quote.ts");
-    expect(takeOff).toContain("const fromOriginal = !!(canonical && revises && canonical.quote_id === revises);");
-    expect(takeOff).toContain('tq = fromOriginal ? tq.eq("quote_id", revises as string) : tq.is("quote_id", null);');
+    expect(takeOff).toContain("let fromOriginal = !!(canonical && revises && canonical.quote_id === revises);");
+    expect(takeOff).toContain('tq = fromOriginal ? tq.eq("quote_id", canonical.quote_id as string) : tq.is("quote_id", null);'); // the list's holder: the original, or an ancestor up the chain
     expect(takeOff).toContain('.select("id, quote_number, job_id, title, customer_id, status, revises_quote_id")');
   });
 });

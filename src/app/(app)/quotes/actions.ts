@@ -1256,7 +1256,7 @@ export async function duplicateQuote(
   // to bring in.
   const { data: quote } = await supabase
     .from("quotes")
-    .select("customer_id, title, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status")
+    .select("customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
@@ -1281,6 +1281,9 @@ export async function duplicateQuote(
     job_id: revision ? ((quote as { job_id?: string | null }).job_id ?? null) : null,
     ...(revision ? { inquiry_id: (quote as { inquiry_id?: string | null }).inquiry_id ?? null } : {}),
     title: revision ? (quote.title ?? "Quote") : `${quote.title ?? "Quote"} (copy)`,
+    // The scope paragraph prints on the customer's paper (audit v1085, carried): a copy and a revision
+    // used to be born without it, because this select list never named it.
+    description: (quote as { description?: string | null }).description ?? null,
     notes: quote.notes ?? "",
     tax_rate: Number(quote.tax_rate) || 0,
     // A revision is a fresh offer: the original's validity (often past, on an accepted estimate) would
@@ -1308,7 +1311,12 @@ export async function duplicateQuote(
     if (sErr || !stamped?.length) {
       reportError("quotes.duplicateQuote.revises", sErr ?? new Error("zero rows"), { from: id, to: res.id });
       // No half-made revision left behind: the copy goes (a draft with no children), and one action is named.
-      await supabase.from("quotes").delete().eq("id", res.id).eq("status", "draft").select("id");
+      const { data: gone, error: dErr } = await supabase.from("quotes").delete().eq("id", res.id).eq("status", "draft").select("id");
+      if (dErr || !gone?.length) {
+        // The stray copy is still there (audit v1085, carried): say so, or "Revise again" makes a second one.
+        reportError("quotes.duplicateQuote.cleanup", dErr ?? new Error("zero rows"), { from: id, to: res.id });
+        return { ok: false, error: `The revision could not be made${sErr ? ` (${dbError(sErr)})` : ""} and its half-made copy is still there — delete the new draft of this estimate, then Revise again.` };
+      }
       return { ok: false, error: `The revision could not be made${sErr ? ` (${dbError(sErr)})` : ""} — Revise again.` };
     }
   }
@@ -1363,6 +1371,16 @@ async function materializeQuoteCustomer(
   return customerId;
 }
 
+/** A work order or a materials list the acceptance could not make — or a list that is there with a word
+ *  about itself — said, never dropped (audit v1085, carried: both Accept branches used to throw the two
+ *  results away, so a failed take-off was neither said nor reported). */
+function paperworkNote(wo: { ok: boolean; error?: string }, list: { ok: boolean; error?: string }): string | null {
+  // Each rule's own words name the one way out (a refusal on purpose, or a lost write), so they pass through
+  // unchanged — wrapping them named a second action.
+  const bits = [!wo.ok ? (wo.error ?? "The work order could not be made — open Work Orders to add it.") : null, !list.ok ? (list.error ?? "The materials list could not be made — open Materials to add it.") : (list.error ?? null)].filter(Boolean);
+  return bits.length ? bits.join(" ") : null;
+}
+
 export async function createJobFromQuote(
   quoteId: string,
   /** From updateQuoteStatus on an estimate already linked to a job: the estimate's figure as it stood
@@ -1392,14 +1410,31 @@ export async function createJobFromQuote(
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: "Quote not found." };
+  // A REPLACED ESTIMATE MAKES NO JOB (audit v1085, carried): its revision does. Named, or the way back.
+  if ((q as { status?: string }).status === "superseded") {
+    let rev: { id: string; quote_number: string | null } | null = null;
+    try {
+      rev = await revisionOf(supabase, { quoteId, orgId: ctx.orgId });
+    } catch (e) {
+      return { ok: false, error: `Couldn't check whether a revision replaced this estimate (${e instanceof Error ? e.message : String(e)}) — try again.` };
+    }
+    return { ok: false, error: rev ? `${rev.quote_number ?? "A revision"} replaced this estimate — open that one.` : "This estimate was replaced by a revision — set it back to Accepted first." };
+  }
   // A REVISION TAKES THE ORIGINAL'S JOB (0391): born while the original was only sent (so with no
   // job), the revision would make a SECOND job when the customer accepted the original in between.
   // The work is one job: the revision is pinned to it (read back) and catches it up below.
   const revises = (q as { revises_quote_id?: string | null }).revises_quote_id ?? null;
+  let sizeBefore = opts?.sizeBefore;
   if (!q.job_id && revises) {
     const { data: orig } = await supabase.from("quotes").select("job_id").eq("id", revises).maybeSingle();
     const origJob = (orig as { job_id?: string | null } | null)?.job_id ?? null;
     if (origJob) {
+      // THE FIGURE BEFORE THIS ESTIMATE COUNTS (audit v1085, carried): read while the revision is not yet
+      // linked, so the job's length follows it like any linked estimate's (sync-job-tasks).
+      if (sizeBefore === undefined) {
+        const est = await estimateLines(supabase, { jobId: origJob, orgId: ctx.orgId });
+        sizeBefore = est.error ? undefined : est.minutes;
+      }
       const { data: pinned, error: pinErr } = await supabase.from("quotes").update({ job_id: origJob }).eq("id", quoteId).is("job_id", null).select("id");
       if (pinErr) return { ok: false, error: dbError(pinErr) };
       if (pinned?.length) q.job_id = origJob;
@@ -1429,11 +1464,15 @@ export async function createJobFromQuote(
     // visit-born job's), seeding its plain lines and leaving the task parts to the materials sync,
     // which finds the visit's rows and re-keys them rather than adding them again. On a fresh list the
     // take-off seeds everything and the sync then finds every part by key.
-    await createWorkOrderFromQuote(quoteId);
-    await createMaterialListFromQuote(quoteId);
-    const follow = await jobFollows(supabase, { jobId: q.job_id, sizeBefore: opts?.sizeBefore }, ctx);
+    const wo = await createWorkOrderFromQuote(quoteId);
+    const list = await createMaterialListFromQuote(quoteId);
+    const follow = await jobFollows(supabase, { jobId: q.job_id, sizeBefore }, ctx);
     revalidatePath(`/quotes/${quoteId}`);
-    return { ok: true, id: q.job_id, ...follow, ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
+    // THE PAPERWORK IS SAID: what the take-off did to the crew's list (a revision's plain rows follow,
+    // Erik 2026-10-11), then what the job's tasks and parts did; what could not be made is a note.
+    const said = [list.said, follow.said].filter(Boolean).join(" ");
+    const note = [paperworkNote(wo, list), follow.note].filter(Boolean).join(" ");
+    return { ok: true, id: q.job_id, ...(said ? { said } : {}), ...(note ? { note } : {}), ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
   }
 
   // A REVISION of an estimate that never had a job (a sent original) supersedes it on acceptance too
@@ -1570,13 +1609,13 @@ export async function createJobFromQuote(
   // Winning a quote spins up the field paperwork — a work order + a material
   // take-off (both idempotent) — and the job lands in the scheduler as
   // "scheduled" (pending). Best-effort: a job is still created if these no-op.
-  await createWorkOrderFromQuote(quoteId);
-  await createMaterialListFromQuote(quoteId);
+  const wo = await createWorkOrderFromQuote(quoteId);
+  const list = await createMaterialListFromQuote(quoteId);
 
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/schedule");
-  const notes = [note, sup.error ? `The estimate this revises could not be marked superseded (${sup.error}). Accept it again to retry.` : null].filter(Boolean);
-  return { ok: true, id: job.id, ...(notes.length ? { note: notes.join(" ") } : {}), ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
+  const notes = [note, paperworkNote(wo, list), sup.error ? `The estimate this revises could not be marked superseded (${sup.error}). Accept it again to retry.` : null].filter(Boolean);
+  return { ok: true, id: job.id, ...(list.said ? { said: list.said } : {}), ...(notes.length ? { note: notes.join(" ") } : {}), ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
 }
 
 /**
@@ -1656,7 +1695,7 @@ export async function updateQuoteStatus(id: string, status: string) {
   // beside its revision (tasks, hours, buy list, contract total all doubled). With no revision standing
   // (deleted, or walked back) the estimate is his again and may move.
   if (status === "superseded") return { ok: false as const, error: "Superseded is set by accepting a revision — Revise this estimate instead." };
-  const { data: was } = await supabase.from("quotes").select("job_id, status").eq("id", id).maybeSingle();
+  const { data: was } = await supabase.from("quotes").select("job_id, status, revises_quote_id").eq("id", id).maybeSingle();
   if ((was as { status?: string } | null)?.status === "superseded") {
     let rev: { id: string; quote_number: string | null } | null;
     try {
@@ -1681,6 +1720,14 @@ export async function updateQuoteStatus(id: string, status: string) {
   if (!updated?.length) return { ok: false as const, error: "That estimate could not be found." };
   /** What the job's list did when a linked estimate was accepted (shown under the status, not as a warning). */
   let said: string | undefined;
+  // WALKING BACK AN ACCEPTED REVISION (audit v1085, carried): the estimate it replaced stays superseded
+  // and the job has no accepted price, with no word. Said, with the one way back.
+  const revisesId = (was as { revises_quote_id?: string | null } | null)?.revises_quote_id ?? null;
+  if (revisesId && (was as { status?: string } | null)?.status === "accepted" && status !== "accepted") {
+    const { data: orig } = await supabase.from("quotes").select("quote_number, status").eq("id", revisesId).maybeSingle();
+    const o = orig as { quote_number?: string | null; status?: string } | null;
+    if (o?.status === "superseded") said = `${o.quote_number ?? "The estimate this revised"} was replaced by this estimate and now stands replaced by nothing — set it back to Accepted if that work goes ahead.`;
+  }
 
   /**
    * ONE DECISION, RECORDED WHEREVER IT IS MADE (Erik, 8/19: "it would be the one in the same
@@ -1691,7 +1738,9 @@ export async function updateQuoteStatus(id: string, status: string) {
    * fact that matters, and a missing appointment link must never fail the save.
    */
   try {
-    const outcome = outcomeForQuoteStatus(status);
+    // A REVISION'S NO DECIDES NO VISIT (audit v1085, carried): it inherits the original's lead and job, so
+    // its decline stamped Lost on every visit behind them while the original's deal stood. Won is still won.
+    const outcome = revisesId && status !== "accepted" ? null : outcomeForQuoteStatus(status);
     if (outcome) {
       const { data: q } = await supabase.from("quotes").select("id, inquiry_id, job_id").eq("id", id).maybeSingle();
       // By the lead, the job AND the capture's own backlink (lib/appointments/behind-quote): the

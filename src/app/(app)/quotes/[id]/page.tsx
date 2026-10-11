@@ -141,23 +141,36 @@ export default async function QuoteDetailPage({
   if (kitsRead.state === "failed") reportError("quotes/[id]:kits", kitsRead.error, { quoteId: id });
   const showCircuits = featureOn(orgS.features, "panel_map") || (Array.isArray(q.circuits) && q.circuits.length > 0);
 
+  // A REPLACED ESTIMATE MAKES NO MORE PAPER (audit v1085, carried): a superseded estimate offers no Create
+  // door — its revision does; a revision not yet accepted makes no work order or list (a newer list would
+  // hide the crew's as the job's one list). View doors stay. The rules themselves refuse too.
+  const replaced = q.status === "superseded";
+  const noPaperYet = replaced || (!!(q as { revises_quote_id?: string | null }).revises_quote_id && q.status !== "accepted");
   const quoteMap: NavTree = {
     center: { label: q.quote_number, icon: "fileText" },
     nodes: [
-      existingInv
-        ? { id: "qm-inv", label: "View Invoice", icon: "receipt", href: `/billing/${existingInv.id}` }
-        : { id: "qm-inv", label: "Create Invoice", icon: "receipt", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" },
-      (q as any).job_id
-        ? { id: "qm-job", label: "View Job", icon: "briefcase", href: `/jobs/${(q as any).job_id}` }
-        : { id: "qm-job", label: "Create Job", icon: "briefcase", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" },
+      ...(existingInv
+        ? [{ id: "qm-inv", label: "View Invoice", icon: "receipt", href: `/billing/${existingInv.id}` }]
+        : replaced
+          ? []
+          : [{ id: "qm-inv", label: "Create Invoice", icon: "receipt", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" }]),
+      ...((q as any).job_id
+        ? [{ id: "qm-job", label: "View Job", icon: "briefcase", href: `/jobs/${(q as any).job_id}` }]
+        : replaced
+          ? []
+          : [{ id: "qm-job", label: "Create Job", icon: "briefcase", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" }]),
       ...(lineItems.length > 0
         ? [
-            existingWo
-              ? { id: "qm-wo", label: "View Work Order", icon: "clipboardCheck", href: `/work-orders/${existingWo.id}` }
-              : { id: "qm-wo", label: "Create Work Order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
-            existingMl
-              ? { id: "qm-ml", label: "View Material List", icon: "boxes", href: `/materials/${existingMl.id}` }
-              : { id: "qm-ml", label: "Create Material List", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
+            ...(existingWo
+              ? [{ id: "qm-wo", label: "View Work Order", icon: "clipboardCheck", href: `/work-orders/${existingWo.id}` }]
+              : noPaperYet
+                ? []
+                : [{ id: "qm-wo", label: "Create Work Order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" }]),
+            ...(existingMl
+              ? [{ id: "qm-ml", label: "View Material List", icon: "boxes", href: `/materials/${existingMl.id}` }]
+              : noPaperYet
+                ? []
+                : [{ id: "qm-ml", label: "Create Material List", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" }]),
           ]
         : []),
       { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/pdf-preview?doc=quote&id=${q.id}&back=/quotes/${q.id}` },

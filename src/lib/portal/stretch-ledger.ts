@@ -332,7 +332,8 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
     const priceCents = toCents(ln.unit_price);
     const qty = Number(ln.quantity) || 0;
     // Where the line is filed: what it was said to be first (line_kind, 0342), then what it stored.
-    const group = lineGroup({ import_source: src, unit: ln.unit, description: ln.description, line_kind: ln.line_kind ?? null }, inv.invoice_kind ?? null);
+    // line_total rides along (audit v1085, carried): without it a stored 'discount' read as Other on the portal.
+    const group = lineGroup({ import_source: src, unit: ln.unit, description: ln.description, line_kind: ln.line_kind ?? null, line_total: ln.line_total }, inv.invoice_kind ?? null);
 
     if (src === "labor" && group === "labor") {
       const entries = [...(ln.entries ?? [])]

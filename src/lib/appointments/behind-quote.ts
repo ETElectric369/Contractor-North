@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isDecidableVisitType } from "@/lib/statuses";
 
 /**
  * THE VISIT CLOSES WHEN ITS ESTIMATE MOVES (cn-v1069; Erik's law: one door opens, the last one
@@ -32,6 +33,8 @@ export interface VisitBehind {
   id: string;
   job_id?: string | null;
   outcome?: string | null;
+  /** The visit's kind: a job day, a service call or a final inspection is not a deal to win or lose. */
+  type?: string | null;
 }
 
 export type VisitOutcome = "won" | "lost";
@@ -66,7 +69,9 @@ export function visitsBehindQuoteFilter(q: QuoteLinks): string {
  *  none is. Pure, so the rule is pinned without a database. */
 export function closingsFor(rows: VisitBehind[], w: Closing): { attach: string[]; stamp: string[] } {
   const attach = w.jobId ? rows.filter((r) => !r.job_id).map((r) => r.id) : [];
-  const stamp = w.outcome ? rows.filter((r) => !r.outcome).map((r) => r.id) : [];
+  // Only a visit that can be won or lost takes the estimate's answer (audit v1085, carried): a job day on
+  // the same job is not a deal, and Lost on it is wrong twice.
+  const stamp = w.outcome ? rows.filter((r) => !r.outcome && isDecidableVisitType(r.type)).map((r) => r.id) : [];
   return { attach, stamp };
 }
 
@@ -90,7 +95,7 @@ export async function closeVisitsBehindQuote(
   if (!w.jobId && !w.outcome) return { attached: 0, stamped: 0 };
   const { data, error } = await supabase
     .from("appointments")
-    .select("id, job_id, outcome")
+    .select("id, job_id, outcome, type")
     .or(visitsBehindQuoteFilter(quote))
     .limit(50);
   if (error) return { attached: 0, stamped: 0, error: error.message };

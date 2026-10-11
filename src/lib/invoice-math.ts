@@ -415,6 +415,14 @@ export function invoiceDiscountSplit<T extends { description?: string | null; li
   return { listed: lines.filter((l) => !isDiscountLine(l)), discounts, gross: cents(storedSubtotal - total) };
 }
 
+/** THE ONE WAY A DISCOUNT ROW IS WORDED on the office card and the customer's paper (audit v1085,
+ *  carried): a label that already says "Discount…" stands; any other label follows "Discount — ". */
+export function discountRowLabel(label: string | null | undefined): string {
+  const t = String(label ?? "").trim();
+  if (!t) return "Discount";
+  return /^discount/i.test(t) ? t : `Discount — ${t}`;
+}
+
 /** A stored line_kind, or null when there is none (or it is a word this app does not know). */
 export function storedLineKind(v: unknown): StoredLineKind | null {
   return v === "labor" || v === "materials" || v === "other" || v === "credit" || v === "discount" ? v : null;

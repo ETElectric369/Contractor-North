@@ -3,11 +3,13 @@ import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
-import { firstThatWorks, kitsSelectRungs, kitLineView, linkedItemOf } from "@/lib/kit-line";
+import { firstThatWorks, kitLineView, linkedItemOf } from "@/lib/kit-line";
+import { partsKitsOnly, taskKitSelectRungs } from "./task-kits";
 import { coerceTaskDetail } from "./task-lines";
 import { keyParts, materialKey } from "./born-with-tasks";
 import { readAllPages } from "@/lib/read-all-pages";
 import { reportError } from "@/lib/observe";
+import type { CountDiffers } from "./sync-job-materials";
 
 /**
  * THE MATERIALS TAKE-OFF AN ACCEPTED ESTIMATE BECOMES — one rule, called by two doors.
@@ -49,11 +51,29 @@ export type TakeOffResult = {
   error?: string;
   id?: string;
   jobId?: string | null;
-  /** The job's own list (no estimate held it) became this estimate's list; its task parts are the sync's to add. */
+  /** The job's own list (no estimate held it), or the original's (a revision), became this estimate's list; its task parts are the sync's to add. */
   adopted?: boolean;
-  /** On an adopted list: plain lines not seeded because the list already carried them by code or words. */
-  skipped?: number;
+  /** On an adopted list: what became of the estimate's PLAIN lines (takeOffWords says it). */
+  follow?: PlainFollow;
 };
+
+/** What an ADOPTED list did with the estimate's PLAIN lines (a task line's parts are the sync's). */
+export interface PlainFollow {
+  /** Plain lines seeded: the list carried no row for them. */
+  added: number;
+  /** Rows the list already carried at the line's count: left exactly as they are. */
+  carried: number;
+  /** The estimate's own unbought rows brought to the revision's count, by name (Erik 2026-10-11). */
+  recounted: string[];
+  /** The estimate's own unbought rows whose line the revision dropped: removed, by name. */
+  removed: string[];
+  /** The estimate's own rows whose line is gone but which are bought, a tool, or carry a count he typed: kept, by name. */
+  kept: string[];
+  /** A matched row not rewritten — bought, a tool, a typed count, or the crew's — whose count is not the line's: said. */
+  countsDiffer: CountDiffers[];
+  /** A write that failed after the list became the estimate's: said with the one way out (the door is idempotent, a retry opens the list). */
+  failed: string[];
+}
 
 /** The one-liner on the sheet for a part he named but never counted. */
 export const HOW_MANY = " · how many?";
@@ -101,6 +121,149 @@ export async function readPriceBook(
     return byDesc.get(normDesc(cleanDesc)) ?? null;
   };
   return { findPl };
+}
+
+const CODE_RE = /\[([^\]]+)\]/;
+
+/** How an UNKEYED row on the sheet is matched to a plain line: by its code, else by its words slugged like a
+ *  key (materialKey) — the "how many?" tail set aside. plainLineOf's `half` is this same string for the row
+ *  the take-off writes, so the take-off and the sync recognise a row the same way. */
+export const plainRowHalf = (r: { part_number: string | null; description: string | null }): string =>
+  materialKey("x", r.part_number, String(r.description ?? "").replace(HOW_MANY, "")).slice(2);
+
+/** A PLAIN LINE'S ROW ON THE SHEET — one reading for the take-off that writes it and the sync that
+ *  recognises it (audit v1085): the FIRST "[CODE]" is the code, the words are the text without it, the
+ *  row's part number is the book's code when the book knows the part (else the tag), and the count is the
+ *  line's (one when blank). A task line (its parts are rows, it is not) and a labor line (an order sheet
+ *  carries materials) are no plain line: null. */
+export function plainLineOf(
+  line: { description?: string | null; quantity?: number | string | null; unit?: string | null; detail?: unknown },
+  findPl: (code: string | null, cleanDesc: string) => any | null,
+): { code: string | null; cleanDesc: string; pl: any | null; half: string; qty: number } | null {
+  if (coerceTaskDetail(line.detail)) return null;
+  const text = String(line.description ?? "");
+  if (String(line.unit ?? "").toLowerCase() === "hr" || /^\s*labor\b/i.test(text)) return null;
+  const m = text.match(CODE_RE);
+  const code = m ? m[1].trim() : null;
+  const cleanDesc = text.replace(CODE_RE, "").trim();
+  const pl = findPl(code, cleanDesc);
+  return { code, cleanDesc, pl, half: plainRowHalf({ part_number: pl?.code ?? code ?? null, description: cleanDesc || text }), qty: Number(line.quantity) || 1 };
+}
+
+/** An unkeyed row on an adopted list, as the plan sees it. */
+export interface PlainRow {
+  id: string;
+  half: string;
+  quantity: number | null;
+  description: string;
+  unit?: string | null;
+  /** Bought, or a tool: his — never rewritten, never removed. */
+  his: boolean;
+}
+/** A plain line of the estimate, with the row the take-off would write for it. */
+export interface PlainLine<T> {
+  half: string;
+  qty: number;
+  unit?: string | null;
+  row: T;
+}
+export interface PlainPlan<T> {
+  /** Lines no row carries: written. */
+  insert: T[];
+  /** The estimate's own UNTOUCHED rows (still at the original line's count), and an untouched "how many?"
+   *  placeholder: brought to the line's count — with the words (the tail dropped) and the unit when they change. */
+  recount: Array<{ id: string; description: string; from: number | null; to: number; words?: string; unit?: string }>;
+  /** The estimate's own untouched, unbought rows whose line is gone. */
+  remove: PlainRow[];
+  /** The estimate's own rows whose line is gone but which are bought, a tool, or carry a typed count: his, said. */
+  kept: PlainRow[];
+  /** A matched row not rewritten (his, a typed count, or the crew's) whose count is not the line's: said. */
+  countsDiffer: CountDiffers[];
+  /** Matched at the line's count: nothing to do. */
+  carried: number;
+}
+
+/** THE PLAN FOR THE PLAIN LINES ON AN ADOPTED LIST, pure (Erik 2026-10-11: "yes" — they follow). Each line
+ *  claims one unkeyed row by code else words — an equal count first, then one that is not his — or is
+ *  written. `estimateHalves` are the plain lines of the estimate the list belonged to (a REVISION's
+ *  original; empty for the job's own visit list), each with the COUNT that line had: a row matching one of
+ *  them is the ESTIMATE'S row, and it FOLLOWS only while it is UNTOUCHED — still at the original line's
+ *  count (a count he typed over it looks the same as one the take-off wrote, so the original's figure is
+ *  the only way to tell; the sync's own rule for the job's length). An untouched unbought row takes the
+ *  revision's count (and its unit when that changed), or goes when no line wants it any more; a bought or
+ *  tool one, or one with a typed count, is kept and said. An untouched "how many?" placeholder (count 1,
+ *  not his) takes the count a line now gives it, whoever's row it is — the tail goes with it. Every other
+ *  unkeyed row is the crew's: never rewritten, never removed, a differing count only said. Rows with the
+ *  same code or words (the crew typed what a line says) are told apart by their count, then by order. */
+export function planPlainRows<T>(lines: ReadonlyArray<PlainLine<T>>, rows: ReadonlyArray<PlainRow>, estimateHalves: ReadonlyMap<string, readonly number[]> = new Map()): PlainPlan<T> {
+  const free = [...rows];
+  const left = new Map([...estimateHalves].map(([h, qs]) => [h, [...qs]] as [string, number[]]));
+  /** Whose row this is: the estimate's at the line's own count, the estimate's with a count typed over it, or nobody's (the crew's). */
+  const identity = (half: string, qty: number | null): "untouched" | "typed" | "none" => {
+    const qs = left.get(half);
+    if (!qs?.length) return "none";
+    const i = qs.indexOf(Number(qty));
+    if (i !== -1) {
+      qs.splice(i, 1);
+      return "untouched";
+    }
+    qs.splice(0, 1);
+    return "typed";
+  };
+  const isPlaceholder = (r: PlainRow) => !r.his && r.description.endsWith(HOW_MANY) && Number(r.quantity) === 1;
+  const plan: PlainPlan<T> = { insert: [], recount: [], remove: [], kept: [], countsDiffer: [], carried: 0 };
+  for (const l of lines) {
+    const same = free.filter((r) => r.half === l.half);
+    if (!same.length) {
+      plan.insert.push(l.row);
+      continue;
+    }
+    const pick = same.find((r) => Number(r.quantity) === l.qty) ?? same.find((r) => !r.his) ?? same[0];
+    free.splice(free.indexOf(pick), 1);
+    const its = identity(l.half, pick.quantity);
+    if (Number(pick.quantity) === l.qty) {
+      plan.carried++;
+      continue;
+    }
+    const placeholder = isPlaceholder(pick);
+    if (!pick.his && (placeholder || its === "untouched")) {
+      const unit = l.unit && (pick.unit ?? "ea") !== l.unit ? l.unit : undefined;
+      plan.recount.push({
+        id: pick.id,
+        description: pick.description,
+        from: pick.quantity,
+        to: l.qty,
+        ...(placeholder ? { words: pick.description.slice(0, -HOW_MANY.length) } : {}),
+        ...(unit ? { unit } : {}),
+      });
+      continue;
+    }
+    plan.countsDiffer.push({ description: pick.description, shows: pick.quantity, estimate: l.qty });
+  }
+  for (const r of free) {
+    const its = identity(r.half, r.quantity);
+    if (its === "none") continue; // the crew's: never the estimate's to remove
+    (r.his || its === "typed" ? plan.kept : plan.remove).push(r);
+  }
+  return plan;
+}
+
+export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+export const few = (names: string[]): string => (names.length ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""})` : "");
+
+/** What an adopted list did with the estimate's plain lines, as a sentence — or null when nothing changed. */
+export function takeOffWords(res: Pick<TakeOffResult, "follow">, lead = "The crew's list is this estimate's now"): string | null {
+  const f = res.follow;
+  if (!f) return null;
+  const bits: string[] = [];
+  if (f.added) bits.push(`${plural(f.added, "line", "lines")} added`);
+  if (f.recounted.length) bits.push(`${f.recounted.length} re-counted${few(f.recounted)}`);
+  if (f.removed.length) bits.push(`${f.removed.length} removed${few(f.removed)} — not on this estimate`);
+  if (f.kept.length) bits.push(`${f.kept.length} kept${few(f.kept)} — bought, a tool, or a count you typed, though not on this estimate`);
+  for (const w of f.failed) bits.push(w);
+  for (const c of f.countsDiffer.slice(0, 3)) bits.push(`${c.description} shows ${c.shows ?? "no count"}, the estimate says ${c.estimate}`);
+  if (f.countsDiffer.length > 3) bits.push(`${f.countsDiffer.length - 3} more counts differ`);
+  return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;
 }
 
 /** A part of a task line as a row on the sheet — ONE shape for the birth and the sync (0390). */
@@ -157,11 +320,30 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   // Idempotent: one material list per quote — re-running opens the existing one.
   const { data: existingList } = await supabase
     .from("material_lists")
-    .select("id")
+    .select("id, job_id")
     .eq("quote_id", quoteId)
     .limit(1)
     .maybeSingle();
-  if (existingList) return { ok: true, id: existingList.id, jobId: quote.job_id ?? null };
+  if (existingList) {
+    // THE LIST FOLLOWS THE ESTIMATE ONTO ITS JOB (audit v1085, carried): a list made from a draft with no
+    // job (Create Material List) stayed job-less when the estimate got one — the job's Materials tab read
+    // empty while the sync kept writing into it, and the crew's first Add minted a second list.
+    const had = existingList as { id: string; job_id: string | null };
+    if (!had.job_id && quote.job_id) {
+      let lq = supabase.from("material_lists").update({ job_id: quote.job_id }).eq("id", had.id).is("job_id", null);
+      if (orgId) lq = lq.eq("org_id", orgId);
+      const { data: linked, error: lErr } = await lq.select("id");
+      if (lErr || !linked?.length) reportError("takeOffFromQuote:linkList", lErr ?? new Error("zero rows"), { quoteId, listId: had.id });
+    }
+    return { ok: true, id: had.id, jobId: quote.job_id ?? null };
+  }
+  // A REPLACED ESTIMATE, OR A REVISION NOT YET ACCEPTED, MAKES NO LIST (audit v1085, carried): a newer list
+  // on the job would become the one list every reader shows and hide the crew's. The revision's own take-off
+  // happens when it is accepted, adopting that list.
+  const status = (quote as { status?: string }).status;
+  if (status === "superseded") return { ok: false, error: "This estimate was replaced by a revision — make the list from that one." };
+  if ((quote as { revises_quote_id?: string | null }).revises_quote_id && status !== "accepted")
+    return { ok: false, error: "This revision isn't accepted yet — accept it, and the crew's list becomes its own." };
 
   let linesQ = supabase
     .from("quote_line_items")
@@ -196,21 +378,65 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   // and all — becomes the revision's, and the sync re-keys the original's rows to the revision's lines.
   let list: { id: string } | null = null;
   let adopted = false;
+  let adoptedFromOriginal = false;
   const revises = (quote as { revises_quote_id?: string | null }).revises_quote_id ?? null;
-  if (quote.job_id && (quote as { status?: string }).status === "accepted") {
+  const originalHalves = new Map<string, number[]>();
+  if (quote.job_id && status === "accepted") {
     let ownQ = supabase.from("material_lists").select("id, quote_id").eq("job_id", quote.job_id);
     if (orgId) ownQ = ownQ.eq("org_id", orgId);
     const { data: own } = await ownQ.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle();
     const canonical = own as { id: string; quote_id: string | null } | null;
-    const fromOriginal = !!(canonical && revises && canonical.quote_id === revises);
+    let fromOriginal = !!(canonical && revises && canonical.quote_id === revises);
+    if (canonical && canonical.quote_id && revises && !fromOriginal) {
+      // A REVISION OF A REVISION (audit v1085, carried): the crew's list may still be the FIRST estimate's —
+      // the one in between was never accepted, so it never adopted. Walk the chain upward (bounded, a cycle
+      // stops at the first repeat): the list of any estimate this one replaces is the list to adopt.
+      const seen = new Set<string>([quote.id]);
+      let cur: string | null = revises;
+      for (let hop = 0; cur && !seen.has(cur) && hop < 12 && !fromOriginal; hop++) {
+        seen.add(cur);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let aq: any = supabase.from("quotes").select("revises_quote_id").eq("id", cur);
+        if (orgId) aq = aq.eq("org_id", orgId);
+        const { data: anc, error: aErr }: { data: { revises_quote_id?: string | null } | null; error: { message: string } | null } = await aq.maybeSingle();
+        if (aErr) return { ok: false, error: `The estimates this one revises could not be read (${dbError(aErr)}) — nothing was taken off. Try again.` };
+        cur = (anc as { revises_quote_id?: string | null } | null)?.revises_quote_id ?? null;
+        if (cur && cur === canonical.quote_id) fromOriginal = true;
+      }
+      if (!fromOriginal) {
+        // A SIBLING (the skeptic's case): two revisions of one original, the first accepted and holding the
+        // crew's list, then the second accepted — supersedeRevised moved the first, so its list is this
+        // estimate's to adopt too, bought marks and all, instead of a second list hiding them.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let hq: any = supabase.from("quotes").select("revises_quote_id, status").eq("id", canonical.quote_id);
+        if (orgId) hq = hq.eq("org_id", orgId);
+        const { data: holder, error: hErr }: { data: { revises_quote_id?: string | null; status?: string | null } | null; error: { message: string } | null } = await hq.maybeSingle();
+        if (hErr) return { ok: false, error: `The estimate holding the crew's list could not be read (${dbError(hErr)}) — nothing was taken off. Try again.` };
+        if (holder?.status === "superseded" && holder.revises_quote_id && seen.has(holder.revises_quote_id)) fromOriginal = true;
+      }
+    }
     if (canonical && (canonical.quote_id === null || fromOriginal)) {
+      // THE ORIGINAL'S PLAIN LINES (a revision, 0391; Erik 2026-10-11): which unkeyed rows on the list it
+      // adopts are the ESTIMATE'S own rows — those FOLLOW the revision (planPlainRows below) — and which
+      // are the crew's. Read BEFORE the adoption is written, so a failed read changes nothing.
+      if (fromOriginal) {
+        let oq = supabase.from("quote_line_items").select("description, quantity, unit, detail").eq("quote_id", canonical.quote_id as string);
+        if (orgId) oq = oq.eq("org_id", orgId);
+        const { data: olines, error: oErr } = await oq;
+        if (oErr) return { ok: false, error: `The estimate this revises could not be read (${dbError(oErr)}) — nothing was taken off. Try again.` };
+        for (const l of (olines ?? []) as any[]) {
+          const p = plainLineOf(l, findPl);
+          if (p) originalHalves.set(p.half, [...(originalHalves.get(p.half) ?? []), p.qty]);
+        }
+      }
       let tq = supabase.from("material_lists").update({ quote_id: quote.id }).eq("id", canonical.id);
-      tq = fromOriginal ? tq.eq("quote_id", revises as string) : tq.is("quote_id", null);
+      tq = fromOriginal ? tq.eq("quote_id", canonical.quote_id as string) : tq.is("quote_id", null);
       const { data: took, error: tErr } = await tq.select("id");
       if (tErr) reportError("takeOffFromQuote:adopt", tErr, { quoteId, listId: canonical.id });
       if (took?.length) {
         list = { id: canonical.id };
         adopted = true;
+        adoptedFromOriginal = fromOriginal;
       }
     }
   }
@@ -267,10 +493,6 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   });
   const costFromSell = (p: number) => Math.round((p / (1 + markup / 100)) * 100) / 100;
 
-  const CODE_RE = /\[([^\]]+)\]/;
-  const isLabor = (it: any) =>
-    String(it.unit ?? "").toLowerCase() === "hr" || /^\s*labor\b/i.test(String(it.description ?? ""));
-
   type Row = {
     list_id: string;
     org_id?: string;
@@ -285,21 +507,24 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     source_key?: string;
   };
   const rows: Row[] = [];
-  // On an adopted list the new rows go after what the crew already has, and a plain line the list
-  // already carries UNKEYED by code or words (the visit's typed items) is not seeded a second time.
+  // ON AN ADOPTED LIST the new rows go after what the crew already has, and the estimate's PLAIN lines are
+  // matched to the rows the list carries UNKEYED — by code else words (planPlainRows): the crew's rows, the
+  // visit's typed items and, on a REVISION, the original estimate's own rows, which FOLLOW (Erik
+  // 2026-10-11): an unbought one takes the revision's count or goes when its line is gone; a bought one is
+  // kept and said; a row of the crew's is never the estimate's to change. Everything it did is said
+  // (takeOffWords) — nothing on the sheet moves in silence.
   let so = 0;
-  const onList = new Map<string, number>();
-  let skipped = 0;
+  const unkeyed: PlainRow[] = [];
+  const plainLines: PlainLine<Row>[] = [];
   if (adopted) {
-    let haveQ = supabase.from("material_list_items").select("sort_order, part_number, description, source_key").eq("list_id", list.id);
+    let haveQ = supabase.from("material_list_items").select("id, sort_order, part_number, description, source_key, quantity, unit, purchased, is_tool").eq("list_id", list.id);
     if (orgId) haveQ = haveQ.eq("org_id", orgId);
-    const { data: had, error: hErr } = await haveQ;
+    const { data: had, error: hErr } = await haveQ.order("sort_order");
     if (hErr) return { ok: false, error: dbError(hErr) };
-    for (const r of (had ?? []) as Array<{ sort_order: number | null; part_number: string | null; description: string | null; source_key: string | null }>) {
+    for (const r of (had ?? []) as Array<{ id: string; sort_order: number | null; part_number: string | null; description: string | null; source_key: string | null; quantity: number | null; unit?: string | null; purchased: boolean | null; is_tool: boolean | null }>) {
       so = Math.max(so, (r.sort_order ?? -1) + 1);
       if (r.source_key) continue;
-      const half = materialKey("x", r.part_number, String(r.description ?? "").replace(HOW_MANY, "")).slice(2);
-      onList.set(half, (onList.get(half) ?? 0) + 1);
+      unkeyed.push({ id: r.id, half: plainRowHalf(r), quantity: r.quantity, description: String(r.description ?? ""), unit: r.unit ?? null, his: r.purchased === true || r.is_tool === true });
     }
   }
   const stamp = orgId ? { org_id: orgId } : {};
@@ -318,26 +543,15 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
       }
       continue;
     }
-    if (isLabor(it)) continue; // an order sheet carries materials, never labor
-    const m = String(it.description ?? "").match(CODE_RE);
-    const code = m ? m[1].trim() : null;
-    const cleanDesc = String(it.description ?? "").replace(CODE_RE, "").trim();
-    const pl = findPl(code, cleanDesc);
-    if (adopted) {
-      const half = materialKey("x", pl?.code ?? code ?? null, cleanDesc || String(it.description ?? "")).slice(2);
-      const n = onList.get(half) ?? 0;
-      if (n) {
-        onList.set(half, n - 1);
-        skipped++;
-        continue;
-      }
-    }
-    rows.push({
+    const plain = plainLineOf(it, findPl); // the one reading of a plain line (the sync's too)
+    if (!plain) continue; // an order sheet carries materials, never labor
+    const { code, cleanDesc, pl } = plain;
+    const row: Row = {
       list_id: list.id,
       ...stamp,
       description: cleanDesc || it.description,
       part_number: pl?.code ?? code ?? null,
-      quantity: Number(it.quantity) || 1,
+      quantity: plain.qty,
       unit: it.unit || pl?.unit || "ea",
       vendor: pl?.supplier ?? null,
       // matched → the book's real buy price, at the vendor the line names when it names one;
@@ -345,9 +559,14 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
       // a vendor option is the BRAND (Marvin), the supplier is where it is bought, and the brand
       // is already in the description.
       est_cost: pl ? bookLineBuy(pl, cleanDesc).buyPrice : it.unit_price != null ? costFromSell(Number(it.unit_price)) : null,
-      sort_order: so++,
-    });
+      sort_order: 0,
+    };
+    if (adopted) plainLines.push({ half: plain.half, qty: plain.qty, unit: row.unit, row });
+    else rows.push({ ...row, sort_order: so++ });
   }
+
+  const plan = adopted ? planPlainRows(plainLines, unkeyed, originalHalves) : null;
+  for (const r of plan?.insert ?? []) rows.push({ ...r, sort_order: so++ });
 
   // Catalog orgs (Tahoe Deck): the granular MATERIAL kits (Framing, Hardware, Decking…) are
   // the POST-ACCEPTANCE purchasing breakdown — deliberately kept OFF the estimate, seeded onto
@@ -355,20 +574,23 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   // the kit name (material_list_items has no group column). Only on first creation (idempotent
   // return above), so re-running never duplicates the groups. RLS scopes kits to this org on a
   // user client; the company's id scopes them on the service client.
-  // On an ADOPTED list (cn-v1084/0391) the groups are there already — the crew's bought marks on them.
-  if (settings.estimating_mode === "catalog" && !adopted) {
+  // On a list adopted from the ORIGINAL estimate (0391) the groups are there already — the crew's bought
+  // marks on them. The job's own list (a visit's, a hand add) never had them (audit v1085, carried): seeded
+  // after the crew's rows. A TASK KIT (hours per unit) prices a task line and is never a buy-list group
+  // (partsKitsOnly, the same rule the kit pickers use).
+  if (settings.estimating_mode === "catalog" && !adoptedFromOriginal) {
     // THE SHARED SELECT SHAPE (kit-line.ts), tolerant of 0166/0240 not having landed. A LINKED
     // line (0240) puts the ITEM on the order sheet: its description, catalog #, unit, vendor and
     // — the whole point — its BUY price as est_cost, not a sell price to back a markup out of.
     // A frozen line keeps today's behaviour (its unit_price as the estimate).
     const { data: matKits } = await firstThatWorks(
-      kitsSelectRungs("name").map((sel) => () => {
+      taskKitSelectRungs().map((sel) => () => {
         let q = supabase.from("kits").select(sel).not("name", "in", '("Decks","Remodels")');
         if (orgId) q = q.eq("org_id", orgId);
         return q.order("name");
       }),
     );
-    for (const k of (matKits ?? []) as any[]) {
+    for (const k of partsKitsOnly((matKits ?? []) as any[])) {
       const kitItems = [...(k.kit_items ?? [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       for (const it of kitItems) {
         const item = linkedItemOf(it);
@@ -397,12 +619,63 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     }
   }
 
-  if (rows.length) {
-    const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
-    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
-    if ((seeded?.length ?? 0) !== rows.length)
-      return { ok: false, error: adopted ? "The list is there but its new lines didn't save. Open it and try again." : "The list was created but its lines didn't save. Open it and try again." };
+  if (!plan) {
+    // A FRESH LIST: its rows in one write. The door is idempotent (the list exists now), so a lost write is
+    // said with the way out, not "try again".
+    if (rows.length) {
+      const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
+      if (itemsErr) return { ok: false, error: dbError(itemsErr) };
+      if ((seeded?.length ?? 0) !== rows.length) return { ok: false, error: "The list was created but its lines didn't save — open it and add them." };
+    }
+    return { ok: true, id: list.id, jobId: quote.job_id ?? null };
   }
 
-  return { ok: true, id: list.id, jobId: quote.job_id ?? null, ...(adopted ? { adopted: true, skipped } : {}) };
+  // AN ADOPTED LIST — THE ORDER OF WRITES (the skeptic's case): ADD first, then re-count, then take away, so a
+  // failure part way leaves the crew with more than they need, never less. The list IS this estimate's
+  // now (the next call opens it, it cannot be re-run), so what could not be done is SAID on an ok result
+  // with the one way out, and reported — never a refusal that a retry cannot honour. Every write is
+  // conditional on what was read (the count, not bought, not a tool: a change made meanwhile is his, said).
+  const countsDiffer = [...plan.countsDiffer];
+  const recounted: string[] = [];
+  const removed: string[] = [];
+  const kept = plan.kept.map((r) => r.description);
+  const failed: string[] = [];
+  const follow: PlainFollow = { added: 0, carried: plan.carried, recounted, removed, kept, countsDiffer, failed };
+  const done = () => ({ ok: true, id: list!.id, jobId: quote.job_id ?? null, adopted: true, follow });
+  if (rows.length) {
+    const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
+    const n = seeded?.length ?? 0;
+    follow.added = itemsErr ? 0 : n;
+    if (itemsErr || n !== rows.length) {
+      reportError("takeOffFromQuote:seed", itemsErr ?? new Error(`${n} of ${rows.length} rows saved`), { quoteId, listId: list.id });
+      failed.push(`${plural(rows.length - follow.added, "line", "lines")} could not be added${itemsErr ? ` (${dbError(itemsErr)})` : ""} — add them on the list; nothing else was changed`);
+      return done(); // nothing is re-counted or removed on a list that did not get its new lines
+    }
+  }
+  for (const r of plan.recount) {
+    const patch = { quantity: r.to, ...(r.words ? { description: r.words } : {}), ...(r.unit ? { unit: r.unit } : {}) };
+    let uq = supabase.from("material_list_items").update(patch).eq("id", r.id).eq("list_id", list.id).eq("purchased", false).eq("is_tool", false).eq("quantity", r.from);
+    if (orgId) uq = uq.eq("org_id", orgId);
+    const { data, error } = await uq.select("id");
+    if (error) {
+      reportError("takeOffFromQuote:recount", error, { quoteId, listId: list.id, rowId: r.id });
+      failed.push(`${r.words ?? r.description} could not be re-counted (${dbError(error)}) — set it to ${r.to} on the list`);
+      continue;
+    }
+    if (data?.length) recounted.push(`${r.words ?? r.description} ${r.from ?? "?"} → ${r.to}`);
+    else countsDiffer.push({ description: r.description, shows: r.from, estimate: r.to }); // changed or bought meanwhile: his
+  }
+  if (plan.remove.length) {
+    let dq = supabase.from("material_list_items").delete().in("id", plan.remove.map((r) => r.id)).eq("list_id", list.id).eq("purchased", false).eq("is_tool", false);
+    if (orgId) dq = dq.eq("org_id", orgId);
+    const { data, error } = await dq.select("id");
+    if (error) {
+      reportError("takeOffFromQuote:remove", error, { quoteId, listId: list.id });
+      failed.push(`${plural(plan.remove.length, "line", "lines")} the estimate dropped could not be removed (${dbError(error)}) — remove ${plan.remove.map((r) => r.description).slice(0, 3).join(", ")}${plan.remove.length > 3 ? ", …" : ""} on the list`);
+    } else {
+      const gone = new Set(((data ?? []) as Array<{ id: string }>).map((r) => r.id));
+      for (const r of plan.remove) (gone.has(r.id) ? removed : kept).push(r.description);
+    }
+  }
+  return done();
 }

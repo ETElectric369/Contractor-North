@@ -226,8 +226,10 @@ export interface BornResult {
  * database answer (the job is already made — the door says what could not be listed).
  */
 /** The keys the job already has (its born tasks). */
-async function keysOnJob(sb: SupabaseClient, jobId: string): Promise<{ keys: Set<string | null>; error?: string }> {
-  const { data, error } = await sb.from("tasks").select("source_key").eq("job_id", jobId).not("source_key", "is", null);
+async function keysOnJob(sb: SupabaseClient, jobId: string, orgId: string | null = null): Promise<{ keys: Set<string | null>; error?: string }> {
+  let q = sb.from("tasks").select("source_key").eq("job_id", jobId).not("source_key", "is", null);
+  if (orgId) q = q.eq("org_id", orgId); // the service client: the company's rows only (audit v1085, carried)
+  const { data, error } = await q;
   if (error) return { keys: new Set(), error: dbError(error) };
   return { keys: new Set(((data ?? []) as Array<{ source_key: string | null }>).map((r) => r.source_key)) };
 }
@@ -235,7 +237,7 @@ async function keysOnJob(sb: SupabaseClient, jobId: string): Promise<{ keys: Set
 export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth): Promise<BornResult> {
   let inserted = 0;
   if (birth.tasks.length) {
-    const have = await keysOnJob(sb, who.jobId);
+    const have = await keysOnJob(sb, who.jobId, who.orgId);
     if (have.error) return { inserted: 0, plannedSet: false, error: have.error };
     const seen = have.keys;
     const rows = birth.tasks
@@ -256,7 +258,7 @@ export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth):
         // TWO DOORS IN THE SAME SECOND (the customer's Accept and the office's): the loser's insert
         // hits tasks_job_source_key_uq (23505). The winner's rows ARE the birth, so re-read and, when
         // every key is now on the job, this call did its work by doing nothing. Any other refusal is said.
-        const raced = (error as { code?: string }).code === "23505" && (await keysOnJob(sb, who.jobId)).keys;
+        const raced = (error as { code?: string }).code === "23505" && (await keysOnJob(sb, who.jobId, who.orgId)).keys;
         if (!raced || !birth.tasks.every((t) => raced.has(t.source_key))) {
           return { inserted: 0, plannedSet: false, error: dbError(error) };
         }

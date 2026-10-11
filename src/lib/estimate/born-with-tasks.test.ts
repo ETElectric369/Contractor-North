@@ -224,7 +224,7 @@ describe("bornTasks — the write", () => {
   });
 
   it("a replay births nothing twice: the keys already on the job are skipped", async () => {
-    const db = fakeDb({ tasks: [{ id: "t-old", job_id: "job-1", source_key: "line:a" }], jobs: jobs(195) });
+    const db = fakeDb({ tasks: [{ id: "t-old", job_id: "job-1", org_id: ORG, source_key: "line:a" }], jobs: jobs(195) }); // the company's row (the keys read is org-scoped)
     const res = await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, birth);
     expect(res).toEqual({ inserted: 1, plannedSet: false });
     expect(db.inserted.tasks.map((r) => r.source_key)).toEqual(["line:b"]);

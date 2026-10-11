@@ -333,7 +333,9 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   let rekeyed = 0;
   const twice: string[] = [];
   for (const r of plan.rekey) {
-    const { data, error } = await sb.from("tasks").update({ source_key: r.source_key }).eq("id", r.id).eq("job_id", who.jobId).select("id");
+    let rq = sb.from("tasks").update({ source_key: r.source_key }).eq("id", r.id).eq("job_id", who.jobId);
+    if (who.orgId) rq = rq.eq("org_id", who.orgId); // the service client: the company's rows only
+    const { data, error } = await rq.select("id");
     // 23505: another door (the customer's Accept) put a task on that line between this read and this
     // write. Theirs is the task. A line orphan is cleaned up by the next pass; a visit's or hand task
     // is never removed here, so it is now on the list twice — SAID, by name. Any other refusal is said.
@@ -362,14 +364,9 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   const keptNames = plan.kept.map((t) => t.title);
   if (plan.remove.length) {
     // Conditional on what was read: a task checked off or photographed in the meantime is not removed — it is kept.
-    const { data, error } = await sb
-      .from("tasks")
-      .delete()
-      .in("id", plan.remove)
-      .eq("job_id", who.jobId)
-      .eq("status", "open")
-      .is("photo_path", null)
-      .select("id");
+    let dq = sb.from("tasks").delete().in("id", plan.remove).eq("job_id", who.jobId).eq("status", "open").is("photo_path", null);
+    if (who.orgId) dq = dq.eq("org_id", who.orgId);
+    const { data, error } = await dq.select("id");
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
     removed = data?.length ?? 0;
     kept += plan.remove.length - removed;
@@ -411,7 +408,8 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
       if (uErr) return { ...done, error: dbError(uErr) };
       if (upd?.length) return { ...done, sizeSet: true, sizeNow: est.minutes };
     }
-    return { ...done, sizeStays: { box: boxNow, estimate: est.minutes } };
+    // "stays at X (now says X)" is no news (audit v1085, carried): only a figure that differs is said.
+    return boxNow === est.minutes ? done : { ...done, sizeStays: { box: boxNow, estimate: est.minutes } };
   }
   return done;
 }

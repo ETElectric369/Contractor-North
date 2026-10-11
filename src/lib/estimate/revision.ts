@@ -69,17 +69,32 @@ export const supersededWords = (numbers: string[]): string | null => {
   return `${list} ${numbers.length === 1 ? "is" : "are"} now superseded by this estimate.`;
 };
 
-/** THE ACCEPTED REVISION THAT REPLACED AN ESTIMATE — or the one that replaced that (a chain), newest
- *  first. Null when none: a superseded estimate with no live revision (the revision was deleted or
- *  walked back) may be set back by hand. */
+/** THE REVISION THAT REPLACED AN ESTIMATE — the TIP of the chain (audit v1085, carried): a revision that
+ *  was itself revised is superseded too, and the one that stands is the last one accepted; a two-deep
+ *  chain used to name the middle one, which every reader took for "over". Bounded; a cycle stops at the
+ *  first repeat. When the chain ends on a superseded estimate with nothing above it (its revision was
+ *  deleted), that one is named — it is the next door. Null when none: a superseded estimate with no
+ *  revision at all may be set back by hand. */
 export async function revisionOf(
   sb: SupabaseClient,
   who: { quoteId: string; orgId: string | null },
 ): Promise<{ id: string; quote_number: string | null } | null> {
-  let q = sb.from("quotes").select("id, quote_number, accepted_at").eq("revises_quote_id", who.quoteId).in("status", ["accepted", "superseded"]);
-  if (who.orgId) q = q.eq("org_id", who.orgId);
-  // NULLS LAST (audit v1085): Postgres puts nulls first on DESC, which named a never-accepted sibling.
-  const { data, error } = await q.order("accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
-  if (error) throw new Error(`revisionOf: ${dbError(error)}`); // a failed read must not lift a lock
-  return (data as { id: string; quote_number: string | null } | null) ?? null;
+  type Rev = { id: string; quote_number: string | null; status?: string | null };
+  const seen = new Set<string>([who.quoteId]);
+  let cur = who.quoteId;
+  let found: Rev | null = null;
+  for (let hop = 0; hop < 12; hop++) {
+    let q = sb.from("quotes").select("id, quote_number, accepted_at, status").eq("revises_quote_id", cur).in("status", ["accepted", "superseded"]);
+    if (who.orgId) q = q.eq("org_id", who.orgId);
+    // NULLS LAST (audit v1085): Postgres puts nulls first on DESC, which named a never-accepted sibling.
+    const { data, error } = await q.order("accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+    if (error) throw new Error(`revisionOf: ${dbError(error)}`); // a failed read must not lift a lock
+    const row = data as Rev | null;
+    if (!row || seen.has(row.id)) break;
+    seen.add(row.id);
+    found = row;
+    if (row.status !== "superseded") break; // the one that stands
+    cur = row.id;
+  }
+  return found ? { id: found.id, quote_number: found.quote_number } : null;
 }

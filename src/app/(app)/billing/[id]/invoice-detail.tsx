@@ -13,7 +13,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { customerLineWords, invoiceBalance, invoiceDiscountSplit, invoiceOverpayment, isDrawKind, supplierNameSet, storedLineKind } from "@/lib/invoice-math";
+import { customerLineWords, invoiceBalance, invoiceDiscountSplit, invoiceOverpayment, isDrawKind, supplierNameSet, storedLineKind, discountRowLabel } from "@/lib/invoice-math";
 import { LineKindChips } from "./line-kind-chips";
 import { processorFeeLabel } from "@/lib/processor-fee";
 import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, materialsImportPlan, type MarkupSeed } from "@/lib/invoice-markup";
@@ -1518,7 +1518,7 @@ export function InvoiceDetail({
                   </div>
                   {split.discounts.map((d, i) => (
                     <div key={i} className="flex justify-between gap-3 text-slate-600">
-                      <span className="min-w-0 truncate">Discount{d.label ? ` — ${d.label}` : ""}</span>
+                      <span className="min-w-0 truncate">{discountRowLabel(d.label)}</span>
                       <span className="whitespace-nowrap">−{formatCurrency(Math.abs(d.amount))}</span>
                     </div>
                   ))}

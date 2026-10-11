@@ -445,17 +445,23 @@ export async function deleteTask(
   const key = (row as { source_key?: string | null }).source_key;
   if (row.job_id && key) {
     const entry = dismissalEntry(key, String((row as { title?: string | null }).title ?? ""));
-    const { data: job } = await supabase.from("jobs").select("dismissed_task_keys").eq("id", row.job_id).maybeSingle();
-    const had = Array.isArray((job as { dismissed_task_keys?: unknown } | null)?.dismissed_task_keys)
-      ? ((job as { dismissed_task_keys: unknown[] }).dismissed_task_keys.filter((k): k is string => typeof k === "string"))
-      : [];
-    if (!had.some((e) => e === key || e.startsWith(`${key}#`))) {
-      const { data: marked, error: markErr } = await supabase
-        .from("jobs")
-        .update({ dismissed_task_keys: [...had, entry] })
-        .eq("id", row.job_id)
-        .select("id");
-      if (markErr || !marked?.length) reportError("deleteTask:dismissKey", markErr ?? new Error("zero rows"), { taskId: id, jobId: row.job_id, key });
+    const { data: job, error: jobErr } = await supabase.from("jobs").select("dismissed_task_keys").eq("id", row.job_id).maybeSingle();
+    if (jobErr || !job) {
+      // A FAILED READ IS NOT AN EMPTY LIST (audit v1085, carried): written back as [entry] it would wipe
+      // every earlier dismissal. Reported; the delete stands, the next sync may bring this one back once.
+      reportError("deleteTask:dismissKey:read", jobErr ?? new Error("no job row"), { taskId: id, jobId: row.job_id, key });
+    } else {
+      const had = Array.isArray((job as { dismissed_task_keys?: unknown } | null)?.dismissed_task_keys)
+        ? ((job as { dismissed_task_keys: unknown[] }).dismissed_task_keys.filter((k): k is string => typeof k === "string"))
+        : [];
+      if (!had.some((e) => e === key || e.startsWith(`${key}#`))) {
+        const { data: marked, error: markErr } = await supabase
+          .from("jobs")
+          .update({ dismissed_task_keys: [...had, entry] })
+          .eq("id", row.job_id)
+          .select("id");
+        if (markErr || !marked?.length) reportError("deleteTask:dismissKey", markErr ?? new Error("zero rows"), { taskId: id, jobId: row.job_id, key });
+      }
     }
   }
   revalidateTaskViews(opts?.category, opts?.jobId);

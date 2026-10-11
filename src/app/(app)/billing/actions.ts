@@ -1,4 +1,5 @@
 "use server";
+import { isLiveQuote } from "@/lib/invoice-import-rule";
 import { revisionOf } from "@/lib/estimate/revision";
 import { revisedOriginalBilled } from "@/lib/billing/revision-billed";
 import { dbError } from "@/lib/db-error";
@@ -1436,14 +1437,15 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
 
   let quoteId = inv.quote_id;
   if (!quoteId && inv.job_id) {
-    const { data: q } = await supabase
-      .from("quotes")
-      .select("id")
-      .eq("job_id", inv.job_id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    quoteId = q?.id ?? null;
+    // THE JOB'S CONTRACT, NOT ITS NEWEST PAPER (audit v1085, carried): the accepted estimate, else the newest
+    // one the customer has seen — never a declined, expired or superseded one, and never a DRAFT (the
+    // revision Revise just made is the job's newest quote from the moment it is tapped, unsent and unpriced
+    // for the customer). Stricter than createInvoiceForJob's pick by the draft, on purpose: this copies lines
+    // onto a bill.
+    const { data: qs, error: qsErr } = await supabase.from("quotes").select("id, status").eq("job_id", inv.job_id).order("created_at", { ascending: false });
+    if (qsErr) return { ok: false, error: dbError(qsErr) };
+    const live = ((qs ?? []) as Array<{ id: string; status: string | null }>).filter((x) => isLiveQuote(x.status) && x.status !== "draft");
+    quoteId = (live.find((x) => x.status === "accepted") ?? live[0])?.id ?? null;
   }
   if (!quoteId) return { ok: false, error: "No quote found on this invoice's job." };
   {

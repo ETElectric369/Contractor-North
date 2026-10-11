@@ -73,13 +73,13 @@ describe("accepting an estimate that already has its job", () => {
     const branch = create.slice(linked, birth);
     expect(branch).toContain('status !== "accepted") return { ok: true, id: q.job_id }'); // a sent/draft linked estimate: the old answer, no sync
     expect(create).toContain('.select("id, job_id, status,');
-    expect(branch).toContain("jobFollows(supabase, { jobId: q.job_id, sizeBefore: opts?.sizeBefore }, ctx)");
+    expect(branch).toContain("jobFollows(supabase, { jobId: q.job_id, sizeBefore }, ctx)"); // the figure before: the caller's, or read before a revision's pin
     expect(branch).toContain("createWorkOrderFromQuote(quoteId)");
     expect(branch).toContain("createMaterialListFromQuote(quoteId)");
     // The paperwork FIRST (cn-v1084): the take-off may adopt a visit-born job's list and leave its task
     // parts to the materials sync, which must therefore run after it.
     expect(branch.indexOf("createMaterialListFromQuote(quoteId)")).toBeLessThan(branch.indexOf("jobFollows("));
-    expect(branch).toContain("return { ok: true, id: q.job_id, ...follow,"); // + the superseded original (0391)
+    expect(branch).toContain("return { ok: true, id: q.job_id, ...(said ? { said } : {}), ...(note ? { note } : {}),"); // the paperwork's words + the superseded original (0391)
     expect(create).not.toContain("if (q.job_id) return { ok: true, id: q.job_id };");
   });
 });
@@ -216,11 +216,11 @@ describe("the deferred items (cn-v1084)", () => {
   });
   it("the take-off adopts the job's own list (no estimate holds it) instead of making a second, compare-and-set, and leaves its task parts to the sync", () => {
     const takeOff = src("src/lib/estimate/take-off-from-quote.ts");
-    expect(takeOff).toContain('if (quote.job_id && (quote as { status?: string }).status === "accepted") {'); // a draft never adopts
+    expect(takeOff).toContain('if (quote.job_id && status === "accepted") {'); // a draft never adopts
     expect(takeOff).toContain('.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle()'); // the canonical pick, as canonicalListIdForJob makes it
     expect(takeOff).toContain("if (canonical && (canonical.quote_id === null || fromOriginal)) {"); // or the list of the estimate it revises (0391)
     expect(takeOff).toContain('let tq = supabase.from("material_lists").update({ quote_id: quote.id }).eq("id", canonical.id);');
-    expect(takeOff).toContain('tq = fromOriginal ? tq.eq("quote_id", revises as string) : tq.is("quote_id", null);'); // compare-and-set either way
+    expect(takeOff).toContain('tq = fromOriginal ? tq.eq("quote_id", canonical.quote_id as string) : tq.is("quote_id", null);'); // compare-and-set either way
     expect(takeOff).toContain('const { data: took, error: tErr } = await tq.select("id");');
     expect(takeOff).toContain('reportError("takeOffFromQuote:adopt"');
     expect(takeOff).toContain("if (adopted) continue;");

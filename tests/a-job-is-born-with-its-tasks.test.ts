@@ -60,7 +60,7 @@ describe("the customer's own Accept link", () => {
     expect(finish).toMatch(/takeOffFromQuote\(sb, \{ quoteId: q\.id, orgId: who\.orgId, userId: who\.userId \}\)/);
   });
   it("rings the office LAST and ALWAYS, on the server, so a closed tab loses neither", () => {
-    expect(finish).toMatch(/\} finally \{[\s\S]*await notifyQuoteAccepted\(token\);/);
+    expect(finish).toMatch(/\} finally \{[\s\S]*await notifyQuoteAccepted\(token, listSaid\);/);
     const page = src("src/app/q/[token]/accept.tsx");
     const accept = page.slice(page.indexOf("async function accept()"), page.indexOf("async function decline()"));
     const rpc = accept.indexOf('rpc("accept_public_quote"');
@@ -118,9 +118,11 @@ describe("the two paperwork rules live in lib, and the signed-in doors are thin"
     expect(rule).toContain('.select("id, description, quantity, unit, unit_price, sort_order, detail")');
     expect(rule).toContain("coerceTaskDetail(it.detail)");
     // the task branch pushes rows for the parts and then `continue`s past the plain-line mapping,
-    // and the labor test comes AFTER it (a task named "Labor …" is a task)
+    // and the labor test comes AFTER it (a task named "Labor …" is a task) — inside plainLineOf, the one
+    // reading of a plain line the sync shares (cn-v1087), which answers null for a task or a labor line.
     // 0390: the parts are keyed as they are listed (keyParts, ordinals for repeats); the task itself still never becomes a row.
-    expect(rule).toMatch(/if \(task\) \{[\s\S]*for \(const m of keyParts\(`line:\$\{it\.id\}`, task\.materials[\s\S]*continue;\n\s*\}\n\s*if \(isLabor\(it\)\) continue;/);
+    expect(rule).toMatch(/if \(task\) \{[\s\S]*for \(const m of keyParts\(`line:\$\{it\.id\}`, task\.materials[\s\S]*continue;\n\s*\}\n\s*const plain = plainLineOf\(it, findPl\);[^\n]*\n\s*if \(!plain\) continue;/);
+    expect(rule).toMatch(/export function plainLineOf\([\s\S]*if \(coerceTaskDetail\(line\.detail\)\) return null;[\s\S]*labor[\s\S]*return null;/);
   });
   it("materials/actions.ts no longer owns the take-off", () => {
     const door = src("src/app/(app)/materials/actions.ts");

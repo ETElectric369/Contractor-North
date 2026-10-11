@@ -65,7 +65,7 @@ describe("takeOffFromQuote — the job's own list is the list (cn-v1084)", () =>
       { id: "typed", list_id: "ml-visit", org_id: ORG, source_key: null, description: "14/2 romex", part_number: "W142", quantity: 2, sort_order: 1 }, // the visit's typed item, back as a plain line
     ];
     const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
-    expect(res).toMatchObject({ ok: true, id: "ml-visit", jobId: "job-1", adopted: true, skipped: 1 });
+    expect(res).toMatchObject({ ok: true, id: "ml-visit", jobId: "job-1", adopted: true, follow: { added: 0, carried: 1, recounted: [], removed: [], kept: [], countsDiffer: [] } });
     expect(db.inserted.material_lists).toBeUndefined();
     expect(db.tables.material_lists[0].quote_id).toBe("q-1");
     expect(db.inserted.material_list_items ?? []).toEqual([]); // the romex is there already; the task's R1 is the sync's to add
@@ -75,7 +75,7 @@ describe("takeOffFromQuote — the job's own list is the list (cn-v1084)", () =>
     db.tables.material_lists.push({ id: "ml-visit", job_id: "job-1", quote_id: null, org_id: ORG, created_at: "2026-10-01" });
     db.tables.material_list_items = [{ id: "v1", list_id: "ml-visit", org_id: ORG, source_key: "task:t-l2#R1", description: "Transfer switch, 200A", part_number: "R1", quantity: 1, sort_order: 4 }];
     const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
-    expect(res).toMatchObject({ ok: true, adopted: true, skipped: 0 });
+    expect(res).toMatchObject({ ok: true, adopted: true, follow: { added: 1, carried: 0 } });
     expect(db.inserted.material_list_items.map((r) => [r.description, r.sort_order, r.source_key ?? null])).toEqual([["14/2 romex", 5, null]]);
   });
   it("a REVISION (0391) adopts the list of the estimate it revises — compare-and-set on that estimate's id — and leaves the task parts to the sync", async () => {
@@ -91,7 +91,7 @@ describe("takeOffFromQuote — the job's own list is the list (cn-v1084)", () =>
   });
   it("a catalog org's kit groups are not seeded again onto an adopted list (the crew's bought marks are on them)", () => {
     const takeOff = fs.readFileSync(path.join(process.cwd(), "src/lib/estimate/take-off-from-quote.ts"), "utf8");
-    expect(takeOff).toContain('if (settings.estimating_mode === "catalog" && !adopted) {');
+    expect(takeOff).toContain('if (settings.estimating_mode === "catalog" && !adoptedFromOriginal) {'); // a job-own (visit) list never had them: seeded
   });
   it("a DRAFT or sent estimate never adopts (nothing would add its parts): a fresh list, as before", async () => {
     const db = world(lines); // status undefined: not accepted

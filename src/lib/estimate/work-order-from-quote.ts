@@ -26,7 +26,7 @@ export async function workOrderFromQuote(supabase: SupabaseClient, who: WorkOrde
   const { quoteId, orgId } = who;
   const { data: quote, error: qErr } = await supabase
     .from("quotes")
-    .select("id, quote_number, title, job_id, customer_id, notes")
+    .select("id, quote_number, title, job_id, customer_id, notes, status, revises_quote_id")
     .eq("id", quoteId)
     .maybeSingle();
   if (qErr) return { ok: false, error: qErr.message };
@@ -39,6 +39,12 @@ export async function workOrderFromQuote(supabase: SupabaseClient, who: WorkOrde
     .limit(1)
     .maybeSingle();
   if (existing) return { ok: true, id: existing.id, jobId: quote.job_id ?? null };
+  // A REPLACED ESTIMATE, OR A REVISION NOT YET ACCEPTED, MAKES NO WORK ORDER (audit v1085, carried): the
+  // crew would carry two scopes for one job. The revision's own paperwork comes with its acceptance.
+  const status = (quote as { status?: string | null }).status;
+  if (status === "superseded") return { ok: false, error: "This estimate was replaced by a revision — make the work order from that one." };
+  if ((quote as { revises_quote_id?: string | null }).revises_quote_id && status !== "accepted")
+    return { ok: false, error: "This revision isn't accepted yet — accept it first." };
 
   let linesQ = supabase.from("quote_line_items").select("description, quantity, unit, sort_order").eq("quote_id", quoteId);
   if (orgId) linesQ = linesQ.eq("org_id", orgId);

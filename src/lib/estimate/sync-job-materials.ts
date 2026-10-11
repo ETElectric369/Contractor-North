@@ -3,7 +3,7 @@ import { dbError } from "@/lib/db-error";
 import { keyParts, materialKey, type LineRow } from "./born-with-tasks";
 import { coerceTaskDetail } from "./task-lines";
 import { GONE_KEY, LINE_KEY, VISIT_KEY } from "./sync-job-tasks";
-import { readPriceBook, taskPartRow } from "./take-off-from-quote";
+import { HOW_MANY, few, plainLineOf, plainRowHalf, plural, readPriceBook, taskPartRow } from "./take-off-from-quote";
 
 /**
  * THE MATERIALS LIST FOLLOWS THE ESTIMATE (0390, 2026-10-10).
@@ -105,9 +105,9 @@ const visitTaskOf = (key: string): string | null => (key.startsWith(VISIT_KEY) &
 /** Bought, or a tool: his, and it stays. */
 export const isHisRow = (r: Pick<ListPartRow, "purchased" | "is_tool">): boolean => r.purchased === true || r.is_tool === true;
 
-/** How an UNKEYED row is recognised as the same part: by code, else by its words (slugged like a key). */
-export const unkeyedHalf = (r: { part_number: string | null; description: string }): string =>
-  partHalf(materialKey("x", r.part_number, r.description.replace(/ · how many\?$/, "")));
+/** How an UNKEYED row is recognised as the same part: by code, else by its words (slugged like a key) —
+ *  the take-off's own reading (plainRowHalf), so a plain line and its row match the same way everywhere. */
+export const unkeyedHalf = (r: { part_number: string | null; description: string }): string => plainRowHalf(r);
 
 export interface CountDiffers {
   description: string;
@@ -131,7 +131,12 @@ export interface PartSyncPlan {
   redismiss: string[];
   /** A kept or re-keyed row whose count is not the estimate's: said, never rewritten. */
   countsDiffer: CountDiffers[];
+  /** A placeholder row ("… · how many?", riding as one, not his) whose part now has a count: filled in. */
+  fill: Array<{ id: string; description: string; qty: number }>;
 }
+
+/** A row as the plan compares it: the keyed rows carry purchased/is_tool, a hand row is not his by definition. */
+type RowLike = Pick<ListPartRow, "id" | "description" | "quantity"> & Partial<Pick<ListPartRow, "purchased" | "is_tool">>;
 
 /** THE PLAN, pure. `hand` = unkeyed rows that are not his: they may be a wanted part's row. */
 export function planPartSync(
@@ -144,8 +149,17 @@ export function planPartSync(
   const haveKeys = new Set(have.map((r) => r.source_key)); // live and tombstoned alike: neither is inserted again
   const currentLines = new Set(wanted.map((p) => lineHalf(p.key)));
   const countsDiffer: CountDiffers[] = [];
-  const differs = (r: Pick<ListPartRow, "description" | "quantity">, p: KeyedPart) => {
-    if (p.qty !== null && Number(r.quantity) !== p.qty) countsDiffer.push({ description: r.description, shows: r.quantity, estimate: p.qty });
+  const fill: PartSyncPlan["fill"] = [];
+  const differs = (r: RowLike, p: KeyedPart) => {
+    if (p.qty === null || Number(r.quantity) === p.qty) return;
+    // THE ANSWER REACHES THE ROW (audit v1085, carried): a part the visit listed without a count ("how
+    // many?", riding as one) takes the count the estimate gives it — only that untouched placeholder, never
+    // a count someone typed (he keeps the words but not the 1) and never a bought or tool row.
+    if (!isHisRow({ purchased: r.purchased ?? null, is_tool: r.is_tool ?? null }) && r.description.endsWith(HOW_MANY) && Number(r.quantity) === 1 && p.qty !== 1) {
+      fill.push({ id: r.id, description: r.description.slice(0, -HOW_MANY.length), qty: p.qty });
+      return;
+    }
+    countsDiffer.push({ description: r.description, shows: r.quantity, estimate: p.qty });
   };
 
   // Kept by key: counts compared.
@@ -159,7 +173,7 @@ export function planPartSync(
   const unmatched = wanted.filter((p) => !haveKeys.has(p.key) && !dismissed.has(p.key));
   const rekey: PartSyncPlan["rekey"] = [];
   const claimed = new Set<string>();
-  const take = (r: Pick<ListPartRow, "id" | "description" | "quantity">, i: number) => {
+  const take = (r: RowLike, i: number) => {
     const p = unmatched[i];
     unmatched.splice(i, 1);
     rekey.push({ id: r.id, source_key: p.key });
@@ -167,7 +181,7 @@ export function planPartSync(
     differs(r, p);
   };
   /** Claim by the part half: an equal count first; any count unless `equalOnly`. */
-  const claimHalf = (r: Pick<ListPartRow, "id" | "description" | "quantity">, half: string, equalOnly: boolean) => {
+  const claimHalf = (r: RowLike, half: string, equalOnly: boolean) => {
     if (claimed.has(r.id)) return;
     const same = (p: KeyedPart) => partHalf(p.key) === half;
     const equal = unmatched.findIndex((p) => same(p) && p.qty !== null && Number(r.quantity) === p.qty);
@@ -238,6 +252,7 @@ export function planPartSync(
     consumed,
     redismiss,
     countsDiffer,
+    fill,
   };
 }
 
@@ -257,6 +272,8 @@ export interface MaterialsSyncResult {
   /** Wanted parts a dismissal under a gone line barred (he deleted that part before), by name. */
   leftOff: string[];
   countsDiffer: CountDiffers[];
+  /** Placeholder rows ("how many?") that took the estimate's count, by name. */
+  filled?: string[];
   error?: string;
 }
 
@@ -270,6 +287,7 @@ const add = (a: MaterialsSyncResult, b: MaterialsSyncResult): MaterialsSyncResul
   keptNames: [...a.keptNames, ...b.keptNames],
   leftOff: [...a.leftOff, ...b.leftOff],
   countsDiffer: [...a.countsDiffer, ...b.countsDiffer],
+  ...(a.filled?.length || b.filled?.length ? { filled: [...(a.filled ?? []), ...(b.filled ?? [])] } : {}),
   ...(a.error || b.error ? { error: [a.error, b.error].filter(Boolean).join(" ") } : {}),
 });
 
@@ -314,22 +332,12 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     });
   // THE ESTIMATE'S OWN PLAIN-LINE ROWS ARE NOT HAND ROWS (audit v1085): the take-off wrote them
   // unkeyed (a plain line is not a task), and a task part with the same code would otherwise claim
-  // one — and the sync remove it when the task line went. One row per plain line, by code else words.
-  // Exactly as the take-off wrote the row (take-off-from-quote): the FIRST "[CODE]" is the code, the words
-  // are the text without it, the row's part number is the book's code when the book knows it, and a
-  // labor line never made a row.
+  // one — and the sync remove it when the task line went. One row per plain line, by code else words,
+  // read EXACTLY as the take-off wrote the row — its own reading, plainLineOf (take-off-from-quote).
   const plainHalves = new Map<string, number>();
-  const CODE_RE = /\[([^\]]+)\]/;
   for (const l of (lines ?? []) as Array<{ description: string | null; detail: unknown; unit?: string | null }>) {
-    if (coerceTaskDetail(l.detail)) continue;
-    const text = String(l.description ?? "");
-    if (String(l.unit ?? "").toLowerCase() === "hr" || /^\s*labor\b/i.test(text)) continue;
-    const m = text.match(CODE_RE);
-    const code = m ? m[1].trim() : null;
-    const cleanDesc = text.replace(CODE_RE, "").trim();
-    const pl = findPl(code, cleanDesc);
-    const half = unkeyedHalf({ part_number: pl?.code ?? code ?? null, description: cleanDesc || text });
-    plainHalves.set(half, (plainHalves.get(half) ?? 0) + 1);
+    const p = plainLineOf(l, findPl);
+    if (p) plainHalves.set(p.half, (plainHalves.get(p.half) ?? 0) + 1);
   }
   const hand: HandRow[] = all.filter((r) => {
     if (r.source_key || isHisRow(r)) return false;
@@ -366,6 +374,19 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
     if (!data?.length) return { ...NONE, rekeyed, error: "A part could not be matched to its line." };
     rekeyed++;
+  }
+
+  // THE ANSWER REACHES THE ROW: conditional on the placeholder being untouched still (count 1, not bought,
+  // not a tool) — a count typed or a buy made meanwhile is his, and the difference is said instead.
+  const filled: string[] = [];
+  for (const f of plan.fill) {
+    const { data, error } = await org(
+      sb.from("material_list_items").update({ quantity: f.qty, description: f.description }).eq("id", f.id).eq("list_id", listId).eq("purchased", false).eq("is_tool", false).eq("quantity", 1),
+      who.orgId,
+    ).select("id");
+    if (error) return { ...NONE, rekeyed, error: dbError(error) };
+    if (data?.length) filled.push(f.description);
+    else plan.countsDiffer.push({ description: f.description, shows: 1, estimate: f.qty });
   }
 
   for (const t of plan.tombstone) {
@@ -420,7 +441,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     if (inserted !== newRows.length) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, inserted, error: `${newRows.length - inserted} of ${newRows.length} parts did not save.` };
   }
 
-  return { inserted, rekeyed, removed, removedNames, kept, keptNames, leftOff: plan.leftOff, countsDiffer: plan.countsDiffer };
+  return { inserted, rekeyed, removed, removedNames, kept, keptNames, leftOff: plan.leftOff, countsDiffer: plan.countsDiffer, ...(filled.length ? { filled } : {}) };
 }
 
 /** EVERY ACCEPTED ESTIMATE OF THE JOB that has a list, each brought in step. */
@@ -432,9 +453,6 @@ export async function syncJobMaterials(sb: SupabaseClient, who: MaterialsSyncWho
   return total;
 }
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const few = (names: string[]): string => (names.length ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""})` : "");
-
 /** What the estimate's materials list did, as a sentence — or null when nothing changed. */
 export function materialsWords(r: MaterialsSyncResult, lead = "The estimate's materials list follows too"): string | null {
   const bits: string[] = [];
@@ -443,6 +461,7 @@ export function materialsWords(r: MaterialsSyncResult, lead = "The estimate's ma
   if (r.removed) bits.push(`${r.removed} removed${few(r.removedNames)}`);
   if (r.kept) bits.push(`${r.kept} kept${few(r.keptNames)} — bought, or a tool`);
   if (r.leftOff.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the list before`);
+  if (r.filled?.length) bits.push(`${plural(r.filled.length, "count", "counts")} filled in${few(r.filled)}`);
   for (const c of r.countsDiffer.slice(0, 3)) bits.push(`${c.description} shows ${c.shows ?? "no count"}, the estimate says ${c.estimate}`);
   if (r.countsDiffer.length > 3) bits.push(`${r.countsDiffer.length - 3} more counts differ`);
   return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;

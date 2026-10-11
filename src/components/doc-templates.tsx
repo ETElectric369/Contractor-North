@@ -1,3 +1,4 @@
+import { discountRowLabel } from "@/lib/invoice-math";
 import { Zap } from "lucide-react";
 import { LOGO_SIZE } from "@/lib/doc-style";
 import { addressHasCityStateZipTail, siteLines, type ResolvedSite } from "@/lib/site-address";
@@ -274,7 +275,7 @@ export function DocTotals({
         <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
         {(discounts ?? []).map((d, i) => (
           <div key={i} className="flex justify-between gap-3 text-slate-600" data-doc-discount="">
-            <span className="min-w-0">{d.label && /^discount/i.test(d.label.trim()) ? d.label : `Discount${d.label ? ` — ${d.label}` : ""}`}</span>
+            <span className="min-w-0">{discountRowLabel(d.label)}</span>
             <span className="whitespace-nowrap">−{formatCurrency(Math.abs(d.amount))}</span>
           </div>
         ))}

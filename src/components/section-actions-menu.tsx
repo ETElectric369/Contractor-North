@@ -7,6 +7,7 @@ import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-m
 import type { NavTree, TreeNode } from "@/lib/nav-tree";
 import { resolveNavTree, type BloomNode } from "./app-shell/glass-bloom";
 import { executeAction } from "@/lib/actions/execute";
+import { useToast } from "@/components/toast";
 
 /** The one menu-row style — modal-owning items composed in as `children`
  *  (Credit / Edit etc. with `menuItem`) use it too, so every row in the panel
@@ -66,6 +67,7 @@ export function SectionActionsMenu({
   children?: React.ReactNode;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const { nodes } = resolveNavTree(tree);
   // resolveNavTree maps icon strings to components but doesn't carry the
   // danger/confirmText fields — recover them from the source tree by id.
@@ -154,6 +156,9 @@ export function SectionActionsMenu({
         setBusy(null);
         if (res.ok) {
           setOpen(false);
+          // A door that did more than open a page says so before the page changes (nothing silent): the
+          // take-off's words on an adopted list, or a list that is there with a part that could not be added.
+          for (const w of [(res as { said?: string }).said, (res as { note?: string }).note, res.error]) if (w) toast(w, "info");
           if (res.id && n.hrefPrefix) router.push(n.hrefPrefix + res.id);
           else if (n.href) router.push(n.href);
           else router.refresh();

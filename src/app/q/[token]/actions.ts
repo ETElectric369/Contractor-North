@@ -10,7 +10,7 @@ import { syncJobMaterials } from "@/lib/estimate/sync-job-materials";
 import { supersedeRevised } from "@/lib/estimate/revision";
 import { FINISH_WINDOW_MS } from "@/lib/estimate/finish-window";
 import { workOrderFromQuote } from "@/lib/estimate/work-order-from-quote";
-import { takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
+import { takeOffFromQuote, takeOffWords } from "@/lib/estimate/take-off-from-quote";
 
 /**
  * Fire-and-forget: ping office staff that a customer accepted a quote. Called by
@@ -18,7 +18,7 @@ import { takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
  * quote by its unguessable share token and only fires when it is actually
  * accepted — so the hook can't be used to send arbitrary notifications.
  */
-export async function notifyQuoteAccepted(token: string): Promise<void> {
+export async function notifyQuoteAccepted(token: string, /** What the crew's list did on this acceptance (takeOffWords), when it did anything. */ said: string | null = null): Promise<void> {
   try {
     if (!token) return;
     const sb = createServiceClient();
@@ -38,7 +38,7 @@ export async function notifyQuoteAccepted(token: string): Promise<void> {
     const staff = await orgStaffIds(q.org_id);
     const payload = {
       title: "Estimate accepted",
-      body: `${q.quote_number || "An estimate"} was accepted${who} — schedule the job.`,
+      body: `${q.quote_number || "An estimate"} was accepted${who} — schedule the job.${said ? ` ${said}` : ""}`,
       // Deep-link straight to the job so "schedule it right there" is one tap.
       url: jobId ? `/jobs/${jobId}` : "/quotes",
     };
@@ -74,6 +74,8 @@ export async function notifyQuoteAccepted(token: string): Promise<void> {
  * the office is rung regardless.
  */
 export async function finishPublicAcceptance(token: string): Promise<void> {
+  /** The crew's list followed this acceptance (a revision's plain rows re-counted, removed, kept): the office hears it. */
+  let listSaid: string | null = null;
   try {
     if (!token) return;
     const sb = createServiceClient();
@@ -108,6 +110,7 @@ export async function finishPublicAcceptance(token: string): Promise<void> {
     if (!wo.ok) reportError("finishPublicAcceptance:workOrder", new Error(wo.error ?? "refused"), { quoteId: q.id, jobId });
     const list = await takeOffFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!list.ok) reportError("finishPublicAcceptance:materials", new Error(list.error ?? "refused"), { quoteId: q.id, jobId });
+    else listSaid = takeOffWords(list); // the first destructive write on this door: never silent
     // A rebuilt or second estimate accepted through the link: its list follows its lines (0390) — on a
     // first birth the take-off just wrote every keyed row and this changes nothing.
     if (!sup.error) {
@@ -121,6 +124,6 @@ export async function finishPublicAcceptance(token: string): Promise<void> {
     reportError("finishPublicAcceptance", e);
   } finally {
     // The office hears either way (its own guards: accepted, within two minutes of the tap).
-    await notifyQuoteAccepted(token);
+    await notifyQuoteAccepted(token, listSaid);
   }
 }

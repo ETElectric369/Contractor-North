@@ -4,8 +4,8 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { HOW_MANY, takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
-import { syncQuoteMaterials } from "@/lib/estimate/sync-job-materials";
+import { HOW_MANY, takeOffFromQuote, takeOffWords } from "@/lib/estimate/take-off-from-quote";
+import { materialsWords, syncQuoteMaterials } from "@/lib/estimate/sync-job-materials";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
@@ -29,7 +29,7 @@ export interface DraftMaterial {
   source_key?: string | null;
 }
 
-export type Result = { ok: boolean; error?: string; id?: string };
+export type Result = { ok: boolean; error?: string; id?: string; /** What the door did beyond the obvious, in a sentence (never silent). */ said?: string };
 
 /** The three columns a tech never sees and never writes. Everything else on a line — what it is,
  *  how many, the catalog #, whether it's been bought — is the crew's as much as the office's. */
@@ -558,6 +558,9 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   if (!user) return { ok: false, error: "Not signed in." };
   const res = await takeOffFromQuote(supabase, { quoteId, userId: user.id, orgId: null });
   if (res.ok) {
+    // WHAT THE TAKE-OFF DID TO THE CREW'S LIST IS SAID (Erik 2026-10-11): on an adopted list the plain
+    // lines were matched, re-counted, removed or kept — never in silence.
+    const said: string[] = [takeOffWords(res)].filter((w): w is string => !!w);
     // AN ADOPTED LIST (cn-v1084): the take-off took over the job's own list and left the estimate's
     // task parts to the sync, which knows the visit's rows — so the sync runs here, as it does on the
     // acceptance doors. A failure is reported and said; the list itself is there.
@@ -567,13 +570,16 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
         reportError("createMaterialListFromQuote:sync", new Error(mats.error), { quoteId, listId: res.id });
         revalidatePath("/materials");
         revalidatePath(`/jobs/${res.jobId}`);
-        return { ok: true, id: res.id, error: `The list is the job's now, but the estimate's parts could not be added (${mats.error}). Open it and check.` };
+        return { ok: true, id: res.id, ...(said.length ? { said: said.join(" ") } : {}), error: `The list is the job's now, but the estimate's parts could not be added (${mats.error}). Open it and check.` };
       }
+      const w = materialsWords(mats, "The estimate's task parts");
+      if (w) said.push(w);
     }
     revalidatePath("/materials");
     if (res.jobId) revalidatePath(`/jobs/${res.jobId}`);
+    return { ok: true, ...(res.id ? { id: res.id } : {}), ...(said.length ? { said: said.join(" ") } : {}) };
   }
-  return { ok: res.ok, ...(res.error ? { error: res.error } : {}), ...(res.id ? { id: res.id } : {}) };
+  return { ok: false, ...(res.error ? { error: res.error } : {}), ...(res.id ? { id: res.id } : {}) };
 }
 
 /** Tolerant parse of a JSON array the model emitted: strips any code fences,
