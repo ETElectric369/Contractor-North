@@ -133,9 +133,10 @@ describe("tasksFromVisit — Start The Job on an inspection", () => {
       { source_key: "task:t1", code: "BRK50", name: "BRK50", qty: 2, cost: null },
       { source_key: "task:t1", code: null, name: "6/3 SER", qty: null, cost: null },
     ]);
+    // Each carries its key (0390) so the job's buy list can find the row again.
     expect(partsAsCaptureItems(b.parts)).toEqual([
-      { id: "task:t1:0", description: "BRK50", quantity: 2, unit: "ea", code: "BRK50" },
-      { id: "task:t1:1", description: "6/3 SER", quantity: null, unit: "ea", code: null },
+      { id: "task:t1:0", description: "BRK50", quantity: 2, unit: "ea", code: "BRK50", source_key: "task:t1#BRK50" },
+      { id: "task:t1:1", description: "6/3 SER", quantity: null, unit: "ea", code: null, source_key: "task:t1#6-3-ser" },
     ]);
   });
 

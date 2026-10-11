@@ -146,3 +146,54 @@ describe("a task he deleted by hand stays gone", () => {
     expect(rule).toContain("planLineSync(wanted, have, dismissed)");
   });
 });
+
+describe("the buy list follows too (0390)", () => {
+  it("jobFollows runs the tasks rule, then the materials rule, and says both", () => {
+    const fn = body(actions, "async function jobFollows(");
+    const tasks = fn.indexOf("syncJobTasks(");
+    const mats = fn.indexOf("syncJobMaterials(");
+    expect(tasks).toBeGreaterThan(-1);
+    expect(mats).toBeGreaterThan(tasks);
+    expect(fn).toContain("materialsWords(mats)");
+    expect(fn).toContain('reportError("jobFollowsEstimate:materials"');
+    expect(fn).toContain('revalidatePath("/materials")');
+  });
+  it("the customer's own Accept link syncs the buy list after the take-off", () => {
+    const finish = body(src("src/app/q/[token]/actions.ts"), "export async function finishPublicAcceptance(");
+    const takeOff = finish.indexOf("takeOffFromQuote(");
+    const mats = finish.indexOf("syncJobMaterials(");
+    expect(mats).toBeGreaterThan(takeOff);
+    expect(finish).toContain('reportError("finishPublicAcceptance:materialsSync"');
+  });
+  it("a part he deletes by hand stays gone: the delete door reads the key first and dismisses it through the crew-safe door (0390)", () => {
+    const fn = body(src("src/app/(app)/materials/actions.ts"), "export async function deleteMaterialItem(");
+    const read = fn.indexOf('select("source_key")');
+    const del = fn.indexOf(".delete()");
+    expect(read).toBeGreaterThan(-1);
+    expect(del).toBeGreaterThan(read);
+    expect(fn).toContain('rpc("dismiss_material_key", { p_list_id: listId, p_key: key })');
+    expect(fn).toContain('reportError("deleteMaterialItem:dismissKey"');
+    const sql = src("supabase/migrations/0390_a_part_remembers_its_line.sql");
+    expect(sql).toContain("create or replace function public.dismiss_material_key(p_list_id uuid, p_key text)");
+    expect(sql).toContain("security definer");
+    expect(sql).toContain("and (public.is_org_staff() or job_id is not null)");
+    expect(sql).toContain("revoke execute on function public.dismiss_material_key(uuid, text) from public, anon;");
+  });
+  it("a visit's parts carry their key onto the list, through the one insert", () => {
+    const born = src("src/lib/estimate/born-with-tasks.ts");
+    expect(born).toContain("source_key: keys.get(p) ?? materialKey(p.source_key, p.code, p.name)"); // keyParts' ordinals, the same as the take-off
+    const mats = src("src/app/(app)/materials/actions.ts");
+    expect(mats).toContain("source_key: i.source_key ?? null");
+    expect(mats).toContain("...(item.source_key ? { source_key: item.source_key } : {})");
+  });
+  it("the take-off and the sync write one row shape, from one book lookup", () => {
+    const takeOff = src("src/lib/estimate/take-off-from-quote.ts");
+    expect(takeOff).toContain("export function taskPartRow(");
+    expect(takeOff).toContain("export async function readPriceBook(");
+    expect(takeOff).toContain("keyParts(`line:${it.id}`, task.materials.filter((x) => x.name.trim()))"); // ordinals for repeats, the same helper the sync uses
+    const sync = src("src/lib/estimate/sync-job-materials.ts");
+    expect(sync).toContain("taskPartRow(listId, who.orgId,");
+    expect(sync).toContain("readPriceBook(sb, who.orgId)");
+    expect(sync).toContain('.eq("purchased", false).eq("is_tool", false), who.orgId).select("id")'); // the conditional, org-scoped remove
+  });
+});

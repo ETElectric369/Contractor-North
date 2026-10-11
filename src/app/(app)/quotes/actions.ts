@@ -45,6 +45,7 @@ import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } 
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
 import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
 import { estimateLines, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
+import { materialsWords, syncJobMaterials } from "@/lib/estimate/sync-job-materials";
 import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
@@ -434,21 +435,29 @@ async function jobBehindQuote(
   return { jobId, sizeBefore: est.error ? undefined : est.minutes };
 }
 
-/** Run the one rule (lib/estimate/sync-job-tasks) and say what the job's list did — or that it could not. */
+/** Run the two rules — the job's tasks (lib/estimate/sync-job-tasks), then its buy list
+ *  (lib/estimate/sync-job-materials, 0390) — and say what they did, or that one could not. */
 async function jobFollows(
   supabase: any,
   who: { jobId: string; sizeBefore?: number | null },
   ctx: { orgId: string | null; userId: string },
 ): Promise<{ said?: string; note?: string }> {
   const res = await syncJobTasks(supabase, { jobId: who.jobId, orgId: ctx.orgId, createdBy: ctx.userId, sizeBefore: who.sizeBefore });
+  const mats = await syncJobMaterials(supabase, { jobId: who.jobId, orgId: ctx.orgId, userId: ctx.userId });
   revalidatePath(`/jobs/${who.jobId}`);
   revalidatePath("/schedule");
+  revalidatePath("/materials");
+  const notes: string[] = [];
   if (res.error) {
     reportError("jobFollowsEstimate", new Error(res.error), { jobId: who.jobId });
-    return { note: `The job's list could not follow this change (${res.error}). Check its tasks.` };
+    notes.push(`The job's list could not follow this change (${res.error}). Check its tasks.`);
   }
-  const said = syncWords(res);
-  return said ? { said } : {};
+  if (mats.error) {
+    reportError("jobFollowsEstimate:materials", new Error(mats.error), { jobId: who.jobId });
+    notes.push(`The buy list could not follow this change (${mats.error}). Check the job's materials.`);
+  }
+  const said = [res.error ? null : syncWords(res), mats.error ? null : materialsWords(mats)].filter(Boolean).join(" ");
+  return { ...(said ? { said } : {}), ...(notes.length ? { note: notes.join(" ") } : {}) };
 }
 
 /** Recompute subtotal/tax/total from the quote's line items. */

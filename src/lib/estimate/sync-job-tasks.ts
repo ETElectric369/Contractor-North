@@ -40,8 +40,8 @@ import { bornTasks, tasksFromLines, type BornTask, type LineRow } from "./born-w
  *    set), as does any figure he typed.
  *
  *  Declining an accepted estimate does NOT run this (deliberate: a walk-back to edit would churn the
- *  list and lose photos on open tasks); accepting again does. The materials list cannot follow a
- *  deleted line — its rows carry no line provenance (deferred, a column). Every write selects what it
+ *  list and lose photos on open tasks); accepting again does. The materials list follows the same
+ *  doors through sync-job-materials (0390 gave its rows their line). Every write selects what it
  *  wrote and counts it (the silent-write law); every read is org-scoped when the caller says who.
  */
 

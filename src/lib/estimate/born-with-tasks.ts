@@ -66,6 +66,28 @@ export interface Birth {
 
 export const EMPTY_BIRTH: Birth = { tasks: [], plannedMinutes: null, parts: [] };
 
+/** A PART'S KEY ON THE MATERIALS LIST (0390): its task's key plus the part — the book code when it has
+ *  one, else a slug of its words — so the sync finds the row again and the builder's new line ids can
+ *  be matched by the "#part" half. "line:<id>#R1", "line:<id>#bayberry-clips"; a SECOND part of the
+ *  same code on one task is "#R1~2" (the ordinal), so two rows never share a key and the sync can
+ *  count them. Every door that keys a part goes through keyParts, so the ordinals agree. */
+export function materialKey(sourceKey: string, code: string | null, name: string, ordinal = 1): string {
+  const c = String(code ?? "").trim().toUpperCase();
+  const part = c || String(name ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "part";
+  return `${sourceKey}#${part}${ordinal > 1 ? `~${ordinal}` : ""}`;
+}
+
+/** The keys of ONE task's parts, in order, with ordinals for repeats of the same code or words. */
+export function keyParts<T extends { code: string | null; name: string }>(sourceKey: string, parts: ReadonlyArray<T>): Array<T & { key: string }> {
+  const seen = new Map<string, number>();
+  return parts.map((p) => {
+    const first = materialKey(sourceKey, p.code, p.name);
+    const n = (seen.get(first) ?? 0) + 1;
+    seen.set(first, n);
+    return { ...p, key: materialKey(sourceKey, p.code, p.name, n) };
+  });
+}
+
 /** jobs.planned_minutes' own check (0229): null, or 0 < n ≤ 43200 (thirty working days). */
 export const PLANNED_MINUTES_MAX = 43_200;
 
@@ -163,7 +185,20 @@ export function tasksAnswered(pb: Playbook, answers: Record<string, unknown>): T
  *  haven't counted it" — and that door writes it as one that SAYS "how many?". Nothing has priced a
  *  visit's part yet, so it lands by its code and words, unit "ea", no vendor, no cost. */
 export function partsAsCaptureItems(parts: ReadonlyArray<BornPart>): CaptureItem[] {
-  return parts.map((p, i) => ({ id: `${p.source_key}:${i}`, description: p.name, quantity: p.qty, unit: "ea", code: p.code }));
+  // Keys per task, with ordinals for repeats (keyParts), the same way the take-off keys a line's parts.
+  const byTask = new Map<string, BornPart[]>();
+  for (const p of parts) byTask.set(p.source_key, [...(byTask.get(p.source_key) ?? []), p]);
+  const keys = new Map<BornPart, string>();
+  for (const [sk, ps] of byTask) keyParts(sk, ps).forEach((k, i) => keys.set(ps[i], k.key));
+  return parts.map((p, i) => ({
+    id: `${p.source_key}:${i}`,
+    description: p.name,
+    quantity: p.qty,
+    unit: "ea",
+    code: p.code,
+    // The row remembers its task and part (0390), so the list can follow the visit's tasks later.
+    source_key: keys.get(p) ?? materialKey(p.source_key, p.code, p.name),
+  }));
 }
 
 export interface BornWho {

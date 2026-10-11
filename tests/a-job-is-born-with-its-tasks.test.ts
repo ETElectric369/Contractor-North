@@ -119,7 +119,8 @@ describe("the two paperwork rules live in lib, and the signed-in doors are thin"
     expect(rule).toContain("coerceTaskDetail(it.detail)");
     // the task branch pushes rows for the parts and then `continue`s past the plain-line mapping,
     // and the labor test comes AFTER it (a task named "Labor …" is a task)
-    expect(rule).toMatch(/if \(task\) \{[\s\S]*for \(const m of task\.materials\)[\s\S]*continue;\n\s*\}\n\s*if \(isLabor\(it\)\) continue;/);
+    // 0390: the parts are keyed as they are listed (keyParts, ordinals for repeats); the task itself still never becomes a row.
+    expect(rule).toMatch(/if \(task\) \{[\s\S]*for \(const m of keyParts\(`line:\$\{it\.id\}`, task\.materials[\s\S]*continue;\n\s*\}\n\s*if \(isLabor\(it\)\) continue;/);
   });
   it("materials/actions.ts no longer owns the take-off", () => {
     const door = src("src/app/(app)/materials/actions.ts");

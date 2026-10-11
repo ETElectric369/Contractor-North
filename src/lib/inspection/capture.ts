@@ -80,6 +80,9 @@ export interface CaptureItem {
   /** Price-book code when the row came from the typeahead — so the estimator prices from the
    *  book instead of researching a description the app already owns. */
   code?: string | null;
+  /** The task part this row was born from ("task:<id>#<CODE|slug>", 0390) when a visit's tasks put it
+   *  on the job's list — carried onto material_list_items.source_key; never stored in the capture. */
+  source_key?: string | null;
   /** Set by CODE, never by the model, when a value arrived by voice and wasn't confirmed.
    *  Stripped before storage — see stripFlags. */
   flag?: string;

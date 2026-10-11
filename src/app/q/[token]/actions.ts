@@ -6,6 +6,7 @@ import { createNotifications } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { reportError } from "@/lib/observe";
 import { estimateLines, syncJobTasks } from "@/lib/estimate/sync-job-tasks";
+import { syncJobMaterials } from "@/lib/estimate/sync-job-materials";
 import { FINISH_WINDOW_MS } from "@/lib/estimate/finish-window";
 import { workOrderFromQuote } from "@/lib/estimate/work-order-from-quote";
 import { takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
@@ -96,6 +97,10 @@ export async function finishPublicAcceptance(token: string): Promise<void> {
     if (!wo.ok) reportError("finishPublicAcceptance:workOrder", new Error(wo.error ?? "refused"), { quoteId: q.id, jobId });
     const list = await takeOffFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!list.ok) reportError("finishPublicAcceptance:materials", new Error(list.error ?? "refused"), { quoteId: q.id, jobId });
+    // A rebuilt or second estimate accepted through the link: its list follows its lines (0390) — on a
+    // first birth the take-off just wrote every keyed row and this changes nothing.
+    const mats = await syncJobMaterials(sb, { jobId, orgId: who.orgId, userId: who.userId });
+    if (mats.error) reportError("finishPublicAcceptance:materialsSync", new Error(mats.error), { quoteId: q.id, jobId });
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/work-orders");
     revalidatePath("/materials");

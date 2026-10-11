@@ -5,6 +5,7 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
 import { firstThatWorks, kitsSelectRungs, kitLineView, linkedItemOf } from "@/lib/kit-line";
 import { coerceTaskDetail } from "./task-lines";
+import { keyParts } from "./born-with-tasks";
 
 /**
  * THE MATERIALS TAKE-OFF AN ACCEPTED ESTIMATE BECOMES — one rule, called by two doors.
@@ -45,6 +46,78 @@ export type TakeOffResult = { ok: boolean; error?: string; id?: string; jobId?: 
 
 /** The one-liner on the sheet for a part he named but never counted. */
 export const HOW_MANY = " · how many?";
+
+/** The company's price book as the take-off looks things up: by "[CODE]" (then its last token), then
+ *  by the normalized description. One read, shared by the birth (takeOffFromQuote) and the sync
+ *  (sync-job-materials), so a part is matched the same way whichever door lists it. */
+export async function readPriceBook(supabase: SupabaseClient, orgId: string | null): Promise<{ findPl: (code: string | null, cleanDesc: string) => any | null }> {
+  // The vendors under each code ride along (THE PROJECTION LAW): a line the estimator, Nort or a
+  // picker priced at a vendor names it ("Replace windows (Marvin) [830]"), and bookLineBuy costs it
+  // at THAT vendor, not at the code's own $830 allowance the customer was never quoted.
+  let bookQ = supabase
+    .from("price_list_items")
+    .select(`code, description, supplier, buy_price, unit, ${ITEM_OPTIONS_EMBED}`)
+    .eq("archived", false)
+    .eq("price_list_item_options.archived", false);
+  if (orgId) bookQ = bookQ.eq("org_id", orgId);
+  const { data: book } = await bookQ;
+  const normDesc = (x: string) => (x ?? "").toLowerCase().replace(/\[[^\]]*\]/g, "").replace(/[^a-z0-9]/g, "");
+  const byCode = new Map<string, any>();
+  const byDesc = new Map<string, any>();
+  for (const b of (book ?? []) as any[]) {
+    if (b.code) byCode.set(String(b.code).toUpperCase(), b);
+    const k = normDesc(b.description);
+    if (k && !byDesc.has(k)) byDesc.set(k, b);
+  }
+  // Match "[CODE]" exactly, then its last token ("[RACO 936]" → "936"), then the cleaned description.
+  const findPl = (code: string | null, cleanDesc: string): any => {
+    if (code) {
+      const up = code.toUpperCase();
+      if (byCode.has(up)) return byCode.get(up);
+      const last = up.split(/\s+/).pop();
+      if (last && byCode.has(last)) return byCode.get(last);
+    }
+    return byDesc.get(normDesc(cleanDesc)) ?? null;
+  };
+  return { findPl };
+}
+
+/** A part of a task line as a row on the sheet — ONE shape for the birth and the sync (0390). */
+export interface TaskPartRow {
+  list_id: string;
+  org_id?: string;
+  description: string;
+  part_number: string | null;
+  quantity: number;
+  unit: string;
+  vendor: string | null;
+  est_cost: number | null;
+  /** "line:<id>#<CODE|slug>" — how the sync finds this row again (0390). */
+  source_key: string;
+}
+
+/** THE TASK'S PART, NEVER THE TASK. A named part is a row by its code; the book names the unit and the
+ *  vendor; the cost is the buy the line was built with, else the book's, else it asks. A part he never
+ *  counted says so on the sheet and rides as one so the row can exist. */
+export function taskPartRow(
+  listId: string,
+  orgId: string | null,
+  part: { code: string | null; name: string; qty: number | null; cost: number | null; source_key: string },
+  pl: any | null,
+): TaskPartRow {
+  const name = part.name.trim();
+  return {
+    list_id: listId,
+    ...(orgId ? { org_id: orgId } : {}),
+    description: part.qty === null ? `${name}${HOW_MANY}` : name,
+    part_number: pl?.code ?? part.code ?? null,
+    quantity: part.qty ?? 1,
+    unit: pl?.unit || "ea",
+    vendor: pl?.supplier ?? null,
+    est_cost: part.cost ?? (pl ? bookLineBuy(pl, name).buyPrice : null),
+    source_key: part.source_key,
+  };
+}
 
 export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho): Promise<TakeOffResult> {
   const { quoteId, orgId } = who;
@@ -102,26 +175,9 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   }
 
   // The price book (RLS-scoped to this org, or scoped here) → resolve each material line to its REAL
-  // buy cost, catalog #, and vendor. Match on the "[CODE]" tag in the description first, then on the
-  // normalized description. Tools are archived, so they never land on an order sheet.
-  // The vendors under each code ride along (THE PROJECTION LAW): a line the estimator, Nort or a
-  // picker priced at a vendor names it ("Replace windows (Marvin) [830]"), and bookLineBuy costs it
-  // at THAT vendor, not at the code's own $830 allowance the customer was never quoted.
-  let bookQ = supabase
-    .from("price_list_items")
-    .select(`code, description, supplier, buy_price, unit, ${ITEM_OPTIONS_EMBED}`)
-    .eq("archived", false)
-    .eq("price_list_item_options.archived", false);
-  if (orgId) bookQ = bookQ.eq("org_id", orgId);
-  const { data: book } = await bookQ;
-  const normDesc = (s: string) => (s ?? "").toLowerCase().replace(/\[[^\]]*\]/g, "").replace(/[^a-z0-9]/g, "");
-  const byCode = new Map<string, any>();
-  const byDesc = new Map<string, any>();
-  for (const b of (book ?? []) as any[]) {
-    if (b.code) byCode.set(String(b.code).toUpperCase(), b);
-    const k = normDesc(b.description);
-    if (k && !byDesc.has(k)) byDesc.set(k, b);
-  }
+  // buy cost, catalog #, and vendor (readPriceBook: "[CODE]" first, then the normalized description;
+  // tools are archived, so they never land on an order sheet).
+  const { findPl } = await readPriceBook(supabase, orgId);
   // An order sheet is a BUY list. Lines that don't match the price book carry the estimate's SELL
   // price, so back the markup out to get cost — through the SAME rule that built the sell:
   // runEstimator prices off-book lines at customer level → default_markup_pct (the item rung is
@@ -150,16 +206,6 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   const CODE_RE = /\[([^\]]+)\]/;
   const isLabor = (it: any) =>
     String(it.unit ?? "").toLowerCase() === "hr" || /^\s*labor\b/i.test(String(it.description ?? ""));
-  // Match "[CODE]" exactly, then its last token ("[RACO 936]" → "936"), then the cleaned description.
-  const findPl = (code: string | null, cleanDesc: string): any => {
-    if (code) {
-      const up = code.toUpperCase();
-      if (byCode.has(up)) return byCode.get(up);
-      const last = up.split(/\s+/).pop();
-      if (last && byCode.has(last)) return byCode.get(last);
-    }
-    return byDesc.get(normDesc(cleanDesc)) ?? null;
-  };
 
   type Row = {
     list_id: string;
@@ -171,6 +217,8 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     vendor: string | null;
     est_cost: number | null;
     sort_order: number;
+    /** 0390: only a task line's part carries one; a plain line's row and a catalog kit's row are not the estimate's to follow. */
+    source_key?: string;
   };
   const rows: Row[] = [];
   let so = 0;
@@ -180,24 +228,11 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     // parts to buy, not a labor line to drop. Only a line that is not a task is tested for labor.
     const task = coerceTaskDetail(it.detail);
     if (task) {
-      // THE TASK'S PARTS, NEVER THE TASK. Each named part is a row by its code; the book names the
-      // unit and the vendor; the cost is the buy the line was built with, else the book's, else it
-      // asks. A part he never counted says so on the sheet and rides as one so the row can exist.
-      for (const m of task.materials) {
+      // THE TASK'S PARTS, NEVER THE TASK (taskPartRow — the one shape the sync writes too), each keyed
+      // to its line and part (0390) so a later change to the estimate can find it.
+      for (const m of keyParts(`line:${it.id}`, task.materials.filter((x) => x.name.trim()))) {
         const name = m.name.trim();
-        if (!name) continue;
-        const pl = findPl(m.code, name);
-        rows.push({
-          list_id: list.id,
-          ...stamp,
-          description: m.qty === null ? `${name}${HOW_MANY}` : name,
-          part_number: pl?.code ?? m.code ?? null,
-          quantity: m.qty ?? 1,
-          unit: pl?.unit || "ea",
-          vendor: pl?.supplier ?? null,
-          est_cost: m.cost ?? (pl ? bookLineBuy(pl, name).buyPrice : null),
-          sort_order: so++,
-        });
+        rows.push({ ...taskPartRow(list.id, orgId, { code: m.code, name, qty: m.qty, cost: m.cost, source_key: m.key }, findPl(m.code, name)), sort_order: so++ });
       }
       continue;
     }

@@ -73,6 +73,11 @@ describe("takeOffFromQuote — a task line puts its PARTS on the sheet, never it
     expect(clips).toMatchObject({ part_number: null, quantity: 1, unit: "ea", vendor: null, est_cost: null });
     const brk = rows[3];
     expect(brk).toMatchObject({ part_number: "BRK50", quantity: 2, unit: "ea", vendor: "Northline Supply", est_cost: 25 });
+    // 0390: a task line's part remembers its line and part; a plain line's row does not (it is not the estimate's to follow).
+    expect(sw.source_key).toBe("line:l2#R1");
+    expect(clips.source_key).toBe("line:l2#bayberry-clips");
+    expect(brk.source_key).toBe("line:l2#BRK50");
+    expect(rows[0].source_key).toBeUndefined();
   });
 
   it("plain lines are treated exactly as before: the [CODE] matched to the book, labor dropped", async () => {

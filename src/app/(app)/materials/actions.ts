@@ -24,6 +24,8 @@ export interface DraftMaterial {
   vendor: string | null;
   est_cost: number | null;
   is_tool?: boolean;
+  /** The task part this row was born from (0390), when the door knows it; stored on the row. */
+  source_key?: string | null;
 }
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -318,6 +320,8 @@ async function insertMaterialLine(supabase: Db, actor: Actor, listId: string, it
       est_cost: item.est_cost,
       is_tool: item.is_tool ?? false,
       sort_order: ((last?.sort_order as number) ?? -1) + 1,
+      // The task part this row came from (0390), when a door knows it — the visit's take-off does.
+      ...(item.source_key ? { source_key: item.source_key } : {}),
     },
     actor,
   );
@@ -360,6 +364,7 @@ export async function addCaptureItemsToJobList(
       unit: i.unit || "ea",
       vendor: null,
       est_cost: null,
+      source_key: i.source_key ?? null,
     });
     if (line.ok) added += 1;
     else failed.push(i.description.trim());
@@ -477,6 +482,11 @@ export async function deleteMaterialItem(
   listId: string,
 ): Promise<Result> {
   const supabase = await createClient();
+  // A PART HE DELETED STAYS GONE (0390): a row an estimate's task line put here would be born again
+  // by the next sync of the job with its estimate (lib/estimate/sync-job-materials) — so its key goes
+  // on the list's dismissed_keys first. Read before the delete; the key is gone with the row after.
+  const { data: row } = await supabase.from("material_list_items").select("source_key").eq("id", itemId).eq("list_id", listId).maybeSingle();
+  const key = (row as { source_key?: string | null } | null)?.source_key ?? null;
   const { data, error } = await supabase
     .from("material_list_items")
     .delete()
@@ -484,6 +494,13 @@ export async function deleteMaterialItem(
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
+  if (key) {
+    // Through the one door the crew can use too (dismiss_material_key, 0390: material_lists is
+    // staff-writable, a tech's direct update would match nothing). Atomic, idempotent. Best-effort: the
+    // delete stands; a failure here is reported, never a refusal of what already happened.
+    const { data: dismissed, error: markErr } = await supabase.rpc("dismiss_material_key", { p_list_id: listId, p_key: key });
+    if (markErr || dismissed !== true) reportError("deleteMaterialItem:dismissKey", markErr ?? new Error("not dismissed"), { itemId, listId, key });
+  }
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
 }
