@@ -114,7 +114,11 @@ export function eligibleLines(inv: AbInvoice, target: { kind: AlreadyBilledKind;
     const total = Number(l.line_total) || 0;
     if (l.import_source === "draw_credit" || isLump(l) || total === 0) return false;
     if (l.import_source != null && l.edited !== true) return false;
-    if (target.negative) return total < 0 && l.import_source == null && lineGroup(l, inv.invoice_kind) !== "credit";
+    if (target.negative) {
+      const g = lineGroup(l, inv.invoice_kind);
+      // A discount (0389) takes money off for a reason of its own; it is not where a return lands.
+      return total < 0 && l.import_source == null && g !== "credit" && g !== "discount";
+    }
     return total > 0 && countsAsWorkCompleted(l, inv.invoice_kind);
   });
   const rank = (l: AbLine) => (lineGroup(l, inv.invoice_kind) === want ? 0 : 1);

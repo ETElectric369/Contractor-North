@@ -8,7 +8,7 @@ import { Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { formatCurrency } from "@/lib/utils";
-import { applyCustomerCredit, createCustomerCredit, listCustomerCreditsForInvoice, markCreditRefunded } from "../actions";
+import { applyCustomerCredit, createCustomerCredit, deleteCustomerCredit, listCustomerCreditsForInvoice, markCreditRefunded, withdrawCustomerCredit } from "../actions";
 
 type OpenCredit = { id: string; amount: number; disposition: string; note: string | null; created_at: string; onThisInvoice: boolean };
 
@@ -39,6 +39,8 @@ export function CreditButton({
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  /** What the last account action did, in words (nothing silent). */
+  const [said, setSaid] = useState<string | null>(null);
   const [credits, setCredits] = useState<OpenCredit[]>([]);
   /**
    * WHAT THIS INVOICE CAN STILL TAKE — the number applyCustomerCredit checks against.
@@ -63,11 +65,13 @@ export function CreditButton({
   }, [open, loadCredits]);
 
   /** Run one account action, then re-read the list so the row reflects what landed. */
-  function act(run: () => Promise<{ ok: boolean; error?: string }>) {
+  function act(run: () => Promise<{ ok: boolean; error?: string; message?: string }>) {
     setError(null);
+    setSaid(null);
     start(async () => {
       const res = await run();
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (res.message) setSaid(res.message);
       await loadCredits();
       router.refresh();
     });
@@ -167,6 +171,7 @@ export function CreditButton({
       >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {said && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{said}</div>}
           {credits.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">On this customer&apos;s account</div>
@@ -191,7 +196,20 @@ export function CreditButton({
                       >
                         Mark Refunded
                       </button>
-                    ) : c.onThisInvoice ? null : !canApply(c) ? (
+                    ) : c.onThisInvoice ? (
+                      // THE WAY BACK (Erik, INV-089): a credit posted to stand in for a discount
+                      // could not be undone. Take It Back returns it to the account (it may be the
+                      // customer's real money, applied here from another bill) and this invoice is
+                      // owed again; Delete This Credit, below, is the second, explicit door.
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => act(() => withdrawCustomerCredit(c.id))}
+                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Take It Back
+                      </button>
+                    ) : !canApply(c) ? (
                       // WHY THIS ONE CAN'T MOVE HERE, IN THE ROW ITSELF. Both sentences are the
                       // server's own two refusals put in front of the click instead of after it,
                       // and both end with the thing that does work: a bill with room on it.
@@ -208,6 +226,22 @@ export function CreditButton({
                         className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                       >
                         Apply To This Invoice
+                      </button>
+                    )}
+                    {/* A credit that should never have existed (posted to stand in for a discount)
+                        is deleted only once it is OFF every invoice, and only on a confirm that names
+                        the amount: the money may be the customer's. */}
+                    {c.disposition === "credit" && !c.onThisInvoice && (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          if (!confirm(`Delete the ${formatCurrency(c.amount)} credit on this customer's account? This cannot be undone.`)) return;
+                          act(() => deleteCustomerCredit(c.id));
+                        }}
+                        className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:text-red-600 disabled:opacity-50"
+                      >
+                        Delete This Credit
                       </button>
                     )}
                   </li>

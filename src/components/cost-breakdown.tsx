@@ -15,6 +15,7 @@ export function CostBreakdown({ items, className = "" }: { items: InvoiceLine[];
   if (g.labor.lines.length) rows.push({ label: "Labor", amount: g.labor.subtotal });
   if (g.materials.lines.length) rows.push({ label: "Materials", amount: g.materials.subtotal });
   if (g.credits.lines.length) rows.push({ label: "Less previous billings", amount: g.credits.subtotal });
+  if (g.discounts.lines.length) rows.push({ label: "Discount", amount: g.discounts.subtotal });
   if (g.other.lines.length) rows.push({ label: "Other", amount: g.other.subtotal });
 
   return (

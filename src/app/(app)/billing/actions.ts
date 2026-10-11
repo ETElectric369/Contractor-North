@@ -30,7 +30,8 @@ import { embeddedJob, finishedDraftRefusal } from "@/lib/action-items/due-filter
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, noBillRateWarnings, withoutClaimedLabor } from "@/lib/labor-billing";
 import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsNotYetNetted, joinNumbers, laborRowIds, unbilledWorkForJob, type ClaimedSources } from "@/lib/unbilled-work";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
-import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS, kindFromPriceBook, pickableLineKind, LINE_KIND_LABEL, type PickableLineKind } from "@/lib/invoice-math";
+import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS, kindFromPriceBook, pickableLineKind, canBeDiscount, discountTooBig, roomForDiscount, DISCOUNT_KIND, LINE_KIND_LABEL, type PickableLineKind, type StoredLineKind } from "@/lib/invoice-math";
+import { deleteCredit, withdrawCredit } from "@/lib/billing/withdraw-credit";
 import { readPriceBookUnits } from "@/lib/price-book-kind";
 import { BRING_IN_NEW_WORK, contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { hoursWords, joinedSentence, leftOffSentence, planLaborOffer, type LaborJoin, type OwnLaborLine } from "@/lib/labor-offer";
@@ -375,6 +376,35 @@ export async function applyCustomerCredit(
 /** Close out a refund-flagged credit once accounting has actually paid it back. Only the
  *  refund disposition: a "keep on account" credit that is reducing an invoice would have its
  *  balance jump back up if this closed it, so that one is applied, not resolved. */
+/**
+ * TAKE A CREDIT BACK (Erik, 2026-10-10, INV-089): an open office-posted credit comes off the
+ * customer's account and the invoice it was posted from is owed again. The rule is
+ * lib/billing/withdraw-credit; this is the office's door onto it.
+ */
+export async function withdrawCustomerCredit(creditId: string): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const res = await withdrawCredit(ctx.supabase, creditId);
+  if (!res.ok) return res;
+  // The credit is off the bill; the bill must now say so, and a delivered copy is older than this.
+  const landed = await recalcInvoice(ctx.supabase, res.invoiceId);
+  if (!landed) return { ok: false, error: "The credit is back on the account, but this invoice did not recompute — reload the invoice." };
+  await stampInvoiceRevised(ctx.supabase, res.invoiceId, "withdrawCustomerCredit");
+  await bustDocPdf("invoice", res.invoiceId);
+  revalidateMoney(res.invoiceId);
+  return { ok: true, message: `Credit of ${formatCurrency(res.amount)} is back on the account — this invoice is owed again.` };
+}
+
+/** DELETE AN OFFICE CREDIT that is off every invoice (the one that should never have existed). */
+export async function deleteCustomerCredit(creditId: string): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const res = await deleteCredit(ctx.supabase, creditId);
+  if (!res.ok) return res;
+  revalidatePath("/crm");
+  return { ok: true, message: `The ${formatCurrency(res.amount)} credit is deleted.` };
+}
+
 export async function markCreditRefunded(creditId: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1133,13 +1163,19 @@ export async function addInvoiceItem(
    *  line say labor for a book item sold by the hour, materials for one that names a supplier.
    *  Omitted, the server reads the line's leading code against this org's price book by the same
    *  rule; no code, or an item that says neither, and the line says nothing. */
-  item: { description: string; quantity: number; unit: string; unit_price: number; kind?: PickableLineKind | null },
+  item: { description: string; quantity: number; unit: string; unit_price: number; kind?: PickableLineKind | typeof DISCOUNT_KIND | null },
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   if (Math.abs((item.quantity || 1) * (item.unit_price || 0)) > 9_999_999_999)
     return { ok: false, error: "That amount is too large." };
+  // A DISCOUNT TAKES MONEY OFF (0389; Erik, INV-089): its own kind, named for what it is, and
+  // never a positive amount under that name.
+  if (item.kind === DISCOUNT_KIND) {
+    if (!item.description?.trim()) return { ok: false, error: "Say what the discount is for." };
+    if (!canBeDiscount((item.quantity || 1) * (item.unit_price || 0))) return { ok: false, error: "A discount takes money off — give it an amount." };
+  }
   const { data: inv } = await supabase
     .from("invoices")
     .select("id, job_id, invoice_kind, status")
@@ -1154,6 +1190,14 @@ export async function addInvoiceItem(
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: can't add billable lines to a standard invoice on a draw job
+  }
+  // A DISCOUNT NEVER TAKES THE BILL BELOW $0 (the skeptic's probe: a negative subtotal, negative
+  // tax, and a sent bill flipping to "paid" with nothing paid). The room is the other lines' total.
+  if (item.kind === DISCOUNT_KIND) {
+    const { data: others, error: othersErr } = await supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId);
+    if (othersErr) return { ok: false, error: dbError(othersErr) };
+    const room = roomForDiscount((others ?? []).map((r: { line_total: unknown }) => r.line_total));
+    if (Math.abs((item.quantity || 1) * (item.unit_price || 0)) > room + 0.005) return { ok: false, error: discountTooBig(room) };
   }
   /**
    * A NEW LINE GOES AT THE END (Erik, 8/18: "i just added a line item for labor - brian and it
@@ -1180,8 +1224,8 @@ export async function addInvoiceItem(
    * backfill ran on the lines already out.
    * Neither, and the line stores nothing and is read by its words as it always was.
    */
-  const said = pickableLineKind(item.kind);
-  const lineKind = said ?? kindFromPriceBook(item, await readPriceBookUnits(supabase, ctx.orgId));
+  const said: StoredLineKind | null = item.kind === DISCOUNT_KIND ? DISCOUNT_KIND : pickableLineKind(item.kind);
+  const lineKind: StoredLineKind | null = said ?? kindFromPriceBook(item, await readPriceBookUnits(supabase, ctx.orgId));
   const row: Record<string, unknown> = {
     invoice_id: invoiceId,
     description: item.description,
@@ -1196,6 +1240,10 @@ export async function addInvoiceItem(
   if (error && lineKind && isMissingColumn(error, "line_kind")) {
     delete row.line_kind;
     ({ error } = await supabase.from("invoice_items").insert(row));
+  }
+  // 0389 not applied yet: the kind is refused by the 0342 check. Say so plainly rather than a raw error.
+  if (error && lineKind === DISCOUNT_KIND && String((error as { code?: string }).code ?? "") === "23514") {
+    return { ok: false, error: "Discounts aren't switched on yet. Try again after the next update." };
   }
   if (error) return { ok: false, error: dbError(error) };
   await stampInvoiceRevised(supabase, invoiceId, "addInvoiceItem");
@@ -1491,17 +1539,34 @@ async function fileEstimateLinesFromBook(supabase: any, orgId: string | null, in
 export async function setInvoiceItemKind(
   itemId: string,
   invoiceId: string,
-  kind: PickableLineKind | null,
+  kind: PickableLineKind | typeof DISCOUNT_KIND | null,
 ): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   if (!ctx.orgId) return { ok: false, error: "No company on this account." };
-  const next = kind === null ? null : pickableLineKind(kind);
-  if (kind !== null && !next) return { ok: false, error: "A line is Labor, Materials or Other." };
+  const next: StoredLineKind | null = kind === null ? null : kind === DISCOUNT_KIND ? DISCOUNT_KIND : pickableLineKind(kind);
+  if (kind !== null && !next) return { ok: false, error: "A line is Labor, Materials, Other or Discount." };
   const block = await requireLiveInvoice(supabase, invoiceId);
   if (block) return block;
   if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
+  // ONLY A LINE THAT TAKES MONEY OFF CAN BE A DISCOUNT (0389): read the line's own figures first.
+  if (next === DISCOUNT_KIND) {
+    const { data: line } = await supabase.from("invoice_items").select("line_total, import_source").eq("id", itemId).eq("invoice_id", invoiceId).maybeSingle();
+    if (!line) return { ok: false, error: "That line isn't on this invoice." };
+    // A hand line only: an imported return or credit is what it is, and an importer may refresh
+    // its figure. And the bill never goes below $0.
+    if (line.import_source || !canBeDiscount(line.line_total)) {
+      return { ok: false, error: "Only a hand-typed line that takes money off can be a discount — add one with Add A Discount." };
+    }
+    const { data: all, error: allErr } = await supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId);
+    if (allErr) return { ok: false, error: dbError(allErr) };
+    const sum = (all ?? []).reduce<number>((t, r: { line_total: unknown }) => t + (Number(r.line_total) || 0), 0);
+    if (sum < -0.005) {
+      const room = roomForDiscount((all ?? []).map((r: { line_total: unknown }) => r.line_total).filter((t) => Number(t) > 0));
+      return { ok: false, error: discountTooBig(room) };
+    }
+  }
   const { data: touched, error } = await supabase
     .from("invoice_items")
     .update({ line_kind: next })
@@ -3254,6 +3319,20 @@ export async function updateInvoiceItem(
   if (item.unit !== undefined) clean.unit = String(item.unit).trim().slice(0, 12) || "ea";
   if (item.unit_price !== undefined) clean.unit_price = item.unit_price || 0;
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
+  // A DISCOUNT STAYS A DISCOUNT (0389): an edit may not turn it into a charge, nor take the bill
+  // below $0. Read the row's own kind and figures, merge the patch, and judge the result.
+  if (item.quantity !== undefined || item.unit_price !== undefined) {
+    const { data: was } = await supabase.from("invoice_items").select("line_kind, quantity, unit_price").eq("id", itemId).eq("invoice_id", invoiceId).maybeSingle();
+    if (was && was.line_kind === DISCOUNT_KIND) {
+      const qty = item.quantity !== undefined ? item.quantity || 1 : Number(was.quantity) || 1;
+      const price = item.unit_price !== undefined ? item.unit_price || 0 : Number(was.unit_price) || 0;
+      if (!canBeDiscount(qty * price)) return { ok: false, error: "A discount takes money off — give it an amount." };
+      const { data: others, error: othersErr } = await supabase.from("invoice_items").select("id, line_total").eq("invoice_id", invoiceId).neq("id", itemId);
+      if (othersErr) return { ok: false, error: dbError(othersErr) };
+      const room = roomForDiscount((others ?? []).map((r: { line_total: unknown }) => r.line_total));
+      if (Math.abs(qty * price) > room + 0.005) return { ok: false, error: discountTooBig(room) };
+    }
+  }
   const { data: touched, error } = await supabase
     .from("invoice_items")
     .update(clean)

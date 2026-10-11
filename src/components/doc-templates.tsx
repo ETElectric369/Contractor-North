@@ -255,6 +255,7 @@ export function DocTotals({
   total,
   amountPaid,
   balance,
+  discounts,
 }: {
   subtotal: number;
   taxRate?: number | null;
@@ -262,12 +263,21 @@ export function DocTotals({
   total: number;
   amountPaid?: number;
   balance?: number;
+  /** DISCOUNTS (0389), printed between Subtotal and Tax: "Discount — traded for the deck boards
+   *  −$165.00". `subtotal` is then the lines BEFORE them; Tax and Total follow the net. */
+  discounts?: { label?: string | null; amount: number }[];
 }) {
   const hasBalance = balance != null;
   return (
     <div className="totals-block mt-4 flex justify-end">
       <div className="w-64 space-y-1 text-sm">
         <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
+        {(discounts ?? []).map((d, i) => (
+          <div key={i} className="flex justify-between gap-3 text-slate-600" data-doc-discount="">
+            <span className="min-w-0">{d.label && /^discount/i.test(d.label.trim()) ? d.label : `Discount${d.label ? ` — ${d.label}` : ""}`}</span>
+            <span className="whitespace-nowrap">−{formatCurrency(Math.abs(d.amount))}</span>
+          </div>
+        ))}
         <div className="flex justify-between text-slate-600">
           <span>Tax{taxRate != null && taxRate > 0 ? ` (${(taxRate * 100).toFixed(2)}%)` : ""}</span>
           <span>{formatCurrency(tax)}</span>

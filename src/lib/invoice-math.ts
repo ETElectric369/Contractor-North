@@ -332,6 +332,8 @@ export type LineBreakdown = {
   labor: { lines: InvoiceLine[]; subtotal: number };
   materials: { lines: InvoiceLine[]; subtotal: number };
   credits: { lines: InvoiceLine[]; subtotal: number };
+  /** Lines filed as a DISCOUNT (0389): negative, printed between Subtotal and Tax on the paper. */
+  discounts: { lines: InvoiceLine[]; subtotal: number };
   other: { lines: InvoiceLine[]; subtotal: number };
   /** True when there are labor OR material lines — i.e. worth showing the split. */
   hasBreakdown: boolean;
@@ -366,7 +368,7 @@ export function isHoursUnit(unit: string | null | undefined): boolean {
  * the customer's bill, the print, the /i link and the portal can never file one line in two places.
  * It is a classification only: it never changes a line's words, amount or order.
  */
-export type StoredLineKind = "labor" | "materials" | "other" | "credit";
+export type StoredLineKind = "labor" | "materials" | "other" | "credit" | "discount";
 /** The kinds the office's Kind chip offers (credit is the draw's own line, never picked by hand). */
 export const PICKABLE_LINE_KINDS = ["labor", "materials", "other"] as const;
 export type PickableLineKind = (typeof PICKABLE_LINE_KINDS)[number];
@@ -375,11 +377,47 @@ export const LINE_KIND_LABEL: Readonly<Record<StoredLineKind, string>> = {
   materials: "Materials",
   other: "Other",
   credit: "Credit",
+  discount: "Discount",
 };
+
+/** A DISCOUNT (0389): a line that takes money off, named for what it is. Only a NEGATIVE line may
+ *  be one — a positive amount under that name would be a charge the customer reads as a gift. */
+export const DISCOUNT_KIND = "discount" as const;
+/** Takes money off, in cents: a sub-cent "discount" is a $0.00 line, not a discount. */
+export const canBeDiscount = (lineTotal: unknown): boolean => Math.round((Number(lineTotal) || 0) * 100) / 100 < 0;
+/** A stored discount THAT STILL TAKES MONEY OFF. A 'discount' line edited to a positive amount is
+ *  read as an ordinary line everywhere (the safety net under the write guards). */
+export const isDiscountLine = (it: { line_kind?: string | null; line_total?: unknown }): boolean =>
+  storedLineKind(it.line_kind) === "discount" && canBeDiscount(it.line_total);
+/** What a discount may take off: the other lines' total, never more (a bill never goes below $0). */
+export function roomForDiscount(otherLineTotals: ReadonlyArray<unknown>): number {
+  const sum = otherLineTotals.reduce<number>((s, n) => s + (Number(n) || 0), 0);
+  return Math.max(0, Math.round(sum * 100) / 100);
+}
+/** The one refusal when a discount is bigger than the bill (addInvoiceItem, updateInvoiceItem, the Kind chip). */
+export const discountTooBig = (room: number): string =>
+  `That discount is more than the ${currencyText(room)} on this bill — enter ${currencyText(room)} or less.`;
+const currencyText = (n: number): string => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+
+/**
+ * THE PAPER'S SPLIT (0389): discount lines leave the list and print in the totals block, so the
+ * printed Subtotal is the lines BEFORE them (gross = stored net − discounts) and Tax and Total
+ * follow the stored net. ONE helper for the customer's document and the office's totals card.
+ */
+export function invoiceDiscountSplit<T extends { description?: string | null; line_kind?: string | null; line_total?: unknown }>(
+  lines: readonly T[],
+  storedSubtotal: number,
+): { listed: T[]; discounts: { label: string; amount: number }[]; gross: number } {
+  const discountLines = lines.filter(isDiscountLine);
+  if (!discountLines.length) return { listed: [...lines], discounts: [], gross: cents(storedSubtotal) };
+  const discounts = discountLines.map((l) => ({ label: String(l.description ?? ""), amount: cents(Number(l.line_total) || 0) }));
+  const total = cents(discounts.reduce((s, d) => s + d.amount, 0));
+  return { listed: lines.filter((l) => !isDiscountLine(l)), discounts, gross: cents(storedSubtotal - total) };
+}
 
 /** A stored line_kind, or null when there is none (or it is a word this app does not know). */
 export function storedLineKind(v: unknown): StoredLineKind | null {
-  return v === "labor" || v === "materials" || v === "other" || v === "credit" ? v : null;
+  return v === "labor" || v === "materials" || v === "other" || v === "credit" || v === "discount" ? v : null;
 }
 
 /** A kind a person (or a door) may set: Labor, Materials or Other. Anything else is null. */
@@ -507,9 +545,11 @@ export function kindFromPriceBook(
  * not settle needs the office to say what it is; that is a stored kind, not a longer word list.
  */
 export function handLineKind(line: { description?: string | null; unit?: string | null; line_kind?: string | null }): "labor" | "materials" | "credit" | null {
-  // WHAT THE LINE WAS SAID TO BE COMES FIRST (0342). "Other" said out loud is still Other: null.
+  // WHAT THE LINE WAS SAID TO BE COMES FIRST (0342). "Other" said out loud is still Other: null;
+  // a filed Discount (0389) is read by its stored kind before the words are ever asked, so to the
+  // words-rule it is likewise not labor, materials or a credit.
   const stored = storedLineKind(line.line_kind);
-  if (stored) return stored === "other" ? null : stored;
+  if (stored) return stored === "other" || stored === "discount" ? null : stored;
   const desc = String(line.description ?? "").trim();
   if (/less previous billings/i.test(desc)) return "credit";
   if (isHoursUnit(line.unit)) return "labor";
@@ -529,6 +569,7 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
     labor: { lines: [], subtotal: 0 },
     materials: { lines: [], subtotal: 0 },
     credits: { lines: [], subtotal: 0 },
+    discounts: { lines: [], subtotal: 0 },
     other: { lines: [], subtotal: 0 },
     hasBreakdown: false,
   };
@@ -561,7 +602,11 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
     const bucket: keyof LineBreakdown = stored
       ? stored === "credit"
         ? "credits"
-        : stored
+        : stored === "discount"
+          ? amt < 0
+            ? "discounts"
+            : "other" // a 'discount' that takes nothing off is not one (the write guards refuse it; this is the net)
+          : stored
       : src === "draw_credit" || worded === "credit"
         ? "credits"
         : src === "labor" || worded === "labor"
@@ -583,7 +628,7 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
    * carry something (or when an import genuinely produced the lines, which is the case the panel
    * was built for).
    */
-  const filled = [g.labor, g.materials, g.other, g.credits].filter((b) => b.lines.length > 0).length;
+  const filled = [g.labor, g.materials, g.other, g.credits, g.discounts].filter((b) => b.lines.length > 0).length;
   const fromImport = (items ?? []).some((it) => it.import_source === "labor" || it.import_source === "costs");
   g.hasBreakdown = (g.labor.lines.length > 0 || g.materials.lines.length > 0) && (filled > 1 || fromImport);
   return g;

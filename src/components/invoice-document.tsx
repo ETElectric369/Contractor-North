@@ -5,7 +5,7 @@ import { DENSITY_ROW, normalizeDocStyle, sheetStyleVars } from "@/lib/doc-style"
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
-import { customerLines, invoiceBalance, mergeSuppliesAndTax, paymentLedger, type InvoiceLine } from "@/lib/invoice-math";
+import { customerLines, invoiceBalance, invoiceDiscountSplit, mergeSuppliesAndTax, paymentLedger, type InvoiceLine } from "@/lib/invoice-math";
 import { paymentMethodLabel } from "@/lib/payment-method";
 import { sectionLines } from "@/lib/portal/line-kind";
 
@@ -112,7 +112,12 @@ export function InvoiceDocument({
   // "Supplies & tax" row prints as ONE "Supplies & Tax" line (INV-074). Same cents; the office
   // editor and the stored rows keep the full words, per receipt.
   const lines = mergeSuppliesAndTax(customerLines(items, supplierNames));
-  const sections = groupByKind ? sectionLines(lines, invoiceKind ?? null) : null;
+  // A DISCOUNT LEAVES THE LINE LIST (0389) and prints in the totals block — Subtotal / Discount —
+  // what for / Tax / Total — the way a bill reads anywhere. The Subtotal above it is the lines
+  // before the discount; the stored `subtotal` (the net) stays the arithmetic Tax and Total follow,
+  // so a discount is a price reduction and tax is on what the customer actually pays.
+  const { listed, discounts, gross: grossSubtotal } = invoiceDiscountSplit(lines, subtotal);
+  const sections = groupByKind ? sectionLines(listed, invoiceKind ?? null) : null;
   // Oldest first, with what was left after each. The Balance column only prints when the payments
   // add up to Amount Paid; a customer credit would make it end on a different figure than the
   // Balance Due box above it.
@@ -205,7 +210,7 @@ export function InvoiceDocument({
             ))
           ) : (
             <tbody>
-              {lines.map((it, i) => (
+              {listed.map((it, i) => (
                 <LineRow key={it.id ?? i} it={it} rowPad={rowPad} gap={gap} />
               ))}
             </tbody>
@@ -218,12 +223,21 @@ export function InvoiceDocument({
       <div className="totals-group">
         {ds.show_breakdown && !sections && (
           <div className="mt-4 flex justify-end">
-            <CostBreakdown items={lines} className="w-64" />
+            {/* The breakdown reads the listed lines: the discount prints once, in the totals block. */}
+            <CostBreakdown items={listed} className="w-64" />
           </div>
         )}
 
         {/* Totals — invoice passes balance, so Paid + Balance-due render and Balance is the bold line. */}
-        <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} amountPaid={amountPaid} balance={balance} />
+        <DocTotals
+          subtotal={grossSubtotal}
+          discounts={discounts}
+          taxRate={taxRate}
+          tax={tax}
+          total={total}
+          amountPaid={amountPaid}
+          balance={balance}
+        />
       </div>
 
       {progress && (

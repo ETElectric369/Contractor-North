@@ -2,15 +2,16 @@
 
 import { useTransition } from "react";
 import { useToast } from "@/components/toast";
-import { groupInvoiceLines, LINE_KIND_LABEL, PICKABLE_LINE_KINDS, storedLineKind, type PickableLineKind } from "@/lib/invoice-math";
+import { canBeDiscount, DISCOUNT_KIND, groupInvoiceLines, LINE_KIND_LABEL, PICKABLE_LINE_KINDS, storedLineKind, type PickableLineKind } from "@/lib/invoice-math";
 import { countsAsWorkCompleted } from "@/lib/portal/line-kind";
 import type { InvoiceItem } from "@/lib/types";
 import { setInvoiceItemKind } from "../actions";
 
 /** Where the customer's Cost Breakdown files this line today: the one reading every document makes. */
-export function lineKindNow(item: Pick<InvoiceItem, "description" | "line_total" | "import_source" | "unit" | "line_kind">): PickableLineKind | "credit" {
+export function lineKindNow(item: Pick<InvoiceItem, "description" | "line_total" | "import_source" | "unit" | "line_kind">): PickableLineKind | "credit" | typeof DISCOUNT_KIND {
   const g = groupInvoiceLines([item]);
   if (g.credits.lines.length) return "credit";
+  if (g.discounts.lines.length) return DISCOUNT_KIND;
   if (g.labor.lines.length) return "labor";
   if (g.materials.lines.length) return "materials";
   return "other";
@@ -53,7 +54,12 @@ export function LineKindChips({
   const counts = (kind: string | null) => countsAsWorkCompleted({ ...item, line_kind: kind }, invoiceKind ?? null);
   const countsNow = counts(item.line_kind ?? null);
 
-  const pick = (kind: PickableLineKind | null, undoing = false) =>
+  // A DISCOUNT CHIP only on a line that takes money off (0389): a positive line cannot be filed
+  // as a gift; Add A Discount is the door that makes one.
+  const kinds: readonly (PickableLineKind | typeof DISCOUNT_KIND)[] =
+    canBeDiscount(item.line_total) && !item.import_source ? [...PICKABLE_LINE_KINDS, DISCOUNT_KIND] : PICKABLE_LINE_KINDS;
+
+  const pick = (kind: PickableLineKind | typeof DISCOUNT_KIND | null, undoing = false) =>
     start(async () => {
       const res = await setInvoiceItemKind(item.id, invoiceId, kind);
       if (!res?.ok) {
@@ -81,7 +87,7 @@ export function LineKindChips({
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="What this line is">
         <span className="text-xs font-medium text-slate-500">Kind</span>
-        {PICKABLE_LINE_KINDS.map((k) => {
+        {kinds.map((k) => {
           const on = now === k;
           return (
             <button

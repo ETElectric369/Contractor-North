@@ -153,8 +153,11 @@ describe("the customer's copy uses it, and only the customer's copy", () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/components/invoice-document.tsx", "utf8");
     expect(src).toMatch(/const lines = mergeSuppliesAndTax\(customerLines\(items, supplierNames\)\)/);
-    expect(src).toMatch(/\{lines\.map\(/);
-    expect(src).toMatch(/<CostBreakdown items=\{lines\}/);
+    // 0389: the list prints `listed` — the merged customer lines with the discount lines taken out
+    // (they print in the totals block) — so the merge still feeds the list; the breakdown reads all.
+    expect(src).toMatch(/const \{ listed, discounts, gross: grossSubtotal \} = invoiceDiscountSplit\(lines, subtotal\);/);
+    expect(src).toMatch(/\{listed\.map\(/);
+    expect(src).toMatch(/<CostBreakdown items=\{listed\}/);
     expect(src).not.toMatch(/\{items\.map\(/);
   });
 

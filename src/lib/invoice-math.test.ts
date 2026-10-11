@@ -417,3 +417,16 @@ describe("lumpDrawAmount — the lump money one bill carries (fixedBillingsToNet
     expect(lumpDrawAmount({ status: "draft", invoice_kind: "deposit", items: [{ import_source: null, line_total: 400 }] })).toBe(0);
   });
 });
+
+describe("groupInvoiceLines — a filed discount (0389)", () => {
+  it("a line filed 'discount' has its own bucket; the unlabelled negative above still reads Other", () => {
+    const g = groupInvoiceLines([
+      { description: "Labor - Erik", line_total: 287.5, unit: "hr" },
+      { description: "traded for the deck boards", line_total: -165, line_kind: "discount" },
+    ]);
+    expect(g.discounts.lines).toHaveLength(1);
+    expect(g.discounts.subtotal).toBe(-165);
+    expect(g.other.lines).toHaveLength(0);
+    expect(g.labor.subtotal).toBe(287.5);
+  });
+});

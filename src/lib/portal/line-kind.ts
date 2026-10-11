@@ -27,7 +27,7 @@
  */
 import { handLineKind, isHoursUnit, storedLineKind } from "@/lib/invoice-math";
 
-export type LineGroup = "labor" | "materials" | "change_orders" | "estimate" | "contract" | "deposit" | "credit" | "tax" | "other";
+export type LineGroup = "labor" | "materials" | "change_orders" | "estimate" | "contract" | "deposit" | "credit" | "discount" | "tax" | "other";
 
 /** The order the groups are listed in, everywhere: labor first, materials second, the rest after. */
 export const LINE_GROUP_ORDER: readonly LineGroup[] = [
@@ -38,6 +38,7 @@ export const LINE_GROUP_ORDER: readonly LineGroup[] = [
   "contract",
   "deposit",
   "credit",
+  "discount",
   "tax",
   "other",
 ];
@@ -51,6 +52,7 @@ export const LINE_GROUP_LABEL: Readonly<Record<LineGroup, string>> = {
   contract: "Contract Payments",
   deposit: "Deposit",
   credit: "Credits",
+  discount: "Discount",
   tax: "Sales Tax",
   other: "Other",
 };
@@ -60,13 +62,14 @@ export { isHoursUnit };
 
 /** Which group a bill's line belongs to. `invoiceKind` is the kind of the bill the line is on. */
 export function lineGroup(
-  line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null },
+  line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null; line_total?: unknown },
   invoiceKind?: string | null,
 ): LineGroup {
   // WHAT THE LINE WAS SAID TO BE COMES FIRST (0342): a line added from the price book, or one the
   // office filed with the Kind chip. The same first read groupInvoiceLines makes on /i and print.
+  // A 'discount' that takes nothing off is not one (0389) — Other, as groupInvoiceLines reads it.
   const stored = storedLineKind(line.line_kind);
-  if (stored) return stored;
+  if (stored) return stored === "discount" && !(Number(line.line_total) < 0) ? "other" : stored;
   const src = typeof line.import_source === "string" ? line.import_source : null;
   switch (src) {
     case "labor":
@@ -109,7 +112,7 @@ export const WORK_COMPLETED_GROUPS: ReadonlySet<LineGroup> = new Set<LineGroup>(
 /** Is this bill line work completed? Its kind is (WORK_COMPLETED_GROUPS), or it reads Other and
  *  nobody filed it as Other. */
 export function countsAsWorkCompleted(
-  line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null },
+  line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null; line_total?: unknown },
   invoiceKind?: string | null,
 ): boolean {
   const g = lineGroup(line, invoiceKind);

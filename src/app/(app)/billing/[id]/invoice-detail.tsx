@@ -13,7 +13,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { customerLineWords, invoiceBalance, invoiceOverpayment, isDrawKind, supplierNameSet, storedLineKind } from "@/lib/invoice-math";
+import { customerLineWords, invoiceBalance, invoiceDiscountSplit, invoiceOverpayment, isDrawKind, supplierNameSet, storedLineKind } from "@/lib/invoice-math";
 import { LineKindChips } from "./line-kind-chips";
 import { processorFeeLabel } from "@/lib/processor-fee";
 import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, materialsImportPlan, type MarkupSeed } from "@/lib/invoice-markup";
@@ -472,6 +472,11 @@ export function InvoiceDetail({
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
   const [price, setPrice] = useState(0);
+  // ADD A DISCOUNT (0389; Erik, INV-089): what for + a positive amount, stored as a negative line
+  // of its own kind so the paper prints it between Subtotal and Tax, never as a payment.
+  const [discountOpen, setDiscountOpen] = useState(false);
+  const [discountFor, setDiscountFor] = useState("");
+  const [discountAmount, setDiscountAmount] = useState(0);
   /**
    * ADD WAS PRESSED ON A LINE WITH NO WORDS (bug report 44aeec9c, Erik on /billing 2026-09-22: "I
    * could not add an amount to a new blank invoice", and INV-073 the same day).
@@ -751,11 +756,15 @@ export function InvoiceDetail({
   const [editPrice, setEditPrice] = useState(0);
   const [editUnit, setEditUnit] = useState("ea");
 
+  // A DISCOUNT'S AMOUNT IS EDITED AS THE POSITIVE FIGURE IT TAKES OFF (0389): the price box takes
+  // no minus sign, so −165 is shown and typed as 165 and stored back negative. The server refuses
+  // the edit if it would turn the discount into a charge or take the bill below $0.
+  const editingDiscount = storedLineKind(items.find((i) => i.id === editId)?.line_kind) === "discount";
   function startEdit(it: InvoiceItem) {
     setEditId(it.id);
     setEditDesc(it.description);
     setEditQty(Number(it.quantity));
-    setEditPrice(Number(it.unit_price));
+    setEditPrice(storedLineKind(it.line_kind) === "discount" ? Math.abs(Number(it.unit_price)) : Number(it.unit_price));
     setEditUnit(it.unit || "ea");
   }
 
@@ -766,7 +775,7 @@ export function InvoiceDetail({
         description: editDesc,
         quantity: editQty,
         unit: editUnit,
-        unit_price: editPrice,
+        unit_price: editingDiscount ? -Math.abs(editPrice) : editPrice,
       });
       if (!res?.ok) { toast(res?.error ?? "Couldn't save the line item — try again.", "error"); return; }
       setEditId(null);
@@ -774,6 +783,36 @@ export function InvoiceDetail({
     });
   }
 
+
+  function addDiscount() {
+    if (pending) return; // Enter twice is one discount, not two
+    if (!discountFor.trim()) {
+      toast("Say what the discount is for.", "error");
+      return;
+    }
+    if (!(discountAmount > 0)) {
+      toast("A discount takes money off — give it an amount.", "error");
+      return;
+    }
+    start(async () => {
+      const res = await addInvoiceItem(invoice.id, {
+        description: discountFor.trim(),
+        quantity: 1,
+        unit: "ea",
+        unit_price: -Math.abs(discountAmount),
+        kind: "discount",
+      });
+      if (!res?.ok) {
+        toast(res?.error ?? "Couldn't add the discount — try again.", "error");
+        return;
+      }
+      toast(`Discount of ${formatCurrency(discountAmount)} added — it prints between Subtotal and Tax.`, "success");
+      setDiscountFor("");
+      setDiscountAmount(0);
+      setDiscountOpen(false);
+      refresh();
+    });
+  }
 
   function addItem() {
     if (addLineAsk(desc)) {
@@ -1431,6 +1470,32 @@ export function InvoiceDetail({
               </Button>
             </div>
             {needsDesc && <p className="text-xs text-amber-700">{addLineAsk(desc)}</p>}
+            {/* A DISCOUNT IS ITS OWN LINE (0389; Erik, INV-089: a traded part of the work). The
+                price box above takes no minus sign on purpose — a discount has its own door, with
+                the one thing a discount needs that a price does not: what it is for. */}
+            {discountOpen ? (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <Input
+                  aria-label="What the discount is for"
+                  placeholder="What for — e.g. traded for the deck boards"
+                  value={discountFor}
+                  onChange={(e) => setDiscountFor(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addDiscount()}
+                  className="min-w-[14rem] flex-1"
+                />
+                <NumberInput aria-label="Discount amount" value={discountAmount} onValueChange={setDiscountAmount} className="w-28 text-right" placeholder="Amount" />
+                <Button onClick={addDiscount} disabled={pending}>
+                  Save The Discount
+                </Button>
+                <button type="button" onClick={() => setDiscountOpen(false)} className="text-sm text-slate-500 hover:underline">
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setDiscountOpen(true)} className="text-sm font-medium text-brand hover:underline">
+                Add A Discount
+              </button>
+            )}
           </div>
           )}
         </div>
@@ -1439,11 +1504,27 @@ export function InvoiceDetail({
       <div className="space-y-6">
         <Card>
           <CardContent className="space-y-2 py-5 text-sm">
-            <CostBreakdown items={items} className="mb-1" />
-            <div className="flex justify-between text-slate-600">
-              <span>Subtotal</span>
-              <span>{formatCurrency(invoice.subtotal)}</span>
-            </div>
+            {/* THE SAME SPLIT THE PAPER PRINTS (0389, invoiceDiscountSplit): Subtotal is the lines
+                before any discount, each discount on its own row, then Tax and Total — the office
+                reads what the customer reads. */}
+            {(() => {
+              const split = invoiceDiscountSplit(items, Number(invoice.subtotal) || 0);
+              return (
+                <>
+                  <CostBreakdown items={split.listed} className="mb-1" />
+                  <div className="flex justify-between text-slate-600">
+                    <span>Subtotal</span>
+                    <span>{formatCurrency(split.gross)}</span>
+                  </div>
+                  {split.discounts.map((d, i) => (
+                    <div key={i} className="flex justify-between gap-3 text-slate-600">
+                      <span className="min-w-0 truncate">Discount{d.label ? ` — ${d.label}` : ""}</span>
+                      <span className="whitespace-nowrap">−{formatCurrency(Math.abs(d.amount))}</span>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
             {/* SALES TAX OFF (the switch board, rule g): an invoice with no tax shows no tax row and no
                 picker. One that already carries tax keeps both, so its total still reads whole. */}
             {taxFieldShown(salesTax, invoice) && (
