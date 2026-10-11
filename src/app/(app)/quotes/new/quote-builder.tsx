@@ -19,7 +19,7 @@ import { formatCurrency } from "@/lib/utils";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
-import { detailExplains, lineFromDetail, lineNameWithUnits, reexpandTaskDetail, repriceTaskLine, taskMoney, type TaskKit } from "@/lib/estimate/task-lines";
+import { detailExplains, lineFromDetail, lineNameWithUnits, partMoney, reexpandTaskDetail, repriceTaskLine, taskMoney, type TaskKit } from "@/lib/estimate/task-lines";
 import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";
 import { rememberTaskAsKit } from "../../price-list/kit-actions";
 import { sameTask } from "@/lib/playbook/tasks";
@@ -373,7 +373,7 @@ function TaskBreakdown({
             onValueChange={(n) => setPart(i, { sell: n > 0 ? n : null })}
           />
           <span className="ml-auto tabular-nums text-slate-700">
-            {m.qty !== null && m.sell !== null ? formatCurrency(m.qty * m.sell) : "—"}
+            {m.qty !== null && m.sell !== null ? formatCurrency(partMoney(m)) : "—"}
           </span>
           <button
             type="button"

@@ -14,6 +14,7 @@ import {
   taskFlags,
   taskLines,
   taskMoney,
+  partMoney,
   type TaskBookRow,
   type TaskKit,
   type TaskLineContext,
@@ -348,5 +349,36 @@ describe("reexpandTaskDetail — the builder's units box on a kit-built line (W4
     // His own "4×4" and a hand-edited name are never rewritten under him.
     expect(lineNameWithUnits("Install 4×4", null, 8)).toBe("Install 4×4 ×8");
     expect(lineNameWithUnits("Footings ×7 (north)", 7, 8)).toBe("Footings ×7 (north) ×8");
+  });
+});
+
+describe("a part's money is the figure the paper prints (item 4): rounded per part, then summed", () => {
+  const part = (name: string, qty: number, sell: number) => ({ code: null, name, qty, cost: null, sell });
+  const d = {
+    task_id: "t1",
+    hours: 2,
+    rate: 100,
+    units: null,
+    kit_id: null,
+    // Counts and prices carry two decimals; the products carry three: 0.91 + 4.975 + 0.495 + 3.99 = 10.37
+    // rounded once, but as printed (0.91 + 4.98 + 0.50 + 3.99) = 10.38. The paper's sum is the rule.
+    materials: [part("Wire nut", 7, 0.13), part("Strap", 2.5, 1.99), part("Tape", 1.5, 0.33), part("Anchor", 3, 1.33)],
+  };
+  it("partMoney rounds one part to cents in exact decimal arithmetic (half up, not the float's), and a hole counts as nothing", () => {
+    expect(partMoney({ qty: 2.5, sell: 1.99 })).toBe(4.98); // the float product 4.97499… would say 4.97
+    expect(partMoney({ qty: 1.5, sell: 0.33 })).toBe(0.5);
+    expect(partMoney({ qty: 7, sell: 0.13 })).toBe(0.91);
+    expect(partMoney({ qty: null, sell: 9 })).toBe(0);
+    expect(partMoney({ qty: 3, sell: null })).toBe(0);
+  });
+  it("the line's parts figure is the sum of the printed parts, so labor + the bullets = the line to the cent", () => {
+    const money = taskMoney(d);
+    const printed = d.materials.reduce((t, m) => t + partMoney(m), 0);
+    expect(money.parts).toBe(10.38);
+    expect(money.parts).toBe(Math.round(printed * 100) / 100);
+    expect(money.total).toBe(210.38);
+    expect(money.labor + money.parts).toBeCloseTo(money.total, 10);
+    expect(detailExplains(d, { quantity: 1, unit_price: 210.38 })).toBe(true);
+    expect(detailExplains(d, { quantity: 1, unit_price: 210.37 })).toBe(false); // the old once-rounded sum no longer explains
   });
 });

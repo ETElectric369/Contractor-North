@@ -3,7 +3,7 @@ import type { ResolvedSite } from "@/lib/site-address";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { CSSProperties } from "react";
 import { normalizeDocStyle, sheetStyleVars, type DocStyle } from "@/lib/doc-style";
-import { coerceTaskDetail, detailExplains, taskMoney } from "@/lib/estimate/task-lines";
+import { coerceTaskDetail, detailExplains, partMoney, taskMoney } from "@/lib/estimate/task-lines";
 
 // The quote table's rhythm is a step tighter than the invoice's at every density.
 const QUOTE_DENSITY_ROW: Record<DocStyle["density"], string> = {
@@ -199,7 +199,7 @@ export function QuoteDocument({
                         <li key={j}>
                           {m.name}
                           {m.qty !== null ? ` × ${m.qty}` : ""}
-                          {m.qty !== null && m.sell !== null ? ` · ${formatCurrency(Math.round(m.qty * m.sell * 100) / 100)}` : ""}
+                          {m.qty !== null && m.sell !== null ? ` · ${formatCurrency(partMoney(m))}` : ""}
                         </li>
                       ))}
                     </ul>

@@ -137,10 +137,23 @@ export function normalizeTaskDetail(d: TaskDetail): TaskDetail {
   };
 }
 
-/** The arithmetic behind a task line, in cents: labor = hours × rate, parts = Σ qty × sell. */
+/** ONE PART'S MONEY, IN CENTS — the figure the paper prints beside it (item 4, 2026-10-10). A count can
+ *  carry two decimals and a price two, so the raw product can carry four; rounding each part first and
+ *  summing those is what makes the bullets the customer adds up equal the line to the cent. Every
+ *  surface that shows a part's money (the document, the builder, the sum) goes through here. */
+export function partMoney(m: Pick<TaskDetailMaterial, "qty" | "sell">): number {
+  // Both carry at most two decimals (normalizeTaskDetail), so whole cents make this EXACT decimal
+  // arithmetic: 2.5 × $1.99 = $4.975 → $4.98, where the float product (4.97499…) rounds down to $4.97.
+  const q = Math.round((m.qty ?? 0) * 100);
+  const s = Math.round((m.sell ?? 0) * 100);
+  return Math.round((q * s) / 100) / 100;
+}
+
+/** The arithmetic behind a task line, in cents: labor = hours × rate, parts = Σ partMoney (each part
+ *  rounded as printed, then summed — never the raw products summed and rounded once). */
 export function taskMoney(d: TaskDetail): { labor: number; parts: number; total: number } {
   const labor = d.hours === null ? 0 : round2(d.hours * d.rate);
-  const parts = round2(d.materials.filter(named).reduce((t, m) => t + (m.qty ?? 0) * (m.sell ?? 0), 0));
+  const parts = round2(d.materials.filter(named).reduce((t, m) => t + partMoney(m), 0));
   return { labor, parts, total: round2(labor + parts) };
 }
 
