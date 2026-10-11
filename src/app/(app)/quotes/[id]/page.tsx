@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { smsReadiness } from "@/lib/sms";
-import { firstThatWorks } from "@/lib/kit-line";
-import { partsKitsOnly, taskKitSelectRungs } from "@/lib/estimate/task-kits";
+import { partsKitsOnly, plainKitsReadWords, readTaskKits } from "@/lib/estimate/task-kits";
+import { reportError } from "@/lib/observe";
 import { BackLink } from "@/components/back-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -90,7 +90,7 @@ export default async function QuoteDetailPage({
   // Has this quote already been turned into these records? (Drives idempotent UI:
   // the map shows "View …" instead of minting a duplicate.) Plus the org's
   // customers so the attached customer can be changed inline.
-  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: orgRow }, { data: visitBehind }] = await Promise.all([
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, kitsRead, { data: orgRow }, { data: visitBehind }] = await Promise.all([
     supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
@@ -112,7 +112,8 @@ export default async function QuoteDetailPage({
       .limit(2000),
     // THE SHARED SELECT SHAPE (kit-line.ts) — sizing + the 0240 price-list link, tolerant of
     // either migration not having landed yet, so a linked kit line prices live for this customer.
-    firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+    // The read SAYS how it went (cn-v1084): a failed read used to empty the picker in silence.
+    readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     // THE VISIT THIS WAS WRITTEN UP FROM (cn-v1069): the backlink saveQuote stamps inside the visit's
     // capture, read back here so the two stay attached both ways. Newest first if ever two claim it.
@@ -135,6 +136,8 @@ export default async function QuoteDetailPage({
   // schedule. An estimate that has circuits keeps them: they are on the proposal the customer signs.
   const orgS = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
   const kitDoors = featureOn(orgS.features, "kits") || orgS.estimating_mode === "catalog";
+  const kits = kitsRead.rows as Parameters<typeof partsKitsOnly>[0] | null;
+  if (kitsRead.state === "failed") reportError("quotes/[id]:kits", kitsRead.error, { quoteId: id });
   const showCircuits = featureOn(orgS.features, "panel_map") || (Array.isArray(q.circuits) && q.circuits.length > 0);
 
   const quoteMap: NavTree = {
@@ -173,6 +176,7 @@ export default async function QuoteDetailPage({
   // so a status-only gate would have hidden controls that still work. null = every control stays
   // live. Read once: the editor shows its reason, and the Duplicate door below follows it.
   const lock = await quoteEditLock(q.id);
+  const kitsNote = kitDoors && !lock ? plainKitsReadWords(kitsRead) : null; // only where the picker is
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -266,6 +270,12 @@ export default async function QuoteDetailPage({
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
           <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
+        </div>
+      )}
+      {kitsNote && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Kits didn&apos;t load whole</p>
+          <p className="mt-0.5 text-sm text-amber-800">{kitsNote}</p>
         </div>
       )}
       <QuoteItemsEditor

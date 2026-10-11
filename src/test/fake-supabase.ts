@@ -16,6 +16,8 @@ export type Row = Record<string, any>;
 export interface FakeDbOptions {
   /** Called before an insert lands; return an error to refuse it (the rows are then NOT added). */
   onInsert?: (table: string, rows: Row[]) => { code?: string; message: string } | undefined;
+  /** Refuse one update the way the database would (a 23505 from a unique index another door just filled). */
+  onUpdate?: (table: string, patch: Row) => { code?: string; message: string } | undefined;
 }
 
 export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) {
@@ -66,6 +68,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
       update(patch: Row) {
         mode = "update";
         pending = [patch];
+        refused = opts.onUpdate?.(table, patch);
         return b;
       },
       maybeSingle() {

@@ -27,7 +27,7 @@ describe("materialKey / keyParts — a part's key is its task's key plus the par
       { id: "l1", description: "", sort_order: 0, detail: { task_id: "t", hours: 1, rate: 1, units: null, kit_id: null, materials: [{ code: "R1", name: "Switch", qty: 2, cost: 4, sell: 5 }, { code: null, name: "  ", qty: 1, cost: null, sell: null }] } },
       { id: "l2", description: "Plain", sort_order: 1, detail: null },
     ]);
-    expect(parts).toEqual([{ key: "line:l1#R1", code: "R1", name: "Switch", qty: 2, cost: 4 }]);
+    expect(parts).toEqual([{ key: "line:l1#R1", code: "R1", name: "Switch", qty: 2, cost: 4, taskId: "t" }]);
   });
 });
 
@@ -91,10 +91,14 @@ describe("planPartSync — the plan", () => {
     expect(plan.insert.map((p) => p.key)).toEqual(["line:a#bayberry-clips"]);
     expect(plan.redismiss).toEqual(["line:a#R1"]);
   });
-  it("a part already on the list UNKEYED (by hand, or before 0390) under the same code or words is not added again", () => {
-    const plan = planPartSync(wanted, [], new Set(), [{ part_number: "r1", description: "Switch" }, { part_number: null, description: "Bayberry clips · how many?" }]);
+  it("an unkeyed row that is not his (typed by hand, or taken off before 0390) under the same code or words becomes the line's — re-keyed, counted as matched, never inserted again", () => {
+    const plan = planPartSync(wanted, [], new Set(), [
+      { id: "h1", part_number: "r1", description: "Switch", quantity: 2 },
+      { id: "h2", part_number: null, description: "Bayberry clips · how many?", quantity: 1 },
+    ]);
+    expect(plan.rekey).toEqual([{ id: "h1", source_key: "line:a#R1" }, { id: "h2", source_key: "line:a#bayberry-clips" }]);
     expect(plan.insert).toEqual([]);
-    expect(plan.alreadyListed.map((p) => p.key)).toEqual(["line:a#R1", "line:a#bayberry-clips"]);
+    expect(plan.countsDiffer).toEqual([]);
   });
   it("isHisRow: bought or a tool", () => {
     expect(isHisRow({ purchased: false, is_tool: false })).toBe(false);
@@ -122,11 +126,55 @@ const world = (over: { lines?: Record<string, unknown>[]; rows?: Record<string, 
 const keyedRow = (id: string, source_key: string, over: Record<string, unknown> = {}) => ({ id, list_id: "ml-1", org_id: ORG, source_key, description: "x", part_number: null, quantity: 1, purchased: false, is_tool: false, sort_order: 0, ...over });
 const WHO = { quoteId: "q-1", jobId: "job-1", orgId: ORG, userId: "u1" };
 
+describe("planPartSync — the deferred items (cn-v1084)", () => {
+  it("a visit's row claims the line built from its task (by id), any count — a differing count is said; one with no line is left alone", () => {
+    const wanted = [part({ key: "line:a#R1", code: "R1", name: "Switch", qty: 3, taskId: "T1" })];
+    const plan = planPartSync(wanted, [row({ id: "v", source_key: "task:T1#R1", quantity: 1, purchased: true }), row({ id: "w", source_key: "task:T2#W9" })]);
+    expect(plan.rekey).toEqual([{ id: "v", source_key: "line:a#R1" }]);
+    expect(plan.countsDiffer).toEqual([{ description: "x", shows: 1, estimate: 3 }]);
+    expect(plan.insert).toEqual([]);
+    expect(plan.remove).toEqual([]);
+    expect(plan.kept).toEqual([]);
+    expect(plan.tombstone).toEqual([]);
+  });
+  it("a visit's row with no id match still claims by the part half like any orphan — but is never removed or kept as the estimate's", () => {
+    const wanted = [part({ key: "line:a#R1", code: "R1", name: "Switch", qty: 2, taskId: "T1" })];
+    const plan = planPartSync(wanted, [row({ id: "v", source_key: "task:OTHER#R1", quantity: 2 }), row({ id: "stay", source_key: "task:OTHER#Z9", quantity: 9 })]);
+    expect(plan.rekey).toEqual([{ id: "v", source_key: "line:a#R1" }]);
+    expect(plan.remove).toEqual([]);
+    expect(plan.kept).toEqual([]);
+  });
+  it("a kept orphan (bought, or a tool) goes under the tombstone — said this once — and is the line's again when that line returns", () => {
+    const plan = planPartSync([], [row({ id: "b", source_key: "line:gone#R1", purchased: true }), row({ id: "open", source_key: "line:gone#W9" })]);
+    expect(plan.kept.map((r) => r.id)).toEqual(["b"]);
+    expect(plan.tombstone).toEqual([{ id: "b", source_key: "gone:line:gone#R1" }]);
+    expect(plan.remove.map((r) => r.id)).toEqual(["open"]);
+    const back = planPartSync([part({ key: "line:gone#R1", code: "R1", name: "Switch", qty: 1 })], [row({ id: "b", source_key: "line:gone#R1", purchased: true, gone: true })]);
+    expect(back.rekey).toEqual([{ id: "b", source_key: "line:gone#R1" }]);
+    expect(back.insert).toEqual([]);
+    expect(back.kept).toEqual([]);
+    const still = planPartSync([], [row({ id: "b", source_key: "line:gone#R1", purchased: true, gone: true })]);
+    expect(still).toMatchObject({ insert: [], rekey: [], remove: [], kept: [], tombstone: [] });
+  });
+  it("a row that is there claims BEFORE a dismissal bars; the bar is said (left off) and the dismissal MOVES — one entry per deletion across rebuilds", () => {
+    const w = [part({ key: "line:NEW#R1", code: "R1", name: "Switch", qty: 2 })];
+    const live = planPartSync(w, [row({ id: "r", source_key: "line:OLD#R1", quantity: 2 })], new Set(["line:GONE#R1"]));
+    expect(live.rekey).toEqual([{ id: "r", source_key: "line:NEW#R1" }]);
+    expect(live.leftOff).toEqual([]);
+    expect(live.consumed).toEqual([]);
+    const barred = planPartSync(w, [], new Set(["line:GONE#R1"]));
+    expect(barred.insert).toEqual([]);
+    expect(barred.leftOff).toEqual(["Switch"]);
+    expect(barred.consumed).toEqual(["line:GONE#R1"]);
+    expect(barred.redismiss).toEqual(["line:NEW#R1"]);
+  });
+});
+
 describe("syncQuoteMaterials — the writes", () => {
   it("inserts the parts nobody has through the take-off's own row shape, keyed, after the last row; a hand row is never touched", async () => {
     const { sb, inserted, tables } = world({ rows: [{ id: "hand", list_id: "ml-1", org_id: ORG, source_key: null, description: "By hand", part_number: null, quantity: 3, purchased: false, is_tool: false, sort_order: 4 }] });
     const res = await syncQuoteMaterials(sb, WHO);
-    expect(res).toMatchObject({ inserted: 2, rekeyed: 0, removed: 0, alreadyListed: 0 });
+    expect(res).toMatchObject({ inserted: 2, rekeyed: 0, removed: 0, leftOff: [] });
     expect(res.error).toBeUndefined();
     expect(inserted.material_list_items).toEqual([
       { id: "material_list_items-1", list_id: "ml-1", org_id: ORG, description: "Transfer switch, 200A", part_number: "R1", quantity: 1, unit: "ea", vendor: "Northline Supply", est_cost: 400, source_key: "line:l1#R1", sort_order: 5 },
@@ -150,30 +198,62 @@ describe("syncQuoteMaterials — the writes", () => {
     expect(byId.r2).toBeUndefined();
     expect(byId.r3).toBeDefined();
   });
-  it("a dismissed key is not born again; a dismissal under a gone line is carried to the rebuilt line's key", async () => {
+  it("a dismissed key is not born again; a dismissal under a gone line bars the rebuilt line's part (left off, said) and MOVES to its key", async () => {
     const { sb, inserted, tables } = world({ dismissed: ["line:OLD#R1"] });
     const res = await syncQuoteMaterials(sb, WHO);
-    expect(res.inserted).toBe(1);
+    expect(res).toMatchObject({ inserted: 1, leftOff: ["Transfer switch, 200A"] });
     expect(inserted.material_list_items.map((r) => r.source_key)).toEqual(["line:l1#bayberry-clips"]);
-    expect(tables.material_lists[0].dismissed_keys).toEqual(["line:OLD#R1", "line:l1#R1"]);
+    expect(tables.material_lists[0].dismissed_keys).toEqual(["line:l1#R1"]);
+    expect(materialsWords(res)).toBe("The estimate's materials list follows too: 1 part added · 1 left off (Transfer switch, 200A) — deleted from the list before.");
   });
-  it("a part already on the list by hand (same code) is not added twice, and that is counted", async () => {
-    const { sb, inserted } = world({ rows: [{ id: "hand", list_id: "ml-1", org_id: ORG, source_key: null, description: "A switch I typed", part_number: "R1", quantity: 1, purchased: false, is_tool: false, sort_order: 0 }] });
+  it("a part already on the list by hand (same code, not bought) becomes the line's row — re-keyed, matched — instead of a second row", async () => {
+    const { sb, inserted, tables } = world({ rows: [{ id: "hand", list_id: "ml-1", org_id: ORG, source_key: null, description: "A switch I typed", part_number: "R1", quantity: 1, purchased: false, is_tool: false, sort_order: 0 }] });
     const res = await syncQuoteMaterials(sb, WHO);
-    expect(res).toMatchObject({ inserted: 1, alreadyListed: 1 });
+    expect(res).toMatchObject({ inserted: 1, rekeyed: 1 });
+    expect(tables.material_list_items.find((r) => r.id === "hand")?.source_key).toBe("line:l1#R1");
     expect(inserted.material_list_items.map((r) => r.source_key)).toEqual(["line:l1#bayberry-clips"]);
   });
   it("no list for the estimate → nothing is made or written here", async () => {
     const { sb, inserted } = world({ noList: true });
     const res = await syncQuoteMaterials(sb, WHO);
-    expect(res).toEqual({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], alreadyListed: 0, countsDiffer: [] });
+    expect(res).toEqual({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], leftOff: [], countsDiffer: [] });
     expect(inserted).toEqual({});
+  });
+  it("a visit's row ('task:<id>#part') is re-keyed to the line built from that task and counted as matched; a bought hand row never bars the estimate's part", async () => {
+    // The fixture's line l1 remembers task "t-l1" (taskLine); the visit's R1 row carries that id.
+    const { sb, inserted, tables } = world({
+      rows: [
+        keyedRow("v1", "task:t-l1#R1", { description: "Switch, from the visit", quantity: 1 }),
+        keyedRow("v2", "task:t-l1#not-on-the-line", { description: "Stays the visit's" }),
+        { id: "bought", list_id: "ml-1", org_id: ORG, source_key: null, description: "R1 already bought", part_number: "R1", quantity: 1, purchased: true, is_tool: false, sort_order: 0 },
+      ],
+    });
+    const res = await syncQuoteMaterials(sb, WHO);
+    expect(res).toMatchObject({ inserted: 1, rekeyed: 1, removed: 0, kept: 0, leftOff: [] });
+    const byId = Object.fromEntries(tables.material_list_items.map((r) => [r.id, r]));
+    expect(byId.v1.source_key).toBe("line:l1#R1");
+    expect(byId.v2.source_key).toBe("task:t-l1#not-on-the-line"); // not the estimate's to touch
+    expect(byId.bought.source_key).toBe(null); // bought: never stands in for the estimate's R1
+    expect(inserted.material_list_items.map((r) => r.source_key)).toEqual(["line:l1#bayberry-clips"]);
+  });
+  it("a kept orphan is said once: it goes under the tombstone, the next sync says nothing, and the line finds it again if it returns", async () => {
+    const { sb, tables } = world({ lines: [], rows: [keyedRow("b", "line:l1#R1", { purchased: true, description: "Romex" })] });
+    const first = await syncQuoteMaterials(sb, WHO);
+    expect(first).toMatchObject({ kept: 1, keptNames: ["Romex"] });
+    expect(tables.material_list_items.find((r) => r.id === "b")?.source_key).toBe("gone:line:l1#R1");
+    const again = await syncQuoteMaterials(sb, WHO);
+    expect(again).toMatchObject({ kept: 0, keptNames: [], inserted: 0 });
+    tables.quote_line_items.push(taskLine("l1", [{ code: "R1", name: "Transfer switch, 200A", qty: 1, cost: 400, sell: 500 }]));
+    const back = await syncQuoteMaterials(sb, WHO);
+    expect(back).toMatchObject({ rekeyed: 1, inserted: 0, kept: 0 });
+    expect(tables.material_list_items).toHaveLength(1);
+    expect(tables.material_list_items[0].source_key).toBe("line:l1#R1");
   });
   it("is idempotent", async () => {
     const { sb, tables } = world();
     await syncQuoteMaterials(sb, WHO);
     const again = await syncQuoteMaterials(sb, WHO);
-    expect(again).toEqual({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], alreadyListed: 0, countsDiffer: [] });
+    expect(again).toEqual({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], leftOff: [], countsDiffer: [] });
     expect(tables.material_list_items).toHaveLength(2);
   });
   it("syncJobMaterials walks the job's accepted estimates and adds the counts up; the words say what the list did", async () => {
@@ -181,9 +261,9 @@ describe("syncQuoteMaterials — the writes", () => {
     const res = await syncJobMaterials(sb, { jobId: "job-1", orgId: ORG, userId: "u1" });
     expect(res.inserted).toBe(2);
     expect(materialsWords(res)).toBe("The estimate's materials list follows too: 2 parts added.");
-    expect(materialsWords({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], alreadyListed: 0, countsDiffer: [] })).toBeNull();
+    expect(materialsWords({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], leftOff: [], countsDiffer: [] })).toBeNull();
     expect(
-      materialsWords({ inserted: 1, rekeyed: 2, removed: 1, removedNames: ["Strap"], kept: 1, keptNames: ["Romex"], alreadyListed: 1, countsDiffer: [{ description: "Rebar", shows: 14, estimate: 18 }] }),
-    ).toBe("The estimate's materials list follows too: 1 part added · 2 matched by name · 1 removed (Strap) · 1 kept (Romex) — bought, or a tool · 1 already on the list by hand · Rebar shows 14, the estimate says 18.");
+      materialsWords({ inserted: 1, rekeyed: 2, removed: 1, removedNames: ["Strap"], kept: 1, keptNames: ["Romex"], leftOff: ["Clip"], countsDiffer: [{ description: "Rebar", shows: 14, estimate: 18 }] }),
+    ).toBe("The estimate's materials list follows too: 1 part added · 2 matched · 1 removed (Strap) · 1 kept (Romex) — bought, or a tool · 1 left off (Clip) — deleted from the list before · Rebar shows 14, the estimate says 18.");
   });
 });

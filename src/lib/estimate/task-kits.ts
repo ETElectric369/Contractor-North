@@ -73,6 +73,20 @@ export async function readTaskKits(
   return { kits: [], rows: null, rung: null, state: "failed", error: last?.error ?? new Error("kits: no rung answered") };
 }
 
+/**
+ * THE PLAIN PICKERS' WORDS (quotes/[id], billing/[id], price-list — cn-v1084). A parts kit is whole
+ * without 0386's columns, so only two things are worth saying there: the read FAILED (the picker is
+ * off — until now these three pages went quiet and offered no kits), or it fell past the price-book
+ * link (the last two of each five rungs: a linked kit line prices from its saved figures, not the
+ * book, until a reload). "thin" with the link intact and "pre-0386" say nothing to a plain picker.
+ */
+export function plainKitsReadWords(read: Pick<TaskKitsRead, "state" | "rung">): string | null {
+  if (read.state === "failed") return "The kits could not be read — the kit picker is off until you reload.";
+  if (read.rung !== null && read.rung % KIT_ITEM_SELECT_RUNGS.length >= 3)
+    return "The kits were read without their price-book links — a kit line prices from its saved figures until you reload.";
+  return null;
+}
+
 /** The one sentence a page says for a read that was not whole — null when it was. */
 export function kitsReadWords(state: KitsReadState): string | null {
   switch (state) {

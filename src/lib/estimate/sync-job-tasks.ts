@@ -39,6 +39,18 @@ import { bornTasks, tasksFromLines, type BornTask, type LineRow } from "./born-w
  *    said with both figures — a walk-back and re-accept lands here (the old figure left the accepted
  *    set), as does any figure he typed.
  *
+ *  - cn-v1084, the deferred items: a KEPT orphan keeps its line under a TOMBSTONE key ("gone:line:<id>")
+ *    — it is his now, "kept" is said once, and if the line ever comes back (an estimate moved away and
+ *    back) the task is the line's again instead of a second copy. A dismissal remembers the task's
+ *    TITLE ("line:<id>#<title>", the delete door since cn-v1084), so a task he deleted stays gone
+ *    through a rebuild that gives its line a new id: the same title on a line nobody has is LEFT OFF
+ *    (said), and the dismissal MOVES to the new key — one entry per deletion, never a pile. A VISIT's
+ *    task ("task:<TaskValue id>", born by Start The Job) finds the line of the estimate drafted from
+ *    that visit — by the task id the line's breakdown remembers (detail.task_id), else by exact title
+ *    — and becomes the line's instead of doubling; so does an OPEN task he made by hand under the
+ *    same exact title. Live tasks claim BEFORE a title dismissal bars, so a dismissal never costs a
+ *    task that is there.
+ *
  *  Declining an accepted estimate does NOT run this (deliberate: a walk-back to edit would churn the
  *  list and lose photos on open tasks); accepting again does. The materials list follows the same
  *  doors through sync-job-materials (0390 gave its rows their line). Every write selects what it
@@ -46,10 +58,15 @@ import { bornTasks, tasksFromLines, type BornTask, type LineRow } from "./born-w
  */
 
 export const LINE_KEY = "line:";
+/** A task Start The Job put on the job from the visit's Inspector (born-with-tasks tasksFromVisit). */
+export const VISIT_KEY = "task:";
+/** A kept orphan's key: "gone:" + the line key it had. His now; the line's again if that line returns. */
+export const GONE_KEY = "gone:";
 
 /** A task on the job that an estimate line put there, as the sync reads it. */
 export interface LineTask {
   id: string;
+  /** The LINE key ("line:<id>") — for a tombstoned task, the key under the "gone:" prefix. */
   source_key: string;
   title: string;
   status: string;
@@ -57,57 +74,128 @@ export interface LineTask {
   photo_path: string | null;
   /** True when steps sit under it (tasks.parent_id, 0055) — deleting it would delete them. */
   has_steps?: boolean;
+  /** True when the stored key is "gone:<source_key>": an orphan kept earlier, said then. */
+  gone?: boolean;
+}
+
+/** Any other task on the job: a visit's ("task:<id>") or one made by hand (no key). Never removed here. */
+export interface OtherTask {
+  id: string;
+  source_key: string | null;
+  title: string;
+  status: string;
 }
 
 /** Something a person added to the task: it is his now, and leaves only by his hand. */
 export const isHisTask = (t: Pick<LineTask, "notes" | "photo_path" | "has_steps">): boolean =>
   !!(t.notes && t.notes.trim()) || !!t.photo_path || !!t.has_steps;
 
+/**
+ * A DISMISSAL, as the delete door writes it since cn-v1084: "<key>#<title>". The key bars that line;
+ * the title bars the same task on a REBUILT line (the builder's autosave re-ids every line, so a key
+ * alone forgot the task the moment the estimate was touched). Entries from before carry the key alone.
+ */
+export const dismissalEntry = (key: string, title: string): string => `${key}#${title.trim()}`;
+const dismissalKey = (e: string): string => (e.includes("#") ? e.slice(0, e.indexOf("#")) : e);
+const dismissalTitle = (e: string): string | null => (e.includes("#") ? e.slice(e.indexOf("#") + 1).trim() || null : null);
+
 export interface LineSyncPlan {
   /** Wanted tasks nobody has (by key or by exact title): inserted. */
   insert: BornTask[];
-  /** Orphans re-keyed to the line that now carries their exact title. */
+  /** Orphans, a visit's tasks, open hand tasks and returning tombstones: re-keyed to the line that is theirs. */
   rekey: Array<{ id: string; source_key: string }>;
   /** Open, bare orphans: removed. */
   remove: string[];
   /** Orphans that stay — done, or his (notes / a photo / steps). Said. */
   kept: LineTask[];
+  /** The kept orphans, re-keyed under the tombstone so "kept" is said once and the line can find them again. */
+  tombstone: Array<{ id: string; source_key: string }>;
+  /** Wanted tasks a title dismissal barred (he deleted that task before): not inserted, said by name. */
+  leftOff: string[];
+  /** The dismissal entries that did the barring: replaced by `redismiss` (one entry per deletion). */
+  consumed: string[];
+  /** The same deletions under the rebuilt lines' keys. */
+  redismiss: string[];
 }
 
 /**
  * THE PLAN, pure: what the job's line tasks must become given what its accepted estimates say.
- * `dismissed` = keys he deleted by hand (jobs.dismissed_task_keys): never inserted, never re-keyed into.
+ * `dismissed` = what he deleted by hand (jobs.dismissed_task_keys): never inserted, never re-keyed into.
+ * `others` = the job's tasks no line put there (a visit's, hand-made): candidates, never removed.
  */
 export function planLineSync(
   wanted: ReadonlyArray<BornTask>,
   have: ReadonlyArray<LineTask>,
   dismissed: ReadonlySet<string> = new Set(),
+  others: ReadonlyArray<OtherTask> = [],
 ): LineSyncPlan {
   const wantedKeys = new Set(wanted.map((t) => t.source_key));
-  const haveKeys = new Set(have.map((t) => t.source_key));
-  // Wanted tasks nobody has yet and he did not dismiss, in estimate order — the pool an orphan may re-key into.
-  const unmatched = wanted.filter((t) => !haveKeys.has(t.source_key) && !dismissed.has(t.source_key));
+  const haveKeys = new Set(have.map((t) => t.source_key)); // live and tombstoned alike: neither is inserted again
+  const dismissedKeys = new Set([...dismissed].map(dismissalKey));
+  // Wanted tasks nobody has yet and he did not dismiss, in estimate order — the pool a task may re-key into.
+  const unmatched = wanted.filter((t) => !haveKeys.has(t.source_key) && !dismissedKeys.has(t.source_key));
+
   const rekey: LineSyncPlan["rekey"] = [];
+  const claimed = new Set<string>();
+  const claim = (t: { id: string }, pick: (w: BornTask) => boolean): void => {
+    if (claimed.has(t.id)) return;
+    const i = unmatched.findIndex(pick);
+    if (i === -1) return;
+    rekey.push({ id: t.id, source_key: unmatched[i].source_key });
+    unmatched.splice(i, 1);
+    claimed.add(t.id);
+  };
+  const open = (t: { status: string }) => t.status === "open";
+
+  // A TOMBSTONE whose line is back (an estimate moved away and back) is the line's again — not a second copy.
+  for (const t of have) if (t.gone && wantedKeys.has(t.source_key)) rekey.push({ id: t.id, source_key: t.source_key });
+
+  // A VISIT'S TASK finds the line built from it, by the task id the line's breakdown remembers — exact,
+  // done or open: it is the same task — before any guess by name below.
+  const visit = others.filter((t) => typeof t.source_key === "string" && t.source_key.startsWith(VISIT_KEY));
+  for (const t of visit) claim(t, (w) => !!w.task_id && `${VISIT_KEY}${w.task_id}` === t.source_key);
+
+  // Orphans (their line is on no accepted estimate) claim a name: open ones first — a done task matched
+  // to a new line of the same name would hide new work. Then a visit's task by exact title, the same
+  // way; then an OPEN task he made by hand (a done one does not: the estimate asking again is new work).
+  const orphans = have.filter((t) => !t.gone && !wantedKeys.has(t.source_key));
+  for (const pass of [orphans.filter(open), orphans.filter((t) => !open(t))]) for (const t of pass) claim(t, (w) => w.title === t.title);
+  for (const pass of [visit.filter(open), visit.filter((t) => !open(t))]) for (const t of pass) claim(t, (w) => w.title === t.title);
+  for (const t of others.filter((o) => !o.source_key && open(o))) claim(t, (w) => w.title === t.title);
+
+  // A dismissal under a line that is gone bars the same task on a line nobody has (one task per
+  // dismissal) — AFTER the claims, so a task that is there always wins — and MOVES to the new key.
+  const leftOff: string[] = [];
+  const consumed: string[] = [];
+  const redismiss: string[] = [];
+  const orphanEntries = [...dismissed].filter((e) => !wantedKeys.has(dismissalKey(e)) && dismissalTitle(e) !== null);
+  const insert = unmatched.filter((t) => {
+    const i = orphanEntries.findIndex((e) => dismissalTitle(e) === t.title.trim());
+    if (i === -1) return true;
+    consumed.push(orphanEntries[i]);
+    orphanEntries.splice(i, 1);
+    redismiss.push(dismissalEntry(t.source_key, t.title));
+    leftOff.push(t.title);
+    return false;
+  });
+
   const remove: string[] = [];
   const kept: LineTask[] = [];
-  const orphans = have.filter((t) => !wantedKeys.has(t.source_key)); // its line is on no accepted estimate
-  // Open orphans claim a name first: a done task matched to a new line of the same name would hide new work.
-  const claimed = new Set<string>();
-  for (const pass of [orphans.filter((t) => t.status === "open"), orphans.filter((t) => t.status !== "open")]) {
-    for (const t of pass) {
-      const i = unmatched.findIndex((w) => w.title === t.title);
-      if (i === -1) continue;
-      rekey.push({ id: t.id, source_key: unmatched[i].source_key });
-      unmatched.splice(i, 1);
-      claimed.add(t.id);
-    }
-  }
   for (const t of orphans) {
     if (claimed.has(t.id)) continue;
     if (t.status === "open" && !isHisTask(t)) remove.push(t.id);
     else kept.push(t);
   }
-  return { insert: unmatched, rekey, remove, kept };
+  return {
+    insert,
+    rekey,
+    remove,
+    kept,
+    tombstone: kept.map((t) => ({ id: t.id, source_key: `${GONE_KEY}${t.source_key}` })),
+    leftOff,
+    consumed,
+    redismiss,
+  };
 }
 
 export interface EstimateLines {
@@ -179,6 +267,10 @@ export interface SyncResult {
   kept: number;
   /** The kept orphans' names, for the sentence. */
   keptNames: string[];
+  /** Wanted tasks a title dismissal barred (he deleted that task before), by name. */
+  leftOff: string[];
+  /** A visit's or hand task that would have taken a line another door just filled: on the list twice, by name. */
+  twice: string[];
   /** True when this call moved jobs.planned_minutes to the estimate's new figure (sizeNow). */
   sizeSet: boolean;
   sizeNow?: number | null;
@@ -187,7 +279,7 @@ export interface SyncResult {
   error?: string;
 }
 
-const NONE: SyncResult = { inserted: 0, rekeyed: 0, removed: 0, kept: 0, keptNames: [], sizeSet: false };
+const NONE: SyncResult = { inserted: 0, rekeyed: 0, removed: 0, kept: 0, keptNames: [], leftOff: [], twice: [], sizeSet: false };
 
 /** THE SYNC: read what the accepted estimates say and what the job has, plan, write, count. */
 export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<SyncResult> {
@@ -195,12 +287,24 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   if (est.error) return { ...NONE, error: est.error };
   const wanted = tasksFromLines(est.lines).tasks;
 
-  let tq = sb.from("tasks").select("id, source_key, title, status, notes, photo_path").eq("job_id", who.jobId).not("source_key", "is", null);
+  let tq = sb.from("tasks").select("id, source_key, title, status, notes, photo_path, parent_id").eq("job_id", who.jobId);
   if (who.orgId) tq = tq.eq("org_id", who.orgId);
   const { data: rows, error: tErr } = await tq.order("sort_order").order("created_at");
   if (tErr) return { ...NONE, error: dbError(tErr) };
-  // Only the tasks a LINE put there: a visit's ("task:") and hand-made tasks (no key) are not the estimate's to touch.
-  const have = ((rows ?? []) as LineTask[]).filter((t) => typeof t.source_key === "string" && t.source_key.startsWith(LINE_KEY));
+  type Row = Omit<LineTask, "source_key"> & { source_key: string | null; parent_id?: string | null };
+  const all = (rows ?? []) as Row[];
+  // The tasks a LINE put there are the estimate's to keep in step — live ("line:") and tombstoned
+  // ("gone:line:", kept earlier). A visit's ("task:") and hand-made tasks (no key) are candidates only —
+  // a line may be theirs — and are never removed here. Steps under a task (parent_id) are the task's.
+  const isLine = (k: string | null): k is string => typeof k === "string" && (k.startsWith(LINE_KEY) || k.startsWith(`${GONE_KEY}${LINE_KEY}`));
+  const have: LineTask[] = all
+    .filter((t) => isLine(t.source_key))
+    .map((t) => {
+      const k = t.source_key as string;
+      return k.startsWith(GONE_KEY) ? { ...t, source_key: k.slice(GONE_KEY.length), gone: true } : { ...t, source_key: k };
+    });
+  const others: OtherTask[] = all.filter((t) => !isLine(t.source_key) && !t.parent_id).map((t) => ({ id: t.id, source_key: t.source_key, title: t.title, status: t.status }));
+  const otherTitle = new Map(others.map((t) => [t.id, t.title]));
 
   // The job itself: the keys he dismissed by hand, and the length box as it stands right now.
   let jq = sb.from("jobs").select("planned_minutes, dismissed_task_keys").eq("id", who.jobId);
@@ -208,11 +312,10 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   const { data: job, error: jErr } = await jq.maybeSingle();
   if (jErr) return { ...NONE, error: dbError(jErr) };
   if (!job) return { ...NONE, error: "That job could not be read." };
-  const dismissed = new Set<string>(
-    (Array.isArray((job as { dismissed_task_keys?: unknown }).dismissed_task_keys) ? (job as { dismissed_task_keys: unknown[] }).dismissed_task_keys : []).filter(
-      (k): k is string => typeof k === "string",
-    ),
+  const dismissedList = (Array.isArray((job as { dismissed_task_keys?: unknown }).dismissed_task_keys) ? (job as { dismissed_task_keys: unknown[] }).dismissed_task_keys : []).filter(
+    (k): k is string => typeof k === "string",
   );
+  const dismissed = new Set<string>(dismissedList);
   const boxNow = ((job as { planned_minutes?: number | null }).planned_minutes ?? null) as number | null;
 
   // Steps under a line task (0055: a parent's delete cascades to them) make it his.
@@ -225,17 +328,33 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     for (const t of have) if (parents.has(t.id)) t.has_steps = true;
   }
 
-  const plan = planLineSync(wanted, have, dismissed);
+  const plan = planLineSync(wanted, have, dismissed, others);
 
   let rekeyed = 0;
+  const twice: string[] = [];
   for (const r of plan.rekey) {
     const { data, error } = await sb.from("tasks").update({ source_key: r.source_key }).eq("id", r.id).eq("job_id", who.jobId).select("id");
     // 23505: another door (the customer's Accept) put a task on that line between this read and this
-    // write. Theirs is the task; this orphan is cleaned up by the next pass. Any other refusal is said.
-    if (error && (error as { code?: string }).code === "23505") continue;
+    // write. Theirs is the task. A line orphan is cleaned up by the next pass; a visit's or hand task
+    // is never removed here, so it is now on the list twice — SAID, by name. Any other refusal is said.
+    if (error && (error as { code?: string }).code === "23505") {
+      const title = otherTitle.get(r.id);
+      if (title) twice.push(title);
+      continue;
+    }
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
     if (!data?.length) return { ...NONE, rekeyed, error: "A task could not be matched to its line." };
     rekeyed++;
+  }
+
+  for (const t of plan.tombstone) {
+    // A KEPT ORPHAN IS HIS NOW: its key goes under the tombstone ("gone:line:<id>") — "kept" is said this
+    // once, not on every sync after, and the line can still find it if it ever comes back.
+    let kq = sb.from("tasks").update({ source_key: t.source_key }).eq("id", t.id).eq("job_id", who.jobId);
+    if (who.orgId) kq = kq.eq("org_id", who.orgId);
+    const { data, error } = await kq.select("id");
+    if (error) return { ...NONE, rekeyed, error: dbError(error) };
+    if (!data?.length) return { ...NONE, rekeyed, error: "A kept task could not be marked." };
   }
 
   let removed = 0;
@@ -256,11 +375,31 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     kept += plan.remove.length - removed;
   }
 
+  if (plan.redismiss.length) {
+    // The same deletions, MOVED to the rebuilt lines' keys: the entries that barred are replaced, never
+    // piled up (two stale entries would bar two live lines). Read again right before the write, so a
+    // delete made meanwhile (the delete door's own read-modify-write) is kept, not overwritten.
+    let fq = sb.from("jobs").select("dismissed_task_keys").eq("id", who.jobId);
+    if (who.orgId) fq = fq.eq("org_id", who.orgId);
+    const { data: fresh, error: fErr } = await fq.maybeSingle();
+    if (fErr) return { ...NONE, rekeyed, removed, kept, keptNames, error: dbError(fErr) };
+    const now = (Array.isArray((fresh as { dismissed_task_keys?: unknown } | null)?.dismissed_task_keys) ? (fresh as { dismissed_task_keys: unknown[] }).dismissed_task_keys : dismissedList).filter(
+      (k): k is string => typeof k === "string",
+    );
+    const consumed = new Set(plan.consumed);
+    const next = [...now.filter((e) => !consumed.has(e)), ...plan.redismiss.filter((e) => !now.includes(e))];
+    let dq = sb.from("jobs").update({ dismissed_task_keys: next }).eq("id", who.jobId);
+    if (who.orgId) dq = dq.eq("org_id", who.orgId);
+    const { data, error } = await dq.select("id");
+    if (error) return { ...NONE, rekeyed, removed, kept, keptNames, error: dbError(error) };
+    if (!data?.length) return { ...NONE, rekeyed, removed, kept, keptNames, error: "The job's deleted tasks could not be kept up." };
+  }
+
   // The birth's own insert: same row shape, dedupe by key, silent-write counts. Size left to the rule below.
   const born = await bornTasks(sb, { jobId: who.jobId, orgId: who.orgId, createdBy: who.createdBy }, { tasks: plan.insert, plannedMinutes: null, parts: [] });
   if (born.error) return { ...NONE, rekeyed, removed, kept, keptNames, error: born.error };
 
-  const done: SyncResult = { inserted: born.inserted, rekeyed, removed, kept, keptNames, sizeSet: false };
+  const done: SyncResult = { inserted: born.inserted, rekeyed, removed, kept, keptNames, leftOff: plan.leftOff, twice, sizeSet: false };
   if (who.sizeBefore !== undefined && est.minutes !== who.sizeBefore) {
     // The box still holds the estimate's figure (or nothing yet): it follows — compare-and-set on the value
     // just read, so a figure he types between the read and the write wins. Anything else is his: it stays, said.
@@ -300,17 +439,19 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 /** Minutes as the schedule says them: "none", "2 h", "1.5 h". */
 export const hoursWords = (minutes: number | null): string => (minutes === null ? "none" : `${Math.round((minutes / 60) * 10) / 10} h`);
 
-/** What the job's list did, in a sentence — or null when nothing changed. */
-export function syncWords(r: SyncResult): string | null {
+const few = (names: string[]): string => (names.length ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""})` : "");
+
+/** What the job's list did, in a sentence — or null when nothing changed. `lead` names whose list, when
+ *  it is not the obvious one (the job an estimate was moved away from). */
+export function syncWords(r: SyncResult, lead = "The job's list follows the estimate"): string | null {
   const bits: string[] = [];
   if (r.inserted) bits.push(`${plural(r.inserted, "task", "tasks")} added`);
-  if (r.rekeyed) bits.push(`${r.rekeyed} matched by name`);
+  if (r.rekeyed) bits.push(`${r.rekeyed} matched`);
   if (r.removed) bits.push(`${r.removed} removed`);
-  if (r.kept) {
-    const names = r.keptNames.slice(0, 3).join(", ");
-    bits.push(`${r.kept} kept${names ? ` (${names}${r.keptNames.length > 3 ? ", …" : ""})` : ""} — done, or with notes, a photo or steps`);
-  }
+  if (r.kept) bits.push(`${r.kept} kept${few(r.keptNames)} — done, or with notes, a photo or steps`);
+  if (r.leftOff?.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the job before`);
+  if (r.twice?.length) bits.push(`${r.twice.length} on the list twice${few(r.twice)} — remove one`);
   if (r.sizeSet) bits.push(`the job's length is now ${hoursWords(r.sizeNow ?? null)}`);
   if (r.sizeStays) bits.push(`the job's length stays at ${hoursWords(r.sizeStays.box)} (the estimate now says ${hoursWords(r.sizeStays.estimate)})`);
-  return bits.length ? `The job's list follows the estimate: ${bits.join(" · ")}.` : null;
+  return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;
 }

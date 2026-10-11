@@ -13,7 +13,7 @@ const wanted = (over: Partial<BornTask> & { source_key: string }): BornTask => (
 const have = (over: Partial<LineTask> & { id: string }): LineTask => ({
   source_key: `line:${over.id}`, title: "Trench", status: "open", notes: null, photo_path: null, ...over,
 });
-const result = (over: Partial<SyncResult> = {}): SyncResult => ({ inserted: 0, rekeyed: 0, removed: 0, kept: 0, keptNames: [], sizeSet: false, ...over });
+const result = (over: Partial<SyncResult> = {}): SyncResult => ({ inserted: 0, rekeyed: 0, removed: 0, kept: 0, keptNames: [], leftOff: [], twice: [], sizeSet: false, ...over });
 
 describe("planLineSync — the plan", () => {
   it("keeps a task whose line is still on an accepted estimate, and inserts the wanted ones nobody has", () => {
@@ -97,6 +97,82 @@ const taskLine = (id: string, quote_id: string, description: string, hours: numb
 });
 const plain = (id: string, quote_id: string, sort_order: number) => ({ id, quote_id, description: "Permit", sort_order, detail: null });
 
+describe("planLineSync — the deferred items (cn-v1084)", () => {
+  it("a dismissal that remembers the title bars the same task on a rebuilt line (the builder's new id): left off and said, the dismissal MOVED to the new key", () => {
+    const plan = planLineSync([wanted({ source_key: "line:NEW" })], [], new Set(["line:OLD#Trench"]));
+    expect(plan.insert).toEqual([]);
+    expect(plan.leftOff).toEqual(["Trench"]);
+    expect(plan.consumed).toEqual(["line:OLD#Trench"]);
+    expect(plan.redismiss).toEqual(["line:NEW#Trench"]);
+  });
+  it("two rebuilds: one deletion stays ONE entry, so a second same-titled line is new work and a live task is never lost (the skeptic's case)", () => {
+    // Two "Install outlet" lines; he deleted the second task. Rebuild 1: T1 claims L1', L2' is left off, the entry moves.
+    const w1 = [wanted({ source_key: "line:L1b", title: "Install outlet" }), wanted({ source_key: "line:L2b", title: "Install outlet", sort_order: 1 })];
+    const p1 = planLineSync(w1, [have({ id: "T1", source_key: "line:L1", title: "Install outlet" })], new Set(["line:L2#Install outlet"]));
+    expect(p1.rekey).toEqual([{ id: "T1", source_key: "line:L1b" }]);
+    expect(p1.leftOff).toEqual(["Install outlet"]);
+    expect(p1.consumed).toEqual(["line:L2#Install outlet"]);
+    expect(p1.redismiss).toEqual(["line:L2b#Install outlet"]);
+    // What the sync writes: the consumed entry gone, the new one in. Rebuild 2 with that list: the same shape, T1 kept.
+    const after1 = ["line:L2b#Install outlet"];
+    const w2 = [wanted({ source_key: "line:L1c", title: "Install outlet" }), wanted({ source_key: "line:L2c", title: "Install outlet", sort_order: 1 })];
+    const p2 = planLineSync(w2, [have({ id: "T1", source_key: "line:L1b", title: "Install outlet" })], new Set(after1));
+    expect(p2.rekey).toEqual([{ id: "T1", source_key: "line:L1c" }]);
+    expect(p2.remove).toEqual([]);
+    expect(p2.leftOff).toEqual(["Install outlet"]);
+    expect(p2.redismiss).toEqual(["line:L2c#Install outlet"]);
+  });
+  it("a live task of the dismissed title claims BEFORE the bar: a dismissal never costs a task that is there", () => {
+    const plan = planLineSync([wanted({ source_key: "line:NEW" })], [have({ id: "T", source_key: "line:OLD" })], new Set(["line:GONE#Trench"]));
+    expect(plan.rekey).toEqual([{ id: "T", source_key: "line:NEW" }]);
+    expect(plan.remove).toEqual([]);
+    expect(plan.leftOff).toEqual([]);
+    expect(plan.consumed).toEqual([]);
+  });
+  it("a dismissal whose line is still current bars only that line — the same title on another line is new work", () => {
+    const plan = planLineSync([wanted({ source_key: "line:a" }), wanted({ source_key: "line:b", sort_order: 1 })], [], new Set(["line:a#Trench"]));
+    expect(plan.insert.map((t) => t.source_key)).toEqual(["line:b"]);
+    expect(plan.redismiss).toEqual([]);
+  });
+  it("a visit's task finds the line built from it by the task id the line remembers — done or open, whatever its name — else by exact title; one with no line stays", () => {
+    const w = [wanted({ source_key: "line:a", title: "Trench ×2", task_id: "T1" }), wanted({ source_key: "line:b", title: "Set the panel", task_id: "T2", sort_order: 1 })];
+    const others = [
+      { id: "v1", source_key: "task:T1", title: "Old name", status: "done" },
+      { id: "v2", source_key: "task:T9", title: "Set the panel", status: "open" },
+      { id: "v3", source_key: "task:T8", title: "Nothing like it", status: "open" },
+    ];
+    const plan = planLineSync(w, [], new Set(), others);
+    expect(plan.rekey).toEqual([{ id: "v1", source_key: "line:a" }, { id: "v2", source_key: "line:b" }]);
+    expect(plan.insert).toEqual([]);
+    expect(plan.remove).toEqual([]);
+    expect(plan.kept).toEqual([]);
+  });
+  it("an OPEN task he made by hand under the same exact title becomes the line's (re-keyed, said as matched); a done one does not bar new work", () => {
+    const w = [wanted({ source_key: "line:a" }), wanted({ source_key: "line:b", title: "Set the panel", sort_order: 1 })];
+    const others = [
+      { id: "h1", source_key: null, title: "Trench", status: "open" },
+      { id: "h2", source_key: null, title: "Set the panel", status: "done" },
+    ];
+    const plan = planLineSync(w, [], new Set(), others);
+    expect(plan.rekey).toEqual([{ id: "h1", source_key: "line:a" }]);
+    expect(plan.insert.map((t) => t.source_key)).toEqual(["line:b"]);
+  });
+  it("a kept orphan goes under the tombstone, so it is said this once — and is the line's again when that line returns", () => {
+    const plan = planLineSync([], [have({ id: "k", status: "done" }), have({ id: "gone" })]);
+    expect(plan.kept.map((t) => t.id)).toEqual(["k"]);
+    expect(plan.tombstone).toEqual([{ id: "k", source_key: "gone:line:k" }]);
+    expect(plan.remove).toEqual(["gone"]);
+    // The estimate comes back (moved away and back): the tombstone is restored, nothing inserted, nothing said as kept.
+    const back = planLineSync([wanted({ source_key: "line:k" })], [have({ id: "k", status: "done", gone: true })]);
+    expect(back.rekey).toEqual([{ id: "k", source_key: "line:k" }]);
+    expect(back.insert).toEqual([]);
+    expect(back.kept).toEqual([]);
+    // A tombstone whose line stays gone is left alone: not kept again, not removed.
+    const still = planLineSync([], [have({ id: "k", status: "done", gone: true })]);
+    expect(still).toMatchObject({ insert: [], rekey: [], remove: [], kept: [], tombstone: [] });
+  });
+});
+
 describe("estimateLines — the accepted estimates' task lines, in order", () => {
   it("reads only ACCEPTED estimates of the job, offsets a later-ACCEPTED estimate past the earlier one, and sums his hours", async () => {
     const { sb } = fakeDb({
@@ -141,13 +217,19 @@ describe("estimateLines — the accepted estimates' task lines, in order", () =>
   });
 });
 
-const db = (over: { tasks?: Record<string, unknown>[]; lines?: Record<string, unknown>[]; planned?: number | null; quotes?: Record<string, unknown>[]; dismissed?: string[] } = {}) =>
-  fakeDb({
-    quotes: over.quotes ?? [{ id: "q1", job_id: "j1", status: "accepted", created_at: "2026-10-01", accepted_at: "2026-10-01" }],
-    quote_line_items: over.lines ?? [taskLine("a", "q1", "Trench", 2, 0), taskLine("b", "q1", "Set the panel", 1, 1)],
-    tasks: over.tasks ?? [],
-    jobs: [{ id: "j1", planned_minutes: over.planned === undefined ? null : over.planned, dismissed_task_keys: over.dismissed ?? [] }],
-  });
+const db = (
+  over: { tasks?: Record<string, unknown>[]; lines?: Record<string, unknown>[]; planned?: number | null; quotes?: Record<string, unknown>[]; dismissed?: string[] } = {},
+  opts?: Parameters<typeof fakeDb>[1],
+) =>
+  fakeDb(
+    {
+      quotes: over.quotes ?? [{ id: "q1", job_id: "j1", status: "accepted", created_at: "2026-10-01", accepted_at: "2026-10-01" }],
+      quote_line_items: over.lines ?? [taskLine("a", "q1", "Trench", 2, 0), taskLine("b", "q1", "Set the panel", 1, 1)],
+      tasks: over.tasks ?? [],
+      jobs: [{ id: "j1", planned_minutes: over.planned === undefined ? null : over.planned, dismissed_task_keys: over.dismissed ?? [] }],
+    },
+    opts,
+  );
 const task = (over: Record<string, unknown>) => ({ job_id: "j1", status: "open", notes: null, photo_path: null, parent_id: null, ...over });
 
 describe("syncJobTasks — the writes", () => {
@@ -178,8 +260,9 @@ describe("syncJobTasks — the writes", () => {
     expect(byId.t1.source_key).toBe("line:a"); // done, re-keyed, still done
     expect(byId.t1.status).toBe("done");
     expect(byId.t2).toBeUndefined(); // bare and open: gone
-    expect(byId.t3.source_key).toBe("line:gone2"); // his notes: stays as it is
-    expect(byId.t4.source_key).toBe("task:v1");
+    expect(byId.t3.source_key).toBe("gone:line:gone2"); // his notes: kept, under the tombstone so "kept" is said this once (cn-v1084)
+    expect(byId.t3.notes).toBe("Keep");
+    expect(byId.t4.source_key).toBe("task:v1"); // a visit's task that matches no line stays the visit's
     expect(byId.t5.source_key).toBe(null);
     expect(inserted.tasks.map((t) => t.source_key)).toEqual(["line:b"]);
   });
@@ -208,6 +291,46 @@ describe("syncJobTasks — the writes", () => {
     expect(tables.tasks).toHaveLength(1);
   });
 
+  it("a task he deleted stays gone through a rebuild: the title in the dismissal bars the new line (left off, said) and the dismissal MOVES to the new key", async () => {
+    const { sb, inserted, tables } = db({ dismissed: ["line:OLD#Trench"] });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res).toEqual(result({ inserted: 1, leftOff: ["Trench"] }));
+    expect(inserted.tasks.map((t) => t.source_key)).toEqual(["line:b"]);
+    expect(tables.jobs[0].dismissed_task_keys).toEqual(["line:a#Trench"]);
+    expect(syncWords(res)).toBe("The job's list follows the estimate: 1 task added · 1 left off (Trench) — deleted from the job before.");
+  });
+  it("a visit's task is re-keyed to the line built from it (the id the line remembers) and an open hand task to its twin — both said as matched", async () => {
+    // The fixture's lines remember tasks "t-a" and "t-b" (taskLine).
+    const { sb, tables, inserted } = db({
+      tasks: [task({ id: "v", source_key: "task:t-a", title: "Trench, as the visit said it", status: "done" }), task({ id: "h", source_key: null, title: "Set the panel" })],
+    });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res).toEqual(result({ rekeyed: 2 }));
+    expect(tables.tasks.find((t) => t.id === "v")?.source_key).toBe("line:a");
+    expect(tables.tasks.find((t) => t.id === "h")?.source_key).toBe("line:b");
+    expect(inserted.tasks ?? []).toEqual([]);
+    expect(syncWords(res)).toBe("The job's list follows the estimate: 2 matched.");
+  });
+  it("a kept orphan is said once: it goes under the tombstone, the next sync says nothing, and the line finds it again if it returns", async () => {
+    const { sb, tables } = db({ lines: [], tasks: [task({ id: "k", source_key: "line:a", title: "Trench", notes: "Keep" })] });
+    const first = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(first).toEqual(result({ kept: 1, keptNames: ["Trench"] }));
+    expect(tables.tasks.find((t) => t.id === "k")?.source_key).toBe("gone:line:a");
+    const again = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(again).toEqual(result());
+    // The estimate's line "a" is back: the task is the line's again, no second copy.
+    tables.quote_line_items.push(taskLine("a", "q1", "Trench", 2, 0));
+    const back = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(back).toEqual(result({ rekeyed: 1 }));
+    expect(tables.tasks).toHaveLength(1);
+    expect(tables.tasks[0].source_key).toBe("line:a");
+  });
+  it("a visit's task whose line another door just filled (23505) is not swallowed: it is on the list twice, said by name", async () => {
+    const { sb } = db({ tasks: [task({ id: "v", source_key: "task:t-a", title: "Trench" })] }, { onUpdate: (table, patch) => (table === "tasks" && patch.source_key === "line:a" ? { code: "23505", message: "duplicate key" } : undefined) });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res.twice).toEqual(["Trench"]);
+    expect(syncWords(res)).toContain("1 on the list twice (Trench) — remove one");
+  });
   it("is idempotent: a second run changes nothing", async () => {
     const { sb, tables } = db();
     await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
@@ -218,7 +341,8 @@ describe("syncJobTasks — the writes", () => {
 
   it("the words: what the list did, or nothing when nothing changed", () => {
     expect(syncWords(result())).toBeNull();
-    expect(syncWords(result({ rekeyed: 3 }))).toBe("The job's list follows the estimate: 3 matched by name.");
+    expect(syncWords(result({ rekeyed: 3 }))).toBe("The job's list follows the estimate: 3 matched.");
+    expect(syncWords(result({ rekeyed: 1 }), "The job it left (J-047) follows too")).toBe("The job it left (J-047) follows too: 1 matched.");
     expect(syncWords(result({ inserted: 2, removed: 1, kept: 1, keptNames: ["Trench"], sizeSet: true, sizeNow: 180 }))).toBe(
       "The job's list follows the estimate: 2 tasks added · 1 removed · 1 kept (Trench) — done, or with notes, a photo or steps · the job's length is now 3 h.",
     );

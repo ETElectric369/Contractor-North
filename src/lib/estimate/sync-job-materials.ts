@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
 import { keyParts, materialKey, type LineRow } from "./born-with-tasks";
 import { coerceTaskDetail } from "./task-lines";
-import { LINE_KEY } from "./sync-job-tasks";
+import { GONE_KEY, LINE_KEY, VISIT_KEY } from "./sync-job-tasks";
 import { readPriceBook, taskPartRow } from "./take-off-from-quote";
 
 /**
@@ -34,6 +34,18 @@ import { readPriceBook, taskPartRow } from "./take-off-from-quote";
  *    after the list's last row.
  *  - No list for the estimate: nothing is made here — the acceptance doors run the take-off, and a
  *    list someone deleted on purpose is not re-made behind their back.
+ *  - cn-v1084, the deferred items: a KEPT orphan keeps its line under a TOMBSTONE key
+ *    ("gone:line:<id>#part") — his now, "kept" said once, and the line's again if that line returns
+ *    (an estimate moved away and back), not a second row to buy twice. A VISIT's row ("task:<TaskValue
+ *    id>#part", Start The Job on the inspection) finds the line of the estimate drafted from that
+ *    visit — by the task id the line's breakdown remembers (detail.task_id) and the same part, else by
+ *    the part half like any orphan — and becomes the line's instead of doubling; one that finds no line
+ *    stays the visit's, untouched. An UNKEYED row that is not his (typed by hand, or taken off before
+ *    0390) under the same code or words becomes the line's too (re-keyed, said as matched) instead of
+ *    being announced as "already on the list" every sync; a bought or tool row never stands in for a
+ *    wanted part by code or words (the estimate wants N more; the bought one is history). A dismissal
+ *    under a gone line bars one part on a line nobody has — AFTER every row that is there has claimed
+ *    — the part is LEFT OFF (said) and the dismissal MOVES to the new key: one entry per deletion.
  *  Rows with no key (typed by hand, plain lines, catalog kits, born before 0390) are never changed.
  *  Every write selects what it wrote and counts it; every read is org-scoped when the caller says who.
  */
@@ -41,13 +53,19 @@ import { readPriceBook, taskPartRow } from "./take-off-from-quote";
 /** A keyed row on the list, as the sync reads it. */
 export interface ListPartRow {
   id: string;
+  /** The row's key — for a tombstoned row, the key under the "gone:" prefix. */
   source_key: string;
   description: string;
   part_number: string | null;
   quantity: number | null;
   purchased: boolean | null;
   is_tool: boolean | null;
+  /** True when the stored key is "gone:<source_key>": an orphan kept earlier, said then. */
+  gone?: boolean;
 }
+
+/** A row with no key that is not his (not bought, not a tool): typed by hand, or taken off before 0390. */
+export type HandRow = Pick<ListPartRow, "id" | "description" | "part_number" | "quantity">;
 
 /** A wanted part with its row key. */
 export interface KeyedPart {
@@ -56,6 +74,8 @@ export interface KeyedPart {
   name: string;
   qty: number | null;
   cost: number | null;
+  /** The Inspector task the line was built from (detail.task_id): how a visit's row finds its line. */
+  taskId?: string | null;
 }
 
 /** The parts of a quote's TASK lines, keyed as the take-off keys them (ordinals for repeats). The
@@ -67,7 +87,7 @@ export function partsFromLines(rows: ReadonlyArray<LineRow>): KeyedPart[] {
     const d = coerceTaskDetail(r.detail);
     if (!d) continue;
     const named = d.materials.filter((m) => m.name.trim());
-    for (const m of keyParts(`line:${r.id}`, named)) out.push({ key: m.key, code: m.code, name: m.name.trim(), qty: m.qty, cost: m.cost });
+    for (const m of keyParts(`line:${r.id}`, named)) out.push({ key: m.key, code: m.code, name: m.name.trim(), qty: m.qty, cost: m.cost, taskId: d.task_id || null });
   }
   return out;
 }
@@ -76,12 +96,14 @@ export function partsFromLines(rows: ReadonlyArray<LineRow>): KeyedPart[] {
 export const partHalf = (key: string): string => key.slice(key.indexOf("#") + 1).replace(/~\d+$/, "");
 /** The "line:<id>" half. */
 const lineHalf = (key: string): string => key.slice(0, key.indexOf("#"));
+/** The Inspector task id inside a visit's row key ("task:<id>#part"), else null. */
+const visitTaskOf = (key: string): string | null => (key.startsWith(VISIT_KEY) && key.includes("#") ? key.slice(VISIT_KEY.length, key.indexOf("#")) : null);
 
 /** Bought, or a tool: his, and it stays. */
 export const isHisRow = (r: Pick<ListPartRow, "purchased" | "is_tool">): boolean => r.purchased === true || r.is_tool === true;
 
 /** How an UNKEYED row is recognised as the same part: by code, else by its words (slugged like a key). */
-const unkeyedHalf = (r: { part_number: string | null; description: string }): string =>
+export const unkeyedHalf = (r: { part_number: string | null; description: string }): string =>
   partHalf(materialKey("x", r.part_number, r.description.replace(/ · how many\?$/, "")));
 
 export interface CountDiffers {
@@ -92,93 +114,128 @@ export interface CountDiffers {
 
 export interface PartSyncPlan {
   insert: KeyedPart[];
+  /** Orphans, a visit's rows, hand rows and returning tombstones: re-keyed to the line's part that is theirs. */
   rekey: Array<{ id: string; source_key: string }>;
   remove: ListPartRow[];
   kept: ListPartRow[];
-  /** Wanted parts already on the list without a key (by code or words): not inserted again. */
-  alreadyListed: KeyedPart[];
-  /** Dismissed under an old line id, barred again under the new one: to be dismissed under the new key too. */
+  /** The kept orphans, re-keyed under the tombstone so "kept" is said once and the line can find them again. */
+  tombstone: Array<{ id: string; source_key: string }>;
+  /** Wanted parts a dismissal under a gone line barred (he deleted that part before), by name. */
+  leftOff: string[];
+  /** The dismissal entries that did the barring: replaced by `redismiss` (one entry per deletion). */
+  consumed: string[];
+  /** The same deletions under the rebuilt lines' keys. */
   redismiss: string[];
   /** A kept or re-keyed row whose count is not the estimate's: said, never rewritten. */
   countsDiffer: CountDiffers[];
 }
 
-/** THE PLAN, pure. */
+/** THE PLAN, pure. `hand` = unkeyed rows that are not his: they may be a wanted part's row. */
 export function planPartSync(
   wanted: ReadonlyArray<KeyedPart>,
   have: ReadonlyArray<ListPartRow>,
   dismissed: ReadonlySet<string> = new Set(),
-  unkeyed: ReadonlyArray<{ part_number: string | null; description: string }> = [],
+  hand: ReadonlyArray<HandRow> = [],
 ): PartSyncPlan {
   const wantedByKey = new Map(wanted.map((p) => [p.key, p]));
-  const haveKeys = new Set(have.map((r) => r.source_key));
+  const haveKeys = new Set(have.map((r) => r.source_key)); // live and tombstoned alike: neither is inserted again
   const currentLines = new Set(wanted.map((p) => lineHalf(p.key)));
   const countsDiffer: CountDiffers[] = [];
-  const differs = (r: ListPartRow, p: KeyedPart) => {
+  const differs = (r: Pick<ListPartRow, "description" | "quantity">, p: KeyedPart) => {
     if (p.qty !== null && Number(r.quantity) !== p.qty) countsDiffer.push({ description: r.description, shows: r.quantity, estimate: p.qty });
   };
 
   // Kept by key: counts compared.
   for (const r of have) {
+    if (r.gone) continue;
     const p = wantedByKey.get(r.source_key);
     if (p) differs(r, p);
   }
 
-  // Wanted parts nobody has (by key), not dismissed, not already on the list unkeyed.
-  let unmatched = wanted.filter((p) => !haveKeys.has(p.key) && !dismissed.has(p.key));
-  const unkeyedHalves = new Map<string, number>();
-  for (const u of unkeyed) unkeyedHalves.set(unkeyedHalf(u), (unkeyedHalves.get(unkeyedHalf(u)) ?? 0) + 1);
-  const alreadyListed: KeyedPart[] = [];
-  unmatched = unmatched.filter((p) => {
-    const n = unkeyedHalves.get(partHalf(p.key)) ?? 0;
-    if (!n) return true;
-    unkeyedHalves.set(partHalf(p.key), n - 1);
-    alreadyListed.push(p);
-    return false;
-  });
-
-  // A dismissal under a line that is gone bars the same part on the rebuilt line.
-  const redismiss: string[] = [];
-  const orphanDismissals = [...dismissed].filter((k) => k.includes("#") && !currentLines.has(lineHalf(k))).map(partHalf);
-  unmatched = unmatched.filter((p) => {
-    const i = orphanDismissals.indexOf(partHalf(p.key));
-    if (i === -1) return true;
-    orphanDismissals.splice(i, 1);
-    redismiss.push(p.key);
-    return false;
-  });
-
-  // Orphans: re-key by the "#part" half — rows that are not his first, preferring an equal count; a
-  // bought or tool row only onto an equal count. Else remove (not his) or keep (his).
-  const orphans = have.filter((r) => !wantedByKey.has(r.source_key));
+  // Wanted parts nobody has (by key) and he did not dismiss.
+  const unmatched = wanted.filter((p) => !haveKeys.has(p.key) && !dismissed.has(p.key));
   const rekey: PartSyncPlan["rekey"] = [];
   const claimed = new Set<string>();
-  const claim = (r: ListPartRow, equalOnly: boolean) => {
-    if (claimed.has(r.id)) return;
-    const half = partHalf(r.source_key);
-    const same = (p: KeyedPart) => partHalf(p.key) === half;
-    const equal = unmatched.findIndex((p) => same(p) && p.qty !== null && Number(r.quantity) === p.qty);
-    const i = equal !== -1 ? equal : equalOnly ? -1 : unmatched.findIndex(same);
-    if (i === -1) return;
+  const take = (r: Pick<ListPartRow, "id" | "description" | "quantity">, i: number) => {
     const p = unmatched[i];
     unmatched.splice(i, 1);
     rekey.push({ id: r.id, source_key: p.key });
     claimed.add(r.id);
     differs(r, p);
   };
+  /** Claim by the part half: an equal count first; any count unless `equalOnly`. */
+  const claimHalf = (r: Pick<ListPartRow, "id" | "description" | "quantity">, half: string, equalOnly: boolean) => {
+    if (claimed.has(r.id)) return;
+    const same = (p: KeyedPart) => partHalf(p.key) === half;
+    const equal = unmatched.findIndex((p) => same(p) && p.qty !== null && Number(r.quantity) === p.qty);
+    const i = equal !== -1 ? equal : equalOnly ? -1 : unmatched.findIndex(same);
+    if (i !== -1) take(r, i);
+  };
+
+  // A TOMBSTONE whose line is back (an estimate moved away and back) is the line's again — not a second row.
+  for (const r of have) {
+    if (!r.gone) continue;
+    const p = wantedByKey.get(r.source_key);
+    if (!p) continue;
+    rekey.push({ id: r.id, source_key: r.source_key });
+    claimed.add(r.id);
+    differs(r, p);
+  }
+
+  // Orphans: a live row whose key is on no task line. A VISIT's row ("task:<id>#part") is an orphan of the
+  // visit, not of a line: it claims first and exactly — the line built from its task, the same part, any
+  // count (it IS that part; a differing count is said) — then like any orphan by the part half; one that
+  // finds no line stays the visit's.
+  const orphans = have.filter((r) => !r.gone && !wantedByKey.has(r.source_key));
+  for (const r of orphans) {
+    const t = visitTaskOf(r.source_key);
+    if (!t) continue;
+    const i = unmatched.findIndex((p) => p.taskId === t && partHalf(p.key) === partHalf(r.source_key));
+    if (i !== -1) take(r, i);
+  }
   // Equal counts claim first across ALL orphans that are not his, then the rest of them by name; a
-  // bought or tool row only ever onto an equal count.
+  // bought or tool row only ever onto an equal count. Then the hand rows (not his by definition).
   const notHis = orphans.filter((o) => !isHisRow(o));
-  for (const r of notHis) claim(r, true);
-  for (const r of notHis) claim(r, false);
-  for (const r of orphans.filter((o) => isHisRow(o))) claim(r, true);
+  for (const r of notHis) claimHalf(r, partHalf(r.source_key), true);
+  for (const r of notHis) claimHalf(r, partHalf(r.source_key), false);
+  for (const r of orphans.filter((o) => isHisRow(o))) claimHalf(r, partHalf(r.source_key), true);
+  for (const r of hand) claimHalf(r, unkeyedHalf(r), true);
+  for (const r of hand) claimHalf(r, unkeyedHalf(r), false);
+
+  // A dismissal under a line that is gone bars the same part on a line nobody has (one part per
+  // dismissal) — AFTER the claims, so a row that is there always wins — and MOVES to the new key.
+  const leftOff: string[] = [];
+  const consumed: string[] = [];
+  const redismiss: string[] = [];
+  const orphanEntries = [...dismissed].filter((k) => k.includes("#") && !currentLines.has(lineHalf(k)));
+  const insert = unmatched.filter((p) => {
+    const i = orphanEntries.findIndex((k) => partHalf(k) === partHalf(p.key));
+    if (i === -1) return true;
+    consumed.push(orphanEntries[i]);
+    orphanEntries.splice(i, 1);
+    redismiss.push(p.key);
+    leftOff.push(p.name);
+    return false;
+  });
+
   const remove: ListPartRow[] = [];
   const kept: ListPartRow[] = [];
   for (const r of orphans) {
     if (claimed.has(r.id)) continue;
+    if (!r.source_key.startsWith(LINE_KEY)) continue; // the visit's: not the estimate's to remove or keep
     (isHisRow(r) ? kept : remove).push(r);
   }
-  return { insert: unmatched, rekey, remove, kept, alreadyListed, redismiss, countsDiffer };
+  return {
+    insert,
+    rekey,
+    remove,
+    kept,
+    tombstone: kept.map((r) => ({ id: r.id, source_key: `${GONE_KEY}${r.source_key}` })),
+    leftOff,
+    consumed,
+    redismiss,
+    countsDiffer,
+  };
 }
 
 export interface MaterialsSyncWho {
@@ -194,12 +251,13 @@ export interface MaterialsSyncResult {
   removedNames: string[];
   kept: number;
   keptNames: string[];
-  alreadyListed: number;
+  /** Wanted parts a dismissal under a gone line barred (he deleted that part before), by name. */
+  leftOff: string[];
   countsDiffer: CountDiffers[];
   error?: string;
 }
 
-const NONE: MaterialsSyncResult = { inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], alreadyListed: 0, countsDiffer: [] };
+const NONE: MaterialsSyncResult = { inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], leftOff: [], countsDiffer: [] };
 const add = (a: MaterialsSyncResult, b: MaterialsSyncResult): MaterialsSyncResult => ({
   inserted: a.inserted + b.inserted,
   rekeyed: a.rekeyed + b.rekeyed,
@@ -207,7 +265,7 @@ const add = (a: MaterialsSyncResult, b: MaterialsSyncResult): MaterialsSyncResul
   removedNames: [...a.removedNames, ...b.removedNames],
   kept: a.kept + b.kept,
   keptNames: [...a.keptNames, ...b.keptNames],
-  alreadyListed: a.alreadyListed + b.alreadyListed,
+  leftOff: [...a.leftOff, ...b.leftOff],
   countsDiffer: [...a.countsDiffer, ...b.countsDiffer],
   ...(a.error || b.error ? { error: [a.error, b.error].filter(Boolean).join(" ") } : {}),
 });
@@ -232,11 +290,21 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
 
   const { data: rows, error: rErr } = await org(sb.from("material_list_items").select("id, source_key, description, part_number, quantity, purchased, is_tool").eq("list_id", listId), who.orgId).order("sort_order");
   if (rErr) return { ...NONE, error: dbError(rErr) };
-  const all = (rows ?? []) as Array<ListPartRow & { source_key: string | null }>;
-  const have = all.filter((r): r is ListPartRow => typeof r.source_key === "string" && r.source_key.startsWith(LINE_KEY));
-  const unkeyed = all.filter((r) => !r.source_key);
+  const all = (rows ?? []) as Array<Omit<ListPartRow, "source_key"> & { source_key: string | null }>;
+  // The estimate's rows — live ("line:") and tombstoned ("gone:line:", kept earlier) — AND the visit's
+  // ("task:"): a line may be theirs. Unkeyed rows that are not his may be a wanted part's row too; a
+  // bought or tool hand row never stands in for a wanted part — the estimate wants N more, the bought
+  // one is history.
+  const keyed = (k: string | null): k is string => typeof k === "string" && (k.startsWith(LINE_KEY) || k.startsWith(VISIT_KEY) || k.startsWith(`${GONE_KEY}${LINE_KEY}`));
+  const have: ListPartRow[] = all
+    .filter((r) => keyed(r.source_key))
+    .map((r) => {
+      const k = r.source_key as string;
+      return k.startsWith(GONE_KEY) ? { ...r, source_key: k.slice(GONE_KEY.length), gone: true } : { ...r, source_key: k };
+    });
+  const hand: HandRow[] = all.filter((r) => !r.source_key && !isHisRow(r));
 
-  const plan = planPartSync(wanted, have, dismissed, unkeyed);
+  const plan = planPartSync(wanted, have, dismissed, hand);
 
   let rekeyed = 0;
   for (const r of plan.rekey) {
@@ -244,6 +312,14 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
     if (!data?.length) return { ...NONE, rekeyed, error: "A part could not be matched to its line." };
     rekeyed++;
+  }
+
+  for (const t of plan.tombstone) {
+    // A KEPT ORPHAN IS HIS NOW: its key goes under the tombstone ("gone:line:<id>#part") — "kept" is said
+    // this once, not on every sync after, and the line can still find it if it ever comes back.
+    const { data, error } = await org(sb.from("material_list_items").update({ source_key: t.source_key }).eq("id", t.id).eq("list_id", listId), who.orgId).select("id");
+    if (error) return { ...NONE, rekeyed, error: dbError(error) };
+    if (!data?.length) return { ...NONE, rekeyed, error: "A kept part could not be marked." };
   }
 
   let removed = 0;
@@ -261,8 +337,16 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
   }
 
   if (plan.redismiss.length) {
-    // The same part, barred again under its rebuilt line's key — staff or service writes this directly.
-    const next = [...dismissedList, ...plan.redismiss.filter((k) => !dismissed.has(k))];
+    // The same deletions, MOVED to the rebuilt lines' keys: the entries that barred are replaced, never
+    // piled up. Read again right before the write so a delete made meanwhile (the crew's
+    // dismiss_material_key) is kept, not overwritten. Staff or service writes this directly.
+    const { data: fresh, error: fErr } = await org(sb.from("material_lists").select("dismissed_keys").eq("id", listId), who.orgId).maybeSingle();
+    if (fErr) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, error: dbError(fErr) };
+    const now = (Array.isArray((fresh as { dismissed_keys?: unknown } | null)?.dismissed_keys) ? (fresh as { dismissed_keys: unknown[] }).dismissed_keys : dismissedList).filter(
+      (k): k is string => typeof k === "string",
+    );
+    const consumed = new Set(plan.consumed);
+    const next = [...now.filter((k) => !consumed.has(k)), ...plan.redismiss.filter((k) => !now.includes(k))];
     const { data, error } = await org(sb.from("material_lists").update({ dismissed_keys: next }).eq("id", listId), who.orgId).select("id");
     if (error) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, error: dbError(error) };
     if (!data?.length) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, error: "The list's dismissed parts could not be kept up." };
@@ -283,7 +367,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     if (inserted !== newRows.length) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, inserted, error: `${newRows.length - inserted} of ${newRows.length} parts did not save.` };
   }
 
-  return { inserted, rekeyed, removed, removedNames, kept, keptNames, alreadyListed: plan.alreadyListed.length, countsDiffer: plan.countsDiffer };
+  return { inserted, rekeyed, removed, removedNames, kept, keptNames, leftOff: plan.leftOff, countsDiffer: plan.countsDiffer };
 }
 
 /** EVERY ACCEPTED ESTIMATE OF THE JOB that has a list, each brought in step. */
@@ -299,14 +383,14 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 const few = (names: string[]): string => (names.length ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""})` : "");
 
 /** What the estimate's materials list did, as a sentence — or null when nothing changed. */
-export function materialsWords(r: MaterialsSyncResult): string | null {
+export function materialsWords(r: MaterialsSyncResult, lead = "The estimate's materials list follows too"): string | null {
   const bits: string[] = [];
   if (r.inserted) bits.push(`${plural(r.inserted, "part", "parts")} added`);
-  if (r.rekeyed) bits.push(`${r.rekeyed} matched by name`);
+  if (r.rekeyed) bits.push(`${r.rekeyed} matched`);
   if (r.removed) bits.push(`${r.removed} removed${few(r.removedNames)}`);
   if (r.kept) bits.push(`${r.kept} kept${few(r.keptNames)} — bought, or a tool`);
-  if (r.alreadyListed) bits.push(`${r.alreadyListed} already on the list by hand`);
+  if (r.leftOff.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the list before`);
   for (const c of r.countsDiffer.slice(0, 3)) bits.push(`${c.description} shows ${c.shows ?? "no count"}, the estimate says ${c.estimate}`);
   if (r.countsDiffer.length > 3) bits.push(`${r.countsDiffer.length - 3} more counts differ`);
-  return bits.length ? `The estimate's materials list follows too: ${bits.join(" · ")}.` : null;
+  return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;
 }

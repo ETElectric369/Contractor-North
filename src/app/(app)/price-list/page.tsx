@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/observe";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Tabs } from "@/components/tabs";
@@ -5,8 +6,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { measurementOptions } from "@/lib/playbook/measurements";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { UNIT_DATALIST_ID, UNIT_SUGGESTIONS } from "@/lib/pricing/units";
-import { firstThatWorks, type KitLineRaw } from "@/lib/kit-line";
-import { taskKitSelectRungs } from "@/lib/estimate/task-kits";
+import { type KitLineRaw } from "@/lib/kit-line";
+import { plainKitsReadWords, readTaskKits } from "@/lib/estimate/task-kits";
 import type { PriceItem } from "./price-list-math";
 import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
@@ -78,8 +79,9 @@ export default async function PriceListPage() {
       const base = await supabase.from("price_list_items").select(ITEM_BASE).order("archived").order("description").limit(2000);
       return { data: base.data, sizingAvailable: false };
     })(),
-    // Three rungs of tolerance: (1) full, (2) without the 0240 link, (3) the pre-0166 base.
-    firstThatWorks(taskKitSelectRungs("category").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+    // The tolerant rungs (task-kits.ts): with 0386's columns across every item rung, then without.
+    // The read SAYS how it went (cn-v1084): a failed read used to show an empty book in silence.
+    readTaskKits((sel) => supabase.from("kits").select(sel).order("name"), "category"),
     // default_markup_pct rides to both tabs so a row's Sell and a kit line picked from the book
     // price through THE markup rule (item → org default), not the item's raw markup alone.
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
@@ -116,7 +118,9 @@ export default async function PriceListPage() {
 
   const allItems = ((itemsRes.data ?? []) as unknown) as PriceItem[];
   const activeItems = allItems.filter((i) => !i.archived);
-  const kits = ((kitsRes.data ?? []) as unknown) as KitRow[];
+  const kits = ((kitsRes.rows ?? []) as unknown) as KitRow[];
+  const kitsNote = plainKitsReadWords(kitsRes);
+  if (kitsRes.state === "failed") reportError("price-list:kits", kitsRes.error);
 
   // itemId → the kits that link to it, so a row can say where it's used.
   const kitsByItem: Record<string, string[]> = {};
@@ -217,6 +221,12 @@ export default async function PriceListPage() {
           <option key={u} value={u} />
         ))}
       </datalist>
+      {kitsNote && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Kits didn&apos;t load whole</p>
+          <p className="mt-0.5 text-sm text-amber-800">{kitsNote}</p>
+        </div>
+      )}
       <Tabs
         tabs={[
           {

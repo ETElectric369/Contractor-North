@@ -46,6 +46,56 @@ function world(lines: Row[], opts: { settings?: Row; everyOrg?: boolean } = {}) 
   });
 }
 
+describe("takeOffFromQuote — the job's own list is the list (cn-v1084)", () => {
+  const lines = [
+    { id: "l1", quote_id: "q-1", org_id: ORG, description: "14/2 romex [W142]", quantity: 2, unit: "roll", unit_price: 125, sort_order: 0, detail: null },
+    taskLine("l2", "Install transfer switch", 1, 3, [{ code: "R1", name: "Transfer switch, 200A", qty: 1, cost: 400, sell: 500 }]),
+  ];
+  const accepted = (db: ReturnType<typeof world>) => {
+    db.tables.quotes[0].status = "accepted";
+    return db;
+  };
+  it("an ACCEPTED estimate adopts the job's canonical list when no estimate holds it (compare-and-set on quote_id null), seeds its plain lines after the crew's rows — skipping what the list already carries by code or words — and leaves the task parts to the sync", async () => {
+    const db = accepted(world(lines));
+    db.tables.material_lists.push({ id: "ml-visit", job_id: "job-1", quote_id: null, org_id: ORG, created_at: "2026-10-01" });
+    db.tables.material_list_items = [
+      { id: "v1", list_id: "ml-visit", org_id: ORG, source_key: "task:t-l2#R1", description: "Transfer switch, 200A", part_number: "R1", quantity: 1, sort_order: 0 },
+      { id: "typed", list_id: "ml-visit", org_id: ORG, source_key: null, description: "14/2 romex", part_number: "W142", quantity: 2, sort_order: 1 }, // the visit's typed item, back as a plain line
+    ];
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res).toMatchObject({ ok: true, id: "ml-visit", jobId: "job-1", adopted: true, skipped: 1 });
+    expect(db.inserted.material_lists).toBeUndefined();
+    expect(db.tables.material_lists[0].quote_id).toBe("q-1");
+    expect(db.inserted.material_list_items ?? []).toEqual([]); // the romex is there already; the task's R1 is the sync's to add
+  });
+  it("seeds a plain line the adopted list does NOT carry, after the crew's last row", async () => {
+    const db = accepted(world(lines));
+    db.tables.material_lists.push({ id: "ml-visit", job_id: "job-1", quote_id: null, org_id: ORG, created_at: "2026-10-01" });
+    db.tables.material_list_items = [{ id: "v1", list_id: "ml-visit", org_id: ORG, source_key: "task:t-l2#R1", description: "Transfer switch, 200A", part_number: "R1", quantity: 1, sort_order: 4 }];
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res).toMatchObject({ ok: true, adopted: true, skipped: 0 });
+    expect(db.inserted.material_list_items.map((r) => [r.description, r.sort_order, r.source_key ?? null])).toEqual([["14/2 romex", 5, null]]);
+  });
+  it("a DRAFT or sent estimate never adopts (nothing would add its parts): a fresh list, as before", async () => {
+    const db = world(lines); // status undefined: not accepted
+    db.tables.material_lists.push({ id: "ml-visit", job_id: "job-1", quote_id: null, org_id: ORG, created_at: "2026-10-01" });
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res.ok).toBe(true);
+    expect(res.adopted).toBeUndefined();
+    expect(db.inserted.material_lists).toHaveLength(1);
+    expect(db.tables.material_lists.find((l) => l.id === "ml-visit")?.quote_id).toBe(null);
+  });
+  it("a job whose canonical list is another estimate's gets a fresh list, as before (one list per estimate, 0388)", async () => {
+    const db = accepted(world(lines));
+    db.tables.material_lists.push({ id: "ml-other", job_id: "job-1", quote_id: "q-other", org_id: ORG, created_at: "2026-10-01" });
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res.ok).toBe(true);
+    expect(res.adopted).toBeUndefined();
+    expect(db.inserted.material_lists).toHaveLength(1);
+    expect(db.inserted.material_list_items.map((r) => r.description)).toEqual(["14/2 romex", "Transfer switch, 200A"]);
+  });
+});
+
 describe("takeOffFromQuote — a task line puts its PARTS on the sheet, never itself", () => {
   const lines = [
     { id: "l1", quote_id: "q-1", org_id: ORG, description: "14/2 romex [W142]", quantity: 2, unit: "roll", unit_price: 125, sort_order: 0, detail: null },

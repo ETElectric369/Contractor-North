@@ -76,6 +76,9 @@ describe("accepting an estimate that already has its job", () => {
     expect(branch).toContain("jobFollows(supabase, { jobId: q.job_id, sizeBefore: opts?.sizeBefore }, ctx)");
     expect(branch).toContain("createWorkOrderFromQuote(quoteId)");
     expect(branch).toContain("createMaterialListFromQuote(quoteId)");
+    // The paperwork FIRST (cn-v1084): the take-off may adopt a visit-born job's list and leave its task
+    // parts to the materials sync, which must therefore run after it.
+    expect(branch.indexOf("createMaterialListFromQuote(quoteId)")).toBeLessThan(branch.indexOf("jobFollows("));
     expect(branch).toContain("return { ok: true, id: q.job_id, ...follow }");
     expect(create).not.toContain("if (q.job_id) return { ok: true, id: q.job_id };");
   });
@@ -103,7 +106,7 @@ describe("the one rule, and nothing silent", () => {
     expect(fn).toContain('reportError("jobFollowsEstimate"');
     expect(fn).toContain("revalidatePath(`/jobs/${who.jobId}`)");
     expect(fn).toContain('revalidatePath("/schedule")');
-    expect(fn).toContain("syncWords(res)");
+    expect(fn).toContain("syncWords(res, lead?.tasks)");
   });
   it("the quote editor shows what the job's list did after a delete or a rename, and shows what it could not do as an error", () => {
     const editor = src("src/app/(app)/quotes/[id]/quote-items-editor.tsx");
@@ -114,7 +117,7 @@ describe("the one rule, and nothing silent", () => {
   it("the rule's writes each select what they wrote", () => {
     const lines = src("src/lib/estimate/sync-job-tasks.ts").split("\n");
     const writes = lines.map((l, i) => (/\.(update|delete)\(/.test(l) ? i : -1)).filter((i) => i !== -1);
-    expect(writes.length).toBe(4); // rekey, remove, size, retitle (the insert is bornTasks', pinned in its own file)
+    expect(writes.length).toBe(6); // rekey, unkey, remove, redismiss, size, retitle (the insert is bornTasks', pinned in its own file)
     for (const i of writes) expect(lines.slice(i, i + 7).join("\n"), `write at line ${i + 1}`).toContain('.select("id")');
     expect(lines.join("\n")).toContain("bornTasks(");
   });
@@ -130,20 +133,22 @@ describe("the one rule, and nothing silent", () => {
   it("the orphan delete is conditional on open and unphotographed, and a re-key that loses to the customer's door is not a failure", () => {
     const rule = src("src/lib/estimate/sync-job-tasks.ts");
     expect(rule).toMatch(/\.delete\(\)[\s\S]{0,160}\.eq\("status", "open"\)[\s\S]{0,40}\.is\("photo_path", null\)/);
-    expect(rule).toContain('(error as { code?: string }).code === "23505") continue;');
+    expect(rule).toContain('(error as { code?: string }).code === "23505") {'); // a line orphan: the next pass cleans it up …
+    expect(rule).toContain("if (title) twice.push(title);"); // … a visit's or hand task: on the list twice, SAID (cn-v1084)
   });
 });
 
 describe("a task he deleted by hand stays gone", () => {
   const fn = body(src("src/app/(app)/tasks/actions.ts"), "export async function deleteTask(");
   it("the delete door reads the task's key and writes it to jobs.dismissed_task_keys, read back; the sync reads that column", () => {
-    expect(fn).toContain('select("id, job_id, created_by, source_key")');
+    expect(fn).toContain('select("id, job_id, created_by, source_key, title")');
     expect(fn).toContain('select("dismissed_task_keys")');
-    expect(fn).toContain("dismissed_task_keys: [...had, key]");
+    expect(fn).toContain("dismissed_task_keys: [...had, entry]"); // "<key>#<title>" (cn-v1084): the title survives a rebuild
+    expect(fn).toContain("dismissalEntry(key,");
     expect(fn).toContain('reportError("deleteTask:dismissKey"');
     const rule = src("src/lib/estimate/sync-job-tasks.ts");
     expect(rule).toContain('select("planned_minutes, dismissed_task_keys")');
-    expect(rule).toContain("planLineSync(wanted, have, dismissed)");
+    expect(rule).toContain("planLineSync(wanted, have, dismissed, others)");
   });
 });
 
@@ -154,7 +159,7 @@ describe("the buy list follows too (0390)", () => {
     const mats = fn.indexOf("syncJobMaterials(");
     expect(tasks).toBeGreaterThan(-1);
     expect(mats).toBeGreaterThan(tasks);
-    expect(fn).toContain("materialsWords(mats)");
+    expect(fn).toContain("materialsWords(mats, lead?.materials)");
     expect(fn).toContain('reportError("jobFollowsEstimate:materials"');
     expect(fn).toContain('revalidatePath("/materials")');
   });
@@ -195,5 +200,61 @@ describe("the buy list follows too (0390)", () => {
     expect(sync).toContain("taskPartRow(listId, who.orgId,");
     expect(sync).toContain("readPriceBook(sb, who.orgId)");
     expect(sync).toContain('.eq("purchased", false).eq("is_tool", false), who.orgId).select("id")'); // the conditional, org-scoped remove
+  });
+});
+
+describe("the deferred items (cn-v1084)", () => {
+  it("an estimate moved off a job: that job follows too, named, and the estimate's paperwork moves with it", () => {
+    const fn = body(actions, "export async function setQuoteJob(");
+    expect(fn).toContain('select("status, job_id")');
+    expect(fn).toContain("if (accepted && from && from !== jobId) {");
+    expect(fn).toContain("tasks: left.label ? `The job it left (${left.label}) follows too` : \"The job it left follows too\"");
+    expect(fn).toContain('for (const [table, what] of [["work_orders", "work order"], ["material_lists", "materials list"]] as const)');
+    expect(fn).toContain('.update({ job_id: jobId }).eq("quote_id", quoteId).select("id")');
+    expect(fn).toContain('reportError("setQuoteJob:movePaperwork"');
+    expect(fn).toContain("if (left) revalidatePath(`/jobs/${left.jobId}`);");
+  });
+  it("the take-off adopts the job's own list (no estimate holds it) instead of making a second, compare-and-set, and leaves its task parts to the sync", () => {
+    const takeOff = src("src/lib/estimate/take-off-from-quote.ts");
+    expect(takeOff).toContain('if (quote.job_id && (quote as { status?: string }).status === "accepted") {'); // a draft never adopts
+    expect(takeOff).toContain('.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle()'); // the canonical pick, as canonicalListIdForJob makes it
+    expect(takeOff).toContain("if (canonical && canonical.quote_id === null) {");
+    expect(takeOff).toContain('.update({ quote_id: quote.id }).eq("id", canonical.id).is("quote_id", null).select("id")');
+    expect(takeOff).toContain('reportError("takeOffFromQuote:adopt"');
+    expect(takeOff).toContain("if (adopted) continue;");
+    // The Create Material List door runs the sync after an adoption, as the acceptance doors do.
+    const door = body(src("src/app/(app)/materials/actions.ts"), "export async function createMaterialListFromQuote(");
+    expect(door).toContain("if (res.adopted && res.jobId) {");
+    expect(door).toContain("syncQuoteMaterials(supabase, { quoteId, jobId: res.jobId, orgId: null, userId: user.id })");
+    expect(door).toContain('reportError("createMaterialListFromQuote:sync"');
+  });
+  it("the three plain kit pickers read through readTaskKits and say a failed read, each in the ops sink", () => {
+    for (const [page, sink, extra] of [
+      ["src/app/(app)/quotes/[id]/page.tsx", "quotes/[id]:kits", ""],
+      ["src/app/(app)/billing/[id]/page.tsx", "billing/[id]:kits", ""],
+      ["src/app/(app)/price-list/page.tsx", "price-list:kits", ', "category"'],
+    ] as const) {
+      const text = src(page);
+      expect(text, page).toContain(`readTaskKits((sel) => supabase.from("kits").select(sel).order("name")${extra})`);
+      expect(text, page).toContain(`reportError("${sink}"`);
+      expect(text, page).toContain("plainKitsReadWords(");
+      expect(text, page).toContain("Kits didn&apos;t load whole");
+      expect(text, page).not.toContain("firstThatWorks(");
+    }
+    // Only where a picker is: a locked estimate and a non-draft invoice have none to be "off".
+    expect(src("src/app/(app)/quotes/[id]/page.tsx")).toContain("const kitsNote = kitDoors && !lock ? plainKitsReadWords(kitsRead) : null;");
+    expect(src("src/app/(app)/billing/[id]/page.tsx")).toContain("const kitsNote = kitDoors && isDraft ? plainKitsReadWords(kitsRead) : null;");
+  });
+  it("a visit's tasks and parts become the estimate's by the task id the line remembers; kept orphans are unkeyed", () => {
+    const tasks = src("src/lib/estimate/sync-job-tasks.ts");
+    expect(tasks).toContain("claim(t, (w) => !!w.task_id && `${VISIT_KEY}${w.task_id}` === t.source_key)");
+    expect(tasks).toContain("tombstone: kept.map((t) => ({ id: t.id, source_key: `${GONE_KEY}${t.source_key}` }))");
+    expect(tasks).toContain("for (const t of plan.tombstone) {");
+    expect(tasks).toContain("const next = [...now.filter((e) => !consumed.has(e)), ...plan.redismiss.filter((e) => !now.includes(e))];"); // moved, never piled; re-read first
+    const mats = src("src/lib/estimate/sync-job-materials.ts");
+    expect(mats).toContain("p.taskId === t && partHalf(p.key) === partHalf(r.source_key)");
+    expect(mats).toContain("tombstone: kept.map((r) => ({ id: r.id, source_key: `${GONE_KEY}${r.source_key}` }))");
+    expect(mats).toContain("const hand: HandRow[] = all.filter((r) => !r.source_key && !isHisRow(r));");
+    expect(mats).toContain("const next = [...now.filter((k) => !consumed.has(k)), ...plan.redismiss.filter((k) => !now.includes(k))];");
   });
 });

@@ -1,5 +1,5 @@
 "use server";
-import { readUsualBillingKind } from "@/lib/schedule-options";
+import { jobLabel, readUsualBillingKind } from "@/lib/schedule-options";
 import { reportError } from "@/lib/observe";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { dbError } from "@/lib/db-error";
@@ -441,6 +441,8 @@ async function jobFollows(
   supabase: any,
   who: { jobId: string; sizeBefore?: number | null },
   ctx: { orgId: string | null; userId: string },
+  /** Whose list the sentences name, when it is not the obvious job (the one an estimate was moved off). */
+  lead?: { tasks: string; materials: string },
 ): Promise<{ said?: string; note?: string }> {
   const res = await syncJobTasks(supabase, { jobId: who.jobId, orgId: ctx.orgId, createdBy: ctx.userId, sizeBefore: who.sizeBefore });
   const mats = await syncJobMaterials(supabase, { jobId: who.jobId, orgId: ctx.orgId, userId: ctx.userId });
@@ -456,7 +458,7 @@ async function jobFollows(
     reportError("jobFollowsEstimate:materials", new Error(mats.error), { jobId: who.jobId });
     notes.push(`The buy list could not follow this change (${mats.error}). Check the job's materials.`);
   }
-  const said = [res.error ? null : syncWords(res), mats.error ? null : materialsWords(mats)].filter(Boolean).join(" ");
+  const said = [res.error ? null : syncWords(res, lead?.tasks), mats.error ? null : materialsWords(mats, lead?.materials)].filter(Boolean).join(" ");
   return { ...(said ? { said } : {}), ...(notes.length ? { note: notes.join(" ") } : {}) };
 }
 
@@ -798,13 +800,25 @@ export async function setQuoteJob(
   // THE JOB FOLLOWS (item 1, 2026-10-10): an ACCEPTED estimate pinned to a job puts its task lines on
   // that job's list. The job's figure is read BEFORE the pin counts this estimate's lines, so a job
   // that already has its own length keeps it.
+  const { data: qs } = await supabase.from("quotes").select("status, job_id").eq("id", quoteId).maybeSingle();
+  const accepted = (qs as { status?: string } | null)?.status === "accepted";
   let pinned: { sizeBefore: number | null | undefined } | null = null;
-  if (jobId) {
-    const { data: qs } = await supabase.from("quotes").select("status").eq("id", quoteId).maybeSingle();
-    if ((qs as { status?: string } | null)?.status === "accepted") {
-      const est = await estimateLines(supabase, { jobId, orgId: ctx.orgId });
-      pinned = { sizeBefore: est.error ? undefined : est.minutes };
-    }
+  if (jobId && accepted) {
+    const est = await estimateLines(supabase, { jobId, orgId: ctx.orgId });
+    pinned = { sizeBefore: est.error ? undefined : est.minutes };
+  }
+  // THE JOB IT LEAVES (cn-v1084): its line tasks and parts came from this estimate, and after the pin
+  // they are on no accepted estimate of that job — so it follows too (open, bare ones go; what is his
+  // stays, said), its figure read before the pin like the other's. Its sentence names the job.
+  const from = (qs as { job_id?: string | null } | null)?.job_id ?? null;
+  let left: { jobId: string; sizeBefore: number | null | undefined; label: string } | null = null;
+  if (accepted && from && from !== jobId) {
+    const [est, { data: fromJob }] = await Promise.all([
+      estimateLines(supabase, { jobId: from, orgId: ctx.orgId }),
+      supabase.from("jobs").select("name, job_number").eq("id", from).maybeSingle(),
+    ]);
+    const j = (fromJob ?? {}) as { name?: string | null; job_number?: string | null };
+    left = { jobId: from, sizeBefore: est.error ? undefined : est.minutes, label: j.name || j.job_number ? jobLabel(j) : "" };
   }
 
   // .select("id") — the silent-write law: a zero-row update (not ours, or gone) is said, not a quiet ok.
@@ -829,11 +843,32 @@ export async function setQuoteJob(
   // re-pointing it must drop the stored PDF or a sent estimate keeps serving the old address
   // while /q shows the new one (audit v921, same reason as setQuoteCustomer above).
   await bustDocPdf("quote", quoteId);
+  // ITS PAPERWORK MOVES WITH IT (cn-v1084): the work order and the materials list this estimate made
+  // (one each per estimate, 0388) are the estimate's, so they point at the job it is pinned to now — a
+  // list left on the old job was the crew's buy list for work that is no longer that job's. Zero rows
+  // is "none made yet", not a failure; a refusal is said.
+  const notes: string[] = [];
+  for (const [table, what] of [["work_orders", "work order"], ["material_lists", "materials list"]] as const) {
+    const { error: moveErr } = await supabase.from(table).update({ job_id: jobId }).eq("quote_id", quoteId).select("id");
+    if (moveErr) {
+      reportError("setQuoteJob:movePaperwork", moveErr, { quoteId, table });
+      notes.push(`The estimate's ${what} could not be moved to this job (${dbError(moveErr)}).`);
+    }
+  }
   const follow = jobId && pinned ? await jobFollows(supabase, { jobId, sizeBefore: pinned.sizeBefore }, ctx) : {};
+  const leftBehind = left
+    ? await jobFollows(supabase, { jobId: left.jobId, sizeBefore: left.sizeBefore }, ctx, {
+        tasks: left.label ? `The job it left (${left.label}) follows too` : "The job it left follows too",
+        materials: left.label ? `${left.label}'s materials list too` : "Its materials list too",
+      })
+    : {};
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, ...follow };
+  if (left) revalidatePath(`/jobs/${left.jobId}`);
+  const said = [follow.said, leftBehind.said].filter(Boolean).join(" ");
+  const note = [follow.note, leftBehind.note, ...notes].filter(Boolean).join(" ");
+  return { ok: true, ...(said ? { said } : {}), ...(note ? { note } : {}) };
 }
 
 /**
@@ -1325,9 +1360,13 @@ export async function createJobFromQuote(
     // one, a walk-back) has no tasks on the job yet, and the sync on its job would read its lines as
     // gone. The old answer stands for it.
     if ((q as { status?: string }).status !== "accepted") return { ok: true, id: q.job_id };
-    const follow = await jobFollows(supabase, { jobId: q.job_id, sizeBefore: opts?.sizeBefore }, ctx);
+    // THE PAPERWORK FIRST, THEN THE FOLLOW (cn-v1084): the take-off may ADOPT the job's own list (a
+    // visit-born job's), seeding its plain lines and leaving the task parts to the materials sync,
+    // which finds the visit's rows and re-keys them rather than adding them again. On a fresh list the
+    // take-off seeds everything and the sync then finds every part by key.
     await createWorkOrderFromQuote(quoteId);
     await createMaterialListFromQuote(quoteId);
+    const follow = await jobFollows(supabase, { jobId: q.job_id, sizeBefore: opts?.sizeBefore }, ctx);
     revalidatePath(`/quotes/${quoteId}`);
     return { ok: true, id: q.job_id, ...follow };
   }

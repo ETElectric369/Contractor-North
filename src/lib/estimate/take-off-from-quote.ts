@@ -5,7 +5,8 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
 import { firstThatWorks, kitsSelectRungs, kitLineView, linkedItemOf } from "@/lib/kit-line";
 import { coerceTaskDetail } from "./task-lines";
-import { keyParts } from "./born-with-tasks";
+import { keyParts, materialKey } from "./born-with-tasks";
+import { reportError } from "@/lib/observe";
 
 /**
  * THE MATERIALS TAKE-OFF AN ACCEPTED ESTIMATE BECOMES — one rule, called by two doors.
@@ -42,7 +43,16 @@ export interface TakeOffWho {
   orgId: string | null;
 }
 
-export type TakeOffResult = { ok: boolean; error?: string; id?: string; jobId?: string | null };
+export type TakeOffResult = {
+  ok: boolean;
+  error?: string;
+  id?: string;
+  jobId?: string | null;
+  /** The job's own list (no estimate held it) became this estimate's list; its task parts are the sync's to add. */
+  adopted?: boolean;
+  /** On an adopted list: plain lines not seeded because the list already carried them by code or words. */
+  skipped?: number;
+};
 
 /** The one-liner on the sheet for a part he named but never counted. */
 export const HOW_MANY = " · how many?";
@@ -127,7 +137,7 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
 
   const { data: quote, error: qErr } = await supabase
     .from("quotes")
-    .select("id, quote_number, job_id, title, customer_id")
+    .select("id, quote_number, job_id, title, customer_id, status")
     .eq("id", quoteId)
     .maybeSingle();
   if (qErr) return { ok: false, error: qErr.message };
@@ -153,25 +163,58 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   if (!items || items.length === 0)
     return { ok: false, error: "This quote has no line items to build from." };
 
-  const { data: list, error } = await supabase
-    .from("material_lists")
-    .insert({
-      ...(orgId ? { org_id: orgId } : {}),
-      name: `Materials — ${quote.quote_number}`,
-      job_id: quote.job_id,
-      quote_id: quote.id,
-      created_by: who.userId,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    // TWO DOORS IN THE SAME SECOND: both read "no list yet"; the second insert is refused by
-    // material_lists_one_per_quote_uq (0388). The other door's list IS the list — open it.
-    if ((error as { code?: string }).code === "23505") {
-      const { data: won } = await supabase.from("material_lists").select("id").eq("quote_id", quoteId).limit(1).maybeSingle();
-      if (won) return { ok: true, id: won.id, jobId: quote.job_id ?? null };
+  // THE JOB'S OWN LIST IS THE LIST (cn-v1084). A job born from a visit already has a list — the
+  // visit's parts, keyed "task:<id>#…" (addCaptureItemsToJobList) — and the estimate drafted from
+  // that same visit used to get a SECOND list here; the job tab then showed the newest as the one
+  // list and the visit's as superseded: the same parts twice, with the crew's bought marks on the dead
+  // one. An ACCEPTED estimate ADOPTS the job's CANONICAL list (the newest, the one every reader shows —
+  // canonicalListIdForJob's own pick) when no estimate holds it (compare-and-set on quote_id null;
+  // 0388 still keeps one list per estimate). Its plain lines are seeded below, skipping what the list
+  // already carries by code or words (the visit's typed items come back as plain lines); its TASK
+  // PARTS are left to the sync (sync-job-materials), which finds the visit's rows by the task id the
+  // line's breakdown remembers and re-keys them instead of adding them again — so the caller runs the
+  // sync after an adoption (the acceptance doors do; so does Create Material List). A draft or sent
+  // estimate never adopts: nothing would add its parts. A refused adoption is reported and falls
+  // through to a fresh list — what happened before.
+  let list: { id: string } | null = null;
+  let adopted = false;
+  if (quote.job_id && (quote as { status?: string }).status === "accepted") {
+    let ownQ = supabase.from("material_lists").select("id, quote_id").eq("job_id", quote.job_id);
+    if (orgId) ownQ = ownQ.eq("org_id", orgId);
+    const { data: own } = await ownQ.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle();
+    const canonical = own as { id: string; quote_id: string | null } | null;
+    if (canonical && canonical.quote_id === null) {
+      const { data: took, error: tErr } = await supabase.from("material_lists").update({ quote_id: quote.id }).eq("id", canonical.id).is("quote_id", null).select("id");
+      if (tErr) reportError("takeOffFromQuote:adopt", tErr, { quoteId, listId: canonical.id });
+      if (took?.length) {
+        list = { id: canonical.id };
+        adopted = true;
+      }
     }
-    return { ok: false, error: dbError(error) };
+  }
+
+  if (!list) {
+    const { data: made, error } = await supabase
+      .from("material_lists")
+      .insert({
+        ...(orgId ? { org_id: orgId } : {}),
+        name: `Materials — ${quote.quote_number}`,
+        job_id: quote.job_id,
+        quote_id: quote.id,
+        created_by: who.userId,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      // TWO DOORS IN THE SAME SECOND: both read "no list yet"; the second insert is refused by
+      // material_lists_one_per_quote_uq (0388). The other door's list IS the list — open it.
+      if ((error as { code?: string }).code === "23505") {
+        const { data: won } = await supabase.from("material_lists").select("id").eq("quote_id", quoteId).limit(1).maybeSingle();
+        if (won) return { ok: true, id: won.id, jobId: quote.job_id ?? null };
+      }
+      return { ok: false, error: dbError(error) };
+    }
+    list = made as { id: string };
   }
 
   // The price book (RLS-scoped to this org, or scoped here) → resolve each material line to its REAL
@@ -221,7 +264,23 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     source_key?: string;
   };
   const rows: Row[] = [];
+  // On an adopted list the new rows go after what the crew already has, and a plain line the list
+  // already carries UNKEYED by code or words (the visit's typed items) is not seeded a second time.
   let so = 0;
+  const onList = new Map<string, number>();
+  let skipped = 0;
+  if (adopted) {
+    let haveQ = supabase.from("material_list_items").select("sort_order, part_number, description, source_key").eq("list_id", list.id);
+    if (orgId) haveQ = haveQ.eq("org_id", orgId);
+    const { data: had, error: hErr } = await haveQ;
+    if (hErr) return { ok: false, error: dbError(hErr) };
+    for (const r of (had ?? []) as Array<{ sort_order: number | null; part_number: string | null; description: string | null; source_key: string | null }>) {
+      so = Math.max(so, (r.sort_order ?? -1) + 1);
+      if (r.source_key) continue;
+      const half = materialKey("x", r.part_number, String(r.description ?? "").replace(HOW_MANY, "")).slice(2);
+      onList.set(half, (onList.get(half) ?? 0) + 1);
+    }
+  }
   const stamp = orgId ? { org_id: orgId } : {};
   for (const it of items as any[]) {
     // THE TASK FIRST (the skeptic's case): "Labor to relocate meter" with a breakdown is a task with
@@ -229,7 +288,9 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     const task = coerceTaskDetail(it.detail);
     if (task) {
       // THE TASK'S PARTS, NEVER THE TASK (taskPartRow — the one shape the sync writes too), each keyed
-      // to its line and part (0390) so a later change to the estimate can find it.
+      // to its line and part (0390) so a later change to the estimate can find it. On an ADOPTED list
+      // they are the sync's to add (it knows the visit's rows); here they would double them.
+      if (adopted) continue;
       for (const m of keyParts(`line:${it.id}`, task.materials.filter((x) => x.name.trim()))) {
         const name = m.name.trim();
         rows.push({ ...taskPartRow(list.id, orgId, { code: m.code, name, qty: m.qty, cost: m.cost, source_key: m.key }, findPl(m.code, name)), sort_order: so++ });
@@ -241,6 +302,15 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     const code = m ? m[1].trim() : null;
     const cleanDesc = String(it.description ?? "").replace(CODE_RE, "").trim();
     const pl = findPl(code, cleanDesc);
+    if (adopted) {
+      const half = materialKey("x", pl?.code ?? code ?? null, cleanDesc || String(it.description ?? "")).slice(2);
+      const n = onList.get(half) ?? 0;
+      if (n) {
+        onList.set(half, n - 1);
+        skipped++;
+        continue;
+      }
+    }
     rows.push({
       list_id: list.id,
       ...stamp,
@@ -309,8 +379,8 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
     if (itemsErr) return { ok: false, error: dbError(itemsErr) };
     if ((seeded?.length ?? 0) !== rows.length)
-      return { ok: false, error: "The list was created but its lines didn't save. Open it and try again." };
+      return { ok: false, error: adopted ? "The list is there but its new lines didn't save. Open it and try again." : "The list was created but its lines didn't save. Open it and try again." };
   }
 
-  return { ok: true, id: list.id, jobId: quote.job_id ?? null };
+  return { ok: true, id: list.id, jobId: quote.job_id ?? null, ...(adopted ? { adopted: true, skipped } : {}) };
 }

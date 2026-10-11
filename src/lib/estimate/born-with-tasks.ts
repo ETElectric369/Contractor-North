@@ -44,6 +44,9 @@ export interface BornTask {
   source_key: string;
   title: string;
   sort_order: number;
+  /** The Inspector task the line was built from (detail.task_id), when it was: how a visit-born task
+   *  ("task:<id>") finds the line of the estimate drafted from the same visit (sync-job-tasks). */
+  task_id?: string | null;
 }
 
 /** One part of one task, as the job's materials list wants it. `cost` is the book's buy at the time
@@ -124,7 +127,7 @@ export function tasksFromLines(rows: ReadonlyArray<LineRow>): Birth {
     const title = String(r.description ?? "").trim();
     if (!title) return;
     const source_key = `line:${r.id}`;
-    tasks.push({ source_key, title, sort_order: typeof r.sort_order === "number" ? r.sort_order : i });
+    tasks.push({ source_key, title, sort_order: typeof r.sort_order === "number" ? r.sort_order : i, task_id: d.task_id || null });
     hours.push(d.hours);
     for (const m of d.materials) {
       if (!m.name.trim()) continue;

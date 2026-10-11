@@ -7,8 +7,7 @@ import { GetPaidButton } from "@/components/settle-up-button";
 import { qboConnected } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
-import { firstThatWorks } from "@/lib/kit-line";
-import { partsKitsOnly, taskKitSelectRungs } from "@/lib/estimate/task-kits";
+import { partsKitsOnly, plainKitsReadWords, readTaskKits } from "@/lib/estimate/task-kits";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { clockDoorWords } from "@/lib/long-shift";
@@ -109,7 +108,7 @@ export default async function InvoicePage({
   // You keeps it on top as "Finished · Send"), so Set Aside Until… is not drawn on it.
   const jobIsOver = isFinishedJobStatus(embeddedJob<{ status?: string | null }>((inv as { jobs?: unknown }).jobs)?.status);
 
-  const [{ data: items, error: itemsErr }, { data: payments, error: paymentsErr }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
+  const [{ data: items, error: itemsErr }, { data: payments, error: paymentsErr }, { data: priceItems, error: priceItemsErr }, kitsRead, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
     await Promise.all([
       supabase
         .from("invoice_items")
@@ -138,7 +137,8 @@ export default async function InvoicePage({
       // THE SHARED SELECT SHAPE (kit-line.ts): sizing + the 0240 price-list link, tolerant of
       // either migration not having landed — so a linked kit line prices live for this customer
       // here exactly as it does in the quote composer, never from its frozen snapshot.
-      firstThatWorks(taskKitSelectRungs().map((sel) => () => supabase.from("kits").select(sel).order("name"))),
+      // The read SAYS how it went (cn-v1084): a failed read used to empty the picker in silence.
+      readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase.from("organizations").select("settings, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
       isDraft
@@ -159,6 +159,9 @@ export default async function InvoicePage({
   // Kits off (the switch board, 0352) hides the kit chips on the line picker, a door; never in
   // catalog mode, where kits are how the work is priced (rule i, as on the estimate pages).
   const kitDoors = featureOn(orgSettings.features, "kits") || orgSettings.estimating_mode === "catalog";
+  const kits = kitsRead.rows as Parameters<typeof partsKitsOnly>[0] | null;
+  const kitsNote = kitDoors && isDraft ? plainKitsReadWords(kitsRead) : null; // only where the picker is
+  if (kitsRead.state === "failed") reportError("billing/[id]:kits", kitsRead.error, { invoiceId: inv.id });
   const paymentMethods = orgSettings.payment_methods;
   // The card door is the ORG's Connect state, not merely "the platform has a Stripe key".
   const cardEnabled = canAcceptPayments(connectStateFromOrg((org ?? {}) as any));
@@ -585,6 +588,12 @@ export default async function InvoicePage({
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
           <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
+        </div>
+      )}
+      {kitsNote && inv.status !== "void" && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Kits didn&apos;t load whole</p>
+          <p className="mt-0.5 text-sm text-amber-800">{kitsNote}</p>
         </div>
       )}
 

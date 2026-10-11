@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { kitsReadWords, kitsWithoutMoney, partsKitsOnly, readTaskKits, taskKitSelectRungs, taskKitsFrom, TASK_KIT_COLS } from "./task-kits";
+import { kitsReadWords, kitsWithoutMoney, partsKitsOnly, plainKitsReadWords, readTaskKits, taskKitSelectRungs, taskKitsFrom, TASK_KIT_COLS } from "./task-kits";
 import { expandTaskKit, type TaskKit } from "./task-lines";
 
 /**
@@ -160,5 +160,17 @@ describe("readTaskKits — the read says how it went (item 3)", () => {
     const { run, asked } = dbMissing(["kit_items"], null); // refuse everything, to see every rung
     await readTaskKits(run, "category");
     expect(asked).toEqual(taskKitSelectRungs("category"));
+  });
+});
+
+describe("plainKitsReadWords — what a plain picker says (cn-v1084)", () => {
+  it("a failed read: the picker is off; a rung without the price-book link: kit lines price from their saved figures; else nothing", () => {
+    expect(plainKitsReadWords({ state: "failed", rung: null })).toBe("The kits could not be read — the kit picker is off until you reload.");
+    expect(plainKitsReadWords({ state: "ok", rung: 0 })).toBeNull();
+    expect(plainKitsReadWords({ state: "thin", rung: 2 })).toBeNull(); // an older link shape: still linked
+    expect(plainKitsReadWords({ state: "thin", rung: 3 })).toBe("The kits were read without their price-book links — a kit line prices from its saved figures until you reload.");
+    expect(plainKitsReadWords({ state: "thin", rung: 4 })).toContain("without their price-book links");
+    expect(plainKitsReadWords({ state: "pre-0386", rung: 5 })).toBeNull(); // bare, with the link: a parts kit is whole
+    expect(plainKitsReadWords({ state: "pre-0386", rung: 9 })).toContain("without their price-book links");
   });
 });

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { HOW_MANY, takeOffFromQuote } from "@/lib/estimate/take-off-from-quote";
+import { syncQuoteMaterials } from "@/lib/estimate/sync-job-materials";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
@@ -557,6 +558,18 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   if (!user) return { ok: false, error: "Not signed in." };
   const res = await takeOffFromQuote(supabase, { quoteId, userId: user.id, orgId: null });
   if (res.ok) {
+    // AN ADOPTED LIST (cn-v1084): the take-off took over the job's own list and left the estimate's
+    // task parts to the sync, which knows the visit's rows — so the sync runs here, as it does on the
+    // acceptance doors. A failure is reported and said; the list itself is there.
+    if (res.adopted && res.jobId) {
+      const mats = await syncQuoteMaterials(supabase, { quoteId, jobId: res.jobId, orgId: null, userId: user.id });
+      if (mats.error) {
+        reportError("createMaterialListFromQuote:sync", new Error(mats.error), { quoteId, listId: res.id });
+        revalidatePath("/materials");
+        revalidatePath(`/jobs/${res.jobId}`);
+        return { ok: true, id: res.id, error: `The list is the job's now, but the estimate's parts could not be added (${mats.error}). Open it and check.` };
+      }
+    }
     revalidatePath("/materials");
     if (res.jobId) revalidatePath(`/jobs/${res.jobId}`);
   }

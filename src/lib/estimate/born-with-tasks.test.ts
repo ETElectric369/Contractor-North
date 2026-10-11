@@ -40,8 +40,8 @@ describe("tasksFromLines — what an accepted estimate gives birth to", () => {
       line("d", "Run generator feed ×2", 3, detail(1.5)),
     ]);
     expect(b.tasks).toEqual([
-      { source_key: "line:b", title: "Install transfer switch", sort_order: 1 },
-      { source_key: "line:d", title: "Run generator feed ×2", sort_order: 3 },
+      { source_key: "line:b", title: "Install transfer switch", sort_order: 1, task_id: "t-3" },
+      { source_key: "line:d", title: "Run generator feed ×2", sort_order: 3, task_id: "t-1.5" },
     ]);
   });
 
@@ -287,7 +287,7 @@ describe("bornWithTasks — the estimate doors' half", () => {
     });
     const res = await bornWithTasks(db.sb, { jobId: "job-1", quoteId: "q-1", orgId: ORG, createdBy: "author" });
     expect(res.inserted).toBe(1);
-    expect(res.birth.tasks).toEqual([{ source_key: "line:l2", title: "Set panel", sort_order: 1 }]);
+    expect(res.birth.tasks).toEqual([{ source_key: "line:l2", title: "Set panel", sort_order: 1, task_id: "t" }]);
     expect(db.inserted.tasks[0]).toMatchObject({ source_key: "line:l2", created_by: "author", org_id: ORG });
     expect(db.tables.jobs[0].planned_minutes).toBe(120);
   });

@@ -133,6 +133,6 @@ describe("the kit manager says what a task kit is", () => {
     expect(update).toContain("patch.labor_minutes =");
     expect(update).toContain("patch.unit =");
     expect(update).toContain('.update(patch)');
-    expect(src("src/app/(app)/price-list/page.tsx")).toContain('taskKitSelectRungs("category")');
+    expect(src("src/app/(app)/price-list/page.tsx")).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"), "category")');
   });
 });
