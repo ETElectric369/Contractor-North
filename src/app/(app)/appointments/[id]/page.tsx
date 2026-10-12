@@ -8,7 +8,7 @@ import { UnscheduleButton } from "../unschedule-button";
 import { Inspector, type CapturePhoto, type InspectionTemplate } from "./inspector";
 import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, formatDateTimeTz } from "@/lib/tz";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,7 @@ import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
-import { kitsReadWords, kitsWithoutMoney, readTaskKits } from "@/lib/estimate/task-kits";
+import { kitsReadWords, kitsWithoutMoney, readTaskKits, type TaskKitsRead } from "@/lib/estimate/task-kits";
 import { reportError } from "@/lib/observe";
 import { MarkCompleteButton } from "./mark-complete-button";
 import { MarkDoneRow, PutBackRow, WontHappenRow } from "./visit-header-actions";
@@ -80,6 +80,10 @@ export default async function AppointmentCapturePage({
   // can never file one person's work under another's name.
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
+  // The visit's company, read first (RLS-scoped: a visit the viewer cannot see has none): the kits read
+  // below goes through the service client and MUST be scoped to it ([[three-orgs-one-database]]).
+  const { data: apptOrgRow } = await supabase.from("appointments").select("org_id").eq("id", id).maybeSingle();
+  const apptOrg = (apptOrgRow as { org_id?: string | null } | null)?.org_id ?? null;
 
   const [{ data: appt }, { data: org }, picker, sheetsRead, answersRead, priceBook, taskKitsRead, intakeRead, { data: meRow }, { data: openRow }, { data: lastClosedRow }] = await Promise.all([
     supabase
@@ -131,7 +135,14 @@ export default async function AppointmentCapturePage({
     // as the kits queries everywhere: a deploy lands before its migration — and the read SAYS how it
     // went (readTaskKits): a failed or pre-0386 read is a sentence on the page, never an empty picker
     // and a false "no longer in the price list" (item 3, 2026-10-10).
-    readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
+    // Read through the SERVICE client, scoped to the company by the visit's own org (audit v1085,
+    // carried [31]): kits are readable by the whole company but price_list_items only by staff, so
+    // a crew lead's read came back with every book link empty and no error — the preview named parts
+    // from the frozen line text ("C80 — Concrete") while the estimate named them from the book. The
+    // page drops every money field before the browser (kitsWithoutMoney), as it always did.
+    apptOrg
+      ? readTaskKits((sel) => createServiceClient().from("kits").select(sel).eq("org_id", apptOrg).order("name"))
+      : Promise.resolve<TaskKitsRead>({ kits: [], rows: null, rung: 0, state: "ok" }), // no visit to see: notFound() below
     // THE FORM THE CUSTOMER FILLED IN. Its playbook is the only place the LABELS for
     // `intake.intake_answers` exist — the answers themselves are a bag of keys, and `q_mst1drw8`
     // is not a question. Through form_playbooks like the sheets (0366), org-scoped; an org with no
@@ -175,7 +186,7 @@ export default async function AppointmentCapturePage({
   const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   // The company's Kits switch (0352); and a kits read that failed outright goes to the ops sink as well as the page.
   const kitsOn = featureOn(orgSettings.features, "kits");
-  if (kitsOn && taskKitsRead.state === "failed") reportError("appointment:kits", taskKitsRead.error, { appointmentId: id });
+  if (taskKitsRead.state === "failed") reportError("appointment:kits", taskKitsRead.error, { appointmentId: id });
   const tz = orgSettings.timezone;
   // THE SWITCH BOARD (0352). On an inspection the Inspector below is Leads & Inspections': off, it
   // shows only on a visit that already captured something, never as a blank sheet to start. Every
@@ -619,12 +630,15 @@ export default async function AppointmentCapturePage({
               unit: p.unit ?? "EA",
               price: Number(p.buy_price ?? 0),
             }))}
-            // The company's Kits switch (0352) hides the picker as it hides every other kit door.
-            taskKits={kitsOn ? kitsWithoutMoney(taskKitsRead.kits) : []}
+            // The kits reach the Inspector whatever the switch says: a task that already picked one still
+            // names and previews it (the estimate and the job still expand it). The company's Kits switch
+            // (0352) hides the PICKER, as it hides every other kit door (audit v1085, carried [39]).
+            taskKits={kitsWithoutMoney(taskKitsRead.kits)}
+            kitsPicker={kitsOn}
             // How the kits read went, said once above the tasks (no money in it, so every role reads it);
             // on a failed read a task that picked a kit says "not read", never that the kit left the list.
             kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state) : null}
-            kitsUnread={kitsOn && taskKitsRead.state === "failed"}
+            kitsUnread={taskKitsRead.state === "failed"}
             initialTemplateId={inspection?.inspection_template_id ?? null}
             // A scope pick stores its price: the office's answers go as they are; nobody else's page
             // carries one (and a crew lead's save can't change a priced answer anyway: 0356).

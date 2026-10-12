@@ -165,6 +165,10 @@ export function taskFlags(d: TaskDetail): string | undefined {
   const flags: string[] = [];
   if (d.hours === null) flags.push("hours?");
   else if (d.rate <= 0) flags.push("no company labor rate set");
+  // A KIT WITH NO COUNT (audit v1085, carried [5]): the kit silences "hours?" (it carries the hours per
+  // unit), so a task that picked one and left Units blank priced as ONE unit and asked nothing — seven
+  // footings went out as one. The hole asks ([[no-speculation]]); typing 1 answers it.
+  if (d.kit_id && d.units === null) flags.push("units?");
   for (const m of d.materials.filter(named)) {
     if (m.qty === null) flags.push(`how many? ${m.name}`);
     // A coded part the book priced at $0 has a cost (0) and asks for a price; a code the book does
@@ -217,8 +221,14 @@ export function expandTaskKit(task: TaskValue, kit: TaskKit, pricing: KitPricing
     const view = kitLineView(it, pricing);
     // The part's words without the code in front (a linked line reads "C80 — Concrete"): the code
     // rides in `code`, and the name may reach the customer's paper — never a book code (0387).
+    // An UNLINKED line (the book row gone, or not readable by this viewer — a crew lead cannot read
+    // price_list_items, audit v1085 carried [31]) keeps its frozen "C80 — Concrete": the lead is
+    // dropped only on a line that WAS linked (price_list_item_id set — the words came from the book, so
+    // what stands before the first " — " is its code, "RACO 936" and all), never on a hand-typed
+    // "Rebar — #4".
     const lead = view.code ? `${view.code} — ` : "";
-    const name = (lead && view.description.startsWith(lead) ? view.description.slice(lead.length) : view.description).trim();
+    const frozen = !view.code && it.price_list_item_id ? /^(.+?) — (.+)$/.exec(view.description) : null;
+    const name = (lead && view.description.startsWith(lead) ? view.description.slice(lead.length) : frozen ? frozen[2] : view.description).trim();
     if (!name) continue;
     materials.push({
       code: view.code,

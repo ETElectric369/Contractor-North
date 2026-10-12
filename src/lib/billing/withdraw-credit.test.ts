@@ -39,7 +39,7 @@ describe("deleteCredit — only once it is off every invoice", () => {
 
   it("refuses a credit still on an invoice (Take It Back first), a refund, a card refund's record", async () => {
     const onBill = fakeDb({ customer_credits: [credit()] });
-    expect(await deleteCredit(onBill.sb, "cr-1")).toEqual({ ok: false, error: "That credit is on an invoice — Take It Back first, then delete it." });
+    expect(await deleteCredit(onBill.sb, "cr-1")).toEqual({ ok: false, error: "That credit is on an invoice — open that invoice and press Take It Back." });
     expect(onBill.tables.customer_credits).toHaveLength(1);
     expect((await deleteCredit(fakeDb({ customer_credits: [credit({ invoice_id: null, disposition: "refund" })] }).sb, "cr-1")).ok).toBe(false);
     expect((await deleteCredit(fakeDb({ customer_credits: [credit({ invoice_id: null, stripe_refund_id: "re_1" })] }).sb, "cr-1")).ok).toBe(false);

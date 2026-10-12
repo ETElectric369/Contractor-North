@@ -18,6 +18,8 @@ export interface FakeDbOptions {
   onInsert?: (table: string, rows: Row[]) => { code?: string; message: string } | undefined;
   /** Refuse one update the way the database would (a 23505 from a unique index another door just filled). */
   onUpdate?: (table: string, patch: Row) => { code?: string; message: string } | undefined;
+  /** Answer an `sb.rpc(fn, args)` call (a SECURITY DEFINER door such as 0393's retitle_task_dismissal). Unanswered = an error. */
+  rpc?: (fn: string, args: Row) => { data: unknown; error: { message: string } | null };
 }
 
 export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) {
@@ -112,5 +114,6 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
     };
     return b;
   };
-  return { sb: { from } as any, inserted, tables };
+  const rpc = (fn: string, args: Row) => Promise.resolve(opts.rpc ? opts.rpc(fn, args) : { data: null, error: { message: `no such function: ${fn}` } });
+  return { sb: { from, rpc } as any, inserted, tables };
 }

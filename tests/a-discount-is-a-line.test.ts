@@ -152,7 +152,10 @@ describe("the doors", () => {
   it("Take It Back returns an open credit to the account, recomputes and stamps the invoice; Delete This Credit is the second door", () => {
     const fn = body(actions, "export async function withdrawCustomerCredit(");
     expect(fn).toContain("withdrawCredit(ctx.supabase, creditId)");
-    expect(fn).toContain("const landed = await recalcInvoice(ctx.supabase, res.invoiceId);");
+    // The recompute is tried twice and the stamp, the stale copy and the pages are dealt with either way
+    // (audit v1085, carried [10]); a bill that still did not recompute names the one way out.
+    expect(fn).toContain("const landed = (await recalcInvoice(ctx.supabase, res.invoiceId)) || (await recalcInvoice(ctx.supabase, res.invoiceId));");
+    expect(fn).toContain("save any line on it to recompute it.");
     expect(fn).toContain('stampInvoiceRevised(ctx.supabase, res.invoiceId, "withdrawCustomerCredit")');
     expect(fn).toContain("revalidateMoney(res.invoiceId);");
     const del = body(actions, "export async function deleteCustomerCredit(");

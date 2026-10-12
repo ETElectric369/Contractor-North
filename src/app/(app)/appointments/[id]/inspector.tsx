@@ -195,6 +195,7 @@ export function Inspector({
   taskKits = [],
   kitsNote = null,
   kitsUnread = false,
+  kitsPicker = true,
   initialTemplateId,
   initialAnswers,
   initialCapture,
@@ -224,6 +225,10 @@ export function Inspector({
   /** The kits could not be read at all: a task that picked one says "not read" and offers no picker —
    *  never "no longer in the price list", which would be false. */
   kitsUnread?: boolean;
+  /** The company's Kits switch (0352). Off hides the PICKER only: a task that already picked a kit still
+   *  names it and previews it (the estimate and the job still expand it), never "no longer in the price
+   *  list" (audit v1085, carried [39]). */
+  kitsPicker?: boolean;
   initialTemplateId: string | null;
   initialAnswers: Answers;
   initialCapture: unknown;
@@ -1037,15 +1042,18 @@ export function Inspector({
                 // Units count a KIT's units; his hours are the whole task's. The box appears with a
                 // kit (or where a count already stands), never beside hand-typed hours alone.
                 const showUnits = !!t.kit_id || t.units !== null;
+                // A KIT WITH NO COUNT asks (audit v1085, carried [5]): the kit answers the hours, so without
+                // this the task priced as one unit and nothing said so. Typing 1 answers it.
+                const unitsAsking = !!kit && t.units === null;
                 const label = "text-[11px] font-semibold uppercase tracking-wide text-slate-400";
-                if (!(taskKits.length > 0 || t.kit_id || showUnits)) return null;
+                if (!((kitsPicker && taskKits.length > 0) || t.kit_id || showUnits)) return null;
                 return (
                   <>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {(taskKits.length > 0 || !!t.kit_id) && (
+                      {((kitsPicker && taskKits.length > 0) || !!t.kit_id) && (
                         <>
                           <span className={label}>Kit</span>
-                          {readOnly || kitUnread ? (
+                          {readOnly || kitUnread || !kitsPicker ? (
                             <span className="text-sm text-slate-700">
                               {kit ? kit.name : kitUnread ? "not read" : kitGone ? "a kit no longer in the price list" : "none"}
                             </span>
@@ -1073,6 +1081,11 @@ export function Inspector({
                           <span className={label}>Units</span>
                           <NumBox value={t.units} className="w-20" placeholder="units" {...focus} onValue={(x) => patchTask(i, { units: x })} />
                           {kit?.unit && <span className="text-sm text-slate-500">{kit.unit}</span>}
+                          {unitsAsking && (
+                            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700" title="How many units? The kit's hours and parts are per unit">
+                              units?
+                            </span>
+                          )}
                         </>
                       )}
                       {kitGone && (
@@ -1094,8 +1107,7 @@ export function Inspector({
                     </div>
                     {preview && (
                       <p className="mt-1 text-xs text-slate-500">
-                        From the kit, for ×{t.units ?? 1}
-                        {kit?.unit ? ` ${kit.unit}` : ""}: {previewHours}
+                        {t.units === null ? `From the kit, per ${kit?.unit || "unit"}` : `From the kit, for ×${t.units}${kit?.unit ? ` ${kit.unit}` : ""}`}: {previewHours}
                         {preview.materials.length ? ` · ${preview.materials.map((m) => `${m.name} ×${m.qty}`).join(", ")}` : ""}
                       </p>
                     )}

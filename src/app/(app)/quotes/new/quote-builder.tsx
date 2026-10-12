@@ -404,7 +404,9 @@ function TaskBreakdown({
             {fromKit ? (
               <>
                 <span className="text-slate-500">· Units</span>
-                <NumberInput aria-label="Units" placeholder="units" className={`${box} w-20`} value={d.units ?? 1} onValueChange={setUnits} />
+                {/* A blank count reads BLANK, never as a chosen 1 (audit v1085, carried [5]): the line's flag
+                    asks "units?" until he types one; the kit prices at one unit meanwhile. */}
+                <NumberInput aria-label="Units" placeholder="units" className={`${box} w-20`} value={d.units ?? 0} onValueChange={setUnits} />
                 {fromKit.unit && <span className="text-slate-500">{fromKit.unit}</span>}
                 {d.hours !== null && d.hours_from_kit !== true && Number(fromKit.labor_minutes) > 0 && (
                   <span className="text-slate-400">· your hours stand; the kit&rsquo;s parts follow the units</span>

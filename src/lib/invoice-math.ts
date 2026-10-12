@@ -397,6 +397,21 @@ export function roomForDiscount(otherLineTotals: ReadonlyArray<unknown>): number
 /** The one refusal when a discount is bigger than the bill (addInvoiceItem, updateInvoiceItem, the Kind chip). */
 export const discountTooBig = (room: number): string =>
   `That discount is more than the ${currencyText(room)} on this bill — enter ${currencyText(room)} or less.`;
+/**
+ * THE SAME RULE FROM THE OTHER SIDE (audit v1085, carried [8]): the never-below-$0 guard ran only
+ * when the DISCOUNT was typed; shrinking or deleting a positive line beside one pushed the bill
+ * negative, and a negative total read as PAID (a hand-made credit memo — a negative bill with no
+ * discount on it — settles as paid once sent by design, so the guard lives at the doors, not in
+ * paidStatus). `after` is every line of the bill as it would stand after the change (the edited
+ * line at its new figure; a deleted line left out). The refusal when a discount would then be more
+ * than the bill, else null.
+ */
+export function discountOverflow(after: ReadonlyArray<{ line_kind?: string | null; line_total?: unknown }>): string | null {
+  if (!after.some(isDiscountLine)) return null;
+  const net = after.reduce<number>((s, l) => s + (Number(l.line_total) || 0), 0);
+  if (net >= -0.005) return null;
+  return "That would take the bill below $0 — lower the discount first.";
+}
 const currencyText = (n: number): string => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
 /**

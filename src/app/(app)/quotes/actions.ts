@@ -44,7 +44,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
 import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
-import { estimateLines, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
+import { estimateLines, retitleDismissal, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
 import { materialsWords, syncJobMaterials } from "@/lib/estimate/sync-job-materials";
 import { revisionOf, supersedeRevised, supersededWords } from "@/lib/estimate/revision";
 import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
@@ -689,6 +689,11 @@ export async function updateQuoteItem(
       } else if (r.renamed) {
         follow = { said: "The job's task is renamed too." };
         revalidatePath(`/jobs/${jobId}`);
+      } else {
+        // No task reads as the line put it: he may have DELETED it. Its dismissal remembers the old title
+        // and must follow the rename, or a rebuild brings the task back (audit v1085, carried [18]).
+        const d = await retitleDismissal(supabase, { jobId, lineId: itemId, from: String(before.description ?? ""), to: String(clean.description) });
+        if (d.error) reportError("updateQuoteItem:retitleDismissal", new Error(d.error), { jobId, itemId });
       }
     }
   }

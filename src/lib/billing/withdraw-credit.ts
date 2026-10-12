@@ -60,7 +60,8 @@ export type DeleteCreditResult = { ok: true; amount: number } | { ok: false; err
 export async function deleteCredit(sb: SupabaseClient, creditId: string): Promise<DeleteCreditResult> {
   const read = await readOpenOfficeCredit(sb, creditId);
   if (!read.ok) return read;
-  if (read.row.invoice_id) return { ok: false, error: "That credit is on an invoice — Take It Back first, then delete it." };
+  // ONE action (audit v1085, carried [13]): the way back is on the invoice the credit sits on.
+  if (read.row.invoice_id) return { ok: false, error: "That credit is on an invoice — open that invoice and press Take It Back." };
   const gone = await sb.from("customer_credits").delete().eq("id", creditId).is("invoice_id", null).eq("status", "open").select("id");
   if (gone.error) return { ok: false, error: dbError(gone.error) };
   if (!gone.data?.length) return { ok: false, error: "That credit changed before this landed — reload and look again." };

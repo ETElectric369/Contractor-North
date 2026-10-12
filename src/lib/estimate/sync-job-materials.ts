@@ -3,7 +3,7 @@ import { dbError } from "@/lib/db-error";
 import { keyParts, materialKey, type LineRow } from "./born-with-tasks";
 import { coerceTaskDetail } from "./task-lines";
 import { GONE_KEY, LINE_KEY, VISIT_KEY } from "./sync-job-tasks";
-import { HOW_MANY, few, plainLineOf, plainRowHalf, plural, readPriceBook, taskPartRow } from "./take-off-from-quote";
+import { HOW_MANY, few, insertKeyedRows, plainLineOf, plainRowHalf, plural, readPriceBook, taskPartRow } from "./take-off-from-quote";
 
 /**
  * THE MATERIALS LIST FOLLOWS THE ESTIMATE (0390, 2026-10-10).
@@ -435,10 +435,12 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
       ...taskPartRow(listId, who.orgId, { code: p.code, name: p.name, qty: p.qty, cost: p.cost, source_key: p.key }, findPl(p.code, p.name)),
       sort_order: so++,
     }));
-    const { data, error } = await sb.from("material_list_items").insert(newRows).select("id");
-    if (error) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, error: dbError(error) };
-    inserted = data?.length ?? 0;
-    if (inserted !== newRows.length) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, inserted, error: `${newRows.length - inserted} of ${newRows.length} parts did not save.` };
+    // TWO DOORS IN THE SAME SECOND (0393, material_items_list_source_key_uq): the other door (the take-off,
+    // or another sync) may have written some of these keyed parts between this read and this write —
+    // insertKeyedRows answers a refused batch by writing only the keys the list does not hold now.
+    const k = await insertKeyedRows(sb, listId, who.orgId, newRows);
+    inserted = k.inserted;
+    if (k.error) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, inserted, error: dbError(k.error) };
   }
 
   return { inserted, rekeyed, removed, removedNames, kept, keptNames, leftOff: plan.leftOff, countsDiffer: plan.countsDiffer, ...(filled.length ? { filled } : {}) };

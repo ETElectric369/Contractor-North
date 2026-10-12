@@ -4,7 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { HOW_MANY, takeOffFromQuote, takeOffWords } from "@/lib/estimate/take-off-from-quote";
+import { HOW_MANY, takeOffFromQuote, takeOffWords, isDuplicateKey } from "@/lib/estimate/take-off-from-quote";
 import { materialsWords, syncQuoteMaterials } from "@/lib/estimate/sync-job-materials";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
@@ -327,6 +327,12 @@ async function insertMaterialLine(supabase: Db, actor: Actor, listId: string, it
     actor,
   );
   const { data: inserted, error } = await supabase.from("material_list_items").insert(row).select("id").maybeSingle();
+  // A VISIT'S PART ALREADY LISTED (0393, material_items_list_source_key_uq): Start The Job pressed twice,
+  // or the estimate's take-off got there first. The row with that key IS this part — answered with it.
+  if (error && item.source_key && isDuplicateKey(error)) {
+    const { data: have } = await supabase.from("material_list_items").select("id").eq("list_id", listId).eq("source_key", item.source_key).maybeSingle();
+    if (have) return { ok: true, id: (have as { id: string }).id, description };
+  }
   if (error) return { ok: false, error: dbError(error) };
   if (!inserted) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);

@@ -99,6 +99,25 @@ export const dismissalEntry = (key: string, title: string): string => `${key}#${
 const dismissalKey = (e: string): string => (e.includes("#") ? e.slice(0, e.indexOf("#")) : e);
 const dismissalTitle = (e: string): string | null => (e.includes("#") ? e.slice(e.indexOf("#") + 1).trim() || null : null);
 
+/**
+ * THE SHIELD (audit v1085, carried [17]): the task lines of the job's LINKED estimates that are not
+ * accepted right now — walked back to Draft to edit, or still Sent after Create Job on a sent one. Their
+ * tasks are on the job and their line is on no ACCEPTED estimate, so the plan read them as orphans:
+ * another estimate's accept, pin or line delete stripped them (open ones removed, done ones
+ * tombstoned), and re-accepting bore the done ones twice. An orphan whose key OR exact title one of
+ * those lines holds is left exactly as it is — not removed, not tombstoned — and SAID ("left alone"),
+ * until its own estimate is accepted again and the title claim re-keys it. By title as well as key
+ * because the builder's autosave re-ids every line, so after an edit the old ids exist nowhere; the
+ * title half is a trade-off (a stale draft can hold a same-titled task the accepted estimate dropped),
+ * which is why it is said every time. Claims run before the shield: an orphan the accepted set wants
+ * again by title is the line's, never a second copy.
+ */
+export interface Shield {
+  keys: ReadonlySet<string>;
+  titles: ReadonlySet<string>;
+}
+export const NO_SHIELD: Shield = { keys: new Set(), titles: new Set() };
+
 export interface LineSyncPlan {
   /** Wanted tasks nobody has (by key or by exact title): inserted. */
   insert: BornTask[];
@@ -116,6 +135,8 @@ export interface LineSyncPlan {
   consumed: string[];
   /** The same deletions under the rebuilt lines' keys. */
   redismiss: string[];
+  /** Orphans a linked-but-unaccepted estimate's line still holds (the shield): untouched, said by name. */
+  leftAlone: string[];
 }
 
 /**
@@ -128,6 +149,7 @@ export function planLineSync(
   have: ReadonlyArray<LineTask>,
   dismissed: ReadonlySet<string> = new Set(),
   others: ReadonlyArray<OtherTask> = [],
+  shield: Shield = NO_SHIELD,
 ): LineSyncPlan {
   const wantedKeys = new Set(wanted.map((t) => t.source_key));
   const haveKeys = new Set(have.map((t) => t.source_key)); // live and tombstoned alike: neither is inserted again
@@ -168,9 +190,13 @@ export function planLineSync(
   const leftOff: string[] = [];
   const consumed: string[] = [];
   const redismiss: string[] = [];
-  const orphanEntries = [...dismissed].filter((e) => !wantedKeys.has(dismissalKey(e)) && dismissalTitle(e) !== null);
+  // A VISIT task's dismissal ("task:<id>#…", the delete door after Start The Job) bars the line built
+  // from that task by the id the line's breakdown remembers — whatever the builder's units box did to
+  // the title (audit v1085, carried [18]) — and MOVES to the line's key like any other.
+  const orphanEntries = [...dismissed].filter((e) => !wantedKeys.has(dismissalKey(e)) && (dismissalTitle(e) !== null || dismissalKey(e).startsWith(VISIT_KEY)));
   const insert = unmatched.filter((t) => {
-    const i = orphanEntries.findIndex((e) => dismissalTitle(e) === t.title.trim());
+    const byTask = t.task_id ? orphanEntries.findIndex((e) => dismissalKey(e) === `${VISIT_KEY}${t.task_id}`) : -1;
+    const i = byTask !== -1 ? byTask : orphanEntries.findIndex((e) => dismissalTitle(e) === t.title.trim());
     if (i === -1) return true;
     consumed.push(orphanEntries[i]);
     orphanEntries.splice(i, 1);
@@ -179,11 +205,18 @@ export function planLineSync(
     return false;
   });
 
+  // A task a linked-but-unaccepted estimate's line still holds (by key or exact title) is that estimate's
+  // (the shield): left exactly as it is — not removed, not tombstoned — and SAID, until its estimate is
+  // accepted again. The claim above ran first: an orphan whose title the accepted set wants again is the
+  // line's, shield or no shield, never a second copy.
+  const shielded = (t: LineTask): boolean => shield.keys.has(t.source_key) || shield.titles.has(t.title.trim());
   const remove: string[] = [];
   const kept: LineTask[] = [];
+  const leftAlone: string[] = [];
   for (const t of orphans) {
     if (claimed.has(t.id)) continue;
-    if (t.status === "open" && !isHisTask(t)) remove.push(t.id);
+    if (shielded(t)) leftAlone.push(t.title);
+    else if (t.status === "open" && !isHisTask(t)) remove.push(t.id);
     else kept.push(t);
   }
   return {
@@ -195,6 +228,7 @@ export function planLineSync(
     leftOff,
     consumed,
     redismiss,
+    leftAlone,
   };
 }
 
@@ -252,6 +286,26 @@ export async function estimateLines(
   return { lines, minutes: tasksFromLines(lines).plannedMinutes };
 }
 
+/**
+ * THE SHIELD READ: the task lines of the job's linked estimates that are DRAFT or SENT right now (never
+ * declined, expired or superseded — those are over). A failed read is an error, and the sync refuses
+ * rather than strip what it could not see.
+ */
+export async function pendingShield(sb: SupabaseClient, who: { jobId: string; orgId: string | null }): Promise<Shield & { error?: string }> {
+  let qq = sb.from("quotes").select("id").eq("job_id", who.jobId).in("status", ["draft", "sent"]);
+  if (who.orgId) qq = qq.eq("org_id", who.orgId);
+  const { data: quotes, error: qErr } = await qq;
+  if (qErr) return { ...NO_SHIELD, error: dbError(qErr) };
+  const ids = ((quotes ?? []) as Array<{ id: string }>).map((q) => q.id);
+  if (!ids.length) return NO_SHIELD;
+  let lq = sb.from("quote_line_items").select("id, description, sort_order, detail").in("quote_id", ids);
+  if (who.orgId) lq = lq.eq("org_id", who.orgId);
+  const { data, error } = await lq;
+  if (error) return { ...NO_SHIELD, error: dbError(error) };
+  const tasks = tasksFromLines((data ?? []) as LineRow[]).tasks;
+  return { keys: new Set(tasks.map((t) => t.source_key)), titles: new Set(tasks.map((t) => t.title.trim())) };
+}
+
 export interface SyncWho {
   jobId: string;
   orgId: string | null;
@@ -271,6 +325,8 @@ export interface SyncResult {
   leftOff: string[];
   /** A visit's or hand task that would have taken a line another door just filled: on the list twice, by name. */
   twice: string[];
+  /** Orphans a linked-but-unaccepted estimate still holds (the shield): untouched, by name. */
+  leftAlone?: string[];
   /** True when this call moved jobs.planned_minutes to the estimate's new figure (sizeNow). */
   sizeSet: boolean;
   sizeNow?: number | null;
@@ -328,7 +384,9 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     for (const t of have) if (parents.has(t.id)) t.has_steps = true;
   }
 
-  const plan = planLineSync(wanted, have, dismissed, others);
+  const shield = await pendingShield(sb, who);
+  if (shield.error) return { ...NONE, error: shield.error };
+  const plan = planLineSync(wanted, have, dismissed, others, shield);
 
   let rekeyed = 0;
   const twice: string[] = [];
@@ -375,7 +433,8 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   if (plan.redismiss.length) {
     // The same deletions, MOVED to the rebuilt lines' keys: the entries that barred are replaced, never
     // piled up (two stale entries would bar two live lines). Read again right before the write, so a
-    // delete made meanwhile (the delete door's own read-modify-write) is kept, not overwritten.
+    // delete made meanwhile (the delete door's dismiss_task_key, 0393) is kept, not overwritten — the
+    // window is one round trip; the service client (the customer's Accept) cannot use an org-bound door.
     let fq = sb.from("jobs").select("dismissed_task_keys").eq("id", who.jobId);
     if (who.orgId) fq = fq.eq("org_id", who.orgId);
     const { data: fresh, error: fErr } = await fq.maybeSingle();
@@ -396,7 +455,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   const born = await bornTasks(sb, { jobId: who.jobId, orgId: who.orgId, createdBy: who.createdBy }, { tasks: plan.insert, plannedMinutes: null, parts: [] });
   if (born.error) return { ...NONE, rekeyed, removed, kept, keptNames, error: born.error };
 
-  const done: SyncResult = { inserted: born.inserted, rekeyed, removed, kept, keptNames, leftOff: plan.leftOff, twice, sizeSet: false };
+  const done: SyncResult = { inserted: born.inserted, rekeyed, removed, kept, keptNames, leftOff: plan.leftOff, twice, sizeSet: false, ...(plan.leftAlone.length ? { leftAlone: plan.leftAlone } : {}) };
   if (who.sizeBefore !== undefined && est.minutes !== who.sizeBefore) {
     // The box still holds the estimate's figure (or nothing yet): it follows — compare-and-set on the value
     // just read, so a figure he types between the read and the write wins. Anything else is his: it stays, said.
@@ -412,6 +471,25 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     return boxNow === est.minutes ? done : { ...done, sizeStays: { box: boxNow, estimate: est.minutes } };
   }
   return done;
+}
+
+/**
+ * A RENAMED LINE'S DISMISSAL FOLLOWS (audit v1085, carried [18]): a task he deleted left "line:<id>#<old
+ * title>" on the job; a rename in the builder and a rebuild then brought the same task back under the new
+ * title, because the title half no longer matched. Moved to the new title in ONE statement
+ * (retitle_task_dismissal, 0393: array_replace, so a dismissal another door appends meanwhile is never
+ * written over by a stale read). False is the common answer (the task is there, or never dismissed).
+ */
+export async function retitleDismissal(
+  sb: SupabaseClient,
+  who: { jobId: string; lineId: string; from: string; to: string },
+): Promise<{ moved: boolean; error?: string }> {
+  const to = who.to.trim();
+  const from = who.from.trim();
+  if (!to || to === from) return { moved: false };
+  const { data, error } = await sb.rpc("retitle_task_dismissal", { p_job_id: who.jobId, p_key: `${LINE_KEY}${who.lineId}`, p_from: from, p_to: to });
+  if (error) return { moved: false, error: dbError(error) };
+  return { moved: data === true };
 }
 
 /**
@@ -449,6 +527,7 @@ export function syncWords(r: SyncResult, lead = "The job's list follows the esti
   if (r.kept) bits.push(`${r.kept} kept${few(r.keptNames)} — done, or with notes, a photo or steps`);
   if (r.leftOff?.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the job before`);
   if (r.twice?.length) bits.push(`${r.twice.length} on the list twice${few(r.twice)} — remove one`);
+  if (r.leftAlone?.length) bits.push(`${r.leftAlone.length} left alone${few(r.leftAlone)} — an estimate not yet accepted still has them`);
   if (r.sizeSet) bits.push(`the job's length is now ${hoursWords(r.sizeNow ?? null)}`);
   if (r.sizeStays) bits.push(`the job's length stays at ${hoursWords(r.sizeStays.box)} (the estimate now says ${hoursWords(r.sizeStays.estimate)})`);
   return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;

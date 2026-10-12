@@ -33,7 +33,7 @@ import { embeddedJob, finishedDraftRefusal } from "@/lib/action-items/due-filter
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, noBillRateWarnings, withoutClaimedLabor } from "@/lib/labor-billing";
 import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsNotYetNetted, joinNumbers, laborRowIds, unbilledWorkForJob, type ClaimedSources } from "@/lib/unbilled-work";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
-import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS, kindFromPriceBook, pickableLineKind, canBeDiscount, discountTooBig, roomForDiscount, DISCOUNT_KIND, LINE_KIND_LABEL, type PickableLineKind, type StoredLineKind } from "@/lib/invoice-math";
+import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS, kindFromPriceBook, pickableLineKind, canBeDiscount, discountOverflow, discountTooBig, roomForDiscount, DISCOUNT_KIND, LINE_KIND_LABEL, type PickableLineKind, type StoredLineKind } from "@/lib/invoice-math";
 import { deleteCredit, withdrawCredit } from "@/lib/billing/withdraw-credit";
 import { readPriceBookUnits } from "@/lib/price-book-kind";
 import { BRING_IN_NEW_WORK, contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
@@ -218,7 +218,19 @@ export async function listCustomerCreditsForInvoice(
   ok: boolean;
   error?: string;
   balance?: number;
-  credits?: { id: string; amount: number; disposition: string; note: string | null; created_at: string; onThisInvoice: boolean }[];
+  credits?: {
+    id: string;
+    amount: number;
+    disposition: string;
+    note: string | null;
+    created_at: string;
+    onThisInvoice: boolean;
+    /** On the customer's account — on no invoice. The only credit Delete This Credit can act on. */
+    onAccount: boolean;
+    /** The number of the OTHER invoice it sits on, when it does ("INV-089"): said in the row, so the
+     *  way back (Take It Back, on that invoice) is named where it is. */
+    onInvoice: string | null;
+  }[];
 }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -238,6 +250,16 @@ export async function listCustomerCreditsForInvoice(
     .order("created_at", { ascending: false })
     .limit(50);
   if (error) return { ok: false, error: dbError(error) };
+  // A credit on ANOTHER invoice is neither this bill's nor the account's (audit v1085, carried [13]):
+  // the row names the invoice it sits on, so the one way back is said where it is.
+  const elsewhere = Array.from(new Set((rows ?? []).map((c: any) => c.invoice_id as string | null).filter((v): v is string => !!v && v !== invoiceId)));
+  const numbers = new Map<string, string>();
+  if (elsewhere.length) {
+    const { data: invs, error: invErr } = await supabase.from("invoices").select("id, invoice_number").in("id", elsewhere);
+    // A name is a courtesy: a failed lookup is reported and the row says "another invoice", never a blank list.
+    if (invErr) reportError("listCustomerCreditsForInvoice:numbers", invErr, { invoiceId });
+    for (const r of (invs ?? []) as Array<{ id: string; invoice_number: string | null }>) numbers.set(r.id, r.invoice_number ?? "another invoice");
+  }
   return {
     ok: true,
     balance: invoiceBalance(inv.total, inv.amount_paid),
@@ -248,6 +270,8 @@ export async function listCustomerCreditsForInvoice(
       note: c.note ?? null,
       created_at: c.created_at,
       onThisInvoice: c.invoice_id === invoiceId,
+      onAccount: c.invoice_id == null,
+      onInvoice: c.invoice_id && c.invoice_id !== invoiceId ? (numbers.get(c.invoice_id) ?? "another invoice") : null,
     })),
   };
 }
@@ -390,11 +414,17 @@ export async function withdrawCustomerCredit(creditId: string): Promise<{ ok: bo
   const res = await withdrawCredit(ctx.supabase, creditId);
   if (!res.ok) return res;
   // The credit is off the bill; the bill must now say so, and a delivered copy is older than this.
-  const landed = await recalcInvoice(ctx.supabase, res.invoiceId);
-  if (!landed) return { ok: false, error: "The credit is back on the account, but this invoice did not recompute — reload the invoice." };
+  // The move has landed whatever happens next (audit v1085, carried [10]): the recompute is tried
+  // twice, and the stamp, the stale copy and the pages are dealt with either way — a bill that still
+  // counts a withdrawn credit as paid must at least stop printing so, and the way out is named.
+  const landed = (await recalcInvoice(ctx.supabase, res.invoiceId)) || (await recalcInvoice(ctx.supabase, res.invoiceId));
   await stampInvoiceRevised(ctx.supabase, res.invoiceId, "withdrawCustomerCredit");
   await bustDocPdf("invoice", res.invoiceId);
   revalidateMoney(res.invoiceId);
+  if (!landed) {
+    reportError("withdrawCustomerCredit:recalc", new Error("invoice did not recompute"), { creditId, invoiceId: res.invoiceId });
+    return { ok: false, error: `The ${formatCurrency(res.amount)} credit is back on the account, but this invoice did not recompute — save any line on it to recompute it.` };
+  }
   return { ok: true, message: `Credit of ${formatCurrency(res.amount)} is back on the account — this invoice is owed again.` };
 }
 
@@ -3375,14 +3405,21 @@ export async function updateInvoiceItem(
   // below $0. Read the row's own kind and figures, merge the patch, and judge the result.
   if (item.quantity !== undefined || item.unit_price !== undefined) {
     const { data: was } = await supabase.from("invoice_items").select("line_kind, quantity, unit_price").eq("id", itemId).eq("invoice_id", invoiceId).maybeSingle();
+    const qty = item.quantity !== undefined ? item.quantity || 1 : Number(was?.quantity) || 1;
+    const price = item.unit_price !== undefined ? item.unit_price || 0 : Number(was?.unit_price) || 0;
     if (was && was.line_kind === DISCOUNT_KIND) {
-      const qty = item.quantity !== undefined ? item.quantity || 1 : Number(was.quantity) || 1;
-      const price = item.unit_price !== undefined ? item.unit_price || 0 : Number(was.unit_price) || 0;
       if (!canBeDiscount(qty * price)) return { ok: false, error: "A discount takes money off — give it an amount." };
       const { data: others, error: othersErr } = await supabase.from("invoice_items").select("id, line_total").eq("invoice_id", invoiceId).neq("id", itemId);
       if (othersErr) return { ok: false, error: dbError(othersErr) };
       const room = roomForDiscount((others ?? []).map((r: { line_total: unknown }) => r.line_total));
       if (Math.abs(qty * price) > room + 0.005) return { ok: false, error: discountTooBig(room) };
+    } else if (was) {
+      // THE SAME RULE FROM THE OTHER SIDE (audit v1085, carried [8]): a positive line shrinking beside a
+      // discount must not take the bill below $0 — the whole bill as it would stand, judged by one rule.
+      const { data: others, error: othersErr } = await supabase.from("invoice_items").select("id, line_kind, line_total").eq("invoice_id", invoiceId).neq("id", itemId);
+      if (othersErr) return { ok: false, error: dbError(othersErr) };
+      const overflow = discountOverflow([...((others ?? []) as Array<{ line_kind?: string | null; line_total?: unknown }>), { line_kind: was.line_kind ?? null, line_total: qty * price }]);
+      if (overflow) return { ok: false, error: overflow };
     }
   }
   const { data: touched, error } = await supabase
@@ -3409,6 +3446,12 @@ export async function deleteInvoiceItem(
   const block = await requireLiveInvoice(supabase, invoiceId);
   if (block) return block; // 0269: any live bill may be corrected; void is the ending
   if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED; // unchanged by 0269
+  // A DISCOUNT NEVER TAKES THE BILL BELOW $0 — from this side too (audit v1085, carried [8]): the bill
+  // without this line is judged before the line goes. Read as a whole; a failed read refuses.
+  const { data: rest, error: restErr } = await supabase.from("invoice_items").select("id, line_kind, line_total").eq("invoice_id", invoiceId).neq("id", itemId);
+  if (restErr) return { ok: false, error: dbError(restErr) };
+  const overflow = discountOverflow((rest ?? []) as Array<{ line_kind?: string | null; line_total?: unknown }>);
+  if (overflow) return { ok: false, error: overflow };
   const { data: gone, error } = await supabase
     .from("invoice_items")
     .delete()

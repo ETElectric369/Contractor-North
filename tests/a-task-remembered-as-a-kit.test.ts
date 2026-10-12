@@ -63,10 +63,15 @@ describe("the inspector", () => {
   it("loads the task kits with the tolerant rungs and hands them over with every money field dropped", () => {
     const page = src("src/app/(app)/appointments/[id]/page.tsx");
     // The read SAYS how it went (item 3): readTaskKits over the same rungs, its state on the page, a failure in the ops sink.
-    expect(page).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"))');
-    expect(page).toContain("taskKits={kitsOn ? kitsWithoutMoney(taskKitsRead.kits) : []}");
+    // Through the service client, scoped to the visit's company (audit v1085, carried [31]): a crew lead
+    // cannot read price_list_items, so his own read came back with every book link empty and no error.
+    expect(page).toContain('? readTaskKits((sel) => createServiceClient().from("kits").select(sel).eq("org_id", apptOrg).order("name"))');
+    expect(page).toContain(': Promise.resolve<TaskKitsRead>({ kits: [], rows: null, rung: 0, state: "ok" })'); // no visit to see: no read
+    // The kits reach the Inspector whatever the switch says; the switch hides the PICKER (carried [39]).
+    expect(page).toContain("taskKits={kitsWithoutMoney(taskKitsRead.kits)}");
+    expect(page).toContain("kitsPicker={kitsOn}");
     expect(page).toContain("kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state) : null}");
-    expect(page).toContain('kitsUnread={kitsOn && taskKitsRead.state === "failed"}');
+    expect(page).toContain('kitsUnread={taskKitsRead.state === "failed"}');
     expect(page).toContain('reportError("appointment:kits"');
   });
   it("previews a picked kit through THE expandTaskKit the estimate seeds from", () => {

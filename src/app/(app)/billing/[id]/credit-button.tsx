@@ -10,7 +10,7 @@ import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { formatCurrency } from "@/lib/utils";
 import { applyCustomerCredit, createCustomerCredit, deleteCustomerCredit, listCustomerCreditsForInvoice, markCreditRefunded, withdrawCustomerCredit } from "../actions";
 
-type OpenCredit = { id: string; amount: number; disposition: string; note: string | null; created_at: string; onThisInvoice: boolean };
+type OpenCredit = { id: string; amount: number; disposition: string; note: string | null; created_at: string; onThisInvoice: boolean; onAccount: boolean; onInvoice: string | null };
 
 /** Post a credit/refund to the customer's account from this invoice — and SPEND one that's
  *  already sitting there. With `menuItem` the trigger renders as an Actions-menu row (the rare
@@ -70,8 +70,10 @@ export function CreditButton({
     setSaid(null);
     start(async () => {
       const res = await run();
-      if (!res.ok) return setError(res.error ?? "Could not save.");
-      if (res.message) setSaid(res.message);
+      // A refusal can land AFTER a move (Take It Back's credit is on the account, the bill did not
+      // recompute): the list and the page are re-read on every outcome, so a stale row is never offered.
+      if (!res.ok) setError(res.error ?? "Could not save.");
+      else if (res.message) setSaid(res.message);
       await loadCredits();
       router.refresh();
     });
@@ -184,7 +186,9 @@ export function CreditButton({
                         ? "refund pending"
                         : c.onThisInvoice
                           ? "credited on this invoice"
-                          : "account credit"}
+                          : c.onInvoice
+                            ? `on ${c.onInvoice}` // on another bill (audit v1085, carried [13]): Apply moves it here; Delete is not offered
+                            : "account credit"}
                       {c.note ? ` — ${c.note}` : ""}
                     </span>
                     {c.disposition === "refund" ? (
@@ -231,7 +235,7 @@ export function CreditButton({
                     {/* A credit that should never have existed (posted to stand in for a discount)
                         is deleted only once it is OFF every invoice, and only on a confirm that names
                         the amount: the money may be the customer's. */}
-                    {c.disposition === "credit" && !c.onThisInvoice && (
+                    {c.disposition === "credit" && c.onAccount && (
                       <button
                         type="button"
                         disabled={pending}

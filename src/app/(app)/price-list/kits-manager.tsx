@@ -194,7 +194,7 @@ function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
           <div><Label htmlFor="ek-hours">Hours Per Unit</Label><Input id="ek-hours" inputMode="decimal" value={hoursPerUnit} onChange={(e) => setHoursPerUnit(e.target.value)} placeholder="empty = parts only" /></div>
           <div><Label htmlFor="ek-unit">Unit</Label><Input id="ek-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="footing, step, opening" /></div>
         </div>
-        <p className="text-xs text-slate-500">With hours per unit this is a task kit: the Inspector offers it on a task, and the estimate prices your hours × the units.</p>
+        <p className="text-xs text-slate-500">With hours per unit this is a task kit: the Inspector offers it on a task, and the estimate prices your hours × the units. It will no longer appear in Add From Kit on estimates and invoices (clear the hours to bring it back).</p>
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
     </Modal>

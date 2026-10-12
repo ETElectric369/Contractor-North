@@ -123,6 +123,40 @@ export async function readPriceBook(
   return { findPl };
 }
 
+/** Postgres 23505: a unique index another door just filled (0393 on the buy list, 0388 on the list itself). */
+export const isDuplicateKey = (e: unknown): boolean => String((e as { code?: unknown } | null)?.code ?? "") === "23505";
+
+/**
+ * KEYED ROWS ONTO A LIST, ONE DOOR AT A TIME (0393, material_items_list_source_key_uq): two doors in the
+ * same second (the customer's Accept and the office's; the take-off and the sync) each write the
+ * estimate's parts, and the batch of the loser is refused whole on the first key the winner already
+ * holds. A 23505 is answered by reading the keys the list holds NOW and writing only the rows whose
+ * key is absent — the other door's view may have been older or newer, so "it wrote all of them" is
+ * never assumed. Any other refusal is returned; a short count is an error too (silent-write law).
+ */
+export async function insertKeyedRows(
+  sb: SupabaseClient,
+  listId: string,
+  orgId: string | null,
+  rows: ReadonlyArray<Record<string, unknown> & { source_key: string }>,
+): Promise<{ inserted: number; error?: unknown }> {
+  if (!rows.length) return { inserted: 0 };
+  const first = await sb.from("material_list_items").insert([...rows]).select("id");
+  if (!first.error) return first.data?.length === rows.length ? { inserted: first.data.length } : { inserted: first.data?.length ?? 0, error: new Error(`${rows.length - (first.data?.length ?? 0)} of ${rows.length} rows did not save`) };
+  if (!isDuplicateKey(first.error)) return { inserted: 0, error: first.error };
+  let kq = sb.from("material_list_items").select("source_key").eq("list_id", listId);
+  if (orgId) kq = kq.eq("org_id", orgId);
+  const { data: had, error: kErr } = await kq;
+  if (kErr) return { inserted: 0, error: kErr };
+  const keys = new Set(((had ?? []) as Array<{ source_key: string | null }>).map((r) => r.source_key).filter((k): k is string => !!k));
+  const missing = rows.filter((r) => !keys.has(r.source_key));
+  if (!missing.length) return { inserted: 0 };
+  const second = await sb.from("material_list_items").insert([...missing]).select("id");
+  if (second.error) return { inserted: 0, error: second.error };
+  const n = second.data?.length ?? 0;
+  return n === missing.length ? { inserted: n } : { inserted: n, error: new Error(`${missing.length - n} of ${missing.length} rows did not save`) };
+}
+
 const CODE_RE = /\[([^\]]+)\]/;
 
 /** How an UNKEYED row on the sheet is matched to a plain line: by its code, else by its words slugged like a
@@ -620,12 +654,20 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   }
 
   if (!plan) {
-    // A FRESH LIST: its rows in one write. The door is idempotent (the list exists now), so a lost write is
-    // said with the way out, not "try again".
-    if (rows.length) {
-      const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
+    // A FRESH LIST: the plain and kit rows (unkeyed — no other door writes those) in one write, then the
+    // task parts (keyed) through insertKeyedRows, so a key another door already holds (0393: the sync got
+    // there first) can only ever refuse the keyed batch, and only the missing keys are written. The door
+    // is idempotent (the list exists now), so a lost write is said with the way out, not "try again".
+    const unkeyed = rows.filter((r) => !r.source_key);
+    const keyed = rows.filter((r): r is Row & { source_key: string } => !!r.source_key);
+    if (unkeyed.length) {
+      const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(unkeyed).select("id");
       if (itemsErr) return { ok: false, error: dbError(itemsErr) };
-      if ((seeded?.length ?? 0) !== rows.length) return { ok: false, error: "The list was created but its lines didn't save — open it and add them." };
+      if ((seeded?.length ?? 0) !== unkeyed.length) return { ok: false, error: "The list was created but its lines didn't save — open it and add them." };
+    }
+    if (keyed.length) {
+      const k = await insertKeyedRows(supabase, list.id, orgId, keyed);
+      if (k.error) return { ok: false, error: `The list was created but the task parts didn't save (${dbError(k.error)}) — open it and add them.` };
     }
     return { ok: true, id: list.id, jobId: quote.job_id ?? null };
   }
@@ -643,6 +685,8 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   const follow: PlainFollow = { added: 0, carried: plan.carried, recounted, removed, kept, countsDiffer, failed };
   const done = () => ({ ok: true, id: list!.id, jobId: quote.job_id ?? null, adopted: true, follow });
   if (rows.length) {
+    // Unkeyed rows only (a task line's parts are the sync's on an adopted list; a plain or kit row has no
+    // key), so 0393's unique index cannot refuse this write.
     const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
     const n = seeded?.length ?? 0;
     follow.added = itemsErr ? 0 : n;

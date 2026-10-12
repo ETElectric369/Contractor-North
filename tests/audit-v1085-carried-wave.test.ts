@@ -193,10 +193,10 @@ describe("the words and the doors (carried [16], [15], [38], [9], [43], [1], [19
   it("[16] the job's length is said only when the box and the estimate differ", () => {
     expect(src("src/lib/estimate/sync-job-tasks.ts")).toContain("return boxNow === est.minutes ? done : { ...done, sizeStays: { box: boxNow, estimate: est.minutes } };");
   });
-  it("[15] deleteTask never writes a dismissal list it could not read", () => {
+  it("[15] deleteTask never writes a dismissal list it could not read: the dismissal goes through ONE atomic door (dismiss_task_key, 0393)", () => {
     const tasks = src("src/app/(app)/tasks/actions.ts");
-    expect(tasks).toContain("const { data: job, error: jobErr } = await supabase.from(\"jobs\").select(\"dismissed_task_keys\")");
-    expect(tasks).toContain("if (jobErr || !job) {");
+    expect(tasks).toContain('await supabase.rpc("dismiss_task_key", { p_job_id: row.job_id, p_entry: entry })');
+    expect(tasks).not.toContain('.update({ dismissed_task_keys: [...had, entry] })');
   });
   it("[38] the service client scopes the job's task keys, the rekey and the orphan delete to the company", () => {
     expect(src("src/lib/estimate/born-with-tasks.ts")).toContain("async function keysOnJob(sb: SupabaseClient, jobId: string, orgId: string | null = null)");

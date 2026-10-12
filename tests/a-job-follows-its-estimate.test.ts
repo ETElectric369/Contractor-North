@@ -117,7 +117,7 @@ describe("the one rule, and nothing silent", () => {
   it("the rule's writes each select what they wrote", () => {
     const lines = src("src/lib/estimate/sync-job-tasks.ts").split("\n");
     const writes = lines.map((l, i) => (/\.(update|delete)\(/.test(l) ? i : -1)).filter((i) => i !== -1);
-    expect(writes.length).toBe(6); // rekey, unkey, remove, redismiss, size, retitle (the insert is bornTasks', pinned in its own file)
+    expect(writes.length).toBe(6); // rekey, unkey, remove, redismiss, size, retitle (the insert is bornTasks'; the dismissal retitle is 0393's own RPC)
     for (const i of writes) expect(lines.slice(i, i + 7).join("\n"), `write at line ${i + 1}`).toContain('.select("id")');
     expect(lines.join("\n")).toContain("bornTasks(");
   });
@@ -140,15 +140,14 @@ describe("the one rule, and nothing silent", () => {
 
 describe("a task he deleted by hand stays gone", () => {
   const fn = body(src("src/app/(app)/tasks/actions.ts"), "export async function deleteTask(");
-  it("the delete door reads the task's key and writes it to jobs.dismissed_task_keys, read back; the sync reads that column", () => {
+  it("the delete door reads the task's key and dismisses it through the one atomic door (dismiss_task_key, 0393), answered; the sync reads that column", () => {
     expect(fn).toContain('select("id, job_id, created_by, source_key, title")');
-    expect(fn).toContain('select("dismissed_task_keys")');
-    expect(fn).toContain("dismissed_task_keys: [...had, entry]"); // "<key>#<title>" (cn-v1084): the title survives a rebuild
+    expect(fn).toContain('supabase.rpc("dismiss_task_key", { p_job_id: row.job_id, p_entry: entry })'); // "<key>#<title>" (cn-v1084): the title survives a rebuild
     expect(fn).toContain("dismissalEntry(key,");
     expect(fn).toContain('reportError("deleteTask:dismissKey"');
     const rule = src("src/lib/estimate/sync-job-tasks.ts");
     expect(rule).toContain('select("planned_minutes, dismissed_task_keys")');
-    expect(rule).toContain("planLineSync(wanted, have, dismissed, others)");
+    expect(rule).toContain("planLineSync(wanted, have, dismissed, others, shield)");
   });
 });
 
