@@ -40,11 +40,15 @@ export function publicIntakeNeeds(pb: Playbook): PublicNeed[] {
   const live = new Set(kept.map((n) => n.key));
   return kept.map((n) => {
     const when = (n.when ?? []).filter((c) => live.has(c.key));
+    // THE SCOPE reaches a stranger as the control it looks like: his words with the door open, or
+    // a text box (the public renderer knows select / text / number / file; it is not told which
+    // question is the scope, because on the public page that is nobody's business).
+    const slot = n.slot?.type === "scope" ? (n.slot.options?.length ? { type: "select" as const, options: n.slot.options, other: true as const } : { type: "text" as const }) : n.slot;
     return {
       key: n.key,
       label: n.label,
       ask: n.ask,
-      ...(n.slot ? { slot: n.slot } : {}),
+      ...(slot ? { slot } : {}),
       ...(when.length ? { when } : {}),
     };
   });

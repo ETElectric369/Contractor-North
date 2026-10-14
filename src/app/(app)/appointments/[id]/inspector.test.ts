@@ -397,3 +397,59 @@ describe("the kits read says how it went (item 3): a sentence once, and never a 
     expect(textOf(html)).not.toContain("could not be read");
   });
 });
+
+describe("the scope lights its kits (field feedback 10-13, item 2): one offer row, the picker grouped by scope", () => {
+  const SCOPE_SHEET = {
+    ...SHEET,
+    playbook: {
+      needs: [
+        { key: "work", label: "Work", ask: "What kind of work is this?", slot: { type: "scope", options: ["Deck", "Remodel"] } },
+        { key: "tasks", label: "Tasks", ask: "What are the tasks?", slot: { type: "tasks" } },
+      ],
+    },
+  };
+  const DECK_KITS = [
+    { id: "dk1", name: "Footings", labor_minutes: 120, unit: "footing", category: "Deck", items: [] },
+    { id: "dk2", name: "Railing", labor_minutes: 30, unit: "lf", category: " deck ", items: [] },
+    { id: "rk1", name: "Demo", labor_minutes: 60, unit: "room", category: "Remodel", items: [] },
+    { id: "nk", name: "Service call", labor_minutes: 60, unit: "ea", category: null, items: [] },
+  ];
+  const one = (html: string) => buttons(html).map((b) => b.text);
+
+  it("typed 'deck' (the Something Else box) lights the two Deck kits, blind to case and spacing; a kit already on the list is not offered twice", () => {
+    const html = render("office", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, initialAnswers: { work: "deck", tasks: null } });
+    expect(one(html)).toContain("Add The Deck Tasks (2)");
+    expect(html).toContain(">Something Else<");
+    const withOne = render("office", {
+      templates: [SCOPE_SHEET],
+      taskKits: DECK_KITS,
+      initialAnswers: { work: "Deck", tasks: [{ id: "t1", name: "Footings", hours: null, units: null, kit_id: "dk1", materials: [] }] },
+    });
+    expect(one(withOne)).toContain("Add The Deck Tasks (1)");
+    // the picker is grouped: the visit's scope first, Other Kits last
+    const sel = withOne.match(/<select aria-label="Kit"[\s\S]*?<\/select>/)?.[0] ?? "";
+    const labels = [...sel.matchAll(/<optgroup label="([^"]+)"/g)].map((m) => m[1]);
+    expect(labels).toEqual(["Deck", "Remodel", "Other Kits"]);
+    expect(sel).toContain(">No Kit<");
+  });
+  it("no scope answer, a word no kit is filed under, a plain tech, or the Kits switch off: no offer row", () => {
+    expect(one(render("office", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, initialAnswers: { tasks: null } }))).not.toContainEqual(expect.stringMatching(/^Add The .* Tasks/));
+    expect(one(render("office", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, initialAnswers: { work: "Hot tub", tasks: null } }))).not.toContainEqual(expect.stringMatching(/^Add The .* Tasks/));
+    expect(one(render("view", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, initialAnswers: { work: "Deck", tasks: null } }))).not.toContainEqual(expect.stringMatching(/^Add The .* Tasks/));
+    expect(one(render("office", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, kitsPicker: false, initialAnswers: { work: "Deck", tasks: null } }))).not.toContainEqual(expect.stringMatching(/^Add The .* Tasks/));
+    // a crew lead fills the visit in: the offer is his too, and it is 44px
+    const lead = render("crewLead", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, initialAnswers: { work: "remodel", tasks: null } });
+    const row = buttons(lead).find((b) => b.text === "Add The Remodel Tasks (1)");
+    expect(row).toBeTruthy();
+    expect(row!.open).toMatch(TARGET);
+  });
+  it("type freely: the scope is a one-line box holding his words; no kit has a category → the flat picker as before", () => {
+    const FREE_SHEET = { ...SCOPE_SHEET, playbook: { needs: [{ ...SCOPE_SHEET.playbook.needs[0], slot: { type: "scope" } }, SCOPE_SHEET.playbook.needs[1]] } };
+    const flatKits = DECK_KITS.map((k) => ({ ...k, category: null }));
+    const html = render("office", { templates: [FREE_SHEET], taskKits: flatKits, initialAnswers: { work: "Panel swap", tasks: [{ id: "t1", name: "Swap", hours: null, units: null, kit_id: null, materials: [] }] } });
+    expect(html).toContain('value="Panel swap"');
+    expect(html).not.toContain(">Something Else<");
+    expect(html).not.toContain("<optgroup");
+    expect(html).toContain('<option value="dk1"');
+  });
+});

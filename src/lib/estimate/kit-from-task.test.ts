@@ -36,7 +36,7 @@ describe("kitFromTaskDetail: per unit, from his totals", () => {
     const r = kitFromTaskDetail(detail(), { name: " Footing ", unit: " footing " });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.kit).toEqual({ name: "Footing", unit: "footing", labor_minutes: 120 });
+    expect(r.value.kit).toEqual({ name: "Footing", unit: "footing", labor_minutes: 120, category: null });
     expect(r.value.items).toEqual([
       { code: "C80", description: "Concrete, 80 lb", quantity: 4, unit: "ea", unit_price: 0, sort_order: 0, qty_round: "none" },
       { code: null, description: "Rebar stake", quantity: 2, unit: "ea", unit_price: 1.25, sort_order: 1, qty_round: "none" },
@@ -48,7 +48,7 @@ describe("kitFromTaskDetail: per unit, from his totals", () => {
     const r = kitFromTaskDetail(detail({ units: null, hours: 1.5, materials: [{ code: null, name: "Breaker", qty: 3, cost: null, sell: 40 }] }), { name: "Breaker swap", unit: "" });
     expect(r).toEqual({
       ok: true,
-      value: { kit: { name: "Breaker swap", unit: "ea", labor_minutes: 90 }, items: [{ code: null, description: "Breaker", quantity: 3, unit: "ea", unit_price: 40, sort_order: 0, qty_round: "none" }] },
+      value: { kit: { name: "Breaker swap", unit: "ea", labor_minutes: 90, category: null }, items: [{ code: null, description: "Breaker", quantity: 3, unit: "ea", unit_price: 40, sort_order: 0, qty_round: "none" }] },
     });
     expect(kitSummary(r.ok ? r.value : (null as never), null)).toBe("90 min and Breaker ×3 per ea (this line is one unit)");
   });
@@ -117,7 +117,7 @@ describe("rememberKit: one name, one kit; codes link to the book; no half a kit"
     });
     const r = await rememberKit(sb, value);
     expect(r).toEqual({ ok: true, id: "kits-1", name: "Footing" });
-    expect(inserted.kits).toEqual([{ name: "Footing", unit: "footing", labor_minutes: 120, id: "kits-1" }]);
+    expect(inserted.kits).toEqual([{ name: "Footing", unit: "footing", labor_minutes: 120, category: null, id: "kits-1" }]);
     expect(inserted.kit_items).toEqual([
       { kit_id: "kits-1", description: "Concrete, 80 lb", quantity: 4, unit: "ea", unit_price: 0, sort_order: 0, qty_round: "none", price_list_item_id: "pli-1", id: "kit_items-2" },
       { kit_id: "kits-1", description: "Rebar stake", quantity: 2, unit: "ea", unit_price: 1.25, sort_order: 1, qty_round: "none", id: "kit_items-3" },

@@ -34,6 +34,9 @@ export interface TaskKit {
   /** His labor minutes for ONE unit. Null = an ordinary parts kit (no hours of its own). */
   labor_minutes: number | null;
   unit: string | null;
+  /** The scope it is filed under (kits.category, Price List › Kits): "Deck" lights "Add The Deck
+   *  Tasks" on a visit whose scope says deck (lib/playbook/scope). Null = offered by name only. */
+  category?: string | null;
   items: KitLineRaw[];
 }
 

@@ -141,7 +141,8 @@ export default async function AppointmentCapturePage({
     // from the frozen line text ("C80 — Concrete") while the estimate named them from the book. The
     // page drops every money field before the browser (kitsWithoutMoney), as it always did.
     apptOrg
-      ? readTaskKits((sel) => createServiceClient().from("kits").select(sel).eq("org_id", apptOrg).order("name"))
+      // + category: the scope a kit is filed under lights "Add The <Scope> Tasks" (lib/playbook/scope).
+      ? readTaskKits((sel) => createServiceClient().from("kits").select(sel).eq("org_id", apptOrg).order("name"), "category")
       : Promise.resolve<TaskKitsRead>({ kits: [], rows: null, rung: 0, state: "ok" }), // no visit to see: notFound() below
     // THE FORM THE CUSTOMER FILLED IN. Its playbook is the only place the LABELS for
     // `intake.intake_answers` exist — the answers themselves are a bag of keys, and `q_mst1drw8`

@@ -91,6 +91,12 @@ function parseSlot(raw: unknown): NeedSlot | undefined {
       // THE PARSER IS THE GATE: an unknown type makes the need OPEN, so forgetting this line would
       // render a task list as one prose box and lose every hour and part on the next autosave.
       return { type: "tasks" };
+    case "scope": {
+      // THE SCOPE (types.ts): his words, or none = type freely. An empty list IS the free mode,
+      // not a dropped slot — the one select-like slot where no options is a legitimate answer.
+      const options = Array.isArray(s.options) ? s.options.map((o) => str(o, 60)).filter(Boolean).slice(0, 40) : [];
+      return { type: "scope", ...(options.length ? { options } : {}) };
+    }
     default:
       return undefined;
   }

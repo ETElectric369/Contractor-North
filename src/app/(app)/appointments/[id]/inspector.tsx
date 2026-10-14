@@ -15,6 +15,7 @@ import { coerceByPlaybook, retiredAnswers, retiredLabel } from "@/lib/playbook/a
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { taskAsking, type TaskMaterial, type TaskValue } from "@/lib/playbook/tasks";
+import { groupedKits, kitsForScope, offerLabel, scopeWord } from "@/lib/playbook/scope";
 import { expandTaskKit, type TaskKit } from "@/lib/estimate/task-lines";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
@@ -798,8 +799,15 @@ export function Inspector({
   const isImage = (p: string) => /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(p);
   const fileLabel = (p: string) => (p.split("/").pop() ?? p).replace(/^\d{10,}-/, "");
 
-  const control = (n: Need) => {
+  const control = (n: Need): React.ReactNode => {
     const v = answers[n.key];
+
+    // THE SCOPE (types.ts) renders as what it looks like: his words as chips with the door open,
+    // or a one-line box. The answer is one string either way; what makes it THE scope is read
+    // by the task list below (scopeWord → the kit offer), not by its control.
+    if (n.slot?.type === "scope") {
+      return control({ ...n, slot: n.slot.options?.length ? { type: "select", options: n.slot.options, other: true } : { type: "text" } });
+    }
 
     // AN OPEN NEED — no slot, so no typed control can hold it. A box, because he types it himself
     // and Nort fills it in for him; that is the same instruction in both directions, and a
@@ -1064,10 +1072,38 @@ export function Inspector({
       // The field you are typing in does not move (see editingKey): same wiring as every box here.
       const focus = { onFocus: () => focusNeed(n.key), onBlur: () => setEditingKey((k) => (k === n.key ? null : k)) };
       const removeClass = "flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100";
+      // THE SCOPE LIGHTS ITS KITS (lib/playbook/scope): the kits filed under the visit's scope word
+      // that are not on the list yet, offered as ONE row. Each arrives as a DRAFT task — the kit's
+      // name and hours per unit, no units, no count: it ASKS (no-speculation); he keeps or removes.
+      const word = scopeWord(playbook, answers);
+      const offer = kitsPicker && word ? kitsForScope(taskKits, word).filter((k) => !tasks.some((t) => t.kit_id === k.id)) : [];
+      const groups = groupedKits(taskKits, word);
+      const kitOption = (k: TaskKit) => (
+        <option key={k.id} value={k.id}>
+          {k.name}
+        </option>
+      );
       return (
         <div className="space-y-2">
           {/* HOW THE KITS READ WENT (item 3): one sentence, once, when it was not whole. */}
           {kitsNote && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{kitsNote}</p>}
+          {!readOnly && offer.length > 0 && word && (
+            <button
+              type="button"
+              onClick={() => {
+                takeHold(n.key);
+                setMultiKey(n.key);
+                setTasks([
+                  ...tasks,
+                  ...offer.map((k) => ({ id: captureId(), name: k.name, hours: null, units: null, kit_id: k.id, materials: [] as TaskMaterial[] })),
+                ]);
+              }}
+              className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg border border-dashed border-brand/60 bg-brand/5 px-3 text-sm font-medium text-brand active:bg-brand/10"
+            >
+              <span>{offerLabel(word, offer.length)}</span>
+              <Plus className="h-4 w-4 shrink-0" />
+            </button>
+          )}
           {tasks.map((t, i) => (
             <div key={t.id} className="rounded-lg border border-slate-200 p-2">
               <div className="flex items-center gap-2">
@@ -1147,11 +1183,14 @@ export function Inspector({
                               className="min-h-[44px] max-w-[14rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
                             >
                               <option value="">No Kit</option>
-                              {taskKits.map((k) => (
-                                <option key={k.id} value={k.id}>
-                                  {k.name}
-                                </option>
-                              ))}
+                              {/* GROUPED BY SCOPE when any kit has one — the visit's scope first — else the flat list. */}
+                              {groups
+                                ? groups.map((g) => (
+                                    <optgroup key={g.label} label={g.label}>
+                                      {g.kits.map(kitOption)}
+                                    </optgroup>
+                                  ))
+                                : taskKits.map(kitOption)}
                               {kitGone && <option value={t.kit_id ?? ""}>Kit No Longer In The Price List</option>}
                             </select>
                           )}

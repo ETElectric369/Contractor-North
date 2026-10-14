@@ -239,12 +239,16 @@ function TaskBreakdown({
   pricing,
   taskKits = [],
   kitsOn = true,
+  scopeWord = null,
   onChange,
 }: {
   line: DraftLineItem;
   detail: TaskDetail;
   priceItems: PriceItemLite[];
   pricing: BookPricing;
+  /** The visit's scope word ("Deck"): what Remember As A Kit files the kit under, unless he
+   *  changes it. Null when the estimate did not come from a visit with a scope. */
+  scopeWord?: string | null;
   /** The org's task kits with their lines (W4): a line built from one says which, and its units
    *  box re-derives the kit's hours and parts for another count (reexpandTaskDetail). */
   taskKits?: TaskKit[];
@@ -293,6 +297,8 @@ function TaskBreakdown({
   const [kitOpen, setKitOpen] = useState(false);
   const [kitName, setKitName] = useState(() => kitNameFromLine(line.description));
   const [kitUnit, setKitUnit] = useState("ea");
+  // THE SCOPE IT FILES UNDER: the visit's word first, his to change (lib/playbook/scope).
+  const [kitCategory, setKitCategory] = useState(scopeWord ?? "");
   const [kitBusy, setKitBusy] = useState(false);
   const [kitSaid, setKitSaid] = useState<{ ok: boolean; text: string } | null>(null);
   // The kit behind the line, while the company's Kits switch is on (off = no kit door, as everywhere).
@@ -309,7 +315,7 @@ function TaskBreakdown({
   const remember = async () => {
     setKitBusy(true);
     try {
-      const r = await rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d });
+      const r = await rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d, category: kitCategory.trim() || null });
       if (r.ok) {
         setKitOpen(false);
         setKitSaid({ ok: true, text: `Remembered as the kit ${r.name ?? kitName} — it's under Kits on the Price List and in the Inspector's kit picker.` });
@@ -421,6 +427,8 @@ function TaskBreakdown({
             <Input aria-label="Kit name" placeholder="Kit name" className={`${box} w-40`} value={kitName} onChange={(e) => setKitName(e.target.value)} />
             <span>per</span>
             <Input aria-label="Unit" placeholder="ea" className={`${box} w-20`} value={kitUnit} onChange={(e) => setKitUnit(e.target.value)} />
+            <span>under</span>
+            <Input aria-label="Scope" placeholder="the scope, like Deck" className={`${box} w-32`} value={kitCategory} onChange={(e) => setKitCategory(e.target.value)} />
             <button
               type="button"
               disabled={kitBusy || !kitName.trim() || !planned?.ok}
@@ -470,6 +478,7 @@ export function QuoteBuilder({
   kits = [],
   taskKits = [],
   kitsOn = true,
+  scopeWord = null,
   quoteExpiryDays = 30,
   defaultMarkupPct = 0,
   defaultLaborRate = 0,
@@ -532,6 +541,8 @@ export function QuoteBuilder({
   taskKits?: TaskKit[];
   /** The company's Kits switch (0352, page.tsx kitDoors): off hides Remember As A Kit too. */
   kitsOn?: boolean;
+  /** The visit's scope word, for Remember As A Kit's "under" box (null = no visit, or no scope). */
+  scopeWord?: string | null;
   quoteExpiryDays?: number;
   /** Org Settings default_markup_pct — the last fallback in effectiveMarkupPct's chain. */
   defaultMarkupPct?: number;
@@ -1587,6 +1598,7 @@ export function QuoteBuilder({
                                   pricing={pricing}
                                   taskKits={taskKits}
                                   kitsOn={kitsOn}
+                                  scopeWord={scopeWord}
                                   onChange={(next) => updateItem(idx, next)}
                                 />
                               )}

@@ -96,17 +96,20 @@ export function sheetFromPlaybook(pb: Playbook): InspectionField[] {
     // Neither a file nor a scope picker has an equivalent in the OLD sheet shape, so neither is
     // exported back to one — a sheet claiming a scope picker was a text box would lose the money.
     if (n.slot.type === "file" || n.slot.type === "scopes" || n.slot.type === "tasks") continue;
+    // THE SCOPE mirrors as what it looks like: his words as a select with the door open, or a
+    // text box. The old readers lose only that it is THE scope — the answer survives as a string.
+    const slot: NeedSlot = n.slot.type === "scope" ? (n.slot.options?.length ? { type: "select", options: n.slot.options, other: true } : { type: "text" }) : n.slot;
     const type =
-      n.slot.type === "number" ? "number" : n.slot.type === "select" ? "select" : n.slot.long ? "textarea" : "text";
+      slot.type === "number" ? "number" : slot.type === "select" ? "select" : slot.type === "text" && slot.long ? "textarea" : "text";
     out.push({
       key: n.key,
       label: n.label,
       type,
-      ...(n.slot.type === "select" ? { options: n.slot.options } : {}),
+      ...(slot.type === "select" ? { options: slot.options } : {}),
       // Both halves of what a select can be, or the mirror is lossy and clearPlaybook — the
       // documented undo — erases answers rather than downgrading questions (cn-v698).
-      ...(n.slot.type === "select" && n.slot.multi ? { multi: true } : {}),
-      ...(n.slot.type === "select" && n.slot.other ? { other: true } : {}),
+      ...(slot.type === "select" && slot.multi ? { multi: true } : {}),
+      ...(slot.type === "select" && slot.other ? { other: true } : {}),
       // Only a single-clause rule survives the trip. A multi-clause need becomes UNCONDITIONAL
       // rather than half-gated: showing a question too often is a nuisance, hiding it on a rule
       // the old engine can't evaluate is a question nobody knows they were meant to answer.

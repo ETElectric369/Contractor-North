@@ -99,7 +99,26 @@ export type NeedSlot =
    * carries its own labor and materials." The answer is a TaskValue[] and it maps 1:1 onto
    * estimate lines, each carrying its breakdown.
    */
-  | { type: "tasks" };
+  | { type: "tasks" }
+  /**
+   * THE SCOPE — what kind of job this is, in the company's own words, as the FIRST why line.
+   *
+   * Erik (2026-10-13, after the Claudio visit): "every job has a scope and this can be the first
+   * why line … Deck/Remodel drops down the tasks preset with all the kits" — and the correction
+   * that made it a setting: "the scope should be a setting in the playbook first and foremost,
+   * i may choose to keep it set as type freely for a while until i setup the kits and that should
+   * stay an option and for my brother he can choose for his scope to be a dropdown with options
+   * in his words Remodel, Deck, etc … moldable and adjustable but not too specific to me."
+   *
+   * So it has ITS OWN MODE, per company, set in Settings › Playbook:
+   *   no `options`  TYPE FREELY — a one-line box. Erik's, until his kits exist.
+   *   `options`     CHOOSE — chips of his words (Chris: Remodel, Deck, …) and always a box for
+   *                 the one he didn't list (a wall is never a door — see `select.other`).
+   * The answer is ONE string either way, and the kit offer keys off that WORD (kits.category,
+   * case-blind — lib/playbook/scope.ts): typed "deck" and chosen "Deck" both light "Add The Deck
+   * Tasks". The FIRST scope need in a playbook is the scope; the editor says so if there are two.
+   */
+  | { type: "scope"; options?: string[] };
 
 /** One condition. ALL of a need's clauses must hold for it to apply. */
 export type Clause =

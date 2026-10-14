@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { scopeWord } from "@/lib/playbook/scope";
+import type { Answers } from "@/lib/playbook/types";
 import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
 import { kitsReadWords, partsKitsOnly, readTaskKits } from "@/lib/estimate/task-kits";
 import { reportError } from "@/lib/observe";
@@ -114,6 +116,7 @@ export default async function NewQuotePage({
   let typedCapture: ReturnType<typeof parseInspectorCapture> | null = null;
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
+  let captureScopeWord: string | null = null; // the visit's scope word: what Remember As A Kit files a kit under
   // The inspection already knows WHOSE house this is. Without carrying these through, a repeat
   // customer's inspection wrote up into a blank estimate and you re-picked them from the full
   // contact list standing in their yard.
@@ -242,6 +245,7 @@ export default async function NewQuotePage({
       // question his answers have since turned off; the Inspector hides that question, so its
       // picks must not become lines on an estimate nobody can see them on the inspection of.
       const liveAnswers = clearInapplicable(pb, answers);
+      captureScopeWord = scopeWord(pb, liveAnswers as Answers);
       for (const n of applicableNeeds(pb, liveAnswers)) {
         if (n.slot?.type === "tasks") {
           const tasks = coerceTasks((liveAnswers as Record<string, unknown>)[n.key]);
@@ -519,6 +523,7 @@ export default async function NewQuotePage({
         kits={estimateKits as any}
         taskKits={taskKits}
         kitsOn={kitDoors}
+        scopeWord={captureScopeWord}
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
         defaultLaborRate={settings.default_labor_rate}

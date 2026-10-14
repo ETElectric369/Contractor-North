@@ -48,9 +48,10 @@ import { clearPlaybook, installPlaybookStarter, savePlaybook } from "./playbook-
  * and the need has no slot, which is what makes it a sentence Nort has to phrase rather than a box.
  */
 
-type Kind = "one" | "many" | "number" | "text" | "long" | "file" | "scopes" | "tasks" | "open";
+type Kind = "scope" | "one" | "many" | "number" | "text" | "long" | "file" | "scopes" | "tasks" | "open";
 
 const KIND_LABEL: Record<Kind, string> = {
+  scope: "The scope — what kind of job it is (typed freely, or picked from your own words)",
   one: "Pick one",
   many: "Pick any that apply",
   number: "A number",
@@ -65,6 +66,8 @@ const KIND_LABEL: Record<Kind, string> = {
 const kindOf = (n: Need): Kind =>
   !n.slot
     ? "open"
+    : n.slot.type === "scope"
+      ? "scope"
     : n.slot.type === "number"
       ? "number"
       : n.slot.type === "file"
@@ -89,7 +92,7 @@ function slotForKind(kind: Kind, prev: NeedSlot | undefined, remembered?: string
   // "Pick one" found his thirteen hand-written choices replaced by Yes / No — silently, one Save
   // from being the version on his website, and with every stored answer outside the new list
   // coercing to null on the next autosave.
-  const options = prev && prev.type === "select" ? prev.options : remembered?.length ? remembered : ["Yes", "No"];
+  const options = prev && prev.type === "select" ? prev.options : prev && prev.type === "scope" && prev.options?.length ? prev.options : remembered?.length ? remembered : ["Yes", "No"];
   // `other` SURVIVES A KIND CHANGE (cn-v698). `multi` is dropped on purpose — one-vs-many IS the
   // thing the dropdown selects. `other` was dropped by omission, and the doc-comment above was
   // false about it: a select→select change can obviously still use it. The cost was silent —
@@ -99,6 +102,13 @@ function slotForKind(kind: Kind, prev: NeedSlot | undefined, remembered?: string
   switch (kind) {
     case "open":
       return undefined;
+    case "scope": {
+      // THE SCOPE keeps the words a select had (Chris turning "What kind of project is it?" into
+      // the scope keeps Deck / Remodel / …); from anything else it starts in TYPE FREELY — no
+      // Yes / No invented for it.
+      const words = prev && prev.type === "select" ? prev.options : prev && prev.type === "scope" ? prev.options ?? [] : remembered ?? [];
+      return { type: "scope", ...(words.length ? { options: words } : {}) };
+    }
     case "number":
       return { type: "number", ...(prev && prev.type === "number" && prev.unit ? { unit: prev.unit } : {}) };
     case "one":
@@ -549,7 +559,51 @@ export function PlaybookManager({
                                  onChange={(e) => edit(i, { slot: { type: "number", unit: e.target.value || undefined } })} />
                         </div>
                       )}
+                      {n.slot?.type === "scope" && (
+                        <div>
+                          <Label className="mb-1.5">How the scope is answered</Label>
+                          <Select
+                            value={n.slot.options ? "words" : "free"}
+                            onChange={(e) =>
+                              edit(i, {
+                                slot: e.target.value === "words"
+                                  ? { type: "scope", options: n.slot?.type === "scope" && n.slot.options?.length ? n.slot.options : lastOptions.current.get(n.key) ?? [] }
+                                  : { type: "scope" },
+                              })
+                            }
+                          >
+                            <option value="free">Typed freely — a box</option>
+                            <option value="words">Picked from my words — and a box for the rest</option>
+                          </Select>
+                        </div>
+                      )}
                     </div>
+
+                    {/* THE SCOPE'S WORDS (Erik: "a dropdown with options in his words Remodel, Deck, etc").
+                        One per line, his. A kit filed under the same word on the Price List is
+                        offered as a task on a visit with that scope; a word nobody listed is still
+                        typeable on the visit — the list is never a wall. */}
+                    {n.slot?.type === "scope" && n.slot.options && (
+                      <div>
+                        <Label className="mb-1.5">Your words, one per line</Label>
+                        <Textarea
+                          rows={Math.min(10, Math.max(3, n.slot.options.length + 1))}
+                          value={n.slot.options.join("\n")}
+                          placeholder={"Deck\nRemodel\nRepair"}
+                          onChange={(e) => {
+                            const options = e.target.value.split("\n").map((w) => w.slice(0, 60));
+                            lastOptions.current.set(n.key, options.map((w) => w.trim()).filter(Boolean));
+                            edit(i, { slot: { type: "scope", options } });
+                          }}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">A kit under the same word on the Price List is offered as a task on a visit with that scope.</p>
+                      </div>
+                    )}
+                    {n.slot?.type === "scope" && needs.findIndex((x) => x.slot?.type === "scope") !== i && (
+                      <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        Only the first scope question counts as the scope. This one is a plain question until the other is changed.
+                      </p>
+                    )}
 
                     {n.slot?.type === "select" && (
                       <div>

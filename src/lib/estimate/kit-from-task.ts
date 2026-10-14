@@ -40,9 +40,13 @@ export interface KitFromTaskItem {
 }
 
 export interface KitFromTask {
-  kit: { name: string; unit: string; labor_minutes: number };
+  /** `category` is the scope the kit files under (the visit's scope word, or what he typed): the
+   *  next visit with that scope offers it in "Add The <Scope> Tasks". Null = by name only. */
+  kit: { name: string; unit: string; labor_minutes: number; category: string | null };
   items: KitFromTaskItem[];
 }
+
+export const MAX_KIT_CATEGORY = 60;
 
 export type KitFromTaskResult = { ok: true; value: KitFromTask } | { ok: false; error: string };
 
@@ -54,10 +58,11 @@ export function kitNameFromLine(description: string): string {
   return stripUnits(description).slice(0, MAX_KIT_NAME);
 }
 
-export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; unit: string }): KitFromTaskResult {
+export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; unit: string; category?: string | null }): KitFromTaskResult {
   const name = (typeof input.name === "string" ? input.name : "").trim().slice(0, MAX_KIT_NAME);
   if (!name) return refuse("Give the kit a name.");
   const unit = (typeof input.unit === "string" ? input.unit : "").trim().slice(0, MAX_KIT_UNIT) || "ea";
+  const category = (typeof input.category === "string" ? input.category : "").trim().replace(/\s+/g, " ").slice(0, MAX_KIT_CATEGORY) || null;
   const hours = detail.hours;
   if (hours === null || !(hours > 0)) return refuse("Give the task its hours first — a kit remembers your hours per unit.");
   const units = detail.units !== null && detail.units > 0 ? detail.units : 1;
@@ -92,7 +97,7 @@ export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; uni
       qty_round: "none",
     });
   }
-  return { ok: true, value: { kit: { name, unit, labor_minutes }, items } };
+  return { ok: true, value: { kit: { name, unit, labor_minutes, category }, items } };
 }
 
 /** What the kit will say, in his words, before he saves it: "2 h and Concrete ×4 per footing". */
@@ -138,7 +143,7 @@ export async function rememberKit(sb: SupabaseClient, value: KitFromTask): Promi
 
   const kit = await sb
     .from("kits")
-    .insert({ name: value.kit.name, unit: value.kit.unit, labor_minutes: value.kit.labor_minutes })
+    .insert({ name: value.kit.name, unit: value.kit.unit, labor_minutes: value.kit.labor_minutes, category: value.kit.category ?? null })
     .select("id")
     .single();
   if (kit.error || !kit.data) return { ok: false, error: dbError(kit.error ?? "Could not save the kit.") };

@@ -95,6 +95,14 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
       // Shape only, same split: hours and counts are HIS numbers or null (never 0), a code's
       // membership in the book and a kit's in this org are checked where the book is known.
       return coerceTasks(v);
+    case "scope": {
+      // ONE WORD OR A FEW, his: a chip or what he typed — never refused for being off the list
+      // (type freely is a mode of this slot, and the list is never exhaustive). The first string
+      // of a list (an old select answer surviving a kind change) is kept, not nulled.
+      const raw = Array.isArray(v) ? v[0] : v;
+      const s = String(raw ?? "").trim().replace(/\s+/g, " ");
+      return s ? s.slice(0, 200) : null;
+    }
     default:
       return String(v).slice(0, n.slot.long ? 8000 : 500);
   }

@@ -35,9 +35,9 @@ describe("taskKitsFrom", () => {
       { id: "", name: "Nameless id", labor_minutes: 30 },
       null,
     ]);
-    expect(got).toEqual([{ id: "k1", name: "Footing", labor_minutes: 120, unit: "footing", items: [{ description: "x", quantity: 1 }] }]);
+    expect(got).toEqual([{ id: "k1", name: "Footing", labor_minutes: 120, unit: "footing", category: null, items: [{ description: "x", quantity: 1 }] }]);
     expect(taskKitsFrom(null)).toEqual([]);
-    expect(taskKitsFrom([{ id: "k4", name: "No unit", labor_minutes: 45.4 }])).toEqual([{ id: "k4", name: "No unit", labor_minutes: 45, unit: null, items: [] }]);
+    expect(taskKitsFrom([{ id: "k4", name: "No unit", labor_minutes: 45.4 }])).toEqual([{ id: "k4", name: "No unit", labor_minutes: 45, unit: null, category: null, items: [] }]);
   });
 });
 
@@ -73,7 +73,7 @@ describe("kitsWithoutMoney", () => {
     // An ALLOW-list: a money column nobody has thought of yet never rides through.
     const sneaky = kitsWithoutMoney([{ ...FULL, items: [{ ...FULL.items[1], cost: 5, markup: 30 } as never] }]);
     expect(JSON.stringify(sneaky)).not.toMatch(/cost|markup/);
-    expect(Object.keys(stripped[0])).toEqual(["id", "name", "labor_minutes", "unit", "items"]);
+    expect(Object.keys(stripped[0])).toEqual(["id", "name", "labor_minutes", "unit", "category", "items"]);
   });
 
   it("partsKitsOnly keeps the ordinary kits out of a task kit's way, and task kits out of the plain pickers", () => {

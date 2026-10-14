@@ -105,6 +105,12 @@ export function hearRequest(pb: Playbook, answers: Answers, transcript: string):
           (n.slot.other ? "\n  — or, if none of those fit, his own words: this question accepts an answer that is not on the list" : ""),
       );
     else if (n.slot?.type === "number") bits.push(`  a number${n.slot.unit ? ` in ${n.slot.unit}` : ""}`);
+    else if (n.slot?.type === "scope")
+      bits.push(
+        `  THE SCOPE — what kind of job this is, in a word or two${
+          n.slot.options?.length ? `; his usual words: ${n.slot.options.join(" | ")} — or his own if none of those fit` : ""
+        }`,
+      );
     else if (n.slot?.type === "tasks") {
       bits.push("  A TASK LIST — one fill per task (see the rules); hours and every qty are HIS numbers, digits in `heard`, or null");
       const have = answers[n.key];

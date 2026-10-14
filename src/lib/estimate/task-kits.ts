@@ -115,7 +115,8 @@ export function taskKitsFrom(rows: unknown): TaskKit[] {
     const name = typeof o.name === "string" ? o.name.trim() : "";
     if (!id || !name) continue;
     const unit = typeof o.unit === "string" && o.unit.trim() ? o.unit.trim() : null;
-    out.push({ id, name, labor_minutes: Math.round(minutes), unit, items: Array.isArray(o.kit_items) ? (o.kit_items as KitLineRaw[]) : [] });
+    const category = typeof o.category === "string" && o.category.trim() ? o.category.trim().slice(0, 60) : null;
+    out.push({ id, name, labor_minutes: Math.round(minutes), unit, category, items: Array.isArray(o.kit_items) ? (o.kit_items as KitLineRaw[]) : [] });
   }
   return out;
 }
@@ -183,7 +184,7 @@ const lineWithoutMoney = (it: KitLineRaw): KitLineRaw => {
  *  buy price or markup, no vendor buy price or markup (the vendors' NAMES ride, so the preview
  *  names a part as the estimate will). All three levels are allow-lists. */
 export function kitsWithoutMoney(kits: TaskKit[]): TaskKit[] {
-  return kits.map((k) => ({ id: k.id, name: k.name, labor_minutes: k.labor_minutes, unit: k.unit, items: k.items.map(lineWithoutMoney) }));
+  return kits.map((k) => ({ id: k.id, name: k.name, labor_minutes: k.labor_minutes, unit: k.unit, category: k.category ?? null, items: k.items.map(lineWithoutMoney) }));
 }
 
 /** The ORDINARY kits — everything but the task kits. The plain kit pickers (an estimate's or an

@@ -331,12 +331,12 @@ export async function updateKit(
  * his parts per unit — so the next visit's Inspector offers it by name. The rule is
  * lib/estimate/kit-from-task (pure + one database rule); this is the office's door onto it.
  */
-export async function rememberTaskAsKit(input: { name: string; unit: string; detail: unknown }): Promise<RememberResult> {
+export async function rememberTaskAsKit(input: { name: string; unit: string; detail: unknown; category?: string | null }): Promise<RememberResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const detail = coerceTaskDetail(input?.detail);
   if (!detail) return { ok: false, error: "That line has no breakdown to remember." };
-  const made = kitFromTaskDetail(detail, { name: input?.name ?? "", unit: input?.unit ?? "" });
+  const made = kitFromTaskDetail(detail, { name: input?.name ?? "", unit: input?.unit ?? "", category: typeof input?.category === "string" ? input.category : null });
   if (!made.ok) return { ok: false, error: made.error };
   const res = await rememberKit(ctx.supabase, made.value);
   if (res.ok) revalidatePath("/price-list");
