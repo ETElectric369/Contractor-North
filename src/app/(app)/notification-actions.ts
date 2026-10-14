@@ -4,6 +4,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { BELL_LIST_SIZE } from "@/lib/bell-words";
 import { NO_HOLDING, type NortHolding } from "@/lib/nort/greeting";
 import { holdingFor } from "@/lib/nort/updates";
+import { orgTimezone } from "@/lib/org-local-time";
 
 export type Notif = {
   id: string;
@@ -32,7 +33,7 @@ export async function getMyBell(): Promise<{ items: Notif[]; unread: number; mor
   // WHAT NORT IS HOLDING (0394) rides the same poll: the top bar's ring and the greeting read it.
   // Best-effort — a miss here is an empty hand, never a broken bell.
   const holdingP = Promise.resolve()
-    .then(() => holdingFor(user.id, createServiceClient(), supabase))
+    .then(async () => holdingFor(user.id, createServiceClient(), supabase, await orgTimezone(supabase)))
     .catch(() => NO_HOLDING);
   const [list, count] = await Promise.all([
     supabase

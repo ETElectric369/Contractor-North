@@ -62,8 +62,8 @@ describe("what Nort holds, and the hand-over", () => {
   const me = "u-me";
   const tables = () => ({
     bug_reports: [
-      { id: "r1", reported_by: me, status: "fixed", filer_notified_at: null, note: "the leads list <order>", created_at: "2026-10-10" },
-      { id: "r2", reported_by: me, status: "wontfix", filer_notified_at: null, note: "a thing", created_at: "2026-10-09" },
+      { id: "r1", reported_by: me, status: "fixed", filer_notified_at: null, note: "the leads list <order>", created_at: new Date(Date.now() - 86400_000).toISOString() },
+      { id: "r2", reported_by: me, status: "wontfix", filer_notified_at: null, note: "a thing", created_at: new Date(Date.now() - 2 * 86400_000).toISOString() },
       { id: "r3", reported_by: me, status: "open", filer_notified_at: null, note: "still open", created_at: "2026-10-08" },
       { id: "r4", reported_by: "u-other", status: "fixed", filer_notified_at: null, note: "not mine", created_at: "2026-10-08" },
       { id: "r5", reported_by: me, status: "fixed", filer_notified_at: "2026-10-01", note: "heard already", created_at: "2026-10-01" },
@@ -86,10 +86,11 @@ describe("what Nort holds, and the hand-over", () => {
   it("hands them over with outcomes and stamps them heard — each write asked for its rows back", async () => {
     const db = fakeDb(tables());
     const u = await readMyUpdates(me, db.sb, db.sb);
-    expect(u.reports).toEqual([
-      { outcome: "shipped", note: "the leads list order" },
-      { outcome: "not being built", note: "a thing" },
+    expect(u.reports.map((r) => ({ outcome: r.outcome, note: r.note, old: r.old }))).toEqual([
+      { outcome: "shipped", note: "the leads list order", old: undefined },
+      { outcome: "not being built", note: "a thing", old: undefined },
     ]);
+    expect(u.reports[0].filed).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
     expect(u.dailyReports.map((d) => d.from)).toEqual(["Brian", "Brian"]);
     expect(u.dailyReports[0]).toEqual({ from: "Brian", line: "Pulled wire at Bayberry", url: "/planner" });
     expect(u.unstamped).toBeUndefined();
@@ -192,9 +193,9 @@ describe("the doors (source pins)", () => {
     expect(c).toContain("if (liveHolding) setNortHolding(liveHolding);");
     expect(c).toContain("for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN]) {");
     const r2 = read("src/app/api/chat/route.ts");
-    expect(r2).toMatch(/const left = await holdingFor\(user\.id, createServiceClient\(\), supabase\);\s*emit\(HOLDING_OPEN \+ JSON\.stringify\(left\) \+ HOLDING_CLOSE\);[\s\S]{0,200}controller\.close\(\);/);
+    expect(r2).toMatch(/const left = await holdingFor\(user\.id, createServiceClient\(\), supabase, orgS\.timezone\);\s*emit\(HOLDING_OPEN \+ JSON\.stringify\(left\) \+ HOLDING_CLOSE\);[\s\S]{0,200}controller\.close\(\);/);
     const a = read("src/app/(app)/notification-actions.ts");
-    expect(a).toMatch(/const holdingP = Promise\.resolve\(\)\s*\.then\(\(\) => holdingFor\(user\.id, createServiceClient\(\), supabase\)\)\s*\.catch\(\(\) => NO_HOLDING\);/);
+    expect(a).toMatch(/const holdingP = Promise\.resolve\(\)\s*\.then\(async \(\) => holdingFor\(user\.id, createServiceClient\(\), supabase, await orgTimezone\(supabase\)\)\)\s*\.catch\(\(\) => NO_HOLDING\);/);
     expect(read("src/app/(app)/timeclock/actions.ts")).toContain('.eq("title", `Daily report from ${name}`)');
   });
   it("the route holds instead of blurbing: one precise question, no stamp on injection, the hand-over on yes", () => {
@@ -207,9 +208,9 @@ describe("the doors (source pins)", () => {
     expect(r).toContain('Never say "good time".');
     expect(r).toContain("the outcome the tool names (shipped / not being built / closed)");
     expect(r).toContain('tu.name === "read_my_updates"');
-    expect(r).toContain("readMyUpdates(user.id, createServiceClient(), supabase)");
+    expect(r).toContain("readMyUpdates(user.id, createServiceClient(), supabase, { skip:");
     expect(r.split("filer_notified_at").length - 1).toBe(0);
-    expect(read("src/lib/nort/updates.ts")).toContain('.update({ filer_notified_at: now }).in("id", ids).eq("reported_by", userId).select("id")');
+    expect(read("src/lib/nort/updates.ts")).toContain('.eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).select("id")');
     expect(read("src/lib/assistant-tools.ts")).toContain('name: "read_my_updates"');
   });
   it("Settings › You: the switch and the name, saved to their own row", () => {

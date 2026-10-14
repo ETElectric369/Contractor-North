@@ -1,4 +1,6 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
+import { APP_VERSION } from "@/lib/version";
+import { HISTORY_FROM, NOTES_DEFAULT, RELEASE_NOTES, isBehind, notesSince, versionNumber } from "@/lib/release-notes";
 import { BUILD_TIME_IS_A_COST_NOT_A_WAGE, isOwnerShift } from "@/lib/build-time-cost";
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -74,8 +76,29 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     // and the service client for a tech's own report rows); it never reaches runDataTool.
     name: "read_my_updates",
     description:
-      "Hand over what Nort is holding for this person — the updates on things they reported and the crew's unread daily reports — and mark them heard. Call ONLY after they say yes / now / go ahead to 'want them now?'. Never call it to check whether there are any (the prompt already says).",
-    input_schema: { type: "object", properties: {} },
+      "Hand over what Nort is holding for this person — the updates on things they reported and the crew's unread daily reports — and mark them heard. Call ONLY after they say yes / now / go ahead to 'want them now?'. With skip=true (they said skip / drop them / don't need them) the updates on things THEY reported are marked heard WITHOUT being read back; a crew daily report is never skipped (it stays held — the result names who). Never call it to check whether there are any (the prompt already says). What's new in the APP itself is a different question: whats_new.",
+    input_schema: {
+      type: "object",
+      properties: {
+        skip: { type: "boolean", description: "true = they said skip: mark the updates on things they reported as heard without reading them back. Omit to hand everything over." },
+      },
+    },
+  },
+  {
+    // THE CHANGELOG (cn-v1093). Erik, the first night of Nort speaking first: "all of the things
+    // that you just mentioned to me are old, and there's been a lot done since then … is Nort on
+    // par with the system?" — and Nort answered that it had no tool for that. lib/release-notes
+    // is one line per release; this reads it. No database, no role gate: what shipped is public.
+    name: "whats_new",
+    description:
+      "What's new in the APP itself: the release notes, newest first with dates; `latest` is the newest build, `phone` the build this phone is running (null when unknown) and `behind` whether the phone is older. Call when they ask what's new / any updates to the app / what changed lately / are you current / is Nort up to date / am I on the latest. (The updates on things THEY reported are read_my_updates, not this.) Read back newest first with the date, in plain words — in voice the top 3–5 and offer the rest; when `behind` is true say both builds and that closing the app and opening it again brings the newest; `more` true means older notes exist past `limit`, back to `history_from`.",
+    input_schema: {
+      type: "object",
+      properties: {
+        since_version: { type: "string", description: "Optional — only releases after this build, e.g. 'cn-v1090'." },
+        limit: { type: "integer", description: "Max releases (default 12, max 40)." },
+      },
+    },
   },
   {
     name: "list_jobs",
@@ -1004,6 +1027,18 @@ export async function runDataTool(
           by_employee: people,
           ...(skipped ? { skipped_entries: skipped } : {}),
         });
+      }
+
+      case "whats_new": {
+        const limit = typeof input.limit === "number" ? input.limit : NOTES_DEFAULT;
+        const since = typeof input.since_version === "string" ? input.since_version : null;
+        const notes = notesSince(since, limit);
+        // The route fills `phone_version` from the request body (the build the phone's bundle
+        // carries) — the model never supplies it; a non-version string is unknown, never echoed.
+        const phone = typeof input.phone_version === "string" && versionNumber(input.phone_version) !== null ? input.phone_version : null;
+        const sinceN = versionNumber(since);
+        const pool = sinceN === null ? RELEASE_NOTES.length : RELEASE_NOTES.filter((r) => (versionNumber(r.version) ?? 0) > sinceN).length;
+        return JSON.stringify({ latest: APP_VERSION, phone, behind: isBehind(phone), count: notes.length, more: pool > notes.length, history_from: HISTORY_FROM, notes });
       }
 
       case "list_forms": {

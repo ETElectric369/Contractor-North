@@ -15,6 +15,13 @@ export type NortHolding = {
   reports: number;
   /** Crew-lead daily reports (the office's) not yet read, by who filed them. */
   dailyReports: { from: string }[];
+  /**
+   * Named when ANY held report is weeks old: the month the oldest was FILED ("July",
+   * "July 2025"). Erik, the first night: "all of the things that you just mentioned to me are
+   * old" — eight fixes he had reported weeks before, read as if they were news. An old update is
+   * still his to hear, but the greeting says how far back the filing goes so he can skip it.
+   */
+  reportsBack?: string;
 };
 
 export const NO_HOLDING: NortHolding = { reports: 0, dailyReports: [] };
@@ -34,7 +41,12 @@ export function holdingWords(h: NortHolding | null | undefined): string | null {
   if (d.length === 1) parts.push(`${d[0].from}'s daily report`);
   else if (d.length === 2) parts.push(`${d[0].from}'s and ${d[1].from}'s daily reports`);
   else if (d.length > 2) parts.push(count(d.length, "daily report", "daily reports"));
-  if (h.reports > 0) parts.push(`${count(h.reports, "update", "updates")} on things you reported`);
+  if (h.reports > 0)
+    parts.push(
+      `${count(h.reports, "update", "updates")} on things you reported${
+        h.reportsBack ? (h.reports === 1 ? `, filed in ${h.reportsBack}` : `, filed as far back as ${h.reportsBack}`) : ""
+      }`,
+    );
   return parts.join(" and ");
 }
 

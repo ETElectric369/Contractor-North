@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { APP_VERSION } from "@/lib/version";
 import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
@@ -881,7 +882,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // invoice" resolves. The route injects both at the cache-safe message tail.
         // greeted: the spoken greeting named what Nort holds and asked "want them now?" — this
         // message is the answer, so the server must not ask again (0394).
-        body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname, greeted: consumeGreeted() }),
+        // version: the build THIS bundle carries — whats_new tells the person whether the phone is behind.
+        body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname, greeted: consumeGreeted(), version: APP_VERSION }),
       });
 
       if (!res.ok || !res.body) {

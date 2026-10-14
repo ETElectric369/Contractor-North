@@ -174,6 +174,7 @@ function statusLabel(tool: string): string {
     search_price_list: "Checking your price list…", price_material: "Pricing it…", schedule_overview: "Checking the schedule…",
     business_summary: "Crunching the numbers…", hours_summary: "Tallying hours…",
     list_shelf: "Checking stock…",
+    read_my_updates: "Getting your updates…", whats_new: "Checking what's new…",
   };
   return m[tool] ?? "Looking that up…";
 }
@@ -525,12 +526,15 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     /* memory is best-effort */
   }
 
-  let body: { messages: ChatMessage[]; voice?: boolean; draft?: Record<string, unknown> | null; path?: string; greeted?: boolean };
+  let body: { messages: ChatMessage[]; voice?: boolean; draft?: Record<string, unknown> | null; path?: string; greeted?: boolean; version?: string };
   try {
     body = await req.json();
   } catch {
     return new Response("Bad request", { status: 400 });
   }
+  // The build the phone's bundle carries (whats_new compares it to the server's): a version
+  // string or nothing — never echoed back to the model as typed.
+  const phoneVersion = typeof body.version === "string" && /^cn-v\d{1,6}$/.test(body.version) ? body.version : null;
   if (body.voice) {
     volatilePrompt +=
       "\n\nVOICE MODE — THIS OVERRIDES EVERY OTHER INSTRUCTION ABOUT READING THINGS BACK. Your reply is read OUT LOUD to someone who is probably DRIVING and can't look at the screen. Two hard rules that beat any 'read it back' / 'readback list' / 'read the whole quote' / 'read back the six' instruction above:\n" +
@@ -567,13 +571,13 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
   // IS the answer. Best-effort — a failure here must never cost the conversation.
   try {
     if (messages.length <= 1 || body.greeted) {
-      const holding = await holdingFor(user.id, createServiceClient(), supabase);
+      const holding = await holdingFor(user.id, createServiceClient(), supabase, orgS.timezone);
       const words = holdingWords(holding);
       if (words) {
         const them = holdingPronoun(holding);
         volatilePrompt += body.greeted
-          ? `\n\nNORT IS HOLDING ${words.toUpperCase()}. Your spoken greeting ALREADY asked "I've got ${words} — want ${them} now?" and this first message is their answer. If it is yes / now / go ahead / sure: call read_my_updates and give ${them} — one short line each: the outcome the tool names (shipped / not being built / closed) then their own words, no ceremony — then answer anything else they said. If it is later / no / not now: one word ("Later." / "Okay."), say nothing more about ${them}, and answer whatever else they said. Never say "good time".`
-          : `\n\nNORT IS HOLDING ${words.toUpperCase()}. In your FIRST reply, before anything else, ask ONCE and precisely: "I've got ${words} — want ${them} now?" Then answer whatever they asked. Do NOT read ${them} out until they say yes; on yes, call read_my_updates and give ${them} — one short line each: the outcome the tool names (shipped / not being built / closed) then their own words, no ceremony. On later / no: one word, and nothing more about ${them}. Never ask "good time?" or anything a person would have to ask "for what?" about.`;
+          ? `\n\nNORT IS HOLDING ${words.toUpperCase()}. Your spoken greeting ALREADY asked "I've got ${words} — want ${them} now?" and this first message is their answer. If it is yes / now / go ahead / sure: call read_my_updates and give ${them} — one short line each: the outcome the tool names (shipped / not being built / closed) then their own words, no ceremony; EVERY not-being-built or closed one is its own line; more than six shipped: the newest six as lines, then the rest in ONE sentence from the tool's summary numbers (never counted by you) — then answer anything else they said. If it is later / no / not now: one word ("Later." / "Okay."${holding.reportsBack ? ' — and because they were filed weeks ago add "or say skip."' : ""}), say nothing more about ${them}, and answer whatever else they said. If it is skip / drop them / don't need them: call read_my_updates with skip true and say "Skipped." — nothing read back; if the result names stillHolding, add "<name>'s daily report is still here."; if it carries unstamped, say that instead of "Skipped.". A line the tool marks old (filed over two weeks ago) opens with when they filed it ("from Sep 30: …"). What's new in the app itself is whats_new, a different question. Never say "good time".`
+          : `\n\nNORT IS HOLDING ${words.toUpperCase()}. In your FIRST reply, before anything else, ask ONCE and precisely: "I've got ${words} — want ${them} now?" Then answer whatever they asked. Do NOT read ${them} out until they say yes; on yes, call read_my_updates and give ${them} — one short line each: the outcome the tool names (shipped / not being built / closed) then their own words, no ceremony; EVERY not-being-built or closed one is its own line; more than six shipped: the newest six as lines, then the rest in ONE sentence from the tool's summary numbers (never counted by you). On later / no: one word, and nothing more about ${them}${holding.reportsBack ? ' — and because they were filed weeks ago add "or say skip."' : ""}. On skip / drop them: read_my_updates with skip true, then "Skipped." — if the result names stillHolding, add "<name>'s daily report is still here."; if it carries unstamped, say that instead. A line the tool marks old (filed over two weeks ago) opens with when they filed it ("from Sep 30: …"). What's new in the app itself is whats_new, a different question. Never ask "good time?" or anything a person would have to ask "for what?" about.`;
       }
     }
   } catch {
@@ -989,8 +993,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // service client for a tech's own report rows (bug_reports' read policy is staff-only).
               const raw =
                 tu.name === "read_my_updates"
-                  ? JSON.stringify(await readMyUpdates(user.id, createServiceClient(), supabase).catch((e: unknown) => ({ error: String((e as Error)?.message ?? e) })))
-                  : await runDataTool(tu.name, tu.input, supabase);
+                  ? JSON.stringify(await readMyUpdates(user.id, createServiceClient(), supabase, { skip: (tu.input as { skip?: unknown } | null)?.skip === true, tz: orgS.timezone }).catch((e: unknown) => ({ error: String((e as Error)?.message ?? e) })))
+                  : tu.name === "whats_new"
+                    // The phone's own build rides the request body (assistant-chat sends its bundle's
+                    // APP_VERSION); the model never supplies it, so it is set here, over whatever it sent.
+                    ? await runDataTool(tu.name, { ...((tu.input ?? {}) as Record<string, unknown>), phone_version: phoneVersion }, supabase)
+                    : await runDataTool(tu.name, tu.input, supabase);
               // Mark read-tool output as untrusted DATA: a customer-controlled field (a note,
               // name, description, inquiry message) must never be read as an instruction on the
               // next turn. The system prompt's GOLDEN RULE binds this delimiter.
@@ -1035,7 +1043,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
         // WHAT NORT STILL HOLDS, after this turn (0394): the phone's ring and its next greeting take
         // this over their own copy, so a hand-over clears them at once. Best-effort, two indexed reads.
         try {
-          const left = await holdingFor(user.id, createServiceClient(), supabase);
+          const left = await holdingFor(user.id, createServiceClient(), supabase, orgS.timezone);
           emit(HOLDING_OPEN + JSON.stringify(left) + HOLDING_CLOSE);
         } catch {
           /* the count is a courtesy; the reply already went */

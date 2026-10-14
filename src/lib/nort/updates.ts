@@ -21,8 +21,64 @@ import { firstName } from "@/lib/nort/greeting";
 type Client = any;
 const RESOLVED = ["fixed", "closed", "wontfix"];
 const FROM = /^Daily report from (.+)$/i;
-export const REPORTS_LIMIT = 8;
+/**
+ * How many unheard reports Nort holds and reads out at once — ALL of them, to a safety cap.
+ * This was 8, a page: Erik's first night found 31 unheard (a backlog the old digest never
+ * stamped), said "sure" twice, got eight each time, and the ring kept pulsing and the greeting
+ * kept asking — "its still repeating and pulsing after the report". A hold is finite: one yes
+ * empties it — the stamp is BY FILTER (every unheard resolved report of theirs), never by the
+ * page of ids, so even past the cap nothing is left to ask about again. The prompt reads the
+ * newest few as lines and sums the rest from `summary`, which is computed here, not by the model.
+ */
+export const REPORTS_LIMIT = 100;
+const DEFAULT_TZ = "UTC";
 export const DAILY_REPORT_AGE_MS = 2 * 24 * 60 * 60 * 1000;
+/** A report filed longer ago than this is OLD: the greeting says how far back, the line says when. */
+export const REPORT_OLD_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** "Sep 30" — the day a report was filed, in the company's timezone (what Nort says back comes
+ *  from the stored instant formatted in the org's tz — lib/org-local-time's rule; 7:34 PM Pacific
+ *  on the 29th is the 30th in UTC and must not be said as the 30th). */
+export function filedWords(iso: string | null | undefined, tz: string = DEFAULT_TZ): string | null {
+  const t = Date.parse(String(iso ?? ""));
+  if (!Number.isFinite(t)) return null;
+  try {
+    return new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: tz });
+  } catch {
+    return new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: DEFAULT_TZ });
+  }
+}
+
+/**
+ * How far back the held reports were FILED, when any of them is old: the month (and the year
+ * when it is not this one) of the oldest. null while every held report is within
+ * REPORT_OLD_AFTER_MS — a fresh batch needs no qualifier. It is the FILING date (bug_reports has
+ * no resolved stamp), which is why the greeting says "filed as far back as July", not "from July".
+ */
+export function reportsBack(filed: (string | null | undefined)[], now: number, tz: string = DEFAULT_TZ): string | null {
+  const ts = filed.map((d) => Date.parse(String(d ?? ""))).filter((t) => Number.isFinite(t));
+  if (!ts.length) return null;
+  const oldestMs = Math.min(...ts);
+  if (now - oldestMs < REPORT_OLD_AFTER_MS) return null;
+  const oldest = new Date(oldestMs);
+  const fmt = (o: Intl.DateTimeFormatOptions) => {
+    try {
+      return oldest.toLocaleDateString("en-US", { ...o, timeZone: tz });
+    } catch {
+      return oldest.toLocaleDateString("en-US", { ...o, timeZone: DEFAULT_TZ });
+    }
+  };
+  const month = fmt({ month: "long" });
+  const year = fmt({ year: "numeric" });
+  const thisYear = (() => {
+    try {
+      return new Date(now).toLocaleDateString("en-US", { year: "numeric", timeZone: tz });
+    } catch {
+      return new Date(now).toLocaleDateString("en-US", { year: "numeric", timeZone: DEFAULT_TZ });
+    }
+  })();
+  return year === thisYear ? month : `${month} ${year}`;
+}
 
 /** The filer's first name, safe for a prompt and a voice: letters, digits, space, ' . -; 24 at most. */
 export function safeFrom(title: string | null | undefined): string {
@@ -39,9 +95,9 @@ export function outcomeWords(status: string): string {
 
 const sinceIso = () => new Date(Date.now() - DAILY_REPORT_AGE_MS).toISOString();
 
-export async function holdingFor(userId: string, service: Client, rls: Client): Promise<NortHolding> {
+export async function holdingFor(userId: string, service: Client, rls: Client, tz: string = DEFAULT_TZ): Promise<NortHolding> {
   const [reports, daily] = await Promise.all([
-    service.from("bug_reports").select("id").eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).limit(REPORTS_LIMIT),
+    service.from("bug_reports").select("id, created_at").eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).order("created_at", { ascending: false }).limit(REPORTS_LIMIT),
     rls.from("notifications").select("id, title").eq("user_id", userId).eq("type", "daily_report").is("read_at", null).gte("created_at", sinceIso()).order("created_at", { ascending: false }).limit(10),
   ]);
   const seen = new Set<string>();
@@ -52,28 +108,101 @@ export async function holdingFor(userId: string, service: Client, rls: Client): 
     seen.add(from);
     dailyReports.push({ from });
   }
-  return { reports: reports.error ? 0 : ((reports.data ?? []) as unknown[]).length, dailyReports };
+  const held = reports.error ? [] : ((reports.data ?? []) as { created_at?: string | null }[]);
+  const back = reportsBack(held.map((r) => r.created_at), Date.now(), tz);
+  return { reports: held.length, dailyReports, ...(back ? { reportsBack: back } : {}) };
+}
+
+/** The outcomes of a hand-over, counted in code so the model never has to (it reads a few lines
+ *  and sums the rest from these numbers). `filedFrom`/`filedTo` are the oldest and newest filing
+ *  days, in the company's timezone. */
+export type UpdatesSummary = {
+  total: number;
+  shipped: number;
+  notBeingBuilt: number;
+  closed: number;
+  filedFrom: string | null;
+  filedTo: string | null;
+};
+
+export function summarize(rows: { status: string; created_at?: string | null }[], tz: string = DEFAULT_TZ): UpdatesSummary {
+  const ts = rows.map((r) => Date.parse(String(r.created_at ?? ""))).filter((t) => Number.isFinite(t));
+  return {
+    total: rows.length,
+    shipped: rows.filter((r) => r.status === "fixed").length,
+    notBeingBuilt: rows.filter((r) => r.status === "wontfix").length,
+    closed: rows.filter((r) => r.status === "closed").length,
+    filedFrom: ts.length ? filedWords(new Date(Math.min(...ts)).toISOString(), tz) : null,
+    filedTo: ts.length ? filedWords(new Date(Math.max(...ts)).toISOString(), tz) : null,
+  };
 }
 
 export type MyUpdates = {
-  reports: { outcome: string; note: string }[];
+  /** `filed` is the day they reported it; `old` marks one filed longer ago than REPORT_OLD_AFTER_MS
+   *  (two weeks), and Nort opens that line with the date so weeks-old news is not read as this
+   *  morning's. Newest first. */
+  reports: { outcome: string; note: string; filed: string | null; old?: true }[];
+  /** The outcomes counted — the model sums from here, never by counting lines. */
+  summary?: UpdatesSummary;
   dailyReports: { from: string; line: string; url: string | null }[];
+  /** They said SKIP: the updates on things they reported were marked heard without being read. */
+  skipped?: { reports: number };
+  /** After a skip: the crew's daily reports are NOT skipped (they are the office's real news, not
+   *  stale) — still held, by who filed them, so Nort can say so. */
+  stillHolding?: { dailyReports: string[] };
   /** A stamp that did not land: said, so the same lines are offered again next time. */
   unstamped?: string;
 };
 
+/**
+ * THEY SAID SKIP (Erik: "all of the things that you just mentioned to me are old"): mark every
+ * unheard resolved report of THEIRS heard — all of them, by filter, not a page — without reading
+ * any back. A crew daily report is not skipped: it is under two days old by construction and it
+ * is the office's news, not a stale backlog; it stays held and Nort says so. The write asks for
+ * its rows back; a miss is said, never swallowed.
+ */
+export async function skipMyUpdates(userId: string, service: Client, rls: Client): Promise<MyUpdates> {
+  const now = new Date().toISOString();
+  const { data: reports, error: rErr } = await service
+    .from("bug_reports").update({ filer_notified_at: now })
+    .eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).select("id");
+  const left = await holdingFor(userId, service, rls).catch(() => null);
+  return {
+    reports: [],
+    dailyReports: [],
+    skipped: { reports: rErr ? 0 : ((reports ?? []) as unknown[]).length },
+    ...(left?.dailyReports.length ? { stillHolding: { dailyReports: left.dailyReports.map((d) => d.from) } } : {}),
+    ...(rErr ? { unstamped: "Couldn't mark the report updates as heard — they will be offered again." } : {}),
+  };
+}
+
 /** HAND THEM OVER (the person said yes): the lines, and the stamps that say they were heard —
  *  filer_notified_at on the reports, read_at on the daily-report rows — each asked for its rows
  *  back (the silent-write law), a miss reported in the answer rather than swallowed. */
-export async function readMyUpdates(userId: string, service: Client, rls: Client): Promise<MyUpdates> {
+export async function readMyUpdates(userId: string, service: Client, rls: Client, opts?: { skip?: boolean; tz?: string }): Promise<MyUpdates> {
+  if (opts?.skip === true) return skipMyUpdates(userId, service, rls);
+  const tz = opts?.tz || DEFAULT_TZ;
+  const nowMs = Date.now();
   const [{ data: shipped }, { data: daily }] = await Promise.all([
-    service.from("bug_reports").select("id, note, status").eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).order("created_at", { ascending: false }).limit(REPORTS_LIMIT),
+    service.from("bug_reports").select("id, note, status, created_at").eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).order("created_at", { ascending: false }).limit(REPORTS_LIMIT),
     rls.from("notifications").select("id, title, body, url").eq("user_id", userId).eq("type", "daily_report").is("read_at", null).gte("created_at", sinceIso()).order("created_at", { ascending: false }).limit(10),
   ]);
-  const reports = ((shipped ?? []) as { id: string; note: string | null; status: string }[]).map((r) => ({
-    outcome: outcomeWords(r.status),
-    note: String(r.note ?? "").replace(/\s+/g, " ").replace(/[<>]/g, "").slice(0, 140),
-  }));
+  // Newest first, sorted HERE as well as by the query, so the order the model reads is the order
+  // whatever answered the query (PostgREST, or a fake in a test) — not a trust in `.order()`.
+  const rows = ([...((shipped ?? []) as { id: string; note: string | null; status: string; created_at?: string | null }[])]).sort(
+    (a, b) => (Date.parse(String(b.created_at ?? "")) || 0) - (Date.parse(String(a.created_at ?? "")) || 0),
+  );
+  const reports = rows.map((r) => {
+    const t = Date.parse(String(r.created_at ?? ""));
+    const old = Number.isFinite(t) && nowMs - t >= REPORT_OLD_AFTER_MS;
+    return {
+      outcome: outcomeWords(r.status),
+      note: String(r.note ?? "").replace(/\s+/g, " ").replace(/[<>]/g, "").slice(0, 140),
+      filed: filedWords(r.created_at, tz),
+      ...(old ? { old: true as const } : {}),
+    };
+  });
+  const summary = summarize(rows, tz);
   const dailyReports = ((daily ?? []) as { id: string; title?: string | null; body?: string | null; url?: string | null }[]).map((n) => ({
     from: safeFrom(n.title),
     line: String(n.body ?? "").replace(/[<>]/g, "").slice(0, 140),
@@ -81,15 +210,17 @@ export async function readMyUpdates(userId: string, service: Client, rls: Client
   }));
   const misses: string[] = [];
   const now = new Date().toISOString();
-  if (shipped?.length) {
-    const ids = (shipped as { id: string }[]).map((r) => r.id);
-    const { data, error } = await service.from("bug_reports").update({ filer_notified_at: now }).in("id", ids).eq("reported_by", userId).select("id");
-    if (error || (data ?? []).length !== ids.length) misses.push("the report updates");
+  if (rows.length) {
+    // BY FILTER, not by the page of ids: one yes empties the hold even past REPORTS_LIMIT, so the
+    // greeting can never ask about the same backlog twice. At least the rows read must stamp.
+    const { data, error } = await service.from("bug_reports").update({ filer_notified_at: now })
+      .eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).select("id");
+    if (error || (data ?? []).length < rows.length) misses.push("the report updates");
   }
   if (daily?.length) {
     const ids = (daily as { id: string }[]).map((n) => n.id);
     const { data, error } = await rls.from("notifications").update({ read_at: now }).in("id", ids).eq("user_id", userId).select("id");
     if (error || (data ?? []).length !== ids.length) misses.push("the daily reports");
   }
-  return { reports, dailyReports, ...(misses.length ? { unstamped: `Couldn't mark ${misses.join(" and ")} as heard — they will be offered again.` } : {}) };
+  return { reports, ...(rows.length ? { summary } : {}), dailyReports, ...(misses.length ? { unstamped: `Couldn't mark ${misses.join(" and ")} as heard — they will be offered again.` } : {}) };
 }
