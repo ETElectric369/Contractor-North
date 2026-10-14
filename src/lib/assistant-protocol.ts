@@ -86,6 +86,15 @@ export type AgentDraft = {
 export const HUD_OPEN = "␞CN_HUD␞";
 export const HUD_CLOSE = "␞/CN_HUD␞";
 
+// WHAT NORT STILL HOLDS, at the end of every turn (0394): the server's own count after any
+// hand-over, so the phone's ring and the next greeting never say "eight updates" about things
+// just read out. Erik, the first night: "he asked if i want the updates now i said sure, it
+// repeated, then didnt remember the next time and the light was still blinking and it started
+// over" — the phone's copy was only ever refreshed by the Bell's minute poll. Delimited like HUD;
+// the client keeps the LAST complete block and strips it from the text.
+export const HOLDING_OPEN = "␞CN_HOLDING␞";
+export const HOLDING_CLOSE = "␞/CN_HOLDING␞";
+
 export type HudFact = {
   /** Short label, e.g. "gate code", "balance due", "hours today". */
   label: string;

@@ -100,47 +100,53 @@ async function acquire(text: string): Promise<{ blob: Blob | null; fromCache: bo
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Resolves true when the greeting played to its end; false when it was skipped, cut or capped.
+/** How the greeting went: "heard" to its end; "cut" by the person's own voice once it was audible
+ *  (they answered over it — that IS hearing it; Erik's first night: "i said sure, it repeated");
+ *  "skipped" when it never became audible (no clip in time, no mic, stopped, capped before a sound).
  *  `rms` is the live mic level (speech.analyserRms); null (the shell drops the capture while Nort
  *  speaks) means no barge-in, as with every reply. */
-export async function playGreeting(text: string, rms: () => number | null): Promise<boolean> {
+export type GreetingOutcome = "heard" | "cut" | "skipped";
+
+export async function playGreeting(text: string, rms: () => number | null): Promise<GreetingOutcome> {
   const t = text.trim();
-  if (!t) return false;
+  if (!t) return "skipped";
   // Bounded: a cold phrase on bad signal, or a store that will not open, must not hold the mic.
   const got = await Promise.race([acquire(t), sleep(ACQUIRE_MAX_MS).then(() => null)]);
-  if (got === null) return false; // skipped; acquire() keeps running and fills the store
-  return new Promise<boolean>((res) => {
+  if (got === null) return "skipped"; // acquire() keeps running and fills the store
+  return new Promise<GreetingOutcome>((res) => {
     let settled = false;
+    let audible = false;
     let stopBarge: () => void = () => {};
     let cutSound: () => void = () => {};
-    const settle = (heard: boolean) => {
+    const settle = (o: GreetingOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(cap);
       stopBarge();
-      if (!heard) cutSound(); // a cap or a cut must not leave Nort talking into the first turn
-      res(heard);
+      if (o !== "heard") cutSound(); // a cap or a cut must not leave Nort talking into the first turn
+      res(o);
     };
-    const cap = setTimeout(() => settle(false), GREETING_MAX_MS);
+    const cap = setTimeout(() => settle(audible ? "cut" : "skipped"), GREETING_MAX_MS);
     // Arm the barge-in only once audio is audible and a grace has passed: the first syllable out
     // of a cold capture through the phone's own speaker is not the person talking over Nort.
     const armBarge = () => {
       if (settled) return;
+      audible = true;
       const armAt = Date.now() + BARGE_GRACE_MS;
-      stopBarge = startBargeInMonitor(rms, () => { if (Date.now() >= armAt) settle(false); });
+      stopBarge = startBargeInMonitor(rms, () => { if (Date.now() >= armAt) settle("cut"); });
     };
     if (got.blob) {
       const clip = playClip(got.blob, t);
       cutSound = clip.stop;
       clip.done.then((o) => {
         if (o === "failed" && got.fromCache) void cacheDelete(clipKey(t)); // a poisoned clip is dropped, not replayed
-        settle(o === "ended");
-      }, () => settle(false));
+        settle(o === "ended" ? "heard" : o === "stopped" && audible ? "cut" : "skipped");
+      }, () => settle("skipped"));
       void clip.playing.then(armBarge);
     } else {
       cutSound = stopSpeaking;
       armBarge();
-      speakSmart(t, () => settle(true));
+      speakSmart(t, () => settle("heard"));
     }
   });
 }

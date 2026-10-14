@@ -91,10 +91,11 @@ function armGreeting(greets: boolean, nortName: string | null, fullName: string 
     play: () => {
       estimatorStore.setSpeaking(true); // the bar shows Stop Nort while he says hello
       return playGreeting(text, speech.analyserRms)
-        .then((heard) => {
-          // "The greeting asked" only when the question was HEARD to its end — never on a skipped,
-          // cut or refused greeting, or the first message would answer a question nobody heard.
-          if (heard && asks) markGreetedWithHolding();
+        .then((how) => {
+          // "The greeting asked" when it was heard — to its end, or until the person answered over
+          // it (a "sure" that cut the clip IS the answer). Never on a greeting that was never
+          // audible, or the first message would answer a question nobody heard.
+          if (how !== "skipped" && asks) markGreetedWithHolding();
         })
         .finally(() => estimatorStore.setSpeaking(false));
     },

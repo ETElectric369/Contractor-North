@@ -28,7 +28,7 @@ import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
-import { CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, sanitizeHudCard, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
+import { HOLDING_OPEN, HOLDING_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, sanitizeHudCard, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
 
 // A client-intent tool: show/refresh the LIVE quote preview as the agent builds it. Not a
 // DB write — the route streams it to the client's preview pane; saving is a separate step.
@@ -1031,6 +1031,14 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           if (round === MAX_ROUNDS - 1) {
             emit("\n\n[Reached the tool-call limit — answering with what I have.]");
           }
+        }
+        // WHAT NORT STILL HOLDS, after this turn (0394): the phone's ring and its next greeting take
+        // this over their own copy, so a hand-over clears them at once. Best-effort, two indexed reads.
+        try {
+          const left = await holdingFor(user.id, createServiceClient(), supabase);
+          emit(HOLDING_OPEN + JSON.stringify(left) + HOLDING_CLOSE);
+        } catch {
+          /* the count is a courtesy; the reply already went */
         }
         controller.close();
       } catch (e: any) {

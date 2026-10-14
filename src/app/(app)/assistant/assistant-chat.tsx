@@ -7,14 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { NO_VOICE_LINE, TRY_AGAIN_LINE } from "@/lib/voice-failure";
 import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
-import { consumeGreeted } from "@/lib/nort-holding";
+import { consumeGreeted, setNortHolding } from "@/lib/nort-holding";
+import type { NortHolding } from "@/lib/nort/greeting";
 import { isNativeShell } from "@/lib/native-shell";
 import { standDownReaderForVoice } from "@/lib/native-tap";
 import { classifyConfirmReply } from "@/lib/confirm-parse";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import * as speech from "@/lib/voice";
 import {
-  CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE,
+  CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, HOLDING_OPEN, HOLDING_CLOSE,
   type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard,
 } from "@/lib/assistant-protocol";
 import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, recoverTurn, type PickerContact } from "./actions";
@@ -26,7 +27,7 @@ const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 
 /** Pull the visible text + the latest live quote draft + the transient tool-status out of the raw
  *  stream so far. */
-function parseStream(full: string): { text: string; draft: AgentDraft | null; card: AgentHudCard | null; status: string | null } {
+function parseStream(full: string): { text: string; draft: AgentDraft | null; card: AgentHudCard | null; status: string | null; holding: NortHolding | null } {
   let draft: AgentDraft | null = null;
   const dre = new RegExp(DRAFT_OPEN + "([\\s\\S]*?)" + DRAFT_CLOSE, "g");
   const blocks = [...full.matchAll(dre)];
@@ -40,26 +41,36 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null; ca
   if (hblocks.length) {
     try { card = JSON.parse(hblocks[hblocks.length - 1][1]); } catch {}
   }
+  // What Nort still holds after this turn (0394) — the LAST complete block, like HUD.
+  let holding: NortHolding | null = null;
+  const nre = new RegExp(HOLDING_OPEN + "([\\s\\S]*?)" + HOLDING_CLOSE, "g");
+  const nblocks = [...full.matchAll(nre)];
+  if (nblocks.length) {
+    try {
+      const h = JSON.parse(nblocks[nblocks.length - 1][1]);
+      if (h && typeof h.reports === "number" && Array.isArray(h.dailyReports)) holding = h;
+    } catch {}
+  }
   // Transient tool-status ("Searching…"): show ONLY when it's the most recent thing in the stream
   // (nothing meaningful streamed after it yet), so it appears during the silent tool call and clears
   // the moment the agent's reply resumes.
   let status: string | null = null;
   const lastClose = full.lastIndexOf(STATUS_CLOSE);
   if (lastClose >= 0) {
-    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").replace(hre, "").trim();
+    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").replace(hre, "").replace(nre, "").trim();
     if (!after) {
       const sb = [...full.matchAll(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"))];
       try { status = JSON.parse(sb[sb.length - 1][1]).label ?? null; } catch {}
     }
   }
-  let text = full.replace(dre, "").replace(hre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
-  // Drop a half-arrived draft/card/status block at the tail so raw JSON never flashes on screen.
-  for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN]) {
+  let text = full.replace(dre, "").replace(hre, "").replace(nre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
+  // Drop a half-arrived draft/card/status/holding block at the tail so raw JSON never flashes on screen.
+  for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN]) {
     const p = text.indexOf(m);
     if (p >= 0) text = text.slice(0, p);
   }
   text = text.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0].split(PICK_MARKER)[0];
-  return { text, draft, card, status };
+  return { text, draft, card, status, holding };
 }
 
 /** The Estimator — the live estimate building in front of you (the assistant's preview box). */
@@ -927,7 +938,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         if (done) break;
         lastByteAt = Date.now();
         full += decoder.decode(value, { stream: true });
-        const { text: visible, draft: liveDraft, card: liveCard, status: liveStatus } = parseStream(full);
+        const { text: visible, draft: liveDraft, card: liveCard, status: liveStatus, holding: liveHolding } = parseStream(full);
+        // The server's own count of what Nort still holds: the ring and the next greeting take it now.
+        if (liveHolding) setNortHolding(liveHolding);
         // `cleared` = the agent just saved the estimate → wipe the preview so it stops
         // anchoring the conversation. Otherwise the quote fills in live as blocks arrive.
         if (liveDraft) setDraft((liveDraft as { cleared?: boolean }).cleared ? null : liveDraft);

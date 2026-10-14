@@ -149,7 +149,10 @@ describe("the doors (source pins)", () => {
     const g = read("src/components/global-assistant.tsx");
     expect(g).toMatch(/function launch\(\) \{[\s\S]*armGreeting\(greets, nortName, fullName\);\s*speech\.startListening\(\);/);
     expect(g).toContain("greetingPhrase({ hour: new Date().getHours(), name: callName(nortName, fullName), holding })");
-    expect(g).toContain("if (heard && asks) markGreetedWithHolding();");
+    expect(g).toContain('if (how !== "skipped" && asks) markGreetedWithHolding();');
+    const p = read("src/lib/nort/greeting-player.ts");
+    expect(p).toContain('export type GreetingOutcome = "heard" | "cut" | "skipped";');
+    expect(p).toContain('settle(o === "ended" ? "heard" : o === "stopped" && audible ? "cut" : "skipped");');
     expect(g).toContain("estimatorStore.setSpeaking(true);");
     expect(g).toContain(".finally(() => estimatorStore.setSpeaking(false));");
     expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain("greeted: consumeGreeted()");
@@ -163,7 +166,7 @@ describe("the doors (source pins)", () => {
     expect(p).toContain("Promise.race([acquire(t), sleep(ACQUIRE_MAX_MS).then(() => null)])");
     expect(p).toContain("const GREETING_MAX_MS = 8_000;");
     expect(p).toContain("const BARGE_GRACE_MS = 900;");
-    expect(p).toContain("if (!heard) cutSound();");
+    expect(p).toContain('if (o !== "heard") cutSound();');
     expect(p).toContain("void clip.playing.then(armBarge);");
     expect(p).toContain('if (o === "failed" && got.fromCache) void cacheDelete(clipKey(t));');
     expect(p).toContain("const SHELF_LIFE_MS = 30 * 24 * 60 * 60 * 1000;");
@@ -182,7 +185,14 @@ describe("the doors (source pins)", () => {
     const b = read("src/components/app-shell/notification-bell.tsx");
     expect(b).toContain("setNortHolding(r.holding);");
     expect(b).toContain('window.addEventListener("cn:bell-refresh", load);');
-    expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain('window.dispatchEvent(new Event("cn:bell-refresh"));');
+    const c = read("src/app/(app)/assistant/assistant-chat.tsx");
+    expect(c).toContain('window.dispatchEvent(new Event("cn:bell-refresh"));');
+    // the server's own count after every turn, taken over the phone's copy at once
+    expect(read("src/lib/assistant-protocol.ts")).toContain('export const HOLDING_OPEN = "␞CN_HOLDING␞";');
+    expect(c).toContain("if (liveHolding) setNortHolding(liveHolding);");
+    expect(c).toContain("for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN]) {");
+    const r2 = read("src/app/api/chat/route.ts");
+    expect(r2).toMatch(/const left = await holdingFor\(user\.id, createServiceClient\(\), supabase\);\s*emit\(HOLDING_OPEN \+ JSON\.stringify\(left\) \+ HOLDING_CLOSE\);[\s\S]{0,200}controller\.close\(\);/);
     const a = read("src/app/(app)/notification-actions.ts");
     expect(a).toMatch(/const holdingP = Promise\.resolve\(\)\s*\.then\(\(\) => holdingFor\(user\.id, createServiceClient\(\), supabase\)\)\s*\.catch\(\(\) => NO_HOLDING\);/);
     expect(read("src/app/(app)/timeclock/actions.ts")).toContain('.eq("title", `Daily report from ${name}`)');
