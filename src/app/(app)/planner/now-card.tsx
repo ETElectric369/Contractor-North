@@ -16,6 +16,7 @@ import { WhichJobSheet } from "./which-job";
 import { askAfterPunch, type WhichJobAsk } from "../timeclock/which-job-choices";
 import { noticeOnScreen, tellAppChose, type AppChoseNotice } from "../timeclock/clock-told";
 import { AppChoseJobNotice } from "../timeclock/app-chose-notice";
+import type { CrewPulse } from "@/lib/crew-pulse";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
  *  the punch never waits out the full 8s highAccuracy fix — if the fix lands inside
@@ -85,6 +86,7 @@ export function NowCard({
   job,
   userId,
   children,
+  crew,
 }: {
   open: NowPunch | null;
   /** The job on the open punch, when the page could read it. */
@@ -95,6 +97,9 @@ export function NowCard({
   /** The job's doors and tasks, rendered on the server (so NavLink, QuickCostButton and NowTasks
    *  keep their server props). Drawn only on the clock with a job. */
   children?: ReactNode;
+  /** WHO ELSE IS ON THE CLOCK (lib/crew-pulse) — the office's, under its own clock. Undefined for
+   *  a tech (not drawn); null when the read failed (said, never a silent "nobody"). */
+  crew?: CrewPulse | null;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
@@ -357,6 +362,42 @@ export function NowCard({
           <Button size="lg" onClick={doClockIn} disabled={pending} className="ml-auto shrink-0">
             {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />} Clock In
           </Button>
+        </div>
+      )}
+      {/* THE CREW PULSE, inside the clock (Erik, 2026-10-13): who else is on the clock, on which job,
+          since when — one row each, a row opens that entry on Timecards (the office's fix door). The
+          count is everyone, the caller included; the caller's own punch is the card above. */}
+      {crew !== undefined && (
+        <div className="border-t border-brand/20 px-5 py-2.5">
+          {crew === null ? (
+            <p className="text-xs text-amber-800">Couldn&rsquo;t read who&rsquo;s on the clock — reload to try again.</p>
+          ) : (
+            <>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">On The Clock</span>
+                <span className="text-xs text-slate-500">
+                  {crew.on} of {crew.of}
+                </span>
+              </div>
+              {crew.rows.length === 0 ? (
+                <p className="mt-0.5 text-sm text-slate-500">{crew.on > 0 ? "Just you." : "Nobody right now."}</p>
+              ) : (
+                <ul className="mt-0.5 divide-y divide-slate-100">
+                  {crew.rows.map((r) => (
+                    <li key={r.id}>
+                      <Link href={r.href} className="flex min-h-11 items-center justify-between gap-3 text-sm">
+                        <span className="min-w-0 truncate">
+                          <span className="font-medium text-slate-900">{r.name}</span>
+                          {r.job ? <span className="text-slate-600"> · {r.job}</span> : <span className="text-amber-700"> · no job yet</span>}
+                        </span>
+                        <span className="shrink-0 text-xs text-slate-500">since {r.since}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
         </div>
       )}
       {ask && (

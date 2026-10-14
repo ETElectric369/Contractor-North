@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
 import { NowCard } from "./now-card";
+import { getCrewStatus, type CrewMember } from "@/lib/crew-status";
+import { crewForCard } from "@/lib/crew-pulse";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
@@ -128,6 +130,34 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
   const isStaff = isStaffRole((me as any)?.role ?? "");
+  // WHO ELSE IS ON THE CLOCK (lib/crew-pulse), for the office's Now card. Staff only: it reads the
+  // whole org's open shifts and names the crew. Started here, the moment the role is known, so it
+  // overlaps the reads below instead of adding a round trip to the page. A failed read is said on
+  // the card, never "nobody" (getCrewStatus throws on a returned error). The shift starts ride
+  // along (lib/shift-chain) so a Switch Job's second piece reads "since" its shift began; a failed
+  // chain read is reported and the piece's own clock-in stands in.
+  const crewP: Promise<{ crew: CrewMember[] | null | undefined; starts: Map<string, string> }> = isStaff
+    ? getCrewStatus(supabase)
+        .then(async (crew) => {
+          const on = crew.filter((c) => c.clockedIn && c.entryId && c.clockIn);
+          let starts = new Map<string, string>();
+          try {
+            const chains = await loadShiftChains(
+              supabase as any,
+              on.map((c) => ({ id: c.entryId as string, clock_in: c.clockIn as string, split_from: c.splitFrom })),
+              null,
+            );
+            starts = new Map([...chains].map(([id, info]) => [id, info.startIso]));
+          } catch (e) {
+            reportError("planner-crew-shift-chain", e);
+          }
+          return { crew, starts };
+        })
+        .catch((e: unknown) => {
+          reportError("planner-crew-status", e);
+          return { crew: null, starts: new Map<string, string>() };
+        })
+    : Promise.resolve({ crew: undefined, starts: new Map<string, string>() });
   // THE SHIFT, NOT THE PIECE (audit v994 SW1): after a Switch Job the running entry began at the
   // switch; "Set When You Stopped" appears at twelve hours of the shift, as the server refuses.
   let openShiftStart: string | null = null;
@@ -193,7 +223,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (An open punch with NO job reads no job list here: the Now card's Pick The Job opens the
   // clock's own "Which Job Are You On?" sheet, which loads its list when it opens: the job he
   // punched last, today's schedule, the jobs in progress. One list at every door.)
-  const [curJobRes, poolR, restCountR, doneTodayR, dailyReportsR] = await Promise.all([
+  const [crewR, curJobRes, poolR, restCountR, doneTodayR, dailyReportsR] = await Promise.all([
+    crewP,
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -858,6 +889,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           below render here, on the server. */}
       <NowCard
         userId={user?.id ?? null}
+        crew={crewForCard(crewR, user?.id ?? null, tz, todayStr)}
         open={
           openEntry
             ? {
@@ -927,9 +959,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         )}
       </NowCard>
 
-      {/* The CrewBoard that sat here is GONE (Erik changed his mind, cn-v503):
-          crew presence + hours live together on /timecards now — the "on the
-          clock" strip above its week grid. My Day keeps the Now card + reports. */}
+      {/* The CrewBoard that sat here is GONE (cn-v503): crew presence + hours live together on
+          /timecards, the "on the clock" strip above its week grid. Since 2026-10-13 the office's Now
+          card above also carries the crew pulse INSIDE the clock (lib/crew-pulse) — one read, two
+          doors, the same rows; nothing else stands here. */}
 
       {/* CREW-LEAD DAILY REPORTS (staff only) — THE debrief surface, moved here whole from
           /timecards (cn-v958). A debrief answers "what got done" and "WHAT MATERIALS DO WE NEED

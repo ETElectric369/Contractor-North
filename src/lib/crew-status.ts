@@ -16,21 +16,29 @@ export type CrewMember = {
   entryId: string | null;
   /** When that entry clocked in (ISO). Null off the clock. */
   clockIn: string | null;
+  /** The entry this piece was cut from at a Switch Job (0288), so a reader can time the SHIFT and
+   *  not the piece (audit v994 SW1: lib/shift-chain). Null for a first piece or off the clock. */
+  splitFrom: string | null;
 };
 
 export async function getCrewStatus(supabase: any): Promise<CrewMember[]> {
-  const { data: members } = await supabase
+  // A RETURNED ERROR IS AN ERROR (skeptic, 2026-10-13). supabase-js hands errors back, it does not
+  // throw them, and reading `data` alone turned a refused or timed-out read into an empty crew —
+  // "Nobody right now" over three running clocks. Thrown, so every caller's catch says so instead.
+  const { data: members, error: membersError } = await supabase
     .from("profiles")
     .select("id, full_name")
     .eq("active", true)
     .order("full_name");
+  if (membersError) throw membersError;
   if (!members?.length) return [];
   const ids = members.map((m: { id: string }) => m.id);
-  const { data: open } = await supabase
+  const { data: open, error: openError } = await supabase
     .from("time_entries")
-    .select("id, profile_id, clock_in, job:job_id(job_number, name)")
+    .select("id, profile_id, clock_in, split_from, job:job_id(job_number, name)")
     .eq("status", "open")
     .in("profile_id", ids);
+  if (openError) throw openError;
 
   const openBy = new Map<string, any>();
   for (const o of (open ?? []) as any[]) openBy.set(o.profile_id, o);
@@ -55,6 +63,7 @@ export async function getCrewStatus(supabase: any): Promise<CrewMember[]> {
       jobLabel: job ? jobLabel(job) : null,
       entryId: o?.id ?? null,
       clockIn: o?.clock_in ?? null,
+      splitFrom: o?.split_from ?? null,
     };
   });
 }

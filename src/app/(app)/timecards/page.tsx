@@ -145,8 +145,12 @@ export default async function TimecardsPage({
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     // The live crew pulse (who's on the clock now) — moved here from My Day's
-    // CrewBoard so presence lives next to the hours it becomes.
-    getCrewStatus(supabase),
+    // CrewBoard so presence lives next to the hours it becomes (and, since 2026-10-13, drawn
+    // under My Day's own clock too). A failed read is null and SAID below, never an empty crew.
+    getCrewStatus(supabase).catch((e: unknown) => {
+      reportError("timecards-crew-status", e);
+      return null;
+    }),
     // Crew & Payroll's door below is quiet until a second person, as on the dock (rule j).
     countTeammates(supabase, me).catch(() => null),
     /* ADD TIME ENTRY'S JOB LIST: every job still in flight (no cap: a cap on newest-first drops the
@@ -485,7 +489,7 @@ export default async function TimecardsPage({
     dot: pillColorForPerson(pid).dot,
   }));
   const gridNow = { dayStr: todayStr, min: tzMinutesOfDay(new Date(), tz) };
-  const onClock = crew.filter((c) => c.clockedIn);
+  const onClock = (crew ?? []).filter((c) => c.clockedIn);
 
   /* ── WHAT HE OWES, IN ONE ROW ──────────────────────────────────────────────────────────────
    *
@@ -785,7 +789,13 @@ export default async function TimecardsPage({
           changed. It was text-xs pills wrapped into one line, and this is the thing he checks
           from a ladder in the sun — 10px of grey inside a pill is not readable at arm's length.
           One person per row, at reading size. */}
-      {crew.length > 0 && (
+      {crew === null ? (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <p className="text-sm text-amber-800">Couldn&rsquo;t read who&rsquo;s on the clock — reload to try again.</p>
+          </CardContent>
+        </Card>
+      ) : crew.length > 0 && (
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-baseline justify-between gap-2">
