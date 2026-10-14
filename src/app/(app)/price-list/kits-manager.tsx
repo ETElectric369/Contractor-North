@@ -189,7 +189,7 @@ function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
     >
       <div className="space-y-3">
         <div><Label htmlFor="ek-name">Kit name</Label><Input id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="A name for the whole assembly" /></div>
-        <div><Label htmlFor="ek-cat">Category</Label><Input id="ek-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
+        <div><Label htmlFor="ek-cat">Scope</Label><Input id="ek-cat" value={category} placeholder="e.g. Deck — the job kind that offers this kit's tasks" onChange={(e) => setCategory(e.target.value)} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label htmlFor="ek-hours">Hours Per Unit</Label><Input id="ek-hours" inputMode="decimal" value={hoursPerUnit} onChange={(e) => setHoursPerUnit(e.target.value)} placeholder="empty = parts only" /></div>
           <div><Label htmlFor="ek-unit">Unit</Label><Input id="ek-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="footing, step, opening" /></div>
@@ -530,7 +530,7 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
                 placeholder="A name for the whole assembly"
               />
             </div>
-            <div className="sm:w-40"><Label htmlFor="k-cat">Category</Label><Input id="k-cat" value={category} onChange={(e) => setCategory(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }} /></div>
+            <div className="sm:w-40"><Label htmlFor="k-cat">Scope</Label><Input id="k-cat" value={category} placeholder="e.g. Deck" onChange={(e) => setCategory(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }} /></div>
             <Button onClick={create} disabled={pending || !name.trim()}><Plus className="h-4 w-4" /> {pending ? "Adding…" : "Add Kit"}</Button>
           </div>
         </Card>

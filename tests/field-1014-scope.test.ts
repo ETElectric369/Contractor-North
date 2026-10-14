@@ -69,6 +69,12 @@ describe("the word lights the kits", () => {
   it("case, spacing and punctuation blind; nothing without a word", () => {
     expect(scopeKey(" Deck. ")).toBe("deck");
     expect(scopeKey("Re-model")).toBe("re model");
+    // "Decks" is "Deck" (skeptic #5, carried): a plain plural folds; a double s and a short word do not.
+    expect(scopeKey("Decks")).toBe(scopeKey("Deck"));
+    expect(scopeKey("Panel Swaps")).toBe("panel swap");
+    expect(scopeKey("Glass")).toBe("glass");
+    expect(scopeKey("Gas")).toBe("gas");
+    expect(scopeKey("Bus")).toBe("bus");
     expect(sameScope("deck", "DECK")).toBe(true);
     expect(sameScope("", "")).toBe(false);
     expect(sameScope(null, "deck")).toBe(false);

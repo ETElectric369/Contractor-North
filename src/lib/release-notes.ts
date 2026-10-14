@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1096", date: "2026-10-14", line: "A name typed into a visit's For box can be added as a new lead in one tap; Decks and Deck are one scope; a kit's box says Scope; Nort says a screen move once" },
   { version: "cn-v1095", date: "2026-10-14", line: "Nort drives the screen: say show me, take me to or where is, and he goes there, rings the spot and parks his box as a bar while he keeps talking; it points, it never presses" },
   { version: "cn-v1094", date: "2026-10-14", line: "The scope is a playbook setting, typed freely or picked from your own words, and its word offers the kits filed under it as tasks; a task opens with its own photos, measurements and note; a jump bar" },
   { version: "cn-v1093", date: "2026-10-14", line: "Nort can say what's new in the app and whether your phone has it, hands over everything he holds at one yes, says how far back it was filed, and skips it when you say so" },

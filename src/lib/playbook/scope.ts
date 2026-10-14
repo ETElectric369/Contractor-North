@@ -32,7 +32,13 @@ export function scopeKey(s: string | null | undefined): string {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    // "Decks" and "Deck" are one scope (skeptic #5, carried): a plain trailing s folds off a word of
+    // four letters or more that does not end in a double s — decks, wires, panels, remodels; never
+    // glass, gas, bus. (A word like "boxes" keeps its e; that is a known limit, not a rule.)
+    .split(" ")
+    .map((w) => (w.length >= 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w))
+    .join(" ");
 }
 
 export const sameScope = (a: string | null | undefined, b: string | null | undefined): boolean => {
