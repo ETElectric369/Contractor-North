@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Link2, Loader2, Search, X } from "lucide-react";
+import { Link2, Loader2, Search, UserPlus, X } from "lucide-react";
 import { Input, Label } from "@/components/ui/input";
-import { linkAppointmentTo, searchLinkTargets, type LinkTarget } from "../actions";
+import { linkAppointmentTo, linkAppointmentToNewLead, searchLinkTargets, type LinkTarget } from "../actions";
 
 /**
  * WHAT IS THIS VISIT FOR — one control over three tables.
@@ -54,8 +54,14 @@ export function LinkPicker({
   const [rows, setRows] = useState<LinkTarget[]>([]);
   const [searching, setSearching] = useState(false);
   const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqId = useRef(0);
+  // A NAME THAT MATCHES NOTHING IS OFFERED AS A NEW LEAD (Erik 2026-10-14, the Claudio visit: the
+  // owner's name typed from memory "does not save to who is it for"). Only what the person TYPED
+  // (never the address seed), only where a lead may be picked, and never while a search is running.
+  const typed = q.replace(/\s+/g, " ").trim();
+  const offerLead = !searching && open && typed.length >= 2 && (!kinds || kinds.includes("lead")) && !rows.some((r) => r.name.trim().toLowerCase() === typed.toLowerCase());
 
   // Debounced, and last-response-wins: typing fast otherwise lets a slow early query overwrite
   // the results for what is actually in the box.
@@ -146,7 +152,35 @@ export function LinkPicker({
             {!searching && rows.length === 0 && (q.trim() || seed.trim()).length >= 2 && (
               // Not an error. Working unattached is a legitimate outcome, not a failure state.
               <p className="px-1 py-2 text-xs text-slate-400">
-                {kinds?.length === 1 && kinds[0] === "job" ? "No job matches yet — try the street or the customer's name." : "Nothing matches yet — carry on, you can connect this later."}
+                {kinds?.length === 1 && kinds[0] === "job" ? "No job matches yet — try the street or the customer's name." : offerLead ? "Nobody by that name yet." : "Nothing matches yet — carry on, you can connect this later."}
+              </p>
+            )}
+            {offerLead && (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    setError(null);
+                    const res = await linkAppointmentToNewLead(appointmentId, typed);
+                    if (res.ok) {
+                      setOpen(false);
+                      router.refresh();
+                    } else setError(res.error ?? "Couldn't make the lead.");
+                  })
+                }
+                className="flex min-h-[44px] w-full items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-left active:bg-emerald-100"
+              >
+                <UserPlus className="h-4 w-4 shrink-0 text-emerald-700" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-emerald-900">Add As A New Lead</span>
+                  <span className="block truncate text-xs text-emerald-800/80">{typed} — this visit's address goes on the lead</span>
+                </span>
+              </button>
+            )}
+            {error && (
+              <p role="alert" className="px-1 py-1 text-xs text-red-700">
+                {error}
               </p>
             )}
             {rows.map((r) => (

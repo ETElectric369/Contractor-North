@@ -30,6 +30,7 @@ import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } fro
 import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
+import { createInquiry } from "../leads/actions";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
@@ -588,6 +589,45 @@ export async function linkAppointmentTo(
   revalidatePath("/leads");
   revalidatePath(`/appointments/${id}`);
   return { ok: true, id, ...(lead.warning ? { warning: lead.warning } : {}) };
+}
+
+/**
+ * A NAME TYPED FROM MEMORY BECOMES THE LEAD THIS VISIT IS FOR (Erik, 2026-10-14 00:53, on the
+ * Claudio inspection: "now ive typed in the owner's name multiple times from memory but it does
+ * not save to who is it for"). The For box only searched what existed — a lead, a customer, a job
+ * — so a new person's name matched nothing and was dropped with "carry on, you can connect this
+ * later". Dead end. The record a new person gets BEFORE the win is a lead (the deferred-customer
+ * doctrine: no contact row until the work is won), so the box now offers to make one: the same
+ * door the Leads board's form uses (createInquiry — the known-customer match, the type, the
+ * revalidates all ride along), carrying the visit's own place onto the lead, and then the link
+ * itself, so the estimate chain reads the name from here on. The visit's title is never touched
+ * when a person named it (linkAppointmentTo's STOCK rule).
+ */
+export async function linkAppointmentToNewLead(id: string, typedName: string): Promise<Result & { note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const name = String(typedName ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  if (name.length < 2) return { ok: false, error: "Type the person's name first." };
+  // PROJECTION LAW: the place the lead inherits is read here, by name.
+  const { data: appt } = await ctx.supabase
+    .from("appointments")
+    .select("id, location, city, state, zip")
+    .eq("id", id)
+    .maybeSingle();
+  if (!appt) return { ok: false, error: "Appointment not found." };
+  const fd = new FormData();
+  fd.set("name", name);
+  // The visit's address is the street line; its parts ride beside it (0177 keeps them structured).
+  const street = String(appt.location ?? "").split(",")[0].trim();
+  if (street) fd.set("address", street);
+  if (appt.city) fd.set("city", String(appt.city));
+  if (appt.state) fd.set("state", String(appt.state));
+  if (appt.zip) fd.set("zip", String(appt.zip));
+  const made = await createInquiry(fd);
+  if (!made.ok || !made.id) return { ok: false, error: made.error ?? "Couldn't make the lead." };
+  const linked = await linkAppointmentTo(id, "lead", made.id);
+  if (!linked.ok) return { ok: false, error: linked.error ?? "Made the lead, but couldn't connect it to this visit." };
+  return { ok: true, id: made.id, ...(made.note ? { note: made.note } : {}) };
 }
 
 /**
