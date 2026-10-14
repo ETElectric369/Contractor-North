@@ -1,5 +1,6 @@
 "use server";
 import { readUsualBillingKind } from "@/lib/schedule-options";
+import { typedLineKeepsParts } from "@/lib/site-address";
 import { dbError } from "@/lib/db-error";
 import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind } from "@/lib/schedule/work-shape";
 
@@ -617,9 +618,12 @@ export async function setAppointmentPlace(
   const clean = location.trim().slice(0, 500);
   const { data: existing } = await supabase
     .from("appointments")
-    .select("title, type")
+    .select("title, type, city, state, zip")
     .eq("id", id)
     .maybeSingle();
+  // A TYPED line that no longer says a stored part takes the parts with it (site-address
+  // typedLineKeepsParts): a pick's Georgia zip must not outlive the pick under a Tahoe street.
+  const clearStale = parts === undefined && !!existing && !typedLineKeepsParts(clean, existing as { city?: string | null; state?: string | null; zip?: string | null });
 
   // The stock titles the create paths hand out, old spellings and new (including the three days it
   // was "Walk-Through": cn-v1034, 2026-09-30, to 2026-10-03). A title a human chose is never touched,
@@ -636,6 +640,7 @@ export async function setAppointmentPlace(
       ...(parts?.city !== undefined ? { city: parts.city || null } : {}),
       ...(parts?.state !== undefined ? { state: parts.state || null } : {}),
       ...(parts?.zip !== undefined ? { zip: parts.zip || null } : {}),
+      ...(clearStale ? { city: null, state: null, zip: null } : {}),
       ...(clean && isStock ? { title: clean } : {}),
       updated_at: new Date().toISOString(),
     })

@@ -22,6 +22,8 @@ export const runtime = "nodejs";
  * that matters on a bill: a fuse, not a quota.
  */
 const PLACES_CALLS_PER_DAY = 5000;
+/** The bias circle's radius, in metres — Google's maximum for one. */
+const BIAS_RADIUS_M = 50_000;
 
 // Same-origin proxy for Google Places (New). The browser calls THIS route; we call Google with
 // the unrestricted SERVER key (see google-server.ts) — so address autocomplete works on EVERY
@@ -44,11 +46,26 @@ export async function POST(req: NextRequest) {
   const input = String(body?.input ?? "").trim();
   const sessionToken = typeof body?.sessionToken === "string" && body.sessionToken ? body.sessionToken : undefined;
   if (input.length < 3) return NextResponse.json({ suggestions: [] });
+  // WHERE TO LOOK FIRST. Without a bias Google ranks the whole country: on 2026-10-13, in front of
+  // a client in Tahoe City, "3812 Dinah" came back as a Georgia street (state GA, zip 30014 landed
+  // on the visit). The client sends the phone's last fix, else the company's own ground
+  // (lib/place-bias); a bias is a preference, never a fence — the right address anywhere still
+  // wins when typed in full. 50 km is Google's ceiling for a circle, and Truckee to Tahoe City is 25.
+  const lat: unknown = body?.bias?.lat;
+  const lng: unknown = body?.bias?.lng;
+  const biased =
+    typeof lat === "number" && typeof lng === "number" && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  const here = { latitude: lat as number, longitude: lng as number };
 
   const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
     method: "POST",
     headers: googleKeyHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ input, includedRegionCodes: ["us"], ...(sessionToken ? { sessionToken } : {}) }),
+    body: JSON.stringify({
+      input,
+      includedRegionCodes: ["us"],
+      ...(biased ? { locationBias: { circle: { center: here, radius: BIAS_RADIUS_M } }, origin: here } : {}),
+      ...(sessionToken ? { sessionToken } : {}),
+    }),
   });
   const data = await res.json().catch(() => ({}));
   return NextResponse.json(data, { status: res.ok ? 200 : res.status });

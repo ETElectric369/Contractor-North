@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Camera, Check, ClipboardList, CloudOff, FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { Camera, Check, ClipboardList, CloudOff, FileText, Loader2, MapPin, Plus, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -30,6 +30,11 @@ import {
 } from "@/lib/inspection/capture";
 import { createStarterInspectionSheet } from "../../forms/actions";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { getPosition } from "@/lib/geo";
+
+/** How close a fix must be before Use My Location writes the address it finds (metres). A phone
+ *  outdoors is 5–40 m; indoors can be 100; an office desktop's Wi-Fi guess is often a kilometre. */
+const LOCATE_SURE_M = 150;
 import { LinkPicker } from "./link-picker";
 import { TellNort } from "@/components/tell-nort";
 import { hearIntoPlaybook } from "../hear-actions";
@@ -324,6 +329,11 @@ export function Inspector({
   const open1 = (key: string) => setOpened((s) => new Set(s).add(key));
 
   const [place, setPlace] = useState(initialLocation);
+  // USE MY LOCATION (Erik, 2026-10-13, no address on the visit, client in front of him). The box is
+  // remounted (whereKey) to take the located line; the note says how close the fix was.
+  const [whereKey, setWhereKey] = useState(0);
+  const [locating, setLocating] = useState(false);
+  const [locatedNote, setLocatedNote] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -486,6 +496,69 @@ export function Inspector({
   playbookRef.current = playbook;
   const placeRef = useRef(place);
   placeRef.current = place;
+  /** The line last written WITH its parts (a pick, Use My Location). A later autosave must not
+   *  write the same line again bare — setAppointmentPlace would then judge it typed and could clear
+   *  the parts it just stored (skeptic, 2026-10-13); and the leave-page flush must not either. */
+  const savedPlaceRef = useRef<string | null>(null);
+  const initialLocationRef = useRef(initialLocation);
+  initialLocationRef.current = initialLocation;
+  const officeRef = useRef(office);
+  officeRef.current = office;
+  /** Where the phone is → the address there, into the Where box and onto the record with its parts.
+   *  The tap IS the permission moment (lib/geo, THE iOS RULE). NO SPECULATION: a loose fix (an office
+   *  desktop's Wi-Fi guess can be a kilometre off) or an answer with no house number fills NOTHING —
+   *  the nearest address to a guess is a guess — and says the one thing to do instead. */
+  async function locateHere() {
+    setLocating(true);
+    setLocatedNote(null);
+    try {
+      const fix = await getPosition({ enableHighAccuracy: true, timeout: 12_000, maximumAge: 0 });
+      if (fix.status !== "ok") {
+        setLocatedNote(
+          fix.status === "denied"
+            ? "Location is off for North — turn it on in Settings."
+            : "Couldn't get a fix — step outside and try again, or type the address.",
+        );
+        return;
+      }
+      const m = Math.round(fix.accuracy);
+      if (m > LOCATE_SURE_M) {
+        setLocatedNote(`Only sure to within ${m} m — step closer and tap again, or type the number.`);
+        return;
+      }
+      const r = await fetch(`/api/geocode?latlng=${fix.coords.lat},${fix.coords.lng}`);
+      if (!r.ok) {
+        setLocatedNote(
+          r.status === 404
+            ? "No street address at this spot — type the number and street."
+            : r.status === 429
+              ? "Address lookup is at its daily limit — type the address."
+              : "Address lookup is down — type the address.",
+        );
+        return;
+      }
+      const found = (await r.json()) as { formatted?: string; line1?: string; city?: string; state?: string; zip?: string };
+      const line = (found.formatted ?? "").trim();
+      // A street with no number is a road, not an address: never written to the record.
+      if (!line || !/^\d/.test((found.line1 ?? "").trim())) {
+        setLocatedNote("No street address at this spot — type the number and street.");
+        return;
+      }
+      savedPlaceRef.current = line;
+      setPlace(line);
+      setWhereKey((k) => k + 1);
+      setLocatedNote(`From your phone, within ${m} m.`);
+      start(async () => {
+        const w = await setAppointmentPlace(appointmentId, line, { city: found.city ?? null, state: found.state ?? null, zip: found.zip ?? null });
+        if (!w.ok) setError(w.error ?? "Couldn't save the address.");
+        else router.refresh();
+      });
+    } catch {
+      setLocatedNote("No signal — type the address for now.");
+    } finally {
+      setLocating(false);
+    }
+  }
 
   function queueCapture(patch: Record<string, unknown>) {
     capturePatchRef.current = { ...capturePatchRef.current, ...patch };
@@ -508,7 +581,7 @@ export function Inspector({
     answersDirty.current = false;
     const latestPlace = placeRef.current;
     // The address is the office's (setAppointmentPlace is staff-only); nobody else has the box.
-    const placeDirty = office && latestPlace.trim() !== initialLocation.trim();
+    const placeDirty = office && latestPlace.trim() !== initialLocation.trim() && latestPlace.trim() !== (savedPlaceRef.current ?? "").trim();
     if (!Object.keys(patch).length && !wantAnswers && !placeDirty) {
       // Pressing Save when everything is already written must still ANSWER. Silence reads as a
       // dead button, and the whole point of the press is to be told the work is safe.
@@ -583,6 +656,14 @@ export function Inspector({
       const patch = capturePatchRef.current;
       capturePatchRef.current = {};
       if (Object.keys(patch).length) void saveInspectionCapture(appointmentId, patch as never).catch(() => {});
+      // THE ADDRESS TOO (skeptic, 2026-10-13). Where writes on blur now, so a fast exit — Start The
+      // Estimate, a nav link, the PWA backgrounded — lands inside the 900 ms with the typed line only
+      // in this box. A line a pick already wrote with its parts is not written again bare.
+      const latestPlace = placeRef.current.trim();
+      if (officeRef.current && latestPlace !== initialLocationRef.current.trim() && latestPlace !== (savedPlaceRef.current ?? "").trim()) {
+        savedPlaceRef.current = placeRef.current;
+        void setAppointmentPlace(appointmentId, placeRef.current).catch(() => {});
+      }
       if (answersDirty.current) {
         answersDirty.current = false;
         void saveInspectionAnswers(
@@ -1348,14 +1429,23 @@ export function Inspector({
         <div className="mt-3">
           <Label className="mb-1.5">Where</Label>
           {office ? (
+            <>
             <AddressAutocomplete
-              defaultValue={initialLocation}
+              key={whereKey}
+              defaultValue={place}
               placeholder="Job address"
-              onTextChange={(v) => { setPlace(v); schedule(); }}
+              // Typing only moves the box. The record is written on blur or on a pick — which is what
+              // "saves on resolve/blur" always claimed, and a schedule() on every keystroke never did:
+              // it wrote the half-typed street every 900 ms.
+              // The box reports its value on mount too (a remount after Use My Location): only a REAL
+              // change clears the located note, so "within 12 m" survives the remount that showed it.
+              onTextChange={(v) => { if (v !== placeRef.current) setLocatedNote(null); setPlace(v); }}
+              onBlur={() => schedule()}
               onResolved={(parts) => {
                 // `formatted` is the full one-line address — appointments.location is a single
                 // text column, so the whole thing is what belongs in it.
                 const line = parts.formatted || parts.line1 || "";
+                savedPlaceRef.current = line;
                 setPlace(line);
                 // Resolved from autocomplete → the PARTS ride along (0177), so the city is stored
                 // rather than left to be guessed out of a string later.
@@ -1366,6 +1456,22 @@ export function Inspector({
                   });
               }}
             />
+            {/* Its own row under the box (a 375 px phone keeps the box and its dropdown whole); the
+                note sits beside the button and never shifts the box above it. */}
+            {!readOnly && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <button
+                  type="button"
+                  onClick={locateHere}
+                  disabled={locating}
+                  className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 active:bg-slate-100 disabled:opacity-60"
+                >
+                  {locating ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />} Use My Location
+                </button>
+                {locatedNote && <span className="min-w-0 text-xs text-slate-500">{locatedNote}</span>}
+              </div>
+            )}
+            </>
           ) : (
             // The address, like the visit's links, is the office's (setAppointmentPlace is staff-only).
             <p className="text-sm text-slate-700">{initialLocation.trim() || "No address yet. The office adds it."}</p>

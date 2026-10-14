@@ -126,5 +126,32 @@ export function siteLines(site: ResolvedSite | null): string[] {
   return out;
 }
 
+/**
+ * A TYPED LINE KEEPS THE PARTS A PICK ONCE RESOLVED ONLY WHILE IT STILL SAYS THEM.
+ *
+ * The Inspector's Where writes a typed line WITHOUT parts (0177: guessing a city from a line is
+ * how a wrong address gets on a record), and the stored city/state/zip stayed as they were. On
+ * 2026-10-13 that left a Georgia pick's state GA / zip 30014 standing under "3812 Dinah" in Tahoe
+ * City after Erik typed over the pick — a record that says two places. So: each stored part must
+ * still appear in the typed line as a whole word ("CA" is not the "ca" in Cathedral City); any
+ * part the line no longer carries means the pick is gone, and the parts go with it (the amber
+ * "no city on file" chip then asks, which is honest). Nothing stored → nothing to keep. Pure.
+ */
+export function typedLineKeepsParts(
+  line: string,
+  parts: { city?: string | null; state?: string | null; zip?: string | null } | null | undefined,
+): boolean {
+  const word = (p: string | null | undefined) => (p ?? "").trim().toLowerCase();
+  const says = (p: string) => new RegExp(`(^|[^a-z0-9])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(line.toLowerCase());
+  // THE STATE AND THE ZIP ARE THE JUDGES. The stored city is Google's locality, which a formatted
+  // line does not always repeat (a borough under "New York", a neighbourhood under a postal city),
+  // so a full picked line could fail a city test and lose the parts it had just been given. A US
+  // formatted line always carries its state and zip; only when neither is stored does the city judge.
+  const anchors = [word(parts?.state), word(parts?.zip)].filter(Boolean);
+  if (anchors.length) return anchors.every(says);
+  const city = word(parts?.city);
+  return city ? says(city) : true;
+}
+
 /** Drives the amber "no city on file" chip. A visible gap beats a silent partial on signed paper. */
 export const siteIsIncomplete = (site: ResolvedSite | null): boolean => !!site?.address && !site.complete;

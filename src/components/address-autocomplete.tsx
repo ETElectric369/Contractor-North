@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { addressBias } from "@/lib/place-bias";
 
 export interface AddressParts {
   formatted: string;
@@ -29,6 +30,7 @@ export function AddressAutocomplete({
   placeholder,
   onResolved,
   onTextChange,
+  onBlur,
   streetOnly = false,
 }: {
   id?: string;
@@ -37,6 +39,10 @@ export function AddressAutocomplete({
   placeholder?: string;
   onResolved?: (parts: AddressParts) => void;
   onTextChange?: (value: string) => void;
+  /** The box lost focus: the moment a parent that writes the record should write it (the Inspector's
+   *  Where saves here and on a pick, never per keystroke). Not fired by a pick — the dropdown keeps
+   *  the focus on purpose, and the pick reports through onResolved. */
+  onBlur?: () => void;
   streetOnly?: boolean;
 }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -55,6 +61,11 @@ export function AddressAutocomplete({
   // session (keystrokes + the final details lookup), instead of Google billing each call
   // separately. Generated on the first keystroke of a search, reset after a selection.
   const sessionRef = useRef<string>("");
+  // A PICK IS A TAP, NOT A TOUCH. Selection used to fire on pointerdown alone, so a thumb landing on
+  // the list to scroll it — or the first contact of a scroll that started over it — chose a row and
+  // replaced whatever was typed (Erik, 2026-10-13: "deleted what i typed"). Down remembers where
+  // the finger landed; up within a few pixels on the same row is the pick; a scroll cancels it.
+  const downRef = useRef<{ x: number; y: number; placeId: string } | null>(null);
   const ensureSession = () => {
     if (!sessionRef.current && typeof crypto !== "undefined" && crypto.randomUUID) sessionRef.current = crypto.randomUUID();
     return sessionRef.current;
@@ -87,7 +98,7 @@ export function AddressAutocomplete({
           method: "POST",
           signal: ctrl.signal,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: q, sessionToken: ensureSession() }),
+          body: JSON.stringify({ input: q, sessionToken: ensureSession(), bias: addressBias() }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -107,6 +118,12 @@ export function AddressAutocomplete({
       ctrl.abort();
     };
   }, [value, key]);
+
+  // A closed list forgets a touch that began on it (a mouse released over another row otherwise
+  // leaves the memory armed for the next row's up).
+  useEffect(() => {
+    if (!open) downRef.current = null;
+  }, [open]);
 
   // Close on outside click.
   useEffect(() => {
@@ -177,6 +194,7 @@ export function AddressAutocomplete({
         name={name}
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder ?? "Address"}
         autoComplete="off"
       />
@@ -194,6 +212,7 @@ export function AddressAutocomplete({
           setValue(e.target.value);
         }}
         onKeyDown={onKeyDown}
+        onBlur={onBlur}
         onFocus={() => suggestions.length > 0 && setOpen(true)}
         placeholder={placeholder ?? "Start typing an address…"}
         autoComplete="off"
@@ -204,11 +223,24 @@ export function AddressAutocomplete({
             <li key={s.placeId}>
               <button
                 type="button"
-                // Select on pointerdown: fires before input blur/keyboard close,
-                // so taps register reliably on phones and webviews.
+                // preventDefault on pointerdown keeps the input's focus (and the keyboard) through
+                // the tap, so a pick never races a blur; the pick itself is the matching pointerup.
                 onPointerDown={(e) => {
                   e.preventDefault();
-                  choose(s);
+                  downRef.current = { x: e.clientX, y: e.clientY, placeId: s.placeId };
+                }}
+                onPointerUp={(e) => {
+                  const d = downRef.current;
+                  downRef.current = null;
+                  if (d && d.placeId === s.placeId && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) choose(s);
+                }}
+                onPointerCancel={() => {
+                  downRef.current = null;
+                }}
+                // A keyboard or screen-reader activation is a click with no pointer behind it
+                // (detail 0); a mouse's click follows its own pointerup, which already chose.
+                onClick={(e) => {
+                  if (e.detail === 0) choose(s);
                 }}
                 className={`flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50 ${
                   i === active ? "bg-slate-50" : ""

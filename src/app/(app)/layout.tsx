@@ -21,6 +21,8 @@ import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
 import { PageOpenCounter } from "@/components/page-open-counter";
 import { BugReporter } from "@/components/bug-reporter";
+import { OrgPlaceBias } from "@/components/org-place-bias";
+import { orgPlaceBias } from "@/lib/geocode-server";
 import { isPlatformAdmin } from "@/lib/platform-admin";
 import { countOpenBugs } from "@/lib/bug-watch-count";
 import { NativePushBridge } from "@/components/native-push-bridge";
@@ -98,6 +100,12 @@ export default async function AppLayout({
     trial_ends_at: string | null;
     current_period_end: string | null;
     settings: unknown;
+    // The company's own address (the mailing one, organizations.*): where every address box
+    // looks first when the phone has no fix of its own (lib/place-bias).
+    address_line1?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zip?: string | null;
   };
   const isStaff = isStaffRole(profile.role);
 
@@ -112,7 +120,7 @@ export default async function AppLayout({
     try {
       const { data } = await supabase
         .from("organizations")
-        .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings")
+        .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings, address_line1, city, state, zip")
         .eq("id", profile.org_id)
         .maybeSingle();
       return (data as OrgLite | null) ?? null;
@@ -439,6 +447,12 @@ export default async function AppLayout({
       <TapToPayAwareness />
       {/* Report A Problem is everyone's (Wave 0): a tech hits the bugs first. */}
       <BugReporter orgId={profile.org_id} platformAdmin={platformAdmin} />
+      {/* WHERE THE COMPANY IS, for every address box (lib/place-bias). Streamed behind the shell:
+          on a cache miss this waits on Google up to 2.5 s, and a page is never held for that —
+          a box that opens before it arrives searches unbiased, as every box did before today. */}
+      <Suspense fallback={null}>
+        <OrgPlaceBiasSlot org={org} />
+      </Suspense>
       {openEntry && (
         <GeofenceMonitor
           // A Switch Job closes the running entry and opens the next one (0288): a new entry is a
@@ -461,4 +475,11 @@ export default async function AppLayout({
       )}
     </div>
   );
+}
+
+/** The company's ground, geocoded once (cached a day in memory, a week shared) and handed to the
+ *  client bias. Its own async component so the lookup streams in after the shell has painted. */
+async function OrgPlaceBiasSlot({ org }: { org: { address_line1?: string | null; city?: string | null; state?: string | null; zip?: string | null } | null }) {
+  const b = await orgPlaceBias(org);
+  return <OrgPlaceBias lat={b?.lat ?? null} lng={b?.lng ?? null} />;
 }
