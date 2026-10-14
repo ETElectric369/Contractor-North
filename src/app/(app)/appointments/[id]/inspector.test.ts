@@ -100,6 +100,9 @@ const render = (access: InspectionAccess, over: Record<string, unknown> = {}) =>
       linked: { kind: "lead", name: "Sara Dale" },
       estimateHref: access === "office" ? "/quotes/new?capture=appt-1" : null,
       access,
+      // THE TASK SHEET (item 2b): one task open at a time. The editor pins below look at t1 open;
+      // the sheet's own cases render with every task collapsed to its row.
+      initialOpenTaskId: "t1",
       ...over,
     }),
   );
@@ -264,7 +267,7 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
   it("the office: both tasks, the coded part as the book names it, one task asking, both add doors, the book as a list", () => {
     const html = render("office");
     expect(html).toContain('value="Transfer switch"');
-    expect(html).toContain('value="Hot tub wires"');
+    expect(textOf(html)).toContain("Hot tub wires"); // t2 collapsed to its row (the task sheet)
     // A part picked from the book is a chip, not a box: a keystroke must not unlink the code.
     expect(html).toContain('title="R1 — Remodel scope">R1 — Remodel scope</span>');
     expect(pills(html)).toBe(1);
@@ -281,7 +284,7 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
   it("a crew lead: the same live control, the coded part by its code (no book), and never a price", () => {
     const html = render("crewLead");
     expect(html).toContain('value="Transfer switch"');
-    expect(html).toContain('value="Hot tub wires"');
+    expect(textOf(html)).toContain("Hot tub wires"); // t2 collapsed to its row (the task sheet)
     expect(html).toContain('title="R1">R1</span>');
     expect(html).not.toContain("Remodel scope");
     expect(html).not.toContain("<datalist");
@@ -297,7 +300,7 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
   it("a plain tech: the tasks, read; no door that would only fail", () => {
     const html = render("view");
     expect(html).toContain('value="Transfer switch"');
-    expect(html).toContain('value="Hot tub wires"');
+    expect(textOf(html)).toContain("Hot tub wires"); // t2 collapsed to its row (the task sheet)
     expect(pills(html)).toBe(1);
     const doors = buttons(html).map((b) => b.text);
     expect(doors).not.toContain("Add A Task");
@@ -312,7 +315,8 @@ describe("a task kit on the visit (W4): picked by name, counted in units, previe
   // The window names its default vendor — the same words the estimate line and the job's list will carry.
   const PREVIEW = "From the kit, for ×7 footing: 14 h · Concrete, 80 lb ×28, Rebar stake ×14, Windows (Allowance) (Marvin, #M-1) ×7";
   // The office's page carries the scope prices above; the TASKS block itself must never carry one.
-  const tasksBlock = (html: string) => html.slice(html.indexOf(">Tasks<"), html.indexOf("Measurements"));
+  // From the tasks question's wrapper (the jump bar's "Tasks" chip comes first on the page now).
+  const tasksBlock = (html: string) => html.slice(html.indexOf('id="need-tasks"'), html.indexOf("Measurements", html.indexOf('id="need-tasks"')));
 
   it("the office: the kit picker, the units box with the kit's word, the preview from the kit; the kit task no longer asks", () => {
     const html = render("office", { taskKits: [KIT], initialAnswers: KIT_ANSWERS });
@@ -372,7 +376,7 @@ describe("the kits read says how it went (item 3): a sentence once, and never a 
       const html = render(access, { taskKits: [], kitsNote: NOTE, kitsUnread: true, initialAnswers: KIT_ANSWERS });
       expect((textOf(html).match(/The kits could not be read/g) ?? []).length).toBe(1);
       // The office's page carries the scope prices above the tasks by design; the TASKS block never does.
-      const tasks = html.slice(html.indexOf(">Tasks<"), html.indexOf("Measurements"));
+      const tasks = html.slice(html.indexOf('id="need-tasks"'), html.indexOf("Measurements", html.indexOf('id="need-tasks"')));
       expect(textOf(tasks)).not.toMatch(PRICE);
       if (access !== "office") expect(textOf(html)).not.toMatch(PRICE);
     }
@@ -451,5 +455,79 @@ describe("the scope lights its kits (field feedback 10-13, item 2): one offer ro
     expect(html).not.toContain(">Something Else<");
     expect(html).not.toContain("<optgroup");
     expect(html).toContain('<option value="dk1"');
+  });
+});
+
+describe("the task sheet (field feedback 10-13, item 2b): rows, one open task, its own photos and measurements, the jump bar", () => {
+  const PHOTO2 = { path: "org-1/appointments/appt-1/2-task.jpg", url: "https://x/2.jpg" };
+  const CAP = {
+    notes: "",
+    photos: [PHOTO.path, PHOTO2.path],
+    photo_meta: { [PHOTO2.path]: { task_id: "t2" } },
+    measures: [{ id: "m1", label: "Run", value: 40, unit: "ft" }, { id: "m2", label: "Drop", value: 8, unit: "ft", task_id: "t2" }],
+  };
+  const over = (x: Record<string, unknown> = {}) => ({ initialOpenTaskId: null, initialCapture: CAP, initialPhotos: [PHOTO, PHOTO2], ...x });
+
+  it("every task collapsed to its row by default: his words, what it still asks, no editor on the page", () => {
+    const html = render("office", over());
+    expect(html).not.toContain('value="Transfer switch"');
+    expect(html).toContain('data-task-row="t1"');
+    expect(html).toContain('data-task-row="t2"');
+    const t = textOf(html);
+    expect(t).toContain("Transfer switch");
+    expect(t).toContain("Hot tub wires");
+    expect((html.match(/>hours\?</g) ?? []).length).toBe(1); // t2 asks, on its row
+    expect(html).toContain("1 photo"); // t2's row counts its own photo and measurement
+    expect(html).toContain("1 measurement");
+    expect(buttons(html).map((b) => b.text)).toContain("Add A Task");
+    expect(buttons(html).map((b) => b.text)).not.toContain("Done");
+  });
+
+  it("the open task: its editor, ONLY its photos and measurements, a note, Take / Add that place the shot on it, Done; the visit's list hides the placed measurement", () => {
+    const html = render("office", over({ initialOpenTaskId: "t2" }));
+    expect(html).toContain('value="Hot tub wires"');
+    expect(html).not.toContain('value="Transfer switch"');
+    const card = html.slice(html.indexOf('id="task-t2"'), html.indexOf("Add A Task"));
+    expect(card).toContain(PHOTO2.url);
+    expect(card).not.toContain(PHOTO.url); // the visit's own photo is not on this task
+    expect(card).toContain('value="Drop"');
+    expect(card).not.toContain('value="Run"');
+    expect(card).toContain("What&#x27;s true about this piece");
+    expect(card).toContain('aria-label="Remove This Photo"');
+    const doors = buttons(card).map((b) => b.text);
+    expect(doors).toContain("Take");
+    expect(doors).toContain("Add");
+    expect(doors).toContain("Add A Measurement");
+    expect(doors).toContain("Done");
+    // the visit's own Measurements section shows the rows no task claimed
+    const visitMeasures = html.slice(html.lastIndexOf(">Measurements<"), html.indexOf("Materials", html.lastIndexOf(">Measurements<")));
+    expect(visitMeasures).toContain('value="Run"');
+    expect(visitMeasures).not.toContain('value="Drop"');
+  });
+
+  it("a crew lead's open task has Take / Add / Done and no photo trash; a plain tech's has none of them", () => {
+    const lead = render("crewLead", over({ initialOpenTaskId: "t2" }));
+    const card = lead.slice(lead.indexOf('id="task-t2"'), lead.indexOf("Add A Task"));
+    const doors = buttons(card);
+    expect(doors.map((b) => b.text)).toEqual(expect.arrayContaining(["Take", "Add", "Add A Measurement", "Done"]));
+    expect(card).not.toContain('aria-label="Remove This Photo"');
+    for (const b of doors.filter((x) => x.text.trim())) expect(b.open, b.text).toMatch(TARGET);
+    const view = render("view", over({ initialOpenTaskId: "t2" }));
+    const vcard = view.slice(view.indexOf('id="task-t2"'), view.indexOf(">Measurements<", view.indexOf('id="task-t2"') + 200));
+    expect(buttons(vcard).map((b) => b.text)).not.toEqual(expect.arrayContaining(["Done"]));
+    expect(vcard).not.toContain(">Take<");
+  });
+
+  it("the jump bar: Where (the office), Tasks, Photos, Notes — 44px chips above the card, landing on ids", () => {
+    const html = render("office", over());
+    const bar = html.slice(html.indexOf('aria-label="Jump To"'), html.indexOf("Inspection"));
+    const chips = buttons(bar);
+    expect(chips.map((b) => b.text)).toEqual(["Where", "Tasks", "Photos", "Notes"]);
+    for (const c of chips) expect(c.open).toMatch(TARGET);
+    expect(html).toContain('id="insp-where"');
+    expect(html).toContain('id="need-tasks"');
+    expect(html).toContain('id="insp-photos"');
+    const lead = render("crewLead", over());
+    expect(buttons(lead.slice(lead.indexOf('aria-label="Jump To"'), lead.indexOf("Inspection"))).map((b) => b.text)).toEqual(["Tasks", "Photos", "Notes"]);
   });
 });

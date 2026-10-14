@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Camera, Check, ClipboardList, CloudOff, FileText, Loader2, MapPin, Plus, Trash2, Upload } from "lucide-react";
+import { Camera, Check, ChevronRight, ClipboardList, CloudOff, FileText, Loader2, MapPin, Plus, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -28,6 +28,7 @@ import {
   parseInspectorCapture,
   type CaptureItem,
   type CaptureMeasure,
+  type CapturePhotoMeta,
 } from "@/lib/inspection/capture";
 import { createStarterInspectionSheet } from "../../forms/actions";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
@@ -206,6 +207,7 @@ export function Inspector({
   initialAnswers,
   initialCapture,
   initialPhotos,
+  initialOpenTaskId = null,
   orgId,
   userId,
   estimateHref,
@@ -239,6 +241,8 @@ export function Inspector({
   initialAnswers: Answers;
   initialCapture: unknown;
   initialPhotos: CapturePhoto[];
+  /** The task whose sheet opens on mount (`?task=<id>`); null = every task collapsed to its row. */
+  initialOpenTaskId?: string | null;
   orgId: string;
   userId: string | null;
   /** Where "Start The Estimate" goes — built by the page so the capture/lead ids ride along. null =
@@ -339,6 +343,23 @@ export function Inspector({
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [viewing, setViewing] = useState<CapturePhoto | null>(null);
+  // THE TASK SHEET (field feedback 10-13, item 2): one task open at a time, the rest their rows.
+  // Erik: "in the task itself is where we will be needing photos, measurements, materials and
+  // labor … pop up what we need when we need it." A photo or a measurement taken from inside a
+  // task is PLACED on it (photo_meta[path].task_id, measure.task_id); the lists stay the one list.
+  const [openTaskId, setOpenTaskId] = useState<string | null>(initialOpenTaskId);
+  const [photoMeta, setPhotoMeta] = useState<Record<string, CapturePhotoMeta>>(stored.photo_meta ?? {});
+  /** The task a Take / Add inside a task sheet is for; read and cleared by upload(). */
+  const pendingTaskRef = useRef<string | null>(null);
+  const openTask = (id: string | null) => {
+    setOpenTaskId(id);
+    if (id && typeof document !== "undefined")
+      requestAnimationFrame(() => document.getElementById(`task-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  };
+  const jumpTo = (id: string) => {
+    if (typeof document === "undefined") return;
+    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  };
   const [seeding, startSeed] = useTransition();
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -740,6 +761,10 @@ export function Inspector({
   // ── PHOTOS ─────────────────────────────────────────────────────────────────────────────────
   async function upload(files: File[]) {
     if (!files.length) return;
+    // Taken from inside a task's sheet: placed on that task (read once, then cleared, so the
+    // visit's own Take / Add never inherits it).
+    const forTask = pendingTaskRef.current;
+    pendingTaskRef.current = null;
     setUploading(true);
     setError(null);
     try {
@@ -765,6 +790,14 @@ export function Inspector({
         : await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
       if (!r.ok) setError(r.error ?? "Couldn't save the photos.");
       else setSavedAt(Date.now());
+      if (forTask && r.ok) {
+        // AFTER the photos are stored, never before: the capture's parse drops placement for a
+        // photo it does not have yet, so meta that landed first would be lost.
+        const meta = { ...photoMeta };
+        for (const a of added) meta[a.path] = { ...(meta[a.path] ?? {}), task_id: forTask };
+        setPhotoMeta(meta);
+        queueCapture({ photo_meta: meta });
+      }
     } catch (e: unknown) {
       setError((e as { message?: string })?.message ?? "Upload failed.");
     } finally {
@@ -1059,6 +1092,17 @@ export function Inspector({
       const patchTask = (i: number, patch: Partial<TaskValue>) => setTasks(tasks.map((t, j) => (j === i ? { ...t, ...patch } : t)));
       const patchPart = (i: number, mi: number, patch: Partial<TaskMaterial>) =>
         patchTask(i, { materials: tasks[i].materials.map((m, j) => (j === mi ? { ...m, ...patch } : m)) });
+      // A task's measurements are the visit's rows carrying its id; edited through the one list.
+      const patchMeasure = (id: string, patch: Partial<CaptureMeasure>) => {
+        const next = measures.map((x) => (x.id === id ? { ...x, ...patch } : x));
+        setMeasures(next);
+        queueCapture({ measures: next });
+      };
+      const dropMeasure = (id: string) => {
+        const next = measures.filter((x) => x.id !== id);
+        setMeasures(next);
+        queueCapture({ measures: next });
+      };
       const hasBook = office && priceBook.length > 0;
       const bookId = `tasks-book-${n.key}`;
       const bookText = (b: BookRow) => `${b.code} — ${b.description}`;
@@ -1093,10 +1137,9 @@ export function Inspector({
               onClick={() => {
                 takeHold(n.key);
                 setMultiKey(n.key);
-                setTasks([
-                  ...tasks,
-                  ...offer.map((k) => ({ id: captureId(), name: k.name, hours: null, units: null, kit_id: k.id, materials: [] as TaskMaterial[] })),
-                ]);
+                const added = offer.map((k) => ({ id: captureId(), name: k.name, hours: null, units: null, kit_id: k.id, materials: [] as TaskMaterial[] }));
+                setTasks([...tasks, ...added]);
+                openTask(added[0].id);
               }}
               className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg border border-dashed border-brand/60 bg-brand/5 px-3 text-sm font-medium text-brand active:bg-brand/10"
             >
@@ -1104,8 +1147,43 @@ export function Inspector({
               <Plus className="h-4 w-4 shrink-0" />
             </button>
           )}
-          {tasks.map((t, i) => (
-            <div key={t.id} className="rounded-lg border border-slate-200 p-2">
+          {tasks.map((t, i) => {
+            const isOpen = openTaskId === t.id;
+            const kitOf = t.kit_id ? taskKits.find((k) => k.id === t.kit_id) ?? null : null;
+            const taskPhotos = photos.filter((p) => photoMeta[p.path]?.task_id === t.id);
+            const taskMeasures = measures.filter((m) => m.task_id === t.id);
+            const chip = (text: string, title?: string) => (
+              <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700" title={title}>{text}</span>
+            );
+            // THE ROW: what the task is and what it still asks — never a price.
+            const rowWords = [
+              t.hours !== null ? `${t.hours} h` : kitOf ? "hours from the kit" : null,
+              t.units !== null ? `×${t.units}${kitOf?.unit ? ` ${kitOf.unit}` : ""}` : null,
+              kitOf ? kitOf.name : null,
+              t.materials.length ? `${t.materials.length} part${t.materials.length === 1 ? "" : "s"}` : null,
+              taskPhotos.length ? `${taskPhotos.length} photo${taskPhotos.length === 1 ? "" : "s"}` : null,
+              taskMeasures.length ? `${taskMeasures.length} measurement${taskMeasures.length === 1 ? "" : "s"}` : null,
+            ].filter(Boolean).join(" · ");
+            return (
+            <div key={t.id} id={`task-${t.id}`} className={isOpen ? "rounded-lg border border-brand/50 p-2 ring-1 ring-brand/20" : "rounded-lg border border-slate-200"}>
+              {!isOpen ? (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  data-task-row={t.id}
+                  onClick={() => openTask(t.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } }}
+                  className="flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-2 text-left active:bg-slate-50"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{t.name.trim() || "A task with no name yet"}</span>
+                  {!t.name.trim() && chip("name?")}
+                  {taskAsking(t) && chip("hours?")}
+                  {!!kitOf && t.units === null && chip("units?", "How many units? The kit's hours and parts are per unit")}
+                  {rowWords && <span className="hidden shrink-0 text-xs text-slate-500 sm:inline">{rowWords}</span>}
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                </div>
+              ) : (
+              <>
               <div className="flex items-center gap-2">
                 <Input
                   autoComplete="off"
@@ -1282,8 +1360,91 @@ export function Inspector({
                   />
                 )}
               </div>
+              {/* PHOTOS ON THIS TASK — the camera where the work is (Erik: "in the task itself").
+                  Take / Add here place the shot on the task; the visit's own grid still shows it. */}
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <SectionLabel>Photos</SectionLabel>
+                  {!readOnly && (
+                    <div className="flex gap-2">
+                      <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = t.id; captureRef.current?.click(); }}>
+                        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
+                      </Button>
+                      <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = t.id; fileRef.current?.click(); }}>
+                        <Upload className="h-4 w-4" /> Add
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                {taskPhotos.length === 0 ? (
+                  <p className="text-xs text-slate-400">No photos on this task yet.</p>
+                ) : (
+                  <div className="grid grid-cols-4 gap-2">
+                    {taskPhotos.map((p) => (
+                      <div key={p.path} className="relative aspect-square overflow-hidden rounded-lg bg-slate-100">
+                        {isImage(p.path) ? (
+                          <button type="button" onClick={() => p.url && setViewing(p)} className="h-full w-full" disabled={readOnly}>
+                            {p.url && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={p.url} alt="" className="h-full w-full object-cover" />
+                            )}
+                          </button>
+                        ) : (
+                          <a href={p.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-slate-500">
+                            {fileLabel(p.path)}
+                          </a>
+                        )}
+                        {office && !readOnly && (
+                          <button type="button" onClick={() => removePhoto(p)} aria-label="Remove This Photo" className="absolute right-1 top-1 rounded-full bg-black/55 p-1.5 text-white">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* MEASUREMENTS ON THIS TASK — typed rows today; Measure / Scan The Room land here. */}
+              <div className="mt-3 space-y-2">
+                <SectionLabel>Measurements</SectionLabel>
+                {taskMeasures.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2">
+                    <Input value={m.label} placeholder="what you measured" {...focus} onChange={(e) => patchMeasure(m.id, { label: e.target.value })} />
+                    <NumBox value={m.value} className="w-24" {...focus} onValue={(x) => patchMeasure(m.id, { value: x })} />
+                    <Input value={m.unit} placeholder="ft" className="w-16" {...focus} onChange={(e) => patchMeasure(m.id, { unit: e.target.value })} />
+                    {!readOnly && (
+                      <button type="button" onClick={() => dropMeasure(m.id)} aria-label="Remove This Measurement" className={removeClass}>
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {!readOnly && (
+                  <AddRow label="Add A Measurement" onClick={() => setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "", task_id: t.id }])} />
+                )}
+              </div>
+              {/* THE NOTE — what is true about this piece, in his words. */}
+              <div className="mt-3">
+                <SectionLabel>Note</SectionLabel>
+                <Textarea
+                  rows={2}
+                  className="mt-1"
+                  value={t.note ?? ""}
+                  placeholder="What's true about this piece — the wall, the access, the catch."
+                  {...focus}
+                  onChange={(e) => patchTask(i, { note: e.target.value || null })}
+                />
+              </div>
+              {!readOnly && (
+                <div className="mt-3 flex justify-end">
+                  <Button type="button" variant="secondary" onClick={() => openTask(null)}>Done</Button>
+                </div>
+              )}
+              </>
+              )}
             </div>
-          ))}
+            );
+          })}
           {!readOnly && (
             <AddRow
               label="Add A Task"
@@ -1294,7 +1455,9 @@ export function Inspector({
                 // hold is: by the next need he touches.
                 takeHold(n.key);
                 setMultiKey(n.key);
-                setTasks([...tasks, { id: captureId(), name: "", hours: null, units: null, kit_id: null, materials: [] }]);
+                const id = captureId();
+                setTasks([...tasks, { id, name: "", hours: null, units: null, kit_id: null, materials: [] }]);
+                openTask(id);
               }}
             />
           )}
@@ -1407,7 +1570,24 @@ export function Inspector({
     );
   };
 
+  const tasksKey = playbook.needs.find((n) => n.slot?.type === "tasks")?.key ?? null;
+  const jumps: { label: string; go: () => void }[] = [
+    ...(office ? [{ label: "Where", go: () => jumpTo("insp-where") }] : []),
+    ...(tasksKey ? [{ label: "Tasks", go: () => jumpTo(`need-${tasksKey}`) }] : []),
+    { label: "Photos", go: () => jumpTo("insp-photos") },
+    { label: "Notes", go: () => { open1("notes"); jumpTo("insp-notes"); } },
+  ];
   return (
+    <>
+    {/* THE JUMP BAR (Erik, in front of a client: "i couldnt jump to what i needed when i needed
+        it"). Sticky at the top of the scroll; one tap lands on the piece. */}
+    <div className="sticky top-0 z-20 -mx-1 mb-2 flex gap-2 overflow-x-auto bg-slate-50/95 px-1 py-1.5 backdrop-blur" aria-label="Jump To">
+      {jumps.map((j) => (
+        <button key={j.label} type="button" onClick={j.go} className="min-h-[44px] shrink-0 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 active:bg-slate-50">
+          {j.label}
+        </button>
+      ))}
+    </div>
     <Card className="overflow-hidden p-0">
       {readOnly && (
         <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
@@ -1465,7 +1645,7 @@ export function Inspector({
             it into the title (which is what 4 of 13 real inspections did) was the only way to
             record it before. Saves on resolve/blur, and renames a stock-titled record so a list
             of visits stops reading "Site inspection" six times. */}
-        <div className="mt-3">
+        <div className="mt-3" id="insp-where">
           <Label className="mb-1.5">Where</Label>
           {office ? (
             <>
@@ -1621,7 +1801,7 @@ export function Inspector({
             worst possible moment for the scope to vanish. Labelled with the SENTENCE he answered,
             not the short heading — "Scope" tells him nothing about the 700 characters underneath. */}
         {spine.map((n) => (
-          <div key={n.key} className="mt-3">
+          <div key={n.key} id={`need-${n.key}`} className="mt-3">
             <Label className="mb-1">{n.ask}</Label>
             {n.why && <p className="mb-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{n.why}</p>}
             {control(n)}
@@ -1673,7 +1853,7 @@ export function Inspector({
                 ONE EXCEPTION, and it is the whole point of the flag: a HOLD always shows. "Don't
                 let me price without this" cannot be a thing you have to go looking for. */}
             {ask.map((n) => (
-              <div key={n.key}>
+              <div key={n.key} id={`need-${n.key}`}>
                 {/* THE SENTENCE, not the heading. His sheet had a field called "Panel" — he typed
                     2 into it and then 2 again into the next box, because a heading transmits
                     nothing about the answer it wants. */}
@@ -1723,7 +1903,7 @@ export function Inspector({
             <SectionLabel>Answered</SectionLabel>
             <div className="mt-2 space-y-3">
               {answered.map((n) => (
-                <div key={n.key} className="rounded-lg bg-slate-50 p-3">
+                <div key={n.key} id={`need-${n.key}`} className="rounded-lg bg-slate-50 p-3">
                   {/* The SHORT label down here — the sentence did its job upstairs; a recap of
                       twelve full questions is a wall. */}
                   <div className="text-[11px] uppercase tracking-wide text-slate-400">{n.label}</div>
@@ -1736,11 +1916,11 @@ export function Inspector({
 
         {/* MEASUREMENTS — still always available, now not always VISIBLE. Typed rows for what a
             kit can size itself from, plus the prose box for the shape a number can't hold. */}
-        {shows("measures", measures.length > 0 || !!proseMeasurements.trim()) && (
+        {shows("measures", measures.some((m) => !m.task_id) || !!proseMeasurements.trim()) && (
         <div>
           <SectionLabel>Measurements</SectionLabel>
           <div className="mt-2 space-y-2">
-            {measures.map((m, i) => (
+            {measures.map((m, i) => m.task_id ? null : (
               <div key={m.id} className="flex items-center gap-2">
                 <Input
                   value={m.label}
@@ -1870,7 +2050,7 @@ export function Inspector({
             some pictures like i normally do to look at later" — the camera is the one thing that
             gets reached for on every job whether the rest of this screen helps or not. Hiding it
             behind a chip would be tidiness at the cost of the single most-used control. */}
-        <div>
+        <div id="insp-photos">
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
             {!readOnly && <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop Photos Or PDFs" className="shrink-0">
@@ -1960,7 +2140,7 @@ export function Inspector({
 
         {/* NOTES — the escape hatch. The sentence nobody's template anticipated. */}
         {shows("notes", !!notes.trim()) && (
-          <div>
+          <div id="insp-notes">
             <SectionLabel>Notes</SectionLabel>
             <Textarea
               rows={3}
@@ -2067,6 +2247,7 @@ export function Inspector({
 
       {viewing?.url && <MediaLightbox url={viewing.url} name={fileLabel(viewing.path)} onClose={() => setViewing(null)} />}
     </Card>
+    </>
   );
 }
 

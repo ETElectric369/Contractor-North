@@ -71,10 +71,15 @@ function tolerableBefore0165(e: unknown): boolean {
  */
 export default async function AppointmentCapturePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  /** `?task=<id>` opens that task's sheet on the Inspector (a door for a row elsewhere to come straight to it). */
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
+  const openTask = typeof sp.task === "string" && /^[\w-]{1,80}$/.test(sp.task) ? sp.task : null;
   const supabase = await createClient();
   // Who's looking — stamped onto anything the inspection sheet queues offline, so a shared phone
   // can never file one person's work under another's name.
@@ -617,6 +622,7 @@ export default async function AppointmentCapturePage({
             appointmentId={a.id}
             orgId={a.org_id}
             userId={viewerId}
+            initialOpenTaskId={openTask}
             // A written why line is where the answer lands in the PRICE and a note is the owner's own
             // voice: the office gets the sheets as written; anyone else gets them with every note
             // dropped and every why without its dollar figures (the row goes to the browser whole).

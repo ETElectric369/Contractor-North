@@ -253,6 +253,9 @@ export interface TaskValue {
   /** A task kit from his own book (0386), or null when typed. */
   kit_id: string | null;
   materials: TaskMaterial[];
+  /** What is true about THIS piece — the wall, the access, the catch — in his words (the task
+   *  sheet, field feedback 10-13). Absent on every task written before it. */
+  note?: string | null;
 }
 
 export type AnswerValue = string | number | boolean | string[] | ScopePickValue[] | TaskValue[] | null;

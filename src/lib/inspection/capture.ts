@@ -94,6 +94,8 @@ export interface CaptureMeasure {
   label: string;
   value: number | null;
   unit: string;
+  /** The task this was measured for (the task sheet, field feedback 10-13); absent = the visit's. */
+  task_id?: string;
   flag?: string;
 }
 
@@ -103,6 +105,9 @@ export interface CapturePhotoMeta {
   /** The label of whatever field had focus when the shutter fired — so the panel shot ties itself
    *  to "Panel brand" rather than landing in an anonymous grid. */
   about?: string;
+  /** The task it was taken for (the task sheet, field feedback 10-13): "in the task itself is
+   *  where we will be needing photos". `photos` stays the one list; this is placement. */
+  task_id?: string;
 }
 
 export interface InspectorCapture {
@@ -165,11 +170,13 @@ export function parseInspectorCapture(raw: unknown): InspectorCapture {
             const o = (r ?? {}) as Record<string, unknown>;
             const label = str(o.label, 200).trim();
             if (!label) return null;
+            const task_id = str(o.task_id, 80).trim();
             const measure: CaptureMeasure = {
               id: typeof o.id === "string" && o.id ? o.id : captureId(label),
               label,
               value: looseNumber(o.value),
               unit: str(o.unit, 12).trim(),
+              ...(task_id ? { task_id } : {}),
             };
             return measure;
           })
@@ -187,7 +194,8 @@ export function parseInspectorCapture(raw: unknown): InspectorCapture {
       const m = v as Record<string, unknown>;
       const caption = str(m.caption, 500).trim();
       const about = str(m.about, 200).trim();
-      if (caption || about) out[k] = { ...(caption ? { caption } : {}), ...(about ? { about } : {}) };
+      const task_id = str(m.task_id, 80).trim();
+      if (caption || about || task_id) out[k] = { ...(caption ? { caption } : {}), ...(about ? { about } : {}), ...(task_id ? { task_id } : {}) };
     }
     if (Object.keys(out).length) photo_meta = out;
   }

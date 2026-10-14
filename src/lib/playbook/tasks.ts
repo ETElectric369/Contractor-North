@@ -68,6 +68,7 @@ export function coerceTask(raw: unknown): TaskValue | null {
   const materials = Array.isArray(o.materials)
     ? (o.materials as unknown[]).map(coerceTaskMaterial).filter((m): m is TaskMaterial => !!m).slice(0, MAX_TASK_MATERIALS)
     : [];
+  const note = str(o.note, 2000);
   return {
     id: str(o.id, 80) || captureId(name),
     name,
@@ -75,6 +76,7 @@ export function coerceTask(raw: unknown): TaskValue | null {
     units: positive(o.units, 100000),
     kit_id: str(o.kit_id, 64) || null,
     materials,
+    ...(note ? { note } : {}),
   };
 }
 
@@ -155,7 +157,8 @@ export function taskLine(t: TaskValue): string {
   const forUnits = t.units !== null && t.units !== 1 ? ` for ×${t.units}` : "";
   const hours = t.hours === null ? (t.kit_id ? `hours from its kit${forUnits}` : "hours?") : `${t.hours} h${forUnits}`;
   const parts = t.materials.length ? `: ${t.materials.map(materialText).join(", ")}` : "";
-  return `${t.name} — ${hours}${parts}`;
+  const note = t.note?.trim() ? ` · note: ${t.note.trim().replace(/\s+/g, " ")}` : "";
+  return `${t.name} — ${hours}${parts}${note}`;
 }
 
 /** The list, one task per line. His line breaks are his structure (answers.factsForEstimator). */
