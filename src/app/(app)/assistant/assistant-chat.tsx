@@ -17,8 +17,10 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import * as speech from "@/lib/voice";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, HOLDING_OPEN, HOLDING_CLOSE,
+  SCREEN_OPEN, SCREEN_CLOSE, screenBlocks,
   type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard,
 } from "@/lib/assistant-protocol";
+import { performScreen } from "@/lib/nort/screen-driver";
 import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, recoverTurn, type PickerContact } from "./actions";
 import { ContactPicker } from "./contact-picker";
 import { DriverCard } from "@/components/driver-card";
@@ -55,18 +57,21 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null; ca
   // Transient tool-status ("Searching…"): show ONLY when it's the most recent thing in the stream
   // (nothing meaningful streamed after it yet), so it appears during the silent tool call and clears
   // the moment the agent's reply resumes.
+  // Screen moves (item 6) are performed by the stream loop (screenBlocks); here they are only
+  // stripped from the words, like every other block.
+  const sre = new RegExp(SCREEN_OPEN + "([\\s\\S]*?)" + SCREEN_CLOSE, "g");
   let status: string | null = null;
   const lastClose = full.lastIndexOf(STATUS_CLOSE);
   if (lastClose >= 0) {
-    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").replace(hre, "").replace(nre, "").trim();
+    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").replace(hre, "").replace(nre, "").replace(sre, "").trim();
     if (!after) {
       const sb = [...full.matchAll(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"))];
       try { status = JSON.parse(sb[sb.length - 1][1]).label ?? null; } catch {}
     }
   }
-  let text = full.replace(dre, "").replace(hre, "").replace(nre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
-  // Drop a half-arrived draft/card/status/holding block at the tail so raw JSON never flashes on screen.
-  for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN]) {
+  let text = full.replace(dre, "").replace(hre, "").replace(nre, "").replace(sre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
+  // Drop a half-arrived draft/card/status/holding/screen block at the tail so raw JSON never flashes on screen.
+  for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, SCREEN_OPEN]) {
     const p = text.indexOf(m);
     if (p >= 0) text = text.slice(0, p);
   }
@@ -469,6 +474,16 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     return () => clearInterval(id);
   }, [streaming]);
   const router = useRouter();
+  // Screen moves performed so far THIS turn (item 6): every complete block is performed exactly
+  // once, in order, as it lands — the count resets with the stream.
+  const screenDoneRef = useRef(0);
+  // A spot Nort pointed at that never showed (item 6): said under the chat for a few seconds, and
+  // the box comes back from the bar so the words are seen — never a silent miss.
+  const [missNote, setMissNote] = useState<string | null>(null);
+  const missTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Whatever Nort parked the box for, this needs eyes on the box: bring it back. */
+  const openBox = () => window.dispatchEvent(new CustomEvent("cn:assistant-box", { detail: { box: "open" } }));
+  const lastCardRef = useRef<string>("");
 
   // Put text into the LAST assistant line (the placeholder a turn appends, possibly half-filled),
   // or append one if the tail isn't an assistant line.
@@ -935,12 +950,37 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       };
 
       full = "";
+      screenDoneRef.current = 0;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         lastByteAt = Date.now();
         full += decoder.decode(value, { stream: true });
         const { text: visible, draft: liveDraft, card: liveCard, status: liveStatus, holding: liveHolding } = parseStream(full);
+        // NORT DRIVES THE SCREEN (item 6): perform each new block once, in order, the moment it is
+        // complete — the chat stays mounted across the push (it lives in the app layout), so the
+        // stream and the voice carry on while the page changes under them.
+        const moves = screenBlocks(full);
+        while (screenDoneRef.current < moves.length) {
+          const step = moves[screenDoneRef.current++];
+          try {
+            performScreen(
+              step,
+              { here: () => window.location.pathname + window.location.search, push: (p) => router.push(p) },
+              window,
+              {
+                onMiss: (s) => {
+                  setMissNote(`Couldn't find ${s.label ?? s.anchor ?? "that"} on this screen.`);
+                  if (missTimerRef.current) clearTimeout(missTimerRef.current);
+                  missTimerRef.current = setTimeout(() => setMissNote(null), 8000);
+                  openBox();
+                },
+              },
+            );
+          } catch {
+            /* a point not made is not a broken turn */
+          }
+        }
         // The server's own count of what Nort still holds: the ring and the next greeting take it now.
         if (liveHolding) setNortHolding(liveHolding);
         // `cleared` = the agent just saved the estimate → wipe the preview so it stops
@@ -948,6 +988,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         if (liveDraft) setDraft((liveDraft as { cleared?: boolean }).cleared ? null : liveDraft);
         // The driver HUD card fills the glass as its block arrives; cleared:true clears it.
         if (liveCard) setCard(liveCard.cleared ? null : liveCard);
+        // A NEW card is for the eyes: a box Nort parked as a bar comes back for it (item 6).
+        if (liveCard && !liveCard.cleared) {
+          const key = JSON.stringify(liveCard);
+          if (key !== lastCardRef.current) {
+            lastCardRef.current = key;
+            openBox();
+          }
+        }
         setStatus(liveStatus); // transient "Searching…" pill while a tool runs
         setTokens(Math.max(1, Math.round(visible.length / 4))); // rough live token count for the status line
         setMessages((m) => {
@@ -985,6 +1033,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       // directive phrase. A plain reply instead flushes its remainder and finishes the stream in order.
       const hasDirective = !!(pickDir || openDir?.url || proposal);
       if (viaVoice && hasDirective) killSpeech();
+      // A picker or a money confirm card must be SEEN: a box Nort parked as a bar comes back (item 6).
+      if (pickDir || proposal) openBox();
 
       if (pickDir) {
         // The assistant asked the user to pick a contact on screen — pop the picker; their choice
@@ -1217,7 +1267,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   sendRef.current = send;
 
   const elapsedStr = (() => { const s = Math.floor(elapsedMs / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; })();
-  const statusText = status ?? (streaming ? (tokens > 2 ? "responding…" : "thinking…") : listening ? "listening…" : speaking ? "talking…" : null);
+  // A spot Nort could not find reads here (item 6), under a live tool status, over the idle words.
+  const statusText = status ?? missNote ?? (streaming ? (tokens > 2 ? "responding…" : "thinking…") : listening ? "listening…" : speaking ? "talking…" : null);
   return (
     <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
       {/* THE WINDSHIELD — pinned at the TOP so the driver card is the hero: the chat log

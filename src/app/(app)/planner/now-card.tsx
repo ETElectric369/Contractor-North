@@ -251,7 +251,8 @@ export function NowCard({
   );
 
   return (
-    <Card className="mb-4 overflow-hidden">
+    // data-tour: Nort's "it's here" (lib/nort/screens) — the same name the tour would point at.
+    <Card className="mb-4 overflow-hidden" data-tour="now-card">
       {open ? (
         <>
           <div className="bg-brand-light/30 px-5 py-4">

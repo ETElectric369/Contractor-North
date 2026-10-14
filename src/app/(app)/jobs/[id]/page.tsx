@@ -2364,6 +2364,7 @@ export default async function JobDetailPage({
         viewerIsStaff={viewerIsStaff}
         urlSync
         look="tiles"
+        barAnchor="job-tabs"
       />
     </div>
   );

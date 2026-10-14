@@ -94,6 +94,7 @@ export function Tabs({
   look = "underline",
   activeId,
   onChange,
+  barAnchor,
 }: {
   tabs: TabDef[];
   urlSync?: boolean;
@@ -107,27 +108,30 @@ export function Tabs({
    *  panels itself). Pass both to take control; urlSync is ignored. */
   activeId?: string;
   onChange?: (id: string) => void;
+  /** A `data-tour` name for the STRIP alone (lib/nort/screens): a wrapper around <Tabs> would
+   *  name the strip and every open panel together. */
+  barAnchor?: string;
 }) {
   // An offStrip tab stays IN the list (its chip is dropped by <TabBar>, below): it is the one that
   // opens from a ?tab= link, so its content has to be here to render. Filtering it out here too
   // meant the link landed on the first tab instead (the job's Tasks, and a switched-off feature's).
   const shown = tabs.filter((t) => !t.staffOnly || viewerIsStaff);
   if (activeId !== undefined) {
-    return <TabView tabs={shown} activeId={activeId} onSelect={onChange ?? (() => {})} maxVisible={maxVisible} look={look} />;
+    return <TabView tabs={shown} activeId={activeId} onSelect={onChange ?? (() => {})} maxVisible={maxVisible} look={look} barAnchor={barAnchor} />;
   }
-  if (urlSync) return <UrlSyncedTabs tabs={shown} paramKey={paramKey} maxVisible={maxVisible} look={look} />;
-  return <StatefulTabs tabs={shown} maxVisible={maxVisible} look={look} />;
+  if (urlSync) return <UrlSyncedTabs tabs={shown} paramKey={paramKey} maxVisible={maxVisible} look={look} barAnchor={barAnchor} />;
+  return <StatefulTabs tabs={shown} maxVisible={maxVisible} look={look} barAnchor={barAnchor} />;
 }
 
 /** The tab a strip opens on when nothing names one: the first with a chip. */
 const firstOnStrip = (tabs: TabDef[]) => (tabs.find((t) => !t.offStrip) ?? tabs[0])?.id;
 
-function StatefulTabs({ tabs, maxVisible, look }: { tabs: TabDef[]; maxVisible: number; look: TabLook }) {
+function StatefulTabs({ tabs, maxVisible, look, barAnchor }: { tabs: TabDef[]; maxVisible: number; look: TabLook; barAnchor?: string }) {
   const [active, setActive] = useState(firstOnStrip(tabs));
-  return <TabView tabs={tabs} activeId={active} onSelect={setActive} maxVisible={maxVisible} look={look} />;
+  return <TabView tabs={tabs} activeId={active} onSelect={setActive} maxVisible={maxVisible} look={look} barAnchor={barAnchor} />;
 }
 
-function UrlSyncedTabs({ tabs, paramKey, maxVisible, look }: { tabs: TabDef[]; paramKey: string; maxVisible: number; look: TabLook }) {
+function UrlSyncedTabs({ tabs, paramKey, maxVisible, look, barAnchor }: { tabs: TabDef[]; paramKey: string; maxVisible: number; look: TabLook; barAnchor?: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const fromUrl = searchParams.get(paramKey);
@@ -162,7 +166,7 @@ function UrlSyncedTabs({ tabs, paramKey, maxVisible, look }: { tabs: TabDef[]; p
     window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
   }
 
-  return <TabView tabs={tabs} activeId={active} onSelect={onSelect} maxVisible={maxVisible} look={look} />;
+  return <TabView tabs={tabs} activeId={active} onSelect={onSelect} maxVisible={maxVisible} look={look} barAnchor={barAnchor} />;
 }
 
 function TabView({
@@ -171,17 +175,20 @@ function TabView({
   onSelect,
   maxVisible,
   look,
+  barAnchor,
 }: {
   tabs: TabDef[];
   activeId?: string;
   onSelect: (id: string) => void;
   maxVisible: number;
   look: TabLook;
+  barAnchor?: string;
 }) {
   const current = tabs.find((t) => t.id === activeId) ?? tabs.find((t) => t.id === firstOnStrip(tabs));
+  const bar = <TabBar items={tabs} activeId={current?.id} onSelect={onSelect} maxVisible={maxVisible} look={look} />;
   return (
     <div>
-      <TabBar items={tabs} activeId={current?.id} onSelect={onSelect} maxVisible={maxVisible} look={look} />
+      {barAnchor ? <div data-tour={barAnchor}>{bar}</div> : bar}
       {current?.content != null && <div>{current.content}</div>}
     </div>
   );

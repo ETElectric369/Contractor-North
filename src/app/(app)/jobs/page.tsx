@@ -140,7 +140,8 @@ export default async function JobsPage({
   return (
     <div>
       <PageHeader title="Jobs" description="All jobs across the business.">
-        <div className="flex items-center gap-2">
+        {/* data-tour: the spot Nort rings for "where do I start a job" (lib/nort/screens). */}
+        <div className="flex items-center gap-2" data-tour="new-job">
           {isStaff && <JobImportButton />}
           {/* createJob is requireStaff: a tech's New Job failed on Save. */}
           {isStaff && <NewJobButton customers={customers} {...newJobDefaults} />}

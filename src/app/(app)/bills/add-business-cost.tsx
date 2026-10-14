@@ -25,6 +25,8 @@ export function AddByHandButton({
   jobsUnread?: boolean;
 }) {
   return (
+    // data-tour: the spot Nort rings for "where do I type a cost in" (lib/nort/screens).
+    <span data-tour="add-by-hand" className="inline-flex">
     <QuickCostButton
       typeOnly
       jobs={jobs}
@@ -34,5 +36,6 @@ export function AddByHandButton({
       icon="none"
       className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline"
     />
+    </span>
   );
 }

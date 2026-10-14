@@ -126,6 +126,9 @@ export function GlobalAssistant({
   const [voiceLaunch, setVoiceLaunch] = useState(false); // Talk To Nort → voice; command bar → text
   const [pendingQuery, setPendingQuery] = useState<string | null>(null); // a typed question from Cmd-K
   const [collapsed, setCollapsed] = useState(false);
+  // What Nort is showing while HE parked the box as a bar (item 6) — the bar reads it. Null when
+  // the person collapsed it themselves (the Estimator line, or nothing, as before).
+  const [parkedLabel, setParkedLabel] = useState<string | null>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null); // null until first open
   const drag = useRef<{ sx: number; sy: number; bx: number; by: number } | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -157,6 +160,18 @@ export function GlobalAssistant({
     const b = panelBounds();
     return { x: Math.round(b.left + (window.innerWidth - b.left - b.right - b.w) / 2), y: 68 + safeAreaTop() };
   }
+  // WHERE NORT PARKS THE BAR (item 6): the bottom, just above the phone's dock — the top is exactly
+  // where the spots he rings sit (the Now card, New Job, Owed To You), and a bar under the topbar
+  // covered them (skeptic #6). The dock's own box says where its top is; a computer has no bar there.
+  function parkedPos() {
+    const b = panelBounds();
+    const dock = document.querySelector<HTMLElement>(".app-dock");
+    const dockTop = dock && dock.getBoundingClientRect().height > 0 ? dock.getBoundingClientRect().top : window.innerHeight;
+    const h = panelRef.current?.getBoundingClientRect().height ?? 48;
+    return { x: Math.round(b.left + (window.innerWidth - b.left - b.right - b.w) / 2), y: Math.max(8 + safeAreaTop(), dockTop - h - 8) };
+  }
+  /** The spot the box sat at before Nort parked it, to go back to. */
+  const unparkedPosRef = useRef<{ x: number; y: number } | null>(null);
 
   // The listener is added once, so it calls whatever launch() is CURRENT through this ref.
   const launchRef = useRef<() => void>(() => {});
@@ -233,6 +248,32 @@ export function GlobalAssistant({
     window.addEventListener("cn:assistant-open", onOpen);
     return () => window.removeEventListener("cn:assistant-open", onOpen);
   }, []);
+
+  // NORT PARKS HIS OWN BOX (item 6, show_screen box:"bar"): a slim bar so the screen he just drove
+  // to is the person's — and, unlike the handle's own Collapse, it does NOT stop the voice: he is
+  // mid-sentence about what they're looking at. "open" brings the box back.
+  useEffect(() => {
+    const onBox = (e: Event) => {
+      const d = (e as CustomEvent<{ box?: string; label?: string | null }>).detail;
+      if (d?.box === "bar") {
+        setCollapsed((c) => {
+          if (!c) unparkedPosRef.current = pos;
+          return true;
+        });
+        setParkedLabel(d.label?.trim() || "Nort");
+        // After the collapse paints, so the bar's own height is what gets measured.
+        requestAnimationFrame(() => setPos(parkedPos()));
+      } else if (d?.box === "open") {
+        setCollapsed(false);
+        setParkedLabel(null);
+        setPos(unparkedPosRef.current ?? centeredPos());
+        unparkedPosRef.current = null;
+      }
+    };
+    window.addEventListener("cn:assistant-box", onBox);
+    return () => window.removeEventListener("cn:assistant-box", onBox);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos]);
 
   // This is a NON-modal floating panel (no scrim, page stays usable) — so it does NOT hide the
   // mobile bottom nav. Instead, keep it on-screen after rotation / viewport resize.
@@ -330,6 +371,11 @@ export function GlobalAssistant({
                 <span className="font-semibold text-brand">ESTIMATOR</span>
                 {draft.title ? ` · ${draft.title}` : ""}
               </span>
+            ) : collapsed && parkedLabel ? (
+              <span className="truncate text-xs font-medium text-slate-500">
+                <span className="font-semibold text-brand">NORT</span>
+                {` · ${parkedLabel}`}
+              </span>
             ) : null}
             <span className="flex-1" />
             <button
@@ -338,6 +384,13 @@ export function GlobalAssistant({
                   const next = !c;
                   // Collapsing parks the conversation — stop voice so the mic isn't left hot behind a hidden panel.
                   if (next) window.dispatchEvent(new Event("cn:assistant-stop"));
+                  // The person took the handle: whatever Nort parked it for is over, and the box
+                  // goes back to where it sat before he parked it.
+                  setParkedLabel(null);
+                  if (!next && unparkedPosRef.current) {
+                    setPos(unparkedPosRef.current);
+                    unparkedPosRef.current = null;
+                  }
                   return next;
                 })
               }

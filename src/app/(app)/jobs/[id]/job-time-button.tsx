@@ -266,6 +266,7 @@ export function JobTimeButton({
       <button
         type="button"
         onClick={openModal}
+        data-tour="job-clock"
         className={triggerCls}
         // elapsedMs is a Date.now()-based live ticker, so its server/client first render
         // differs → React #418. suppressHydrationWarning covers the aria-label here + the

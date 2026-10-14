@@ -182,6 +182,7 @@ export function JobStatusControl({
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label={`Status: ${statusTitle(status)}. Change it`}
+          data-tour="job-status"
           className={cn(PILL, tone, "hover:brightness-95 disabled:opacity-60")}
         >
           {pending ? "Saving…" : statusTitle(status)}

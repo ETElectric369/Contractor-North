@@ -28,7 +28,8 @@ import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
-import { HOLDING_OPEN, HOLDING_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, sanitizeHudCard, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
+import { HOLDING_OPEN, HOLDING_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
+import { screenPromptBlock } from "@/lib/nort/screens";
 
 // A client-intent tool: show/refresh the LIVE quote preview as the agent builds it. Not a
 // DB write — the route streams it to the client's preview pane; saving is a separate step.
@@ -155,6 +156,27 @@ const REQUEST_CONTACT_TOOL = {
     properties: {
       search: { type: "string", description: "Optional initial search term to pre-fill, e.g. 'Marla'." },
       type: { type: "string", enum: ["residential", "commercial", "industrial", "subcontractor"], description: "Optional — filter the picker to one contact type." },
+    },
+  },
+} as const;
+
+// NORT DRIVES THE SCREEN (field feedback 10-13, item 6): a client-intent tool like show_card —
+// the route emits a SCREEN block mid-stream and the agent keeps talking; the phone takes the person
+// to the path, scrolls to the spot and rings it, opens the avatar menu, or parks Nort's box. It
+// moves and points, never saves (fill-vs-execute; the write freeze is untouched). The paths and
+// spot names it may use are the registry in lib/nort/screens, which also writes the prompt block.
+const SHOW_SCREEN_TOOL = {
+  name: "show_screen",
+  description:
+    "TAKE the user to a screen of the app and POINT at a spot on it (scroll there and ring it for a few seconds) — hands-free. Use for 'show me', 'take me to', 'where is', 'open the schedule / the job's costs', and whenever you explain where a button is: go there and ring it instead of describing the route. Pass `path` (an app path from DRIVING THE SCREEN, with its query), and/or `anchor` (a spot's name from the list), `menu: 'account'` to open the avatar menu, `box: 'bar'` to park your own box as a slim bar so they can see the screen while you keep talking ('open' brings it back), and `label` (3–6 words: what you're showing). It only moves and points — it saves nothing, and it is not show_card. Two moves are two calls, in order.",
+  input_schema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "A same-app path with its query, e.g. '/jobs/<id>?tab=costs', '/schedule?view=week&date=2026-10-20'. Omit to stay on the current screen." },
+      anchor: { type: "string", description: "A spot's name on that screen, e.g. 'job-tabs', 'needs-you', 'insp-photos', 'dock-jobs'. Omit to just go there." },
+      menu: { type: "string", enum: ["account"], description: "Open the avatar menu (behind their initials) first." },
+      box: { type: "string", enum: ["bar", "open"], description: "'bar' parks your box as a slim bar (keep talking); 'open' brings it back." },
+      label: { type: "string", description: "What you're showing, 3–6 words, e.g. 'the Costs tab'." },
     },
   },
 } as const;
@@ -290,7 +312,7 @@ export async function POST(req: Request) {
   // cached block. The trade line kills a bias that has now bitten twice (Nort pitched electrical
   // fields to a general contractor); the map kills "I can't do that" about features that shipped
   // — on 8/7 Nort declared the embed snippet impossible two days after it went live.
-  systemPrompt += `\n\n${NORT_PRODUCT_MAP}`;
+  systemPrompt += `\n\n${NORT_PRODUCT_MAP}\n\n${screenPromptBlock(isStaffCaller)}`;
   // SUB-CACHING SPLIT: `systemPrompt` accumulates only the STABLE core (frozen instructions +
   // org-config estimating method + playbook + write-tool rules) — byte-identical per org/role, so
   // it becomes a CACHED system block (tools cache with it, since tools render before system). Every
@@ -790,7 +812,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // input-is-data rule in the system prompt covers them).
               // The live quote preview is an Estimates door (its Save makes an estimate): off with it.
               // With Sales Tax off it carries no tax field (quoteDraftToolFor).
-              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax)] : []), SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax)] : []), SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             },
             // Strip the directive markers from MODEL text so a prompt-injection can't forge a
             // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
@@ -805,7 +827,9 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                 .split(DRAFT_OPEN).join("")
                 .split(DRAFT_CLOSE).join("")
                 .split(HUD_OPEN).join("")
-                .split(HUD_CLOSE).join("");
+                .split(HUD_CLOSE).join("")
+                .split(SCREEN_OPEN).join("")
+                .split(SCREEN_CLOSE).join("");
               if (needsRoundBreak && clean.trim()) {
                 needsRoundBreak = false;
                 if (!/\s$/.test(assistantReply) && !/^\s/.test(clean)) {
@@ -886,6 +910,22 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             if (tu.name === "show_card") {
               emit(HUD_OPEN + JSON.stringify(sanitizeHudCard(tu.input)) + HUD_CLOSE);
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, shown: true }) });
+              continue;
+            }
+            // Client-intent: DRIVE THE SCREEN (item 6). Clamp the payload (internal path, bare anchor
+            // name, closed enums), emit it mid-stream, keep going — the agent speaks its one line
+            // while the phone moves. Not a DB read/write; nothing is saved.
+            if (tu.name === "show_screen") {
+              // The office's screens are refused for a tech, and the bar only by voice — both are SAID back.
+              const shown = sanitizeScreen(tu.input, { isStaff: isStaffCaller, voice: !!body.voice });
+              const asked = (tu.input ?? {}) as Record<string, unknown>;
+              const dropped = (["path", "anchor", "menu", "box"] as const).filter((k) => asked[k] != null && asked[k] !== "" && !(k in shown));
+              emit(SCREEN_OPEN + JSON.stringify(shown) + SCREEN_CLOSE);
+              results.push({
+                type: "tool_result",
+                tool_use_id: tu.id,
+                content: JSON.stringify({ ok: true, showing: shown, ...(dropped.length ? { not_used: dropped, why: "not a screen this person can be taken to / not a spot name / box is a voice-only move — say where it is in words instead" } : {}) }),
+              });
               continue;
             }
             // Client-intent: open Maps. Turn it into an OPEN directive + end the turn (the

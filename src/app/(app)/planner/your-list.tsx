@@ -406,7 +406,7 @@ export function YourList({
   // Always drawn: the Add line is My Day's one door for a Reminder or a job's task, even on a day
   // with nothing on it (no dead end, and never a first Reminder with nowhere to type it).
   return (
-    <Card className="mb-4 overflow-hidden">
+    <Card className="mb-4 overflow-hidden" data-tour="tasks-reminders">
       <div className="flex items-center border-b border-slate-100 px-5 py-3">
         <div className="flex items-center gap-2.5">
           {/* ERIK NAMED IT: "lets not limit it and call it something more clear like Tasks &

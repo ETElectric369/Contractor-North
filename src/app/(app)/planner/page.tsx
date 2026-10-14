@@ -1077,7 +1077,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           Earlier / Next / Later: the job you're on is the Now card. */}
       {view === "week" ? (
         /* Tech week — the agenda grouped by day, the company's week start first, paged via ?week=. */
-        <Card className="mb-4 overflow-hidden">
+        <Card className="mb-4 overflow-hidden" data-tour="agenda">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="min-w-0 text-sm font-semibold text-slate-900">
               <div className="flex min-w-0 items-center gap-2">
@@ -1139,7 +1139,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       ) : (
         /* Day — the Today card holds only Earlier / Next / Later: the job you're ON is the Now
            card at the top of the page, with its doors. */
-        <Card className="mb-4 overflow-hidden">
+        <Card className="mb-4 overflow-hidden" data-tour="agenda">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <CalendarCheck className="h-4 w-4 text-brand" /> Today
@@ -1212,7 +1212,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           sentence and Undo; they land here instead, until he leaves the page. */}
       <SupplierPaperDoneTrail scope={SUPPLIER_PAPERS_SCOPE} />
       {(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (
-        <Card className="mb-4 overflow-hidden">
+        <Card className="mb-4 overflow-hidden" data-tour="needs-you">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
             <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
             {/* The open count (a pile counts one), the same number as the dock's badge. Nothing to

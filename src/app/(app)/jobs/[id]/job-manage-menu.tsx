@@ -118,6 +118,7 @@ export function JobManageMenu({
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Manage job"
+        data-tour="job-manage"
         aria-haspopup="menu"
         aria-expanded={open}
         title="Manage job"

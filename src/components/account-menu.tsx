@@ -128,9 +128,11 @@ export function AccountMenu({
   // component has to know a tour exists beyond this one listener.
   useEffect(() => {
     const onTour = (e: Event) => {
-      const d = (e as CustomEvent<{ menu?: string; open?: boolean }>).detail;
+      const d = (e as CustomEvent<{ menu?: string; open?: boolean; sticky?: boolean }>).detail;
       if (d?.menu !== "account") return;
-      setByTour(!!d.open);
+      // The tour's open is sticky (it closes what it opened); Nort's show_screen sends sticky:false
+      // so the person can close it the usual ways — otherwise it hung over the next screen.
+      setByTour(!!d.open && d.sticky !== false);
       setOpen(!!d.open);
     };
     window.addEventListener("cn:tour-menu", onTour);

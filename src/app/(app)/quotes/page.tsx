@@ -68,7 +68,7 @@ export default async function QuotesPage({
     <div>
       <PageHeader title={heading} description="Estimates are time-&-materials by default — switch any one to a fixed-price quote.">
         {estimatesOn && (
-          <Link href="/quotes/new">
+          <Link href="/quotes/new" data-tour="new-estimate">
             <Button>
               <Plus className="h-4 w-4" /> New Estimate
             </Button>

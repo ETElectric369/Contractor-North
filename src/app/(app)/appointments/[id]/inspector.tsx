@@ -368,6 +368,15 @@ export function Inspector({
     if (initialOpenTaskId) jumpTo(`task-${initialOpenTaskId}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // AND FOLLOWS A CHANGE: a push to the same route with a new ?task= (Nort's show_screen, a second
+  // link) re-renders the server page with a new prop, and the sheet opens on it — the first render
+  // seeded the state once and would otherwise ignore it (skeptic #5, carried; #6).
+  const seenOpenRef = useRef(initialOpenTaskId);
+  useEffect(() => {
+    if (initialOpenTaskId && initialOpenTaskId !== seenOpenRef.current) openTask(initialOpenTaskId);
+    seenOpenRef.current = initialOpenTaskId;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenTaskId]);
   const [seeding, startSeed] = useTransition();
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);

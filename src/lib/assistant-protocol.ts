@@ -161,7 +161,10 @@ export type AgentHudCard = {
  */
 export function safeInternalHref(raw: unknown): string | null {
   const p = typeof raw === "string" ? raw.trim() : "";
-  return p.startsWith("/") && !p.startsWith("//") && !p.includes("\\") ? p.slice(0, 512) : null;
+  // A TAB OR A NEWLINE IS AN ESCAPE (skeptic #6, item 6): the URL parser strips ASCII tab, CR and LF
+  // before it reads a path, so "/\t/evil.com" is "//evil.com" — protocol-relative — by the time the
+  // router sees it. No control character and no whitespace survives here.
+  return p.startsWith("/") && !p.startsWith("//") && !p.includes("\\") && !/[\s\u0000-\u001f\u007f]/.test(p) ? p.slice(0, 512) : null;
 }
 
 /**
@@ -188,4 +191,122 @@ export function sanitizeHudCard(input: unknown): Partial<AgentHudCard> {
     });
   }
   return out as Partial<AgentHudCard>;
+}
+
+// NORT DRIVES THE SCREEN (field feedback 10-13, item 6; Erik 2026-10-13: "compare how you have
+// access to my entire computer and can connect to anywhere you need to in order to complete a
+// task, thats what we are looking for with Nort"). The first rung is the BODY: a client directive
+// that takes the person to a screen, scrolls to a named spot on it and rings it, opens the avatar
+// menu, or parks Nort's own box as a bar so the screen is theirs while he keeps talking. Emitted
+// MID-stream like HUD (delimited; the agent keeps talking after it moves the screen) — but unlike
+// HUD every complete block is PERFORMED ONCE, in order: "go to the job, then its Costs tab" is
+// two blocks, not a last-wins card. It only moves and points: fill-vs-execute holds, nothing is
+// saved, and the write freeze is untouched.
+export const SCREEN_OPEN = "␞CN_SCREEN␞";
+export const SCREEN_CLOSE = "␞/CN_SCREEN␞";
+
+export type AgentScreen = {
+  /** A same-app path with its query, e.g. "/jobs/<id>?tab=costs"; omitted = stay on this screen. */
+  path?: string | null;
+  /** A named spot on the screen to scroll to and ring: a `data-tour` name or an element id. */
+  anchor?: string | null;
+  /** A menu to open first: the avatar menu behind the person's initials. */
+  menu?: "account" | null;
+  /** Nort's own box: "bar" parks it as a slim bar (he keeps talking), "open" brings it back. */
+  box?: "bar" | "open" | null;
+  /** What he is showing, in a few words — the parked bar reads it, e.g. "the Costs tab". */
+  label?: string | null;
+};
+
+/** A spot's name: the same alphabet `data-tour` and element ids use here; never a selector. */
+export const SCREEN_ANCHOR_RE = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
+
+/**
+ * THE SCREENS A DRIVE MAY LAND ON — the first path segment, pinned to lib/nort/screens by a test
+ * (kept here so this module stays dependency-free). An internal path is not enough: /api/google/
+ * connect bounces to Google, /login leaves the app shell and kills the chat, and a query key like
+ * ?debrief=1 opens a door of its own. So a drive is a KNOWN screen, an optional record id, and
+ * only the query keys the pages read.
+ */
+export const SCREEN_ROOTS = [
+  "planner", "schedule", "timeclock", "jobs", "quotes", "billing", "bills", "crm", "leads", "inspections",
+  "appointments", "settings", "timecards", "price-list", "analytics", "reconcile", "team",
+] as const;
+/** The office's screens: a tech's drive there is refused (and the model is told), never a dead page. */
+export const SCREEN_ROOTS_STAFF_ONLY = new Set<string>([
+  "schedule", "quotes", "billing", "bills", "crm", "leads", "inspections", "timecards", "price-list", "analytics", "reconcile", "team",
+]);
+/** The query keys the pages read (tabs.tsx ?tab=, schedule view/date, planner view/week, …). */
+export const SCREEN_QUERY_KEYS = new Set<string>(["tab", "view", "date", "week", "status", "q", "open", "focus", "task", "type", "sort", "due"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A drive's path, or null: internal (safeInternalHref), a known screen root, at most one more
+ * segment (a record's UUID, or "new" for a builder), and only the pages' own query keys with plain
+ * values — returned canonical, so what the phone pushes is exactly what passed.
+ */
+export function screenPath(raw: unknown, isStaff = true): string | null {
+  const p = safeInternalHref(raw);
+  if (!p) return null;
+  let u: URL;
+  try {
+    u = new URL(p, "http://x.invalid");
+  } catch {
+    return null;
+  }
+  if (u.origin !== "http://x.invalid") return null;
+  const segs = u.pathname.split("/").filter(Boolean);
+  if (segs.length < 1 || segs.length > 2) return null;
+  const root = segs[0].toLowerCase();
+  if (!(SCREEN_ROOTS as readonly string[]).includes(root)) return null;
+  if (!isStaff && SCREEN_ROOTS_STAFF_ONLY.has(root)) return null;
+  if (segs.length === 2 && !UUID_RE.test(segs[1]) && segs[1] !== "new") return null;
+  segs[0] = root;
+  const q = new URLSearchParams();
+  for (const [k, v] of u.searchParams) {
+    if (!SCREEN_QUERY_KEYS.has(k)) return null;
+    const val = v.trim().slice(0, 80);
+    if (/[\u0000-\u001f\u007f<>"'`]/.test(val)) return null;
+    q.set(k, val);
+  }
+  const qs = q.toString();
+  return `/${segs.join("/")}${qs ? `?${qs}` : ""}`;
+}
+
+/**
+ * Server-side clamp for a show_screen payload before it reaches the client. The path is
+ * model-authored and the model reads customer-controlled text, so it passes the same internal-only
+ * predicate a HUD href does (safeInternalHref); an anchor is a bare name (a selector would be an
+ * injection surface the moment one is interpolated into querySelector); the enums are closed; the
+ * label is text. Anything else is dropped, never "fixed".
+ */
+export function sanitizeScreen(input: unknown, opts: { isStaff?: boolean; voice?: boolean } = {}): AgentScreen {
+  const c = (input ?? {}) as Record<string, unknown>;
+  const out: AgentScreen = {};
+  const path = screenPath(c.path, opts.isStaff !== false);
+  if (path) out.path = path;
+  const anchor = typeof c.anchor === "string" ? c.anchor.trim() : "";
+  if (SCREEN_ANCHOR_RE.test(anchor)) out.anchor = anchor;
+  if (c.menu === "account") out.menu = "account";
+  // Parking the box is a VOICE move: by text the reply and the input live in it, so a bar would hide
+  // the conversation he is having (skeptic #6). opts.voice unset = the client re-clamp: keep it.
+  if ((c.box === "bar" && opts.voice !== false) || c.box === "open") out.box = c.box;
+  const label = typeof c.label === "string" ? c.label.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+  if (label) out.label = label;
+  return out;
+}
+
+/** Every COMPLETE screen block in the stream so far, in order (the client performs each once;
+ *  an unparseable block stays in the list as an empty step so the count never slips). */
+export function screenBlocks(full: string): AgentScreen[] {
+  const re = new RegExp(SCREEN_OPEN + "([\\s\\S]*?)" + SCREEN_CLOSE, "g");
+  const out: AgentScreen[] = [];
+  for (const m of full.matchAll(re)) {
+    try {
+      out.push(sanitizeScreen(JSON.parse(m[1])));
+    } catch {
+      out.push({});
+    }
+  }
+  return out;
 }

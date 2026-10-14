@@ -210,7 +210,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       </PageHeader>
 
       {/* OWED TO YOU: one figure, what of it is late, and one thin bar of current against late. */}
-      <Card className="mb-4">
+      <Card className="mb-4" data-tour="owed-to-you">
         <CardContent className="py-4">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="text-sm font-medium text-slate-600">Owed To You</span>

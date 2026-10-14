@@ -316,7 +316,7 @@ export default async function SchedulePage({
           (globals.css `turned`) the calendar comes FIRST and the rail follows it — rotating to see
           the calendar must not land you on the rail. */}
       <div className="schedule-split space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
-        <aside className="lg:sticky lg:top-4">
+        <aside className="lg:sticky lg:top-4" data-tour="waiting-for-a-day">
           {/* WAITING FOR A DAY (n): the open work on the rail, counted. A read that came back full may
               have left some out, so the count says "n+" and one line says where the rest are
               (nothing silent: a capped list never passes for the whole of it). */}
