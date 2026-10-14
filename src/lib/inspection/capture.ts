@@ -246,7 +246,10 @@ export function mergeCaptureSections(stored: unknown, patch: CapturePatch): Insp
   if (patch.photos !== undefined) next.photos = patch.photos.filter((p) => typeof p === "string" && !!p.trim());
   if (patch.items !== undefined) next.items = patch.items;
   if (patch.measures !== undefined) next.measures = patch.measures;
-  if (patch.photo_meta !== undefined) next.photo_meta = patch.photo_meta;
+  // PLACEMENT MERGES, never replaces: a phone's map is a snapshot from when its page opened, and
+  // the office may have captioned or placed photos since. A key in the patch wins; the rest
+  // stand. To take a placement OFF, write the key with task_id "" — the re-parse drops it.
+  if (patch.photo_meta !== undefined) next.photo_meta = { ...(base.photo_meta ?? {}), ...patch.photo_meta };
 
   next.rev = (base.rev ?? 0) + 1;
   // Re-parse so clamping, orphan-dropping and the quantity law apply to whatever the patch brought.

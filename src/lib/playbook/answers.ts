@@ -96,12 +96,16 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
       // membership in the book and a kit's in this org are checked where the book is known.
       return coerceTasks(v);
     case "scope": {
-      // ONE WORD OR A FEW, his: a chip or what he typed — never refused for being off the list
-      // (type freely is a mode of this slot, and the list is never exhaustive). The first string
-      // of a list (an old select answer surviving a kind change) is kept, not nulled.
+      // HIS WORDS, his: a chip or what he typed — never refused for being off the list (type
+      // freely is a mode of this slot, and the list is never exhaustive). The OPEN cap, not a chip
+      // cap: Erik's real scope today is a 700-character paragraph under an open need, and the day
+      // he turns that need into the scope kind its answers must survive the next autosave whole.
+      // The first string of a list (an old select answer surviving a kind change) is kept; a list
+      // of objects (a task list left behind by a kind change) is nothing, never "[object Object]".
       const raw = Array.isArray(v) ? v[0] : v;
-      const s = String(raw ?? "").trim().replace(/\s+/g, " ");
-      return s ? s.slice(0, 200) : null;
+      if (raw === null || raw === undefined || typeof raw === "object") return null;
+      const s = String(raw).trim();
+      return s ? s.slice(0, 8000) : null;
     }
     default:
       return String(v).slice(0, n.slot.long ? 8000 : 500);

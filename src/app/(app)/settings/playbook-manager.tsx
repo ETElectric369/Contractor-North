@@ -51,7 +51,7 @@ import { clearPlaybook, installPlaybookStarter, savePlaybook } from "./playbook-
 type Kind = "scope" | "one" | "many" | "number" | "text" | "long" | "file" | "scopes" | "tasks" | "open";
 
 const KIND_LABEL: Record<Kind, string> = {
-  scope: "The scope — what kind of job it is (typed freely, or picked from your own words)",
+  scope: "The scope — what kind of job it is",
   one: "Pick one",
   many: "Pick any that apply",
   number: "A number",
@@ -540,7 +540,7 @@ export function PlaybookManager({
                           onChange={(e) => {
                             // Record the outgoing list BEFORE the slot is replaced — this is the
                             // only moment it still exists.
-                            if (n.slot?.type === "select" && n.slot.options.length)
+                            if ((n.slot?.type === "select" || n.slot?.type === "scope") && n.slot.options?.length)
                               lastOptions.current.set(n.key, n.slot.options);
                             edit(i, {
                               slot: slotForKind(e.target.value as Kind, n.slot, lastOptions.current.get(n.key)),
@@ -564,13 +564,15 @@ export function PlaybookManager({
                           <Label className="mb-1.5">How the scope is answered</Label>
                           <Select
                             value={n.slot.options ? "words" : "free"}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              // His words survive a trip through "typed freely" and back.
+                              if (n.slot?.type === "scope" && n.slot.options?.length) lastOptions.current.set(n.key, n.slot.options);
                               edit(i, {
                                 slot: e.target.value === "words"
                                   ? { type: "scope", options: n.slot?.type === "scope" && n.slot.options?.length ? n.slot.options : lastOptions.current.get(n.key) ?? [] }
                                   : { type: "scope" },
-                              })
-                            }
+                              });
+                            }}
                           >
                             <option value="free">Typed freely — a box</option>
                             <option value="words">Picked from my words — and a box for the rest</option>
@@ -724,7 +726,7 @@ export function PlaybookManager({
                           {(n.when ?? []).map((c, ci) => {
                             const target = byKey.get(c.key);
                             const mode = clauseMode(c);
-                            const opts = target?.slot?.type === "select" ? target.slot.options : [];
+                            const opts = target?.slot?.type === "select" ? target.slot.options : target?.slot?.type === "scope" ? target.slot.options ?? [] : [];
                             const setClause = (next: Clause) =>
                               edit(i, { when: (n.when ?? []).map((x, k) => (k === ci ? next : x)) });
                             return (

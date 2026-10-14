@@ -166,14 +166,16 @@ export function taskMoney(d: TaskDetail): { labor: number; parts: number; total:
  */
 export function taskFlags(d: TaskDetail): string | undefined {
   const flags: string[] = [];
-  if (d.hours === null) flags.push("hours?");
-  else if (d.rate <= 0) flags.push("no company labor rate set");
-  // A KIT WITH NO COUNT (audit v1085, carried [5]): the kit silences "hours?" (it carries the hours per
-  // unit), so a task that picked one and left Units blank priced as ONE unit and asked nothing — seven
-  // footings went out as one. The hole asks ([[no-speculation]]); typing 1 answers it.
-  if (d.kit_id && d.units === null) flags.push("units?");
+  // A KIT WITH NO COUNT (audit v1085, carried [5]; field feedback 10-13): the kit carries the hours
+  // and parts PER UNIT, so the one thing the line asks is the count — "units?" — and until it is
+  // given the line prices nothing (buildTaskDetail seeds it asking). Typing 1 answers it.
+  const uncounted = !!d.kit_id && d.units === null;
+  if (d.hours === null && !uncounted) flags.push("hours?");
+  else if (d.hours !== null && d.rate <= 0) flags.push("no company labor rate set");
+  if (uncounted) flags.push("units?");
   for (const m of d.materials.filter(named)) {
-    if (m.qty === null) flags.push(`how many? ${m.name}`);
+    // A kit part with no count is the same one question ("units?"), not one per part.
+    if (m.qty === null && !(uncounted && m.from_kit)) flags.push(`how many? ${m.name}`);
     // A coded part the book priced at $0 has a cost (0) and asks for a price; a code the book does
     // not carry has no cost at all and says so.
     if (m.sell === null) flags.push(m.code && m.cost === null ? `not in the price book: ${m.code}` : `price? ${m.name}`);
@@ -272,16 +274,25 @@ function materialDetail(m: TaskMaterial, ctx: TaskLineContext): TaskDetailMateri
 export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDetail {
   const kit = task.kit_id ? ctx.kits?.get(task.kit_id) ?? null : null;
   const fromKit = kit ? expandTaskKit(task, kit, { orgDefaultPct: ctx.pricing.orgDefaultPct ?? 0, levelPct: ctx.pricing.levelPct }) : null;
-  const kitHours = task.hours === null && fromKit?.hours !== null && fromKit?.hours !== undefined;
+  // A KIT TASK WITH NO COUNT IS ASKING ([[no-speculation]]): "Add The Deck Tasks" drops seven kit
+  // tasks on a visit with no units on any of them; priced as one unit each they would be seven
+  // dollar figures nobody gave. The kit's hours and parts are named and NOT counted until the
+  // units are (the builder's units box re-derives them through reexpandTaskDetail). His own typed
+  // hours still win.
+  const uncounted = !!kit && task.units === null;
+  const kitHours = task.hours === null && !uncounted && fromKit?.hours !== null && fromKit?.hours !== undefined;
   return {
     task_id: task.id,
-    hours: task.hours ?? fromKit?.hours ?? null,
+    hours: task.hours ?? (uncounted ? null : fromKit?.hours ?? null),
     rate: ctx.rate,
     units: task.units,
     kit_id: kit ? kit.id : null,
     // The kit's parts are marked as the kit's, so a change of units re-derives them and leaves
     // his own alone (reexpandTaskDetail).
-    materials: [...(fromKit?.materials ?? []).map((m) => ({ ...m, from_kit: true as const })), ...task.materials.map((m) => materialDetail(m, ctx))],
+    materials: [
+      ...(fromKit?.materials ?? []).map((m) => ({ ...m, ...(uncounted ? { qty: null } : {}), from_kit: true as const })),
+      ...task.materials.map((m) => materialDetail(m, ctx)),
+    ],
     ...(kitHours ? { hours_from_kit: true as const } : {}),
   };
 }

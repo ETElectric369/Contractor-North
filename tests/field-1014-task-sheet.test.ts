@@ -42,9 +42,15 @@ describe("a measurement and a photo may be placed on a task; the lists stay one 
     expect(c.photo_meta).toEqual({ "org/a.jpg": { task_id: "t1" }, "org/b.jpg": { caption: "panel" }, "org/c.pdf": { about: "Plans", task_id: "t2" } });
     // placement for a photo that is not on the list is noise that outlives its subject
     expect(c.photo_meta).not.toHaveProperty("org/gone.jpg");
-    const merged = mergeCaptureSections(c, { photo_meta: { ...c.photo_meta, "org/b.jpg": { caption: "panel", task_id: "t1" } } });
+    // a patch MERGES placements (a phone's map is a snapshot): the key it names wins, the rest stand
+    const merged = mergeCaptureSections(c, { photo_meta: { "org/b.jpg": { caption: "panel", task_id: "t1" } } });
     expect(merged.photo_meta!["org/b.jpg"]).toEqual({ caption: "panel", task_id: "t1" });
+    expect(merged.photo_meta!["org/a.jpg"]).toEqual({ task_id: "t1" });
     expect(merged.measures![0].task_id).toBe("t1");
+    // taking a placement OFF: task_id "" drops it on the re-parse, the caption stays
+    const off = mergeCaptureSections(merged, { photo_meta: { "org/b.jpg": { caption: "panel", task_id: "" }, "org/a.jpg": { task_id: "" } } });
+    expect(off.photo_meta!["org/b.jpg"]).toEqual({ caption: "panel" });
+    expect(off.photo_meta).not.toHaveProperty("org/a.jpg");
   });
   it("the page opens a task from ?task= — an id, never a sentence", () => {
     const page = read("src/app/(app)/appointments/[id]/page.tsx");

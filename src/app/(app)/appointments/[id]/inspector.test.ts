@@ -451,7 +451,7 @@ describe("the scope lights its kits (field feedback 10-13, item 2): one offer ro
     const FREE_SHEET = { ...SCOPE_SHEET, playbook: { needs: [{ ...SCOPE_SHEET.playbook.needs[0], slot: { type: "scope" } }, SCOPE_SHEET.playbook.needs[1]] } };
     const flatKits = DECK_KITS.map((k) => ({ ...k, category: null }));
     const html = render("office", { templates: [FREE_SHEET], taskKits: flatKits, initialAnswers: { work: "Panel swap", tasks: [{ id: "t1", name: "Swap", hours: null, units: null, kit_id: null, materials: [] }] } });
-    expect(html).toContain('value="Panel swap"');
+    expect(html).toContain(">Panel swap</textarea>"); // a growing box: his scope may be a paragraph
     expect(html).not.toContain(">Something Else<");
     expect(html).not.toContain("<optgroup");
     expect(html).toContain('<option value="dk1"');
@@ -477,8 +477,11 @@ describe("the task sheet (field feedback 10-13, item 2b): rows, one open task, i
     expect(t).toContain("Transfer switch");
     expect(t).toContain("Hot tub wires");
     expect((html.match(/>hours\?</g) ?? []).length).toBe(1); // t2 asks, on its row
-    expect(html).toContain("1 photo"); // t2's row counts its own photo and measurement
-    expect(html).toContain("1 measurement");
+    // the row's second line carries the counts on every width (the phone is where he reads them)
+    const row2 = html.slice(html.indexOf('data-task-row="t2"'), html.indexOf("</div>", html.indexOf('data-task-row="t2"')));
+    expect(row2).toContain("1 photo · 1 measurement");
+    expect(row2).not.toContain("hidden");
+    expect(html).toContain('aria-expanded="false" data-task-row="t2"');
     expect(buttons(html).map((b) => b.text)).toContain("Add A Task");
     expect(buttons(html).map((b) => b.text)).not.toContain("Done");
   });
@@ -529,5 +532,25 @@ describe("the task sheet (field feedback 10-13, item 2b): rows, one open task, i
     expect(html).toContain('id="insp-photos"');
     const lead = render("crewLead", over());
     expect(buttons(lead.slice(lead.indexOf('aria-label="Jump To"'), lead.indexOf("Inspection"))).map((b) => b.text)).toEqual(["Tasks", "Photos", "Notes"]);
+  });
+});
+
+describe("the task sheet, the skeptic's round: the note holds, an orphaned measurement comes back to the visit", () => {
+  it("a stored note is in the box (every task key survives the live reader)", () => {
+    const answers = { ...ANSWERS, tasks: [{ ...ANSWERS.tasks[0], note: "stucco wall, core drill" }, ANSWERS.tasks[1]] };
+    const html = render("office", { initialAnswers: answers, initialOpenTaskId: "t1" });
+    expect(html).toContain(">stucco wall, core drill</textarea>");
+  });
+  it("a measurement placed on a task that is gone shows in the visit's own list, and is counted", () => {
+    const cap = { notes: "", photos: [], measures: [{ id: "m9", label: "Orphan", value: 3, unit: "ft", task_id: "t-gone" }] };
+    const html = render("office", { initialCapture: cap, initialPhotos: [], initialOpenTaskId: null });
+    expect(html).toContain('value="Orphan"');
+    expect(textOf(html)).toContain("1 measurements");
+  });
+  it("the scroll targets clear the sticky bar", () => {
+    const html = render("office", { initialOpenTaskId: null });
+    expect(html).toMatch(/id="task-t1" class="scroll-mt-16/);
+    expect(html).toMatch(/class="mt-3 scroll-mt-16" id="insp-where"/);
+    expect(html).toMatch(/id="insp-photos" class="scroll-mt-16"/);
   });
 });

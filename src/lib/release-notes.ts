@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1094", date: "2026-10-14", line: "The scope is a playbook setting, typed freely or picked from your own words, and its word offers the kits filed under it as tasks; a task opens with its own photos, measurements and note; a jump bar" },
   { version: "cn-v1093", date: "2026-10-14", line: "Nort can say what's new in the app and whether your phone has it, hands over everything he holds at one yes, says how far back it was filed, and skips it when you say so" },
   { version: "cn-v1092", date: "2026-10-13", line: "A greeting you answer over counts as asked, and what Nort holds is told at every turn's end" },
   { version: "cn-v1091", date: "2026-10-13", line: "Nort speaks first: a greeting the moment the mic is ready, by your name, naming what he holds and asking once" },

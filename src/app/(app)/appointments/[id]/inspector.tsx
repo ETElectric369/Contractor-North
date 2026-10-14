@@ -14,7 +14,7 @@ import { prepareImageForUpload } from "@/lib/image-prep";
 import { coerceByPlaybook, retiredAnswers, retiredLabel } from "@/lib/playbook/answers";
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
-import { taskAsking, type TaskMaterial, type TaskValue } from "@/lib/playbook/tasks";
+import { sameTask, taskAsking, type TaskMaterial, type TaskValue } from "@/lib/playbook/tasks";
 import { groupedKits, kitsForScope, offerLabel, scopeWord } from "@/lib/playbook/scope";
 import { expandTaskKit, type TaskKit } from "@/lib/estimate/task-lines";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -120,6 +120,9 @@ function liveTasks(v: unknown): TaskValue[] {
       units: num(o.units),
       kit_id: text(o.kit_id),
       materials,
+      // Every key a task carries must survive this reader, or the box it feeds snaps back to ""
+      // on the next keystroke and any other edit erases what was stored (the task sheet's note).
+      ...(text(o.note) ? { note: text(o.note) } : {}),
     }];
   });
 }
@@ -351,21 +354,33 @@ export function Inspector({
   const [photoMeta, setPhotoMeta] = useState<Record<string, CapturePhotoMeta>>(stored.photo_meta ?? {});
   /** The task a Take / Add inside a task sheet is for; read and cleared by upload(). */
   const pendingTaskRef = useRef<string | null>(null);
-  const openTask = (id: string | null) => {
-    setOpenTaskId(id);
-    if (id && typeof document !== "undefined")
-      requestAnimationFrame(() => document.getElementById(`task-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
-  };
   const jumpTo = (id: string) => {
     if (typeof document === "undefined") return;
     requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
+  const openTask = (id: string | null) => {
+    pendingTaskRef.current = null; // a Take cancelled inside one task must not place the next shot
+    setOpenTaskId(id);
+    if (id) jumpTo(`task-${id}`);
+  };
+  // The ?task= door lands ON the task, not at the top of the page.
+  useEffect(() => {
+    if (initialOpenTaskId) jumpTo(`task-${initialOpenTaskId}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [seeding, startSeed] = useTransition();
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
 
   const playbook = useMemo<Playbook>(() => playbookForForm(template), [template]);
+  // Every task on the sheet, by id: a measurement placed on a task that is gone (removed, or never
+  // named and so never saved) belongs to the visit again and shows in its own list.
+  const taskIds = useMemo(
+    () => new Set(playbook.needs.filter((n) => n.slot?.type === "tasks").flatMap((n) => liveTasks(answers[n.key]).map((t) => t.id))),
+    [playbook, answers],
+  );
+  const claimed = (m: CaptureMeasure) => !!m.task_id && taskIds.has(m.task_id);
 
   // THE ASK is what applies AND is still unanswered. The moment you answer something it leaves
   // the top and shows up below — the top of the screen is never a list of things you've done.
@@ -839,7 +854,7 @@ export function Inspector({
     // or a one-line box. The answer is one string either way; what makes it THE scope is read
     // by the task list below (scopeWord → the kit offer), not by its control.
     if (n.slot?.type === "scope") {
-      return control({ ...n, slot: n.slot.options?.length ? { type: "select", options: n.slot.options, other: true } : { type: "text" } });
+      return control({ ...n, slot: n.slot.options?.length ? { type: "select", options: n.slot.options, other: true } : { type: "text", long: true } });
     }
 
     // AN OPEN NEED — no slot, so no typed control can hold it. A box, because he types it himself
@@ -1103,6 +1118,29 @@ export function Inspector({
         setMeasures(next);
         queueCapture({ measures: next });
       };
+      // REMOVING A TASK gives its measurements and photos back to the visit — nothing it held is
+      // lost or hidden. The photo placement comes off with task_id "" (the server merges maps; an
+      // empty task_id is dropped on the re-parse).
+      const removeTask = (i: number) => {
+        const gone = tasks[i];
+        setTasks(tasks.filter((_, j) => j !== i));
+        if (measures.some((m) => m.task_id === gone.id)) {
+          const next = measures.map((m) => (m.task_id === gone.id ? (({ task_id: _t, ...rest }) => rest)(m) : m));
+          setMeasures(next);
+          queueCapture({ measures: next });
+        }
+        const placed = Object.entries(photoMeta).filter(([, m]) => m.task_id === gone.id);
+        if (placed.length) {
+          const next = { ...photoMeta };
+          const patch: Record<string, CapturePhotoMeta> = {};
+          for (const [path, m] of placed) {
+            next[path] = (({ task_id: _t, ...rest }) => rest)(m);
+            patch[path] = { ...next[path], task_id: "" };
+          }
+          setPhotoMeta(next);
+          queueCapture({ photo_meta: patch });
+        }
+      };
       const hasBook = office && priceBook.length > 0;
       const bookId = `tasks-book-${n.key}`;
       const bookText = (b: BookRow) => `${b.code} — ${b.description}`;
@@ -1120,7 +1158,7 @@ export function Inspector({
       // that are not on the list yet, offered as ONE row. Each arrives as a DRAFT task — the kit's
       // name and hours per unit, no units, no count: it ASKS (no-speculation); he keeps or removes.
       const word = scopeWord(playbook, answers);
-      const offer = kitsPicker && word ? kitsForScope(taskKits, word).filter((k) => !tasks.some((t) => t.kit_id === k.id)) : [];
+      const offer = kitsPicker && word ? kitsForScope(taskKits, word).filter((k) => !tasks.some((t) => t.kit_id === k.id || sameTask(t.name, k.name))) : [];
       const groups = groupedKits(taskKits, word);
       const kitOption = (k: TaskKit) => (
         <option key={k.id} value={k.id}>
@@ -1148,7 +1186,7 @@ export function Inspector({
             </button>
           )}
           {tasks.map((t, i) => {
-            const isOpen = openTaskId === t.id;
+            const sheetOpen = openTaskId === t.id;
             const kitOf = t.kit_id ? taskKits.find((k) => k.id === t.kit_id) ?? null : null;
             const taskPhotos = photos.filter((p) => photoMeta[p.path]?.task_id === t.id);
             const taskMeasures = measures.filter((m) => m.task_id === t.id);
@@ -1165,21 +1203,24 @@ export function Inspector({
               taskMeasures.length ? `${taskMeasures.length} measurement${taskMeasures.length === 1 ? "" : "s"}` : null,
             ].filter(Boolean).join(" · ");
             return (
-            <div key={t.id} id={`task-${t.id}`} className={isOpen ? "rounded-lg border border-brand/50 p-2 ring-1 ring-brand/20" : "rounded-lg border border-slate-200"}>
-              {!isOpen ? (
+            <div key={t.id} id={`task-${t.id}`} className={sheetOpen ? "scroll-mt-16 rounded-lg border border-brand/50 p-2 ring-1 ring-brand/20" : "scroll-mt-16 rounded-lg border border-slate-200"}>
+              {!sheetOpen ? (
                 <div
                   role="button"
                   tabIndex={0}
+                  aria-expanded={false}
                   data-task-row={t.id}
                   onClick={() => openTask(t.id)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } }}
-                  className="flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-2 text-left active:bg-slate-50"
+                  className="flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left active:bg-slate-50"
                 >
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{t.name.trim() || "A task with no name yet"}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-800">{t.name.trim() || "A task with no name yet"}</span>
+                    {rowWords && <span className="block truncate text-xs text-slate-500">{rowWords}</span>}
+                  </span>
                   {!t.name.trim() && chip("name?")}
                   {taskAsking(t) && chip("hours?")}
                   {!!kitOf && t.units === null && chip("units?", "How many units? The kit's hours and parts are per unit")}
-                  {rowWords && <span className="hidden shrink-0 text-xs text-slate-500 sm:inline">{rowWords}</span>}
                   <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
                 </div>
               ) : (
@@ -1199,7 +1240,7 @@ export function Inspector({
                 {!readOnly && (
                   <button
                     type="button"
-                    onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
+                    onClick={() => removeTask(i)}
                     aria-label="Remove This Task"
                     className={removeClass}
                   >
@@ -1570,7 +1611,8 @@ export function Inspector({
     );
   };
 
-  const tasksKey = playbook.needs.find((n) => n.slot?.type === "tasks")?.key ?? null;
+  // The Tasks chip lands on the tasks question only while it applies (a rule may gate it off).
+  const tasksKey = applicableNeeds(playbook, answers).find((n) => n.slot?.type === "tasks")?.key ?? null;
   const jumps: { label: string; go: () => void }[] = [
     ...(office ? [{ label: "Where", go: () => jumpTo("insp-where") }] : []),
     ...(tasksKey ? [{ label: "Tasks", go: () => jumpTo(`need-${tasksKey}`) }] : []),
@@ -1581,7 +1623,7 @@ export function Inspector({
     <>
     {/* THE JUMP BAR (Erik, in front of a client: "i couldnt jump to what i needed when i needed
         it"). Sticky at the top of the scroll; one tap lands on the piece. */}
-    <div className="sticky top-0 z-20 -mx-1 mb-2 flex gap-2 overflow-x-auto bg-slate-50/95 px-1 py-1.5 backdrop-blur" aria-label="Jump To">
+    <div role="group" className="sticky top-0 z-20 -mx-1 mb-2 flex gap-2 overflow-x-auto bg-slate-50/95 px-1 py-1.5 backdrop-blur" aria-label="Jump To">
       {jumps.map((j) => (
         <button key={j.label} type="button" onClick={j.go} className="min-h-[44px] shrink-0 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 active:bg-slate-50">
           {j.label}
@@ -1645,7 +1687,7 @@ export function Inspector({
             it into the title (which is what 4 of 13 real inspections did) was the only way to
             record it before. Saves on resolve/blur, and renames a stock-titled record so a list
             of visits stops reading "Site inspection" six times. */}
-        <div className="mt-3" id="insp-where">
+        <div className="mt-3 scroll-mt-16" id="insp-where">
           <Label className="mb-1.5">Where</Label>
           {office ? (
             <>
@@ -1801,7 +1843,7 @@ export function Inspector({
             worst possible moment for the scope to vanish. Labelled with the SENTENCE he answered,
             not the short heading — "Scope" tells him nothing about the 700 characters underneath. */}
         {spine.map((n) => (
-          <div key={n.key} id={`need-${n.key}`} className="mt-3">
+          <div key={n.key} id={`need-${n.key}`} className="mt-3 scroll-mt-16">
             <Label className="mb-1">{n.ask}</Label>
             {n.why && <p className="mb-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{n.why}</p>}
             {control(n)}
@@ -1853,7 +1895,7 @@ export function Inspector({
                 ONE EXCEPTION, and it is the whole point of the flag: a HOLD always shows. "Don't
                 let me price without this" cannot be a thing you have to go looking for. */}
             {ask.map((n) => (
-              <div key={n.key} id={`need-${n.key}`}>
+              <div key={n.key} id={`need-${n.key}`} className="scroll-mt-16">
                 {/* THE SENTENCE, not the heading. His sheet had a field called "Panel" — he typed
                     2 into it and then 2 again into the next box, because a heading transmits
                     nothing about the answer it wants. */}
@@ -1903,7 +1945,7 @@ export function Inspector({
             <SectionLabel>Answered</SectionLabel>
             <div className="mt-2 space-y-3">
               {answered.map((n) => (
-                <div key={n.key} id={`need-${n.key}`} className="rounded-lg bg-slate-50 p-3">
+                <div key={n.key} id={`need-${n.key}`} className="scroll-mt-16 rounded-lg bg-slate-50 p-3">
                   {/* The SHORT label down here — the sentence did its job upstairs; a recap of
                       twelve full questions is a wall. */}
                   <div className="text-[11px] uppercase tracking-wide text-slate-400">{n.label}</div>
@@ -1916,11 +1958,11 @@ export function Inspector({
 
         {/* MEASUREMENTS — still always available, now not always VISIBLE. Typed rows for what a
             kit can size itself from, plus the prose box for the shape a number can't hold. */}
-        {shows("measures", measures.some((m) => !m.task_id) || !!proseMeasurements.trim()) && (
+        {shows("measures", measures.some((m) => !claimed(m)) || !!proseMeasurements.trim()) && (
         <div>
           <SectionLabel>Measurements</SectionLabel>
           <div className="mt-2 space-y-2">
-            {measures.map((m, i) => m.task_id ? null : (
+            {measures.map((m, i) => claimed(m) ? null : (
               <div key={m.id} className="flex items-center gap-2">
                 <Input
                   value={m.label}
@@ -2050,15 +2092,17 @@ export function Inspector({
             some pictures like i normally do to look at later" — the camera is the one thing that
             gets reached for on every job whether the rest of this screen helps or not. Hiding it
             behind a chip would be tidiness at the cost of the single most-used control. */}
-        <div id="insp-photos">
+        <div id="insp-photos" className="scroll-mt-16">
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
-            {!readOnly && <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop Photos Or PDFs" className="shrink-0">
+            {!readOnly && <DropTarget onFiles={(files) => { pendingTaskRef.current = null; void upload(files); }} accept="image/*,application/pdf" label="Drop Photos Or PDFs" className="shrink-0">
               <div className="flex gap-2">
-                <Button type="button" variant="secondary" disabled={uploading} onClick={() => captureRef.current?.click()}>
+                {/* The visit's own doors clear the pending task: a Take cancelled inside a task's
+                    sheet fires no change event, so the ref would otherwise still be set here. */}
+                <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = null; captureRef.current?.click(); }}>
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
                 </Button>
-                <Button type="button" variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = null; fileRef.current?.click(); }}>
                   <Upload className="h-4 w-4" /> Add
                 </Button>
               </div>
@@ -2140,7 +2184,7 @@ export function Inspector({
 
         {/* NOTES — the escape hatch. The sentence nobody's template anticipated. */}
         {shows("notes", !!notes.trim()) && (
-          <div id="insp-notes">
+          <div id="insp-notes" className="scroll-mt-16">
             <SectionLabel>Notes</SectionLabel>
             <Textarea
               rows={3}

@@ -1,4 +1,5 @@
 import type { Answers, AnswerValue, Clause, Fill, Need, Playbook } from "./types";
+import { scopeKey } from "./scope";
 import { coerceTasks, mergeHeardTasks, screenHeardTask } from "./tasks";
 
 /**
@@ -33,7 +34,9 @@ function clauseHolds(c: Clause, answers: Answers): boolean {
   // MULTI-SELECT MATTERS HERE. Erik's job was outlets AND lights — a router that only holds one
   // value is the shipped sheet's failure rebuilt one layer up. Any overlap counts.
   const held = Array.isArray(v) ? v.map(String) : [String(v)];
-  return held.some((x) => c.in.includes(x));
+  // Blind to case, spacing and punctuation, like the kit offer: a scope typed "deck" holds a rule
+  // written on the chip "Deck". A select's options are distinct words, so nothing is lost.
+  return held.some((x) => c.in.some((o) => o === x || scopeKey(o) === scopeKey(x)));
 }
 
 /**

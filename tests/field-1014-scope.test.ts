@@ -26,20 +26,25 @@ describe("the slot survives the database in both modes", () => {
   it("type freely and his words both parse; empty words = type freely; junk and a second scope are plain", () => {
     expect(parsePlaybook(roundTrip(FREE))).toEqual(FREE);
     expect(parsePlaybook(roundTrip(WORDS))).toEqual(WORDS);
-    const back = parsePlaybook({ needs: [{ key: "k", label: "K", ask: "K?", slot: { type: "scope", options: ["", "  ", 7, "x".repeat(80)] } }] });
-    expect(back.needs[0].slot).toEqual({ type: "scope", options: ["x".repeat(60)] });
+    const back = parsePlaybook({ needs: [{ key: "k", label: "K", ask: "K?", slot: { type: "scope", options: ["", "  ", 7, "x".repeat(80), "Deck", "Deck"] } }] });
+    expect(back.needs[0].slot).toEqual({ type: "scope", options: ["x".repeat(60), "Deck"] });
+    // the parser is a fixed point (the editor's concurrency stamp hashes a re-parse)
+    expect(parsePlaybook(roundTrip(back))).toEqual(back);
     const empty = parsePlaybook({ needs: [{ key: "k", label: "K", ask: "K?", slot: { type: "scope", options: [] } }] });
     expect(empty.needs[0].slot).toEqual({ type: "scope" });
     const two: Playbook = { needs: [...WORDS.needs, { key: "again", label: "Again", ask: "Again?", slot: { type: "scope" } }] };
     expect(scopeNeed(two)?.key).toBe("kind"); // the FIRST is the scope
   });
-  it("the answer is one trimmed string in either mode — a word off the list is kept, never nulled", () => {
-    expect(coerceByPlaybook(FREE, { scope: "  panel   swap " }).scope).toBe("panel swap");
+  it("the answer is one trimmed string in either mode — a word off the list is kept, a paragraph survives whole, never '[object Object]'", () => {
+    expect(coerceByPlaybook(FREE, { scope: "  panel   swap " }).scope).toBe("panel   swap");
     expect(coerceByPlaybook(WORDS, { kind: "Deck" }).kind).toBe("Deck");
     expect(coerceByPlaybook(WORDS, { kind: "Hot tub" }).kind).toBe("Hot tub");
     expect(coerceByPlaybook(WORDS, { kind: ["Remodel"] }).kind).toBe("Remodel"); // an old select answer survives a kind change
     expect(coerceByPlaybook(WORDS, { kind: "" }).kind).toBeNull();
-    expect(String(coerceByPlaybook(FREE, { scope: "y".repeat(500) }).scope).length).toBe(200);
+    expect(coerceByPlaybook(WORDS, { kind: [{ id: "t1", name: "a task list left behind" }] }).kind).toBeNull();
+    const paragraph = "Converting the storage room to living space.\nPermitted for occupancy. " + "y".repeat(700);
+    expect(coerceByPlaybook(FREE, { scope: paragraph }).scope).toBe(paragraph); // the open cap, not a chip cap
+    expect(String(coerceByPlaybook(FREE, { scope: "y".repeat(9000) }).scope).length).toBe(8000);
   });
   it("the old sheet mirror and the public form see what it looks like: his words with the door open, or a box", () => {
     expect(sheetFromPlaybook(WORDS)[0]).toMatchObject({ key: "kind", type: "select", options: ["Deck", "Remodel"], other: true });
@@ -99,5 +104,37 @@ describe("the word lights the kits", () => {
     expect(made.ok && made.value.kit.category).toBe("deck");
     const bare = kitFromTaskDetail({ task_id: "t", name: "Footings", hours: 2, units: 1, materials: [] } as never, { name: "Footings", unit: "footing" });
     expect(bare.ok && bare.value.kit.category).toBeNull();
+  });
+});
+
+describe("a rule on the scope, and the estimate's seed of an uncounted kit task", () => {
+  it("a typed 'deck' holds a rule written on the chip 'Deck' (blind to case, like the offer)", async () => {
+    const { applicableNeeds } = await import("@/lib/playbook/resolve");
+    const pb: Playbook = {
+      needs: [
+        ...WORDS.needs,
+        { key: "rail", label: "Railing", ask: "Railing?", slot: { type: "text" }, when: [{ key: "kind", in: ["Deck"] }] },
+      ],
+    };
+    expect(applicableNeeds(pb, { kind: "deck" }).map((n) => n.key)).toEqual(["kind", "rail"]);
+    expect(applicableNeeds(pb, { kind: "Remodel" }).map((n) => n.key)).toEqual(["kind"]);
+  });
+  it("a kit task with no count seeds the estimate ASKING — named, not priced — and one count prices it", async () => {
+    const { buildTaskDetail, taskFlags, taskMoney } = await import("@/lib/estimate/task-lines");
+    const kit = { id: "k1", name: "Footings", labor_minutes: 120, unit: "footing", category: "Deck", items: [{ id: "i1", description: "Concrete, 80 lb", quantity: 4, unit: "ea", unit_price: 9, sort_order: 0 }] };
+    const ctx = { book: new Map(), rate: 100, pricing: { orgDefaultPct: 0, levelPct: null }, kits: new Map([[kit.id, kit]]) } as never;
+    const asking = buildTaskDetail({ id: "t1", name: "Footings", hours: null, units: null, kit_id: "k1", materials: [] }, ctx);
+    expect(asking.hours).toBeNull();
+    expect(asking.materials.map((m) => [m.name, m.qty])).toEqual([["Concrete, 80 lb", null]]);
+    expect(taskMoney(asking).total).toBe(0);
+    expect(taskFlags(asking)).toBe("units?");
+    const counted = buildTaskDetail({ id: "t1", name: "Footings", hours: null, units: 7, kit_id: "k1", materials: [] }, ctx);
+    expect(counted.hours).toBe(14);
+    expect(counted.materials[0].qty).toBe(28);
+    expect(taskMoney(counted).total).toBeGreaterThan(0);
+    expect(taskFlags(counted)).toBeUndefined();
+    // his own typed hours still win, even uncounted
+    const his = buildTaskDetail({ id: "t1", name: "Footings", hours: 3, units: null, kit_id: "k1", materials: [] }, ctx);
+    expect(his.hours).toBe(3);
   });
 });

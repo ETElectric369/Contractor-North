@@ -25,7 +25,7 @@ describe("the door on the estimate", () => {
     expect(builder).toContain('import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";');
     const breakdown = builder.slice(builder.indexOf("function TaskBreakdown("), builder.indexOf("export function QuoteBuilder("));
     expect(breakdown).toContain("Remember As A Kit");
-    expect(breakdown).toContain("rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d })");
+    expect(breakdown).toContain("rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d, category: kitCategory.trim() || null })");
     // The pure rule speaks BEFORE the round trip, so the door never opens onto a refusal.
     expect(breakdown).toContain("kitFromTaskDetail(d, { name: kitName || \"kit\", unit: kitUnit })");
   });
@@ -40,7 +40,7 @@ describe("the action", () => {
   it("is the office's, coerces the breakdown, applies the rule, writes through rememberKit and revalidates", () => {
     expect(fn).toContain("await requireStaff()");
     expect(fn).toContain("coerceTaskDetail(input?.detail)");
-    expect(fn).toContain("kitFromTaskDetail(detail, { name: input?.name ?? \"\", unit: input?.unit ?? \"\" })");
+    expect(fn).toContain("kitFromTaskDetail(detail, { name: input?.name ?? \"\", unit: input?.unit ?? \"\", category: typeof input?.category === \"string\" ? input.category : null })");
     expect(fn).toContain("rememberKit(ctx.supabase, made.value)");
     expect(fn).toContain('revalidatePath("/price-list")');
   });
@@ -49,7 +49,7 @@ describe("the action", () => {
 describe("the rule writes nothing silently", () => {
   const rule = src("src/lib/estimate/kit-from-task.ts");
   it("reads back the kit's and the lines' ids, links by code to live items, keeps one kit per name", () => {
-    expect(rule).toMatch(/\.insert\(\{ name: value\.kit\.name, unit: value\.kit\.unit, labor_minutes: value\.kit\.labor_minutes \}\)\s*\.select\("id"\)/);
+    expect(rule).toMatch(/\.insert\(\{ name: value\.kit\.name, unit: value\.kit\.unit, labor_minutes: value\.kit\.labor_minutes, category: value\.kit\.category \?\? null \}\)\s*\.select\("id"\)/);
     expect(rule).toContain('from("kit_items").insert(rows).select("id")');
     expect(rule).toContain('.in("code", codes).eq("archived", false)');
     // One name, one kit — compared in code, case-blind, so his "*" is a star and not a wildcard.
@@ -65,7 +65,8 @@ describe("the inspector", () => {
     // The read SAYS how it went (item 3): readTaskKits over the same rungs, its state on the page, a failure in the ops sink.
     // Through the service client, scoped to the visit's company (audit v1085, carried [31]): a crew lead
     // cannot read price_list_items, so his own read came back with every book link empty and no error.
-    expect(page).toContain('? readTaskKits((sel) => createServiceClient().from("kits").select(sel).eq("org_id", apptOrg).order("name"))');
+    // + "category": the scope a kit is filed under lights the Inspector's offer row (field feedback 10-13, item 2)
+    expect(page).toContain('? readTaskKits((sel) => createServiceClient().from("kits").select(sel).eq("org_id", apptOrg).order("name"), "category")');
     expect(page).toContain(': Promise.resolve<TaskKitsRead>({ kits: [], rows: null, rung: 0, state: "ok" })'); // no visit to see: no read
     // The kits reach the Inspector whatever the switch says; the switch hides the PICKER (carried [39]).
     expect(page).toContain("taskKits={kitsWithoutMoney(taskKitsRead.kits)}");
