@@ -45,6 +45,14 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
         filters.push((r) => r[col] === v);
         return b;
       },
+      gte(col: string, v: unknown) {
+        filters.push((r) => r[col] != null && (r[col] as any) >= (v as any));
+        return b;
+      },
+      lte(col: string, v: unknown) {
+        filters.push((r) => r[col] != null && (r[col] as any) <= (v as any));
+        return b;
+      },
       neq(col: string, v: unknown) {
         filters.push((r) => r[col] != null && r[col] !== v); // Postgres <> is false for NULL
         return b;

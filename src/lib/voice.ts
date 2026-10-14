@@ -52,3 +52,8 @@ export function analyserRms(): number | null {
 export function usingStreamBackend(): boolean {
   return streamBackend.speechSupported();
 }
+/** Nort speaks first (0394): only the stream backend greets — the webkit fallback has no live
+ *  stream to greet over, and starts recording at once as it always did. */
+export function setGreeting(g: { text: string; play: () => Promise<void> } | null) {
+  (streamBackend as any).setGreeting?.(g);
+}

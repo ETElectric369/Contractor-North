@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { NO_VOICE_LINE, TRY_AGAIN_LINE } from "@/lib/voice-failure";
 import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
+import { consumeGreeted } from "@/lib/nort-holding";
 import { isNativeShell } from "@/lib/native-shell";
 import { standDownReaderForVoice } from "@/lib/native-tap";
 import { classifyConfirmReply } from "@/lib/confirm-parse";
@@ -867,7 +868,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // Round-trip the LIVE draft (restored or in-progress) so resuming an estimate CONTINUES
         // from what's on screen instead of restarting it, + the current page so "this job"/"this
         // invoice" resolves. The route injects both at the cache-safe message tail.
-        body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname }),
+        // greeted: the spoken greeting named what Nort holds and asked "want them now?" — this
+        // message is the answer, so the server must not ask again (0394).
+        body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname, greeted: consumeGreeted() }),
       });
 
       if (!res.ok || !res.body) {
@@ -1173,6 +1176,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     } finally {
       setStreaming(false);
       scrollToBottom();
+      // A turn may have handed over what Nort was holding (read_my_updates): the Bell re-reads now,
+      // so his ring and the next greeting do not keep saying "holding" for up to a minute (0394).
+      try { window.dispatchEvent(new Event("cn:bell-refresh")); } catch {}
     }
   }
 

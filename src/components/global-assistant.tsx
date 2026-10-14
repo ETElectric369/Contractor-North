@@ -13,6 +13,10 @@ import { standDownReaderForVoice } from "@/lib/native-tap";
 import * as speech from "@/lib/voice";
 import { useEstimator } from "@/lib/estimator-store";
 import { NORT_TALK_EVENT } from "@/lib/onboarding/help-rows";
+import { callName, greetingPhrase, holdingCount } from "@/lib/nort/greeting";
+import { playGreeting } from "@/lib/nort/greeting-player";
+import { getNortHolding, markGreetedWithHolding } from "@/lib/nort-holding";
+import { estimatorStore } from "@/lib/estimator-store";
 
 const PANEL_W = 384; // 24rem
 
@@ -70,7 +74,44 @@ function DeepLinkOpener({ param, onLaunch }: { param: string; onLaunch: () => vo
  * page, the live status + estimate lines, no header text and no in-panel mic — and the ?debrief= /
  * ?attention= openers. Mounted while Nort is on.
  */
-export function GlobalAssistant() {
+/** NORT SPEAKS FIRST (0394): arm the greeting for the fresh start the Talk tap is about to make.
+ *  The words are picked on this phone (lib/nort/greeting) from the hour, the name this person
+ *  chose, and what Nort is holding (the Bell's own poll). Plain and synchronous — launch() must
+ *  reach speech.startListening() inside the tap with nothing asynchronous in front of it. */
+function armGreeting(greets: boolean, nortName: string | null, fullName: string | null) {
+  if (!greets) {
+    speech.setGreeting(null);
+    return;
+  }
+  const holding = getNortHolding();
+  const text = greetingPhrase({ hour: new Date().getHours(), name: callName(nortName, fullName), holding });
+  const asks = holdingCount(holding) > 0;
+  speech.setGreeting({
+    text,
+    play: () => {
+      estimatorStore.setSpeaking(true); // the bar shows Stop Nort while he says hello
+      return playGreeting(text, speech.analyserRms)
+        .then((heard) => {
+          // "The greeting asked" only when the question was HEARD to its end — never on a skipped,
+          // cut or refused greeting, or the first message would answer a question nobody heard.
+          if (heard && asks) markGreetedWithHolding();
+        })
+        .finally(() => estimatorStore.setSpeaking(false));
+    },
+  });
+}
+
+export function GlobalAssistant({
+  greets = false,
+  nortName = null,
+  fullName = null,
+}: {
+  /** Nort speaks first (0394, profiles.nort_greets): the greeting plays the moment the mic is live. */
+  greets?: boolean;
+  /** What Nort calls this person (profiles.nort_name); null = their first name. */
+  nortName?: string | null;
+  fullName?: string | null;
+} = {}) {
   const [open, setOpenState] = useState(false);
   // THE PANEL'S OPEN STATE, READABLE FROM A LISTENER ADDED ONCE. launch() now runs from a window
   // event whose listener is registered on mount; a closure over `open` would see the value from
@@ -142,6 +183,11 @@ export function GlobalAssistant() {
     // START THE MIC RIGHT HERE, INSIDE THE TAP. iOS only honors SpeechRecognition.start() inside the
     // user gesture — starting it later (the old post-mount effect) was the "mic never starts on iPhone"
     // bug. The chat panel (mounted next / already mounted) picks up the transcript via the shared service.
+    // NORT SPEAKS FIRST (0394): armed here, inside the tap, so it is in place when the stream goes
+    // live. Voice launches only; the words are picked on this phone (lib/nort/greeting) from the
+    // hour, the name this person chose, and what Nort is holding (the Bell's own poll). When the
+    // greeting names what he holds, the first send tells the server so (markGreetedWithHolding).
+    armGreeting(greets, nortName, fullName);
     speech.startListening();
     // Already open → Talk To Nort just re-opened the mic; tell the panel to resume the conversation.
     // openRef, not `open`: this runs from a listener registered once (see above).

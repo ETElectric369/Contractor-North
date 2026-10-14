@@ -1,7 +1,9 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { BELL_LIST_SIZE } from "@/lib/bell-words";
+import { NO_HOLDING, type NortHolding } from "@/lib/nort/greeting";
+import { holdingFor } from "@/lib/nort/updates";
 
 export type Notif = {
   id: string;
@@ -21,12 +23,17 @@ export type Notif = {
  * the explicit user filter is what lets the partial index serve the count. `failed` when the list
  * itself couldn't be read, so the bell says so instead of "all caught up".
  */
-export async function getMyBell(): Promise<{ items: Notif[]; unread: number; more: boolean; failed: boolean }> {
+export async function getMyBell(): Promise<{ items: Notif[]; unread: number; more: boolean; failed: boolean; holding: NortHolding }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { items: [], unread: 0, more: false, failed: false };
+  if (!user) return { items: [], unread: 0, more: false, failed: false, holding: NO_HOLDING };
+  // WHAT NORT IS HOLDING (0394) rides the same poll: the top bar's ring and the greeting read it.
+  // Best-effort — a miss here is an empty hand, never a broken bell.
+  const holdingP = Promise.resolve()
+    .then(() => holdingFor(user.id, createServiceClient(), supabase))
+    .catch(() => NO_HOLDING);
   const [list, count] = await Promise.all([
     supabase
       .from("notifications")
@@ -36,12 +43,13 @@ export async function getMyBell(): Promise<{ items: Notif[]; unread: number; mor
       .limit(BELL_LIST_SIZE + 1),
     supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", user.id).is("read_at", null),
   ]);
-  if (list.error) return { items: [], unread: count.error ? 0 : (count.count ?? 0), more: false, failed: true };
+  const holding = await holdingP;
+  if (list.error) return { items: [], unread: count.error ? 0 : (count.count ?? 0), more: false, failed: true, holding };
   const rows = (list.data ?? []) as Notif[];
   const items = rows.slice(0, BELL_LIST_SIZE);
   // A count that couldn't be read falls back to the lines in hand: short, never a false zero.
   const unread = count.error || count.count == null ? items.filter((n) => !n.read_at).length : count.count;
-  return { items, unread, more: rows.length > BELL_LIST_SIZE, failed: false };
+  return { items, unread, more: rows.length > BELL_LIST_SIZE, failed: false, holding };
 }
 
 /** Mark specific notifications (or ALL my unread, when ids omitted) as read. RLS ensures a user can

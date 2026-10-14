@@ -12,7 +12,7 @@
  * is invisible until someone decides it is safe for every member of the org to read.
  */
 export const PROFILE_SAFE_COLS =
-  "id, full_name, email, phone, role, avatar_url, active, created_at, updated_at, org_id, language, home_lat, home_lng, push_prefs, must_reset_password, crew_lead, deactivated_at, deactivated_by, onboarded_at, nort_humor, nort_register, nort_notes, lessons_seen";
+  "id, full_name, email, phone, role, avatar_url, active, created_at, updated_at, org_id, language, home_lat, home_lng, push_prefs, must_reset_password, crew_lead, deactivated_at, deactivated_by, onboarded_at, nort_humor, nort_register, nort_notes, nort_greets, nort_name, lessons_seen";
 
 /**
  * The pay/address columns — readable only through `profile_pay`, never off `profiles`.

@@ -63,6 +63,7 @@ import { AvatarUpload } from "./avatar-upload";
 import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
 import { NortTone } from "./nort-tone";
+import { NortGreeting } from "./nort-greeting";
 import { asRegister, clampHumor } from "@/lib/nort/tone";
 import { listPasskeys } from "./passkey-actions";
 import { gcalConfigured, connectionNeedsReauth } from "@/lib/google-calendar";
@@ -356,6 +357,13 @@ export default async function SettingsPage({
               register={asRegister((profile as any)?.nort_register)}
               notes={typeof (profile as any)?.nort_notes === "string" ? (profile as any).nort_notes : ""}
             />
+            {/* Nort speaks first (0394): the greeting switch and the name he uses, beside his tone. */}
+            <div className="mt-5 border-t border-slate-100 pt-4">
+              <NortGreeting
+                greets={(profile as any)?.nort_greets !== false}
+                name={typeof (profile as any)?.nort_name === "string" ? (profile as any).nort_name : ""}
+              />
+            </div>
           </Section>
         )}
         <Section title="Your profile">

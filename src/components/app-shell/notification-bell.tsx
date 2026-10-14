@@ -6,6 +6,7 @@ import { Bell } from "lucide-react";
 import { ToastProvider, useToast } from "@/components/toast";
 import { getMyBell, markNotificationsRead, type Notif } from "@/app/(app)/notification-actions";
 import { BELL_MORE_LINE, bellBadge, bellWhen } from "@/lib/bell-words";
+import { setNortHolding } from "@/lib/nort-holding";
 
 /**
  * The in-app notification bell — the ALWAYS-WORKS channel (independent of push permission,
@@ -50,6 +51,7 @@ function BellInner() {
         setUnread(r.unread);
         setMore(r.more);
         setFailed(r.failed);
+        setNortHolding(r.holding); // the top bar's Nort ring and the greeting read this (0394)
       })
       .catch(() => setFailed(true));
   }, []);
@@ -59,7 +61,11 @@ function BellInner() {
     const t = setInterval(load, 60_000);
     const onVis = () => document.visibilityState === "visible" && load();
     document.addEventListener("visibilitychange", onVis);
+    // Nort just handed something over (read_my_updates) or a report was reviewed: refresh now, so
+    // his ring and the greeting do not say "holding" for up to a minute after it was heard.
+    window.addEventListener("cn:bell-refresh", load);
     return () => {
+      window.removeEventListener("cn:bell-refresh", load);
       clearInterval(t);
       document.removeEventListener("visibilitychange", onVis);
     };

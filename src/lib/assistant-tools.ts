@@ -68,6 +68,16 @@ const sectionWords = (bucket: keyof typeof BUCKET_SECTION) => (BUCKET_SECTION[bu
 
 export const DATA_TOOLS: Anthropic.Tool[] = [
   {
+    // NORT HOLDS, THEN HANDS OVER (0394). The things Nort has for THIS person — their resolved bug
+    // reports they have not heard about, the crew's daily reports the office has not read — are
+    // read out only when they say yes. The route runs this one itself (it needs the caller's id
+    // and the service client for a tech's own report rows); it never reaches runDataTool.
+    name: "read_my_updates",
+    description:
+      "Hand over what Nort is holding for this person — the updates on things they reported and the crew's unread daily reports — and mark them heard. Call ONLY after they say yes / now / go ahead to 'want them now?'. Never call it to check whether there are any (the prompt already says).",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "list_jobs",
     description:
       "List this company's jobs. Use for questions like 'what jobs are in progress', 'show me my jobs', 'find the job at the Smith house'. Filter by status and/or a text search on job name/number/description.",

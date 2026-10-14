@@ -39,3 +39,24 @@ export async function saveNortTone(
   revalidatePath("/settings");
   return { ok: true };
 }
+
+/**
+ * NORT SPEAKS FIRST (0394): whether Nort greets the moment the mic is live, and what he calls this
+ * person. Their own row; `.eq("id", user.id)` is the whole boundary. The name is cut at 40 here
+ * as well as by the CHECK, so a save never reports success for a row the database refused.
+ */
+export async function saveNortGreeting(greets: boolean, name: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in first." };
+  const clean = Array.from(name.trim().replace(/[<>]/g, "")).slice(0, 40).join("");
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ nort_greets: !!greets, nort_name: clean || null })
+    .eq("id", user.id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That didn't save. Try again?" };
+  revalidatePath("/settings");
+  return { ok: true };
+}

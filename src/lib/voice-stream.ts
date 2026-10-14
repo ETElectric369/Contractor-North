@@ -224,12 +224,33 @@ let micAttempt = 0;
  * getUserMedia (async) and returns true; once the stream is live, recording turns no longer need a
  * gesture. A later call with the stream already alive just records the next turn.
  */
+/** NORT SPEAKS FIRST (0394). Set before a fresh start (inside the Talk tap): once the stream is
+ *  live, the greeting plays BEFORE the first turn records, under the same discipline as every
+ *  reply (setMuted: in the shell the capture is dropped and the session is plain playback, so the
+ *  speaker never mutes the track; on the web the mic stays for barge-in), and the turn then
+ *  starts the way a turn after a reply does (startListening → nextTurn's interrupted-capture
+ *  check, or a fresh grant in the shell). Consumed by that one fresh start and CLEARED by anything
+ *  that is not one — a re-tap on a live stream, a stop, a refused mic — so a greeting armed in
+ *  one tap can never play in the middle of a later conversation. `text` is shown as the status
+ *  while it plays (a muted phone still sees the question). */
+let greeting: { text: string; play: () => Promise<void> } | null = null;
+let greetingActive = false;
+export function setGreeting(g: { text: string; play: () => Promise<void> } | null) {
+  greeting = g;
+}
+/** True while the greeting is being said: a re-tap must not start recording over it. */
+export function isGreeting(): boolean {
+  return greetingActive;
+}
+
 export function startListening(_lang?: string): boolean {
   if (!speechSupported()) return false;
   muted = false;
   silentTurns = 0; // a fresh (user-initiated) start resets the silent-retry budget
   reported.reset(); // …and is a new turn for reporting
   if (stream && audioCtx && analyser) {
+    greeting = null; // not a fresh start: a greeting armed for this tap must not play mid-conversation
+    if (greetingActive) return true; // Nort is still saying hello; the turn follows it
     nextTurn(); // stream alive (mid-conversation) → record the next answer, no gesture needed
     return true;
   }
@@ -266,11 +287,28 @@ export function startListening(_lang?: string): boolean {
       src.connect(analyser);
       mimeType = pickMime();
       status("Mic ready. Go ahead.");
-      beginTurn();
+      const greet = greeting;
+      greeting = null;
+      if (greet) {
+        const mine = session;
+        greetingActive = true;
+        status(greet.text);
+        setMuted(true); // the reply discipline: the shell drops the capture and declares playback
+        void greet
+          .play()
+          .catch(() => {})
+          .finally(() => {
+            greetingActive = false;
+            if (mine !== session || !wantStream) return; // stopped meanwhile: nothing follows
+            setMuted(false);
+            startListening(); // the turn after a reply: nextTurn's check on the web, a fresh grant in the shell
+          });
+      } else beginTurn();
     })
     .catch((err) => {
       settled = true;
       clearTimeout(hang);
+      greeting = null; // no mic, no greeting
       wantStream = false;
       active = false;
       const msg = String(err?.name || err || "");
@@ -599,6 +637,7 @@ async function finishTurn() {
  */
 export function stopListening(opts?: { discard?: boolean }) {
   session++;
+  greeting = null; // a stop ends an armed greeting too
   wantStream = false;
   if (isNativeShell()) setAudioSessionType("auto"); // the conversation is over: leave the session as found
   active = false;

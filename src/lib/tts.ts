@@ -84,6 +84,81 @@ export function quietBrowserVoice() {
   } catch {}
 }
 
+/** ONE CLIP FROM THE NEURAL VOICE, as a blob (null when there is no provider or it failed): the
+ *  greeting keeps these on the phone (lib/nort/greeting-player) so a greeting never waits on a
+ *  synthesis round trip at open. */
+export async function fetchClip(text: string): Promise<Blob | null> {
+  const t = speakable((text || "").trim());
+  if (!t || neuralDisabled) return null;
+  try {
+    const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) });
+    if (r.status === 503) { neuralDisabled = true; return null; }
+    if (!r.ok) return null;
+    // Only audio is a clip: a redirected page or a truncated body must never be kept and replayed.
+    if (!(r.headers.get("content-type") || "").toLowerCase().startsWith("audio/")) return null;
+    const buf = await r.arrayBuffer();
+    if (buf.byteLength < 1024) return null;
+    return new Blob([buf], { type: "audio/mpeg" });
+  } catch {
+    return null;
+  }
+}
+
+/** PLAY A CLIP on the shared element (the one unlockAudio primed in the tap, so it plays off-gesture
+ *  on iOS). `done` settles when the clip ends OR `stop()` cuts it (a barge-in); the element is
+ *  released either way (the lock-screen card rule above). Falls back to the browser voice, speaking
+ *  `fallbackText`, when the element will not play. */
+export type ClipOutcome = "ended" | "stopped" | "failed";
+export function playClip(blob: Blob, fallbackText: string): { done: Promise<ClipOutcome>; playing: Promise<void>; stop: () => void } {
+  let fired = false;
+  let resolveDone: (o: ClipOutcome) => void = () => {};
+  const done = new Promise<ClipOutcome>((res) => { resolveDone = res; });
+  let resolvePlaying: () => void = () => {};
+  const playing = new Promise<void>((res) => { resolvePlaying = res; });
+  const fire = (o: ClipOutcome) => { if (fired) return; fired = true; resolvePlaying(); resolveDone(o); };
+  const a = getAudio();
+  if (!a) {
+    resolvePlaying();
+    browserSpeak(speakable(fallbackText), () => fire("ended"));
+    return { done, playing, stop: () => { stopSpeaking(); fire("stopped"); } };
+  }
+  const url = URL.createObjectURL(blob);
+  quietBrowserVoice();
+  const onPause = () => finish("stopped"); // stopSpeaking() pauses; a pause mid-clip is a stop
+  const finish = (o: ClipOutcome) => {
+    if (fired) return;
+    a.onended = null;
+    a.onerror = null;
+    try { a.removeEventListener("pause", onPause); } catch {}
+    try { URL.revokeObjectURL(url); } catch {}
+    releaseElement(a);
+    fire(o);
+  };
+  a.onended = () => finish("ended");
+  a.onerror = () => finish("failed");
+  a.src = url;
+  // The pause listener only AFTER playback actually starts (playClipUrl's rule), so setting src on
+  // a stopped element cannot settle us before the clip has played.
+  a.play()
+    .then(() => { resolvePlaying(); if (!fired) a.addEventListener("pause", onPause); })
+    .catch(() => {
+      // The element would not play (not a decode failure — those fire onerror and are done): ONE
+      // fallback voice, never a second one over a clip that already ended or failed.
+      if (fired) return;
+      a.onended = null;
+      a.onerror = null;
+      try { URL.revokeObjectURL(url); } catch {}
+      releaseElement(a);
+      resolvePlaying();
+      browserSpeak(speakable(fallbackText), () => fire("ended"));
+    });
+  return {
+    done,
+    playing,
+    stop: () => { try { a.pause(); } catch {} finish("stopped"); },
+  };
+}
+
 /** Call from a user gesture (the mic tap) so neural audio can play afterward on iOS. */
 export function unlockAudio() {
   const a = getAudio();

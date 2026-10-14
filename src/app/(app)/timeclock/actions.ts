@@ -3061,10 +3061,31 @@ export async function markDailyReportReviewed(id: string): Promise<ClockResult> 
     .from("daily_reports")
     .update({ status: "reviewed" })
     .eq("id", id)
-    .select("id")
+    .select("id, profile_id")
     .maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
   if (!hit) return { ok: false, error: "That report isn't there any more — My Day is catching up." };
+  // Reviewed here is heard: the reviewer's own unread bell row for this filer's report is read too,
+  // so Nort stops holding it (0394). Best-effort — the Bell row is a courtesy, the review is the deed.
+  try {
+    const {
+      data: { user },
+    } = await ctx.supabase.auth.getUser();
+    const { data: filer } = await ctx.supabase.from("profiles").select("full_name").eq("id", (hit as { profile_id?: string | null }).profile_id ?? "").maybeSingle();
+    const name = (filer as { full_name?: string | null } | null)?.full_name;
+    if (user && name) {
+      await ctx.supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("user_id", user.id)
+        .eq("type", "daily_report")
+        .is("read_at", null)
+        .eq("title", `Daily report from ${name}`)
+        .select("id");
+    }
+  } catch {
+    /* the review stands either way */
+  }
   revalidatePath("/planner"); // the Daily Reports card's reviewed badge + the "N to review" count
   return { ok: true };
 }

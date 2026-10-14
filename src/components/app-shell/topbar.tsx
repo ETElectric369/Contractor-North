@@ -12,6 +12,8 @@ import { hasInAppHistory } from "@/components/back-link";
 import { featureOn, type FeatureMap } from "@/lib/features";
 import { useEstimator } from "@/lib/estimator-store";
 import { setupWaiting, talkToNort } from "@/lib/onboarding/help-rows";
+import { useNortHolding } from "@/lib/nort-holding";
+import { holdingCount, holdingWords } from "@/lib/nort/greeting";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import type { Answers } from "@/lib/playbook/types";
 import type { Profile } from "@/lib/types";
@@ -74,6 +76,15 @@ export function Topbar({
   // publishes these to the shared store even while its panel is collapsed).
   const { listening, streaming, speaking } = useEstimator();
   const nortBusy = nortOn && (listening || streaming || speaking);
+  // NORT IS HOLDING SOMETHING (0394): a daily report, an update on a thing they reported. The Bell's
+  // poll fills the store; the button wears a red pulsing ring until it is heard or read. A mark,
+  // never a count — the Bell keeps the record of every push.
+  const holding = useNortHolding();
+  const nortHolds = nortOn && !nortBusy && holdingCount(holding) > 0;
+  const holdsWords = holdingWords(holding);
+  const talkTitle = nortHolds && holdsWords ? `Nort has ${holdsWords}` : "Talk To Nort";
+  const talkRing = nortHolds ? " animate-pulse motion-reduce:animate-none ring-2 ring-red-500 ring-offset-1" : "";
+  const p = profile as (Profile & { nort_greets?: boolean | null; nort_name?: string | null }) | null;
   // NOTHING SILENT: a person not yet walked through, or a company with setup questions open, gets a
   // dot on the door that holds the setup rows (a mark, never a count). With Nort off those rows are
   // under Help in the avatar menu, so the dot goes there instead.
@@ -134,7 +145,7 @@ export function Topbar({
           change. `turned:` puts the phone's own measurements back. */}
       <div className="flex shrink-0 items-center gap-2 sm:gap-3 turned:gap-2">
         {/* Nort's panel and deep-link openers — no DOM of its own in the bar (the panel floats). */}
-        {nortOn && <GlobalAssistant />}
+        {nortOn && <GlobalAssistant greets={p?.nort_greets !== false} nortName={p?.nort_name ?? null} fullName={p?.full_name ?? null} />}
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}
           data-upright
@@ -173,9 +184,10 @@ export function Topbar({
               onClick={talkToNort}
               data-upright
               data-tour="nort"
+              data-holding={nortHolds ? "yes" : undefined}
               aria-label="Talk To Nort"
-              title="Talk To Nort"
-              className="btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-brand text-white shadow-sm transition-colors hover:bg-brand-dark"
+              title={talkTitle}
+              className={"btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-brand text-white shadow-sm transition-colors hover:bg-brand-dark" + talkRing}
             >
               <AudioLines className="h-5 w-5 shrink-0" />
             </button>
