@@ -6,7 +6,7 @@ import { isNativeShell } from "@/lib/native-shell";
  * thing that keeps the app running after the screen locks. On the web, or a shell built before
  * the plugin, every call is a no-op that resolves to null: the voice loop never waits on it.
  */
-type Snapshot = { on: boolean; category?: string; mode?: string; seconds?: number; background?: boolean };
+type Snapshot = { on: boolean; playing?: boolean; revived?: number; category?: string; mode?: string; seconds?: number; background?: boolean };
 type Plugin = {
   keepAlive(o: { on: boolean }): Promise<Snapshot>;
   state(): Promise<Snapshot>;
@@ -42,7 +42,7 @@ export async function logHeartbeat(): Promise<() => void> {
   if (!p) return () => {};
   try {
     const h = await p.addListener("tick", (s) => {
-      try { console.log(`[nort-audio] tick js-alive background=${s.background} seconds=${s.seconds} category=${s.category}`); } catch {}
+      try { console.log(`[nort-audio] tick js-alive background=${s.background} playing=${s.playing} revived=${s.revived} seconds=${s.seconds} category=${s.category}`); } catch {}
     });
     return () => h.remove();
   } catch {

@@ -258,9 +258,13 @@ export function startListening(_lang?: string): boolean {
   wantStream = true;
   // Undo setMuted's 'playback' before asking for the mic: capture needs the session back.
   if (isNativeShell()) setAudioSessionType("auto");
-  // NORT WITH THE SCREEN OFF (item 4): the shell holds a real audio session for the whole
-  // conversation, so the app — and this loop — survives the lock. A no-op off the shell.
-  if (isNativeShell()) {
+  // NORT WITH THE SCREEN OFF (item 4): the shell can hold a real audio session for the whole
+  // conversation, so the app — and this loop — survives the lock. SWITCHED OFF after the spike of
+  // 2026-10-14 (bridge-1014b.log, error_events 22:28–22:33): the page did run dark, but WebKit's own
+  // capture does not — a mic request made while locked hung, and the reused track came back muted
+  // (no-speech ×4) — and a native session active beside WebKit's capture interrupts it. The next
+  // rung records natively and hands the bytes to the page; until then the loop is as it was.
+  if (isNativeShell() && NATIVE_KEEP_ALIVE) {
     void holdNativeSession(true);
     void logHeartbeat().then((stop) => { stopHeartbeat = stop; });
   }
@@ -643,13 +647,15 @@ async function finishTurn() {
  * recorder before stopping it and nothing of that turn goes anywhere.
  */
 let stopHeartbeat: () => void = () => {};
+/** The screen-off keep-alive (NortAudioPlugin): off until native capture lands (see startListening). */
+const NATIVE_KEEP_ALIVE = false;
 
 export function stopListening(opts?: { discard?: boolean }) {
   session++;
   greeting = null; // a stop ends an armed greeting too
   wantStream = false;
   if (isNativeShell()) setAudioSessionType("auto"); // the conversation is over: leave the session as found
-  if (isNativeShell()) {
+  if (isNativeShell() && NATIVE_KEEP_ALIVE) {
     void holdNativeSession(false); // the screen may sleep the app again
     stopHeartbeat();
     stopHeartbeat = () => {};

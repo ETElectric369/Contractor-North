@@ -35,17 +35,20 @@ describe("the plist and the shell", () => {
     expect(geo).not.toMatch(/URLSession|URLRequest/);
     const audio = read("ios/App/App/NortAudioPlugin.swift");
     expect(audio).toContain('public let jsName = "NortAudio"');
-    expect(audio).toContain(".playAndRecord, mode: .voiceChat");
+    // Never the category (WebKit's): the first build took it and the page's mic was refused.
+    expect(audio).not.toContain("setCategory(");
+    expect(audio).not.toContain("installTap(");
+    expect(audio).toContain("player.scheduleBuffer(silence, at: nil, options: [.loops]");
     expect(audio).not.toMatch(/URLSession|URLRequest/);
   });
 });
 
 describe("the page's doors", () => {
-  it("the voice loop holds the native session for the conversation and lets go at stop", () => {
+  it("the voice loop's keep-alive is wired but SWITCHED OFF until native capture lands (the 10-14 spike: WebKit's capture does not run dark)", () => {
     const v = read("src/lib/voice-stream.ts");
-    expect(v).toContain("void holdNativeSession(true);");
+    expect(v).toContain("const NATIVE_KEEP_ALIVE = false;");
+    expect(v).toContain("if (isNativeShell() && NATIVE_KEEP_ALIVE) {\n    void holdNativeSession(true);");
     expect(v).toContain("void holdNativeSession(false); // the screen may sleep the app again");
-    expect(v.indexOf("void holdNativeSession(true);")).toBeLessThan(v.indexOf("export function stopListening("));
   });
   it("the fence arms iOS's circle when the anchor is known, disarms when the monitor goes, and an observed exit opens the same sheet with the time filled in", () => {
     const g = read("src/components/geofence-monitor.tsx");
