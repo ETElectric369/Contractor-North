@@ -75,6 +75,7 @@ function parseTurn(d: Record<string, unknown> | undefined): NativeTurn {
 }
 
 let handles: Handle[] = [];
+let ticks = 0;
 async function releaseListeners() {
   const hs = handles;
   handles = [];
@@ -99,10 +100,16 @@ export async function startNativeMic(ev: NativeMicEvents): Promise<Snapshot> {
     p.addListener("interrupted", (d) =>
       ev.onResumed({ resumed: !!d?.resumed, hadTurn: !!d?.hadTurn, listening: !!d?.listening, why: String(d?.why ?? "") }),
     ),
-    // THE HEARTBEAT (every 5 s): echoed to the console so the bridge log over the cable says whether
-    // the page ran, and a turn recorded, while the screen was dark — the only way to read a locked
-    // phone. The first native night (2026-10-15) could not say, because nothing listened for it.
+    // THE HEARTBEAT IS LOAD-BEARING (the 01:25 trace, 2026-10-15). iOS suspends WebKit's page
+    // process while the screen is dark unless its own audio is playing; the plugin's tick is a
+    // native call into the page, and it is what runs the loop between a turn's stages — but only
+    // when a listener exists here, because Capacitor delivers nothing to a page with none. cn-v1099
+    // had no listener and the reply waited for the unlock; cn-v1100 listened and the whole loop ran
+    // dark. Never remove this. The plugin ticks fast (0.5 s) while the screen is dark, so the console
+    // echo is thinned there; the bridge log over the cable still says the page ran.
     p.addListener("tick", (d) => {
+      ticks++;
+      if (d?.background && ticks % 10 !== 0) return;
       try {
         console.log(`[nort-audio] tick background=${!!d?.background} listening=${!!d?.listening} running=${!!d?.running} muted=${!!d?.muted} turns=${num(d?.turns)} revived=${num(d?.revived)} seconds=${num(d?.seconds)}`);
       } catch {

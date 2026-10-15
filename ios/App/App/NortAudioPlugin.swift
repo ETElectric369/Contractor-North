@@ -54,6 +54,15 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private let smoothSeconds = 0.055 // the level's time constant (the page: 0.3 per frame at ~60 Hz)
     private let floorClimbPerSecond: Float = 0.18 // how fast the floor follows a louder room (0.003 × 60)
     private let levelEveryMs = 120.0 // the meter's cadence, foreground only
+    /// THE PAGE SLEEPS BETWEEN TICKS (the 01:25 trace, 2026-10-15). iOS suspends WebKit's page
+    /// process while the screen is dark unless its own audio is playing; a native call into the page
+    /// — this heartbeat, delivered to the page's `tick` listener — runs it. Every stage of a dark turn
+    /// (transcribe done, chat answered, playback started) landed right after a tick, five seconds
+    /// apart, which is the "substantially longer delay while locked" Erik heard. So the heartbeat is
+    /// fast while the screen is dark and a conversation is live, and slow in the foreground, where
+    /// nothing needs waking. The page's listener is load-bearing: without it nothing is delivered.
+    private let tickForeground = 5.0
+    private let tickBackground = 0.5
     /// THE LEVELS QUESTION (skeptic #7, unverified off the phone). The page's gates were tuned against
     /// WebKit's gain-controlled capture; this tap is raw. If build 4's `turn` facts (peak/floor/gate in
     /// the bridge log and the no-speech reports) show speech under the gate, flip this and rebuild:
@@ -145,6 +154,26 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         lock.lock()
         foreground = f
         lock.unlock()
+        if on { scheduleHeartbeat() } // the cadence follows the screen
+    }
+
+    private func scheduleHeartbeat() {
+        heartbeat?.invalidate()
+        lock.lock()
+        let interval = foreground ? tickForeground : tickBackground
+        lock.unlock()
+        heartbeat = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self, self.on else { return }
+            // Capacitor drops every listener when the page navigates or its process dies. Nobody
+            // would hear a turn, so nothing may keep recording: the mic goes off within seconds.
+            if !self.hasListeners("turn") {
+                print("[NortAudio] the page let go: stopping")
+                self.teardown()
+                return
+            }
+            self.revive("tick") // an engine that fell over between notifications comes back here
+            self.notifyListeners("tick", data: self.snapshot())
+        }
     }
 
     // ── The page's doors ─────────────────────────────────────────────────────────────────────
@@ -280,18 +309,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         on = true
         startedAt = Date()
         turns = 0
-        heartbeat = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            guard let self, self.on else { return }
-            // Capacitor drops every listener when the page navigates or its process dies. Nobody
-            // would hear a turn, so nothing may keep recording: the mic goes off within 5 s.
-            if !self.hasListeners("turn") {
-                print("[NortAudio] the page let go: stopping")
-                self.teardown()
-                return
-            }
-            self.revive("tick") // an engine that fell over between notifications comes back here
-            self.notifyListeners("tick", data: self.snapshot())
-        }
+        scheduleHeartbeat()
         print("[NortAudio] start: \(snapshot())")
     }
 

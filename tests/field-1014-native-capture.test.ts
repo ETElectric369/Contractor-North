@@ -97,6 +97,13 @@ describe("the page's door (native-audio.ts)", () => {
     expect(door).toContain('return new Blob([bytes], { type: t.mime || "audio/mp4" });');
     // The heartbeat reaches the console: the bridge log says whether a turn ran with the screen dark.
     expect(door).toContain('p.addListener("tick", (d) => {');
+    // LOAD-BEARING: the tick listener is what lets the plugin's heartbeat run the hidden page (the 01:25 trace).
+    expect(door).toContain("THE HEARTBEAT IS LOAD-BEARING");
+    expect(door).toMatch(/p\.addListener\("tick"[\s\S]*\]\);\s*try \{\s*return await p\.start\(\);/); // registered BEFORE start, so the first tick is heard
+    const sw = read("ios/App/App/NortAudioPlugin.swift");
+    expect(sw).toContain("private let tickForeground = 5.0");
+    expect(sw).toContain("private let tickBackground = 0.5");
+    expect(sw).toContain("if on { scheduleHeartbeat() } // the cadence follows the screen");
     // The trace reaches the ops sink on its own when the screen comes back (a reopened app detaches the cable).
     const tr = read("src/lib/nort/trace.ts");
     expect(tr).toContain('if (document.visibilityState === "visible") flushTrace("screen back");');
