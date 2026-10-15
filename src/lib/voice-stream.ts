@@ -10,7 +10,18 @@
  */
 import { reportClientError } from "@/app/report-client-error";
 import { isNativeShell } from "@/lib/native-shell";
-import { keepAlive as holdNativeSession, logHeartbeat } from "@/lib/native-audio";
+import {
+  cancelTurnNative,
+  listenNative,
+  muteNative,
+  nativeMicAvailable,
+  startNativeMic,
+  stopNativeMic,
+  turnBlob,
+  type NativeLevel,
+  type NativeResumed,
+  type NativeTurn,
+} from "@/lib/native-audio";
 import {
   micBlockedLine,
   oncePerTurn,
@@ -38,6 +49,13 @@ let handler: ResultCb | null = null;
  *  and no report (it is not a defect; review of the 09-23 wave reproduced a false 'no-handler'). */
 let session = 0;
 const stateSubs = new Set<StateCb>();
+/** THE MIC SOURCE. In the shell, NortAudioPlugin records each turn natively and the WebView never
+ *  opens the mic — its capture does not run with the screen dark (the 10-14 spike) — while the
+ *  page keeps the transcription, the model and the reply's voice. Everywhere else: getUserMedia +
+ *  MediaRecorder as before. Decided once per conversation, at the fresh start. */
+let nativeOn = false;
+let nativeStarting = false; // start() in flight (the permission prompt may be up): a second tap waits on it
+let nativeDrop = false; // the red Stop: a turn still in flight from the plugin goes nowhere
 
 // Diagnostics so the user (and we) can SEE what the mic is doing — the only way to debug a device
 // I can't run: a live input LEVEL (is the mic actually hearing sound?) and a step STATUS string.
@@ -144,6 +162,7 @@ function errName(err: unknown): string {
 
 export function speechSupported(): boolean {
   if (typeof window === "undefined") return false;
+  if (nativeMicAvailable()) return true;
   const ac = (window as any).AudioContext || (window as any).webkitAudioContext;
   return !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined" && !!ac;
 }
@@ -177,6 +196,14 @@ export function setResultHandler(cb: ResultCb | null) {
  *  AFTER the reply, so this is mostly a safety net. */
 export function setMuted(b: boolean) {
   muted = b;
+  if (nativeOn) {
+    // The native recorder runs through the reply — the recording is what keeps the app alive past
+    // the lock — and muted means its end-of-turn rule pauses, as the tick's does on the web. The
+    // page's own session type stays plain playback for the whole conversation (WebKit never
+    // captures beside the plugin), so there is nothing to drop and nothing to declare here.
+    void muteNative(b);
+    return;
+  }
   // THE LAST OF THE CRACKLE IS APPLE'S (WebKit bug 324811, rdar://188098655, filed 2026-09-22):
   // periodic clicking through the BUILT-IN SPEAKER while getUserMedia capture is active, on iPhone 16
   // and 17 running iOS 27.0; clean on headphones, not on iPhone 15 or iOS 26. Nort's mic stayed open
@@ -219,6 +246,15 @@ function pickMime(): string {
 // come up late, the turn simply starts.
 const MIC_HANG_MS = 10000;
 let micAttempt = 0;
+function hangWatch(attempt: number, source: string): () => void {
+  const hang = setTimeout(() => {
+    if (!wantStream || attempt !== micAttempt) return;
+    const line = `The mic isn't answering. ${TRY_AGAIN_LINE}`;
+    status(line);
+    report("getusermedia-hung", line, `${MIC_HANG_MS / 1000}s ${source}`);
+  }, MIC_HANG_MS);
+  return () => clearTimeout(hang);
+}
 
 /**
  * START. The FIRST call must run inside a user gesture (the mic-permission prompt). It kicks off
@@ -249,6 +285,13 @@ export function startListening(_lang?: string): boolean {
   muted = false;
   silentTurns = 0; // a fresh (user-initiated) start resets the silent-retry budget
   reported.reset(); // …and is a new turn for reporting
+  if (nativeOn || nativeStarting) {
+    greeting = null; // not a fresh start: a greeting armed for this tap must not play mid-conversation
+    if (greetingActive || nativeStarting) return true; // Nort is still saying hello, or the mic is still coming up; the turn follows
+    void muteNative(false); // a reply with nothing to say re-arms through here, never through setMuted(false)
+    nextTurn(); // the conversation is live: the next answer records natively, no gesture needed
+    return true;
+  }
   if (stream && audioCtx && analyser) {
     greeting = null; // not a fresh start: a greeting armed for this tap must not play mid-conversation
     if (greetingActive) return true; // Nort is still saying hello; the turn follows it
@@ -256,32 +299,22 @@ export function startListening(_lang?: string): boolean {
     return true;
   }
   wantStream = true;
+  // NORT WITH THE SCREEN OFF (item 4): in the shell the plugin records, so the app — and this
+  // loop — survives the lock. The 10-14 spike showed the page runs dark but WebKit's capture does
+  // not, so the WebView never opens the mic here.
+  if (isNativeShell() && nativeMicAvailable()) {
+    startNative();
+    return true;
+  }
   // Undo setMuted's 'playback' before asking for the mic: capture needs the session back.
   if (isNativeShell()) setAudioSessionType("auto");
-  // NORT WITH THE SCREEN OFF (item 4): the shell can hold a real audio session for the whole
-  // conversation, so the app — and this loop — survives the lock. SWITCHED OFF after the spike of
-  // 2026-10-14 (bridge-1014b.log, error_events 22:28–22:33): the page did run dark, but WebKit's own
-  // capture does not — a mic request made while locked hung, and the reused track came back muted
-  // (no-speech ×4) — and a native session active beside WebKit's capture interrupts it. The next
-  // rung records natively and hands the bytes to the page; until then the loop is as it was.
-  if (isNativeShell() && NATIVE_KEEP_ALIVE) {
-    void holdNativeSession(true);
-    void logHeartbeat().then((stop) => { stopHeartbeat = stop; });
-  }
   status("Connecting to the mic…");
   const attempt = ++micAttempt;
-  let settled = false;
-  const hang = setTimeout(() => {
-    if (settled || !wantStream || attempt !== micAttempt) return;
-    const line = `The mic isn't answering. ${TRY_AGAIN_LINE}`;
-    status(line);
-    report("getusermedia-hung", line, `${MIC_HANG_MS / 1000}s`);
-  }, MIC_HANG_MS);
+  const unhang = hangWatch(attempt, "web");
   navigator.mediaDevices
     .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
     .then((s) => {
-      settled = true;
-      clearTimeout(hang);
+      unhang();
       // Superseded (a second tap while this one hung) or already holding a stream: stop this one.
       // Overwriting `stream` and `audioCtx` would leave the first mic and its context running.
       if (!wantStream || attempt !== micAttempt || stream) {
@@ -297,28 +330,10 @@ export function startListening(_lang?: string): boolean {
       analyser.fftSize = 2048;
       src.connect(analyser);
       mimeType = pickMime();
-      status("Mic ready. Go ahead.");
-      const greet = greeting;
-      greeting = null;
-      if (greet) {
-        const mine = session;
-        greetingActive = true;
-        status(greet.text);
-        setMuted(true); // the reply discipline: the shell drops the capture and declares playback
-        void greet
-          .play()
-          .catch(() => {})
-          .finally(() => {
-            greetingActive = false;
-            if (mine !== session || !wantStream) return; // stopped meanwhile: nothing follows
-            setMuted(false);
-            startListening(); // the turn after a reply: nextTurn's check on the web, a fresh grant in the shell
-          });
-      } else beginTurn();
+      micReady();
     })
     .catch((err) => {
-      settled = true;
-      clearTimeout(hang);
+      unhang();
       greeting = null; // no mic, no greeting
       wantStream = false;
       active = false;
@@ -331,6 +346,167 @@ export function startListening(_lang?: string): boolean {
       emit();
     });
   return true;
+}
+
+/** The mic is live (either source): say so, then the greeting under the reply discipline, or the
+ *  first turn. */
+function micReady() {
+  status("Mic ready. Go ahead.");
+  const greet = greeting;
+  greeting = null;
+  if (greet) {
+    const mine = session;
+    greetingActive = true;
+    status(greet.text);
+    setMuted(true); // the reply discipline: the shell drops the capture and declares playback
+    void greet
+      .play()
+      .catch(() => {})
+      .finally(() => {
+        greetingActive = false;
+        if (mine !== session || !wantStream) return; // stopped meanwhile: nothing follows
+        setMuted(false);
+        startListening(); // the turn after a reply: nextTurn's check on the web, a fresh grant in the shell
+      });
+  } else beginTurn();
+}
+
+// ── The native source (the shell) ──────────────────────────────────────────────────────────
+// NortAudioPlugin holds the session and records each turn; the page keeps the rest. The WebView's
+// own session is declared plain playback for the whole conversation, so WebKit never opens the mic
+// beside the plugin (the first spike build had both, and WebKit refused its own capture).
+function startNative() {
+  setAudioSessionType("playback");
+  mimeType = "audio/mp4 (native)";
+  nativeStarting = true;
+  nativeDrop = false;
+  status("Connecting to the mic…");
+  const attempt = ++micAttempt;
+  const unhang = hangWatch(attempt, "native");
+  startNativeMic({ onTurn: onNativeTurn, onLevel: onNativeLevel, onResumed: onNativeResumed })
+    .then(() => {
+      unhang();
+      nativeStarting = false;
+      // Stopped while the permission prompt was up: the plugin is let go. (A second tap meanwhile
+      // waited on this one — startListening's guard — so no start ever supersedes another.)
+      if (!wantStream) {
+        void stopNativeMic(false);
+        return;
+      }
+      nativeOn = true;
+      micReady();
+    })
+    .catch((err) => {
+      unhang();
+      nativeStarting = false;
+      greeting = null; // no mic, no greeting
+      wantStream = false;
+      active = false;
+      const code = String((err as { code?: unknown } | null)?.code ?? "");
+      const line = code === "denied" ? micBlockedLine(true) : `Mic unavailable (${errName(err) || "no audio"}). ${TRY_AGAIN_LINE}`;
+      status(line);
+      report("getusermedia-rejected", line, `native ${code}: ${errName(err)}`);
+      emit();
+    });
+}
+
+let nativeHeard = false; // "Hearing you…" once per turn
+let nativeSaidStill = false; // "Still listening…" once per turn
+let nativeDeadman: ReturnType<typeof setTimeout> | null = null;
+const nativeDeadmanMs = () => TURN_CAP_MS + 8000; // the plugin's own cap, plus slack for the bridge
+
+function clearDeadman() {
+  if (nativeDeadman) clearTimeout(nativeDeadman);
+  nativeDeadman = null;
+}
+
+/** A turn the plugin lost without a word (an interruption it could not report, an engine that
+ *  never came back) must not leave "Listening" up forever: past the cap it is dropped and treated
+ *  as a silent turn, which retries or hands control back. */
+function armDeadman() {
+  clearDeadman();
+  nativeDeadman = setTimeout(() => {
+    nativeDeadman = null;
+    if (!active || !nativeOn) return;
+    void cancelTurnNative();
+    active = false;
+    level = 0;
+    emit();
+    retryOrGiveUp("The mic went quiet.", "no-speech-cap", `native deadman ${nativeDeadmanMs() / 1000}s`);
+  }, nativeDeadmanMs());
+}
+
+function beginNativeTurn() {
+  if (!wantStream || !nativeOn) return;
+  if (active) return; // listening is listening: a re-tap mid-turn restarts nothing
+  active = true;
+  nativeHeard = false;
+  nativeSaidStill = false;
+  armDeadman();
+  emit();
+  status("Listening. Go ahead.");
+  void listenNative()
+    .then((listening) => {
+      // The engine is down (a reply's playback still holds the session): the plugin starts the
+      // turn the moment it is back, and says so (onNativeResumed).
+      if (!listening && active && nativeOn) status("Getting the mic back…");
+    })
+    .catch((err) => {
+      active = false;
+      emit();
+      cannotRecord("recorder-start-failed", err);
+    });
+}
+
+function onNativeLevel(l: NativeLevel) {
+  if (!active) return;
+  level = l.rms; // the live meter
+  if (l.spoke && !nativeHeard) {
+    nativeHeard = true;
+    status("Hearing you…");
+  }
+  if (l.spoke && !nativeSaidStill && l.elapsedMs > STILL_LISTENING_MS) {
+    nativeSaidStill = true;
+    status("Still listening. Pause for a couple of seconds when you're done.");
+  }
+}
+
+/** A turn the plugin closed: by the pause rule, by a cap, by hand, or with no speech at all. */
+function onNativeTurn(t: NativeTurn) {
+  clearDeadman();
+  level = 0;
+  active = false;
+  emit();
+  if (nativeDrop) return; // the red Stop: whatever was still in flight is dropped, as the web detaches onstop
+  const facts = `peak ${t.peak.toFixed(4)} floor ${t.floor.toFixed(4)} gate ${t.gate.toFixed(4)} ${t.seconds}s native`;
+  if (t.why === "no-speech") {
+    // Nothing was uploaded for silence (a locked phone on cellular pays for every byte).
+    retryOrGiveUp("Didn't hear anything. Try speaking a bit louder.", "no-speech-cap", facts);
+    return;
+  }
+  const blob = turnBlob(t);
+  if (!blob) {
+    if (t.why === "manual") return; // stopped by hand before a word: nothing to send, nothing to say
+    retryOrGiveUp(`No audio captured (${t.bytes} bytes).`, "blob-too-small", facts);
+    return;
+  }
+  if (t.why === "cap") status("Sending what I heard. The mic never caught a pause…");
+  void shipTurn(blob, "m4a");
+}
+
+/** The engine came back (a reply's playback, a call, a route change). A turn that was cut is
+ *  re-armed unless Nort is speaking, in which case the turn after the reply re-arms itself. */
+function onNativeResumed(r: NativeResumed) {
+  if (!nativeOn || !wantStream) return;
+  const was = active;
+  active = r.listening;
+  if (!r.listening) clearDeadman();
+  emit();
+  if (r.listening && !nativeHeard) status("Listening. Go ahead."); // a pending turn the plugin started itself
+  if (r.hadTurn || (was && !r.listening)) {
+    report("capture-interrupted", lastStatus, `native engine back (${r.why}); turn ${r.listening ? "already re-armed" : "re-armed"}`);
+    if (!r.listening && !muted && !greetingActive) beginNativeTurn();
+  }
 }
 
 // ── End-of-speech detection ──────────────────────────────────────────────────────────────
@@ -403,6 +579,10 @@ function dropCapture() {
 
 /** Record the next turn on the open stream, or get the mic back first if a reply interrupted it. */
 function nextTurn() {
+  if (nativeOn) {
+    beginNativeTurn();
+    return;
+  }
   if (!captureInterrupted()) {
     beginTurn();
     return;
@@ -443,6 +623,10 @@ const TURN_CAP_MS = 45000; // never run a single turn forever (45 s holds a whol
 const NO_SPEECH_CAP_MS = 9000; // give up a turn with no speech at all
 
 function beginTurn() {
+  if (nativeOn) {
+    beginNativeTurn();
+    return;
+  }
   if (!wantStream || !stream || !analyser) return;
   // A turn is already recording — the Talk button re-tapped mid-turn, or a re-arm raced the
   // previous turn. Replacing the live recorder here used to leak: the old recorder's final
@@ -592,13 +776,19 @@ function stopTurn() {
 }
 
 async function finishTurn() {
-  const mine = session;
   cancelAnimationFrame(rafId);
   level = 0;
   active = false;
   emit();
   const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
   chunks = [];
+  const ext = mimeType.includes("mp4") || mimeType.includes("aac") ? "mp4" : mimeType.includes("mpeg") ? "mp3" : "webm";
+  await shipTurn(blob, ext);
+}
+
+/** One turn's audio, from either source, to the transcriber and on to the handler. */
+async function shipTurn(blob: Blob, ext: string) {
+  const mine = session;
   if (blob.size < 1200) {
     // Nothing usable was recorded — almost always the silent-PWA mic (stream "on" but capturing
     // nothing) or a permission gap. Say so plainly, and re-arm the mic if the stream is still wanted.
@@ -612,7 +802,6 @@ async function finishTurn() {
   status(`Sending ${(blob.size / 1024) | 0}KB to transcribe…`);
   try {
     const fd = new FormData();
-    const ext = mimeType.includes("mp4") || mimeType.includes("aac") ? "mp4" : mimeType.includes("mpeg") ? "mp3" : "webm";
     fd.append("audio", blob, `turn.${ext}`);
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json().catch(() => null);
@@ -646,19 +835,23 @@ async function finishTurn() {
  * whatever it had anyway, so Nort answered a question after the user had said stop. Detach the
  * recorder before stopping it and nothing of that turn goes anywhere.
  */
-let stopHeartbeat: () => void = () => {};
-/** The screen-off keep-alive (NortAudioPlugin): off until native capture lands (see startListening). */
-const NATIVE_KEEP_ALIVE = false;
-
 export function stopListening(opts?: { discard?: boolean }) {
   session++;
   greeting = null; // a stop ends an armed greeting too
   wantStream = false;
   if (isNativeShell()) setAudioSessionType("auto"); // the conversation is over: leave the session as found
-  if (isNativeShell() && NATIVE_KEEP_ALIVE) {
-    void holdNativeSession(false); // the screen may sleep the app again
-    stopHeartbeat();
-    stopHeartbeat = () => {};
+  if (nativeOn) {
+    // By hand, the live turn ships as `manual` (its event arrives after this and is handled as any
+    // turn); the red Stop drops it. The screen may sleep the app again once the plugin lets go.
+    nativeOn = false;
+    nativeDrop = !!opts?.discard;
+    clearDeadman();
+    active = false;
+    level = 0;
+    lastStatus = "";
+    void stopNativeMic(!opts?.discard);
+    emit();
+    return;
   }
   active = false;
   lastStatus = ""; // this session's line must not replay into the next panel

@@ -35,20 +35,22 @@ describe("the plist and the shell", () => {
     expect(geo).not.toMatch(/URLSession|URLRequest/);
     const audio = read("ios/App/App/NortAudioPlugin.swift");
     expect(audio).toContain('public let jsName = "NortAudio"');
-    // Never the category (WebKit's): the first build took it and the page's mic was refused.
-    expect(audio).not.toContain("setCategory(");
-    expect(audio).not.toContain("installTap(");
-    expect(audio).toContain("player.scheduleBuffer(silence, at: nil, options: [.loops]");
+    // The recorder (plan C): the session is the plugin's for the conversation, mixable so the page's
+    // playback is never cut; the mic is a real input tap. The silent player of the spike is gone.
+    expect(audio).toContain("try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])");
+    expect(audio).toContain("input.installTap(onBus: 0, bufferSize: 1024, format: format)");
+    expect(audio).not.toContain("scheduleBuffer(");
     expect(audio).not.toMatch(/URLSession|URLRequest/);
   });
 });
 
 describe("the page's doors", () => {
-  it("the voice loop's keep-alive is wired but SWITCHED OFF until native capture lands (the 10-14 spike: WebKit's capture does not run dark)", () => {
+  it("the voice loop records natively in the shell and the spike's keep-alive is gone (the 10-14 spike: WebKit's capture does not run dark)", () => {
     const v = read("src/lib/voice-stream.ts");
-    expect(v).toContain("const NATIVE_KEEP_ALIVE = false;");
-    expect(v).toContain("if (isNativeShell() && NATIVE_KEEP_ALIVE) {\n    void holdNativeSession(true);");
-    expect(v).toContain("void holdNativeSession(false); // the screen may sleep the app again");
+    expect(v).toContain("if (isNativeShell() && nativeMicAvailable()) {\n    startNative();\n    return true;");
+    expect(v).not.toContain("NATIVE_KEEP_ALIVE");
+    expect(v).not.toContain("holdNativeSession");
+    expect(read("src/lib/native-audio.ts")).not.toContain("keepAlive({");
   });
   it("the fence arms iOS's circle when the anchor is known, disarms when the monitor goes, and an observed exit opens the same sheet with the time filled in", () => {
     const g = read("src/components/geofence-monitor.tsx");

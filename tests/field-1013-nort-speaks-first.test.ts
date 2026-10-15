@@ -143,7 +143,7 @@ describe("the doors (source pins)", () => {
     expect(after).toContain("} else beginTurn();");
     expect(s).toMatch(/if \(stream && audioCtx && analyser\) \{\s*greeting = null;[\s\S]*if \(greetingActive\) return true;/);
     expect(s).toMatch(/export function stopListening\([^)]*\) \{\s*session\+\+;\s*greeting = null;/);
-    expect(s).toMatch(/clearTimeout\(hang\);\s*greeting = null; \/\/ no mic, no greeting/);
+    expect(s).toMatch(/unhang\(\);\s*greeting = null; \/\/ no mic, no greeting/);
     expect(read("src/lib/voice.ts")).toContain("export function setGreeting(");
   });
   it("the Talk tap arms it with this person's words; greeted only when HEARD; Stop Nort shows while he says hello", () => {
