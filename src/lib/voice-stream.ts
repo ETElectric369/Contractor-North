@@ -10,7 +10,7 @@
  */
 import { reportClientError } from "@/app/report-client-error";
 import { isNativeShell } from "@/lib/native-shell";
-import { trace } from "@/lib/nort/trace";
+import { flushTrace, trace } from "@/lib/nort/trace";
 import {
   cancelTurnNative,
   listenNative,
@@ -845,6 +845,7 @@ export function stopListening(opts?: { discard?: boolean }) {
   greeting = null; // a stop ends an armed greeting too
   wantStream = false;
   if (isNativeShell()) setAudioSessionType("auto"); // the conversation is over: leave the session as found
+  if (nativeOn) flushTrace("stop");
   if (nativeOn) {
     // By hand, the live turn ships as `manual` (its event arrives after this and is handled as any
     // turn); the red Stop drops it. The screen may sleep the app again once the plugin lets go.

@@ -97,6 +97,12 @@ describe("the page's door (native-audio.ts)", () => {
     expect(door).toContain('return new Blob([bytes], { type: t.mime || "audio/mp4" });');
     // The heartbeat reaches the console: the bridge log says whether a turn ran with the screen dark.
     expect(door).toContain('p.addListener("tick", (d) => {');
+    // The trace reaches the ops sink on its own when the screen comes back (a reopened app detaches the cable).
+    const tr = read("src/lib/nort/trace.ts");
+    expect(tr).toContain('if (document.visibilityState === "visible") flushTrace("screen back");');
+    expect(tr).toContain("if (!wasHidden || !isNativeShell()) return;");
+    expect(tr).toContain('void reportClientError("nort-voice", `trace turn ${turnNo}`, { why, at: clock(), lines: mine.join("\\n") })');
+    expect(read("src/lib/voice-stream.ts")).toContain('if (nativeOn) flushTrace("stop");');
     expect(door).toContain("console.log(`[nort-audio] tick background=${!!d?.background} listening=${!!d?.listening}");
     // The final manual turn is delivered before the listeners go, and only THIS conversation's go.
     expect(door).toMatch(/const mine = handles;[\s\S]*await p\?\.stop\(\{ ship \}\);[\s\S]*for \(const h of mine\)/);
