@@ -35,6 +35,9 @@ function fakePlugin(opts: { startSettles?: "now" | "later" } = {}) {
     async mute(o: { on: boolean }) {
       calls.push(`mute:${o.on}`);
     },
+    async wake(o: { fast: boolean }) {
+      calls.push(`wake:${o.fast}`);
+    },
     async stop(o: { ship: boolean }) {
       calls.push(`stop:${o.ship}`);
       return { on: false };
@@ -62,9 +65,10 @@ let plugin: ReturnType<typeof fakePlugin>;
 async function load(p = fakePlugin()) {
   plugin = p;
   vi.resetModules();
-  vi.stubGlobal("window", globalThis);
+  const win = new EventTarget() as EventTarget & { Capacitor?: unknown };
+  win.Capacitor = { Plugins: { NortAudio: plugin } };
+  vi.stubGlobal("window", win);
   vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (iPhone) CNShell/4 (iOS)" });
-  (globalThis as any).Capacitor = { Plugins: { NortAudio: plugin } };
   fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "hello there" }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return await import("@/lib/voice-stream");
@@ -75,7 +79,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete (globalThis as any).Capacitor;
 });
 
 describe("the native source, driven", () => {
@@ -85,10 +88,14 @@ describe("the native source, driven", () => {
     v.setResultHandler((t) => heard.push(t));
     expect(v.startListening()).toBe(true);
     await flush();
-    expect(plugin.calls).toEqual(["start", "listen"]);
+    expect(plugin.calls).toEqual(["start", "wake:false", "listen"]);
     expect(v.isListening()).toBe(true);
     plugin.emit("turn", turn("pause"));
     await flush();
+    expect(plugin.calls.at(-1)).toBe("wake:true"); // in flight: the page needs waking between stages
+    window.dispatchEvent(new Event("cn:nort-play")); // the reply plays: back to the slow tick
+    await flush();
+    expect(plugin.calls.at(-1)).toBe("wake:false");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(heard).toEqual(["hello there"]);
     expect(v.isListening()).toBe(false);
@@ -98,7 +105,7 @@ describe("the native source, driven", () => {
     expect(plugin.calls.at(-1)).toBe("mute:true");
     v.startListening();
     await flush();
-    expect(plugin.calls.slice(-2)).toEqual(["mute:false", "listen"]); // skeptic #7 HIGH: the native mute was never cleared
+    expect(plugin.calls.slice(-3)).toEqual(["mute:false", "wake:false", "listen"]); // skeptic #7 HIGH: the native mute was never cleared
     v.stopListening({ discard: true });
     await flush();
   });
@@ -111,7 +118,7 @@ describe("the native source, driven", () => {
     await flush();
     plugin.settleStart();
     await flush();
-    expect(plugin.calls).toEqual(["start", "listen"]);
+    expect(plugin.calls).toEqual(["start", "wake:false", "listen"]);
     expect(plugin.calls).not.toContain("stop:false");
     expect(v.isListening()).toBe(true);
     v.stopListening({ discard: true });

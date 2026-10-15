@@ -1,4 +1,14 @@
 import { trace } from "@/lib/nort/trace";
+
+/** A clip began to play. voice-stream listens (cn:nort-play): in the shell the recorder's fast
+ *  wake ends here, because playback at the slow tick is the proven-clean condition. */
+function clipPlaying() {
+  try {
+    window.dispatchEvent(new Event("cn:nort-play"));
+  } catch {
+    /* no window */
+  }
+}
 // Speak with a real, intelligence-grade NEURAL voice (ElevenLabs / OpenAI via /api/tts),
 // not the OS's robotic speech synthesis. The browser voice is only a last-ditch fallback
 // when no neural provider is configured or audio playback is blocked.
@@ -141,7 +151,7 @@ export function playClip(blob: Blob, fallbackText: string): { done: Promise<Clip
   // The pause listener only AFTER playback actually starts (playClipUrl's rule), so setting src on
   // a stopped element cannot settle us before the clip has played.
   a.play()
-    .then(() => { trace("play started", `${blob.size}b`); resolvePlaying(); if (!fired) a.addEventListener("pause", onPause); })
+    .then(() => { trace("play started", `${blob.size}b`); clipPlaying(); resolvePlaying(); if (!fired) a.addEventListener("pause", onPause); })
     .catch((e: unknown) => {
       trace("play refused", String((e as { name?: unknown } | null)?.name ?? e));
       // The element would not play (not a decode failure — those fire onerror and are done): ONE
@@ -391,7 +401,7 @@ function playClipUrl(url: string): Promise<void> {
     // Attach the pause listener only AFTER playback actually starts, so setting src on an
     // already-stopped element can't spuriously resolve us before this clip has played.
     a.play()
-      .then(() => { trace("play started"); if (!done) a.addEventListener("pause", onPause); })
+      .then(() => { trace("play started"); clipPlaying(); if (!done) a.addEventListener("pause", onPause); })
       .catch((e: unknown) => { trace("play refused", String((e as { name?: unknown } | null)?.name ?? e)); finish(); });
   });
 }

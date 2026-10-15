@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1103", date: "2026-10-15", line: "On the phone app, Nort's voice no longer fades out with the screen locked: the page is woken fast only while he's working on your turn, not while he speaks" },
   { version: "cn-v1102", date: "2026-10-15", line: "Nort answers faster with the screen locked on the phone app: the page is woken every half second while it's dark instead of every five" },
   { version: "cn-v1101", date: "2026-10-15", line: "The phone app's trace of a screen-off conversation reaches the ops sink by itself when the screen comes back, so the cable is no longer needed to read it" },
   { version: "cn-v1100", date: "2026-10-15", line: "Nort now takes you to a job's Permits tab when you ask, instead of saying he can't; the phone app keeps a trace while Nort listens so a screen-off problem can be found" },

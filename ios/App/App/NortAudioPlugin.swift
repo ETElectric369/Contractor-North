@@ -38,6 +38,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "endTurn", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "mute", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "wake", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "state", returnType: CAPPluginReturnPromise),
     ]
@@ -58,11 +59,16 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     /// process while the screen is dark unless its own audio is playing; a native call into the page
     /// — this heartbeat, delivered to the page's `tick` listener — runs it. Every stage of a dark turn
     /// (transcribe done, chat answered, playback started) landed right after a tick, five seconds
-    /// apart, which is the "substantially longer delay while locked" Erik heard. So the heartbeat is
-    /// fast while the screen is dark and a conversation is live, and slow in the foreground, where
-    /// nothing needs waking. The page's listener is load-bearing: without it nothing is delivered.
-    private let tickForeground = 5.0
-    private let tickBackground = 0.5
+    /// apart, which is the "substantially longer delay while locked" Erik heard. Build 5 ticked
+    /// every 0.5 s whenever the screen was dark, and twice the reply's voice FADED a few seconds
+    /// after it started (01:49, 01:50) — which never happened at 5 s (01:25, three dark replies).
+    /// So the fast tick is only for the stretch that needs waking: from the turn's end until the
+    /// reply starts to play (transcribe, chat). The page says when (`wake`); playback and listening
+    /// run at the slow tick that is proven clean. The page's listener is load-bearing: without it
+    /// nothing is delivered.
+    private let tickSlow = 5.0
+    private let tickFast = 0.5
+    private var fastWake = false
     /// THE LEVELS QUESTION (skeptic #7, unverified off the phone). The page's gates were tuned against
     /// WebKit's gain-controlled capture; this tap is raw. If build 4's `turn` facts (peak/floor/gate in
     /// the bridge log and the no-speech reports) show speech under the gate, flip this and rebuild:
@@ -160,7 +166,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private func scheduleHeartbeat() {
         heartbeat?.invalidate()
         lock.lock()
-        let interval = foreground ? tickForeground : tickBackground
+        let interval = (foreground || !fastWake) ? tickSlow : tickFast
         lock.unlock()
         heartbeat = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self, self.on else { return }
@@ -231,6 +237,20 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func cancel(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [weak self] in
             self?.dropTurn()
+            call.resolve()
+        }
+    }
+
+    /// The page is working on a turn (transcribe, chat) and needs waking between its stages while
+    /// the screen is dark: `fast: true` from the turn's end, `false` once the reply plays.
+    @objc func wake(_ call: CAPPluginCall) {
+        let fast = call.getBool("fast") ?? false
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return call.reject("gone") }
+            if self.fastWake != fast {
+                self.fastWake = fast
+                if self.on { self.scheduleHeartbeat() }
+            }
             call.resolve()
         }
     }
@@ -577,6 +597,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         on = false
         pendingListen = false
         hadTurn = false
+        fastWake = false
         dropTurn()
         dropEngine()
         lock.lock()

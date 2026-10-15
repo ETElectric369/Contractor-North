@@ -101,9 +101,16 @@ describe("the page's door (native-audio.ts)", () => {
     expect(door).toContain("THE HEARTBEAT IS LOAD-BEARING");
     expect(door).toMatch(/p\.addListener\("tick"[\s\S]*\]\);\s*try \{\s*return await p\.start\(\);/); // registered BEFORE start, so the first tick is heard
     const sw = read("ios/App/App/NortAudioPlugin.swift");
-    expect(sw).toContain("private let tickForeground = 5.0");
-    expect(sw).toContain("private let tickBackground = 0.5");
-    expect(sw).toContain("if on { scheduleHeartbeat() } // the cadence follows the screen");
+    // The fast tick is only for the in-flight stretch (turn's end → the reply plays): at 0.5 s through
+    // playback the voice faded (01:49, 01:50); playback and listening run at the proven 5 s.
+    expect(sw).toContain("private let tickSlow = 5.0");
+    expect(sw).toContain("private let tickFast = 0.5");
+    expect(sw).toContain("let interval = (foreground || !fastWake) ? tickSlow : tickFast");
+    expect(sw).toContain('CAPPluginMethod(name: "wake"');
+    expect(page).toContain("void wakeNative(true); // transcribe and the chat need the page awake between their stages");
+    expect(page).toContain("void wakeNative(false); // listening needs no waking");
+    expect(page).toContain('export const PLAY_EVENT = "cn:nort-play";');
+    expect(read("src/lib/tts.ts")).toContain('window.dispatchEvent(new Event("cn:nort-play"));');
     // The trace reaches the ops sink on its own when the screen comes back (a reopened app detaches the cable).
     const tr = read("src/lib/nort/trace.ts");
     expect(tr).toContain('if (document.visibilityState === "visible") flushTrace("screen back");');
@@ -150,7 +157,7 @@ describe("the mic source switch (voice-stream.ts)", () => {
     expect(page.match(/status\("Mic ready\. Go ahead\."\);/g)?.length).toBe(1); // micReady: one greeting discipline
     expect(page).toContain("function micReady() {");
     expect(page).toContain("micReady();\n    })"); // the web path lands there
-    expect(page).toContain("nativeOn = true;\n      micReady();"); // and the native one
+    expect(page).toContain("nativeOn = true;\n      listenForPlay();\n      micReady();"); // and the native one
     // The hang watch is one function for both mics.
     expect(page.match(/hangWatch\(attempt, "(web|native)"\)/g)?.length).toBe(2);
   });

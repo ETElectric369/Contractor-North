@@ -39,6 +39,7 @@ type Plugin = {
   endTurn(): Promise<void>;
   cancel(): Promise<void>;
   mute(o: { on: boolean }): Promise<void>;
+  wake?(o: { fast: boolean }): Promise<void>;
   stop(o: { ship: boolean }): Promise<Snapshot>;
   state(): Promise<Snapshot>;
   addListener(ev: string, cb: (d: Record<string, unknown> | undefined) => void): Promise<Handle>;
@@ -149,6 +150,17 @@ export async function muteNative(on: boolean): Promise<void> {
     await plugin()?.mute({ on });
   } catch {
     /* the plugin is gone: nothing to mute */
+  }
+}
+
+/** The page is working on a turn and needs waking between its stages while the screen is dark
+ *  (the fast heartbeat): true from the turn's end, false once the reply plays or a turn listens.
+ *  A plugin built before the door (no `wake`) ticks as it always did. */
+export async function wakeNative(fast: boolean): Promise<void> {
+  try {
+    await plugin()?.wake?.({ fast });
+  } catch {
+    /* the plugin is gone: nothing to wake */
   }
 }
 

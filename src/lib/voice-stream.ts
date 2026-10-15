@@ -19,6 +19,7 @@ import {
   startNativeMic,
   stopNativeMic,
   turnBlob,
+  wakeNative,
   type NativeLevel,
   type NativeResumed,
   type NativeTurn,
@@ -395,6 +396,7 @@ function startNative() {
         return;
       }
       nativeOn = true;
+      listenForPlay();
       micReady();
     })
     .catch((err) => {
@@ -437,9 +439,26 @@ function armDeadman() {
   }, nativeDeadmanMs());
 }
 
+/** THE REPLY PLAYS: tts.ts says so (cn:nort-play), and the fast wake ends — playback at the slow
+ *  tick is the proven-clean condition (01:25); at the fast tick the voice faded (01:49, 01:50). */
+export const PLAY_EVENT = "cn:nort-play";
+let playListening = false;
+function listenForPlay() {
+  if (playListening || typeof window === "undefined") return;
+  playListening = true;
+  try {
+    window.addEventListener(PLAY_EVENT, () => {
+      if (nativeOn) void wakeNative(false);
+    });
+  } catch {
+    /* a window with no events: the slow tick stands */
+  }
+}
+
 function beginNativeTurn() {
   if (!wantStream || !nativeOn) return;
   if (active) return; // listening is listening: a re-tap mid-turn restarts nothing
+  void wakeNative(false); // listening needs no waking: the plugin's turn event wakes the page itself
   active = true;
   nativeHeard = false;
   nativeSaidStill = false;
@@ -475,6 +494,7 @@ function onNativeLevel(l: NativeLevel) {
 /** A turn the plugin closed: by the pause rule, by a cap, by hand, or with no speech at all. */
 function onNativeTurn(t: NativeTurn) {
   trace("turn", `${t.why} ${t.bytes}b ${t.seconds}s`);
+  void wakeNative(true); // transcribe and the chat need the page awake between their stages
   clearDeadman();
   level = 0;
   active = false;

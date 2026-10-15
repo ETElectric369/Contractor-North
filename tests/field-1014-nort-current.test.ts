@@ -41,7 +41,7 @@ describe("the release notes", () => {
     expect(versionNumber("cn-v1093")).toBe(1093);
     expect(versionNumber("v1093")).toBeNull();
     const after = notesSince("cn-v1090");
-    expect(after.map((r) => r.version)).toEqual(RELEASE_NOTES.filter((r) => versionNumber(r.version)! > 1090).map((r) => r.version));
+    expect(after.map((r) => r.version)).toEqual(RELEASE_NOTES.filter((r) => versionNumber(r.version)! > 1090).map((r) => r.version).slice(0, NOTES_DEFAULT)); // capped: 13 builds since cn-v1090 by 2026-10-15
     expect(after[0].version).toBe(APP_VERSION);
     expect(notesSince(APP_VERSION)).toEqual([]);
     expect(notesSince(null).length).toBe(Math.min(NOTES_DEFAULT, RELEASE_NOTES.length));
