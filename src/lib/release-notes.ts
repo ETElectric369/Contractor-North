@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1100", date: "2026-10-15", line: "Nort now takes you to a job's Permits tab when you ask, instead of saying he can't; the phone app keeps a trace while Nort listens so a screen-off problem can be found" },
   { version: "cn-v1099", date: "2026-10-14", line: "On the phone app, Nort's mic is the app's own: it records each turn natively and keeps listening after the screen locks; the web mic is unchanged" },
   { version: "cn-v1098", date: "2026-10-14", line: "Nort's screen-off keep-alive is switched off again on the phone app: it broke the mic after the first turn; the fence stays; native recording is the next step" },
   { version: "cn-v1097", date: "2026-10-14", line: "On the phone app: Nort holds a real audio session so he can keep going after the screen locks, and the job's fence can wake the phone when you drive off and ask if you're still working" },

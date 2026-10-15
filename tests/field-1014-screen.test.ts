@@ -425,4 +425,12 @@ describe("the wiring, pinned", () => {
     expect(RING_CLASS).toBe("cn-nort-ring");
     expect(RING_MS).toBe(4000);
   });
+  it("a permit is reached through its job's Permits tab, never a /permits screen (Erik 2026-10-15 00:09: 'why couldn't you take me there directly?')", () => {
+    const p = screenPromptBlock(true);
+    expect(p).toContain("A job's permits, inspections, panel and work orders are TABS on the job (`/jobs/<id>?tab=permits`)");
+    expect(p).toContain("there is no /permits path");
+    expect(screenPath("/permits/5f0c3a2e-1b8d-4f3a-9c0d-0a1b2c3d4e5f", true)).toBeNull();
+    expect(screenPath("/jobs/5f0c3a2e-1b8d-4f3a-9c0d-0a1b2c3d4e5f?tab=permits", false)).toBe("/jobs/5f0c3a2e-1b8d-4f3a-9c0d-0a1b2c3d4e5f?tab=permits");
+  });
+
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { trace } from "@/lib/nort/trace";
 import { useRouter } from "next/navigation";
 import { APP_VERSION } from "@/lib/version";
 import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, X } from "lucide-react";
@@ -866,6 +867,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     let recoveredEarly: string | null = null;
     const dropStream = (why: "stalled" | "found") => {
       dropReason = why;
+      trace("chat dropped", why);
       try { myAbort.abort(); } catch {}
     };
     const stallWatch = setInterval(() => {
@@ -887,6 +889,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     };
     document.addEventListener("visibilitychange", onVisible);
     writePendingTurn({ content, at: sentAt, voice: viaVoice });
+    trace("chat sent", viaVoice ? "voice" : "typed");
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -901,6 +904,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname, greeted: consumeGreeted(), version: APP_VERSION }),
       });
 
+      trace("chat answered", `HTTP ${res.status}`);
       if (!res.ok || !res.body) {
         turnSettled = true; // the route refused the turn — there is no reply to come back for
         const errText = await res.text().catch(() => "Request failed.");
@@ -1148,6 +1152,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         }
       }
     } finally {
+      trace("chat finished", `${turnSettled ? "settled" : "unsettled"}${dropReason ? ` after ${dropReason}` : ""}${recoveredEarly ? " recovered" : ""}`);
       clearInterval(stallWatch);
       document.removeEventListener("visibilitychange", onVisible);
       if (turnSettled) clearPendingTurn(sentAt);

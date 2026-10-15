@@ -10,6 +10,7 @@
  */
 import { reportClientError } from "@/app/report-client-error";
 import { isNativeShell } from "@/lib/native-shell";
+import { trace } from "@/lib/nort/trace";
 import {
   cancelTurnNative,
   listenNative,
@@ -473,6 +474,7 @@ function onNativeLevel(l: NativeLevel) {
 
 /** A turn the plugin closed: by the pause rule, by a cap, by hand, or with no speech at all. */
 function onNativeTurn(t: NativeTurn) {
+  trace("turn", `${t.why} ${t.bytes}b ${t.seconds}s`);
   clearDeadman();
   level = 0;
   active = false;
@@ -800,11 +802,13 @@ async function shipTurn(blob: Blob, ext: string) {
     return;
   }
   status(`Sending ${(blob.size / 1024) | 0}KB to transcribe…`);
+  trace("transcribe sent", `${blob.size}b`);
   try {
     const fd = new FormData();
     fd.append("audio", blob, `turn.${ext}`);
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json().catch(() => null);
+    trace("transcribe done", `HTTP ${r.status} ${String(j?.text ?? "").length} chars`);
     if (mine !== session) return; // Nort was closed while this was in flight: nobody is listening
     if (!r.ok) {
       retryOrGiveUp(`Transcribe error: ${j?.error ?? r.status}.`, "transcribe-error", `HTTP ${r.status}, ${blob.size} bytes`);
@@ -824,6 +828,7 @@ async function shipTurn(blob: Blob, ext: string) {
       );
   } catch (e: any) {
     if (mine !== session) return;
+    trace("transcribe failed", errName(e));
     retryOrGiveUp(`Couldn't reach transcription (${e?.message ?? "network"}).`, "transcribe-unreachable", errName(e));
   }
 }

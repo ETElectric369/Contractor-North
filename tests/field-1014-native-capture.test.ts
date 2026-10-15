@@ -95,6 +95,9 @@ describe("the page's door (native-audio.ts)", () => {
     expect(door).toContain('typeof p.start === "function" && typeof p.listen === "function" && typeof p.stop === "function"');
     for (const f of ["nativeMicAvailable", "startNativeMic", "listenNative", "cancelTurnNative", "muteNative", "stopNativeMic", "turnBlob"]) expect(door).toContain(`export ${f === "nativeMicAvailable" || f === "turnBlob" ? "function" : "async function"} ${f}(`);
     expect(door).toContain('return new Blob([bytes], { type: t.mime || "audio/mp4" });');
+    // The heartbeat reaches the console: the bridge log says whether a turn ran with the screen dark.
+    expect(door).toContain('p.addListener("tick", (d) => {');
+    expect(door).toContain("console.log(`[nort-audio] tick background=${!!d?.background} listening=${!!d?.listening}");
     // The final manual turn is delivered before the listeners go, and only THIS conversation's go.
     expect(door).toMatch(/const mine = handles;[\s\S]*await p\?\.stop\(\{ ship \}\);[\s\S]*for \(const h of mine\)/);
   });

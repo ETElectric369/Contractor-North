@@ -99,6 +99,16 @@ export async function startNativeMic(ev: NativeMicEvents): Promise<Snapshot> {
     p.addListener("interrupted", (d) =>
       ev.onResumed({ resumed: !!d?.resumed, hadTurn: !!d?.hadTurn, listening: !!d?.listening, why: String(d?.why ?? "") }),
     ),
+    // THE HEARTBEAT (every 5 s): echoed to the console so the bridge log over the cable says whether
+    // the page ran, and a turn recorded, while the screen was dark — the only way to read a locked
+    // phone. The first native night (2026-10-15) could not say, because nothing listened for it.
+    p.addListener("tick", (d) => {
+      try {
+        console.log(`[nort-audio] tick background=${!!d?.background} listening=${!!d?.listening} running=${!!d?.running} muted=${!!d?.muted} turns=${num(d?.turns)} revived=${num(d?.revived)} seconds=${num(d?.seconds)}`);
+      } catch {
+        /* a console that is gone */
+      }
+    }),
   ]);
   try {
     return await p.start();
