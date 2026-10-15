@@ -39,6 +39,9 @@ class NorthBridgeViewController: CAPBridgeViewController {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(TapToPayEducationPlugin())
         bridge?.registerPluginInstance(ScreenTurnPlugin())
+        // The screen-off pair (field feedback 10-13, item 4): Nort's audio session and the job's fence.
+        bridge?.registerPluginInstance(NortAudioPlugin())
+        bridge?.registerPluginInstance(GeofencePlugin())
         installNavigationFailureRelay()
         shareTheSpeaker()
         #if DEBUG

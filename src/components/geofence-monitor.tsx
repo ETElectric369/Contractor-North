@@ -13,6 +13,7 @@ import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
 import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
+import { armFence, disarmFence, onFenceExit, takePendingExit, type PendingExit } from "@/lib/native-geofence";
 import type { GeoPoint } from "@/lib/types";
 
 /** Great-circle distance in meters. */
@@ -613,6 +614,43 @@ export function GeofenceMonitor({
   }, [pathname]);
 
   // The one thing worth saying while nothing else is happening: the net is down.
+  // THE FENCE WITH THE SCREEN OFF (field feedback 10-13, item 4; native-geofence.ts). In the shell,
+  // iOS watches the same circle while the app is asleep or gone: armed the moment the anchor is
+  // known (re-armed for a new trip), disarmed when this monitor goes (clock-out). An exit iOS saw
+  // — straight away while the app is awake, or remembered for the next open — opens the SAME
+  // sheet, with the observed time filled in for the person to confirm or change: a human still
+  // states the time (the payroll boundary), the phone only says when it noticed. Off the shell
+  // every door is a no-op, so nothing here changes the web app.
+  useEffect(() => {
+    if (typeof anchorLat !== "number" || typeof anchorLng !== "number") return;
+    let cancelled = false;
+    void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel });
+    const takeExit = (e: PendingExit) => {
+      if (cancelled || doneRef.current || e.entryId !== entryId) return;
+      if (phaseRef.current !== "idle" || Date.now() < snoozedUntil(entryId)) return;
+      openPrompt("wake");
+      const ms = Date.parse(e.exitedAt);
+      if (Number.isFinite(ms) && ms <= Date.now()) {
+        setPickedIso(new Date(ms).toISOString());
+        setPhase("picking");
+      }
+    };
+    void takePendingExit().then((e) => { if (e) takeExit(e); });
+    let stop: () => void = () => {};
+    void onFenceExit(takeExit).then((s) => { stop = s; });
+    const onVis = () => { if (document.visibilityState === "visible") void takePendingExit().then((e) => { if (e) takeExit(e); }); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      stop();
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripKey, anchorLat, anchorLng, radiusM]);
+  // Clock-out unmounts the monitor (the layout renders it only while an entry is open): the
+  // region goes with it.
+  useEffect(() => () => { void disarmFence(); }, []);
+
   if (phase === "idle")
     return watchOff ? (
       <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

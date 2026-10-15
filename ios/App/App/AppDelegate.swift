@@ -9,6 +9,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // A fresh process holds no picked file, so every copy a past one left behind can go.
         AppDelegate.sweepPickedFileCopies(olderThan: 0)
+        // THE FENCE'S DELEGATE EXISTS BEFORE ANYTHING ELSE: iOS relaunches the app in the background for
+        // a region exit (launchOptions carries .location), and the exit is only delivered to a
+        // CLLocationManager that is already standing (GeofencePlugin.swift).
+        GeofenceCore.shared.start()
         // A long-lived process keeps today's copies (a form may still hold one) and drops the rest.
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
                                                object: nil, queue: nil) { _ in

@@ -19,6 +19,8 @@
 		9582B6852FE993A90072D4E8 /* TapToPayEducationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6842FE993A80072D4E8 /* TapToPayEducationPlugin.swift */; };
 		9582B6872FE993AB0072D4E8 /* NorthBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6862FE993AA0072D4E8 /* NorthBridgeViewController.swift */; };
 		9582B6892FE993AD0072D4E8 /* ScreenTurnPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6882FE993AC0072D4E8 /* ScreenTurnPlugin.swift */; };
+		9582B6A12FEA0A010072D4E8 /* NortAudioPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6A02FEA0A010072D4E8 /* NortAudioPlugin.swift */; };
+		9582B6A32FEA0A020072D4E8 /* GeofencePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6A22FEA0A020072D4E8 /* GeofencePlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +37,8 @@
 		9582B6842FE993A80072D4E8 /* TapToPayEducationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapToPayEducationPlugin.swift; sourceTree = "<group>"; };
 		9582B6862FE993AA0072D4E8 /* NorthBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NorthBridgeViewController.swift; sourceTree = "<group>"; };
 		9582B6882FE993AC0072D4E8 /* ScreenTurnPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTurnPlugin.swift; sourceTree = "<group>"; };
+		9582B6A02FEA0A010072D4E8 /* NortAudioPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NortAudioPlugin.swift; sourceTree = "<group>"; };
+		9582B6A22FEA0A020072D4E8 /* GeofencePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofencePlugin.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -74,6 +78,8 @@
 				9582B6842FE993A80072D4E8 /* TapToPayEducationPlugin.swift */,
 				9582B6862FE993AA0072D4E8 /* NorthBridgeViewController.swift */,
 				9582B6882FE993AC0072D4E8 /* ScreenTurnPlugin.swift */,
+				9582B6A02FEA0A010072D4E8 /* NortAudioPlugin.swift */,
+				9582B6A22FEA0A020072D4E8 /* GeofencePlugin.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -172,6 +178,8 @@
 				9582B6852FE993A90072D4E8 /* TapToPayEducationPlugin.swift in Sources */,
 				9582B6872FE993AB0072D4E8 /* NorthBridgeViewController.swift in Sources */,
 				9582B6892FE993AD0072D4E8 /* ScreenTurnPlugin.swift in Sources */,
+				9582B6A12FEA0A010072D4E8 /* NortAudioPlugin.swift in Sources */,
+				9582B6A32FEA0A020072D4E8 /* GeofencePlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -10,6 +10,7 @@
  */
 import { reportClientError } from "@/app/report-client-error";
 import { isNativeShell } from "@/lib/native-shell";
+import { keepAlive as holdNativeSession, logHeartbeat } from "@/lib/native-audio";
 import {
   micBlockedLine,
   oncePerTurn,
@@ -257,6 +258,12 @@ export function startListening(_lang?: string): boolean {
   wantStream = true;
   // Undo setMuted's 'playback' before asking for the mic: capture needs the session back.
   if (isNativeShell()) setAudioSessionType("auto");
+  // NORT WITH THE SCREEN OFF (item 4): the shell holds a real audio session for the whole
+  // conversation, so the app — and this loop — survives the lock. A no-op off the shell.
+  if (isNativeShell()) {
+    void holdNativeSession(true);
+    void logHeartbeat().then((stop) => { stopHeartbeat = stop; });
+  }
   status("Connecting to the mic…");
   const attempt = ++micAttempt;
   let settled = false;
@@ -635,11 +642,18 @@ async function finishTurn() {
  * whatever it had anyway, so Nort answered a question after the user had said stop. Detach the
  * recorder before stopping it and nothing of that turn goes anywhere.
  */
+let stopHeartbeat: () => void = () => {};
+
 export function stopListening(opts?: { discard?: boolean }) {
   session++;
   greeting = null; // a stop ends an armed greeting too
   wantStream = false;
   if (isNativeShell()) setAudioSessionType("auto"); // the conversation is over: leave the session as found
+  if (isNativeShell()) {
+    void holdNativeSession(false); // the screen may sleep the app again
+    stopHeartbeat();
+    stopHeartbeat = () => {};
+  }
   active = false;
   lastStatus = ""; // this session's line must not replay into the next panel
   cancelAnimationFrame(rafId);
