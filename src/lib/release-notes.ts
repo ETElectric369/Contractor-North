@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1105", date: "2026-10-15", line: "The phone app's trace also follows each sentence of Nort's reply, so a reply that stops after its first sentence with the screen locked can be placed" },
   { version: "cn-v1104", date: "2026-10-15", line: "The phone app notes when Nort's panel closes on its own, so an unlock that ends a conversation can be traced to its cause" },
   { version: "cn-v1103", date: "2026-10-15", line: "On the phone app, Nort's voice no longer fades out with the screen locked: the page is woken fast only while he's working on your turn, not while he speaks" },
   { version: "cn-v1102", date: "2026-10-15", line: "Nort answers faster with the screen locked on the phone app: the page is woken every half second while it's dark instead of every five" },

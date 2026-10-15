@@ -138,6 +138,7 @@ export function playClip(blob: Blob, fallbackText: string): { done: Promise<Clip
   const onPause = () => finish("stopped"); // stopSpeaking() pauses; a pause mid-clip is a stop
   const finish = (o: ClipOutcome) => {
     if (fired) return;
+    trace("clip done", o);
     a.onended = null;
     a.onerror = null;
     try { a.removeEventListener("pause", onPause); } catch {}
@@ -388,6 +389,7 @@ function playClipUrl(url: string): Promise<void> {
     const finish = () => {
       if (done) return;
       done = true;
+      trace("clip done", a.ended ? "ended" : a.error ? "error" : "paused");
       a.onended = null;
       a.onerror = null;
       try { a.removeEventListener("pause", onPause); } catch {}
@@ -476,8 +478,10 @@ export class SpeakQueue {
       const item = this.items.shift()!;
       let url: string | null = null;
       // Race synth (and playback below) against stop() so a teardown never leaves the pump hung.
+      trace("clip wait"); // the next sentence: its synthesis (a fetch) must settle while the page may be hidden
       try { url = await Promise.race([item.clip, this.stopped$.then(() => null)]); } catch { url = null; }
       if (this.stopped) break;
+      trace(url ? "clip ready" : "clip missing");
       if (url) {
         await Promise.race([playClipUrl(url), this.stopped$]);
       } else {

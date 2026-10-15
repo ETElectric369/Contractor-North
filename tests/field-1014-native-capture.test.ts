@@ -121,6 +121,9 @@ describe("the page's door (native-audio.ts)", () => {
     expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain('trace("panel unmounted"');
     expect(read("src/components/global-assistant.tsx")).toContain('trace("assistant mounted", window.location.pathname);');
     expect(tr).toContain('trace(visible ? "screen visible" : "screen hidden");');
+    // Each sentence of a reply: waited for, ready (or missing), and done with its outcome.
+    const tts = read("src/lib/tts.ts");
+    for (const l of ['trace("clip wait");', 'trace(url ? "clip ready" : "clip missing");', 'trace("clip done", o);']) expect(tts).toContain(l);
     expect(door).toContain("console.log(`[nort-audio] tick background=${!!d?.background} listening=${!!d?.listening}");
     // The final manual turn is delivered before the listeners go, and only THIS conversation's go.
     expect(door).toMatch(/const mine = handles;[\s\S]*await p\?\.stop\(\{ ship \}\);[\s\S]*for \(const h of mine\)/);
