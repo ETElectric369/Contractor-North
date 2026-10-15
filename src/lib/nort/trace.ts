@@ -27,7 +27,9 @@ function install() {
   if (installed || typeof document === "undefined") return;
   installed = true;
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") flushTrace("screen back");
+    const visible = document.visibilityState === "visible";
+    trace(visible ? "screen visible" : "screen hidden");
+    if (visible) flushTrace("screen back");
   });
 }
 

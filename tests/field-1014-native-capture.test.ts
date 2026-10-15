@@ -113,10 +113,14 @@ describe("the page's door (native-audio.ts)", () => {
     expect(read("src/lib/tts.ts")).toContain('window.dispatchEvent(new Event("cn:nort-play"));');
     // The trace reaches the ops sink on its own when the screen comes back (a reopened app detaches the cable).
     const tr = read("src/lib/nort/trace.ts");
-    expect(tr).toContain('if (document.visibilityState === "visible") flushTrace("screen back");');
+    expect(tr).toContain('if (visible) flushTrace("screen back");');
     expect(tr).toContain("if (!wasHidden || !isNativeShell()) return;");
     expect(tr).toContain('void reportClientError("nort-voice", `trace turn ${turnNo}`, { why, at: clock(), lines: mine.join("\\n") })');
     expect(read("src/lib/voice-stream.ts")).toContain('if (nativeOn) flushTrace("stop");');
+    // The unlock-stop hunt: the panel's unmount, the assistant's mount/unmount and the screen's state are in the trace.
+    expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain('trace("panel unmounted"');
+    expect(read("src/components/global-assistant.tsx")).toContain('trace("assistant mounted", window.location.pathname);');
+    expect(tr).toContain('trace(visible ? "screen visible" : "screen hidden");');
     expect(door).toContain("console.log(`[nort-audio] tick background=${!!d?.background} listening=${!!d?.listening}");
     // The final manual turn is delivered before the listeners go, and only THIS conversation's go.
     expect(door).toMatch(/const mine = handles;[\s\S]*await p\?\.stop\(\{ ship \}\);[\s\S]*for \(const h of mine\)/);

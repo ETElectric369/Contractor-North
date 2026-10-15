@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { trace } from "@/lib/nort/trace";
 import { safeAreaLeft, safeAreaRight, safeAreaTop } from "@/lib/native-shell";
 import { isStaffRole } from "@/lib/actions/perms";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -114,6 +115,13 @@ export function GlobalAssistant({
   fullName?: string | null;
 } = {}) {
   const [open, setOpenState] = useState(false);
+  // THE UNLOCK-STOP HUNT (2026-10-15): when the screen comes back, every client component of the
+  // shell has been seen remounting together, which closes this panel and stops the recorder. The
+  // mount and unmount say so, with the path, next to the screen-visible line in the trace.
+  useEffect(() => {
+    trace("assistant mounted", window.location.pathname);
+    return () => trace("assistant unmounted", window.location.pathname);
+  }, []);
   // THE PANEL'S OPEN STATE, READABLE FROM A LISTENER ADDED ONCE. launch() now runs from a window
   // event whose listener is registered on mount; a closure over `open` would see the value from
   // that first render forever, so a second Talk To Nort into an OPEN panel would remount the chat

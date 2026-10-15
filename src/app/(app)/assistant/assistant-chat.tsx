@@ -404,6 +404,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // Tear the voice session down on unmount (close), so a live recognizer + any in-flight speech
   // (streaming queue / barge-in monitor) never outlive the panel.
   useEffect(() => () => {
+    trace("panel unmounted", typeof window !== "undefined" ? window.location.pathname : ""); // the unlock-stop hunt (2026-10-15)
     speech.stopListening({ discard: true }); // the panel is gone — a half-recorded turn goes nowhere
     speech.setResultHandler(null);
     try { bargeStopRef.current?.(); } catch {}
