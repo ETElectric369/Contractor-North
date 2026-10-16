@@ -626,7 +626,10 @@ export async function generateMaterialDraft(
       model: DEFAULT_MODEL,
       max_tokens: 2000,
       system:
-        'You are a material estimator for a trade contractor. Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot), "vendor": string|null, "est_cost": number|null (per-unit USD, rough)}. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array — no prose, no code fences.',
+        // NO PRICE, NO VENDOR FROM THE MODEL (2026-10-15). It used to be asked for a "rough per-unit USD"
+        // and a vendor on every line: a guess (the model only structures; it never prices — the
+        // no-speculation law) into est_cost, a column the checklist stopped showing in cn-v1108.
+        'You are a material estimator for a trade contractor. Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot)}. No prices and no vendors: the list says what to buy and how many; the price book and the supplier\'s bill price it. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array — no prose, no code fences.',
       // NO ASSISTANT PREFILL. This turn used to end with `{ role: "assistant", content: "[" }` to
       // force the model straight into a JSON array — a technique that stopped being supported on
       // the 4.6-and-later family. On claude-opus-4-8 the API rejects it outright, so EVERY call to
@@ -651,8 +654,9 @@ export async function generateMaterialDraft(
         part_number: i.part_number ? String(i.part_number) : null,
         quantity: Number(i.quantity) || 1,
         unit: String(i.unit ?? "ea"),
-        vendor: i.vendor ? String(i.vendor) : null,
-        est_cost: i.est_cost != null ? Number(i.est_cost) : null,
+        // Nothing the model says about money or a vendor lands on a line (see the system prompt).
+        vendor: null,
+        est_cost: null,
       }),
     );
     return { ok: true, items };

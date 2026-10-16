@@ -177,7 +177,7 @@ export const materialActions: Record<string, ActionDef> = {
     group: "material",
     label: "Add materials line",
     description:
-      "Add ONE line to a job's materials list (the job's one shopping/take-off list) — 'add <item> to the <job> materials list', 'put two <item> on the <job> job, to be purchased'. Pass job_id as the job's id from list_jobs, OR the job's name / number as spoken ('<job name>', 'J-012'); it resolves itself, and if several jobs match you'll be asked which — then look it up with list_jobs (search) and pass the id. One line per call: '<an item> and two <another item>' is two calls. description is the item as a person would say it; quantity defaults to 1 and unit to 'ea' (also ft, box, roll…). part_number / vendor / est_cost / is_tool (true = a tool from the truck, not something to buy) are optional — pass them only when said. A new line is unpurchased, which means 'to be purchased'; the office is notified when a crew member adds one. Use list_material_items to read the list back.",
+      "Add ONE line to a job's materials list (the job's one shopping/take-off list) — 'add <item> to the <job> materials list', 'put two <item> on the <job> job, to be purchased'. Pass job_id as the job's id from list_jobs, OR the job's name / number as spoken ('<job name>', 'J-012'); it resolves itself, and if several jobs match you'll be asked which — then look it up with list_jobs (search) and pass the id. One line per call: '<an item> and two <another item>' is two calls. description is the item as a person would say it; quantity defaults to 1 and unit to 'ea' (also ft, box, roll…). part_number / vendor / is_tool (true = a tool from the truck, not something to buy) are optional — pass them only when said. A price said with the line is NOT kept (the list carries no prices: the price book and the supplier's bill are the cost) — pass it as est_cost anyway so the reply can say it wasn't kept. A new line is unpurchased, which means 'to be purchased'; the office is notified when a crew member adds one. Use list_material_items to read the list back.",
     input: z.object({
       job_id: z.string().min(1),
       description: z.string().trim().min(1),
@@ -185,7 +185,7 @@ export const materialActions: Record<string, ActionDef> = {
       unit: z.string().trim().optional().default("ea"),
       part_number: z.string().nullable().optional(),
       vendor: z.string().nullable().optional(),
-      est_cost: z.number().nullable().optional(),
+      est_cost: z.number().nullable().optional(), // accepted so a spoken price gets a word back; never stored (2026-10-15)
       is_tool: z.boolean().optional(),
     }),
     auth: "any",
@@ -201,8 +201,9 @@ export const materialActions: Record<string, ActionDef> = {
       const list = await ensureJobMaterialList(j.job.id);
       if (!list.ok || !list.id) return { ok: false, error: list.error ?? "Couldn't open that job's materials list." };
 
-      // A tech's line carries no money (withoutMoney strips it server-side and 0254 pins it at the
-      // database). Drop it HERE too so the read-back below never announces a price nobody saved.
+      // A tech's line carries no vendor and no tool flag (withoutMoney strips them server-side and
+      // 0254 pins it at the database), and since 2026-10-15 nobody's line carries a price. Drop
+      // them HERE too so the read-back below never announces a thing nobody saved.
       const staff = isStaffRole(ctx.role);
       const draft = {
         description: i.description,
@@ -210,7 +211,11 @@ export const materialActions: Record<string, ActionDef> = {
         quantity: i.quantity ?? 1,
         unit: i.unit || "ea",
         vendor: staff ? (i.vendor ?? null) : null,
-        est_cost: staff ? (i.est_cost ?? null) : null,
+        // NO PRICE ON A LINE (Erik, 2026-10-15, after the checklist lost its prices in cn-v1108): a
+        // price said to Nort used to land in est_cost, a column no screen shows any more. The price
+        // book (through the estimate's take-off) and the supplier's bill are the cost; a spoken
+        // figure is dropped with a word (the warning below), never kept and never silent.
+        est_cost: null,
         is_tool: staff ? (i.is_tool ?? false) : false,
       };
       const added = await addMaterialItem(list.id, draft);
@@ -243,10 +248,16 @@ export const materialActions: Record<string, ActionDef> = {
       const extras = [
         draft.part_number ? `part # ${draft.part_number}` : "",
         draft.vendor ? `from ${draft.vendor}` : "",
-        draft.est_cost != null ? `est. $${Number(draft.est_cost).toFixed(2)}` : "",
         draft.is_tool ? "marked as a tool" : "",
       ].filter(Boolean);
-      const droppedMoney = !staff && (i.vendor || i.est_cost != null || i.is_tool);
+      // Every dropped value gets its own sentence and ALL of them are said (nothing silent): a tech
+      // who says a vendor AND a price hears both. A zero is not a price said.
+      const droppedOfficeFields = !staff && (i.vendor || i.is_tool);
+      const droppedPrice = typeof i.est_cost === "number" && i.est_cost > 0;
+      const warnings = [
+        droppedOfficeFields ? "The vendor and the tool flag are the office's to set — the line was added without them." : "",
+        droppedPrice ? `The $${Number(i.est_cost).toFixed(2)} wasn't kept: the materials list carries no prices — the price book and the supplier's bill are the cost.` : "",
+      ].filter(Boolean);
       return {
         ok: true,
         data: {
@@ -259,7 +270,7 @@ export const materialActions: Record<string, ActionDef> = {
           purchased: false,
         },
         recorded: `Added: ${words} to the ${label} materials list${extras.length ? ` (${extras.join(", ")})` : ""} — to be purchased.`,
-        ...(droppedMoney ? { warning: "Cost, vendor and the tool flag are the office's to set — the line was added without them." } : {}),
+        ...(warnings.length ? { warning: warnings.join(" ") } : {}),
       };
     },
   },
