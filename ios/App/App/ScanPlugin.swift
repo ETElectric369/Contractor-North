@@ -1121,19 +1121,31 @@ struct Scan3DScreen: View {
                 }
             }
         }
+        // The update streams carry CHANGES, not the value as it stands: the session is started in
+        // viewDidLoad and is often already `.ready` by the time these loops begin (Erik's screen stuck
+        // on "Starting the camera…" with Apple's feed live behind it, 10-16). Seed from the current
+        // values first, then follow the streams.
         .task {
-            for await s in session.stateUpdates {
-                state = s
-                switch s {
-                case .completed: onFinished()
-                case .failed(let error):
-                    failure = error.localizedDescription
-                default: break
-                }
-            }
+            apply(session.state)
+            for await s in session.stateUpdates { apply(s) }
         }
-        .task { for await n in session.numberOfShotsTakenUpdates { shots = n } }
-        .task { for await p in session.userCompletedScanPassUpdates { passDone = p } }
+        .task {
+            shots = session.numberOfShotsTaken
+            for await n in session.numberOfShotsTakenUpdates { shots = n }
+        }
+        .task {
+            passDone = session.userCompletedScanPass
+            for await p in session.userCompletedScanPassUpdates { passDone = p }
+        }
+    }
+
+    private func apply(_ s: ObjectCaptureSession.CaptureState) {
+        state = s
+        switch s {
+        case .completed: onFinished()
+        case .failed(let error): failure = error.localizedDescription
+        default: break
+        }
     }
 
     @State private var failure: String? = nil
