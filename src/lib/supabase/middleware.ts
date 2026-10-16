@@ -2,10 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isReservedSlug } from "@/lib/site-reserved";
 import { loginRedirectUrl } from "@/lib/safe-next";
+import { checkUser } from "@/lib/supabase/user-check";
 
 const PUBLIC_PATHS = [
   "/.well-known", // apple-app-site-association (and friends): fetched by Apple's CDN, never signed in
   "/login",
+  "/sign-in-check", // where a sign-in check with NO ANSWER lands (not a sign-out): needs no check itself
   "/forgot",
   "/auth",
   "/q/",
@@ -55,6 +57,18 @@ const PUBLIC_PATHS = [
  * Refreshes the Supabase auth session on every request and redirects
  * unauthenticated users to /login (except for public paths).
  */
+/** The page a NAVIGATION gets when the sign-in check had no answer: a fresh 503 from here, not the
+ *  app, so (1) a session auth-js dropped on the blip is not deleted from the phone by a cookie
+ *  write, (2) nothing downstream rotates a token the phone would never receive (a Server Component
+ *  cannot set cookies), (3) the offline cache keeps nothing (not a 200). A soft navigation that
+ *  meets it falls back to a full load, which meets this page or the real one. */
+const SIGN_IN_CHECK_HTML =
+  '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try Again</title>' +
+  '<body style="font-family:-apple-system,system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:24px;text-align:center;color:#0f172a">' +
+  '<div><h1 style="font-size:18px;margin:0 0 6px">Couldn\'t check your sign-in just now</h1>' +
+  '<p style="color:#64748b;font-size:14px;margin:0 0 16px">Nothing was lost. Try again in a moment.</p>' +
+  '<button onclick="location.reload()" style="min-height:44px;padding:0 20px;border-radius:12px;border:0;background:#0f172a;color:#fff;font-size:15px">Try Again</button></div></body>';
+
 export async function updateSession(request: NextRequest, onOrgSite = false) {
   let response = NextResponse.next({ request });
 
@@ -80,9 +94,9 @@ export async function updateSession(request: NextRequest, onOrgSite = false) {
   );
 
   // IMPORTANT: do not run code between createServerClient and getUser().
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // A FAILED CHECK IS NOT A SIGN-OUT (lib/supabase/user-check): told apart below.
+  const check = await checkUser(supabase);
+  const user = check.user;
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
@@ -115,6 +129,16 @@ export async function updateSession(request: NextRequest, onOrgSite = false) {
   }
 
   if (!user && !isPublic && pathname !== "/") {
+    // THE CHECK FAILED, nobody signed out: a page gets the Try Again page above, an API call a 503
+    // it can retry — never "session expired" (Erik, 2026-10-16: sent to /login twice
+    // mid-conversation; once he re-typed his password).
+    if (check.failed) {
+      if (pathname.startsWith("/api/")) {
+        return new NextResponse("Couldn't check your sign-in just now — try again.", { status: 503 });
+      }
+      return new NextResponse(SIGN_IN_CHECK_HTML, { status: 503, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+    }
+
     // An API route (fetched via fetch()) must get a clean 401 — NOT a 307 to /login, which
     // the browser would follow and hand the caller the login PAGE's HTML (e.g. the chat
     // would stream the login page back as "Claude's reply"). Only redirect real navigations.

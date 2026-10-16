@@ -2,6 +2,7 @@ import { PROFILE_SAFE_COLS } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
+import { checkUser } from "@/lib/supabase/user-check";
 import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
 import { CommandBar } from "@/components/command-bar";
@@ -61,17 +62,30 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  // A FAILED CHECK IS NOT A SIGN-OUT (lib/supabase/user-check): the login screen is only for nobody
+  // signed in; a blip says so and tries again, and a refused session is reported so its cause is known.
+  const check = await checkUser(supabase);
+  if (check.failed) {
+    reportError("app-layout.sign-in-check", check.error, { status: check.error?.status, name: check.error?.name });
+    redirect("/sign-in-check");
+  }
+  if (check.reason === "refused") {
+    reportError("app-layout.signed-out", check.error, { status: check.error?.status, name: check.error?.name, code: (check.error as { code?: string } | null)?.code });
+  }
+  const user = check.user;
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileErr } = await supabase
     .from("profiles")
     .select(PROFILE_SAFE_COLS)
     .eq("id", user.id)
     .single();
+  // A profile read that FAILED is not a profile that is missing: the onboarding wall is for a
+  // person with no company, never for a blip (skeptic #15, 2026-10-16). PGRST116 = no row.
+  if (profileErr && profileErr.code !== "PGRST116") {
+    reportError("app-layout.profile-read", profileErr, { code: profileErr.code });
+    redirect("/sign-in-check");
+  }
 
   // DEACTIVATED IS CHECKED FIRST (audit v921 high). A revoked site collaborator has active=false
   // AND org_id=null (revokeSiteCollaborator sets both), so the org-less redirect below fired

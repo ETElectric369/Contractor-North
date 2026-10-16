@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1113", date: "2026-10-16", line: "A sign-in check that gets no answer for a moment no longer sends you to the login screen: the app tries again and says so if it still can't; a refused session is now reported" },
   { version: "cn-v1112", date: "2026-10-16", line: "Nort can fix a visit's address by voice (move it, re-address it, or both); a field he leaves empty no longer shows as null on the confirm card, and the card lists no record ids" },
   { version: "cn-v1111", date: "2026-10-16", line: "A yes-or-no question from Nort reaches the phone again: the card shows, the question is spoken, and your yes runs it, on screen or with the screen locked" },
   { version: "cn-v1110", date: "2026-10-15", line: "A confirm question Nort asks by voice is retried and traced if its clip fails; the appointment form has New Lead and New Customer in plain sight and an address picker; Nort reads no cost back" },
