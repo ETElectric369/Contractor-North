@@ -511,6 +511,12 @@ export function CalendarView({
      half hour (schedule/add-to-schedule-sheet). The office only. */
   const [adding, setAdding] = useState<AddAt | null>(null);
   const onSlotTap = useCallback((day: string, minute: number | null) => setAdding({ day, minute }), []);
+  // The sheet's "New Appointment At …" pushes the create intent (?new=1) and leaves the closing to
+  // this, once the URL has landed: closing first would step history back under a navigation still
+  // in flight (the Modal's own history entry), and a push a popstate overtakes is dropped.
+  useEffect(() => {
+    if (searchParams.get("new") === "1") setAdding(null);
+  }, [searchParams]);
 
   /* EACH DAY'S OWN HOURS (0370), by job and day: the grid draws a day by them, the day drill reads
      them, and the tile's time is that day's. Empty before 0370 (every day is the job's usual hours). */

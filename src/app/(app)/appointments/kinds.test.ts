@@ -198,7 +198,7 @@ describe("the pickers offer the five (and a row's own old kind)", () => {
     expect(btn).toContain("{typeOptions.map((t) => (");
     expect(btn).not.toContain("APPOINTMENT_TYPES.map(");
     // The create default: Job from a job, Other anywhere else (the Inspections tab passes its own).
-    expect(btn).toContain('type: appointment?.type ?? defaultType ?? (defaultJobId ? "job" : "other"),');
+    expect(btn).toContain('type: appointment?.type ?? urlSeed.current.type ?? defaultType ?? (defaultJobId ? "job" : "other"),');
   });
 
   it("the lead form and the rail's kind select map kindOptions, never WORK_KINDS", () => {

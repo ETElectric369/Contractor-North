@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1108", date: "2026-10-15", line: "New Inspection on the + menu; a tapped time on the schedule offers a new appointment there too; the materials checklist shows no prices (a bill is the cost) and says In Stock where Shop Stock has it" },
   { version: "cn-v1107", date: "2026-10-15", line: "Permits read right on the phone; an inspection is Passed in one tap and the permit follows it; a punch undone within two minutes leaves no row; a job's Time tab counts the shifts not billed yet" },
   { version: "cn-v1106", date: "2026-10-15", line: "On the phone app, Nort's voice now plays through the app itself, not the web page, so his replies are heard with the screen locked; a shell without the new build plays as before" },
   { version: "cn-v1105", date: "2026-10-15", line: "The phone app's trace also follows each sentence of Nort's reply, so a reply that stops after its first sentence with the screen locked can be placed" },

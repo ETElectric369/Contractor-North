@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { formatCurrency } from "@/lib/utils";
 import {
   createMaterialList,
   generateMaterialDraft,
@@ -30,28 +29,22 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
   const [mDesc, setMDesc] = useState("");
   const [mQty, setMQty] = useState(1);
   const [mUnit, setMUnit] = useState("ea");
-  const [mCost, setMCost] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   function addManual() {
     if (!mDesc.trim()) return;
     setItems((p) => [
       ...p,
-      { description: mDesc.trim(), part_number: null, quantity: mQty || 1, unit: mUnit || "ea", vendor: null, est_cost: mCost || null },
+      { description: mDesc.trim(), part_number: null, quantity: mQty || 1, unit: mUnit || "ea", vendor: null, est_cost: null }, // no money on a checklist (2026-10-15)
     ]);
     setMDesc("");
     setMQty(1);
     setMUnit("ea");
-    setMCost(0);
   }
   const [generating, startGen] = useTransition();
   const [saving, startSave] = useTransition();
   const router = useRouter();
 
-  const estTotal = items.reduce(
-    (s, i) => s + (i.est_cost ?? 0) * i.quantity,
-    0,
-  );
 
   function onGenerate() {
     setError(null);
@@ -164,7 +157,6 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
               <Input value={mDesc} onChange={(e) => setMDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addManual())} placeholder="The item, the way you'd ask for it at the counter" className="min-w-[160px] flex-1" />
               <NumberInput value={mQty} onValueChange={setMQty} className="w-16 text-center" placeholder="Qty" />
               <Input value={mUnit} onChange={(e) => setMUnit(e.target.value)} className="w-14" placeholder="ea" />
-              <NumberInput value={mCost} onValueChange={setMCost} className="w-24 text-right" placeholder="$ each" />
               <Button size="sm" variant="outline" onClick={addManual} disabled={!mDesc.trim()}>
                 <Plus className="h-3.5 w-3.5" /> Add
               </Button>
@@ -180,9 +172,6 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
                       <td className="px-3 py-1.5 text-slate-700">{it.description}</td>
                       <td className="px-2 py-1.5 text-right text-slate-500">
                         {it.quantity} {it.unit}
-                      </td>
-                      <td className="px-2 py-1.5 text-right text-slate-600">
-                        {it.est_cost != null ? formatCurrency(it.est_cost) : "—"}
                       </td>
                       <td className="px-2 py-1.5 text-right">
                         <button
@@ -200,8 +189,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
                 </tbody>
               </table>
               <div className="flex justify-between border-t border-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
-                <span>{items.length} items · est. material cost</span>
-                <span>{formatCurrency(estTotal)}</span>
+                <span>{items.length} items</span>
               </div>
             </div>
           )}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Plus, Camera, Briefcase, CalendarPlus, FileText, Receipt, UserSearch, X, type LucideIcon } from "lucide-react";
+import { Plus, Camera, Briefcase, CalendarPlus, ClipboardCheck, FileText, Receipt, UserSearch, X, type LucideIcon } from "lucide-react";
 import { SnapOrNoteProvider, openSnapOrNote, snapStillSending } from "@/components/snap-or-note";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
@@ -30,6 +30,9 @@ export const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly
   { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true, feature: "leads" },
   { label: "New Job", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },
   { label: "New Appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
+  // The Inspector's visit (Erik, 2026-10-15: "Add new inspection to plus menu"): the schedule's one
+  // create form, opened on the inspection type. Leads off = no inspections = no door.
+  { label: "New Inspection", href: "/schedule?new=inspection", icon: ClipboardCheck, staffOnly: true, feature: "leads" },
   { label: "New Estimate", href: "/quotes/new", icon: FileText, staffOnly: true, feature: "estimates" },
   { label: "New Invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
 ];

@@ -17,7 +17,7 @@ import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { crewChips } from "@/lib/schedule/block-info";
-import { visitTitle } from "@/lib/statuses";
+import { visitTitle, PICKABLE_APPOINTMENT_TYPES } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,7 @@ const CAL_VIEWS = ["day", "week", "2weeks", "month"] as const;
 export default async function SchedulePage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; date?: string; new?: string }>;
+  searchParams: Promise<{ view?: string; date?: string; new?: string; type?: string; time?: string }>;
 }) {
   const sp = await searchParams;
 
@@ -69,10 +69,15 @@ export default async function SchedulePage({
   // EXPLICITLY (org-tz today) — a dateless day view keys off the client's
   // "today", and the server→client day correction would remount the button
   // and close the just-opened modal whenever the two clocks disagree.
-  if (sp.new === "appointment" || (sp.new === "1" && (sp.view !== "day" || !date))) {
+  // ?new=inspection (the + menu's New Inspection) is the same door opened on the inspection type;
+  // a tapped half hour (the day's Add To Schedule sheet) rides along as ?time=HH:MM. Both are
+  // checked here and read by the create form (appointment-button) when it answers ?new=1.
+  if (sp.new === "appointment" || sp.new === "inspection" || (sp.new === "1" && (sp.view !== "day" || !date))) {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const tz = getOrgSettings((org as any)?.settings).timezone;
-    redirect(`/schedule?view=day&date=${date ?? todayStrInTz(tz)}&new=1`);
+    const type = sp.new === "inspection" ? "inspection" : (PICKABLE_APPOINTMENT_TYPES as readonly string[]).includes(sp.type ?? "") ? sp.type : null;
+    const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(sp.time ?? "") ? sp.time : null;
+    redirect(`/schedule?view=day&date=${date ?? todayStrInTz(tz)}&new=1${type ? `&type=${type}` : ""}${time ? `&time=${time}` : ""}`);
   }
 
   // Map: demoted from a tab to the header's MapPin icon, but it keeps a real

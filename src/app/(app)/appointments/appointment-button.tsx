@@ -14,7 +14,7 @@ import { useDraft } from "@/lib/use-draft";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzMinutesOfDay } from "@/lib/tz";
-import { appointmentTypeLabel, appointmentTypeOptions } from "@/lib/statuses";
+import { appointmentTypeLabel, appointmentTypeOptions, PICKABLE_APPOINTMENT_TYPES } from "@/lib/statuses";
 import { suggestedVisitTitle } from "@/lib/schedule/work-shape";
 import {
   createAppointment,
@@ -204,6 +204,10 @@ export function AppointmentButton({
   const pathname = usePathname();
   const toast = useToast();
   const editing = !!appointment;
+  /** WHAT THE URL SAID WHEN IT OPENED THIS FORM: ?type= (New Inspection) and ?time= (a tapped half
+   *  hour), kept until the form is closed so a re-seed on the way in keeps them, and cleared on
+   *  close so the next plain open starts clean. Declared before emptyForm, which reads it at mount. */
+  const urlSeed = useRef<{ type?: string; time?: string }>({});
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -244,13 +248,16 @@ export function AppointmentButton({
     const ctxJob = !appointment && defaultJobId ? jobs.find((j) => j.id === defaultJobId) : undefined;
     const ctxCust = !appointment && defaultCustomerId ? customers.find((c) => c.id === defaultCustomerId) : undefined;
     const date = appointment ? toLocal(appointment.starts_at, tz).date : suggestedDate(defaultDate);
-    const st = appointment ? toLocal(appointment.starts_at, tz) : { date, time: "08:00" };
+    // The door that opened this form may have said the time (a tapped half hour) and the type (the
+    // + menu's New Inspection): urlSeed, read once from ?new=1's companions below.
+    const st = appointment ? toLocal(appointment.starts_at, tz) : { date, time: urlSeed.current.time ?? "08:00" };
     const en = appointment ? toLocal(appointment.ends_at, tz) : { date: "", time: "" };
     const base = {
-      // Default TYPE (W2-06): the caller's explicit defaultType first (the Inspections tab passes
-      // "inspection"); booked from a job, a Job (the work on that job's day); anywhere else Other,
-      // today's plain appointment, with no write-up nag after it.
-      type: appointment?.type ?? defaultType ?? (defaultJobId ? "job" : "other"),
+      // Default TYPE (W2-06): the door's own word first (?type=, the + menu's New Inspection), then
+      // the caller's explicit defaultType (the Inspections tab passes "inspection"); booked from a
+      // job, a Job (the work on that job's day); anywhere else Other, today's plain appointment,
+      // with no write-up nag after it.
+      type: appointment?.type ?? urlSeed.current.type ?? defaultType ?? (defaultJobId ? "job" : "other"),
       customer_id: appointment?.customer_id ?? defaultCustomerId ?? "",
       job_id: appointment?.job_id ?? defaultJobId ?? "",
       new_customer_name: "",
@@ -328,9 +335,26 @@ export function AppointmentButton({
       return;
     }
     if (!newParam.take(claimant)) return;
+    const type = searchParams.get("type") ?? "";
+    const time = searchParams.get("time") ?? "";
+    urlSeed.current = {
+      ...((PICKABLE_APPOINTMENT_TYPES as readonly string[]).includes(type) ? { type } : {}),
+      ...(/^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? { time } : {}),
+    };
+    if (urlSeed.current.type || urlSeed.current.time) {
+      // Re-baseline, as applyOrgTz does: the seed is not an edit, so the close guard never asks
+      // "discard your changes?" about a form nobody touched.
+      const seeded = emptyForm();
+      const live = draftStateRef.current;
+      setForm(seeded);
+      initialSnap.current = JSON.stringify({ form: seeded, mode: live.mode, slots: live.slots });
+      draftStateRef.current = { form: seeded, mode: live.mode, slots: live.slots };
+    }
     setOpen(true);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.delete("new");
+    params.delete("type");
+    params.delete("time");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [searchParams, pathname, router, editing, claimant]);
@@ -396,6 +420,7 @@ export function AppointmentButton({
   // an explicit discard, so the stored draft goes too and the form resets.
   function closeAll() {
     draft.clear();
+    urlSeed.current = {};
     setForm(emptyForm());
     setOpen(false);
     setLinkToken(null);
@@ -465,6 +490,7 @@ export function AppointmentButton({
       if (editing) {
         initialSnap.current = JSON.stringify(draftState);
       } else {
+        urlSeed.current = {}; // the door's seed is spent: the next plain open starts clean
         setForm(emptyForm());
         setMode("set");
         setSlots(defaultSlots());

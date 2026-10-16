@@ -116,8 +116,9 @@ import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { readJobShelfNet, splitJobMaterialCost } from "@/lib/job-cost";
-import { jobTakes } from "@/lib/stock-ledger";
+import { jobTakes, shelfForCrew } from "@/lib/stock-ledger";
 import { TookFromStock } from "../../materials/took-from-stock";
+import { stockForLines } from "@/lib/materials-stock";
 import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
 
@@ -934,6 +935,9 @@ export default async function JobDetailPage({
   // above (open POs, payment milestones, the shelf) is computed exactly as it was.
   const switches = { features: getOrgSettings((org as any)?.settings).features, isOwner: (meRow as any)?.role === "owner" };
   const on = (k: FeatureKey) => featureOn(switches.features, k);
+  // What the shelf holds (lib/materials-stock), started here and awaited by the Materials tab: a
+  // serial read after the page's big wave was the tab's own latency (skeptic #10).
+  const crewShelfP = on("shop_stock") ? shelfForCrew(supabase).catch(() => null) : Promise.resolve(null);
   const laborReadFailed = laborRows === null || jobLevelRate === undefined;
   const billableLabor = laborRows
     ? computeJobLaborBilling(laborRows.jobEntries, defaultLaborRate, jobLevelRate ?? null, laborRows.nonBillableCodes).total
@@ -1230,6 +1234,10 @@ export default async function JobDetailPage({
   // each row also serializes into EditEntryButton props on a page techs can view.
   // Non-staff get an allowlist projection with every pay field stripped; staff
   // pass the full rows through unchanged (the edit modal's Rate anchor uses them).
+  // WHAT THE SHELF HOLDS of the job's materials lines (lib/materials-stock; Erik: no pricing on the
+  // list, "it could show if stock is available"). Shop Stock on only; a failed read says nothing.
+  const crewShelf = await crewShelfP;
+  const materialsStock = crewShelf?.ok ? stockForLines(crewShelf.rows, (canonicalItems ?? []) as unknown as { id: string; description?: string | null }[]) : {};
   /** THE TIME TAB'S BADGE: the shifts no invoice has claimed yet (tests/badges-show-open names it). */
   const timeOpen = unbilled?.schemaReady ? unbilled.shifts : 0;
   const timeTabEntries: {
@@ -1973,7 +1981,7 @@ export default async function JobDetailPage({
               left to buy on top, checked lines folded into Bought (N) inside the
               editor; the pick-list print and PO seed ride on top of the SAME list. */}
           {/* The pick-list print and the PO seed are office doors (a PO is money; the print
-              carries est_cost) — staff only. */}
+              carries no prices) — staff only. */}
           {viewerIsStaff && canonicalList && (
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Link
@@ -1998,7 +2006,7 @@ export default async function JobDetailPage({
               editor the office gets — add, edit, remove, tick purchased — and the SAME lazy
               ensureJobMaterialList on the first add when the job has no list yet (never a second
               list; the tab IS the list). What stays out of a tech's hands and eyes is the money:
-              viewerIsStaff=false hides est_cost / vendor / is_tool / the total inside the editor,
+              viewerIsStaff=false hides vendor / is_tool inside the editor (nobody sees a price there now),
               and a DB trigger pins those columns, so the UI is a convenience, not the boundary.
               This replaces the read-only <ul> a tech used to get. */}
           {/* TOOK FROM STOCK (Phase 3): one button, the same for the crew and the office, and under
@@ -2012,6 +2020,7 @@ export default async function JobDetailPage({
             jobId={j.id}
             items={(canonicalItems ?? []) as any}
             viewerIsStaff={viewerIsStaff}
+            stock={materialsStock}
           />
           {/* BELOW the editor, for a tech: the "need it fast" door — a line on this list plus a
               bell + push to the boss's phone (requestMaterials), for the ask that can't wait

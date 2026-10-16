@@ -21,10 +21,11 @@ const words = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").tri
 const rows = (html: string) => Array.from(html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)).map((m) => words(m[1]));
 
 describe("quickAddActions", () => {
-  it("the office, everything on (or no map): the five typed verbs, New Customer and New Reminder cut", () => {
-    const five = ["New Lead", "New Job", "New Appointment", "New Estimate", "New Invoice"];
-    expect(labels(true, ALL_ON)).toEqual(five);
-    expect(labels(true)).toEqual(five);
+  it("the office, everything on (or no map): the six typed verbs, New Customer and New Reminder cut", () => {
+    // New Inspection (Erik, 2026-10-15: "Add new inspection to plus menu") rides Leads, like New Lead.
+    const six = ["New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"];
+    expect(labels(true, ALL_ON)).toEqual(six);
+    expect(labels(true)).toEqual(six);
     expect(labels(true)).not.toContain("New Customer");
     expect(labels(true)).not.toContain("New Reminder");
   });
@@ -36,16 +37,16 @@ describe("quickAddActions", () => {
     expect(plusOpens(true)).toBe("menu");
   });
 
-  it("Leads off: no New Lead; Estimates off: no New Estimate; the rest stay", () => {
+  it("Leads off: no New Lead and no New Inspection; Estimates off: no New Estimate; the rest stay", () => {
     expect(labels(true, off("leads"))).toEqual(["New Job", "New Appointment", "New Estimate", "New Invoice"]);
-    expect(labels(true, off("estimates"))).toEqual(["New Lead", "New Job", "New Appointment", "New Invoice"]);
+    expect(labels(true, off("estimates"))).toEqual(["New Lead", "New Job", "New Appointment", "New Inspection", "New Invoice"]);
   });
 });
 
 describe("the + on screen", () => {
   it("the office's menu: Snap Or Note is the first row, then the verbs, every row 44px", () => {
     const html = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} }));
-    expect(rows(html)).toEqual(["Snap Or Note", "New Lead", "New Job", "New Appointment", "New Estimate", "New Invoice"]);
+    expect(rows(html)).toEqual(["Snap Or Note", "New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
     for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b).toContain("min-h-11");
     // A switch that is off removes only its own row.
     const leadsOff = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, features: off("leads"), onSnap: () => {}, onGo: () => {} }));

@@ -7,10 +7,9 @@ import { Plus, Trash2, Pencil, Check, ChevronDown, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { checklistGroups, openToBuyCount, tickWord, toBuyWords } from "@/lib/materials-checklist";
-import { lineExtension, listMoney, listTotalLine } from "@/lib/materials-money";
+import { inStockWords, type StockOnShelf } from "@/lib/materials-stock";
 import {
   addMaterialItem,
   deleteMaterialItem,
@@ -78,6 +77,7 @@ export function ItemEditor({
   items,
   jobId,
   viewerIsStaff = true,
+  stock,
 }: {
   listId: string | null;
   items: Item[];
@@ -85,6 +85,8 @@ export function ItemEditor({
   jobId?: string;
   /** false = a tech: same list, same verbs, no money and no tool toggle. */
   viewerIsStaff?: boolean;
+  /** What the shop shelf holds of these lines, by line id (lib/materials-stock). Absent: nothing said. */
+  stock?: StockOnShelf;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -96,7 +98,6 @@ export function ItemEditor({
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
   const [vendor, setVendor] = useState("");
-  const [cost, setCost] = useState(0);
   // edit
   const [editId, setEditId] = useState<string | null>(null);
   const [eDesc, setEDesc] = useState("");
@@ -104,7 +105,6 @@ export function ItemEditor({
   const [eQty, setEQty] = useState(1);
   const [eUnit, setEUnit] = useState("ea");
   const [eVendor, setEVendor] = useState("");
-  const [eCost, setECost] = useState(0);
   // The Bought fold: closed until someone opens it (the open lines lead).
   const [foldOpen, setFoldOpen] = useState(false);
   // THE TICK LANDS UNDER THE THUMB. A checked line moves to the fold the moment it is tapped, not a
@@ -125,12 +125,10 @@ export function ItemEditor({
     return f && f.from === server ? f.to : server;
   };
   const view = items.map((it) => ({ ...it, purchased: bought(it) }));
-  // THE MONEY, AND WHAT IT LEAVES OUT (item C4). The total used to sum (est_cost ?? 0) × quantity, so
-  // a line with no price yet counted as zero with nothing said — a twenty-line list where six have no
-  // price read as a finished figure. lib/materials-money owns both the sum and the sentence.
-  // `figure` is null when NOTHING on the list is priced: then there is no total to print, only the
-  // sentence saying why (item C4-6). lib/materials-money decides that, not this footer.
-  const { figure, caveat } = listTotalLine(listMoney(view));
+  // NO MONEY ON THE CHECKLIST (Erik, 2026-10-14 and 2026-10-15: "take pricing off the materials tab
+  // completely as a bill is a cost and the checklist is for reference"). The list is what to grab and
+  // what to buy; the price book prices and a supplier's bill is the cost. est_cost stays a column
+  // nothing here reads or writes. What the shelf holds is said instead (lib/materials-stock).
   const openCount = openToBuyCount(view);
   // Tools float to the top (grab from the shop first), materials to buy below, both in their own
   // sort_order; every checked line (tools too) folds into Bought. The tools-first grouping is for
@@ -160,7 +158,7 @@ export function ItemEditor({
         quantity: qty || 1,
         unit: unit || "ea",
         vendor: viewerIsStaff ? vendor || null : null,
-        est_cost: viewerIsStaff ? cost || null : null,
+        est_cost: null, // no money on a checklist: the column stays, nothing here fills it
       });
       if (!res.ok) return setError(res.error ?? "Could not add the item.");
       setDesc("");
@@ -168,7 +166,6 @@ export function ItemEditor({
       setQty(1);
       setUnit("ea");
       setVendor("");
-      setCost(0);
       router.refresh();
     });
   }
@@ -267,7 +264,6 @@ export function ItemEditor({
           {viewerIsStaff && (
             <>
               <Input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder={COMPANY_FIELD.material_line.placeholder} aria-label={COMPANY_FIELD.material_line.label} />
-              <NumberInput value={eCost} onValueChange={setECost} className="h-11 min-w-[6rem] flex-1 text-right" placeholder="Est. cost" aria-label="Est. cost" />
             </>
           )}
         </div>
@@ -308,20 +304,12 @@ export function ItemEditor({
             <span className="block text-xs text-slate-400">
               {it.part_number ? `#${it.part_number} · ` : ""}
               {it.quantity} {it.unit}
-              {viewerIsStaff && it.est_cost != null ? ` × ${formatCurrency(it.est_cost)}` : ""}
+              {/* What the shop shelf holds of this line, when it does (lib/materials-stock). */}
+              {!it.purchased && stock?.[it.id] && (
+                <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800">{inStockWords(stock[it.id])}</span>
+              )}
             </span>
           </span>
-          {viewerIsStaff && (
-            // The line's own extension, or NO PRICE YET in words (item C4): a dash reads as nothing
-            // to pay, and this is a line nobody has priced.
-            <span
-              className={`shrink-0 text-right font-medium ${
-                lineExtension(it) === null ? "text-xs font-normal text-amber-700" : "text-slate-900"
-              }`}
-            >
-              {lineExtension(it) === null ? "No Price Yet" : formatCurrency(lineExtension(it)!)}
-            </span>
-          )}
           <Pencil className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
         </button>
         {viewerIsStaff && (
@@ -345,7 +333,6 @@ export function ItemEditor({
     setEQty(it.quantity);
     setEUnit(it.unit ?? "ea");
     setEVendor(it.vendor ?? "");
-    setECost(it.est_cost ?? 0);
   }
 
   function saveEdit() {
@@ -361,7 +348,7 @@ export function ItemEditor({
         part_number: ePart || null,
         quantity: eQty || 1,
         unit: eUnit || "ea",
-        ...(viewerIsStaff ? { vendor: eVendor || null, est_cost: eCost || null } : {}),
+        ...(viewerIsStaff ? { vendor: eVendor || null } : {}),
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setEditId(null);
@@ -389,7 +376,6 @@ export function ItemEditor({
           {viewerIsStaff && (
             <>
               <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder={COMPANY_FIELD.material_line.placeholder} aria-label={COMPANY_FIELD.material_line.label} />
-              <NumberInput value={cost} onValueChange={setCost} className="h-11 min-w-[6rem] flex-1 text-right" placeholder="Est. cost" />
             </>
           )}
           <Button onClick={add} disabled={pending || !desc.trim()} className="ml-auto shrink-0">
@@ -435,15 +421,7 @@ export function ItemEditor({
         <div className="border-t border-slate-100 px-4 py-2 text-sm">
           <div className="flex items-center justify-between gap-3">
             <span className="text-slate-500">{toBuyWords(openCount)}</span>
-            {viewerIsStaff && figure !== null && (
-              <span className="text-slate-500">
-                List Total <span className="font-semibold text-slate-900">{formatCurrency(figure)}</span>
-              </span>
-            )}
           </div>
-          {/* NOTHING SILENT: the lines this total does not cover are named, under the figure (item C4) —
-              or in place of it, when no line is priced and there is no figure to stand behind. */}
-          {viewerIsStaff && caveat && <p className="mt-1 text-xs text-amber-700">{caveat}</p>}
         </div>
       )}
     </div>

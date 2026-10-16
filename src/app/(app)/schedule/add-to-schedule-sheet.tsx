@@ -2,13 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { CalendarPlus, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { BlockTimeControls, type BlockPatch } from "@/components/block-time-controls";
 import { jobStatusLabel } from "@/lib/job-status";
-import { dayWords, readHm, workDayMinutes } from "@/lib/schedule/job-block";
+import { dayWords, hmWords, readHm, workDayMinutes } from "@/lib/schedule/job-block";
 import { dayHoursOf, nextDayHours } from "@/lib/schedule/day-hours";
 import { minutesToHm } from "@/lib/schedule/fit-day";
 import { initialsOf, nameSays, streetOf } from "@/lib/schedule/block-info";
@@ -103,6 +104,12 @@ export function nextDraft(p: {
 }
 
 const LIST_MAX = 40;
+
+/** The day a new appointment from this sheet goes on: the Day box when it holds a date, else the
+ *  tapped day — a cleared box must not send the create form to "today" without a word. */
+export function apptDayOf(day: string, tapped: string | null | undefined): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : (tapped ?? "");
+}
 
 export function AddToScheduleSheet(props: {
   at: AddAt | null;
@@ -309,6 +316,26 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
             <p className="mt-1 text-xs text-slate-500">The job&apos;s crew, for all its days. Tap to put someone on or take them off.</p>
           </section>
         )}
+
+        {/* OR AN APPOINTMENT AT THAT TIME (Erik, 2026-10-15: "add a new appointment to the schedule
+            when I click on a time or a job or whatever"). This sheet places a JOB on the day; an
+            appointment is the day drill's one create form, which answers ?new=1 with the day and the
+            tapped half hour (schedule/page.tsx carries ?time=). One tap: the intent is pushed, and
+            the calendar closes this sheet once the URL has landed — closing first would step
+            history back under a navigation still in flight (the Modal's own entry). */}
+        <section>
+          <Heading>Or An Appointment</Heading>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-auto min-h-11 whitespace-normal py-2 text-left"
+            onClick={() =>
+              router.push(`/schedule?view=day&date=${apptDayOf(day, at?.day)}&new=1${at?.minute != null ? `&time=${minutesToHm(at.minute)}` : ""}`)
+            }
+          >
+            <CalendarPlus className="h-4 w-4" /> New Appointment {at?.minute != null ? `At ${hmWords(minutesToHm(at.minute))}` : `On ${dayWords(apptDayOf(day, at?.day))}`}
+          </Button>
+        </section>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
