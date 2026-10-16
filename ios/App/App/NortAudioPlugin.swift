@@ -11,8 +11,10 @@ import UIKit
 /// one AAC file per turn), the end of the turn is found by the SAME silence rule the page uses
 /// (voice-stream.ts; a test pins the numbers to each other), and the bytes go to the page as a `turn`
 /// event. The page keeps everything else: it POSTs the audio to /api/transcribe with its own session
-/// cookie, talks to the model, and plays the reply through its <audio> element (proven to play dark).
-/// NO NETWORK FROM HERE, EVER (the agent security framework).
+/// cookie, talks to the model, and fetches each sentence of the reply from /api/tts — then hands the
+/// bytes HERE (`play`): WebKit will not reliably begin a clip while the page is hidden (the 19:26
+/// round, 2026-10-15: play() resolved, no sound), while an AVAudioPlayer in the app process plays dark
+/// by right (UIBackgroundModes audio). NO NETWORK FROM HERE, EVER (the agent security framework).
 ///
 /// THE SESSION IS OURS FOR THE CONVERSATION. The first build set .playAndRecord beside WebKit's own
 /// capture and WebKit refused its mic ("AudioSession category is not compatible with audio capture").
@@ -39,6 +41,8 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "mute", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "wake", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "play", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopPlayback", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "state", returnType: CAPPluginReturnPromise),
     ]
@@ -123,6 +127,10 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private var muted = false
     private var foreground = true
     private var levelAt = Date.distantPast
+    /// NATIVE PLAYBACK: one clip at a time, on the session this plugin already holds (play-and-record,
+    /// speaker, mixable). The page hands each sentence's bytes over and hears `played` when it ends.
+    private var player: AVAudioPlayer?
+    private var playId = 0
 
     deinit { teardown() }
 
@@ -133,6 +141,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             let kind = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) ?? 99
             if kind == AVAudioSession.InterruptionType.began.rawValue {
                 self.interruptionBegan()
+                self.stopPlayer("stopped") // a call took the speaker: the page hears the clip end now
             } else if kind == AVAudioSession.InterruptionType.ended.rawValue {
                 self.revive("interruption ended")
             }
@@ -140,6 +149,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self, self.on else { return }
             self.interruptionBegan()
+            self.stopPlayer("stopped") // the player is invalid after a reset: its delegate never speaks again
             self.rebuild("media services reset")
         })
         observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] note in
@@ -242,7 +252,10 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// The page is working on a turn (transcribe, chat) and needs waking between its stages while
-    /// the screen is dark: `fast: true` from the turn's end, `false` once the reply plays.
+    /// the screen is dark: `fast: true` from the turn's end, `false` once the reply plays on the
+    /// element (build 6 and before) or, with the native player, when the next turn listens — the
+    /// page fetches the reply's later sentences while the first one sounds, and those fetches need
+    /// the wake too. Whether the fast tick under a NATIVE reply is clean is build 7's question.
     @objc func wake(_ call: CAPPluginCall) {
         let fast = call.getBool("fast") ?? false
         DispatchQueue.main.async { [weak self] in
@@ -253,6 +266,63 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             call.resolve()
         }
+    }
+
+    /// Play one clip of the reply (base64 bytes from the page's own /api/tts fetch) in the app
+    /// process. Resolves once the sound has begun, with the clip's length; `played` {id, outcome}
+    /// follows when it ends, is stopped, or fails. One voice at a time: a clip still playing is
+    /// stopped first (the page's queue never overlaps them; this is the guard). Never a file, never
+    /// a print of the bytes.
+    @objc func play(_ call: CAPPluginCall) {
+        guard let b64 = call.getString("audio"), let data = Data(base64Encoded: b64), data.count > 0 else {
+            return call.reject("no audio", "input")
+        }
+        let id = call.getInt("id") ?? 0
+        let mime = (call.getString("mime") ?? "").lowercased()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return call.reject("gone") }
+            self.stopPlayer("stopped")
+            do {
+                // Off a conversation (the plugin torn down under a late clip) the launch session is
+                // still a playback one; it only needs to be active.
+                if !self.on { try AVAudioSession.sharedInstance().setActive(true, options: []) }
+                let hint: String? = mime.contains("mpeg") || mime.contains("mp3") ? AVFileType.mp3.rawValue : (mime.contains("mp4") || mime.contains("aac") ? AVFileType.m4a.rawValue : nil)
+                let p = try AVAudioPlayer(data: data, fileTypeHint: hint)
+                p.delegate = self
+                p.prepareToPlay()
+                guard p.play() else { throw PlayError.refused }
+                self.player = p
+                self.playId = id
+                print("[NortAudio] play \(id): \(data.count) bytes, \(String(format: "%.1f", p.duration)) s")
+                call.resolve(["playing": true, "id": id, "seconds": p.duration])
+            } catch {
+                print("[NortAudio] play \(id) failed: \(error.localizedDescription)")
+                call.reject("play: \(error.localizedDescription)", "play")
+            }
+        }
+    }
+
+    /// Cut the voice (Stop, a barge-in, a new turn). `played` {stopped} follows for the clip that was up.
+    @objc func stopPlayback(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return call.reject("gone") }
+            self.stopPlayer("stopped")
+            call.resolve()
+        }
+    }
+
+    private enum PlayError: LocalizedError {
+        case refused
+        var errorDescription: String? { "the player would not start" }
+    }
+
+    /// Main thread. Ends the clip that is up (if any) and tells the page its outcome.
+    private func stopPlayer(_ outcome: String) {
+        guard let p = player else { return }
+        player = nil
+        p.delegate = nil
+        p.stop()
+        notifyListeners("played", data: ["id": playId, "outcome": outcome])
     }
 
     /// Nort is speaking: the end-of-turn rule pauses (the recording itself keeps the app alive).
@@ -313,8 +383,10 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private func begin() throws {
         if on {
             // The page came back (a reload, a WebContent restart) to a plugin still running: it must
-            // find it as a fresh start would — nothing muted, no turn half-open, nothing pending.
+            // find it as a fresh start would — nothing muted, no turn half-open, nothing pending,
+            // nothing of the old page's reply still sounding (its ids start over).
             dropTurn()
+            stopPlayer("stopped")
             lock.lock()
             muted = false
             lock.unlock()
@@ -594,6 +666,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private func teardown() {
         heartbeat?.invalidate()
         heartbeat = nil
+        stopPlayer("stopped") // the conversation is over: the reply's voice goes with it
         on = false
         pendingListen = false
         hadTurn = false
@@ -623,6 +696,7 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             "running": engine?.isRunning ?? false,
             "listening": listening,
             "muted": isMuted,
+            "playing": player?.isPlaying ?? false,
             "revived": revived,
             "turns": turns,
             "category": session.category.rawValue,
@@ -631,5 +705,28 @@ public class NortAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             "seconds": startedAt.map { Int(Date().timeIntervalSince($0)) } ?? 0,
             "background": UIApplication.shared.applicationState != .active,
         ]
+    }
+}
+
+// AVAudioPlayer tells its delegate on the main thread; `player` is only ever touched there.
+extension NortAudioPlugin: AVAudioPlayerDelegate {
+    public func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully flag: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.player === p else { return } // a clip already stopped or replaced
+            self.player = nil
+            p.delegate = nil
+            self.notifyListeners("played", data: ["id": self.playId, "outcome": flag ? "ended" : "failed"])
+        }
+    }
+
+    public func audioPlayerDecodeErrorDidOccur(_ p: AVAudioPlayer, error: Error?) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.player === p else { return }
+            print("[NortAudio] play \(self.playId) decode error: \(error?.localizedDescription ?? "?")")
+            self.player = nil
+            p.delegate = nil
+            p.stop()
+            self.notifyListeners("played", data: ["id": self.playId, "outcome": "failed"])
+        }
     }
 }

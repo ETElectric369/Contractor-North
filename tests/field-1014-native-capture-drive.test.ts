@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/report-client-error", () => ({ reportClientError: vi.fn(async () => {}) }));
 
 type Listener = (d: Record<string, unknown>) => void;
-function fakePlugin(opts: { startSettles?: "now" | "later" } = {}) {
+function fakePlugin(opts: { startSettles?: "now" | "later"; player?: boolean; playRefuses?: boolean } = {}) {
   const calls: string[] = [];
   const listeners = new Map<string, Set<Listener>>();
   let settleStart: (() => void) | null = null;
@@ -45,6 +45,19 @@ function fakePlugin(opts: { startSettles?: "now" | "later" } = {}) {
     async state() {
       return {};
     },
+    // The player (build 7+): only when asked for, so a build-6 shell is driven too.
+    ...(opts.player
+      ? {
+          async play(o: { audio: string; mime: string; id: number }) {
+            calls.push(`play:${o.id}:${o.mime}:${o.audio.length > 0}`);
+            if (opts.playRefuses) throw new Error("the player would not start");
+            return { playing: true, id: o.id, seconds: 1 };
+          },
+          async stopPlayback() {
+            calls.push("stopPlayback");
+          },
+        }
+      : {}),
     async addListener(ev: string, cb: Listener) {
       if (!listeners.has(ev)) listeners.set(ev, new Set());
       listeners.get(ev)!.add(cb);
@@ -173,6 +186,137 @@ describe("the native source, driven", () => {
     plugin.emit("turn", turn("pause"));
     await flush();
     expect(heard).toEqual(["hello there"]);
+    v.stopListening({ discard: true });
+    await flush();
+  });
+
+  it("the reply's clips play in the app process: handed over, ended by `played`, cut by Stop, gone at the end", async () => {
+    const v = await load(fakePlugin({ player: true }));
+    const na = await import("@/lib/native-audio");
+    const tts = await import("@/lib/tts");
+    expect(na.nativePlaybackOn()).toBe(false); // nothing plays natively off a conversation
+    v.startListening();
+    await flush();
+    expect(na.nativePlaybackOn()).toBe(true);
+    const mp3 = () => new Blob([new Uint8Array(2000)], { type: "audio/mpeg" });
+    // One clip (the greeting's door): started when the plugin has it, done when the plugin says so.
+    const clip = tts.playClip(mp3(), "hello");
+    await flush();
+    expect(plugin.calls.at(-1)).toBe("play:1:audio/mpeg:true");
+    await clip.playing;
+    plugin.emit("played", { id: 1, outcome: "ended" });
+    expect(await clip.done).toBe("ended");
+    // Cut by hand: the plugin is told, the clip settles as stopped without waiting for the event.
+    const cut = tts.playClip(mp3(), "hello again");
+    await flush();
+    expect(plugin.calls.at(-1)).toBe("play:2:audio/mpeg:true");
+    cut.stop();
+    expect(await cut.done).toBe("stopped");
+    await flush();
+    expect(plugin.calls.at(-1)).toBe("stopPlayback");
+    // The streamed reply (the queue): each sentence's bytes go over in order; onDone after the last `played`.
+    let drained = false;
+    const q = new tts.SpeakQueue(() => { drained = true; });
+    q.push("Hello there.");
+    q.done();
+    await flush(10);
+    expect(plugin.calls.at(-1)).toBe("play:3:audio/mpeg:true");
+    expect(drained).toBe(false);
+    plugin.emit("played", { id: 3, outcome: "ended" });
+    await flush();
+    expect(drained).toBe(true);
+    // The topbar Stop: stopSpeaking reaches the plugin too.
+    tts.stopSpeaking();
+    await flush();
+    expect(plugin.calls.at(-1)).toBe("stopPlayback");
+    // A clip up when the conversation ends settles without a `played`.
+    const late = tts.playClip(mp3(), "late");
+    await flush();
+    v.stopListening({ discard: true });
+    expect(await late.done).toBe("stopped");
+    await flush();
+    expect(na.nativePlaybackOn()).toBe(false);
+  });
+
+  it("a Stop in the middle of a native sentence ends the queue once; a stale `played` changes nothing", async () => {
+    const v = await load(fakePlugin({ player: true }));
+    const tts = await import("@/lib/tts");
+    v.startListening();
+    await flush();
+    let drained = 0;
+    const q = new tts.SpeakQueue(() => { drained++; });
+    q.push("First sentence.");
+    q.push("Second sentence.");
+    await flush(10);
+    expect(plugin.calls.filter((c) => c.startsWith("play:")).length).toBe(1); // in order: the second waits
+    q.stop(); // the barge-in / Stop: the clip is cut, the second never goes over
+    await flush();
+    expect(plugin.calls.at(-1)).toBe("stopPlayback");
+    expect(drained).toBe(1);
+    plugin.emit("played", { id: 1, outcome: "stopped" }); // the plugin's own word for the cut clip, late
+    plugin.emit("played", { id: 99, outcome: "ended" }); // an id nobody is waiting on
+    await flush(10);
+    expect(plugin.calls.filter((c) => c.startsWith("play:")).length).toBe(1);
+    expect(drained).toBe(1);
+    v.stopListening({ discard: true });
+    await flush();
+  });
+
+  it("a clip the plugin refuses gets the one fallback voice; one that breaks after starting is reported, never spoken twice", async () => {
+    const v = await load(fakePlugin({ player: true, playRefuses: true }));
+    const tts = await import("@/lib/tts");
+    v.startListening();
+    await flush();
+    // No speechSynthesis in this window: the fallback voice ends at once, and that is the clip's end.
+    const refused = tts.playClip(new Blob([new Uint8Array(2000)], { type: "audio/mpeg" }), "hello");
+    expect(await refused.done).toBe("ended");
+    await flush();
+    v.stopListening({ discard: true });
+    await flush();
+    const v2 = await load(fakePlugin({ player: true }));
+    const tts2 = await import("@/lib/tts");
+    v2.startListening();
+    await flush();
+    const broke = tts2.playClip(new Blob([new Uint8Array(2000)], { type: "audio/mpeg" }), "hello");
+    await flush();
+    plugin.emit("played", { id: 1, outcome: "failed" });
+    expect(await broke.done).toBe("failed"); // greeting-player drops a cached clip on this, as on the element
+    v2.stopListening({ discard: true });
+    await flush();
+  });
+
+  it("a lost `played` cannot hang the reply: the clip's own length plus slack ends it", async () => {
+    const v = await load(fakePlugin({ player: true }));
+    const tts = await import("@/lib/tts");
+    v.startListening();
+    await flush();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const io = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
+    try {
+      const clip = tts.playClip(new Blob([new Uint8Array(2000)], { type: "audio/mpeg" }), "hello");
+      let settled: string | null = null;
+      void clip.done.then((o) => { settled = o; });
+      await io(); // the bytes encode and go over (real I/O), the bridge answers "1 s"
+      expect(plugin.calls.at(-1)).toBe("play:1:audio/mpeg:true");
+      await vi.advanceTimersByTimeAsync(3400); // 1 s + 2.5 s slack: not yet
+      await io();
+      expect(settled).toBeNull();
+      await vi.advanceTimersByTimeAsync(200);
+      await io();
+      expect(settled).toBe("ended");
+    } finally {
+      vi.useRealTimers();
+    }
+    v.stopListening({ discard: true });
+    await flush();
+  });
+
+  it("a shell whose plugin has no player (build 6) keeps the element for the reply", async () => {
+    const v = await load();
+    const na = await import("@/lib/native-audio");
+    v.startListening();
+    await flush();
+    expect(na.nativePlaybackOn()).toBe(false);
     v.stopListening({ discard: true });
     await flush();
   });

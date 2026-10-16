@@ -50,8 +50,8 @@ describe("one end-of-turn rule, two languages", () => {
 
 describe("the plugin (Swift)", () => {
   it("offers the page's doors and events, and nothing else", () => {
-    for (const m of ["start", "listen", "endTurn", "cancel", "mute", "stop", "state"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}"`);
-    for (const ev of ['"turn"', '"level"', '"interrupted"', '"tick"']) expect(swift).toContain(`notifyListeners(${ev}`);
+    for (const m of ["start", "listen", "endTurn", "cancel", "mute", "wake", "play", "stopPlayback", "stop", "state"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}"`);
+    for (const ev of ['"turn"', '"level"', '"interrupted"', '"tick"', '"played"']) expect(swift).toContain(`notifyListeners(${ev}`);
     expect(swift).not.toMatch(/URLSession|URLRequest|NSURLConnection/);
   });
   it("claims a mixable play-and-record session for the conversation and hands it back at stop", () => {
@@ -82,6 +82,19 @@ describe("the plugin (Swift)", () => {
     expect(swift).toContain('self.pendingListen = true\n                call.resolve(["listening": false, "pending": true])');
     expect(swift).toContain("if turn != nil { return } // listening is listening");
   });
+  it("plays the reply's clips in the app process and tells the page when each ends (the 19:26 round)", () => {
+    // WebKit would not reliably BEGIN a clip while the page was hidden (play() resolved, no sound);
+    // an AVAudioPlayer on the plugin's own session plays dark by right. One clip at a time; the
+    // outcome goes back as `played`; Stop, a phone call and the conversation's end all cut it.
+    expect(swift).toContain("let p = try AVAudioPlayer(data: data, fileTypeHint: hint)");
+    expect(swift).toContain("p.delegate = self");
+    expect(swift).toContain("extension NortAudioPlugin: AVAudioPlayerDelegate");
+    expect(swift).toContain('notifyListeners("played", data: ["id": self.playId, "outcome": flag ? "ended" : "failed"])');
+    expect(swift).toMatch(/@objc func play\(_ call: CAPPluginCall\) \{[\s\S]*self\.stopPlayer\("stopped"\)[\s\S]*let p = try AVAudioPlayer/); // one voice at a time
+    expect(swift).toContain('self.stopPlayer("stopped") // a call took the speaker');
+    expect(swift).toMatch(/private func teardown\(\) \{[\s\S]*stopPlayer\("stopped"\)[\s\S]*on = false/);
+    expect(swift).not.toMatch(/print\([^\n]*b64/); // the bytes are never printed
+  });
   it("the tap thread never reads UIKit: the foreground flag is a copy kept on main", () => {
     const consume = swift.slice(swift.indexOf("private func consume("), swift.indexOf("private static func rms("));
     expect(consume).not.toContain("UIApplication");
@@ -99,7 +112,7 @@ describe("the page's door (native-audio.ts)", () => {
     expect(door).toContain('p.addListener("tick", (d) => {');
     // LOAD-BEARING: the tick listener is what lets the plugin's heartbeat run the hidden page (the 01:25 trace).
     expect(door).toContain("THE HEARTBEAT IS LOAD-BEARING");
-    expect(door).toMatch(/p\.addListener\("tick"[\s\S]*\]\);\s*try \{\s*return await p\.start\(\);/); // registered BEFORE start, so the first tick is heard
+    expect(door).toMatch(/p\.addListener\("tick"[\s\S]*\]\);\s*try \{\s*const snap = await p\.start\(\);/); // registered BEFORE start, so the first tick is heard
     const sw = read("ios/App/App/NortAudioPlugin.swift");
     // The fast tick is only for the in-flight stretch (turn's end → the reply plays): at 0.5 s through
     // playback the voice faded (01:49, 01:50); playback and listening run at the proven 5 s.
@@ -123,10 +136,34 @@ describe("the page's door (native-audio.ts)", () => {
     expect(tr).toContain('trace(visible ? "screen visible" : "screen hidden");');
     // Each sentence of a reply: waited for, ready (or missing), and done with its outcome.
     const tts = read("src/lib/tts.ts");
-    for (const l of ['trace("clip wait");', 'trace(url ? "clip ready" : "clip missing");', 'trace("clip done", o);']) expect(tts).toContain(l);
+    for (const l of ['trace("clip wait");', 'trace(clip ? "clip ready" : "clip missing");', 'trace("clip done", o);']) expect(tts).toContain(l);
     expect(door).toContain("console.log(`[nort-audio] tick background=${!!d?.background} listening=${!!d?.listening}");
     // The final manual turn is delivered before the listeners go, and only THIS conversation's go.
     expect(door).toMatch(/const mine = handles;[\s\S]*await p\?\.stop\(\{ ship \}\);[\s\S]*for \(const h of mine\)/);
+  });
+});
+
+describe("the reply's voice (tts.ts ↔ native-audio.ts)", () => {
+  it("every clip goes to the plugin while a shell conversation is live; a shell without the player keeps the element", () => {
+    const tts = read("src/lib/tts.ts");
+    expect(door).toContain("export function nativePlaybackOn()");
+    expect(door).toContain('playback = typeof p.play === "function" && typeof p.stopPlayback === "function";'); // decided at start, per shell
+    expect(door).toContain('p.addListener("played", (d) => {');
+    expect(door).toContain('settleAll("stopped"); // the plugin\'s teardown cuts the voice; the page\'s clips must not wait for it');
+    // A `played` lost under a process change must not hang the reply: the clip's own length plus slack ends it.
+    expect(door).toContain('armDeadman(PLAY_UNKNOWN_MS + PLAY_SLACK_MS); // the bridge\'s own reply may be the thing that is lost');
+    expect(door).toContain('armDeadman((seconds > 0 ? seconds * 1000 : PLAY_UNKNOWN_MS) + PLAY_SLACK_MS);');
+    expect(door).toContain('started.catch(() => finish("refused"));'); // refused (fall back) is not failed (never twice)
+    expect(tts).toContain('if (o === "refused") { resolvePlaying(); browserSpeak(speakable(fallbackText), () => fire("ended")); return; }');
+    expect(tts).toContain("else if (o !== \"stopped\") fire();"); // speakSmart: never onEnd on a cut (the element's contract)
+    expect(swift).toContain('stopPlayer("stopped") // the player is invalid after a reset');
+    expect(door).not.toMatch(/console\.log\([^\n]*(d\?\.audio|b64|base64)/); // the bytes are never echoed
+    // The three players and the one stop all branch on the same switch.
+    expect(tts.split("if (nativePlaybackOn()) {").length - 1).toBe(3); // playClip, playQueuedClip, speakSmart
+    expect(tts).toContain("if (nativePlaybackOn()) void stopPlaybackNative();");
+    expect(tts).toContain('trace("play started", `${blob.size}b native`)');
+    // The element path is untouched for the web and for a shell built before the player (build 6).
+    expect(tts).toContain('a.play()\n    .then(() => { trace("play started", `${blob.size}b`); clipPlaying();');
   });
 });
 

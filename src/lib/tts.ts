@@ -1,7 +1,10 @@
 import { trace } from "@/lib/nort/trace";
+import { nativePlaybackOn, playNative, stopPlaybackNative } from "@/lib/native-audio";
 
-/** A clip began to play. voice-stream listens (cn:nort-play): in the shell the recorder's fast
- *  wake ends here, because playback at the slow tick is the proven-clean condition. */
+/** A clip began to play ON THE ELEMENT. voice-stream listens (cn:nort-play): in the shell the
+ *  recorder's fast wake ends here, because WebKit's playback at the slow tick is the proven-clean
+ *  condition. The native player never says so — it is not WebKit's, and the page still needs waking
+ *  between the sentences it fetches; the next turn's listen slows the tick. */
 function clipPlaying() {
   try {
     window.dispatchEvent(new Event("cn:nort-play"));
@@ -127,6 +130,25 @@ export function playClip(blob: Blob, fallbackText: string): { done: Promise<Clip
   let resolvePlaying: () => void = () => {};
   const playing = new Promise<void>((res) => { resolvePlaying = res; });
   const fire = (o: ClipOutcome) => { if (fired) return; fired = true; resolvePlaying(); resolveDone(o); };
+  // THE SHELL PLAYS NATIVELY while a conversation is live (native-audio.ts): WebKit would not
+  // reliably begin a clip with the screen dark. Same contract: done once, the fallback voice only
+  // when the plugin would not play it.
+  if (nativePlaybackOn()) {
+    quietBrowserVoice();
+    const np = playNative(blob);
+    np.started.then((sent) => { if (sent) trace("play started", `${blob.size}b native`); resolvePlaying(); }, (e: unknown) => {
+      trace("play refused", `native ${String((e as { message?: unknown } | null)?.message ?? e)}`);
+    });
+    void np.done.then((o) => {
+      if (fired) return;
+      trace("clip done", o);
+      // Refused = the plugin would not start it: the one fallback voice. Failed = it broke after
+      // starting: reported as such (a cached greeting is dropped), never spoken a second time.
+      if (o === "refused") { resolvePlaying(); browserSpeak(speakable(fallbackText), () => fire("ended")); return; }
+      fire(o);
+    });
+    return { done, playing, stop: () => { stopSpeaking(); fire("stopped"); } };
+  }
   const a = getAudio();
   if (!a) {
     resolvePlaying();
@@ -149,7 +171,7 @@ export function playClip(blob: Blob, fallbackText: string): { done: Promise<Clip
   a.onended = () => finish("ended");
   a.onerror = () => finish("failed");
   a.src = url;
-  // The pause listener only AFTER playback actually starts (playClipUrl's rule), so setting src on
+  // The pause listener only AFTER playback actually starts (playQueuedClip's rule), so setting src on
   // a stopped element cannot settle us before the clip has played.
   a.play()
     .then(() => { trace("play started", `${blob.size}b`); clipPlaying(); resolvePlaying(); if (!fired) a.addEventListener("pause", onPause); })
@@ -186,6 +208,7 @@ export function unlockAudio() {
  *  voice-mode Stop button so the user can cut Claude off mid-sentence, like chat. */
 export function stopSpeaking() {
   quietBrowserVoice();
+  if (nativePlaybackOn()) void stopPlaybackNative();
   try {
     if (audioEl) {
       audioEl.onended = null;
@@ -297,6 +320,16 @@ export function speakSmart(text: string, onEnd?: () => void) {
       if (r.status === 503) { neuralDisabled = true; throw new Error("no provider"); }
       if (!r.ok) throw new Error("tts " + r.status);
       const buf = await r.arrayBuffer();
+      if (nativePlaybackOn()) {
+        quietBrowserVoice();
+        // The element's contract: onEnd at the end (or a failure, so a caller waiting to re-arm
+        // the mic is never left hanging), never on a cut — a Stop re-arms by its own hand.
+        void playNative(new Blob([buf], { type: "audio/mpeg" })).done.then((o) => {
+          if (o === "refused") browserSpeak(t, fire);
+          else if (o !== "stopped") fire();
+        });
+        return;
+      }
       const url = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
       const a = getAudio();
       if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire); return; }
@@ -363,24 +396,32 @@ export function splitSentences(text: string): { sentences: string[]; rest: strin
   return { sentences, rest: s.slice(start) };
 }
 
-/** Synthesize ONE already-speakable clip → an <audio>-playable object URL. Resolves to null when the
- *  neural provider is unavailable/errored (caller then browser-speaks the text). Never rejects. */
-function synthClip(speakableText: string): Promise<string | null> {
+/** Synthesize ONE already-speakable clip → its bytes. Resolves to null when the neural provider is
+ *  unavailable/errored (caller then browser-speaks the text). Never rejects. */
+function synthClip(speakableText: string): Promise<Blob | null> {
   if (neuralDisabled) return Promise.resolve(null);
   return fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: speakableText }) })
     .then(async (r) => {
       if (r.status === 503) { neuralDisabled = true; return null; }
       if (!r.ok) return null;
       const buf = await r.arrayBuffer();
-      return URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
+      return new Blob([buf], { type: "audio/mpeg" });
     })
     .catch(() => null);
 }
 
-/** Play one object-URL clip on the shared audio element; resolves when it ends, fails, OR is paused
- *  (a stopSpeaking() during a barge-in/Stop pauses the element — resolving on pause keeps the speak
- *  queue's pump from hanging on a clip that will never fire `ended`). Idempotent: resolves once. */
-function playClipUrl(url: string): Promise<void> {
+/** Play one queued clip: in the app process when the shell's conversation is live (native-audio.ts),
+ *  else on the shared audio element. Resolves when it ends, fails, OR is stopped (a stopSpeaking()
+ *  during a barge-in/Stop pauses the element — resolving on pause keeps the speak queue's pump from
+ *  hanging on a clip that will never fire `ended`). Idempotent: resolves once. */
+function playQueuedClip(blob: Blob): Promise<void> {
+  if (nativePlaybackOn()) {
+    quietBrowserVoice();
+    const np = playNative(blob);
+    np.started.then((sent) => { if (sent) trace("play started", `${blob.size}b native`); }, (e: unknown) => trace("play refused", `native ${String((e as { message?: unknown } | null)?.message ?? e)}`));
+    return np.done.then((o) => { trace("clip done", o); });
+  }
+  const url = URL.createObjectURL(blob);
   return new Promise((resolve) => {
     const a = getAudio();
     if (!a) { URL.revokeObjectURL(url); resolve(); return; }
@@ -421,7 +462,7 @@ function playClipUrl(url: string): Promise<void> {
  * whole queue immediately and fires onDone so the caller's re-arm path always runs.
  */
 export class SpeakQueue {
-  private items: { speakable: string; clip: Promise<string | null> }[] = [];
+  private items: { speakable: string; clip: Promise<Blob | null> }[] = [];
   private playing = false;
   private producerDone = false;
   private stopped = false;
@@ -476,14 +517,14 @@ export class SpeakQueue {
     this.playing = true;
     while (!this.stopped && this.items.length) {
       const item = this.items.shift()!;
-      let url: string | null = null;
+      let clip: Blob | null = null;
       // Race synth (and playback below) against stop() so a teardown never leaves the pump hung.
       trace("clip wait"); // the next sentence: its synthesis (a fetch) must settle while the page may be hidden
-      try { url = await Promise.race([item.clip, this.stopped$.then(() => null)]); } catch { url = null; }
+      try { clip = await Promise.race([item.clip, this.stopped$.then(() => null)]); } catch { clip = null; }
       if (this.stopped) break;
-      trace(url ? "clip ready" : "clip missing");
-      if (url) {
-        await Promise.race([playClipUrl(url), this.stopped$]);
+      trace(clip ? "clip ready" : "clip missing");
+      if (clip) {
+        await Promise.race([playQueuedClip(clip), this.stopped$]);
       } else {
         // Neural failed for this clip — speak it with the browser voice, still in order.
         await Promise.race([new Promise<void>((res) => browserSpeak(item.speakable, res)), this.stopped$]);
