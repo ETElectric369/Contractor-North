@@ -356,7 +356,7 @@ describe("the wiring, pinned", () => {
 
   it("the route offers show_screen to EVERY caller, emits the clamped block mid-stream and keeps going", () => {
     expect(route).toContain('name: "show_screen"');
-    expect(route).toContain("SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : [])");
+    expect(route).toContain("SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, FILL_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : [])");
     const h = route.slice(route.indexOf('if (tu.name === "show_screen")'), route.indexOf('if (tu.name === "open_maps")'));
     expect(h).toContain("sanitizeScreen(tu.input, { isStaff: isStaffCaller, voice: !!body.voice })");
     expect(h).toContain("emit(SCREEN_OPEN + JSON.stringify(shown) + SCREEN_CLOSE)");

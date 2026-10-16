@@ -74,7 +74,7 @@ describe("the release notes", () => {
     expect(route).toContain('whats_new: "Checking what\'s new…"');
     expect(route).toContain('read_my_updates: "Getting your updates…"');
     expect(route.split("What's new in the app itself is whats_new").length - 1).toBe(2);
-    expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain("greeted: consumeGreeted(), version: APP_VERSION }");
+    expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain("greeted: consumeGreeted(), version: APP_VERSION, doors: listNortDoors(), seen: seenNow }");
   });
 });
 

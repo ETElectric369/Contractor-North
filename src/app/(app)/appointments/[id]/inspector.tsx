@@ -42,6 +42,10 @@ import { TellNort } from "@/components/tell-nort";
 import { hearIntoPlaybook } from "../hear-actions";
 import { addInspectionPhotos, removeInspectionPhoto, saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
 import type { InspectionAccess } from "@/lib/inspection/inspection-access";
+import { registerNortDoors, type NortDoor } from "@/lib/nort/doors";
+import { measureNative, measurePluginPresent, type MeasureMode } from "@/lib/native-measure";
+import { Ruler } from "lucide-react";
+import { inspectorDoors } from "@/lib/inspection/doors";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
  *  it renders 0 as blank, so "I didn't count it" and "zero of them" become the same stored value —
@@ -53,10 +57,13 @@ function NumBox({
   onFocus,
   onBlur,
   placeholder,
+  id,
 }: {
   value: number | null;
   onValue: (n: number | null) => void;
   className?: string;
+  /** The box's name on the screen (a door Nort can type into is rung by its id). */
+  id?: string;
   /** Same keyboard-stealing bug as the prose boxes: the first DIGIT flips isAnswered, the field
    *  moves to another branch of the tree, and iOS takes the keyboard with it. A measurement is
    *  rarely one digit. */
@@ -71,6 +78,7 @@ function NumBox({
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <Input
+      id={id}
       autoComplete="off"
       inputMode="decimal"
       value={draft ?? (value === null ? "" : String(value))}
@@ -345,6 +353,12 @@ export function Inspector({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // MEASURE WITH THE CAMERA (LiDAR rung 1): the door exists only where the shell carries the plugin
+  // — read after mount, so the server's render and the phone's first paint agree (no door), and the
+  // phone grows it on the first effect. A browser never shows it: nothing to tap that could only fail.
+  const [canMeasure, setCanMeasure] = useState(false);
+  useEffect(() => setCanMeasure(measurePluginPresent()), []);
+  const [measuring, setMeasuring] = useState(false);
   const [viewing, setViewing] = useState<CapturePhoto | null>(null);
   // THE TASK SHEET (field feedback 10-13, item 2): one task open at a time, the rest their rows.
   // Erik: "in the task itself is where we will be needing photos, measurements, materials and
@@ -743,6 +757,113 @@ export function Inspector({
     queueAnswers();
   };
 
+  // ── MEASURE WITH THE CAMERA (LiDAR rung 1, field feedback 10-13, item 5) ───────────────────
+  // The tap opens the shell's measuring view (ARKit; LiDAR where the phone has it); the figure
+  // lands as a measurement row — feet, or square feet for an area — on the task it was taken for
+  // (or the visit), with the snapshot placed beside it wearing the figure as its caption, and the
+  // row's label box takes the cursor so he can say what it was. A cancel is a cancel (nothing
+  // said); a phone that cannot measure says the plugin's own sentence (nothing silent).
+  const measuringRef = useRef(false);
+  async function measureInto(taskId: string | null, mode: MeasureMode) {
+    if (measuringRef.current) return; // a double tap is one measurement (the plugin would refuse the second in words)
+    measuringRef.current = true;
+    setMeasuring(true);
+    setError(null);
+    try {
+      const r = await measureNative(mode);
+      if (!r.ok) {
+        if ("refused" in r) setError(r.refused);
+        return;
+      }
+      const id = captureId();
+      // A NAMED ROW: the server drops a nameless measurement on save (skeptic #16, M8), so the row
+      // says what the tool did — neutral, not a guess — and he renames it in the label box. A figure
+      // off a phone without the sensor says so: an estimated plane is close, not exact.
+      const label = `${mode === "area" ? "Measured area" : "Measured length"}${r.approx ? " (approx.)" : ""}`;
+      const row: CaptureMeasure = { id, label, value: r.value, unit: r.unit, ...(taskId ? { task_id: taskId } : {}) };
+      const next = [...measuresRef.current, row];
+      measuresRef.current = next;
+      setMeasures(next);
+      queueCapture({ measures: next });
+      if (taskId) openTask(taskId);
+      else open1("measures");
+      // The label box gets the cursor where iOS allows a focus outside a tap (it may not raise the keyboard).
+      setTimeout(() => document.getElementById(`measure-label-${id}`)?.focus(), 80);
+      if (r.photo) {
+        pendingTaskRef.current = taskId;
+        await upload([r.photo], { caption: r.caption, about: label });
+      } else {
+        setError("The measurement landed, but its picture didn't come back.");
+      }
+    } finally {
+      measuringRef.current = false;
+      setMeasuring(false);
+    }
+  }
+
+  // ── THE DOORS NORT TYPES INTO (field feedback 10-13, rung 2) ───────────────────────────────
+  // Erik: "enter text into the box directly for me and record measurements where they are
+  // supposed to be recorded." Every box on this sheet, as a named door over the SAME setters a
+  // keystroke runs (lib/inspection/doors), rebuilt each render and read through one provider
+  // registered once — so a task added a second ago has its doors the moment Nort asks, and the
+  // autosave sees a typed value. A plain tech's view registers nothing.
+  const tasksNeed = playbook.needs.find((n) => n.slot?.type === "tasks") ?? null;
+  // FRESH STATE FOR EVERY DOOR (skeptic #16, H1): two fills can land in ONE tick (one model message,
+  // two blocks), before React renders either — so a door reads and writes these refs synchronously,
+  // never a render's copy, and the second fill sees the first. The refs follow state at render.
+  const measuresRef = useRef(measures);
+  measuresRef.current = measures;
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
+  const openTaskIdRef = useRef(openTaskId);
+  openTaskIdRef.current = openTaskId;
+  const tasksNow = () => (tasksNeed ? liveTasks(answersRef.current[tasksNeed.key]) : []);
+  const doorsRef = useRef<Record<string, NortDoor>>({});
+  doorsRef.current = inspectorDoors({
+    readOnly,
+    tasks: tasksNeed ? liveTasks(answers[tasksNeed.key]) : [],
+    openTaskId,
+    taskOf: (id) => tasksNow().find((t) => t.id === id) ?? null,
+    patchTask: (taskId, patch) => {
+      if (!tasksNeed) return;
+      const next = tasksNow().map((t) => (t.id === taskId ? { ...t, ...patch } : t));
+      // The same spine as setAnswer (clearInapplicable, the hold release, the debounced save), against the ref.
+      const nextAnswers = clearInapplicable(playbook, { ...answersRef.current, [tasksNeed.key]: (next.length ? next : null) as never });
+      answersRef.current = nextAnswers;
+      setMultiKey((k) => (k === tasksNeed.key ? k : null));
+      setAnswers(nextAnswers);
+      queueAnswers();
+    },
+    // Show the task without clearing a pending Take (openTask does) and without re-jumping an open one.
+    showTask: (id) => {
+      if (openTaskIdRef.current === id) return;
+      openTaskIdRef.current = id;
+      setOpenTaskId(id);
+      jumpTo(`task-${id}`);
+    },
+    measures,
+    addMeasure: (row) => {
+      const next = [...measuresRef.current, { id: captureId(), ...row }];
+      measuresRef.current = next;
+      setMeasures(next);
+      queueCapture({ measures: next });
+    },
+    needs: applicableNeeds(playbook, answers),
+    answerOf: (key) => answersRef.current[key],
+    setAnswer: (key, value) => {
+      answersRef.current = clearInapplicable(playbook, { ...answersRef.current, [key]: value as never });
+      setAnswer(key, value as never);
+    },
+    open1,
+    readNotes: () => notesRef.current,
+    setNotes: (text) => {
+      notesRef.current = text;
+      setNotes(text);
+      queueCapture({ notes: text });
+    },
+  });
+  useEffect(() => registerNortDoors(() => doorsRef.current), []);
+
   // ── THE PRELIMINARY REPORT'S ANSWERS ─────────────────────────────────────────────────────
   // What the plan reading prepared that THIS sheet still has open. Booking an inspection from
   // the lead seeds these server-side; this covers the other orderings — an inspection booked
@@ -783,10 +904,18 @@ export function Inspector({
   };
 
   // ── PHOTOS ─────────────────────────────────────────────────────────────────────────────────
-  async function upload(files: File[]) {
+  // The photo list and its placements as they stand when an upload FINISHES, not when it started:
+  // an upload spans seconds (a measurement, a minute), and a whole-list write from a stale copy
+  // would drop a photo added meanwhile (skeptic #16, M9).
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
+  const photoMetaRef = useRef(photoMeta);
+  photoMetaRef.current = photoMeta;
+  async function upload(files: File[], extra?: Partial<CapturePhotoMeta>) {
     if (!files.length) return;
     // Taken from inside a task's sheet: placed on that task (read once, then cleared, so the
-    // visit's own Take / Add never inherits it).
+    // visit's own Take / Add never inherits it). `extra` is what Measure knows about its snapshot
+    // (the figure as its caption) — merged the same way, after the photo is stored.
     const forTask = pendingTaskRef.current;
     pendingTaskRef.current = null;
     setUploading(true);
@@ -804,7 +933,8 @@ export function Inspector({
         const { data } = await supabase.storage.from("documents").createSignedUrl(path, 3600);
         added.push({ path, url: data?.signedUrl ?? null });
       }
-      const next = [...photos, ...added];
+      const next = [...photosRef.current, ...added];
+      photosRef.current = next;
       setPhotos(next);
       // Persist immediately — a closed tab must not lose the shots. A crew lead sends only the ones
       // he just took, appended on the server: his page's list is from when it opened, and sending it
@@ -814,11 +944,12 @@ export function Inspector({
         : await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
       if (!r.ok) setError(r.error ?? "Couldn't save the photos.");
       else setSavedAt(Date.now());
-      if (forTask && r.ok) {
+      if ((forTask || extra) && r.ok) {
         // AFTER the photos are stored, never before: the capture's parse drops placement for a
         // photo it does not have yet, so meta that landed first would be lost.
-        const meta = { ...photoMeta };
-        for (const a of added) meta[a.path] = { ...(meta[a.path] ?? {}), task_id: forTask };
+        const meta = { ...photoMetaRef.current };
+        for (const a of added) meta[a.path] = { ...(meta[a.path] ?? {}), ...(extra ?? {}), ...(forTask ? { task_id: forTask } : {}) };
+        photoMetaRef.current = meta;
         setPhotoMeta(meta);
         queueCapture({ photo_meta: meta });
       }
@@ -1236,6 +1367,7 @@ export function Inspector({
               <>
               <div className="flex items-center gap-2">
                 <Input
+                  id={`task-name-${t.id}`}
                   autoComplete="off"
                   value={t.name}
                   placeholder="The piece of work, in your words"
@@ -1259,7 +1391,7 @@ export function Inspector({
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Hours</span>
-                <NumBox value={t.hours} className="w-20" {...focus} onValue={(x) => patchTask(i, { hours: x })} />
+                <NumBox id={`task-hours-${t.id}`} value={t.hours} className="w-20" {...focus} onValue={(x) => patchTask(i, { hours: x })} />
                 {/* THE ASKING STATE: his number or a question, never an average filled in for him. */}
                 {taskAsking(t) && (
                   <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">hours?</span>
@@ -1327,7 +1459,7 @@ export function Inspector({
                       {showUnits && (
                         <>
                           <span className={label}>Units</span>
-                          <NumBox value={t.units} className="w-20" placeholder="units" {...focus} onValue={(x) => patchTask(i, { units: x })} />
+                          <NumBox id={`task-units-${t.id}`} value={t.units} className="w-20" placeholder="units" {...focus} onValue={(x) => patchTask(i, { units: x })} />
                           {kit?.unit && <span className="text-sm text-slate-500">{kit.unit}</span>}
                           {unitsAsking && (
                             <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700" title="How many units? The kit's hours and parts are per unit">
@@ -1455,11 +1587,23 @@ export function Inspector({
                 )}
               </div>
               {/* MEASUREMENTS ON THIS TASK — typed rows today; Measure / Scan The Room land here. */}
-              <div className="mt-3 space-y-2">
-                <SectionLabel>Measurements</SectionLabel>
+              <div id={`task-measure-${t.id}`} className="mt-3 scroll-mt-16 space-y-2">
+                <div className="flex items-center justify-between">
+                  <SectionLabel>Measurements</SectionLabel>
+                  {canMeasure && !readOnly && (
+                    <div className="flex gap-2">
+                      <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(t.id, "length")}>
+                        {measuring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ruler className="h-4 w-4" />} Measure
+                      </Button>
+                      <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(t.id, "area")}>
+                        Measure Area
+                      </Button>
+                    </div>
+                  )}
+                </div>
                 {taskMeasures.map((m) => (
                   <div key={m.id} className="flex items-center gap-2">
-                    <Input value={m.label} placeholder="what you measured" {...focus} onChange={(e) => patchMeasure(m.id, { label: e.target.value })} />
+                    <Input id={`measure-label-${m.id}`} value={m.label} placeholder="what you measured" {...focus} onChange={(e) => patchMeasure(m.id, { label: e.target.value })} />
                     <NumBox value={m.value} className="w-24" {...focus} onValue={(x) => patchMeasure(m.id, { value: x })} />
                     <Input value={m.unit} placeholder="ft" className="w-16" {...focus} onChange={(e) => patchMeasure(m.id, { unit: e.target.value })} />
                     {!readOnly && (
@@ -1477,6 +1621,7 @@ export function Inspector({
               <div className="mt-3">
                 <SectionLabel>Note</SectionLabel>
                 <Textarea
+                  id={`task-note-${t.id}`}
                   rows={2}
                   className="mt-1"
                   value={t.note ?? ""}
@@ -1968,12 +2113,25 @@ export function Inspector({
         {/* MEASUREMENTS — still always available, now not always VISIBLE. Typed rows for what a
             kit can size itself from, plus the prose box for the shape a number can't hold. */}
         {shows("measures", measures.some((m) => !claimed(m)) || !!proseMeasurements.trim()) && (
-        <div>
-          <SectionLabel>Measurements</SectionLabel>
+        <div id="insp-measures" className="scroll-mt-16">
+          <div className="flex items-center justify-between">
+            <SectionLabel>Measurements</SectionLabel>
+            {canMeasure && !readOnly && (
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(null, "length")}>
+                  {measuring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ruler className="h-4 w-4" />} Measure
+                </Button>
+                <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(null, "area")}>
+                  Measure Area
+                </Button>
+              </div>
+            )}
+          </div>
           <div className="mt-2 space-y-2">
             {measures.map((m, i) => claimed(m) ? null : (
               <div key={m.id} className="flex items-center gap-2">
                 <Input
+                  id={`measure-label-${m.id}`}
                   value={m.label}
                   placeholder="what you measured"
                   onChange={(e) => {

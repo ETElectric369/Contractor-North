@@ -42,6 +42,8 @@ class NorthBridgeViewController: CAPBridgeViewController {
         // The screen-off pair (field feedback 10-13, item 4): Nort's audio session and the job's fence.
         bridge?.registerPluginInstance(NortAudioPlugin())
         bridge?.registerPluginInstance(GeofencePlugin())
+        // Measure with the camera (LiDAR rung 1, field feedback 10-13, item 5).
+        bridge?.registerPluginInstance(MeasurePlugin())
         installNavigationFailureRelay()
         shareTheSpeaker()
         #if DEBUG

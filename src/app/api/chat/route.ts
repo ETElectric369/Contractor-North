@@ -30,6 +30,7 @@ import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
 import { HOLDING_OPEN, HOLDING_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
 import { screenPromptBlock } from "@/lib/nort/screens";
+import { doorContextLines, seenLines } from "@/lib/nort/door-context";
 
 // A client-intent tool: show/refresh the LIVE quote preview as the agent builds it. Not a
 // DB write — the route streams it to the client's preview pane; saving is a separate step.
@@ -181,6 +182,31 @@ const SHOW_SCREEN_TOOL = {
   },
 } as const;
 
+// TYPING FOR THEM (rung 2; Erik 2026-10-14: "enter text into the box directly for me and record
+// measurements where they are supposed to be recorded, you know Jarvis style"). The turn's app
+// context lists the BOXES ON THE SCREEN by door name; this puts words into one of them THROUGH
+// THE PAGE'S OWN STATE — the same setter a keystroke runs, so the page's autosave is the save and
+// the person watches it land. Only what they said; a number that is not one is refused in words
+// by the door itself. Not a DB write from here; the write freeze is untouched.
+const FILL_SCREEN_TOOL = {
+  name: "fill_screen",
+  description:
+    "TYPE INTO A BOX on the screen the user is looking at, exactly as if they typed it (the page saves it the way it saves a keystroke). The boxes available RIGHT NOW are listed in the latest app context as BOXES ON THE SCREEN, by door name — use only a door from that list; if the box they mean isn't listed, take them to its screen first (show_screen) and try on the next turn. Pass `door` and `value` for a box (words, or a number as they said it), or `door` and `fields` for an add-row door such as a measurement ({label, value, unit}). Put in ONLY what the user said — never a number or a word they didn't give. Say ONE short line about what you put where; the next turn's context tells you what landed.",
+  input_schema: {
+    type: "object",
+    properties: {
+      door: { type: "string", description: "The door's name from BOXES ON THE SCREEN, e.g. 'task-note-<id>', 'need-panel_amps', 'insp-notes'." },
+      value: { type: "string", description: "The words or the number to put in the box, as the user said them." },
+      fields: {
+        type: "object",
+        description: "For an add-row door only: its named fields, e.g. {label: 'wall', value: '12.5', unit: 'ft'} — only the fields the user gave.",
+        additionalProperties: { type: "string" },
+      },
+    },
+    required: ["door"],
+  },
+} as const;
+
 // (The remember_style tool was replaced by the registry's confirm-gated memory.standingOrders
 // in audit 8 — same job, but the human reads the exact text on a card before it becomes an
 // instruction that outranks Nort's defaults in every future prompt.)
@@ -197,6 +223,7 @@ function statusLabel(tool: string): string {
     business_summary: "Crunching the numbers…", hours_summary: "Tallying hours…",
     list_shelf: "Checking stock…",
     read_my_updates: "Getting your updates…", whats_new: "Checking what's new…",
+    fill_screen: "Typing it in…",
   };
   return m[tool] ?? "Looking that up…";
 }
@@ -548,7 +575,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     /* memory is best-effort */
   }
 
-  let body: { messages: ChatMessage[]; voice?: boolean; draft?: Record<string, unknown> | null; path?: string; greeted?: boolean; version?: string };
+  let body: { messages: ChatMessage[]; voice?: boolean; draft?: Record<string, unknown> | null; path?: string; greeted?: boolean; version?: string; doors?: unknown; seen?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -712,6 +739,15 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
   if (typeof body.path === "string" && body.path.startsWith("/") && body.path.length <= 200) {
     tailContext.push(`User is currently viewing ${body.path}`);
   }
+  // THE BOXES ON THE SCREEN (rung 2): the page's own door list, clamped — names in the spot alphabet,
+  // labels as plain text — so fill_screen can name a real box. Volatile by nature (it changes with
+  // every task added), so it rides the message tail, never the cached system block.
+  const doorLines = doorContextLines(body.doors);
+  if (doorLines.length) tailContext.push(`BOXES ON THE SCREEN RIGHT NOW (fill_screen doors; [name] what it is):\n${doorLines.join("\n")}`);
+  // WHAT LANDED since the last turn: the phone's own word on each fill (the ack), so a refusal
+  // ("isn't a number") is answered and a landed note is never typed twice.
+  const seen = seenLines(body.seen);
+  if (seen.length) tailContext.push(`WHAT LANDED ON THE SCREEN since your last turn (do not repeat a fill that landed):\n${seen.join("\n")}`);
   if (tailContext.length) {
     for (let i = convo.length - 1; i >= 0; i--) {
       const m = convo[i];
@@ -816,7 +852,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // input-is-data rule in the system prompt covers them).
               // The live quote preview is an Estimates door (its Save makes an estimate): off with it.
               // With Sales Tax off it carries no tax field (quoteDraftToolFor).
-              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax)] : []), SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax)] : []), SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, FILL_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             },
             // Strip the directive markers from MODEL text so a prompt-injection can't forge a
             // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
@@ -930,6 +966,22 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                 tool_use_id: tu.id,
                 content: JSON.stringify({ ok: true, showing: shown, ...(dropped.length ? { not_used: dropped, why: "not a screen this person can be taken to / not a spot name / box is a voice-only move — say where it is in words instead" } : {}) }),
               });
+              continue;
+            }
+            // Client-intent: TYPE INTO A BOX (rung 2). Same channel as show_screen: the clamped step
+            // rides a SCREEN block mid-stream, the phone's driver runs the page's own setter, and the
+            // agent keeps talking. What did not pass the clamp is said back (not_used).
+            if (tu.name === "fill_screen") {
+              const asked = (tu.input ?? {}) as Record<string, unknown>;
+              const fieldsIn = asked.fields && typeof asked.fields === "object" && !Array.isArray(asked.fields) && Object.keys(asked.fields as object).length ? asked.fields : null;
+              const wanted = fieldsIn ? { add: { door: asked.door, fields: fieldsIn } } : { fill: { door: asked.door, value: asked.value } };
+              const typed = sanitizeScreen(wanted, { isStaff: isStaffCaller, voice: !!body.voice });
+              if (typed.fill || typed.add) {
+                emit(SCREEN_OPEN + JSON.stringify(typed) + SCREEN_CLOSE);
+                results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, typing: typed.fill ?? typed.add, note: "sent to the screen — the next turn's context says what landed" }) });
+              } else {
+                results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: false, not_used: Object.keys(asked), why: "door must be a name from BOXES ON THE SCREEN and value (or fields) plain text — say what you'd put where in words instead" }) });
+              }
               continue;
             }
             // Client-intent: open Maps. Turn it into an OPEN directive + end the turn (the

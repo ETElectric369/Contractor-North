@@ -216,7 +216,26 @@ export type AgentScreen = {
   box?: "bar" | "open" | null;
   /** What he is showing, in a few words — the parked bar reads it, e.g. "the Costs tab". */
   label?: string | null;
+  /** TYPE INTO A BOX (rung 2): the door's name and the words (or the number, as said) to put in it. */
+  fill?: { door: string; value: string } | null;
+  /** ADD A ROW through an add-row door (a measurement): the door's name and its named fields. */
+  add?: { door: string; fields: Record<string, string> } | null;
 };
+
+/** A fill's value: a note can be long, and keeps its line breaks; every other control char goes. */
+export const FILL_VALUE_MAX = 2000;
+/** An add-row door's fields: a few short named strings (label / value / unit). */
+export const ADD_FIELDS_MAX = 8;
+export const ADD_FIELD_MAX = 200;
+export const ADD_KEY_RE = /^[a-z][a-z_]{0,19}$/;
+
+/** Plain text for a box: control characters out, line breaks kept, capped — never "fixed" further. */
+export function fillText(raw: unknown, max: number): string | null {
+  if (typeof raw !== "string") return null;
+  // eslint-disable-next-line no-control-regex
+  const t = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").replace(/\r\n?/g, "\n").trim().slice(0, max).trim();
+  return t ? t : null;
+}
 
 /** A spot's name: the same alphabet `data-tour` and element ids use here; never a selector. */
 export const SCREEN_ANCHOR_RE = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
@@ -293,6 +312,32 @@ export function sanitizeScreen(input: unknown, opts: { isStaff?: boolean; voice?
   if ((c.box === "bar" && opts.voice !== false) || c.box === "open") out.box = c.box;
   const label = typeof c.label === "string" ? c.label.replace(/\s+/g, " ").trim().slice(0, 120) : "";
   if (label) out.label = label;
+  // TYPING FOR THEM (rung 2): a door is a bare name like an anchor; the value is text (a number is
+  // parsed by the door itself, so "2.5" and "two" are the door's to accept or refuse in words).
+  const fill = c.fill as Record<string, unknown> | undefined;
+  if (fill && typeof fill === "object") {
+    const door = typeof fill.door === "string" ? fill.door.trim() : "";
+    const value = fillText(fill.value, FILL_VALUE_MAX);
+    if (SCREEN_ANCHOR_RE.test(door) && value !== null) out.fill = { door, value };
+  }
+  const add = c.add as Record<string, unknown> | undefined;
+  if (add && typeof add === "object") {
+    const door = typeof add.door === "string" ? add.door.trim() : "";
+    const fields: Record<string, string> = {};
+    const raw = (add.fields ?? {}) as Record<string, unknown>;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [k, v] of Object.entries(raw)) {
+        if (!ADD_KEY_RE.test(k)) continue;
+        const t = fillText(v, ADD_FIELD_MAX);
+        if (t === null) continue;
+        // The model's empty-as-a-word is nothing (cn-v1112's lesson): never a unit called "null".
+        if (["null", "none", "undefined", "n/a", "nil"].includes(t.toLowerCase())) continue;
+        fields[k] = t.replace(/\s+/g, " ");
+        if (Object.keys(fields).length >= ADD_FIELDS_MAX) break;
+      }
+    }
+    if (SCREEN_ANCHOR_RE.test(door) && Object.keys(fields).length) out.add = { door, fields };
+  }
   return out;
 }
 

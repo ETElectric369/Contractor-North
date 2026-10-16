@@ -22,6 +22,7 @@ import {
   type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard,
 } from "@/lib/assistant-protocol";
 import { performScreen } from "@/lib/nort/screen-driver";
+import { listNortDoors } from "@/lib/nort/doors";
 import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, recoverTurn, type PickerContact } from "./actions";
 import { ContactPicker } from "./contact-picker";
 import { DriverCard } from "@/components/driver-card";
@@ -485,6 +486,18 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   /** Whatever Nort parked the box for, this needs eyes on the box: bring it back. */
   const openBox = () => window.dispatchEvent(new CustomEvent("cn:assistant-box", { detail: { box: "open" } }));
   const lastCardRef = useRef<string>("");
+  // WHAT LANDED (rung 2): each fill's own word — landed, refused, no such box — kept until the next
+  // turn carries it to the server as context, so Nort answers a refusal and never types a note twice.
+  const seenRef = useRef<string[]>([]);
+  /** The screen the turn's door list was read on: a fill lands only there (skeptic #16, M1). */
+  const turnPathRef = useRef<string>("");
+  /** A line under the chat for a few seconds (a miss, a refusal), and the box back so it is seen. */
+  const noteUnder = (text: string) => {
+    setMissNote(text);
+    if (missTimerRef.current) clearTimeout(missTimerRef.current);
+    missTimerRef.current = setTimeout(() => setMissNote(null), 8000);
+    openBox();
+  };
 
   // Put text into the LAST assistant line (the placeholder a turn appends, possibly half-filled),
   // or append one if the tail isn't an assistant line.
@@ -908,6 +921,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     document.addEventListener("visibilitychange", onVisible);
     writePendingTurn({ content, at: sentAt, voice: viaVoice });
     trace("chat sent", viaVoice ? "voice" : "typed");
+    const seenNow = seenRef.current.slice();
+    turnPathRef.current = window.location.pathname;
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -919,10 +934,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // greeted: the spoken greeting named what Nort holds and asked "want them now?" — this
         // message is the answer, so the server must not ask again (0394).
         // version: the build THIS bundle carries — whats_new tells the person whether the phone is behind.
-        body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname, greeted: consumeGreeted(), version: APP_VERSION }),
+        // doors + seen (rung 2): the boxes on this screen Nort may type into, and what his last
+        // fills came to — both from the page's own registry, read at send time. The seen lines are
+        // cleared only once the server has them (a refused turn keeps them for the next).
+        body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname, greeted: consumeGreeted(), version: APP_VERSION, doors: listNortDoors(), seen: seenNow }),
       });
 
       trace("chat answered", `HTTP ${res.status}`);
+      if (res.ok) seenRef.current = seenRef.current.slice(seenNow.length);
       if (!res.ok || !res.body) {
         turnSettled = true; // the route refused the turn — there is no reply to come back for
         const errText = await res.text().catch(() => "Request failed.");
@@ -985,6 +1004,17 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         const moves = screenBlocks(full);
         while (screenDoneRef.current < moves.length) {
           const step = moves[screenDoneRef.current++];
+          // A FILL LANDS ON THE SCREEN ITS BOXES WERE LISTED FROM. If the screen moved since the turn
+          // was sent (a show_screen in this same turn, or the person's own tap), the door names Nort
+          // holds belong to the page that is leaving — refused and said, never typed into the wrong
+          // visit; the next turn lists the new screen's boxes (skeptic #16, M1).
+          const typing = step.fill ?? step.add;
+          if (typing && !step.path && window.location.pathname !== turnPathRef.current) {
+            seenRef.current.push(`${typing.door}: NOT filled — the screen moved from ${turnPathRef.current} to ${window.location.pathname} since its boxes were listed; use the next turn's list`);
+            noteUnder("The screen changed — say that again.");
+            if (viaVoice) say("The screen changed. Say that again.");
+            continue;
+          }
           try {
             performScreen(
               step,
@@ -996,6 +1026,18 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   if (missTimerRef.current) clearTimeout(missTimerRef.current);
                   missTimerRef.current = setTimeout(() => setMissNote(null), 8000);
                   openBox();
+                  seenRef.current.push(`${s.anchor ?? "a spot"}: not on this screen`);
+                },
+                // A fill's word (rung 2): landed = the rung box says it; refused or missing = said
+                // here AND spoken by voice, since the reply may already have claimed it (skeptic #16, M7).
+                onDoor: (o) => {
+                  if (o.result.ok) seenRef.current.push(`${o.door}: landed — ${o.result.landed}`);
+                  else {
+                    seenRef.current.push(`${o.door}: NOT filled — ${o.result.why}`);
+                    const words = "missing" in o.result ? `No box called ${o.door} on this screen.` : `Couldn't put that in: ${o.result.why}`;
+                    noteUnder(words);
+                    if (viaVoice) say("missing" in o.result ? "That box isn't on this screen." : `That didn't go in. ${o.result.why}`);
+                  }
                 },
               },
             );
