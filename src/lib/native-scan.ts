@@ -19,9 +19,12 @@ import { FEET_PER_METER, metersToFeet, photoFile, squareMetersToSquareFeet } fro
 export type ScanKind = "site" | "room";
 
 type Plugin = {
-  isSupported?(): Promise<{ site?: unknown; room?: unknown; reason?: unknown }>;
+  isSupported?(): Promise<{ site?: unknown; room?: unknown; model?: unknown; reason?: unknown }>;
   scanSite?(): Promise<Record<string, unknown>>;
   scanRoom?(): Promise<Record<string, unknown>>;
+  scan3d?(): Promise<Record<string, unknown>>;
+  readChunk?(o: { path: string; offset: number; length: number }): Promise<{ data?: unknown; bytes?: unknown; total?: unknown }>;
+  discard?(o: { path: string }): Promise<void>;
 };
 
 function plugin(): Plugin | null {
@@ -35,8 +38,8 @@ export function scanPluginPresent(): boolean {
   return typeof plugin()?.scanSite === "function";
 }
 
-export type ScanDoors = { site: boolean; room: boolean };
-export const NO_SCAN_DOORS: ScanDoors = { site: false, room: false };
+export type ScanDoors = { site: boolean; room: boolean; model: boolean };
+export const NO_SCAN_DOORS: ScanDoors = { site: false, room: false, model: false };
 
 /** Which scans this phone can do — the plugin's own answer (the sensor; iOS 16 for a room). */
 export async function scanDoors(): Promise<ScanDoors> {
@@ -44,7 +47,7 @@ export async function scanDoors(): Promise<ScanDoors> {
   if (!p?.isSupported) return NO_SCAN_DOORS;
   try {
     const r = await p.isSupported();
-    return { site: r?.site === true, room: r?.room === true };
+    return { site: r?.site === true, room: r?.room === true, model: r?.model === true };
   } catch {
     return NO_SCAN_DOORS;
   }
@@ -196,4 +199,90 @@ export async function scanNative(kind: ScanKind): Promise<ScanResult> {
   const out = kind === "site" ? siteScanOf(r) : roomScanOf(r);
   if (!out) return { ok: false, refused: kind === "site" ? "The scan came back without a footprint — tap at least three corners next time." : "The scan came back without a wall. Try again, walking the room more slowly." };
   return out;
+}
+
+// ── SCAN IN 3D: the textured model ─────────────────────────────────────────────────────────────
+// Erik 2026-10-16, after Polycam: "collect all of the pixels for all surfaces and render an
+// image … i want that." The shell captures the photos and builds the model on the phone; the file
+// (tens of megabytes) stays in the shell's temp folder and comes over in 2 MB pieces — never one
+// giant string over the bridge — then is discarded. No numbers: this door is the picture.
+
+export type ModelScan = { ok: true; kind: "model"; model: File; shots: number; /** The shell's copy, discarded by the page once the upload has landed. */ path: string };
+export type ModelScanResult = ModelScan | { ok: false; cancelled: true } | { ok: false; refused: string };
+
+/** How much comes over the bridge per call (base64 of this many bytes). */
+export const CHUNK_BYTES = 2_000_000;
+/** The biggest model the page will assemble (a reduced-detail room is a few to a few tens of MB). */
+export const MODEL_MAX_BYTES = 200_000_000;
+
+/** Base64 → bytes; null when it is not base64. */
+export function bytesOf(b64: unknown): Uint8Array | null {
+  if (typeof b64 !== "string" || typeof atob !== "function") return null;
+  try {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** The shell's copy of a scan goes — called by the page once the upload has LANDED, never before
+ *  (a minutes-long capture must survive a bad-signal upload; skeptic #18). A wrong path is a no-op. */
+export async function discardScan(path: string): Promise<void> {
+  const p = plugin();
+  if (!p?.discard || !path) return;
+  await p.discard({ path }).catch(() => undefined);
+}
+
+/** Pull one file out of the shell in pieces and hand it back as a File. Each piece is asked twice
+ *  before giving up; the shell's copy is left where it is (discardScan takes it later). */
+export async function pullFile(p: Plugin, path: string, total: number, name: string, type: string): Promise<File | null> {
+  if (!p.readChunk || !Number.isFinite(total) || total <= 0 || total > MODEL_MAX_BYTES) return null;
+  const parts: Uint8Array[] = [];
+  let got = 0;
+  while (got < total) {
+    let bytes: Uint8Array | null = null;
+    for (let attempt = 0; attempt < 2 && !bytes; attempt++) {
+      try {
+        const r = await p.readChunk({ path, offset: got, length: CHUNK_BYTES });
+        bytes = bytesOf(r?.data);
+      } catch {
+        bytes = null;
+      }
+    }
+    if (!bytes || bytes.length === 0) return null;
+    parts.push(bytes);
+    got += bytes.length;
+  }
+  if (got !== total) return null;
+  return new File(parts as BlobPart[], name, { type });
+}
+
+/** Open Apple's capture view, wait for the model, and bring it over. The tap that calls this is the camera ask. */
+export async function scan3dNative(now = Date.now()): Promise<ModelScanResult> {
+  const p = plugin();
+  if (!p?.scan3d) return { ok: false, refused: "Scan In 3D needs the North app on an iPhone with a LiDAR sensor." };
+  let r: Record<string, unknown>;
+  try {
+    r = await p.scan3d();
+  } catch (e: unknown) {
+    const msg = (e as { message?: unknown })?.message;
+    return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : "Couldn't open Scan In 3D. Try again." };
+  }
+  if (r?.ok !== true) return { ok: false, cancelled: true };
+  const path = typeof r.path === "string" ? r.path : "";
+  const total = typeof r.bytes === "number" ? r.bytes : 0;
+  if (!path || total <= 0) {
+    await discardScan(path);
+    return { ok: false, refused: "The model came back empty. Try again with more light and a slower walk." };
+  }
+  if (total > MODEL_MAX_BYTES) {
+    await discardScan(path);
+    return { ok: false, refused: `The model is too big to send (${Math.round(total / 1_000_000)} MB). Scan a smaller area.` };
+  }
+  const model = await pullFile(p, path, total, `scan-3d-${now}.usdz`, USDZ_MIME);
+  if (!model) return { ok: false, refused: "The model didn't come over from the camera whole. Tap Scan In 3D again to retry." };
+  return { ok: true, kind: "model", model, path, shots: typeof r.shots === "number" ? r.shots : 0 };
 }

@@ -132,7 +132,7 @@ describe("the wiring, pinned", () => {
     expect(insp).toContain("const [canMeasure, setCanMeasure] = useState(false);");
     // One helper draws both headers (the task's and the visit's) since the scans joined it (rung 2).
     expect(insp).toContain("const measureButtons = (taskId: string | null) =>");
-    expect(insp).toContain("!readOnly && (canMeasure || scanOn.site || scanOn.room) ? (");
+    expect(insp).toContain("!readOnly && (canMeasure || scanOn.site || scanOn.room || scanOn.model) ? (");
     expect(insp).toContain("{measureButtons(t.id)}");
     expect(insp).toContain("{measureButtons(null)}");
     expect(insp).toContain('onClick={() => void measureInto(taskId, "length")}');

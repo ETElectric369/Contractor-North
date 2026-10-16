@@ -299,6 +299,7 @@ describe("the plans and drawings section (0326)", () => {
     [`${ORG}/${JOB}/300-circuit.pdf`]: "https://signed.example/circuit?t=1",
     [`${ORG}/${JOB}/301-floor.jpg`]: "https://signed.example/floor?t=1",
     [`${ORG}/${JOB}/302-house.e57`]: "https://signed.example/scan?t=1",
+    [`${ORG}/${JOB}/303-room.usdz`]: "https://signed.example/303-room.usdz?t=1",
   };
   const doc = (id: string, kind: string, path: string, over: Record<string, unknown> = {}) => ({
     id,
@@ -315,6 +316,7 @@ describe("the plans and drawings section (0326)", () => {
       doc("d1", "circuit_map", `${ORG}/${JOB}/300-circuit.pdf`, { title: "Circuit Map", is_update: true }),
       doc("d2", "plan", `${ORG}/${JOB}/301-floor.jpg`, { title: "Main Floor Plan", added_at: "2026-08-03T18:00:00Z" }),
       doc("d3", "scan_3d", `${ORG}/${JOB}/302-house.e57`, { title: "House Scan" }),
+      doc("d4", "scan_3d", `${ORG}/${JOB}/303-room.usdz`, { title: "Room In 3D" }),
     ],
   });
   const html = renderToStaticMarkup(
@@ -331,17 +333,22 @@ describe("the plans and drawings section (0326)", () => {
     // The newer circuit map says it is an update, not a second map.
     expect(t).toContain("Circuit Map Updated Sep 24");
     // Each kind is its own heading.
-    for (const h of ["Plan", "Circuit Map", "3D Scan"]) expect(html).toContain(`tracking-wide text-slate-600">${h}</h3>`);
+    // Two scans now (the point cloud and the USDZ): the heading is the plural.
+    for (const h of ["Plan", "Circuit Map", "3D Scans"]) expect(html).toContain(`tracking-wide text-slate-600">${h}</h3>`);
   });
 
-  it("a picture is drawn on the page, a PDF opens in the viewer or full size, a scan is a plain link", () => {
+  it("a picture is drawn on the page, a PDF opens in the viewer or full size, a scan opens in the 3D viewer or as the file", () => {
     expect(html).toContain('src="https://signed.example/floor?t=1"');
     expect(t).toContain("Open The Circuit Map");
     expect(html).toContain('href="https://signed.example/circuit?t=1"');
     expect(t).toContain("Open Full Size");
+    // A point cloud the viewer cannot draw is a plain file; Apple's USDZ (Scan In 3D) spins in the viewer.
     expect(t).toContain("A 3D file.");
     expect(html).toContain('href="https://signed.example/scan?t=1"');
     expect(t).toContain("Open The File");
+    expect(t).toContain("A 3D scan.");
+    expect(t).toContain("View In 3D");
+    expect(html).toContain('href="https://signed.example/303-room.usdz?t=1"');
   });
 
   it("no section and no chip when nothing is shown", () => {

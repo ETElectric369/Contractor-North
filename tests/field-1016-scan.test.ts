@@ -124,20 +124,20 @@ describe("the bridge: doors only where the plugin says so; a cancel is a cancel;
   });
   it("no plugin: no door, no scan", async () => {
     expect(scanPluginPresent()).toBe(false);
-    expect(await scanDoors()).toEqual({ site: false, room: false });
+    expect(await scanDoors()).toEqual({ site: false, room: false, model: false });
     expect(await scanNative("site")).toEqual({ ok: false, refused: "Scanning needs the North app on an iPhone with a LiDAR sensor." });
   });
   it("the plugin's own answer on what this phone can do; a throw is no doors", async () => {
     const off = shell({ Scan: { scanSite: async () => SQUARE, isSupported: async () => ({ site: true, room: false }) } });
     try {
       expect(scanPluginPresent()).toBe(true);
-      expect(await scanDoors()).toEqual({ site: true, room: false });
+      expect(await scanDoors()).toEqual({ site: true, room: false, model: false });
     } finally {
       off();
     }
     const off2 = shell({ Scan: { scanSite: async () => SQUARE, isSupported: async () => { throw new Error("x"); } } });
     try {
-      expect(await scanDoors()).toEqual({ site: false, room: false });
+      expect(await scanDoors()).toEqual({ site: false, room: false, model: false });
     } finally {
       off2();
     }
@@ -378,9 +378,9 @@ describe("the wiring, pinned", () => {
     expect(job).toContain('await addDocument({ job_id: job, name, category: "Other", file_url: to, size_bytes: size });');
     expect(job).toContain("} catch (e: unknown) {");
     expect(job).toContain("await storage.remove([to]).then(() => undefined, () => undefined);");
-    expect(insp).toContain("const is3d = (p: string) => /\\.usdz($|\\?)/i.test(p);");
-    // The 3D badge on both tiles: the task's and the visit's.
-    expect((insp.match(/\{is3d\(p\.path\) && <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black\/55 px-1 py-0\.5 text-\[9px\] font-bold text-white">3D<\/span>\}/g) ?? []).length).toBe(2);
+    expect(insp).toContain("const is3d = (p: string) => /\\.(usdz|glb|gltf)($|\\?)/i.test(p);");
+    // The 3D badge on both tiles (the task's and the visit's), each a button into the viewer.
+    expect((insp.match(/<span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black\/55 px-1 py-0\.5 text-\[9px\] font-bold text-white">3D<\/span>/g) ?? []).length).toBe(2);
     expect(insp).toContain("jobId?: string | null;");
     expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain("jobId={a.job_id ?? null}");
     // The job's papers already know a 3D file by its name (the portal's model seam).

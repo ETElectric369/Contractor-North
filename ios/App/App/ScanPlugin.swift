@@ -1,7 +1,9 @@
 import ARKit
 import AVFoundation
 import Capacitor
+import RealityKit
 import SceneKit
+import SwiftUI
 import UIKit
 #if canImport(RoomPlan)
 import RoomPlan
@@ -20,6 +22,14 @@ import RoomPlan
 ///   scanRoom — INDOORS (iOS 16+, RoomPlan). Apple's scanning view does the walk; Done hands back
 ///     the walls (length, height, both ends), the doors, windows and openings, the ceiling height,
 ///     the floor outline where iOS 17 gives one, and the room as a USDZ.
+///   scan3d — THE PICTURE (iOS 17+, Object Capture + on-phone photogrammetry). Erik 2026-10-16,
+///     after Polycam: "collect all of the pixels for all surfaces and render an image … i want
+///     that." Apple's capture view walks the room or the site (its own Area mode on iOS 18),
+///     takes the photos itself, and PhotogrammetrySession builds a TEXTURED model on the phone —
+///     every surface wearing its real pixels — as a USDZ. The file can be tens of megabytes, so it
+///     stays in the app's temp folder and the page pulls it through readChunk in 2 MB pieces
+///     (never one giant string over the bridge), then discards it. No numbers come from this door:
+///     the measurements are Measure's and the other two scans'.
 ///
 /// THE PAGE DRAWS THE PLAN. The numbers cross the bridge in meters; the web side turns them into
 /// feet, draws the to-scale plan (lib/scan/plan-svg), lands the rows on the task and uploads the
@@ -37,6 +47,9 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "isSupported", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "scanSite", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "scanRoom", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "scan3d", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "readChunk", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "discard", returnType: CAPPluginReturnPromise),
     ]
 
     /// One scan on screen at a time: a second call while one is up is answered, not stacked.
@@ -55,16 +68,28 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
         return false
     }
 
+    /// A textured model is Object Capture (the guided photos) plus photogrammetry on the phone: iOS 17
+    /// and the sensor. Apple's answer lives on the main actor, so the askers hop there.
+    @MainActor static var modelSupported: Bool {
+        // iOS 18: an AREA capture (a room, a site) starts straight from the ready state — there is no
+        // object-detection step and no mode switch in the API (checked against the 18.5 SDK).
+        if #available(iOS 18.0, *) { return ObjectCaptureSession.isSupported && PhotogrammetrySession.isSupported }
+        return false
+    }
+
     static let noLidarSentence = "Scanning needs an iPhone with a LiDAR sensor (12 Pro or newer). Measure or type the measurements instead."
+    static let no3dSentence = "Scan In 3D needs iOS 18 or newer on an iPhone with a LiDAR sensor. Update the iPhone, or Scan The Room."
     static let noRoomPlanSentence = "Scan The Room needs iOS 16 or newer. Update the iPhone, or Scan The Site."
     static let couldNotOpen = "The scan couldn't open over this screen. Close what's open and try again."
 
     /// Resolves { site: Bool, room: Bool, reason: String? } — `reason` is the sentence to show when
     /// neither door exists.
     @objc func isSupported(_ call: CAPPluginCall) {
-        var out: [String: Any] = ["site": Self.siteSupported, "room": Self.roomSupported]
-        if !Self.siteSupported { out["reason"] = Self.noLidarSentence }
-        call.resolve(out)
+        Task { @MainActor in
+            var out: [String: Any] = ["site": Self.siteSupported, "room": Self.roomSupported, "model": Self.modelSupported]
+            if !Self.siteSupported { out["reason"] = Self.noLidarSentence }
+            call.resolve(out)
+        }
     }
 
     @objc func scanSite(_ call: CAPPluginCall) {
@@ -87,6 +112,72 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         #endif
         call.reject(Self.noRoomPlanSentence)
+    }
+
+    @objc func scan3d(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            guard Self.modelSupported else {
+                call.reject(Self.siteSupported ? Self.no3dSentence : Self.noLidarSentence)
+                return
+            }
+            if #available(iOS 18.0, *) {
+                Self.sweepOldScans()
+                self.present(call) { done in Scan3DViewController(done: done) }
+                return
+            }
+            call.reject(Self.no3dSentence)
+        }
+    }
+
+    /// A model the page never collected (the app was killed mid-build, the page reloaded) would sit
+    /// in tmp for good: anything in the scan folder older than an hour goes before a new scan.
+    static func sweepOldScans() {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: scanFolder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        for url in items {
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if Date().timeIntervalSince(modified) > 3600 { try? fm.removeItem(at: url) }
+        }
+    }
+
+    /// The scan folder: every file this plugin hands the page lives here and nowhere else, so a
+    /// path from the page is served only when it is one of ours (never an arbitrary file).
+    static var scanFolder: URL { FileManager.default.temporaryDirectory.appendingPathComponent("north-scans", isDirectory: true) }
+
+    static func ownFile(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let url = URL(fileURLWithPath: raw).standardizedFileURL
+        let folder = scanFolder.standardizedFileURL.path
+        guard url.path.hasPrefix(folder + "/"), url.pathExtension.lowercased() == "usdz" else { return nil }
+        return url
+    }
+
+    /// 2 MB base64 pieces of a scan file: { data, bytes, total }. The page assembles them.
+    @objc func readChunk(_ call: CAPPluginCall) {
+        guard let url = Self.ownFile(call.getString("path")) else {
+            call.reject("That file isn't a scan of this app's.")
+            return
+        }
+        let offset = max(0, call.getInt("offset") ?? 0)
+        let length = min(max(1, call.getInt("length") ?? 2_000_000), 4_000_000)
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let total = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                try handle.seek(toOffset: UInt64(offset))
+                let data = handle.readData(ofLength: length)
+                call.resolve(["data": data.base64EncodedString(), "bytes": data.count, "total": total])
+            } catch {
+                call.reject("Couldn't read the scan file (\(error.localizedDescription)).")
+            }
+        }
+    }
+
+    /// The page has the bytes: the temp file goes. (Nothing else; a wrong path is a no-op.)
+    @objc func discard(_ call: CAPPluginCall) {
+        if let url = Self.ownFile(call.getString("path")) { try? FileManager.default.removeItem(at: url) }
+        call.resolve()
     }
 
     /// The camera permission is asked here, in the tap that opened the scan (the iOS rule: the first
@@ -802,3 +893,263 @@ final class RoomScanViewController: ScanViewController, RoomCaptureViewDelegate,
     }
 }
 #endif
+
+// MARK: - SCAN IN 3D (Object Capture + photogrammetry on the phone)
+
+/// A UIKit shell around Apple's SwiftUI capture view. The view walks the person through the
+/// capture (Continue → Start Capture → walk → Finish; Area mode is Apple's own switch on iOS 18);
+/// when the session completes, PhotogrammetrySession builds the textured model from the photos in
+/// the scan folder, with a progress screen and a Cancel that stops it. The result is a path in the
+/// scan folder (never the bytes): the page reads it in pieces.
+@available(iOS 18.0, *)
+final class Scan3DViewController: ScanViewController {
+    private let session = ObjectCaptureSession()
+    private var photo: PhotogrammetrySession?
+    private var host: UIHostingController<Scan3DScreen>?
+    private let progress = Scan3DProgress()
+    private let imagesDir: URL
+    private let checkpointDir: URL
+    private let outputURL: URL
+    private var processing = false
+    /// A failure found while the screen is still being presented is said once it is up (a dismiss
+    /// mid-present is dropped by UIKit, and the promise would hang).
+    private var pendingFailure: String?
+
+    override init(done: @escaping (ScanOutcome) -> Void) {
+        let stamp = UUID().uuidString
+        let folder = ScanPlugin.scanFolder
+        imagesDir = folder.appendingPathComponent("capture-\(stamp)/images", isDirectory: true)
+        checkpointDir = folder.appendingPathComponent("capture-\(stamp)/checkpoint", isDirectory: true)
+        outputURL = folder.appendingPathComponent("model-\(stamp).usdz")
+        super.init(done: done)
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        do {
+            try FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: checkpointDir, withIntermediateDirectories: true)
+        } catch {
+            pendingFailure = "Couldn't make room for the scan on this phone (\(error.localizedDescription))."
+            return
+        }
+        // A capture and a build take minutes: the phone must not lock in the middle of them.
+        UIApplication.shared.isIdleTimerDisabled = true
+        var config = ObjectCaptureSession.Configuration()
+        config.checkpointDirectory = checkpointDir
+        config.isOverCaptureEnabled = false
+        session.start(imagesDirectory: imagesDir, configuration: config)
+        let screen = Scan3DScreen(session: session, progress: progress, onCancel: { [weak self] in self?.cancelTapped() }, onFinished: { [weak self] in self?.buildModel() })
+        let host = UIHostingController(rootView: screen)
+        self.host = host
+        addChild(host)
+        host.view.frame = view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.view.backgroundColor = .black
+        view.addSubview(host.view)
+        host.didMove(toParent: self)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let pendingFailure { finish(.failed(pendingFailure)) }
+    }
+
+    override func finish(_ outcome: ScanOutcome) {
+        UIApplication.shared.isIdleTimerDisabled = false
+        super.finish(outcome)
+    }
+
+    /// Cancel with photos taken, or mid-build, asks first: one tap must not throw away minutes of walking.
+    private func cancelTapped() {
+        guard !finished else { return }
+        if session.numberOfShotsTaken == 0 && !processing {
+            dropScan()
+            return
+        }
+        let alert = UIAlertController(title: processing ? "Drop This Model?" : "Drop This Scan?", message: processing ? "The model is still building. Dropping it throws the photos away." : "\(session.numberOfShotsTaken) photos so far would be thrown away.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Keep Going", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Drop It", style: .destructive) { [weak self] _ in self?.dropScan() })
+        (presentedViewController ?? self).present(alert, animated: true)
+    }
+
+    private func dropScan() {
+        guard !finished else { return }
+        if processing { photo?.cancel() } else { session.cancel() }
+        cleanup(keepModel: false)
+        finish(.cancelled)
+    }
+
+    /// Photogrammetry's errors in plain words (the raw ones read "The operation couldn't be completed").
+    static func buildSentence(_ error: Error) -> String {
+        if let e = error as? PhotogrammetrySession.Error {
+            switch e {
+            case .insufficientStorage: return "This phone is out of space for the model. Free some space and try again."
+            case .invalidImages: return "The photos couldn't be used for a model. Try again with more light and a slower walk."
+            case .invalidOutput: return "The model couldn't be written on this phone. Try again."
+            @unknown default: break
+            }
+        }
+        return "The model didn't build. Try again with more light, a slower walk and at least 10 photos."
+    }
+
+    /// The capture is complete: the photos are on disk; build the model from them.
+    private func buildModel() {
+        guard !finished, !processing else { return }
+        processing = true
+        let shots = session.numberOfShotsTaken
+        var config = PhotogrammetrySession.Configuration()
+        // A room or a site, not one thing on a table: nothing is cut away as "background".
+        config.isObjectMaskingEnabled = false
+        config.checkpointDirectory = checkpointDir
+        let photo: PhotogrammetrySession
+        do {
+            photo = try PhotogrammetrySession(input: imagesDir, configuration: config)
+        } catch {
+            cleanup(keepModel: false)
+            finish(.failed("The phone couldn't start building the model (\(error.localizedDescription))."))
+            return
+        }
+        self.photo = photo
+        progress.building = true
+        let output = outputURL
+        Task { [weak self] in
+            do {
+                try photo.process(requests: [.modelFile(url: output, detail: .reduced)])
+                for try await o in photo.outputs {
+                    switch o {
+                    case .requestProgress(_, let fraction):
+                        await MainActor.run { self?.progress.fraction = fraction }
+                    case .requestError(_, let error):
+                        await MainActor.run {
+                            guard let self, !self.finished else { return }
+                            self.cleanup(keepModel: false)
+                            self.finish(.failed(Self.buildSentence(error)))
+                        }
+                        return
+                    case .processingCancelled:
+                        return
+                    case .requestComplete(_, .modelFile):
+                        await MainActor.run {
+                            guard let self, !self.finished else { return }
+                            let bytes = (try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0
+                            self.cleanup(keepModel: true)
+                            guard bytes > 0 else {
+                                self.finish(.failed("The model came out empty. Try again with more light and a slower walk."))
+                                return
+                            }
+                            self.finish(.scanned(["ok": true, "kind": "model", "path": output.path, "bytes": bytes, "mime": "model/vnd.usdz+zip", "shots": shots]))
+                        }
+                        return
+                    default:
+                        break
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, !self.finished else { return }
+                    self.cleanup(keepModel: false)
+                    self.finish(.failed(Self.buildSentence(error)))
+                }
+            }
+        }
+    }
+
+    /// The photos and checkpoints go as soon as the model is built (or the scan is dropped); the
+    /// model stays for the page to read, and goes on its discard.
+    private func cleanup(keepModel: Bool) {
+        try? FileManager.default.removeItem(at: imagesDir.deletingLastPathComponent())
+        if !keepModel { try? FileManager.default.removeItem(at: outputURL) }
+    }
+}
+
+/// What the building screen shows: owned by the controller, observed by the SwiftUI view.
+@available(iOS 18.0, *)
+final class Scan3DProgress: ObservableObject {
+    @Published var building = false
+    @Published var fraction = 0.0
+}
+
+/// Apple's capture view with our bar: Cancel; Start Capture from the ready state (an AREA
+/// capture — a room, a site — has no detection step on iOS 18); Finish once ten photos are in;
+/// the shot count while walking; and the building screen with its progress once the photos are in.
+@available(iOS 18.0, *)
+struct Scan3DScreen: View {
+    /// Photogrammetry wants a real set of photos: Finish opens at this many.
+    static let minShots = 10
+    let session: ObjectCaptureSession
+    @ObservedObject var progress: Scan3DProgress
+    let onCancel: () -> Void
+    let onFinished: () -> Void
+    @State private var state: ObjectCaptureSession.CaptureState = .initializing
+    @State private var shots = 0
+    @State private var passDone = false
+
+    var body: some View {
+        ZStack {
+            if progress.building {
+                VStack(spacing: 16) {
+                    Text("Building the model…").font(.title2.bold()).foregroundStyle(.white)
+                    ProgressView(value: progress.fraction).tint(.white).padding(.horizontal, 40)
+                    Text("\(Int(progress.fraction * 100))% — a few minutes on the phone; keep the app open").font(.callout).foregroundStyle(.white.opacity(0.8))
+                    Button("Cancel", action: onCancel).buttonStyle(.bordered).tint(.white).padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+            } else {
+                ObjectCaptureView(session: session)
+                    .ignoresSafeArea()
+                VStack {
+                    HStack {
+                        Button("Cancel", action: onCancel).buttonStyle(.borderedProminent).tint(.black.opacity(0.6))
+                        Spacer()
+                        if case .capturing = state, shots >= Self.minShots {
+                            Button("Finish") { session.finish() }.buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black)
+                        }
+                    }
+                    .padding(16)
+                    Spacer()
+                    VStack(spacing: 10) {
+                        Text(hint).font(.callout.weight(.medium)).foregroundStyle(.white).multilineTextAlignment(.center)
+                            .padding(.horizontal, 12).padding(.vertical, 8).background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+                        if case .ready = state {
+                            Button("Start Capture") { session.startCapturing() }.buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black)
+                        }
+                    }
+                    .padding(.bottom, 28)
+                }
+            }
+        }
+        .task {
+            for await s in session.stateUpdates {
+                state = s
+                switch s {
+                case .completed: onFinished()
+                case .failed(let error):
+                    failure = error.localizedDescription
+                default: break
+                }
+            }
+        }
+        .task { for await n in session.numberOfShotsTakenUpdates { shots = n } }
+        .task { for await p in session.userCompletedScanPassUpdates { passDone = p } }
+    }
+
+    @State private var failure: String? = nil
+
+    private var hint: String {
+        if let failure { return "The capture stopped: \(failure). Cancel and try again." }
+        switch state {
+        case .initializing: return "Starting the camera…"
+        case .ready: return "Stand where you can see the room or the site, then Start Capture."
+        case .capturing:
+            if shots < Self.minShots { return "Walk slowly, pointing the phone at every surface — \(shots) of \(Self.minShots) photos." }
+            return passDone ? "Pass complete — Finish, or keep walking for more." : "\(shots) photos — keep walking for every surface, then Finish."
+        case .finishing: return "Finishing the capture…"
+        case .completed: return "Captured. Building the model…"
+        case .failed: return "The capture stopped. Cancel and try again."
+        default: return "Frame the area, then Start Capture."
+        }
+    }
+}

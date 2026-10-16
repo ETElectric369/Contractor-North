@@ -46,7 +46,8 @@ import type { InspectionAccess } from "@/lib/inspection/inspection-access";
 import { registerNortDoors, type NortDoor } from "@/lib/nort/doors";
 import { measureNative, measurePluginPresent, type MeasureMode } from "@/lib/native-measure";
 import { Box, Ruler } from "lucide-react";
-import { NO_SCAN_DOORS, scanDoors, scanNative, type ScanDoors, type ScanKind } from "@/lib/native-scan";
+import { discardScan, NO_SCAN_DOORS, scan3dNative, scanDoors, scanNative, type ScanDoors, type ScanKind } from "@/lib/native-scan";
+import { ModelViewer } from "@/components/model-viewer";
 import { scanLanding } from "@/lib/scan/landing";
 import { planImageFile } from "@/lib/scan/plan-image";
 import { jobFilePath } from "@/lib/job-file-upload";
@@ -381,6 +382,8 @@ export function Inspector({
     };
   }, []);
   const [viewing, setViewing] = useState<CapturePhoto | null>(null);
+  /** A 3D file (a scan's USDZ, a dropped GLB) open in the in-app viewer. */
+  const [viewing3d, setViewing3d] = useState<CapturePhoto | null>(null);
   // THE TASK SHEET (field feedback 10-13, item 2): one task open at a time, the rest their rows.
   // Erik: "in the task itself is where we will be needing photos, measurements, materials and
   // labor … pop up what we need when we need it." A photo or a measurement taken from inside a
@@ -890,6 +893,54 @@ export function Inspector({
     }
   }
 
+  // ── SCAN IN 3D: the textured model (LiDAR rung 2) ───────────────────────────────────────────
+  // Erik 2026-10-16, after Polycam: "collect all of the pixels for all surfaces and render an
+  // image … i want that." Apple's capture view walks the room or the site, the phone builds the
+  // textured model, and it lands on the task (or the visit) as a 3D file the tile opens in the
+  // viewer — and on the job's papers when the visit is on a job. No rows: this door is the picture.
+  /** A model whose upload failed, kept for a retry without another walk (the shell's copy stays too). */
+  const unsentModelRef = useRef<{ model: File; path: string } | null>(null);
+  async function scan3dInto(taskId: string | null) {
+    if (measuringRef.current) return;
+    measuringRef.current = true;
+    setMeasuring(true);
+    setError(null);
+    try {
+      let model: File;
+      let path: string;
+      const unsent = unsentModelRef.current;
+      if (unsent) {
+        // The last model never landed: send it again, no camera.
+        ({ model, path } = unsent);
+      } else {
+        const r = await scan3dNative();
+        if (!r.ok) {
+          if ("refused" in r) setError(r.refused);
+          return;
+        }
+        ({ model, path } = r);
+      }
+      if (taskId) openTask(taskId);
+      pendingTaskRef.current = taskId;
+      const stored = await upload([model], { caption: "3D model", about: "Scan In 3D" });
+      if (!stored.length) {
+        // upload() said why (the signal, a size limit); the model waits here for one more tap.
+        unsentModelRef.current = { model, path };
+        setError((e) => `${e ?? "The 3D model didn't upload."} It's kept on this phone — tap Scan In 3D again to send it without scanning.`);
+        return;
+      }
+      unsentModelRef.current = null;
+      await discardScan(path);
+      if (jobId) {
+        const filed = await fileOnJob(jobId, stored[0], model.name, model.size);
+        if (!filed.ok) setError(filed.error);
+      }
+    } finally {
+      measuringRef.current = false;
+      setMeasuring(false);
+    }
+  }
+
   /** A COPY of the visit's file goes on the job's papers — never one object with two owners, since
    *  deleting a job document removes its file and would blank the visit's. */
   async function fileOnJob(job: string, from: string, name: string, size: number): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -915,7 +966,7 @@ export function Inspector({
   // helper draws both (the task's and the visit's), so they cannot drift. Their own row, wrapping
   // left to right: beside the label four buttons stacked into a column (Erik's screenshot, 10-16).
   const measureButtons = (taskId: string | null) =>
-    !readOnly && (canMeasure || scanOn.site || scanOn.room) ? (
+    !readOnly && (canMeasure || scanOn.site || scanOn.room || scanOn.model) ? (
       <div className="mt-2 flex flex-wrap gap-2">
         {canMeasure && (
           <>
@@ -935,6 +986,11 @@ export function Inspector({
         {scanOn.room && (
           <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scanInto(taskId, "room")}>
             Scan The Room
+          </Button>
+        )}
+        {scanOn.model && (
+          <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scan3dInto(taskId)}>
+            Scan In 3D
           </Button>
         )}
       </div>
@@ -1127,8 +1183,8 @@ export function Inspector({
   const noSheet = templates.length === 0;
 
   const isImage = (p: string) => /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(p);
-  /** A 3D scan (USDZ, Apple's own): the phone opens it in AR Quick Look from its tile. */
-  const is3d = (p: string) => /\.usdz($|\?)/i.test(p);
+  /** A 3D file (a scan's USDZ, a dropped GLB): its tile opens the in-app viewer. */
+  const is3d = (p: string) => /\.(usdz|glb|gltf)($|\?)/i.test(p);
   const fileLabel = (p: string) => (p.split("/").pop() ?? p).replace(/^\d{10,}-/, "");
 
   const control = (n: Need): React.ReactNode => {
@@ -1715,11 +1771,16 @@ export function Inspector({
                               <img src={p.url} alt="" className="h-full w-full object-cover" />
                             )}
                           </button>
+                        ) : is3d(p.path) ? (
+                          <button type="button" onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-slate-500">
+                            <Box className="h-5 w-5 shrink-0 text-slate-400" />
+                            <span className="line-clamp-2 break-all leading-tight">{fileLabel(p.path)}</span>
+                            <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>
+                          </button>
                         ) : (
                           <a href={p.url ?? "#"} target="_blank" rel="noopener noreferrer" className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-slate-500">
-                            {is3d(p.path) ? <Box className="h-5 w-5 shrink-0 text-slate-400" /> : <FileText className="h-5 w-5 shrink-0 text-slate-400" />}
+                            <FileText className="h-5 w-5 shrink-0 text-slate-400" />
                             <span className="line-clamp-2 break-all leading-tight">{fileLabel(p.path)}</span>
-                            {is3d(p.path) && <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>}
                           </a>
                         )}
                         {office && !readOnly && (
@@ -2386,7 +2447,7 @@ export function Inspector({
         <div id="insp-photos" className="scroll-mt-16">
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
-            {!readOnly && <DropTarget onFiles={(files) => { pendingTaskRef.current = null; void upload(files); }} accept="image/*,application/pdf" label="Drop Photos Or PDFs" className="shrink-0">
+            {!readOnly && <DropTarget onFiles={(files) => { pendingTaskRef.current = null; void upload(files); }} accept="image/*,application/pdf,.usdz,.glb" label="Drop Photos, PDFs Or 3D Files" className="shrink-0">
               <div className="flex gap-2">
                 {/* The visit's own doors clear the pending task: a Take cancelled inside a task's
                     sheet fires no change event, so the ref would otherwise still be set here. */}
@@ -2399,7 +2460,7 @@ export function Inspector({
               </div>
             </DropTarget>}
           </div>
-          <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden"
+          <input ref={fileRef} type="file" multiple accept="image/*,application/pdf,.usdz,.glb" className="hidden"
                  onChange={(e) => { upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden"
                  onChange={(e) => { upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
@@ -2426,6 +2487,14 @@ export function Inspector({
                         <img src={p.url} alt="" className="h-full w-full object-cover" />
                       )}
                     </button>
+                  ) : is3d(p.path) ? (
+                    /* A 3D FILE OPENS IN THE VIEWER (Scan In 3D's model, a dropped GLB): spin it here;
+                       Open In AR from inside it on an iPhone. */
+                    <button type="button" onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+                      <Box className="h-6 w-6 shrink-0 text-slate-400" />
+                      <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
+                      <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>
+                    </button>
                   ) : (
                     /* A PDF SHOWS ITS FACE (Erik: "i cant see an image of the pdf"). The browser's
                        own renderer paints page one right in the tile — zero dependencies — and the
@@ -2448,13 +2517,10 @@ export function Inspector({
                           <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">PDF</span>
                         </>
                       ) : (
-                        <>
-                          <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
-                            {is3d(p.path) ? <Box className="h-6 w-6 shrink-0 text-slate-400" /> : <FileText className="h-6 w-6 shrink-0 text-slate-400" />}
-                            <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
-                          </span>
-                          {is3d(p.path) && <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>}
-                        </>
+                        <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+                          <FileText className="h-6 w-6 shrink-0 text-slate-400" />
+                          <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
+                        </span>
                       )}
                     </a>
                   )}
@@ -2584,6 +2650,7 @@ export function Inspector({
       </div>}
 
       {viewing?.url && <MediaLightbox url={viewing.url} name={fileLabel(viewing.path)} onClose={() => setViewing(null)} />}
+      {viewing3d?.url && <ModelViewer url={viewing3d.url} name={fileLabel(viewing3d.path)} onClose={() => setViewing3d(null)} />}
     </Card>
     </>
   );

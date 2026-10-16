@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Box, ExternalLink, FileText, Maximize2, X } from "lucide-react";
 import type { PortalDocument } from "@/lib/portal/job-view-shape";
+import { ModelViewer, modelKind } from "@/components/model-viewer";
 import { PORTAL_DOC_KINDS } from "@/lib/portal/doc-kinds";
 import { fmtDay } from "./portal-format";
 import { TimedOut, iconBtn, useDeadLink, useDialog } from "./portal-media";
@@ -85,6 +86,9 @@ const action =
 function DocCard({ d, thisYear, onOpen }: { d: PortalDocument; thisYear: string; onOpen: (d: PortalDocument, el: HTMLElement) => void }) {
   const img = d.format === "image" ? d.url : null;
   const { dead, onError } = useDeadLink(img);
+  // A 3D scan spins right here (Scan In 3D's model, a rendering): the viewer, then Open The File.
+  const [spinning, setSpinning] = useState(false);
+  const spins = d.format === "model" && modelKind(d.url) !== null;
   return (
     <div className="portal-glass rounded-2xl p-3">
       <div className="flex items-start gap-3 px-1">
@@ -125,14 +129,25 @@ function DocCard({ d, thisYear, onOpen }: { d: PortalDocument; thisYear: string;
       ) : (
         <div className="mt-2">
           <p className="px-1 text-sm text-slate-700">
-            {d.format === "model"
-              ? "A 3D file. It opens in an app that reads 3D files, or saves to your phone to open later."
-              : "This file opens in a new tab, or saves to your phone to open later."}
+            {spins
+              ? "A 3D scan. View it here, turn it and zoom in; on an iPhone, Open In AR puts it in the room."
+              : d.format === "model"
+                ? "A 3D file. It opens in an app that reads 3D files, or saves to your phone to open later."
+                : "This file opens in a new tab, or saves to your phone to open later."}
           </p>
-          <a href={d.url} target="_blank" rel="noopener noreferrer" className={`${action} mt-2`}>
-            {d.format === "model" ? <Box className="h-4 w-4" aria-hidden /> : <ExternalLink className="h-4 w-4" aria-hidden />}
-            <span>Open The File</span>
-          </a>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {spins && (
+              <button type="button" onClick={() => setSpinning(true)} className={action}>
+                <Box className="h-4 w-4" aria-hidden />
+                <span>View In 3D</span>
+              </button>
+            )}
+            <a href={d.url} target="_blank" rel="noopener noreferrer" className={action}>
+              <ExternalLink className="h-4 w-4" aria-hidden />
+              <span>Open The File</span>
+            </a>
+          </div>
+          {spinning && spins && <ModelViewer url={d.url} name={d.title} onClose={() => setSpinning(false)} />}
         </div>
       )}
     </div>
