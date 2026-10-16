@@ -448,7 +448,7 @@ describe("the wiring, pinned", () => {
     expect(insp).toContain("useEffect(() => registerNortDoors(() => doorsRef.current), []);");
     expect(insp).toContain("doorsRef.current = inspectorDoors({");
     for (const id of ["task-name-${t.id}", "task-hours-${t.id}", "task-units-${t.id}", "task-note-${t.id}", "task-measure-${t.id}"]) expect(insp).toContain(`id={\`${id}\`}`);
-    expect(insp).toContain('<div id="insp-measures" className="scroll-mt-16">');
+    expect(insp).toContain('<div id="insp-measures" className="scroll-mt-16 space-y-2">');
     expect(insp).toContain('<div id="insp-notes" className="scroll-mt-16">');
     // The provider's setters are the page's own: the tasks need's answer, the measures list, the capture's notes.
     const prov = insp.slice(insp.indexOf("doorsRef.current = inspectorDoors({"), insp.indexOf("useEffect(() => registerNortDoors"));

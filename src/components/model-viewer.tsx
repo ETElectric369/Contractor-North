@@ -6,8 +6,8 @@ import { Box, Download, Loader2, X } from "lucide-react";
 import { arPreviewPresent, openInAr } from "@/lib/native-scan";
 
 /**
- * THE 3D VIEWER (LiDAR rung 2, Scan In 3D). Erik 2026-10-16: "it would render an image just fine,
- * i want that." A scanned model — Apple's USDZ from Scan In 3D, or a GLB someone dropped from
+ * THE 3D VIEWER (Lidar, 3D Scan). Erik 2026-10-16: "it would render an image just fine,
+ * i want that." A scanned model — the USDZ from 3D Scan, or a GLB someone dropped from
  * Polycam — drawn right here with three.js (its USD loader reads Apple's binary USD, so one file
  * serves the phone, the office and the portal): spin, zoom, pan. On an iPhone, Open In AR hands
  * the same file to Apple's AR viewer, which drops it into the room.

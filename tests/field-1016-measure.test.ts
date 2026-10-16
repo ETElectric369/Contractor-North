@@ -130,9 +130,14 @@ describe("the wiring, pinned", () => {
     const insp = read("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(insp).toContain("useEffect(() => setCanMeasure(measurePluginPresent()), []);");
     expect(insp).toContain("const [canMeasure, setCanMeasure] = useState(false);");
-    // One helper draws both headers (the task's and the visit's) since the scans joined it (rung 2).
+    // One helper draws both headers (the task's and the visit's) under the Lidar title, above the
+    // Measurements rows (Erik 2026-10-16: "group everything with a title called Lidar").
     expect(insp).toContain("const measureButtons = (taskId: string | null) =>");
-    expect(insp).toContain("!readOnly && (canMeasure || scanOn.site || scanOn.room || scanOn.model) ? (");
+    expect(insp).toContain("!readOnly && (canMeasure || scanOn.model) ? (");
+    expect(insp).toContain("<SectionLabel>Lidar</SectionLabel>");
+    expect((insp.match(/<SectionLabel>Lidar<\/SectionLabel>/g) ?? []).length).toBe(1);
+    expect(insp).toContain("{measureButtons(t.id)}\n                <SectionLabel>Measurements</SectionLabel>");
+    expect(insp).toContain("{measureButtons(null)}\n          <SectionLabel>Measurements</SectionLabel>");
     expect(insp).toContain("{measureButtons(t.id)}");
     expect(insp).toContain("{measureButtons(null)}");
     expect(insp).toContain('onClick={() => void measureInto(taskId, "length")}');

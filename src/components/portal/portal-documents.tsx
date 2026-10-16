@@ -86,7 +86,7 @@ const action =
 function DocCard({ d, thisYear, onOpen }: { d: PortalDocument; thisYear: string; onOpen: (d: PortalDocument, el: HTMLElement) => void }) {
   const img = d.format === "image" ? d.url : null;
   const { dead, onError } = useDeadLink(img);
-  // A 3D scan spins right here (Scan In 3D's model, a rendering): the viewer, then Open The File.
+  // A 3D scan spins right here (3D Scan's model, a rendering): the viewer, then Open The File.
   const [spinning, setSpinning] = useState(false);
   const spins = d.format === "model" && modelKind(d.url) !== null;
   return (

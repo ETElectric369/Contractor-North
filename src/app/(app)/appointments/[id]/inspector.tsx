@@ -21,16 +21,7 @@ import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
 import { briefProvenanceKeys, computeBriefFills, type PlanBrief } from "@/lib/plan-brief";
-import {
-  captureId,
-  inspectorReadiness,
-  looseNumber,
-  MAX_MEASURES,
-  parseInspectorCapture,
-  type CaptureItem,
-  type CaptureMeasure,
-  type CapturePhotoMeta,
-} from "@/lib/inspection/capture";
+import { captureId, inspectorReadiness, looseNumber, parseInspectorCapture, type CaptureItem, type CaptureMeasure, type CapturePhotoMeta } from "@/lib/inspection/capture";
 import { createStarterInspectionSheet } from "../../forms/actions";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { getPosition } from "@/lib/geo";
@@ -46,10 +37,8 @@ import type { InspectionAccess } from "@/lib/inspection/inspection-access";
 import { registerNortDoors, type NortDoor } from "@/lib/nort/doors";
 import { measureNative, measurePluginPresent, type MeasureMode } from "@/lib/native-measure";
 import { Box, Ruler } from "lucide-react";
-import { discardScan, NO_SCAN_DOORS, scan3dNative, scanDoors, scanNative, type ScanDoors, type ScanKind } from "@/lib/native-scan";
+import { discardScan, NO_SCAN_DOORS, scan3dNative, scanDoors, type ScanDoors } from "@/lib/native-scan";
 import { ModelViewer } from "@/components/model-viewer";
-import { scanLanding } from "@/lib/scan/landing";
-import { planImageFile } from "@/lib/scan/plan-image";
 import { jobFilePath } from "@/lib/job-file-upload";
 import { addDocument } from "../../jobs/actions";
 import { inspectorDoors } from "@/lib/inspection/doors";
@@ -369,8 +358,8 @@ export function Inspector({
   const [canMeasure, setCanMeasure] = useState(false);
   useEffect(() => setCanMeasure(measurePluginPresent()), []);
   const [measuring, setMeasuring] = useState(false);
-  // SCAN THE SITE / SCAN THE ROOM (LiDAR rung 2): the plugin's own word on what this phone can do
-  // (the sensor; iOS 16 for a room), asked once after mount; nothing until it answers.
+  // 3D SCAN (Lidar): the plugin's own word on whether this phone can (the sensor; iOS 17), asked
+  // once after mount; nothing until it answers.
   const [scanOn, setScanOn] = useState<ScanDoors>(NO_SCAN_DOORS);
   useEffect(() => {
     let live = true;
@@ -825,79 +814,12 @@ export function Inspector({
     }
   }
 
-  // ── SCAN THE SITE / SCAN THE ROOM (LiDAR rung 2) ──────────────────────────────────────────
-  // Erik 2026-10-16: "go for the scan … not being able to scan outside is what my brother
-  // specifically asked for." The shell walks the site (tapped corners over the LiDAR mesh) or the
-  // room (Apple's RoomPlan); the figures land as measurement rows on the task (or the visit), the
-  // to-scale plan lands as a picture wearing the headline figures, and the 3D file (USDZ, Apple's
-  // own, which the phone opens in AR Quick Look) lands beside it — and on the job's papers when
-  // the visit is on a job. Every number is a tapped corner or a RoomPlan wall, never a guess off
-  // the mesh. A cancel is a cancel; a refusal is the plugin's sentence; a partial 3D file says so.
-  async function scanInto(taskId: string | null, kind: ScanKind) {
-    if (measuringRef.current) return; // one camera door at a time (Measure shares the latch)
-    measuringRef.current = true;
-    setMeasuring(true);
-    setError(null);
-    try {
-      const r = await scanNative(kind);
-      if (!r.ok) {
-        if ("refused" in r) setError(r.refused);
-        return;
-      }
-      const landing = scanLanding(r);
-      const notes: string[] = [];
-      // A RE-SCAN REPLACES ITS OWN ROWS: the last scan of this kind on this task (or the visit) is
-      // the one that stands — two sets of "Wall 1" under each other read as two rooms (Erik's
-      // screenshot, 10-16). Rows typed by hand or measured by Measure are never touched; the earlier
-      // scan's pictures stay (the office can take one off).
-      const kept = measuresRef.current.filter((m) => !(m.scan === r.kind && (m.task_id ?? null) === taskId));
-      const replaced = measuresRef.current.length - kept.length;
-      // The rows that fit under the visit's cap land; the rest is said, never silently dropped.
-      const fits = Math.max(0, MAX_MEASURES - kept.length);
-      const rows: CaptureMeasure[] = landing.rows.slice(0, fits).map((m) => ({ id: captureId(), ...m, scan: r.kind, ...(taskId ? { task_id: taskId } : {}) }));
-      if (rows.length || replaced) {
-        const next = [...kept, ...rows];
-        measuresRef.current = next;
-        setMeasures(next);
-        queueCapture({ measures: next });
-      }
-      if (replaced) notes.push(`Replaced the last ${r.kind} scan's ${replaced} row${replaced === 1 ? "" : "s"}.`);
-      if (rows.length < landing.rows.length) notes.push(`${MAX_MEASURES} measurements is the most a visit holds — ${landing.rows.length - rows.length} of the scan's rows didn't fit.`);
-      if (taskId) openTask(taskId);
-      else open1("measures");
-      // Each upload clears the error line as it starts, so every outcome is read off its return and
-      // said at the end together (skeptic #17: a plan that failed to upload must not vanish quietly).
-      const plan = await planImageFile(landing.svg, landing.name);
-      pendingTaskRef.current = taskId;
-      const planStored = await upload([plan], { caption: landing.caption, about: landing.about });
-      if (!planStored.length) notes.push("The plan drawing didn't upload — try the scan again.");
-      if (r.kind === "site" && r.photo) {
-        pendingTaskRef.current = taskId;
-        const shot = await upload([r.photo], { caption: landing.caption, about: landing.about });
-        if (!shot.length) notes.push("The site picture didn't upload.");
-      }
-      if (r.model) {
-        pendingTaskRef.current = taskId;
-        const stored = await upload([r.model], { caption: "3D scan", about: landing.about });
-        if (!stored.length) notes.push("The 3D file didn't upload — try the scan again.");
-        else if (jobId) {
-          const filed = await fileOnJob(jobId, stored[0], r.model.name, r.model.size);
-          if (!filed.ok) notes.push(filed.error);
-        }
-      }
-      if (r.modelNote) notes.push(r.modelNote);
-      if (notes.length) setError(notes.join(" "));
-    } finally {
-      measuringRef.current = false;
-      setMeasuring(false);
-    }
-  }
-
-  // ── SCAN IN 3D: the textured model (LiDAR rung 2) ───────────────────────────────────────────
+  // ── 3D SCAN: the textured model (Lidar) ─────────────────────────────────────────────────────
   // Erik 2026-10-16, after Polycam: "collect all of the pixels for all surfaces and render an
-  // image … i want that." Apple's capture view walks the room or the site, the phone builds the
-  // textured model, and it lands on the task (or the visit) as a 3D file the tile opens in the
-  // viewer — and on the job's papers when the visit is on a job. No rows: this door is the picture.
+  // image … i want that." The shell's own capture walks the room or the site (the surfaces show
+  // blue until a photo has them), the phone builds the textured model, and it lands on the task (or
+  // the visit) as a 3D file the tile opens in the viewer — and on the job's papers when the visit is
+  // on a job. No rows: this door is the picture; the numbers are Measure's, beside it under Lidar.
   /** A model whose upload failed, kept for a retry without another walk (the shell's copy stays too). */
   const unsentModelRef = useRef<{ model: File; path: string } | null>(null);
   async function scan3dInto(taskId: string | null) {
@@ -922,11 +844,11 @@ export function Inspector({
       }
       if (taskId) openTask(taskId);
       pendingTaskRef.current = taskId;
-      const stored = await upload([model], { caption: "3D model", about: "Scan In 3D" });
+      const stored = await upload([model], { caption: "3D model", about: "3D Scan" });
       if (!stored.length) {
         // upload() said why (the signal, a size limit); the model waits here for one more tap.
         unsentModelRef.current = { model, path };
-        setError((e) => `${e ?? "The 3D model didn't upload."} It's kept on this phone — tap Scan In 3D again to send it without scanning.`);
+        setError((e) => `${e ?? "The 3D model didn't upload."} It's kept on this phone — tap 3D Scan again to send it without scanning.`);
         return;
       }
       unsentModelRef.current = null;
@@ -961,38 +883,32 @@ export function Inspector({
     return { ok: false, error: `The 3D file is on the visit but didn't file on the job (${why}).` };
   }
 
-  // The camera doors under a Measurements label: Measure / Measure Area where the Measure plugin is
-  // on the bridge, Scan The Site / Scan The Room where the Scan plugin says this phone can. ONE
-  // helper draws both (the task's and the visit's), so they cannot drift. Their own row, wrapping
-  // left to right: beside the label four buttons stacked into a column (Erik's screenshot, 10-16).
+  // THE LIDAR GROUP (Erik 2026-10-16: "lets group everything with a title called Lidar … keep
+  // measurements and measure area and 3d scan"): Measure / Measure Area where the Measure plugin
+  // is on the bridge, 3D Scan where the Scan plugin says this phone can — under their own title,
+  // above the Measurements rows they feed. ONE helper draws both (the task's and the visit's), so
+  // they cannot drift. The buttons wrap left to right in their own row (Erik's screenshot, 10-16).
   const measureButtons = (taskId: string | null) =>
-    !readOnly && (canMeasure || scanOn.site || scanOn.room || scanOn.model) ? (
-      <div className="mt-2 flex flex-wrap gap-2">
-        {canMeasure && (
-          <>
-            <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(taskId, "length")}>
-              {measuring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ruler className="h-4 w-4" />} Measure
+    !readOnly && (canMeasure || scanOn.model) ? (
+      <div>
+        <SectionLabel>Lidar</SectionLabel>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {canMeasure && (
+            <>
+              <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(taskId, "length")}>
+                {measuring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ruler className="h-4 w-4" />} Measure
+              </Button>
+              <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(taskId, "area")}>
+                Measure Area
+              </Button>
+            </>
+          )}
+          {scanOn.model && (
+            <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scan3dInto(taskId)}>
+              <Box className="h-4 w-4" /> 3D Scan
             </Button>
-            <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(taskId, "area")}>
-              Measure Area
-            </Button>
-          </>
-        )}
-        {scanOn.site && (
-          <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scanInto(taskId, "site")}>
-            <Box className="h-4 w-4" /> Scan The Site
-          </Button>
-        )}
-        {scanOn.room && (
-          <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scanInto(taskId, "room")}>
-            Scan The Room
-          </Button>
-        )}
-        {scanOn.model && (
-          <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scan3dInto(taskId)}>
-            Scan In 3D
-          </Button>
-        )}
+          )}
+        </div>
       </div>
     ) : null;
 
@@ -1793,10 +1709,10 @@ export function Inspector({
                   </div>
                 )}
               </div>
-              {/* MEASUREMENTS ON THIS TASK — typed rows today; Measure / Scan The Room land here. */}
+              {/* THE LIDAR GROUP, THEN THE MEASUREMENTS ON THIS TASK — typed rows and Measure's land here; 3D Scan lands as a file. */}
               <div id={`task-measure-${t.id}`} className="mt-3 scroll-mt-16 space-y-2">
-                <SectionLabel>Measurements</SectionLabel>
                 {measureButtons(t.id)}
+                <SectionLabel>Measurements</SectionLabel>
                 {taskMeasures.map((m) => (
                   <div key={m.id} className="flex items-center gap-2">
                     <Input id={`measure-label-${m.id}`} value={m.label} placeholder="what you measured" {...focus} onChange={(e) => patchMeasure(m.id, { label: e.target.value })} />
@@ -2309,9 +2225,9 @@ export function Inspector({
         {/* MEASUREMENTS — still always available, now not always VISIBLE. Typed rows for what a
             kit can size itself from, plus the prose box for the shape a number can't hold. */}
         {shows("measures", measures.some((m) => !claimed(m)) || !!proseMeasurements.trim()) && (
-        <div id="insp-measures" className="scroll-mt-16">
-          <SectionLabel>Measurements</SectionLabel>
+        <div id="insp-measures" className="scroll-mt-16 space-y-2">
           {measureButtons(null)}
+          <SectionLabel>Measurements</SectionLabel>
           <div className="mt-2 space-y-2">
             {measures.map((m, i) => claimed(m) ? null : (
               <div key={m.id} className="flex items-center gap-2">
@@ -2488,7 +2404,7 @@ export function Inspector({
                       )}
                     </button>
                   ) : is3d(p.path) ? (
-                    /* A 3D FILE OPENS IN THE VIEWER (Scan In 3D's model, a dropped GLB): spin it here;
+                    /* A 3D FILE OPENS IN THE VIEWER (3D Scan's model, a dropped GLB): spin it here;
                        Open In AR from inside it on an iPhone. */
                     <button type="button" onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
                       <Box className="h-6 w-6 shrink-0 text-slate-400" />

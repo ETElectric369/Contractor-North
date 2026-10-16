@@ -1,6 +1,7 @@
 /**
- * SCAN IN 3D (LiDAR rung 2, the picture). Erik 2026-10-16, after Polycam: "collect all of the
- * pixels for all surfaces and render an image … i want that." Apple's capture view takes the photos,
+ * 3D SCAN (Lidar, the picture). Erik 2026-10-16, after Polycam: "collect all of the pixels for all
+ * surfaces and render an image … i want that", and after Apple's own capture showed no coverage:
+ * OUR OWN capture takes the photos as the walker moves (the mesh shows blue until a photo has it),
  * the phone builds the textured model, the file comes over the bridge in pieces, lands on the task
  * as a 3D file, and the tile (and the portal's 3D Scan slot) opens it in the in-app viewer.
  */
@@ -103,11 +104,11 @@ describe("the file comes over in pieces; the shell's copy goes only once the upl
     }
   });
   it("scan3dNative: no door without the plugin; cancelled; a rejection's sentence; the model as a File; empty refused", async () => {
-    expect(await scan3dNative()).toEqual({ ok: false, refused: "Scan In 3D needs the North app on an iPhone with a LiDAR sensor." });
+    expect(await scan3dNative()).toEqual({ ok: false, refused: "3D Scan needs the North app on an iPhone with a LiDAR sensor." });
     const f = fakeFile(5000);
-    const off = shell({ Scan: { ...f.plugin, isSupported: async () => ({ site: true, room: true, model: true }) } });
+    const off = shell({ Scan: { ...f.plugin, isSupported: async () => ({ model: true }) } });
     try {
-      expect(await scanDoors()).toEqual({ site: true, room: true, model: true });
+      expect(await scanDoors()).toEqual({ model: true });
       const r = await scan3dNative(9);
       expect(r.ok && r.kind === "model" && r.model.name === "scan-3d-9.usdz" && r.model.size === 5000 && r.shots === 42 && r.path === "/tmp/north-scans/model-x.usdz").toBe(true);
       expect(f.discarded()).toBe(0);
@@ -120,9 +121,9 @@ describe("the file comes over in pieces; the shell's copy goes only once the upl
     } finally {
       off2();
     }
-    const off3 = shell({ Scan: { ...f.plugin, scan3d: async () => { throw new Error("Scan In 3D needs iOS 17 or newer on an iPhone with a LiDAR sensor. Update the iPhone, or Scan The Room."); } } });
+    const off3 = shell({ Scan: { ...f.plugin, scan3d: async () => { throw new Error("3D Scan needs iOS 17 or newer on an iPhone with a LiDAR sensor. Update the iPhone."); } } });
     try {
-      expect(await scan3dNative()).toEqual({ ok: false, refused: "Scan In 3D needs iOS 17 or newer on an iPhone with a LiDAR sensor. Update the iPhone, or Scan The Room." });
+      expect(await scan3dNative()).toEqual({ ok: false, refused: "3D Scan needs iOS 17 or newer on an iPhone with a LiDAR sensor. Update the iPhone." });
     } finally {
       off3();
     }
@@ -160,7 +161,7 @@ describe("Open In AR: the page stages the bytes it drew and the shell opens Quic
     let previewed = "";
     let discarded = 0;
     const plugin = {
-      scanSite: async () => ({}),
+      scan3d: async () => ({}),
       stageFile: async ({ name }: { name: string }) => ({ path: `/tmp/north-scans/stage-${name}.usdz` }),
       stageChunk: async ({ data }: { path: string; data: string }) => {
         chunks.push(data);
@@ -212,54 +213,90 @@ describe("Open In AR: the page stages the bytes it drew and the shell opens Quic
 });
 
 describe("the wiring, pinned", () => {
-  it("the Swift door: Object Capture + photogrammetry on the phone, area masking off, the file served only from its own folder, in pieces", () => {
+  it("the Swift door: our own ARKit capture with visible coverage, then photogrammetry on the phone (depth + gravity per photo, masking off), the file served only from its own folder, in pieces", () => {
     const swift = read("ios/App/App/ScanPlugin.swift");
-    for (const m of ["scan3d", "readChunk", "discard"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}", returnType: CAPPluginReturnPromise)`);
-    expect(swift).toContain("ObjectCaptureSession.isSupported && PhotogrammetrySession.isSupported");
-    expect(swift).toContain("session.start(imagesDirectory: imagesDir, configuration: config)");
-    expect(swift).toContain("config.isObjectMaskingEnabled = false");
-    // Skeptic #18: an AREA capture starts straight from ready (no detection step, iOS 18); Finish
-    // waits for ten photos; the phone must not lock; Cancel with work done asks; a failure before
-    // the screen is up is said once it is; the build's errors are plain sentences; stale scans sweep.
-    expect(swift).toContain('Button("Start Capture") { session.startCapturing() }');
-    expect(swift).not.toContain("startDetecting()");
+    for (const m of ["isSupported", "scan3d", "readChunk", "discard"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}", returnType: CAPPluginReturnPromise)`);
+    // Erik 2026-10-16: the site and room doors are gone; one door, one plugin.
+    for (const gone of ["scanSite", "scanRoom", "RoomPlan", "ObjectCaptureSession", "ObjectCaptureView", "SiteScanViewController", "RoomScanViewController"]) expect(swift).not.toContain(gone);
+    expect(swift).toContain("if #available(iOS 17.0, *) { return lidarPresent && PhotogrammetrySession.isSupported }");
+    expect(swift).toContain('"3D Scan needs iOS 17 or newer on an iPhone with a LiDAR sensor. Update the iPhone."');
+    // The capture: the mesh drawn blue, a 12 MP still by itself every 0.35 m / 15° (and on the shutter),
+    // the faces a photo saw (in front, within reach, facing, not behind something per the depth map)
+    // left out of the drawing — that is the clear; the coverage judged off the main thread.
+    expect(swift).toContain("config.sceneReconstruction = .mesh");
+    expect(swift).toContain("ARWorldTrackingConfiguration.recommendedVideoFormatForHighResolutionFrameCapturing");
+    expect(swift).toContain("sceneView.session.captureHighResolutionFrame { [weak self] hi, _ in");
+    expect(swift).toContain("DispatchQueue.main.async { self?.landShot(hi ?? frame, pose: frame) }");
+    expect(swift).toContain("static let moveStep: Float = 0.35");
+    expect(swift).toContain("static let turnStep: Float = 15 * .pi / 180");
+    expect(swift).toContain("guard moved >= Self.moveStep || turned >= Self.turnStep else { return }");
+    expect(swift).toContain('shutter.accessibilityLabel = "Take A Photo"');
+    expect(swift).toContain("if z > reading + 0.08 + 0.06 * z { continue }");
+    expect(swift).toContain("if normal != .zero, simd_dot(normal, eye - centre) <= 0 { continue }");
+    expect(swift).toContain("guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { return .min }");
+    expect(swift).toContain("if !covered.contains(Self.key((a + b + c) / 3)) { idx.append(contentsOf: snap.faces[i..<i + 3]) }");
+    expect(swift).toContain('private let work = DispatchQueue(label: "north.scan3d.coverage", qos: .userInitiated)');
+    expect(swift).toContain("m.diffuse.contents = UIColor(red: 0.25, green: 0.55, blue: 1, alpha: 0.5)");
+    expect(swift).toContain("Blue is what the scan still needs; it clears as photos land.");
+    expect(swift).toContain("haptic.impactOccurred()");
+    // The build: Finish waits for ten photos AND for every photo to be on disk; the photos go to the
+    // session one at a time with their depth map (real size) and gravity (upright), in walking order.
     expect(swift).toContain("static let minShots = 10");
-    expect(swift).toContain("if case .capturing = state, shots >= Self.minShots {");
+    expect(swift).toContain("guard finishWaiting, !processing, !finished, !shotInFlight, pendingWrites == 0 else { return }");
+    expect(swift).toContain("struct ShotSamples: Sequence, IteratorProtocol");
+    expect(swift).toContain("s.depthDataMap = map");
+    expect(swift).toContain("s.gravity = r.gravity");
+    expect(swift).toContain("config.isObjectMaskingEnabled = false");
+    expect(swift).toContain("config.sampleOrdering = .sequential");
+    expect(swift).toContain("try photo.process(requests: [.modelFile(url: output, detail: .reduced)])");
+    expect(swift).toContain("PhotogrammetrySession(input: ShotSamples(dir: folder, records: records.sorted { $0.id < $1.id }), configuration: config)");
+    // Kept from the first cut (skeptic #18): the phone must not lock; Cancel with work done asks;
+    // a failure before the screen is up is said once it is; the build's errors are plain
+    // sentences; stale scans sweep; the file is served only from the scan folder, in pieces.
     expect(swift).toContain("UIApplication.shared.isIdleTimerDisabled = true");
     expect(swift).toContain("UIApplication.shared.isIdleTimerDisabled = false");
     expect(swift).toContain('UIAlertAction(title: "Drop It", style: .destructive)');
-    expect(swift).toContain("if let pendingFailure { finish(.failed(pendingFailure)) }");
+    // Skeptic #19: an outcome before the screen is up waits for viewDidAppear; the presenter
+    // dismisses (an alert on top goes with it); a build that ends with nothing is said, never hung;
+    // photo ids never repeat; a failed capture drops its photos; the photo's own camera judges coverage.
+    expect(swift).toContain("guard appeared else {\n            if pendingOutcome == nil { pendingOutcome = outcome }\n            return\n        }");
+    expect(swift).toContain("(presentingViewController ?? self).dismiss(animated: true) { [done] in done(outcome) }");
+    expect(swift).toContain('finish(.failed("The model didn\'t finish building. Try again."))');
+    expect(swift).toContain("await MainActor.run { self?.buildEnded() }");
+    expect(swift).toContain("nextId += 1\n        let id = nextId");
+    expect(swift).toContain("let cam = frame.camera\n        let gravity = Self.gravity(in: cam.transform)");
+    expect(swift).toContain("static let maxShots: Int = {");
+    expect(swift).not.toContain("AudioServicesPlaySystemSound");
     expect(swift).toContain("static func buildSentence(_ error: Error) -> String");
     expect(swift).toContain("static func sweepOldScans()");
     expect(swift).toContain('"path": output.path');
-    expect(swift).toContain("config.isOverCaptureEnabled = false");
-    expect(swift).toContain('"Scan In 3D needs iOS 18 or newer');
-    expect(swift).toContain("try photo.process(requests: [.modelFile(url: output, detail: .reduced)])");
     expect(swift).toContain('guard url.path.hasPrefix(folder + "/"), url.pathExtension.lowercased() == "usdz" else { return nil }');
     expect(swift).toContain('"mime": "model/vnd.usdz+zip", "shots": shots');
     expect(swift).toContain("let length = min(max(1, call.getInt(\"length\") ?? 2_000_000), 4_000_000)");
-    expect(swift).toContain("ObjectCaptureView(session: session)");
-    expect(swift).toContain("if processing { photo?.cancel() } else { session.cancel() }");
+    expect(swift).toContain("if processing { photo?.cancel() }");
     // Open In AR: staging doors + Quick Look (the AR tab is Apple's); the staged file goes on dismiss.
     for (const m of ["stageFile", "stageChunk", "previewFile"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}", returnType: CAPPluginReturnPromise)`);
     expect(swift).toContain("final class ModelPreview: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate");
     expect(swift).toContain("guard let url = Self.ownFile(call.getString(\"path\")) else {\n            call.reject(\"That file isn't a staged model of this app's.\")");
     expect(swift).toContain("try? FileManager.default.removeItem(at: url)\n                call.resolve()");
     expect(swift).not.toMatch(/URLSession|URLRequest/);
+    expect(read("ios/App/App/Info.plist")).toContain("3D Scan uses it with the LiDAR sensor to photograph every surface and build a 3D model.");
     expect(read("package.json")).toContain('"three": "^0.186.1"');
   });
   it("the Inspector: the button, the landing (the model uploaded, filed on the job), the tiles open the viewer, drops take a 3D file; the portal spins it", () => {
     const insp = read("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(insp).toContain('onClick={() => void scan3dInto(taskId)}');
-    expect(insp).toContain("Scan In 3D\n");
-    expect(insp).toContain("!readOnly && (canMeasure || scanOn.site || scanOn.room || scanOn.model) ? (");
+    expect(insp).toContain('<Box className="h-4 w-4" /> 3D Scan\n');
+    expect(insp).toContain("!readOnly && (canMeasure || scanOn.model) ? (");
+    // The old doors are gone from the page too (Erik 2026-10-16); no plan drawing, no site rows.
+    for (const gone of ["scanInto(", "scanNative", "scanLanding", "planImageFile", "Scan The Site", "Scan The Room", "Scan In 3D"]) expect(insp).not.toContain(gone);
     const fn = insp.slice(insp.indexOf("async function scan3dInto("), insp.indexOf("/** A COPY of the visit's file"));
     expect(fn).toContain("const r = await scan3dNative();");
-    expect(fn).toContain('const stored = await upload([model], { caption: "3D model", about: "Scan In 3D" });');
+    expect(fn).toContain('const stored = await upload([model], { caption: "3D model", about: "3D Scan" });');
     // A failed upload keeps the model (and the shell's copy) for one more tap; the shell's copy goes
     // only after the upload landed; upload()'s own reason is kept, not overwritten.
     expect(fn).toContain("unsentModelRef.current = { model, path };");
-    expect(fn).toContain("tap Scan In 3D again to send it without scanning.");
+    expect(fn).toContain("tap 3D Scan again to send it without scanning.");
     expect(fn).toContain("unsentModelRef.current = null;\n      await discardScan(path);");
     expect(fn).toContain("const filed = await fileOnJob(jobId, stored[0], model.name, model.size);");
     expect(insp).toContain("const is3d = (p: string) => /\\.(usdz|glb|gltf)($|\\?)/i.test(p);");

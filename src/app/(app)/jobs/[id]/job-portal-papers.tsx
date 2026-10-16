@@ -25,7 +25,7 @@ import {
 } from "../portal-share-actions";
 
 /** What the plans door takes: PDFs and pictures, several at once (the same list the Costs tab takes). */
-/** Plans, drawings, and 3D scans (a USDZ from Scan In 3D, a GLB from another scanner). */
+/** Plans, drawings, and 3D scans (a USDZ from 3D Scan, a GLB from another scanner). */
 export const PLAN_ACCEPT = "image/*,application/pdf,.usdz,.glb";
 
 function onPhone() {

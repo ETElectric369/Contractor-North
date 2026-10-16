@@ -342,7 +342,7 @@ describe("the plans and drawings section (0326)", () => {
     expect(t).toContain("Open The Circuit Map");
     expect(html).toContain('href="https://signed.example/circuit?t=1"');
     expect(t).toContain("Open Full Size");
-    // A point cloud the viewer cannot draw is a plain file; Apple's USDZ (Scan In 3D) spins in the viewer.
+    // A point cloud the viewer cannot draw is a plain file; the USDZ (3D Scan) spins in the viewer.
     expect(t).toContain("A 3D file.");
     expect(html).toContain('href="https://signed.example/scan?t=1"');
     expect(t).toContain("Open The File");
