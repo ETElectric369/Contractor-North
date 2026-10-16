@@ -243,13 +243,17 @@ describe("the wiring, pinned", () => {
     // session one at a time with their depth map (real size) and gravity (upright), in walking order.
     expect(swift).toContain("static let minShots = 10");
     expect(swift).toContain("guard finishWaiting, !processing, !finished, !shotInFlight, pendingWrites == 0 else { return }");
-    expect(swift).toContain("struct ShotSamples: Sequence, IteratorProtocol");
-    expect(swift).toContain("s.depthDataMap = map");
-    expect(swift).toContain("s.gravity = r.gravity");
+    // The session is given the FOLDER of photos (its constructor over a sequence of samples trapped
+    // on Erik's phone, twice, the moment Finish was tapped — the crash reports of 10-16 16:39/16:41);
+    // each photo is a HEIC with the LiDAR depth map embedded, gravity written beside it.
+    expect(swift).toContain("photo = try PhotogrammetrySession(input: imagesDir, configuration: config)");
+    expect(swift).not.toContain("PhotogrammetrySample");
+    expect(swift).toContain('CGImageDestinationCreateWithData(out, "public.heic" as CFString, 1, nil)');
+    expect(swift).toContain("CGImageDestinationAddAuxiliaryDataInfo(dest, aux.type, aux.info)");
+    expect(swift).toContain("AVDepthData(fromDictionaryRepresentation: representation)");
+    expect(swift).toContain('name + "_gravity.txt"');
     expect(swift).toContain("config.isObjectMaskingEnabled = false");
-    expect(swift).toContain("config.sampleOrdering = .sequential");
     expect(swift).toContain("try photo.process(requests: [.modelFile(url: output, detail: .reduced)])");
-    expect(swift).toContain("PhotogrammetrySession(input: ShotSamples(dir: folder, records: records.sorted { $0.id < $1.id }), configuration: config)");
     // Kept from the first cut (skeptic #18): the phone must not lock; Cancel with work done asks;
     // a failure before the screen is up is said once it is; the build's errors are plain
     // sentences; stale scans sweep; the file is served only from the scan folder, in pieces.

@@ -2,7 +2,6 @@ import ARKit
 import AVFoundation
 import Capacitor
 import CoreImage
-import CoreMotion
 import ImageIO
 import QuickLook
 import RealityKit
@@ -321,77 +320,6 @@ class ScanViewController: UIViewController {
 
 // MARK: - 3D SCAN (our own capture: ARKit photos with visible coverage → photogrammetry)
 
-/// One photo on disk: its file, the gravity it was taken under (the device's frame, CoreMotion's
-/// convention — what PhotogrammetrySample wants) and the size of its depth map.
-struct ShotRecord {
-    let id: Int
-    let image: String
-    let depth: String?
-    let depthWidth: Int
-    let depthHeight: Int
-    let gravity: CMAcceleration
-}
-
-/// Hands the photos to PhotogrammetrySession ONE AT A TIME, read off disk as it asks (two hundred
-/// 12 MP images would not fit in memory together): the image, the LiDAR depth map behind it (so the
-/// model comes out at its real size) and gravity (so it stands up).
-@available(iOS 17.0, *)
-struct ShotSamples: Sequence, IteratorProtocol {
-    let dir: URL
-    let records: [ShotRecord]
-    var at = 0
-
-    mutating func next() -> PhotogrammetrySample? {
-        while at < records.count {
-            let r = records[at]
-            at += 1
-            guard let image = ShotSamples.pixels(jpeg: dir.appendingPathComponent(r.image)) else { continue }
-            var s = PhotogrammetrySample(id: r.id, image: image)
-            if let depth = r.depth, let map = ShotSamples.depth(file: dir.appendingPathComponent(depth), width: r.depthWidth, height: r.depthHeight) { s.depthDataMap = map }
-            s.gravity = r.gravity
-            return s
-        }
-        return nil
-    }
-
-    static let context = CIContext(options: [.useSoftwareRenderer: false])
-
-    /// A JPEG → a BGRA pixel buffer (the format the session takes), scaled down where the session's
-    /// own ceiling on an image's size is lower than the photo; nil when the file is unreadable.
-    static func pixels(jpeg url: URL) -> CVPixelBuffer? {
-        guard var ci = CIImage(contentsOf: url) else { return nil }
-        let limit = PhotogrammetrySession.limits.maximumInputImageDimension
-        let longest = Swift.max(ci.extent.width, ci.extent.height)
-        if limit > 0, longest > CGFloat(limit) {
-            let scale = CGFloat(limit) / longest
-            ci = ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        }
-        let w = Int(ci.extent.width.rounded(.down)), h = Int(ci.extent.height.rounded(.down))
-        guard w > 0, h > 0 else { return nil }
-        var pb: CVPixelBuffer?
-        let attrs: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [:]]
-        guard CVPixelBufferCreate(kCFAllocatorDefault, w, h, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &pb) == kCVReturnSuccess, let pb else { return nil }
-        context.render(ci, to: pb)
-        return pb
-    }
-
-    /// Raw Float32 meters on disk → a DepthFloat32 pixel buffer.
-    static func depth(file url: URL, width: Int, height: Int) -> CVPixelBuffer? {
-        guard width > 0, height > 0, let data = try? Data(contentsOf: url), data.count == width * height * 4 else { return nil }
-        var pb: CVPixelBuffer?
-        guard CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_DepthFloat32, nil, &pb) == kCVReturnSuccess, let pb else { return nil }
-        CVPixelBufferLockBaseAddress(pb, [])
-        defer { CVPixelBufferUnlockBaseAddress(pb, []) }
-        guard let base = CVPixelBufferGetBaseAddress(pb) else { return nil }
-        let bpr = CVPixelBufferGetBytesPerRow(pb)
-        data.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
-            guard let s = src.baseAddress else { return }
-            for row in 0..<height { memcpy(base.advanced(by: row * bpr), s.advanced(by: row * width * 4), width * 4) }
-        }
-        return pb
-    }
-}
-
 /// A copy of one LiDAR mesh anchor, taken on the main thread so the coverage work can read it off
 /// the main thread without touching ARKit's recycled Metal buffers.
 struct MeshSnap {
@@ -500,6 +428,9 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     private let buildLabel = UILabel()
 
     private let folder: URL
+    /// The photos alone (the session reads EVERY image in the folder it is given — the checkpoints
+    /// live beside it, never in it).
+    private let imagesDir: URL
     private let checkpointDir: URL
     private let outputURL: URL
 
@@ -516,7 +447,8 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     /// Photos still being written to disk; Finish waits for zero.
     private var pendingWrites = 0
     private var finishWaiting = false
-    private var records: [ShotRecord] = []
+    /// The ids of the photos that are on disk.
+    private var records: [Int] = []
     private var processing = false
     private var photo: PhotogrammetrySession?
     /// The recommended high-resolution video format is tried first; if the session refuses it, the
@@ -542,6 +474,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         let stamp = UUID().uuidString
         let base = ScanPlugin.scanFolder
         folder = base.appendingPathComponent("capture-\(stamp)", isDirectory: true)
+        imagesDir = folder.appendingPathComponent("images", isDirectory: true)
         checkpointDir = folder.appendingPathComponent("checkpoint", isDirectory: true)
         outputURL = base.appendingPathComponent("model-\(stamp).usdz")
         super.init(done: done)
@@ -553,6 +486,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         super.viewDidLoad()
         view.backgroundColor = .black
         do {
+            try FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: checkpointDir, withIntermediateDirectories: true)
         } catch {
             // Said once the screen is up (ScanViewController.finish holds it until then).
@@ -815,27 +749,23 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         }
 
         pendingWrites += 1
-        let dir = folder
+        let dir = imagesDir
         encode.async { [weak self] in
-            let name = String(format: "shot-%04d.jpg", id)
-            var record: ShotRecord?
-            if let jpeg = Self.jpeg(of: image) {
+            let name = String(format: "shot-%04d", id)
+            var saved = false
+            if let bytes = Self.heic(of: image, depth: depth) ?? Self.jpeg(of: image) {
                 do {
-                    try jpeg.write(to: dir.appendingPathComponent(name))
-                    var depthName: String?
-                    if let depth {
-                        let dn = String(format: "shot-%04d.depth", id)
-                        if (try? depth.data.write(to: dir.appendingPathComponent(dn))) != nil { depthName = dn }
-                    }
-                    record = ShotRecord(id: id, image: name, depth: depthName, depthWidth: depth?.width ?? 0, depthHeight: depth?.height ?? 0, gravity: gravity)
+                    try bytes.write(to: dir.appendingPathComponent(name + (bytes.isHEIC ? ".heic" : ".jpg")))
+                    try? "\(gravity.x),\(gravity.y),\(gravity.z)".write(to: dir.appendingPathComponent(name + "_gravity.txt"), atomically: true, encoding: .utf8)
+                    saved = true
                 } catch {
-                    record = nil
+                    saved = false
                 }
             }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.pendingWrites -= 1
-                if let record { self.records.append(record) }
+                if saved { self.records.append(id) }
                 else if !self.finished {
                     self.shots = max(0, self.shots - 1)
                     self.refreshCounter()
@@ -847,6 +777,39 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     }
 
     static let jpegContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    /// The photo as a HEIC with the LiDAR depth map embedded as Apple's auxiliary depth image — the
+    /// form Apple's own capture writes and the session reads for the model's real size. Nil when the
+    /// encoder refuses (the JPEG without depth is the fallback).
+    static func heic(of image: CVPixelBuffer, depth: (data: Data, floats: [Float], width: Int, height: Int)?) -> Data? {
+        let ci = CIImage(cvPixelBuffer: image)
+        guard let cg = jpegContext.createCGImage(ci, from: ci.extent) else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, "public.heic" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+        if let depth, let aux = auxiliaryDepth(depth) { CGImageDestinationAddAuxiliaryDataInfo(dest, aux.type, aux.info) }
+        guard CGImageDestinationFinalize(dest), out.length > 0 else { return nil }
+        return out as Data
+    }
+
+    /// The depth map as the auxiliary-image dictionary ImageIO embeds in a HEIC.
+    static func auxiliaryDepth(_ d: (data: Data, floats: [Float], width: Int, height: Int)) -> (type: CFString, info: CFDictionary)? {
+        let description: [String: Any] = [
+            kCGImagePropertyWidth as String: d.width,
+            kCGImagePropertyHeight as String: d.height,
+            kCGImagePropertyBytesPerRow as String: d.width * 4,
+            kCGImagePropertyPixelFormat as String: Int(kCVPixelFormatType_DepthFloat32),
+        ]
+        let representation: [AnyHashable: Any] = [
+            kCGImageAuxiliaryDataInfoData: d.data,
+            kCGImageAuxiliaryDataInfoDataDescription: description,
+            kCGImageAuxiliaryDataInfoMetadata: CGImageMetadataCreateMutable(),
+        ]
+        guard let depthData = try? AVDepthData(fromDictionaryRepresentation: representation) else { return nil }
+        var type: NSString?
+        guard let info = depthData.dictionaryRepresentation(forAuxiliaryDataType: &type), let type else { return nil }
+        return (type as CFString, info as CFDictionary)
+    }
 
     static func jpeg(of image: CVPixelBuffer) -> Data? {
         let ci = CIImage(cvPixelBuffer: image)
@@ -869,15 +832,16 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     }
 
     /// Gravity in the device's frame (CoreMotion's: x out the right edge, y out the top, z out of
-    /// the screen). ARKit's camera frame has x running from the front camera toward the bottom of the
-    /// phone and y across it, so world "down" is carried into the camera frame and turned.
-    static func gravity(in camera: simd_float4x4) -> CMAcceleration {
+    /// the screen), written beside each photo. ARKit's camera frame has x running from the front
+    /// camera toward the bottom of the phone and y across it, so world "down" is carried into the
+    /// camera frame and turned.
+    static func gravity(in camera: simd_float4x4) -> simd_float3 {
         let r = simd_float3x3(columns: (
             simd_float3(camera.columns.0.x, camera.columns.0.y, camera.columns.0.z),
             simd_float3(camera.columns.1.x, camera.columns.1.y, camera.columns.1.z),
             simd_float3(camera.columns.2.x, camera.columns.2.y, camera.columns.2.z)))
         let g = r.transpose * simd_float3(0, -1, 0)
-        return CMAcceleration(x: Double(g.y), y: Double(-g.x), z: Double(g.z))
+        return simd_float3(g.y, -g.x, g.z)
     }
 
     // MARK: Coverage (the `work` queue)
@@ -1118,13 +1082,13 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         let shots = records.count
         var config = PhotogrammetrySession.Configuration()
         // A room or a site, not one thing on a table: nothing is cut away as "background". The
-        // photos come in walking order, which the session can use.
+        // session is given the FOLDER and reads the photos itself: its constructor over a sequence
+        // of samples trapped on this phone the moment Finish was tapped (two crash reports, 10-16).
         config.isObjectMaskingEnabled = false
-        config.sampleOrdering = .sequential
         config.checkpointDirectory = checkpointDir
         let photo: PhotogrammetrySession
         do {
-            photo = try PhotogrammetrySession(input: ShotSamples(dir: folder, records: records.sorted { $0.id < $1.id }), configuration: config)
+            photo = try PhotogrammetrySession(input: imagesDir, configuration: config)
         } catch {
             cleanup(keepModel: false)
             finish(.failed("The phone couldn't start building the model (\(error.localizedDescription)). Try again."))
@@ -1195,6 +1159,11 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         try? FileManager.default.removeItem(at: folder)
         if !keepModel { try? FileManager.default.removeItem(at: outputURL) }
     }
+}
+
+private extension Data {
+    /// A HEIC starts with an ISO box whose type is "ftyp" at byte 4.
+    var isHEIC: Bool { count > 12 && self[4] == 0x66 && self[5] == 0x74 && self[6] == 0x79 && self[7] == 0x70 }
 }
 
 // MARK: - Quick Look for a model (Open In AR)
