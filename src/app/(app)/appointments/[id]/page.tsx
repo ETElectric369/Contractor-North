@@ -657,6 +657,7 @@ export default async function AppointmentCapturePage({
             initialCapture={capture}
             initialPhotos={photos}
             initialLocation={a.location ?? ""}
+            jobId={a.job_id ?? null}
             linked={
               a.inquiry_id && a.inquiries?.name
                 ? { kind: "lead" as const, name: a.inquiries.name }

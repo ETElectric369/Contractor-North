@@ -130,11 +130,13 @@ describe("the wiring, pinned", () => {
     const insp = read("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(insp).toContain("useEffect(() => setCanMeasure(measurePluginPresent()), []);");
     expect(insp).toContain("const [canMeasure, setCanMeasure] = useState(false);");
-    expect((insp.match(/\{canMeasure && !readOnly && \(/g) ?? []).length).toBe(2);
-    expect(insp).toContain('onClick={() => void measureInto(t.id, "length")}');
-    expect(insp).toContain('onClick={() => void measureInto(t.id, "area")}');
-    expect(insp).toContain('onClick={() => void measureInto(null, "length")}');
-    expect(insp).toContain('onClick={() => void measureInto(null, "area")}');
+    // One helper draws both headers (the task's and the visit's) since the scans joined it (rung 2).
+    expect(insp).toContain("const measureButtons = (taskId: string | null) =>");
+    expect(insp).toContain("!readOnly && (canMeasure || scanOn.site || scanOn.room) ? (");
+    expect(insp).toContain("{measureButtons(t.id)}");
+    expect(insp).toContain("{measureButtons(null)}");
+    expect(insp).toContain('onClick={() => void measureInto(taskId, "length")}');
+    expect(insp).toContain('onClick={() => void measureInto(taskId, "area")}');
     const fn = insp.slice(insp.indexOf("async function measureInto("), insp.indexOf("// ── THE DOORS NORT TYPES INTO"));
     expect(fn).toContain('if ("refused" in r) setError(r.refused);');
     expect(fn).toContain("const label = `${mode === \"area\" ? \"Measured area\" : \"Measured length\"}${r.approx ? \" (approx.)\" : \"\"}`;");
@@ -145,7 +147,7 @@ describe("the wiring, pinned", () => {
     expect(fn).toContain("queueCapture({ measures: next });");
     expect(fn).toContain("await upload([r.photo], { caption: r.caption, about: label });");
     expect(fn).toContain("document.getElementById(`measure-label-${id}`)?.focus()");
-    expect(insp).toContain("async function upload(files: File[], extra?: Partial<CapturePhotoMeta>)");
+    expect(insp).toContain("async function upload(files: File[], extra?: Partial<CapturePhotoMeta>): Promise<string[]>");
     expect(insp).toContain("...(extra ?? {}), ...(forTask ? { task_id: forTask } : {})");
     // The upload writes the list as it stands when it FINISHES (refs), never a stale copy.
     expect(insp).toContain("const next = [...photosRef.current, ...added];\n      photosRef.current = next;");

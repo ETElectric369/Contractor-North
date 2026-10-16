@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1115", date: "2026-10-16", line: "Scan The Site and Scan The Room on the task sheet: walk the corners outdoors or the walls indoors, and the sides, area and perimeter land as rows with a to-scale plan drawing and a 3D file." },
   { version: "cn-v1114", date: "2026-10-16", line: "Nort can type for you: a note, hours, an answer or a measurement goes into the box on the visit sheet, as you said it. Measure a length or an area with the camera, right on the task sheet." },
   { version: "cn-v1113", date: "2026-10-16", line: "A sign-in check that gets no answer for a moment no longer sends you to the login screen: the app tries again and says so if it still can't; a refused session is now reported" },
   { version: "cn-v1112", date: "2026-10-16", line: "Nort can fix a visit's address by voice (move it, re-address it, or both); a field he leaves empty no longer shows as null on the confirm card, and the card lists no record ids" },

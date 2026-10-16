@@ -34,7 +34,7 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>North can use Bluetooth to talk to a supported card reader. Tap to Pay on iPhone itself needs no reader — the phone is the reader.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>North uses the camera so you can photograph job sites, materials, receipts and documents and attach them to the job, and to measure a length or an area on site with Measure.</string>
+	<string>North uses the camera so you can photograph job sites, materials, receipts and documents and attach them to the job, and to measure a length or an area on site with Measure. Scan The Site and Scan The Room use it with the LiDAR sensor to draw a plan and build a 3D scan.</string>
 	<!-- THE FENCE WITH THE SCREEN OFF (field feedback 10-13, item 4; Chris 2026-10-14: "use geo tracking
 	     to remember when I left jobsite"). Always-location is asked for ONE thing: a circle around the
 	     job you are clocked in on, so the phone can notice you drove off while the app is asleep and
