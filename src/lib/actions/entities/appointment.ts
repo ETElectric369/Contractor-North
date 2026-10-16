@@ -4,6 +4,7 @@ import {
   createAppointment,
   linkAppointmentTo,
   setAppointmentOutcome,
+  setAppointmentPlace,
   setAppointmentStatus,
   rescheduleAppointment,
 } from "@/app/(app)/appointments/actions";
@@ -16,15 +17,23 @@ import type { ActionDef, ActionResult } from "../types";
 const LOCAL_TIME_RULE =
   "Times are the company's LOCAL wall-clock time, written YYYY-MM-DDTHH:MM with NO Z and NO offset ('tomorrow at 10 AM' = <tomorrow>T10:00); the app converts it to the stored instant. Confirm to the user from the result's `recorded` line (what was actually stored), never from your own words.";
 
+/** A text the model may leave EMPTY. It says the emptiness as a WORD — "null", "none", "" — not as
+ *  JSON null (ends_at: "null", 2026-10-16: the confirm card read "ends at: null" and the yes failed
+ *  with "I couldn't read "null" as a date and time"). The words become null before the card is
+ *  built: the card shows only what will run. */
+const EMPTY_WORDS = new Set(["", "null", "none", "undefined", "n/a"]);
+const nullableText = () =>
+  z.preprocess((v) => (typeof v === "string" && EMPTY_WORDS.has(v.trim().toLowerCase()) ? null : v), z.string().nullable().optional());
+
 type Db = Awaited<ReturnType<typeof createClient>>;
 
 /** ANNOUNCE THE DEED: read the row back and say its time in the org timezone. A write that stored
  *  the wrong hour then SAYS the wrong hour; the old reply repeated the model's intent, which is how
  *  "Booked, tomorrow at 10 AM" went out over a row stored at 3 AM Pacific (2026-09-24). */
-async function readBack(supabase: Db, id: string, tz: string, verb: string): Promise<string | null> {
+async function readBack(supabase: Db, id: string, tz: string, verb: string, withPlace = false): Promise<string | null> {
   const { data } = await supabase
     .from("appointments")
-    .select("title, starts_at, ends_at, customers(name)")
+    .select("title, starts_at, ends_at, location, customers(name)")
     .eq("id", id)
     .maybeSingle();
   if (!data) return null;
@@ -32,21 +41,25 @@ async function readBack(supabase: Db, id: string, tz: string, verb: string): Pro
     title?: string | null;
     starts_at?: string | null;
     ends_at?: string | null;
+    location?: string | null;
     customers?: { name?: string | null } | null;
   };
-  return appointmentRecorded(verb, row, tz);
+  return appointmentRecorded(verb, row, tz, withPlace);
 }
 
 /** The `recorded` sentence for a stored appointment row (pure, so it is testable without a DB). */
 export function appointmentRecorded(
   verb: string,
-  row: { title?: string | null; starts_at?: string | null; ends_at?: string | null; customers?: { name?: string | null } | null },
+  row: { title?: string | null; starts_at?: string | null; ends_at?: string | null; location?: string | null; customers?: { name?: string | null } | null },
   tz: string,
+  /** Say the stored address too — when the deed was an address change, so the read-back names it. */
+  withPlace = false,
 ): string {
   const end = endSaid(row.starts_at, row.ends_at, tz);
+  const at = withPlace && row.location ? `, at ${quotedData(row.location)}` : "";
   const who = row.customers?.name ? `, customer ${quotedData(row.customers.name)}` : ", no customer linked";
-  // Title and name are database free text (a lead's name can reach the title): quoted, as data.
-  return `${verb}: ${quotedData(row.title ?? "appointment")}, ${spokenWhen(row.starts_at, tz)}${end}${who}.`;
+  // Title, address and name are database free text (a lead's name can reach the title): quoted, as data.
+  return `${verb}: ${quotedData(row.title ?? "appointment")}, ${spokenWhen(row.starts_at, tz)}${end}${at}${who}.`;
 }
 
 /** "until 10:00 AM PDT" on the same org-local day; the end's day too when it falls on another day;
@@ -83,11 +96,16 @@ export const appointmentActions: Record<string, ActionDef> = {
   "appointment.update": {
     name: "appointment.update",
     group: "appointment",
-    label: "Reschedule appointment",
+    label: "Change appointment",
     description:
-      "Reschedule an appointment / inspection to a new time — e.g. 'move the Smith inspection to Thursday at 9am'. Find it first with schedule_overview (it returns the id), then pass that id plus the new starts_at (optionally ends_at). Without ends_at the visit keeps its length and the end moves with it. Keeps everything else; no cancel+recreate. " +
+      "Reschedule an appointment / inspection to a new time, change its address, or both — e.g. 'move the Smith inspection to Thursday at 9am', 'that inspection is at 123 Main Street, not Pine'. Find it first with schedule_overview (it returns the id), then pass that id plus the new starts_at (optionally ends_at) and/or the new location — the WHOLE address line (street and town, zip if said); given only a street, ask which town before proposing. Without ends_at the visit keeps its length and the end moves with it. Keeps everything else; no cancel+recreate. Leave a field OUT rather than passing 'null'. " +
       LOCAL_TIME_RULE,
-    input: z.object({ id: z.string(), starts_at: z.string().min(1), ends_at: z.string().nullable().optional() }),
+    // The address came with cn-v1112 (2026-10-16): asked to "fix the location", Nort had only a
+    // time door, re-proposed the move it had just made, and the address stayed in his sentence.
+    input: z
+      .object({ id: z.string(), starts_at: nullableText(), ends_at: nullableText(), location: nullableText() })
+      .refine((i) => !!i.starts_at || !!i.location, { message: "Say the new time or the new address.", path: ["starts_at"] })
+      .refine((i) => !i.ends_at || !!i.starts_at, { message: "An end time needs the start time with it.", path: ["ends_at"] }),
     auth: "staff",
     effect: "write",
     // Moving a real appointment by VOICE is Erik's "swap days while driving" hazard: a stray
@@ -98,15 +116,32 @@ export const appointmentActions: Record<string, ActionDef> = {
     // Read the day/time straight off the string the model passed: its wall-clock time, which the
     // handler converts in the org timezone. A string carrying its own offset (a stamped Z) says so
     // out loud ("at 10am UTC"), because that one is stored as given and is not company-local.
-    describe: (i) => `Move this appointment to ${readbackWhen(i.starts_at)}? Check the details below before you confirm.`,
+    describe: (i) => {
+      const when = i.starts_at ? `Move this appointment to ${readbackWhen(i.starts_at)}` : "";
+      const where = i.location ? (when ? ` and change its address to ${quotedData(i.location)}` : `Change this appointment's address to ${quotedData(i.location)}`) : "";
+      return `${when}${where}? Check the details below before you confirm.`;
+    },
     handler: async (i) => {
       const supabase = await createClient();
       const tz = await orgTimezone(supabase);
-      const span = convertSpan(i.starts_at, i.ends_at, tz);
-      if ("error" in span) return { ok: false, error: span.error };
-      const r = await rescheduleAppointment(i.id, span.start, span.end);
-      if (!r.ok) return r;
-      const recorded = await readBack(supabase, i.id, tz, "Moved");
+      // The address goes FIRST, so the move's own calendar push carries the new place and title.
+      if (i.location) {
+        // The form's own address door: a typed line that no longer says a stored city or zip takes
+        // those parts with it, a stock title becomes the address, and Google gets the new place.
+        const p = await setAppointmentPlace(i.id, i.location);
+        if (!p.ok) return p;
+      }
+      let r: ActionResult = { ok: true };
+      if (i.starts_at) {
+        const span = convertSpan(i.starts_at, i.ends_at, tz);
+        const moved: ActionResult = "error" in span ? { ok: false, error: span.error } : await rescheduleAppointment(i.id, span.start, span.end);
+        if (!moved.ok) {
+          // A PARTIAL DEED IS SAID: the address is already changed when the move fails.
+          return i.location ? { ok: false, error: `The address was changed, but the time wasn't moved: ${moved.error ?? "That didn't work."}` } : moved;
+        }
+        r = moved;
+      }
+      const recorded = await readBack(supabase, i.id, tz, i.starts_at ? "Moved" : "Updated", !!i.location);
       return { ...r, ...(recorded ? { recorded } : {}) };
     },
   },
@@ -127,11 +162,11 @@ export const appointmentActions: Record<string, ActionDef> = {
       // New Appointment form offers and createAppointment accepts. No kind is Other, never an inspection.
       type: z.enum(PICKABLE_APPOINTMENT_TYPES).default("other"),
       starts_at: z.string().min(1),
-      ends_at: z.string().nullable().optional(),
-      job_id: z.string().nullable().optional(),
-      customer_id: z.string().nullable().optional(),
-      location: z.string().nullable().optional(),
-      notes: z.string().nullable().optional(),
+      ends_at: nullableText(),
+      job_id: nullableText(),
+      customer_id: nullableText(),
+      location: nullableText(),
+      notes: nullableText(),
     }),
     auth: "staff",
     effect: "write",
@@ -202,7 +237,8 @@ export const appointmentActions: Record<string, ActionDef> = {
     // move — gate the AGENT route so Nort reads the change back and waits for the yes. Cancelling
     // also withdraws the live pick-a-time link, so this is not a cheap undo. UI is exempt.
     confirm: "destructive",
-    describe: (i) => `${statusVerb(i.status)} this appointment? Check the details below before you confirm.`,
+    // No "details below": the card has no row to show for a status change (its id is not a detail).
+    describe: (i) => `${statusVerb(i.status)} this appointment?`,
     handler: (i) => setAppointmentStatus(i.id, i.status),
   },
   /** How an inspection ended (0205) — the exit the inbox was missing. */

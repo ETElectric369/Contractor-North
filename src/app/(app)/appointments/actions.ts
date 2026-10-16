@@ -721,6 +721,7 @@ export async function setAppointmentPlace(
     .select("id, title");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Appointment not found." };
+  await pushCalendarItem("appointment", id); // live Google push (fire-safe): the event carries the address and the title
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");

@@ -296,7 +296,7 @@ export const timeActions: Record<string, ActionDef> = {
       if (i.clock_out) parts.push(`clock-out ${hm(i.clock_out)}`);
       if (i.lunch_minutes != null) parts.push(`lunch ${i.lunch_minutes} min`);
       if (i.job_id !== undefined) parts.push(i.job_id ? "move it to a different job" : "clear its job");
-      return `Fix this timecard entry — set ${parts.join(", ")} — say yes to confirm. Check the details below.`;
+      return `Fix this timecard entry — set ${parts.join(", ")} — say yes to confirm.`;
     },
     handler: async (i) => {
       // Resolve the entry through the caller's RLS-scoped client (staff-gated above), merge

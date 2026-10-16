@@ -1542,7 +1542,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           {/* Show EVERY field that will be written, so what you approve == what runs. */}
           <ul className="mb-2 space-y-0.5 text-xs text-amber-800">
             {Object.entries(pendingConfirm.input)
-              .filter(([k, v]) => v != null && v !== "" && !["status", "bill_number", "lunch_minutes"].includes(k))
+              // A record id is not a detail a person checks (Erik, 2026-10-16: the card read id,
+              // starts_at and "null" while the address sat in the sentence behind it).
+              .filter(([k, v]) => v != null && v !== "" && k !== "id" && !k.endsWith("_id") && !["status", "bill_number", "lunch_minutes"].includes(k))
               .map(([k, v]) => (
                 <li key={k}>
                   <span className="font-medium capitalize">{k.replace(/_/g, " ")}:</span>{" "}

@@ -5,16 +5,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Nort said "Booked, tomorrow at 10 AM". These drive the REAL handlers with the server action and
 // the database stubbed, and check both halves: what is stored, and what Nort is told was stored.
 
-const { createAppointment, rescheduleAppointment, linkAppointmentTo, db } = vi.hoisted(() => ({
+const { createAppointment, rescheduleAppointment, setAppointmentPlace, linkAppointmentTo, db } = vi.hoisted(() => ({
   createAppointment: vi.fn(),
   rescheduleAppointment: vi.fn(),
+  setAppointmentPlace: vi.fn(),
   linkAppointmentTo: vi.fn(),
-  db: { tz: "America/Los_Angeles", stored: null as null | { title: string; starts_at: string; ends_at: string | null; customers: { name: string } | null } },
+  db: { tz: "America/Los_Angeles", stored: null as null | { title: string; starts_at: string; ends_at: string | null; location?: string | null; customers: { name: string } | null } },
 }));
 
 vi.mock("@/app/(app)/appointments/actions", () => ({
   createAppointment,
   rescheduleAppointment,
+  setAppointmentPlace,
   linkAppointmentTo,
   setAppointmentOutcome: vi.fn(),
   setAppointmentStatus: vi.fn(),
@@ -56,8 +58,14 @@ beforeEach(() => {
     return { ok: true, id: "78fa75b1-8384-4148-8895-242846abcce5" };
   });
   rescheduleAppointment.mockImplementation(async (_id: string, start: string, end: string | null) => {
-    db.stored = { title: "Inspection: Tom Goodman", starts_at: start, ends_at: end, customers: null };
+    // The row keeps whatever else it holds (an address written a moment earlier), as the real one does.
+    db.stored = { ...(db.stored ?? {}), title: "Inspection: Tom Goodman", starts_at: start, ends_at: end, customers: null };
     return { ok: true };
+  });
+  // The form's address door, stubbed: the row keeps its time and takes the typed line.
+  setAppointmentPlace.mockImplementation(async (id: string, location: string) => {
+    db.stored = { ...(db.stored ?? { title: "Inspection: Bayberry", starts_at: "2026-10-19T16:00:00.000Z", ends_at: null, customers: null }), location };
+    return { ok: true, id };
   });
 });
 
@@ -162,6 +170,80 @@ describe("appointment.update — the reschedule door converts the same way", () 
   it("the confirm card speaks a stamped offset out loud", () => {
     expect(readbackWhen("2026-09-26T09:00")).toBe("Sat 9/26 at 9am");
     expect(readbackWhen("2026-09-26T09:00:00Z")).toBe("Sat 9/26 at 9am UTC");
+  });
+});
+
+/** THE ADDRESS DOOR (2026-10-16, the lock-screen round): "go ahead and fix the location … 16210
+ *  Thistlewood Circle". Nort had only a time door, so he re-proposed the move he had just made with
+ *  ends_at "null" (the word), the card read "ends at: null", and the yes failed on it while the
+ *  address stayed in his sentence. */
+describe("appointment.update — the address door, and the model's 'null' is nothing", () => {
+  const def = appointmentActions["appointment.update"];
+  const street = "16210 Thistlewood Circle, Truckee";
+
+  it("changes the address alone through the form's own door and reads the stored address back", async () => {
+    db.stored = { title: "Baseboard heater", starts_at: "2026-10-19T16:00:00.000Z", ends_at: null, location: "94248 Old Road, Bayberry", customers: null };
+    const r = await def.handler(def.input.parse({ id: "a1", location: street }), ctx);
+    expect(setAppointmentPlace).toHaveBeenCalledWith("a1", street);
+    expect(rescheduleAppointment).not.toHaveBeenCalled();
+    expect(r.ok).toBe(true);
+    expect(r.recorded).toBe(`Updated: "Baseboard heater", Mon Oct 19 at 9:00 AM PDT, at "${street}", no customer linked.`);
+  });
+
+  it("moves and re-addresses in one yes — the address first, so the move's calendar push carries it", async () => {
+    const r = await def.handler(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00", location: street }), ctx);
+    expect(setAppointmentPlace).toHaveBeenCalledWith("a1", street);
+    expect(rescheduleAppointment).toHaveBeenCalledWith("a1", "2026-10-19T16:00:00.000Z", null);
+    expect(setAppointmentPlace.mock.invocationCallOrder[0]).toBeLessThan(rescheduleAppointment.mock.invocationCallOrder[0]);
+    expect(r.recorded).toMatch(/^Moved: "[^"]+", Mon Oct 19 at 9:00 AM PDT, at "16210 Thistlewood Circle, Truckee"/);
+  });
+
+  it("a partial deed is said: the address changed, the move failed", async () => {
+    rescheduleAppointment.mockImplementationOnce(async () => ({ ok: false, error: "The end time has to be after the start." }));
+    const r = await def.handler(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00", ends_at: "2026-10-19T08:00", location: street }), ctx);
+    expect(setAppointmentPlace).toHaveBeenCalledWith("a1", street);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("The address was changed, but the time wasn't moved: The end time has to be after the start.");
+    // And an address that could not be written stops the deed before the move.
+    setAppointmentPlace.mockImplementationOnce(async () => ({ ok: false, error: "Appointment not found." }));
+    const r2 = await def.handler(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00", location: street }), ctx);
+    expect(r2).toEqual({ ok: false, error: "Appointment not found." });
+    expect(rescheduleAppointment).toHaveBeenCalledTimes(1);
+  });
+
+  it("a move alone reads back without an address line (unchanged)", async () => {
+    const r = await def.handler(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00" }), ctx);
+    expect(setAppointmentPlace).not.toHaveBeenCalled();
+    expect(r.recorded).not.toContain(" at \"");
+  });
+
+  it("the word 'null' (and 'none', '') is nothing: the card shows no such row and the yes runs", () => {
+    const parsed = def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00", ends_at: "null" });
+    expect(parsed.ends_at).toBeNull();
+    expect(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00", location: "none" }).location).toBeNull();
+    expect(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00", ends_at: "" }).ends_at).toBeNull();
+    const c = appointmentActions["appointment.create"].input.parse({ title: "Inspection: Bayberry", starts_at: "2026-10-19T09:00", ends_at: "null", location: "N/A", notes: "none", job_id: "null", customer_id: "" });
+    expect([c.ends_at, c.location, c.notes, c.job_id, c.customer_id]).toEqual([null, null, null, null, null]);
+  });
+
+  it("refuses an update that names neither a time nor an address, and an end without a start", () => {
+    expect(def.input.safeParse({ id: "a1" }).success).toBe(false);
+    expect(def.input.safeParse({ id: "a1", starts_at: "null", location: "null" }).success).toBe(false);
+    expect(def.input.safeParse({ id: "a1", ends_at: "2026-10-19T10:00", location: street }).success).toBe(false);
+    expect(def.input.safeParse({ id: "a1", location: street }).success).toBe(true);
+  });
+
+  it("the read-back names the deed: the time, the address, or both", () => {
+    expect(def.describe!(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00" }))).toBe("Move this appointment to Mon 10/19 at 9am? Check the details below before you confirm.");
+    expect(def.describe!(def.input.parse({ id: "a1", location: street }))).toBe(`Change this appointment's address to "${street}"? Check the details below before you confirm.`);
+    expect(def.describe!(def.input.parse({ id: "a1", starts_at: "2026-10-19T09:00", location: street }))).toBe(`Move this appointment to Mon 10/19 at 9am and change its address to "${street}"? Check the details below before you confirm.`);
+  });
+
+  it("the tool tells the model about the address and about leaving a field out", () => {
+    expect(def.description).toContain("change its address");
+    expect(def.description).toContain("Leave a field OUT rather than passing 'null'");
+    expect(def.description).toContain("given only a street, ask which town before proposing");
+    expect(def.label).toBe("Change appointment");
   });
 });
 
