@@ -2,9 +2,10 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { addressPrefillOnCustomerPick } from "@/lib/schedule-options";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Plus, Pencil, Copy, Check, MessageSquare } from "lucide-react";
+import { Plus, Pencil, Copy, Check, MessageSquare, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -138,8 +139,19 @@ interface ApptForm {
   new_customer_name: string;
   new_customer_phone: string;
   location: string;
+  /** The picked address's parts (a pick in the Location box); blank and parts_picked=false when the
+   *  line was typed — guessing a town from a typed line is how a wrong address gets onto a record. */
+  city: string;
+  state: string;
+  zip: string;
+  parts_picked: boolean;
   notes: string;
 }
+
+/** A person not in the list: a NEW LEAD (the visit and its address go on a lead, the appointment page's
+ *  own door) or a NEW CUSTOMER (someone already yours). Both ride customer_id as a word the list never
+ *  shows, with the name and phone typed beside. */
+const isNewPerson = (id: string) => id === "__new__" || id === "__lead__";
 
 // A page can mount several "new appointment" buttons; only the FIRST mounted
 // instance may answer ?new=1 or two modals would stack.
@@ -236,7 +248,7 @@ export function AppointmentButton({
     suggestedVisitTitle(f.type, {
       jobName: jobs.find((j) => j.id === f.job_id)?.label ?? null,
       customerName:
-        f.customer_id === "__new__" ? f.new_customer_name : (customers.find((c) => c.id === f.customer_id)?.label ?? null),
+        isNewPerson(f.customer_id) ? f.new_customer_name : (customers.find((c) => c.id === f.customer_id)?.label ?? null),
       place: f.location,
     });
 
@@ -264,6 +276,10 @@ export function AppointmentButton({
       // Location from the job address when mounted from a job; picking a customer fills it too
       // (the option carries the address now — see the customer onChange below).
       location: appointment?.location ?? ctxJob?.address ?? ctxCust?.address ?? "",
+      city: "",
+      state: "",
+      zip: "",
+      parts_picked: false,
     };
     return {
       ...base,
@@ -279,6 +295,11 @@ export function AppointmentButton({
     };
   };
   const [form, setForm] = useState<ApptForm>(emptyForm);
+  // The Location box is the address picker, uncontrolled inside (it owns its text while a pick is in
+  // flight); a location set from OUTSIDE it — a customer or job pick's prefill, a restored draft, the
+  // clean form after a save — re-seeds it by remount.
+  const [locSeed, setLocSeed] = useState(0);
+  const reseedLocation = () => setLocSeed((n) => n + 1);
   const patch = (p: Partial<ApptForm>) => setForm((f) => ({ ...f, ...p }));
   /** A change to a field the title is built from. While the title is still the one this form
    *  suggested (or blank), it follows; a title somebody typed is theirs and is never touched. An edit
@@ -289,6 +310,8 @@ export function AppointmentButton({
     setForm(next);
   };
   const newCust = form.customer_id === "__new__";
+  const newLead = form.customer_id === "__lead__";
+  const newPerson = newCust || newLead;
 
   // Interruption recovery: a deploy reload / iOS killing the tab restores the
   // half-typed appointment (fields + propose-times slots). Keyed per record
@@ -304,6 +327,7 @@ export function AppointmentButton({
       // never as a value the select can't show (which would save whatever option happened to be first).
       if (!typeOptions.includes(restored.type)) restored.type = appointment?.type ?? "other";
       setForm(restored);
+      reseedLocation();
       setMode(d.mode === "propose" ? "propose" : "set");
       setSlots(Array.isArray(d.slots) && d.slots.length ? d.slots : defaultSlots());
     },
@@ -452,6 +476,7 @@ export function AppointmentButton({
       start(async () => {
         const res = await createAppointmentProposal(formData);
         if (!res.ok || !res.token) return setError(res.error ?? "Could not create the link.");
+        if (res.warning) toast(res.warning, "info", undefined, { sticky: true }); // must be READ: the form closes
         draft.clear();
         setLinkToken(res.token);
         router.refresh();
@@ -484,14 +509,20 @@ export function AppointmentButton({
         ? await updateAppointment(appointment!.id, formData)
         : await createAppointment(formData);
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (res.warning) toast(res.warning, "info", undefined, { sticky: true }); // must be READ: the form closes
       // Saved — drop the draft. New mode resets so reopening doesn't offer a
       // duplicate; edit mode keeps the just-saved values as the new baseline.
       draft.clear();
       if (editing) {
-        initialSnap.current = JSON.stringify(draftState);
+        // A new person made by this save is made: the box goes back to the list, so a reopened edit
+        // cannot make them twice (skeptic #12). The baseline is the cleared form.
+        const cleared = isNewPerson(form.customer_id) ? { ...form, customer_id: "", new_customer_name: "", new_customer_phone: "" } : form;
+        if (cleared !== form) setForm(cleared);
+        initialSnap.current = JSON.stringify({ form: cleared, mode, slots });
       } else {
         urlSeed.current = {}; // the door's seed is spent: the next plain open starts clean
         setForm(emptyForm());
+        reseedLocation();
         setMode("set");
         setSlots(defaultSlots());
       }
@@ -714,7 +745,6 @@ export function AppointmentButton({
               <Label htmlFor="ap-cust">Customer</Label>
               <Select
                 id="ap-cust"
-                name="customer_id"
                 value={form.customer_id}
                 onChange={(e) => {
                   // PICKING A CUSTOMER FILLS IN WHERE THEY ARE — the same move the new-job form
@@ -726,12 +756,16 @@ export function AppointmentButton({
                   const prev = customers.find((c) => c.id === form.customer_id)?.address ?? "";
                   const now = customers.find((c) => c.id === next)?.address ?? "";
                   const filled = addressPrefillOnCustomerPick(form.location, prev, now);
-                  patchSuggesting({ customer_id: next, ...(filled !== null ? { location: filled } : {}) });
+                  if (filled !== null) reseedLocation();
+                  patchSuggesting({ customer_id: next, ...(filled !== null ? { location: filled, city: "", state: "", zip: "", parts_picked: false } : {}) });
                 }}
               >
                 <option value="">—</option>
                 {customers.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                <option value="__new__">+ New customer…</option>
+                {/* A new person is chosen with the buttons below, never from this list (the option that
+                    sat at its bottom went unseen — Erik, 2026-10-15). The value still shows here. */}
+                {newLead && <option value="__lead__">New Lead</option>}
+                {newCust && <option value="__new__">New Customer</option>}
               </Select>
             </div>
             <div>
@@ -743,9 +777,11 @@ export function AppointmentButton({
                 onChange={(e) => {
                   // Auto-fill the location from the job's address when it's empty.
                   const job = jobs.find((j) => j.id === e.target.value);
+                  const fill = !!job?.address && !form.location.trim();
+                  if (fill) reseedLocation();
                   patchSuggesting({
                     job_id: e.target.value,
-                    ...(job?.address && !form.location.trim() ? { location: job.address } : {}),
+                    ...(fill ? { location: job!.address as string, city: "", state: "", zip: "", parts_picked: false } : {}),
                   });
                 }}
               >
@@ -755,10 +791,27 @@ export function AppointmentButton({
             </div>
           </div>
 
-          {newCust && (
+          {/* THE CUSTOMER'S ID RIDES A HIDDEN INPUT: a new person is "__lead__" or "__new__" (isNewPerson),
+              chosen with these two buttons in plain sight. It was one option at the bottom of the list
+              above, and it made a bare customer — Erik, 2026-10-15, two visits booked with the names typed
+              into their titles: "both new leads with no way to enter their name as a new lead". */}
+          <input type="hidden" name="customer_id" value={form.customer_id} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant={newLead ? "primary" : "outline"} aria-pressed={newLead} className="min-h-11" onClick={() => patchSuggesting({ customer_id: newLead ? "" : "__lead__" })}>
+              <UserPlus className="h-4 w-4" /> New Lead
+            </Button>
+            <Button type="button" size="sm" variant={newCust ? "primary" : "outline"} aria-pressed={newCust} className="min-h-11" onClick={() => patchSuggesting({ customer_id: newCust ? "" : "__new__" })}>
+              <Plus className="h-4 w-4" /> New Customer
+            </Button>
+            <span className="text-xs text-slate-500">
+              {newLead ? "A lead: this visit and its address go on it." : newCust ? "Someone already yours who isn't in the list." : "Not in the list? Add them here."}
+            </span>
+          </div>
+
+          {newPerson && (
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-brand/30 bg-brand-light/30 p-3">
               <div>
-                <Label htmlFor="ap-newname">New customer name</Label>
+                <Label htmlFor="ap-newname">{newLead ? "New lead name" : "New customer name"}</Label>
                 <Input id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patchSuggesting({ new_customer_name: e.target.value })} placeholder="Name" required />
               </div>
               <div>
@@ -770,7 +823,29 @@ export function AppointmentButton({
 
           <div>
             <Label htmlFor="ap-loc">Location</Label>
-            <Input id="ap-loc" name="location" value={form.location} onChange={(e) => patchSuggesting({ location: e.target.value })} placeholder="Address or site" />
+            {/* THE SAME ADDRESS PICKER THE LEAD FORM HAS (Erik, 2026-10-15: "the new appointment page address
+                picker doesn't work" — this box was a plain input, so a street typed here reached a lead with
+                no town). A pick writes the parts too (city/state/zip, 0177), so a lead made from this visit
+                inherits a real address; typing over a pick drops its parts. Re-seeded by locSeed. */}
+            <AddressAutocomplete
+              key={locSeed}
+              id="ap-loc"
+              name="location"
+              defaultValue={form.location}
+              placeholder="Address or site"
+              onTextChange={(v) => {
+                if (v === form.location) return;
+                patchSuggesting(form.parts_picked ? { location: v, city: "", state: "", zip: "", parts_picked: false } : { location: v });
+              }}
+              onResolved={(p) => patchSuggesting({ location: p.formatted, city: p.city, state: p.state, zip: p.zip, parts_picked: true })}
+            />
+            {form.parts_picked && (
+              <>
+                <input type="hidden" name="city" value={form.city} />
+                <input type="hidden" name="state" value={form.state} />
+                <input type="hidden" name="zip" value={form.zip} />
+              </>
+            )}
           </div>
           <div>
             <Label htmlFor="ap-notes">Notes</Label>

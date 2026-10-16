@@ -50,6 +50,10 @@ export interface ProposalInput {
   /** Lead provenance — stamps appointments.inquiry_id and switches dedup to per-lead. */
   inquiryId?: string | null;
   location?: string | null;
+  /** The picked address's parts (0177), when the caller's Location box resolved them. */
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
   notes?: string | null;
   assignedTo?: string | null;
   /** The staff caller's user id — stored on appointments/schedule_proposals.created_by. */
@@ -68,7 +72,7 @@ export interface ProposalInput {
 }
 
 export type ProposalResult =
-  | { ok: true; token: string }
+  | { ok: true; token: string; /** The tentative appointment the link offers times for. */ appointmentId: string }
   | { ok: false; error: string };
 
 export async function createProposalCore(
@@ -134,6 +138,9 @@ export async function createProposalCore(
       customer_id: input.customerId ?? null,
       inquiry_id: input.inquiryId ?? null,
       location: input.location ?? null,
+      city: input.city ?? null,
+      state: input.state ?? null,
+      zip: input.zip ?? null,
       notes: input.notes ?? null,
       assigned_to: input.assignedTo ?? null,
       planned_minutes: input.plannedMinutes ?? null,
@@ -159,5 +166,5 @@ export async function createProposalCore(
     .single();
   if (pErr || !prop) return { ok: false, error: pErr?.message ?? "Could not create the pick-a-time link." };
 
-  return { ok: true, token: prop.token as string };
+  return { ok: true, token: prop.token as string, appointmentId: appt.id };
 }

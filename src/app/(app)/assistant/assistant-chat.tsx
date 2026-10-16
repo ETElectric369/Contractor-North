@@ -555,14 +555,32 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // Speak a SHORT phrase (directive lead-ins: "opening maps…", the confirm prompt, "say yes or no").
   // Tracks speaking state, mutes the live mic so Nort's own TTS isn't transcribed back, then runs
   // `after` (usually re-open the mic). Unchanged conversational contract; used for the non-streamed bits.
-  function say(text: string, after?: () => void) {
+  function say(text: string, after?: (heard: boolean) => void) {
     setSpeaking(true);
     speech.setMuted(true);
-    speakSmart(text, () => {
+    speakSmart(text, (heard) => {
       setSpeaking(false);
       speech.setMuted(false);
-      after?.();
+      after?.(heard);
     });
+  }
+
+  /** The confirm question was said — or could not be (a lost clip with the screen dark, 2026-10-15):
+   *  listen for the yes only when it was HEARD. A question nobody heard must not gate a write on a
+   *  stray word. Unheard, the card waits on screen and the question is asked again the moment the
+   *  screen comes back, while it is still the one pending. */
+  function confirmAfterSaid(heard: boolean) {
+    if (!voiceModeRef.current || !confirmRef.current) return;
+    if (heard) { confirmListen(); return; }
+    trace("confirm unheard");
+    const pending = confirmRef.current;
+    const again = () => {
+      if (document.visibilityState !== "visible") return;
+      document.removeEventListener("visibilitychange", again);
+      if (confirmRef.current !== pending || !voiceModeRef.current) return;
+      say(pending.prompt, (h) => { if (h && confirmRef.current === pending) confirmAfterSaid(true); });
+    };
+    document.addEventListener("visibilitychange", again);
   }
 
   // Speak a reply as it STREAMS: `feed` pushes completed-sentence chunks (played in order, first one
@@ -740,7 +758,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // this. The re-arm after the reply (startMic / confirmListen) opens the mic again.
         speech.stopListening({ discard: true });
         setListening(false);
-        if (rec.confirm) say(rec.confirm.prompt, () => { if (voiceModeRef.current) confirmListen(); });
+        if (rec.confirm) say(rec.confirm.prompt, confirmAfterSaid);
         else say(spoken, () => { if (voiceModeRef.current) startMic(); });
       }
     } else {
@@ -1066,7 +1084,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           });
         }
         // Voice: read the proposal and listen for yes/no. Card shows either way.
-        if (viaVoice) say(proposal.prompt, () => { if (voiceModeRef.current) confirmListen(); });
+        if (viaVoice) say(proposal.prompt, confirmAfterSaid);
       } else if (viaVoice) {
         // No directive — finish the streamed read, then re-open the mic (the queue's onDone re-arms
         // after the LAST sentence). If streaming was disabled or nothing streamed, fall back to
@@ -1128,7 +1146,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
             if (viaVoice) {
               // With a proposal waiting, read the read-back and listen for yes or no — the same
               // explicit human answer the live path waits for, never an automatic one.
-              if (rec.confirm) say(rec.confirm.prompt, () => { if (voiceModeRef.current) confirmListen(); });
+              if (rec.confirm) say(rec.confirm.prompt, confirmAfterSaid);
               else {
                 const unspoken = stripTrailingTag(partial && head.startsWith(partial) ? head.slice(spokenLen) : head).trim();
                 if (unspoken) say(unspoken, () => { if (voiceModeRef.current) startMic(); });
@@ -1217,7 +1235,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         void send(t, true);
       } else {
         // Unclear — re-prompt, then listen again (only while a proposal is still pending).
-        say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
+        say("Say yes or no.", confirmAfterSaid);
       }
     });
     if (!speech.startListening()) setStatus(speech.speechSupported() ? TRY_AGAIN_LINE : NO_VOICE_LINE);

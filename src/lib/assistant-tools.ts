@@ -1498,7 +1498,9 @@ export async function runDataTool(
 
         let q = supabase
           .from("material_list_items")
-          .select(staff ? "id, description, part_number, quantity, unit, vendor, est_cost, purchased, purchased_at, is_tool, sort_order" : TECH_ITEM_COLUMNS)
+          // NO PRICE READ BACK (Erik, 2026-10-15: "Nort does not need to read the price book data back, lets
+          // keep his responses simple"): the checklist shows none since cn-v1108, so neither does Nort.
+          .select(staff ? "id, description, part_number, quantity, unit, vendor, purchased, purchased_at, is_tool, sort_order" : TECH_ITEM_COLUMNS)
           .eq("list_id", listId)
           .order("sort_order");
         if (input.to_buy_only === true) q = q.eq("purchased", false);
@@ -1520,7 +1522,7 @@ export async function runDataTool(
             purchased: !!it.purchased,
             purchased_at: it.purchased_at ?? null,
             is_tool: !!it.is_tool,
-            ...(staff ? { vendor: it.vendor ?? null, est_cost: it.est_cost == null ? null : money(it.est_cost) } : {}),
+            ...(staff ? { vendor: it.vendor ?? null } : {}),
           })),
         });
       }

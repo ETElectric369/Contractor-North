@@ -207,6 +207,7 @@ export function unlockAudio() {
 /** Stop any in-flight speech immediately (neural audio + browser voice). Used by the
  *  voice-mode Stop button so the user can cut Claude off mid-sentence, like chat. */
 export function stopSpeaking() {
+  sayEpoch++; // a phrase still fetching its clip is cut too (clipTwice / speakSmart)
   quietBrowserVoice();
   if (nativePlaybackOn()) void stopPlaybackNative();
   try {
@@ -306,39 +307,101 @@ export function speakable(input: string): string {
   return t.replace(/\s{2,}/g, " ").trim();
 }
 
+/** The page cannot be heard while it is hidden: the browser voice and the element both fall silent in
+ *  the dark (measured 2026-10-15). A clip that could not be had is not "spoken" there — the flow
+ *  finishes (the mic re-arms, a card waits on screen) and the trace says why. */
+function pageHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+/** One clip from /api/tts, asked for TWICE before giving up. The confirm question of 2026-10-15
+ *  ("Move this appointment to Monday at 9?", screen locked) lost its one request and fell to the
+ *  browser voice, which is silent in the dark: Nort listened for a yes nobody had heard a question
+ *  for. 503 = no provider at all: remembered, never retried. Every stage leaves a trace line. */
+export const CLIP_RETRY_MS = 1500;
+/** How long one request may take: a request that hangs with the phone locked must not hold the turn
+ *  (and the mic) for ever. */
+export const CLIP_WAIT_MS = 8000;
+/** Bumped by stopSpeaking(): a clip still on its way for a phrase the person cut off is dropped when
+ *  it lands, never played late ("never on a cut"), and its second try is not made. */
+let sayEpoch = 0;
+async function clipTwice(t: string, alive: () => boolean = () => true): Promise<{ blob: Blob } | { why: string }> {
+  let why = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) {
+      await new Promise<void>((res) => setTimeout(res, CLIP_RETRY_MS));
+      if (!alive()) return { why: "stopped" };
+    }
+    try {
+      const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(CLIP_WAIT_MS) : undefined;
+      const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }), ...(signal ? { signal } : {}) });
+      if (!alive()) return { why: "stopped" };
+      if (r.status === 503) { neuralDisabled = true; return { why: "no provider" }; }
+      // Only audio is a clip: a redirected page (a sign-in, say) must never be handed to the player.
+      // (The route always says audio/mpeg; an answer that names another type is not a clip.)
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      if (r.ok && (!ct || ct.startsWith("audio/"))) {
+        const buf = await r.arrayBuffer();
+        if (buf.byteLength >= 1024) return { blob: new Blob([buf], { type: "audio/mpeg" }) };
+        why = "tts empty";
+      } else {
+        why = r.ok ? "tts not audio" : `tts ${r.status}`;
+        // A refusal is not a hiccup: the same request a second later is refused the same way.
+        if ([400, 401, 403, 404].includes(r.status)) return { why };
+      }
+    } catch {
+      why = "tts unreachable";
+    }
+    if (!attempt) trace("clip retry", why);
+  }
+  return { why };
+}
+
 /** Speak `text` with the neural voice; fall back to the browser voice only if there's no
- *  provider or playback is blocked. onEnd always fires exactly once. */
-export function speakSmart(text: string, onEnd?: () => void) {
+ *  provider or playback is blocked — and never while the page is dark (pageHidden). onEnd always
+ *  fires exactly once. */
+export function speakSmart(text: string, onEnd?: (heard: boolean) => void) {
   let fired = false;
-  const fire = () => { if (fired) return; fired = true; onEnd?.(); };
+  // `heard`: false when nothing could be heard (the dark, no clip) — a caller that would listen for
+  // an answer to a question must not listen for one nobody heard.
+  const fire = (heard = true) => { if (fired) return; fired = true; onEnd?.(heard); };
   const t = speakable((text || "").trim());
   if (!t) { fire(); return; }
-  if (neuralDisabled) { browserSpeak(t, fire); return; }
+  const dark = () => nativePlaybackOn() && pageHidden();
+  if (neuralDisabled) { if (dark()) fire(false); else browserSpeak(t, fire); return; }
+  const mine = sayEpoch;
+  const alive = () => sayEpoch === mine;
+  trace("say sent", `${t.length} chars`);
 
-  fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) })
-    .then(async (r) => {
-      if (r.status === 503) { neuralDisabled = true; throw new Error("no provider"); }
-      if (!r.ok) throw new Error("tts " + r.status);
-      const buf = await r.arrayBuffer();
-      if (nativePlaybackOn()) {
-        quietBrowserVoice();
-        // The element's contract: onEnd at the end (or a failure, so a caller waiting to re-arm
-        // the mic is never left hanging), never on a cut — a Stop re-arms by its own hand.
-        void playNative(new Blob([buf], { type: "audio/mpeg" })).done.then((o) => {
-          if (o === "refused") browserSpeak(t, fire);
-          else if (o !== "stopped") fire();
-        });
-        return;
-      }
-      const url = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
-      const a = getAudio();
-      if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire); return; }
+  void clipTwice(t, alive).then((got) => {
+    if (!alive()) return; // cut while the clip was on its way: never late, never onEnd (a Stop re-arms by its own hand)
+    if ("why" in got) {
+      trace("say failed", got.why);
+      if (dark()) { fire(false); return; } // nothing can be heard in the dark: the caller is told so
+      browserSpeak(t, fire);
+      return;
+    }
+    const blob = got.blob;
+    if (nativePlaybackOn()) {
       quietBrowserVoice();
-      a.onended = () => { URL.revokeObjectURL(url); releaseElement(a); fire(); };
-      a.src = url;
-      a.play().catch(() => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire); });
-    })
-    .catch(() => browserSpeak(t, fire));
+      trace("say clip", `${blob.size}b native`);
+      // The element's contract: onEnd at the end (or a failure, so a caller waiting to re-arm
+      // the mic is never left hanging), never on a cut — a Stop re-arms by its own hand.
+      void playNative(blob).done.then((o) => {
+        trace("say done", o);
+        if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire); }
+        else if (o !== "stopped") fire();
+      });
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = getAudio();
+    if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire); return; }
+    quietBrowserVoice();
+    a.onended = () => { URL.revokeObjectURL(url); releaseElement(a); fire(); };
+    a.src = url;
+    a.play().catch(() => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire); });
+  });
 }
 
 // ── Streaming speech: sentence-chunking + an in-order FIFO speak queue ────────────────
@@ -398,16 +461,15 @@ export function splitSentences(text: string): { sentences: string[]; rest: strin
 
 /** Synthesize ONE already-speakable clip → its bytes. Resolves to null when the neural provider is
  *  unavailable/errored (caller then browser-speaks the text). Never rejects. */
-function synthClip(speakableText: string): Promise<Blob | null> {
+function synthClip(speakableText: string, alive: () => boolean): Promise<Blob | null> {
   if (neuralDisabled) return Promise.resolve(null);
-  return fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: speakableText }) })
-    .then(async (r) => {
-      if (r.status === 503) { neuralDisabled = true; return null; }
-      if (!r.ok) return null;
-      const buf = await r.arrayBuffer();
-      return new Blob([buf], { type: "audio/mpeg" });
-    })
-    .catch(() => null);
+  // The same two tries the directive phrase gets (clipTwice): a sentence lost to one failed request
+  // was skipped or read by the silent browser voice in the dark. A stopped queue makes no second try.
+  return clipTwice(speakableText, alive).then((got) => {
+    if ("blob" in got) return got.blob;
+    trace("clip failed", got.why);
+    return null;
+  });
 }
 
 /** Play one queued clip: in the app process when the shell's conversation is live (native-audio.ts),
@@ -479,7 +541,7 @@ export class SpeakQueue {
     if (this.stopped) return;
     const t = speakable((text || "").trim());
     if (!t) return;
-    this.items.push({ speakable: t, clip: synthClip(t) });
+    this.items.push({ speakable: t, clip: synthClip(t, () => !this.stopped) });
     if (!this.playing) void this.pump();
   }
 
@@ -525,6 +587,8 @@ export class SpeakQueue {
       trace(clip ? "clip ready" : "clip missing");
       if (clip) {
         await Promise.race([playQueuedClip(clip), this.stopped$]);
+      } else if (nativePlaybackOn() && pageHidden()) {
+        trace("clip skipped", "dark"); // the browser voice cannot be heard here (pageHidden); the next sentence follows
       } else {
         // Neural failed for this clip — speak it with the browser voice, still in order.
         await Promise.race([new Promise<void>((res) => browserSpeak(item.speakable, res)), this.stopped$]);

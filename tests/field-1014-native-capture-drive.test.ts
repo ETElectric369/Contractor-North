@@ -82,7 +82,12 @@ async function load(p = fakePlugin()) {
   win.Capacitor = { Plugins: { NortAudio: plugin } };
   vi.stubGlobal("window", win);
   vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (iPhone) CNShell/4 (iOS)" });
-  fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "hello there" }), { status: 200 }));
+  // /api/tts answers with audio (the clip guard of 2026-10-15 takes nothing else); the rest with the transcript.
+  fetchMock = vi.fn(async (url: unknown) =>
+    String(url).includes("/api/tts")
+      ? new Response(new Uint8Array(2000), { status: 200, headers: { "content-type": "audio/mpeg" } })
+      : new Response(JSON.stringify({ text: "hello there" }), { status: 200 }),
+  );
   vi.stubGlobal("fetch", fetchMock);
   return await import("@/lib/voice-stream");
 }

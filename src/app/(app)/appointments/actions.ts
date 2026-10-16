@@ -89,9 +89,16 @@ async function resolveCustomer(
   supabase: any,
   formData: FormData,
   userId: string,
-): Promise<{ customerId: string | null; error?: string }> {
+): Promise<{ customerId: string | null; error?: string; lead?: { name: string; phone: string | null } }> {
   const customerId = emptyToNull(formData.get("customer_id"));
   const newName = emptyToNull(formData.get("new_customer_name"));
+  // A NEW LEAD, NOT A CUSTOMER (Erik, 2026-10-15): the form's New Lead makes the person a lead through
+  // the door the visit's page already has (linkAppointmentToNewLead), once the visit exists — so the
+  // visit's address lands on the lead and the visit is attached. The visit is written with no customer.
+  if (customerId === "__lead__") {
+    if (!newName) return { customerId: null, error: "Enter a name for the new lead." };
+    return { customerId: null, lead: { name: newName, phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null } };
+  }
   if (customerId === "__new__" || (!customerId && newName)) {
     if (!newName) return { customerId: null, error: "Enter a name for the new customer." };
     const { data: c, error } = await supabase
@@ -145,6 +152,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
       job_id: emptyToNull(formData.get("job_id")),
       customer_id: customerId,
       location: emptyToNull(formData.get("location")),
+      // The picked address's parts, when the Location box resolved them (absent for a typed line: 0177).
+      ...placeParts(formData),
       notes: emptyToNull(formData.get("notes")),
       assigned_to: emptyToNull(formData.get("assigned_to")),
       created_by: ctx.userId,
@@ -155,6 +164,10 @@ export async function createAppointment(formData: FormData): Promise<Result> {
 
   // Live Google push (fire-safe: never throws, no-op when not connected).
   await pushCalendarItem("appointment", data.id);
+
+  // The New Lead door, once the visit exists (resolveCustomer): the lead inherits the visit's address
+  // and the visit is attached to it. A lead that could not be made is SAID, never silent.
+  const warning = cust.lead ? await attachNewLead(data.id, cust.lead) : undefined;
 
   const assignedTo = emptyToNull(formData.get("assigned_to"));
   if (assignedTo && assignedTo !== ctx.userId) {
@@ -175,7 +188,22 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  return { ok: true, id: data.id };
+  return { ok: true, id: data.id, ...(warning ? { warning } : {}) };
+}
+
+/** The parts a pick in the Location box resolved, when the form sent them; nothing for a typed line
+ *  (an edit then leaves the stored parts as they are). */
+function placeParts(formData: FormData): { city?: string | null; state?: string | null; zip?: string | null } {
+  if (!formData.has("city")) return {};
+  return { city: emptyToNull(formData.get("city")), state: emptyToNull(formData.get("state")), zip: emptyToNull(formData.get("zip")) };
+}
+
+/** The form's New Lead, after its visit is written: the appointment page's own door, with the phone
+ *  typed beside the name. Returns the sentence to say when the lead could not be made. */
+async function attachNewLead(appointmentId: string, lead: { name: string; phone: string | null }): Promise<string | undefined> {
+  const made = await linkAppointmentToNewLead(appointmentId, lead.name, lead.phone);
+  if (made.ok) return made.note || undefined; // the door's own word (named like an existing customer, say) is said too
+  return `Saved, but the lead wasn't made: ${made.error ?? "add them from the visit's For box."}`;
 }
 
 /** "Start An Inspection" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
@@ -318,7 +346,7 @@ export async function openLeadInspection(inquiryId: string): Promise<Result> {
  *  time options). The appointment shows as "proposed" until they tap a slot. */
 export async function createAppointmentProposal(
   formData: FormData,
-): Promise<{ ok: boolean; error?: string; token?: string }> {
+): Promise<{ ok: boolean; error?: string; token?: string; warning?: string }> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -357,17 +385,21 @@ export async function createAppointmentProposal(
     jobId: emptyToNull(formData.get("job_id")),
     customerId: cust.customerId,
     location: emptyToNull(formData.get("location")),
+    // The picked address's parts ride onto the tentative visit too (skeptic #12: a lead made from a
+    // Propose Times visit had a street and no town).
+    ...placeParts(formData),
     notes: emptyToNull(formData.get("notes")),
     assignedTo: emptyToNull(formData.get("assigned_to")),
     createdBy: ctx.userId,
     startsAtIso: startIso,
   });
   if (!res.ok) return { ok: false, error: res.error };
+  const warning = cust.lead ? await attachNewLead(res.appointmentId, cust.lead) : undefined;
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  return { ok: true, token: res.token };
+  return { ok: true, token: res.token, ...(warning ? { warning } : {}) };
 }
 
 /** The on-site inspection field capture (notes / measurements / materials +
@@ -603,7 +635,7 @@ export async function linkAppointmentTo(
  * itself, so the estimate chain reads the name from here on. The visit's title is never touched
  * when a person named it (linkAppointmentTo's STOCK rule).
  */
-export async function linkAppointmentToNewLead(id: string, typedName: string): Promise<Result & { note?: string }> {
+export async function linkAppointmentToNewLead(id: string, typedName: string, phone?: string | null): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const name = String(typedName ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
@@ -617,6 +649,7 @@ export async function linkAppointmentToNewLead(id: string, typedName: string): P
   if (!appt) return { ok: false, error: "Appointment not found." };
   const fd = new FormData();
   fd.set("name", name);
+  if (phone) fd.set("phone", phone); // the form's New Lead types it beside the name
   // The visit's address is the street line; its parts ride beside it (0177 keeps them structured).
   const street = String(appt.location ?? "").split(",")[0].trim();
   if (street) fd.set("address", street);
@@ -1095,9 +1128,18 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   // THE ROW'S OWN KIND (W2-06): an edit may keep a kind nobody can pick any more (a Client Meeting
   // stays one), so the guard needs to know what is stored. RLS scopes the read; a missing row is
   // the zero-row write below, said in words.
-  const { data: cur } = await supabase.from("appointments").select("type").eq("id", id).maybeSingle();
-  const typed = resolveType(formData, "other", (cur as { type?: string | null } | null)?.type ?? null);
+  const { data: cur } = await supabase.from("appointments").select("type, city, state, zip, inquiry_id").eq("id", id).maybeSingle();
+  const row = cur as { type?: string | null; city?: string | null; state?: string | null; zip?: string | null; inquiry_id?: string | null } | null;
+  const typed = resolveType(formData, "other", row?.type ?? null);
   if (typed.error) return { ok: false, error: typed.error };
+  // ONE LEAD PER VISIT: New Lead on a visit that already has one would make a second lead and point
+  // the visit at it (skeptic #12). Who it is for changes from the visit's page.
+  if (cust.lead && row?.inquiry_id) return { ok: false, error: "This visit already has a lead attached — change who it's for from the visit's page." };
+  // A TYPED line that no longer says a stored part takes the parts with it (the inspector's own rule,
+  // typedLineKeepsParts): a pick's zip must not outlive the pick under another street. A pick sends
+  // its parts; a typed line that still says them keeps them.
+  const line = String(formData.get("location") ?? "").trim();
+  const parts = formData.has("city") ? placeParts(formData) : row && !typedLineKeepsParts(line, row) ? { city: null, state: null, zip: null } : {};
 
   const { data: wroteAppt, error } = await supabase
     .from("appointments")
@@ -1109,6 +1151,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
       job_id: emptyToNull(formData.get("job_id")),
       customer_id: customerId,
       location: emptyToNull(formData.get("location")),
+      ...parts,
       notes: emptyToNull(formData.get("notes")),
       assigned_to: emptyToNull(formData.get("assigned_to")),
       updated_at: new Date().toISOString(),
@@ -1119,12 +1162,13 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   if (!wroteAppt?.length) return { ok: false, error: "That appointment could not be found." };
 
   await pushCalendarItem("appointment", id); // live Google push (fire-safe)
+  const warning = cust.lead ? await attachNewLead(id, cust.lead) : undefined;
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   revalidatePath(`/appointments/${id}`); // the capture page hosts Edit Details — show the save
-  return { ok: true };
+  return { ok: true, ...(warning ? { warning } : {}) };
 }
 
 /**

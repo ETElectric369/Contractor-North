@@ -1,4 +1,5 @@
 import { voiceGate } from "@/lib/voice-gate";
+import { reportError } from "@/lib/observe";
 // Neural text-to-speech so Claude speaks with a real, intelligence-grade voice instead of
 // the OS robot. ElevenLabs is preferred (best quality + supports a cloned voice — Erik's
 // "hero's voice"); OpenAI is the simpler fallback. Returns mp3 audio. 503 if neither key
@@ -99,6 +100,10 @@ export async function POST(req: Request) {
     if (!r.ok || !r.body) {
       const detail = await r.text().catch(() => "");
       console.error("[tts] ElevenLabs failed:", r.status, detail.slice(0, 300));
+      // TO THE OPS SINK, NOT ONLY THE SERVER LOG (2026-10-15): a failed clip was the silent half of a
+      // confirm question Nort never asked aloud with the screen locked. The sink is read; the log is not.
+      // Status and size only: a provider's body can echo the words (names), which the sink never holds.
+      reportError("api/tts", new Error(`ElevenLabs ${r.status}`), { provider: "elevenlabs", status: r.status, chars: text.length });
       return new Response("TTS failed", { status: 502 });
     }
     return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
@@ -125,6 +130,7 @@ export async function POST(req: Request) {
     if (!r.ok || !r.body) {
       const detail = await r.text().catch(() => "");
       console.error("[tts] OpenAI failed:", r.status, detail.slice(0, 300));
+      reportError("api/tts", new Error(`OpenAI ${r.status}`), { provider: "openai", status: r.status, chars: text.length });
       return new Response("TTS failed", { status: 502 });
     }
     return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
