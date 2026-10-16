@@ -280,6 +280,27 @@ describe("what lands: the rows, the plan, the caption", () => {
   });
 });
 
+describe("the stored row keeps its scan tag", () => {
+  it("parseInspectorCapture keeps scan: site | room and drops anything else", async () => {
+    const { parseInspectorCapture } = await import("@/lib/inspection/capture");
+    const c = parseInspectorCapture({
+      notes: "", measurements: "", materials: "", photos: [],
+      measures: [
+        { id: "a", label: "Wall 1", value: 12, unit: "ft", scan: "room" },
+        { id: "b", label: "Side A–B", value: 9.84, unit: "ft", scan: "site", task_id: "t1" },
+        { id: "c", label: "Typed", value: 3, unit: "ft", scan: "other" },
+        { id: "d", label: "Measured length", value: 3.25, unit: "ft" },
+      ],
+    });
+    expect(c.measures).toEqual([
+      { id: "a", label: "Wall 1", value: 12, unit: "ft", scan: "room" },
+      { id: "b", label: "Side A–B", value: 9.84, unit: "ft", task_id: "t1", scan: "site" },
+      { id: "c", label: "Typed", value: 3, unit: "ft" },
+      { id: "d", label: "Measured length", value: 3.25, unit: "ft" },
+    ]);
+  });
+});
+
 describe("the wiring, pinned", () => {
   it("the Swift plugin: two doors, the mesh kept, corners from the tapped circle, the USDZ written by SceneKit / RoomPlan, no network", () => {
     const swift = read("ios/App/App/ScanPlugin.swift");
@@ -330,8 +351,18 @@ describe("the wiring, pinned", () => {
     expect(fn).toContain("if (measuringRef.current) return;");
     expect(fn).toContain('if ("refused" in r) setError(r.refused);');
     expect(fn).toContain("const landing = scanLanding(r);");
-    expect(fn).toContain("const room = Math.max(0, MAX_MEASURES - measuresRef.current.length);");
-    expect(fn).toContain("const next = [...measuresRef.current, ...rows];\n        measuresRef.current = next;");
+    // A re-scan replaces its own earlier rows on the same task/visit (and says so); hand-typed and
+    // Measure rows are kept; the cap counts what is kept.
+    expect(fn).toContain("const kept = measuresRef.current.filter((m) => !(m.scan === r.kind && (m.task_id ?? null) === taskId));");
+    expect(fn).toContain("const fits = Math.max(0, MAX_MEASURES - kept.length);");
+    expect(fn).toContain("const next = [...kept, ...rows];\n        measuresRef.current = next;");
+    expect(fn).toContain("scan: r.kind, ...(taskId ? { task_id: taskId } : {})");
+    expect(fn).toContain("if (replaced) notes.push(`Replaced the last ${r.kind} scan's ${replaced} row${replaced === 1 ? \"\" : \"s\"}.`);");
+    // The buttons sit on their own wrapping row under the label, never beside it (they stacked).
+    expect(insp).toContain('<div className="mt-2 flex flex-wrap gap-2">');
+    expect(insp).toContain("<SectionLabel>Measurements</SectionLabel>\n                {measureButtons(t.id)}");
+    expect(insp).toContain("<SectionLabel>Measurements</SectionLabel>\n          {measureButtons(null)}");
+    expect(insp).not.toContain("flex flex-wrap justify-end gap-2");
     expect(fn).toContain("queueCapture({ measures: next });");
     expect(fn).toContain("const plan = await planImageFile(landing.svg, landing.name);");
     // Every upload's outcome is read off its return and said (skeptic #17): the plan, the site

@@ -843,15 +843,22 @@ export function Inspector({
       }
       const landing = scanLanding(r);
       const notes: string[] = [];
+      // A RE-SCAN REPLACES ITS OWN ROWS: the last scan of this kind on this task (or the visit) is
+      // the one that stands — two sets of "Wall 1" under each other read as two rooms (Erik's
+      // screenshot, 10-16). Rows typed by hand or measured by Measure are never touched; the earlier
+      // scan's pictures stay (the office can take one off).
+      const kept = measuresRef.current.filter((m) => !(m.scan === r.kind && (m.task_id ?? null) === taskId));
+      const replaced = measuresRef.current.length - kept.length;
       // The rows that fit under the visit's cap land; the rest is said, never silently dropped.
-      const room = Math.max(0, MAX_MEASURES - measuresRef.current.length);
-      const rows: CaptureMeasure[] = landing.rows.slice(0, room).map((m) => ({ id: captureId(), ...m, ...(taskId ? { task_id: taskId } : {}) }));
-      if (rows.length) {
-        const next = [...measuresRef.current, ...rows];
+      const fits = Math.max(0, MAX_MEASURES - kept.length);
+      const rows: CaptureMeasure[] = landing.rows.slice(0, fits).map((m) => ({ id: captureId(), ...m, scan: r.kind, ...(taskId ? { task_id: taskId } : {}) }));
+      if (rows.length || replaced) {
+        const next = [...kept, ...rows];
         measuresRef.current = next;
         setMeasures(next);
         queueCapture({ measures: next });
       }
+      if (replaced) notes.push(`Replaced the last ${r.kind} scan's ${replaced} row${replaced === 1 ? "" : "s"}.`);
       if (rows.length < landing.rows.length) notes.push(`${MAX_MEASURES} measurements is the most a visit holds — ${landing.rows.length - rows.length} of the scan's rows didn't fit.`);
       if (taskId) openTask(taskId);
       else open1("measures");
@@ -903,12 +910,13 @@ export function Inspector({
     return { ok: false, error: `The 3D file is on the visit but didn't file on the job (${why}).` };
   }
 
-  // The camera doors on a Measurements header: Measure / Measure Area where the Measure plugin is
+  // The camera doors under a Measurements label: Measure / Measure Area where the Measure plugin is
   // on the bridge, Scan The Site / Scan The Room where the Scan plugin says this phone can. ONE
-  // helper draws both headers (the task's and the visit's), so they cannot drift.
+  // helper draws both (the task's and the visit's), so they cannot drift. Their own row, wrapping
+  // left to right: beside the label four buttons stacked into a column (Erik's screenshot, 10-16).
   const measureButtons = (taskId: string | null) =>
     !readOnly && (canMeasure || scanOn.site || scanOn.room) ? (
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="mt-2 flex flex-wrap gap-2">
         {canMeasure && (
           <>
             <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(taskId, "length")}>
@@ -1726,10 +1734,8 @@ export function Inspector({
               </div>
               {/* MEASUREMENTS ON THIS TASK — typed rows today; Measure / Scan The Room land here. */}
               <div id={`task-measure-${t.id}`} className="mt-3 scroll-mt-16 space-y-2">
-                <div className="flex items-center justify-between">
-                  <SectionLabel>Measurements</SectionLabel>
-                  {measureButtons(t.id)}
-                </div>
+                <SectionLabel>Measurements</SectionLabel>
+                {measureButtons(t.id)}
                 {taskMeasures.map((m) => (
                   <div key={m.id} className="flex items-center gap-2">
                     <Input id={`measure-label-${m.id}`} value={m.label} placeholder="what you measured" {...focus} onChange={(e) => patchMeasure(m.id, { label: e.target.value })} />
@@ -2243,10 +2249,8 @@ export function Inspector({
             kit can size itself from, plus the prose box for the shape a number can't hold. */}
         {shows("measures", measures.some((m) => !claimed(m)) || !!proseMeasurements.trim()) && (
         <div id="insp-measures" className="scroll-mt-16">
-          <div className="flex items-center justify-between">
-            <SectionLabel>Measurements</SectionLabel>
-            {measureButtons(null)}
-          </div>
+          <SectionLabel>Measurements</SectionLabel>
+          {measureButtons(null)}
           <div className="mt-2 space-y-2">
             {measures.map((m, i) => claimed(m) ? null : (
               <div key={m.id} className="flex items-center gap-2">

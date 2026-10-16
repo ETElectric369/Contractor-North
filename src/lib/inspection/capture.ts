@@ -96,6 +96,9 @@ export interface CaptureMeasure {
   unit: string;
   /** The task this was measured for (the task sheet, field feedback 10-13); absent = the visit's. */
   task_id?: string;
+  /** The scan door that wrote this row (LiDAR rung 2): a re-scan of the same kind on the same
+   *  task replaces its own earlier rows instead of stacking a second set under them. */
+  scan?: "site" | "room";
   flag?: string;
 }
 
@@ -171,12 +174,14 @@ export function parseInspectorCapture(raw: unknown): InspectorCapture {
             const label = str(o.label, 200).trim();
             if (!label) return null;
             const task_id = str(o.task_id, 80).trim();
+            const scan = o.scan === "site" || o.scan === "room" ? o.scan : null;
             const measure: CaptureMeasure = {
               id: typeof o.id === "string" && o.id ? o.id : captureId(label),
               label,
               value: looseNumber(o.value),
               unit: str(o.unit, 12).trim(),
               ...(task_id ? { task_id } : {}),
+              ...(scan ? { scan } : {}),
             };
             return measure;
           })
