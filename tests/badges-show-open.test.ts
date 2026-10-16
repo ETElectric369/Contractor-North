@@ -91,6 +91,7 @@ const OPEN_TAB_COUNTS: Record<string, string> = {
   materialsOpen: "the job's materials lines still to buy",
   costsOpen: "the job's Not Billed Yet costs + supplier papers naming it that are in nobody's books + its receipts on no bill yet (every one a row on the tab)",
   panelCount: "suggested circuits waiting on a Keep or a Not This",
+  timeOpen: "the job's shifts no invoice has claimed yet (lib/unbilled-work `shifts`, the Overview's own rule; Erik 2026-10-02 + 2026-10-15: 'still no badge number for open time on a job')",
   "tray.length": "Organize's Needs Attention tray",
 };
 
@@ -132,7 +133,7 @@ describe("every tab count in the app is an open count", () => {
     expect(seen).toBeGreaterThanOrEqual(15);
   });
 
-  it("the job's Photos chip keeps its total (Erik's exception), Time carries no badge, and Materials counts only what's to buy", () => {
+  it("the job's Photos chip keeps its total (Erik's exception), Time counts the shifts not billed, and Materials counts only what's to buy", () => {
     const page = read("app/(app)/jobs/[id]/page.tsx");
     const tab = (id: string) => page.slice(page.indexOf(`id: "${id}",`), page.indexOf("content:", page.indexOf(`id: "${id}",`)));
     // "keep the badge for total job photos": the one total badge, and only the job-site photos.
@@ -140,7 +141,9 @@ describe("every tab count in the app is an open count", () => {
     expect(photos && photos in PHOTOS_TOTAL_EXCEPTION, `Photos count: ${photos}`).toBe(true);
     // Job-site photos only: no plan or permit (pictures), no receipt, no bill rides the total.
     expect(photos).not.toMatch(/pictures|byBill|moneyPictures|docs\./);
-    expect(tab("time")).not.toMatch(/\bcount:/);
+    // A shift is open until it is billed (Erik asked twice): the badge is the Overview's own figure.
+    expect(tab("time")).toContain("count: timeOpen");
+    expect(page).toContain("const timeOpen = unbilled?.schemaReady ? unbilled.shifts : 0;");
     expect(tab("materials")).toContain("count: materialsOpen");
     expect(page).not.toContain("count: canonicalItems?.length");
   });

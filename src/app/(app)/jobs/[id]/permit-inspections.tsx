@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
@@ -14,16 +14,20 @@ import {
   INSPECTION_RESULTS,
   INSPECTION_WINDOWS,
   INSPECTOR_MAX,
+  PERMIT_STATUSES_OPEN_TO_VISITS,
   WHY_MAX,
+  authorityWithoutRow,
   inOrder,
   inspectionLine,
   isOpenInspection,
+  passedOnDay,
   permitInspectionStand,
   standLine,
+  type InspectionResult,
   type InspectionStand,
   type PermitInspection,
 } from "@/lib/permit-inspections";
-import { deleteInspection, recordInspectionResult, saveInspection } from "../../permits/inspection-actions";
+import { deleteInspection, recordInspectionResult, reopenInspection, saveInspection } from "../../permits/inspection-actions";
 
 /**
  * WHO STILL HAS TO COME — on the permit, where the permit already is (0378).
@@ -48,7 +52,8 @@ const HOW_IT_WORKS = [
   "One that is waiting on the visit in front of it reads \"Waits for …\". Until the one in front passes, it is not yours to chase and the app will not ask you about it.",
   "You can still book it now. Inspectors are booked days ahead — often two on one morning — and the order only decides what the app calls ready, never what you may write down.",
   "A booking is a DAY plus morning, afternoon or all day: an inspector gives you a window, never a time.",
-  "Saying how it went needs the day they came, and one of passed, failed or cancelled.",
+  "Passed is one tap: it is written on the day it was booked (or today). Tapped by mistake? Change It, then It Hasn't Happened Yet puts the visit back as open.",
+  "Failed asks why — what has to be put right before they come back. A visit that was cancelled is written there too.",
   "A visit that failed stays on the list as what happened. Book another one with the same authority and it takes that visit's place in the line, so whoever was waiting on it now waits on the new one.",
   "Only a booking nobody went to can be removed. A visit that happened is changed, never removed — removing it would erase who came and what they said.",
   "When every inspection has passed, the permit is closed and the job is genuinely finished. On an electrical job the last visit is often the utility's, where the meter goes back on.",
@@ -62,9 +67,16 @@ export function PermitInspections({
   suggestions = [],
   canWrite = false,
   unread = false,
+  authority = null,
+  permitStatus = null,
 }: {
   permitId: string;
   rows: PermitInspection[];
+  /** Who ISSUED the permit (permits.authority). When no row carries that name, the card offers its
+   *  visit in one tap — the town that issues an electrical permit also inspects it. */
+  authority?: string | null;
+  /** The permit's own status: a closed permit offers no visit to add. */
+  permitStatus?: string | null;
   /** The COMPANY's today (yyyy-mm-dd), handed down from the server: never the browser's clock. */
   todayStr: string;
   /** The authorities this company has called before — a shortcut past the typing, never a list. */
@@ -79,8 +91,8 @@ export function PermitInspections({
   const toast = useToast();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  /** Which form is open: a booking (new or an id), a result (an id), or nothing. */
-  const [form, setForm] = useState<{ kind: "book" | "result"; id: string | null } | null>(null);
+  /** Which form is open: a booking (new or an id), a result (an id; `preset` = the verb tapped), or nothing. */
+  const [form, setForm] = useState<{ kind: "book" | "result"; id: string | null; preset?: InspectionResult } | null>(null);
   /** WHAT THE LAST RESULT CARRIED FORWARD: what is true now, and the one next step, with its door.
    *  A toast is gone in four seconds; "the job is done — finish the job and bill it" is the end of the
    *  chain and has to stay on the screen until he takes it. */
@@ -90,6 +102,15 @@ export function PermitInspections({
   const stand = permitInspectionStand(ordered, todayStr);
   const line = standLine(stand);
   const listId = `auth-${permitId}`;
+  /** The issuing authority's own visit, not yet a row (lib/permit-inspections): offered while the
+   *  permit is open to visits (issued, booked, failed) and not every visit has passed. */
+  const missing = !unread && PERMIT_STATUSES_OPEN_TO_VISITS.has(permitStatus ?? "") && stand.state !== "clear" ? authorityWithoutRow(authority, ordered) : null;
+  /** The door just used: hidden until the rows come back changed, so a second tap in the gap
+   *  between the save and the refresh cannot add the visit twice. A failed save shows it again. */
+  const [addedFor, setAddedFor] = useState<string | null>(null);
+  useEffect(() => {
+    setAddedFor(null);
+  }, [rows]);
 
   const run = (
     what: Promise<{ ok: boolean; error?: string; message?: string; next?: string | null; href?: string | null }>,
@@ -133,6 +154,32 @@ export function PermitInspections({
 
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
 
+      {/* THE ISSUING AUTHORITY'S OWN VISIT, IN ONE TAP (J-012, 2026-10-15: the Town of Truckee permit
+          had a TTPUD row and no Truckee row; Erik marked "the permit inspection" passed on the permit's
+          status, which carries nothing forward). Not booked yet — Passed or Change The Booking follow. */}
+      {canWrite && missing && addedFor !== missing && (
+        <div className="mt-1">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-auto min-h-11 whitespace-normal py-2 text-left"
+            disabled={pending}
+            onClick={() => {
+              setAddedFor(missing);
+              run(
+                saveInspection({ authority: missing, scheduled_for: null, scheduled_window: null, permit_id: permitId, first: true }).then((res) => {
+                  if (!res?.ok) setAddedFor(null);
+                  return res;
+                }),
+                "Couldn't add it — try again.",
+              );
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" /> Add The {missing} Inspection
+          </Button>
+        </div>
+      )}
+
       {/* WHAT THE LAST RESULT CARRIED FORWARD. One line of what is true now, and the next door — the
           utility to book, or the finished job to bill. Never a write that goes quiet. */}
       {carried && (
@@ -162,17 +209,49 @@ export function PermitInspections({
                 {/* ONE LINE: who, when, how it went. No badge repeating the word the line just said —
                     the permit's own line above carries the colour. */}
                 <span className="min-w-0 text-xs text-slate-700">{inspectionLine(ordered, r)}</span>
-                <span className="flex items-center gap-1">
+                <span className="flex flex-wrap items-center gap-1">
                   {canWrite && (
                     <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="min-h-11"
-                        onClick={() => setForm(form?.kind === "result" && form.id === r.id ? null : { kind: "result", id: r.id })}
-                      >
-                        {isOpenInspection(r) ? "Record Inspection Status" : "Change It"}
-                      </Button>
+                      {/* THE VERB FIRST, IN WORDS (Erik, 2026-10-15, from the phone). An open visit:
+                          Passed is one tap, written on the booked day (or today) — the common case
+                          needs no form; Failed opens the form, because a failure says why. A visit
+                          written up: Change It. */}
+                      {isOpenInspection(r) ? (
+                        <>
+                          <Button
+                            size="sm"
+                            className="min-h-11"
+                            aria-label={`${r.authority}: passed`}
+                            disabled={pending}
+                            onClick={() =>
+                              run(
+                                recordInspectionResult({ id: r.id, result: "passed", result_on: passedOnDay(r, todayStr), inspector: null, why: null }),
+                                "Couldn't save it — try again.",
+                              )
+                            }
+                          >
+                            Passed
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="min-h-11"
+                            aria-label={`${r.authority}: failed`}
+                            onClick={() => setForm(form?.kind === "result" && form.id === r.id ? null : { kind: "result", id: r.id, preset: "failed" })}
+                          >
+                            Failed
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="min-h-11"
+                          onClick={() => setForm(form?.kind === "result" && form.id === r.id ? null : { kind: "result", id: r.id })}
+                        >
+                          Change It
+                        </Button>
+                      )}
                       <Button
                         size="icon-sm"
                         variant="ghost"
@@ -207,7 +286,15 @@ export function PermitInspections({
                 </span>
               </div>
               {form?.kind === "result" && form.id === r.id && (
-                <ResultForm row={r} pending={pending} todayStr={todayStr} onCancel={() => setForm(null)} onSave={(input) => run(recordInspectionResult(input), "Couldn't save it — try again.")} />
+                <ResultForm
+                  row={r}
+                  preset={form.preset}
+                  pending={pending}
+                  todayStr={todayStr}
+                  onCancel={() => setForm(null)}
+                  onSave={(input) => run(recordInspectionResult(input), "Couldn't save it — try again.")}
+                  onReopen={r.result ? () => run(reopenInspection(r.id, permitId), "Couldn't reopen it — try again.") : undefined}
+                />
               )}
               {form?.kind === "book" && form.id === r.id && (
                 <BookingForm
@@ -326,15 +413,23 @@ function ResultForm({
   todayStr,
   onCancel,
   onSave,
+  preset,
+  onReopen,
 }: {
   row: PermitInspection;
   pending: boolean;
   todayStr: string;
   onCancel: () => void;
   onSave: (input: { id: string; result: string; result_on: string; inspector: string | null; why: string | null }) => void;
+  /** The verb that opened the form (Failed), when one did. */
+  preset?: InspectionResult;
+  /** THE UNDO for a result written by mistake: the visit goes back to open. Only on a written-up row. */
+  onReopen?: () => void;
 }) {
-  const [result, setResult] = useState<string>(row.result ?? "passed");
-  const [on, setOn] = useState((row.result_on ?? row.scheduled_for ?? todayStr).slice(0, 10));
+  const [result, setResult] = useState<string>(preset ?? row.result ?? "passed");
+  // The day they came: the one written, else the booked day once it has come, else today — never a
+  // day still ahead (the same rule as the one-tap Passed).
+  const [on, setOn] = useState((row.result_on ?? "").slice(0, 10) || passedOnDay(row, todayStr));
   const [who, setWho] = useState(row.inspector ?? "");
   const [why, setWhy] = useState(row.notes ?? "");
 
@@ -377,7 +472,12 @@ function ResultForm({
           />
         </div>
       )}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
+        {onReopen && (
+          <Button size="sm" variant="outline" className="mr-auto min-h-11" disabled={pending} onClick={onReopen}>
+            It Hasn&rsquo;t Happened Yet
+          </Button>
+        )}
         <Button size="sm" variant="outline" className="min-h-11" onClick={onCancel}>
           Cancel
         </Button>

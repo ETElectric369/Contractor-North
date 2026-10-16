@@ -146,6 +146,8 @@ describe("computeUnbilledWork — the 41 Larkspur reference case", () => {
   it("bills only the new entry and the two new bills — ~$2,305, never the paid INV-061 rows", () => {
     const w = computeUnbilledWork(base);
     expect(w.hours).toBe(5.25);
+    expect(w.shifts).toBe(1); // the Time tab's badge: e10 is the one shift no invoice holds
+    expect(computeUnbilledWork({ ...base, claims: foldClaims([], true) }).shifts).toBe(10); // nothing billed yet: every closed shift
     expect(w.laborAmount).toBe(393.75);
     expect(w.laborByPerson).toEqual([{ name: "Brian", hours: 5.25, amount: 393.75 }]);
     expect(w.billsCount).toBe(2);

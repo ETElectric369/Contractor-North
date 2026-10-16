@@ -87,7 +87,7 @@ describe("the gate decides what may nag", () => {
       id: "permitinsp-p1",
       kind: "permit_inspection",
       title: "Meter Base Swap · J-052",
-      subtitle: "Town of Truckee was booked Oct 15 — record the inspection status · Permit E-1234 · Snowbell Holdings",
+      subtitle: "Town of Truckee was booked Oct 15 — say how it went · Permit E-1234 · Snowbell Holdings",
       chip: "Not Written Up",
       when: THU,
       urgency: 1,

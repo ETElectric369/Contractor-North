@@ -222,7 +222,9 @@ export function NowCard({
           gps,
         });
         if (!res.ok) setErr(res.error ?? "Could not clock out.");
-        else {
+        else if (res.undone) {
+          toast(res.warning ?? "That punch is gone.", "success"); // under two minutes old: taken back, nothing asked
+        } else {
           // Where the lunch landed after a Switch Job (the part before it, when it didn't fit this
           // one) is said here too, and kept until it is read, as the Timeclock panel does.
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });

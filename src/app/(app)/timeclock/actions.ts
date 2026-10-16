@@ -4,7 +4,7 @@ import { reportError } from "@/lib/observe";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { promoteJobToInProgress } from "@/lib/job-promote";
 import { requireStaff } from "@/lib/staff-guard";
@@ -44,7 +44,7 @@ import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
 import { UNREAD_JOB_LABEL, punchJobLabel, type AppPickSource, type PunchJob } from "./clock-told";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
-import { CEILING_REFUSAL_ASK_OFFICE, LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
+import { CEILING_REFUSAL_ASK_OFFICE, LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, UNDO_PUNCH_MS, UNDO_PUNCH_SENTENCE, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
 
 export type ClockResult = {
@@ -59,6 +59,10 @@ export type ClockResult = {
   clash?: OverlapClash;
   /** The time entry the punch wrote or closed (clockIn, clockOut). Also runOnce's result_id. */
   id?: string;
+  /** THE PUNCH WAS TAKEN BACK (lib/long-shift UNDO_PUNCH_MS): a clock-out by hand within two minutes
+   *  of its own clock-in removed the row instead of closing it. `warning` carries the sentence;
+   *  nothing was recorded, so no door reads a shift back or asks which job it was on. */
+  undone?: boolean;
   /** THE CLOCK COULDN'T TELL THE JOB (Erik, 2026-09-26: "yes"). The punch landed, or closed, with
    *  no job and no code, so the door asks "Which Job Are You On?" once, with a Skip. Only ever set
    *  on a punch that is ALREADY saved: the question never holds the clock up. */
@@ -809,6 +813,43 @@ export async function clockOut(input: {
    * the geofence prompt, Nort's "clock me out"), so a stale tab or a voice command gets the same
    * answer as the button.
    */
+  // A PUNCH TAKEN BACK (lib/long-shift, UNDO_PUNCH_MS — Erik's two punches at 15:08, 2026-10-15). A
+  // clock-out BY HAND within two minutes of its own clock-in is a mistake being undone, never a
+  // shift: the row goes, nothing is paid, the sentence says so. Never for the fence (`auto`), a
+  // stop time somebody picked, or an unattended close — those are statements about a shift that
+  // ran. Nor for a punch somebody put WORK on: the second part of a Switch Job (its first part
+  // already closed at the switch), a typed note, miles, or a lunch — those are a day, not a slip.
+  const untouched = !ent?.split_from && !(ent?.notes ?? "").trim() && !input.miles && !(input.notes ?? "").trim() && !input.lunch_minutes && !input.lunch_on_entry_id;
+  if (ent?.status === "open" && entClockIn && untouched && !input.auto && !input.at && !input.picked && !input.autoClosedReason) {
+    const ciMs = Date.parse(entClockIn);
+    const age = Date.now() - ciMs;
+    if (Number.isFinite(ciMs) && age >= 0 && age < UNDO_PUNCH_MS) {
+      // ON THE SERVICE CLIENT, scoped by hand (the jobs promotion below, for the same reason): the
+      // only DELETE policy on time_entries is the office's (0004), so on the caller's client this
+      // was a zero-row no-op for every TECH — exactly the people who punch. Exactly this id, this
+      // person's, still open, and still under two minutes old by the database's own clock; the rows
+      // read back (the silent-write law). Zero rows means it closed or went from another screen
+      // meanwhile, and the ordinary path says which. An error here is reported and never leaves
+      // anyone unable to clock out: the ordinary close follows.
+      const { data: gone, error: undoErr } = await createServiceClient()
+        .from("time_entries")
+        .delete()
+        .eq("id", input.entry_id)
+        .eq("profile_id", user.id)
+        .eq("status", "open")
+        .gt("clock_in", new Date(Date.now() - UNDO_PUNCH_MS).toISOString())
+        .select("id");
+      if (undoErr) {
+        reportError("timeclock.clockOut.undo", undoErr, { entryId: input.entry_id });
+      } else if (gone?.length) {
+        revalidatePath("/timeclock");
+        revalidatePath("/timecards");
+        revalidatePath("/planner");
+        return { ok: true, id: input.entry_id, undone: true, warning: UNDO_PUNCH_SENTENCE };
+      }
+    }
+  }
+
   const ciMsForStop = entClockIn ? Date.parse(entClockIn) : NaN;
   const closeMs = Date.parse(clockOutIso);
   const nowMs = Date.now();

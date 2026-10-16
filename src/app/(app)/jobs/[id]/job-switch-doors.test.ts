@@ -93,7 +93,31 @@ describe("Permits & Inspections on the job's Permits tab", () => {
     const off = r(JobPermits, { jobId: "j1", permits, inspections: booked, todayStr: "2026-10-14", canAdd: false });
     expect(off).toContain("Town of Truckee · Thu Oct 15, morning");
     expect(off).not.toContain("Add Inspection");
-    expect(off).not.toContain("Record Inspection Status");
+    expect(off).not.toContain(">Passed<"); // the one-tap verb is a door, and the switch is off
+  });
+
+  it("an open visit offers Passed and Failed in words; the issuing town with no row of its own is one tap away (2026-10-15)", () => {
+    const issued = [{ ...permits[0], authority: TOWN, status: "inspection_scheduled" }];
+    const ttpudOnly = [visit({ position: 2, authority: "TTPUD", scheduled_for: "2026-10-15", scheduled_window: "morning" })];
+    const html = r(JobPermits, { jobId: "j1", permits: issued, inspections: ttpudOnly, todayStr: "2026-10-15" });
+    expect(html).toContain(">Passed</button>");
+    expect(html).toContain(">Failed</button>");
+    expect(html).not.toContain("Record Inspection Status");
+    expect(html).toContain(`Add The ${TOWN} Inspection`);
+    // The permit's own select never offers what its rows say; what they wrote shows, disabled.
+    expect(html).not.toContain('<option value="passed"');
+    expect(html).toContain("Inspection scheduled (from its inspections)");
+    // Not offered: a permit not issued yet, one that is closed, or one whose town already has a row.
+    for (const status of ["applied", "closed", "passed"]) {
+      expect(r(JobPermits, { jobId: "j1", permits: [{ ...issued[0], status }], inspections: ttpudOnly, todayStr: "2026-10-15" })).not.toContain(`Add The ${TOWN} Inspection`);
+    }
+    expect(r(JobPermits, { jobId: "j1", permits: issued, inspections: booked, todayStr: "2026-10-14" })).not.toContain(`Add The ${TOWN} Inspection`);
+    expect(r(JobPermits, { jobId: "j1", permits: issued, inspections: ttpudOnly, todayStr: "2026-10-15", canAdd: false })).not.toContain(`Add The ${TOWN} Inspection`);
+    // A written-up visit offers Change It (its undo lives in that form), never Passed again.
+    const done = [visit({ position: 1, scheduled_for: "2026-10-14", result: "passed", result_on: "2026-10-14" })];
+    const after = r(JobPermits, { jobId: "j1", permits: issued, inspections: done, todayStr: "2026-10-15" });
+    expect(after).toContain(">Change It</button>");
+    expect(after).not.toContain(">Passed</button>");
   });
 
   it("a lost read says so, and claims nothing about who has been", () => {

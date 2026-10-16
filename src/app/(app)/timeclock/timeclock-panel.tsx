@@ -421,6 +421,11 @@ export function TimeclockPanel({
           setSwitching(false);
           // The shift is over: the sentence was about a punch that is no longer running.
           setChose(null);
+          // A punch taken back (under two minutes old) is not a shift: said once, nothing asked after it.
+          if (res.undone) {
+            toast(res.warning ?? "That punch is gone.", "success");
+            return;
+          }
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
           // Still on no job at the end of it: "Which Job Are You On?" once more, first.
           const again = askAfterPunch(res, "out");

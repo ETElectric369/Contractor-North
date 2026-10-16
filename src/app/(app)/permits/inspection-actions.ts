@@ -20,6 +20,7 @@ import {
   type InspectionStand,
   type InspectionWindow,
   type PermitInspection,
+  shortDayWords,
 } from "@/lib/permit-inspections";
 
 /**
@@ -206,6 +207,9 @@ export interface InspectionInput {
   scheduled_window?: string | null;
   inspector?: string | null;
   notes?: string | null;
+  /** A new row that goes FIRST in line (the issuing town's own visit, added after the utility's was):
+   *  the rows already there move back one. Ignored on a change. */
+  first?: boolean;
 }
 
 /**
@@ -256,10 +260,27 @@ export async function saveInspection(input: InspectionInput): Promise<Inspection
 
   const have = await inspectionsOf(supabase, ctx.orgId, input.permit_id);
   if ("error" in have) return { ok: false, error: have.error };
-  const position = nextPosition(have.rows);
+  let position = nextPosition(have.rows);
   if (have.rows.some((r) => Number(r.position) === position)) {
     // 0378 keeps one visit per place in the order, and the ceiling is 20.
     return { ok: false, error: `This permit already has ${MAX_INSPECTION_POSITION} inspections on it.` };
+  }
+  if (input.first && have.rows.length) {
+    // THE ISSUING AUTHORITY GOES FIRST IN LINE (the town tags before the utility — the header of
+    // lib/permit-inspections). Room is made from the back, one row at a time, because
+    // permit_inspections_one_per_position holds at every step; each move reads its row back.
+    const back = [...have.rows].sort((a, b) => Number(b.position) - Number(a.position));
+    for (const r of back) {
+      const { data: moved, error: moveErr } = await supabase
+        .from("permit_inspections")
+        .update({ position: Number(r.position) + 1 })
+        .eq("id", r.id)
+        .eq("org_id", ctx.orgId)
+        .select("id");
+      if (moveErr) return { ok: false, error: dbError(moveErr) };
+      if (!moved?.length) return { ok: false, error: "Couldn't make room at the front of the line — reload and try again." };
+    }
+    position = 1;
   }
 
   const { data, error } = await supabase
@@ -272,8 +293,56 @@ export async function saveInspection(input: InspectionInput): Promise<Inspection
   // only door of the four that never ran the rule.
   const moved = await permitFollowsItsVisits(supabase, ctx.orgId, got.permit, input.permit_id);
   rev(got.permit.job_id);
-  const booked = when ? `${authority} booked` : `${authority} added — book a day when you have one`;
+  const first = position === 1 && have.rows.length > 0 ? ", first in line" : "";
+  const booked = when ? `${authority} booked${first}` : `${authority} added${first} — book a day when you have one`;
   return { ok: true, message: [booked, moved].filter(Boolean).join(" ") };
+}
+
+/**
+ * IT HASN'T HAPPENED YET — the undo for a Passed tapped by mistake (one tap, no confirm: the
+ * NOT-annoying rule wants an undo trail, never a nag before every write). The visit goes back to
+ * open: no result, no day, nobody came; its booking and its notes stay. The permit follows its
+ * visits again (a "passed" it wrote on the last pass comes back to issued or booked).
+ */
+export async function reopenInspection(id: string, permitId: string): Promise<InspectionRecorded> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const supabase = ctx.supabase;
+  const got = await permitFor(supabase, ctx.orgId, permitId);
+  if ("error" in got) return { ok: false, error: got.error };
+
+  const { data: row, error: readErr } = await supabase
+    .from("permit_inspections")
+    .select("id, authority")
+    .eq("id", id)
+    .eq("permit_id", permitId)
+    .eq("org_id", ctx.orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (!row) return { ok: false, error: "That inspection isn't here any more." };
+  const who = String((row as { authority?: string | null }).authority ?? "").trim() || "That inspection";
+
+  const { data, error } = await supabase
+    .from("permit_inspections")
+    .update({ result: null, result_on: null, inspector: null })
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "Nothing was changed — that inspection was removed from another screen." };
+
+  const moved = await permitFollowsItsVisits(supabase, ctx.orgId, got.permit, permitId);
+  const after = await inspectionsOf(supabase, ctx.orgId, permitId);
+  const stand = "error" in after ? null : permitInspectionStand(after.rows, await orgTodayStr(supabase));
+  rev(got.permit.job_id);
+  return {
+    ok: true,
+    clear: false,
+    message: [`${who} is open again — it hasn't happened yet.`, moved].filter(Boolean).join(" "),
+    next: stand ? standLine(stand) : null,
+    href: got.permit.job_id ? `/jobs/${got.permit.job_id}?tab=permits` : null,
+  };
 }
 
 /**
@@ -363,7 +432,9 @@ export async function recordInspectionResult(input: {
 
   const number = got.permit.permit_number ? ` on permit ${got.permit.permit_number}` : "";
   const said = input.result === "passed" ? "passed" : input.result === "failed" ? "failed" : "was cancelled";
-  const head = `${row.authority} ${said}`;
+  // WITH THE DAY: a one-tap Passed writes the booked day, which may be last week's — said, not silent.
+  const onWords = shortDayWords(on);
+  const head = `${row.authority} ${said}${onWords ? ` on ${onWords}` : ""}`;
   if (!stand) {
     return {
       ok: true,

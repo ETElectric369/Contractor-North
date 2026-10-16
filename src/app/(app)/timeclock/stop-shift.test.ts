@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
  * STOP THE CLOCK (2026-09-24), pinned without a database.
@@ -35,6 +35,7 @@ vi.mock("@/lib/push", () => ({
 vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: true })) }));
 
 import { clockOut, stopShift, switchJob, updateOpenEntry, updateTimeEntry } from "./actions";
+import { createServiceClient } from "@/lib/supabase/server";
 
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete" | "rpc"; cols: string; payload?: any; filters: any[] };
 type Reply = { data?: any; error?: any } | undefined;
@@ -335,6 +336,90 @@ describe("clockOut past twelve hours", () => {
     state.client = fakeSupabase(routes(new Date(Date.now() - 11 * H).toISOString()), calls);
     expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
     expect(spies.notify).toEqual([]);
+  });
+});
+
+describe("a punch taken back (Erik's two punches at 15:08, 2026-10-15)", () => {
+  // The clock-out door's own reads on the caller's client; the undo's delete runs on the SERVICE
+  // client (the only DELETE policy on time_entries is the office's — a tech's delete was a silent
+  // zero-row no-op, skeptic #9), so the two clients are two fakes.
+  type Punch = { clock_in: string; notes?: string; split_from?: string | null };
+  const routes = (row: Punch) => (q: Q): Reply => {
+    if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
+    if (q.table === "profiles") return { data: { full_name: "Erik Taylor" } };
+    if (q.table === "time_entries" && q.verb === "select" && /status/.test(q.cols))
+      return { data: { id: ENTRY, profile_id: "user-1", clock_in: row.clock_in, lunch_minutes: 0, status: "open", notes: row.notes ?? "", split_from: row.split_from ?? null, org_id: "org-1" } };
+    if (q.table === "time_entries" && q.verb === "select") return { data: [] };
+    if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: ENTRY }] };
+    return undefined;
+  };
+  let serviceCalls: Q[] = [];
+  const arm = (row: Punch, undoRows: any[] = [{ id: ENTRY }]) => {
+    state.client = fakeSupabase(routes(row), calls);
+    serviceCalls = [];
+    const service = fakeSupabase((q) => (q.table === "time_entries" && q.verb === "delete" ? { data: undoRows } : undefined), serviceCalls);
+    vi.mocked(createServiceClient).mockImplementation(() => service as any);
+  };
+  afterEach(() => {
+    vi.mocked(createServiceClient).mockImplementation(() => state.client);
+  });
+  const young = () => new Date(Date.now() - 14_000).toISOString();
+  const userDeletes = () => calls.filter((c) => c.table === "time_entries" && c.verb === "delete");
+  const serviceDeletes = () => serviceCalls.filter((c) => c.table === "time_entries" && c.verb === "delete");
+  const updates = () => calls.filter((c) => c.table === "time_entries" && c.verb === "update");
+
+  it("a clock-out by hand fourteen seconds after its clock-in removes the row and says so — nothing closed, nothing paid", async () => {
+    arm({ clock_in: young() });
+    const r = await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null });
+    expect(r).toEqual({ ok: true, id: ENTRY, undone: true, warning: "That punch is gone — it was under two minutes old, so nothing was recorded and nothing is paid." });
+    expect(userDeletes()).toEqual([]); // never on the caller's client: a tech's delete would be a silent no-op
+    expect(serviceDeletes()).toHaveLength(1);
+    // Scoped by hand: this id, this person's, still open, still under two minutes by the database's clock; rows read back.
+    const f = serviceDeletes()[0].filters;
+    expect(f.slice(0, 3)).toEqual([["eq", "id", ENTRY], ["eq", "profile_id", "user-1"], ["eq", "status", "open"]]);
+    expect(f[3][0]).toBe("gt");
+    expect(f[3][1]).toBe("clock_in");
+    expect(Date.now() - Date.parse(f[3][2])).toBeLessThan(125_000);
+    expect(updates()).toEqual([]);
+  });
+
+  it("three minutes in, it is a shift: closed as always", async () => {
+    arm({ clock_in: new Date(Date.now() - 3 * 60_000).toISOString() });
+    expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
+    expect(serviceDeletes()).toEqual([]);
+    expect(updates()).toHaveLength(1);
+  });
+
+  it("the fence, a picked stop time and an unattended close never undo a punch", async () => {
+    arm({ clock_in: young() });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: null, notes: "", gps: null, auto: true, at: new Date().toISOString() })).undone).toBeUndefined();
+    arm({ clock_in: young() });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null, at: new Date().toISOString(), picked: true })).undone).toBeUndefined();
+    arm({ clock_in: young() });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: null, notes: "", gps: null, auto: true, autoClosedReason: "nobody answered" })).undone).toBeUndefined();
+    expect(serviceDeletes()).toEqual([]);
+  });
+
+  it("a punch somebody put work on is a day, not a slip: a note, miles, a lunch, or the second part of a Switch Job", async () => {
+    arm({ clock_in: young() });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "pulled the old panel", gps: null })).undone).toBeUndefined();
+    arm({ clock_in: young() });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null, miles: 3 })).undone).toBeUndefined();
+    arm({ clock_in: young() });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: 30, notes: "", gps: null })).undone).toBeUndefined();
+    arm({ clock_in: young(), notes: "typed mid-shift" });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null })).undone).toBeUndefined();
+    arm({ clock_in: young(), split_from: "a0000000-0000-4000-8000-000000000aaa" });
+    expect((await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null })).undone).toBeUndefined();
+    expect(serviceDeletes()).toEqual([]);
+  });
+
+  it("a punch that closed from another screen meanwhile is not undone: the ordinary path answers", async () => {
+    arm({ clock_in: young() }, []);
+    const r = await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null });
+    expect(r.undone).toBeUndefined();
+    expect(serviceDeletes()).toHaveLength(1);
+    expect(updates()).toHaveLength(1); // fell through to the close, which read its own rows back
   });
 });
 

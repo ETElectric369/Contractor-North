@@ -129,6 +129,9 @@ export const timeActions: Record<string, ActionDef> = {
     handler: async (i) => {
       const res = await clockOutCurrent({ miles: i.miles, notes: i.notes, lunch_minutes: i.lunch_minutes });
       if (!res || (res as { ok?: boolean }).ok === false) return res;
+      // A punch taken back (under two minutes old, lib/long-shift): nothing was recorded, so the
+      // read-back below would announce the PREVIOUS shift as this one. Say what happened instead.
+      if ((res as { undone?: boolean }).undone) return { ...res, recorded: (res as { warning?: string }).warning ?? "That punch was taken back; nothing was recorded." };
       // ANNOUNCE THE DEED, NOT THE INTENT (Erik's phantom "3 hours yesterday": the model
       // clocked in and straight out — a 3.4-second entry on the wrong day with no job — then
       // announced the hours it meant to log). Read back what was actually recorded; a

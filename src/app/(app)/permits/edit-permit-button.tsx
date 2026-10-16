@@ -6,7 +6,7 @@ import { Pencil } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { updatePermit } from "./actions";
-import { PERMIT_TYPES as TYPES, PERMIT_STATUSES as STATUSES } from "@/lib/permit-options";
+import { PERMIT_TYPES as TYPES, permitStatusOptions } from "@/lib/permit-options";
 
 type Permit = {
   id: string;
@@ -43,6 +43,23 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
   const [portal, setPortal] = useState(permit.portal_url ?? "");
   const [notes, setNotes] = useState(permit.notes ?? "");
 
+  /** EVERY OPEN STARTS FROM THE PERMIT AS IT IS NOW. The boxes were seeded once at mount: with the
+   *  page open, a one-tap Passed moved the permit to "passed" under them, and a later Save (to fix
+   *  a permit number) wrote the stale "issued" back — the permit counted open again with every
+   *  visit passed. */
+  function seed() {
+    setType(permit.type ?? "Electrical");
+    setNum(permit.permit_number ?? "");
+    setAuthority(permit.authority ?? "");
+    setStatus(permit.status ?? "applied");
+    setApplied(d(permit.applied_date));
+    setIssued(d(permit.issued_date));
+    setExpires(d(permit.expires_date));
+    setPortal(permit.portal_url ?? "");
+    setNotes(permit.notes ?? "");
+    setError(null);
+  }
+
   function save() {
     setError(null);
     start(async () => {
@@ -67,9 +84,13 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
-        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        onClick={() => {
+          seed();
+          setOpen(true);
+        }}
+        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         title="Edit permit"
+        aria-label="Edit this permit"
       >
         <Pencil className="h-3.5 w-3.5" />
       </button>
@@ -85,7 +106,7 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
             <div><Label htmlFor="ep-type">Type</Label><Select id="ep-type" value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
             <div><Label htmlFor="ep-num">Permit #</Label><Input id="ep-num" value={num} onChange={(e) => setNum(e.target.value)} /></div>
             <div><Label htmlFor="ep-auth">Authority</Label><Input id="ep-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
-            <div><Label htmlFor="ep-status">Status</Label><Select id="ep-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
+            <div><Label htmlFor="ep-status">Status</Label><Select id="ep-status" value={status} onChange={(e) => setStatus(e.target.value)}>{permitStatusOptions(status).map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}</Select></div>
             <div><Label htmlFor="ep-applied">Applied date</Label><Input id="ep-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
             <div><Label htmlFor="ep-issued">Issued date</Label><Input id="ep-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
             <div><Label htmlFor="ep-expires">Expires</Label><Input id="ep-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></div>

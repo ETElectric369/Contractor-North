@@ -1230,6 +1230,8 @@ export default async function JobDetailPage({
   // each row also serializes into EditEntryButton props on a page techs can view.
   // Non-staff get an allowlist projection with every pay field stripped; staff
   // pass the full rows through unchanged (the edit modal's Rate anchor uses them).
+  /** THE TIME TAB'S BADGE: the shifts no invoice has claimed yet (tests/badges-show-open names it). */
+  const timeOpen = unbilled?.schemaReady ? unbilled.shifts : 0;
   const timeTabEntries: {
     id: string;
     profile_id: string;
@@ -1650,8 +1652,11 @@ export default async function JobDetailPage({
     {
       id: "time",
       label: "Time",
-      // No badge: the number of shifts on a job is a total. The time not billed yet is said on the
-      // Overview's running total and the Costs tab, where the door that bills it is.
+      // WHAT'S OPEN: the shifts no invoice has claimed yet (Erik, 2026-10-02 and 2026-10-15: "still
+      // no badge number for open time on a job"; every badge counts only what's open, and a shift
+      // is open until it is billed). The same rule as the Overview's "not billed yet" figure
+      // (lib/unbilled-work, `shifts`), never a second count; nothing read = no badge.
+      count: timeOpen,
       content: (
         <Card className="overflow-hidden">
           {/* ONE CLOCK ON A JOB (W1-20). The tab's own Clock In left: the dock's TIME button at the top

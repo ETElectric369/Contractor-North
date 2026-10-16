@@ -97,7 +97,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }
 // writing up), so the suite has to be able to set it to a day that is not the booked one.
 vi.mock("@/lib/billing-pipeline", () => ({ orgTodayStr: async () => state.today }));
 
-const { saveInspection, recordInspectionResult, deleteInspection } = await import("./inspection-actions");
+const { saveInspection, recordInspectionResult, deleteInspection, reopenInspection } = await import("./inspection-actions");
 
 const TOWN = "Town of Truckee";
 const UTIL = "Liberty Utilities";
@@ -225,7 +225,7 @@ describe("saveInspection: booking one is never gated", () => {
     // another visit" to the very action that recorded the pass, and the permit stayed red forever.
     const pass = await recordInspectionResult({ id: "new-3", result: "passed", result_on: "2026-10-20" });
     expect(pass.ok).toBe(true);
-    expect(pass.next).toBe(`${UTIL} was booked Oct 15 — record the inspection status`);
+    expect(pass.next).toBe(`${UTIL} was booked Oct 15 — say how it went`);
     expect(pass.next).not.toContain("book another visit");
     expect(state.permits[0].status).toBe("inspection_scheduled"); // the retry is ON THE BOOKS, so the permit says so itself (0380-era rule, Erik 2026-10-04)
   });
@@ -341,7 +341,7 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
     const res = await recordInspectionResult({ id: "i1", result: "passed", result_on: THU, inspector: "Dana" });
     expect(res.ok).toBe(true);
     expect(res.clear).toBe(false);
-    expect(res.message).toBe(`${TOWN} passed.`);
+    expect(res.message).toBe(`${TOWN} passed on Oct 15.`);
     expect(res.next).toBe(`Waiting on ${UTIL} — Thu Oct 15, morning`);
     expect(res.href).toBe("/jobs/j1?tab=permits");
     expect(state.permits[0].status).toBe("inspection_scheduled"); // THE UTILITY IS STILL BOOKED, and a booked visit is the permit's own word now (Erik 2026-10-04)
@@ -355,7 +355,7 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
     expect(res.clear).toBe(true);
     // NOT "the meter is on": that is a fact about an electrical job whose last authority is the
     // utility. A deck permit's one county inspection said it to the builder too.
-    expect(res.message).toBe(`${UTIL} passed. Every inspection on permit E-1234 has passed — the job is done.`);
+    expect(res.message).toBe(`${UTIL} passed on Oct 15. Every inspection on permit E-1234 has passed — the job is done.`);
     expect(res.message).not.toContain("meter");
     expect(res.next).toBe("Finish the job and bill it");
     expect(res.href).toBe("/jobs/j1");
@@ -366,17 +366,17 @@ describe("recordInspectionResult: a result needs a day, and the pass carries for
     state.permits = [{ id: "p1", org_id: "org-1", permit_number: "B-7", job_id: "j1", status: "issued" }];
     state.inspections = [insp({ position: 1, authority: "Nevada County Building", scheduled_for: THU })];
     const res = await recordInspectionResult({ id: "i1", result: "passed", result_on: THU });
-    expect(res.message).toBe("Nevada County Building passed. Every inspection on permit B-7 has passed — the job is done.");
+    expect(res.message).toBe("Nevada County Building passed on Oct 15. Every inspection on permit B-7 has passed — the job is done.");
     expect(res.message).not.toContain("meter");
   });
 
   it("WRITTEN UP A DAY LATE, the sentence is read against TODAY — never the day they came", async () => {
     // Friday. Nothing was written up on Thursday, so he records the town for Thursday. Reading the
     // verdict against Thursday said "Waiting on Liberty Utilities — Thu Oct 15, morning" while the card
-    // beside it, on the real today, read "Liberty Utilities was booked Oct 15 — record the inspection status".
+    // beside it, on the real today, read "Liberty Utilities was booked Oct 15 — say how it went".
     state.today = "2026-10-16";
     const res = await recordInspectionResult({ id: "i1", result: "passed", result_on: THU });
-    expect(res.next).toBe(`${UTIL} was booked Oct 15 — record the inspection status`);
+    expect(res.next).toBe(`${UTIL} was booked Oct 15 — say how it went`);
   });
 
   it("A LOST RE-READ NEVER PASSES FOR 'nothing outstanding': it says the permit was not re-checked", async () => {
@@ -563,5 +563,47 @@ describe("every door is org-scoped and staff-only", () => {
     // The INSERT is the one that doesn't carry it: 0378's own trigger (set_org_id) stamps the row,
     // so a client that got it wrong could never put a visit in another company's permit.
     expect(lastInsert()).not.toHaveProperty("org_id");
+  });
+});
+
+describe("the issuing town's own visit, added after the utility's (J-012, 2026-10-15)", () => {
+  it("goes FIRST in line: the rows already there move back one, from the back", async () => {
+    state.inspections = [insp({ position: 2, authority: UTIL, scheduled_for: THU, scheduled_window: "morning" })];
+    const res = await saveInspection({ permit_id: "p1", authority: TOWN, scheduled_for: null, scheduled_window: null, first: true });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain(`${TOWN} added, first in line — book a day when you have one`);
+    expect(lastInsert()).toMatchObject({ authority: TOWN, position: 1 });
+    const util = state.inspections.find((r) => r.authority === UTIL);
+    expect(util?.position).toBe(3);
+    expect(state.writes.filter((w) => w.kind === "update" && w.table === "permit_inspections").map((w) => w.patch)).toEqual([{ position: 3 }]);
+  });
+  it("with nothing in line yet it is simply the first, and a plain booking never moves anybody", async () => {
+    state.inspections = [];
+    expect((await saveInspection({ permit_id: "p1", authority: TOWN, scheduled_for: null, scheduled_window: null, first: true })).message).toBe(`${TOWN} added — book a day when you have one`);
+    state.inspections = [insp({ position: 1, authority: TOWN })];
+    await saveInspection({ permit_id: "p1", authority: UTIL, scheduled_for: null, scheduled_window: null });
+    expect(lastInsert()).toMatchObject({ authority: UTIL, position: 2 });
+    expect(state.writes.filter((w) => w.kind === "update" && w.table === "permit_inspections")).toEqual([]);
+  });
+});
+
+describe("reopenInspection: a Passed tapped by mistake goes back to open", () => {
+  it("clears the result, the day and who came; the booking stays; the permit follows", async () => {
+    state.inspections = [insp({ position: 1, scheduled_for: THU, scheduled_window: "morning", result: "passed", result_on: THU, inspector: "Dana" })];
+    const res = await reopenInspection("i1", "p1");
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain(`${TOWN} is open again — it hasn't happened yet.`);
+    expect(state.inspections[0]).toMatchObject({ result: null, result_on: null, inspector: null, scheduled_for: THU, scheduled_window: "morning" });
+    expect(res.next).toBe(`Waiting on ${TOWN} — Thu Oct 15, morning`); // booked for today: theirs to come, not yet overdue
+    expect(res.href).toContain("?tab=permits");
+    const read = state.queries.find((x) => x.table === "permit_inspections" && x.kind === "read" && x.on.includes("id"));
+    expect(read?.on).toEqual(expect.arrayContaining(["id", "permit_id", "org_id"])); // the row is this permit's and this company's
+    const q = state.queries.find((x) => x.table === "permit_inspections" && x.kind === "update");
+    expect(q?.on).toEqual(expect.arrayContaining(["id", "org_id"]));
+  });
+  it("a row that is gone says so and writes nothing else", async () => {
+    state.inspections = [];
+    expect(await reopenInspection("i9", "p1")).toEqual({ ok: false, error: "That inspection isn't here any more." });
+    expect(state.writes.filter((w) => w.table === "permits")).toEqual([]);
   });
 });

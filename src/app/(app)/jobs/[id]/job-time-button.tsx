@@ -124,7 +124,7 @@ export function JobTimeButton({
     setOpen(true);
   }
 
-  function run<T extends { ok: boolean; error?: string; warning?: string }>(fn: () => Promise<T>, after?: (res: T) => void) {
+  function run<T extends { ok: boolean; error?: string; warning?: string; undone?: boolean }>(fn: () => Promise<T>, after?: (res: T) => void) {
     setErr(null);
     start(async () => {
       // THE 60MPH LAW (v800 audit). A server action that REJECTS — no signal in a dead zone, a
@@ -145,8 +145,10 @@ export function JobTimeButton({
       }
       setOpen(false);
       // A pay rate left on the part before a switch, or a lunch that moved: money, so it is said and
-      // kept on screen until read (the Timeclock panel says the same thing the same way).
-      if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
+      // kept on screen until read (the Timeclock panel says the same thing the same way). A punch
+      // taken back (under two minutes old) is said once and is not money.
+      if (res.undone) toast(res.warning ?? "That punch is gone.", "success");
+      else if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
       if (after) after(res);
       else router.refresh();
     });

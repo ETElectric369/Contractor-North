@@ -6,18 +6,13 @@ import { Plus, Trash2, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { createPermit, updatePermit, deletePermit } from "../../permits/actions";
 import { EditPermitButton } from "../../permits/edit-permit-button";
 // Canonical permit options + tones (the inline dropdown now writes the same status keys the
 // standalone editor uses — was "scheduled" here vs "inspection_scheduled" there).
-import {
-  PERMIT_TYPES as TYPES,
-  PERMIT_STATUSES as STATUSES,
-  permitStatusTone as statusTone,
-} from "@/lib/permit-options";
+import { PERMIT_TYPES as TYPES, PERMIT_PICKABLE_STATUSES as STATUSES, permitStatusOptions } from "@/lib/permit-options";
 import type { PermitInspection } from "@/lib/permit-inspections";
 import { PermitInspections } from "./permit-inspections";
 
@@ -130,6 +125,12 @@ export function JobPermits({
         <ul className="space-y-2">
           {permits.map((p) => (
             <li key={p.id} className="rounded-lg border border-slate-200 p-3">
+              {/* ONE COLUMN. The status select, Edit and Delete sat in a fixed column BESIDE the body:
+                  on a 390-px phone its 160-px select left the body ~150 px, and every chip, line and
+                  button stacked down the left edge (Erik, 2026-10-15: "all crammed onto the left side
+                  lined up vertically, unreadable"). Nothing of fixed width stands beside the body now:
+                  the controls are a wrapping row under the title, and the select is full width on a
+                  phone. The status's colour is carried by the inspections' own line below it. */}
               <div className="flex items-start gap-3">
                 <ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                 <div className="min-w-0 flex-1">
@@ -153,6 +154,29 @@ export function JobPermits({
                     {Number(p.fee) > 0 && <span>· ${Number(p.fee).toFixed(2)}</span>}
                   </div>
                   {p.notes && <div className="mt-1 whitespace-pre-wrap text-xs text-slate-500">{p.notes}</div>}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {/* THE PERMIT'S OWN PAPERWORK (lib/permit-options, PERMIT_PICKABLE_STATUSES): what its
+                        inspections say is read here, never picked here. */}
+                    <Select
+                      value={p.status}
+                      aria-label="Permit status"
+                      className="h-11 w-full text-sm sm:h-9 sm:w-48 sm:text-xs"
+                      onChange={(e) => { const v = e.target.value; start(async () => { const res = await updatePermit(p.id, { status: v, job_id: jobId }); if (!res?.ok) { toast(res?.error ?? "Couldn't update status — try again.", "error"); return; } router.refresh(); }); }}
+                    >
+                      {permitStatusOptions(p.status).map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
+                    </Select>
+                    <EditPermitButton permit={p as any} jobId={jobId} />
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Delete this permit"
+                      title="Delete"
+                      className="min-h-11 min-w-11 text-slate-400 hover:text-red-600"
+                      onClick={() => { if (confirm("Delete this permit?")) start(async () => { const res = await deletePermit(p.id, jobId); if (!res?.ok) { toast(res?.error ?? "Couldn't delete permit — try again.", "error"); return; } toast("Permit deleted", "success"); router.refresh(); }); }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                   {/* WHO STILL HAS TO COME (0378): this permit's own inspections, in the order they come. */}
                   <PermitInspections
                     permitId={p.id}
@@ -161,23 +185,9 @@ export function JobPermits({
                     suggestions={authorities}
                     canWrite={canAdd}
                     unread={inspectionsUnread}
+                    authority={p.authority}
+                    permitStatus={p.status}
                   />
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <Select
-                    value={p.status}
-                    className="h-7 w-40 text-xs"
-                    onChange={(e) => { const v = e.target.value; start(async () => { const res = await updatePermit(p.id, { status: v, job_id: jobId }); if (!res?.ok) { toast(res?.error ?? "Couldn't update status — try again.", "error"); return; } router.refresh(); }); }}
-                  >
-                    {STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </Select>
-                  <div className="flex items-center gap-2">
-                    {/* NOTE: first-underscore-only label — fine while every PERMIT_STATUSES value
-                        has ≤1 underscore; switch to the spine's [value,label] pairs if that changes. */}
-                    <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
-                    <EditPermitButton permit={p as any} jobId={jobId} />
-                    <button onClick={() => { if (confirm("Delete this permit?")) start(async () => { const res = await deletePermit(p.id, jobId); if (!res?.ok) { toast(res?.error ?? "Couldn't delete permit — try again.", "error"); return; } toast("Permit deleted", "success"); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
-                  </div>
                 </div>
               </div>
             </li>

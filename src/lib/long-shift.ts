@@ -40,6 +40,16 @@ export const OFFICE_BELL_HOURS = 10;
 /** No single shift is longer than this. The database refuses one (0214/0281) unless the system
  *  closed it itself and said why. */
 export const MAX_SHIFT_HOURS = 18;
+/**
+ * A PUNCH TAKEN BACK (Erik, 2026-10-15: "I am punched in twice at the same time, I was trying to
+ * switch jobs but ended up clocking in again"). He clocked in by hand at 15:08:40, saw it was wrong,
+ * clocked out at 15:08:54 and punched again from 2:00 — the fourteen-second row stayed (0360 tolerates
+ * overlaps under a minute) and his timecard read two punches at 15:08. A clock-out BY HAND this soon
+ * after its own clock-in is a mistake being undone, never a shift: the row goes, nothing is paid, and
+ * the toast says so. The fence, a picked stop time and an unattended close never undo anything.
+ */
+export const UNDO_PUNCH_MS = 2 * 60_000;
+export const UNDO_PUNCH_SENTENCE = "That punch is gone — it was under two minutes old, so nothing was recorded and nothing is paid.";
 
 /**
  * "18 hours": the ceiling as every sentence says it, read from the constant above.

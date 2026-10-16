@@ -43,6 +43,11 @@ import {
 export type UnbilledWork = {
   /** Unclaimed labor hours, quarter-hour rounded per person — the quantity the lines would bill. */
   hours: number;
+  /** HOW MANY SHIFTS those hours are: the closed, billable entries no invoice has claimed — the
+   *  job's Time tab badge (Erik, twice: "still no badge number for open time on a job"; every badge
+   *  counts only what's open, and a shift is open until it is billed). 0 = no badge. The same rows
+   *  that made `hours` (the labor lines' sourceIds), never a second reading of the entries. */
+  shifts: number;
   laborAmount: number;
   laborByPerson: { name: string; hours: number; amount: number }[];
   /** Unclaimed supplier bills + live purchase orders, AT COST (before markup) - and since
@@ -405,6 +410,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   const { lines, total: laborAmount } = computeJobLaborBilling(free.jobEntries, input.defaultRate, input.levelRate, input.nonBillableCodes);
   const laborByPerson = lines.map((l) => ({ name: l.name, hours: l.quantity, amount: l.amount }));
   const hours = cents(lines.reduce((s, l) => s + l.quantity, 0));
+  const shifts = lines.reduce((n, l) => n + (l.quantity > 0 ? l.sourceIds.length : 0), 0); // a seconds-long row rounds to no hours: not a shift to bill
   // The oldest open thing, compared by its first ten characters (a day), so an ISO time and a
   // bare day order together.
   let oldestAt: string | null = null;
@@ -547,6 +553,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   const last = input.claims.invoices[0] ?? null;
   return {
     hours,
+    shifts,
     laborAmount,
     laborByPerson,
     billsAmount,

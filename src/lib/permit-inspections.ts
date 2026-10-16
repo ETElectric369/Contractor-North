@@ -206,6 +206,43 @@ export function blockedBy(rows: readonly PermitInspection[] | null | undefined, 
 /** Nobody has written up this visit yet. 0378 keeps result NULL until they have been. */
 export const isOpenInspection = (r: Pick<PermitInspection, "result">): boolean => !r.result;
 
+/** THE DAY A ONE-TAP "PASSED" IS RECORDED ON: the booked day once it has come, else the company's
+ *  today — never a day still ahead (a visit booked for next week and passed today happened today). */
+export function passedOnDay(row: Pick<PermitInspection, "scheduled_for">, todayStr: string): string {
+  const booked = (row.scheduled_for ?? "").slice(0, 10);
+  const today = (todayStr ?? "").slice(0, 10);
+  if (booked && today) return booked <= today ? booked : today;
+  return today || booked;
+}
+
+/** THE ISSUING AUTHORITY WITH NO VISIT OF ITS OWN YET. A permit's `authority` is who issued it; on an
+ *  electrical job that town inspects too, and a permit from before 0378 — or one whose visit was only
+ *  ever its status — has no row for that visit, so the person records it on the permit's status, where
+ *  it carries nothing forward (J-012, 2026-10-15). The card offers that row in one tap. Null when a
+ *  row with that authority exists (case and spaces aside) or the permit names no authority. */
+export function authorityWithoutRow(
+  authority: string | null | undefined,
+  rows: readonly Pick<PermitInspection, "authority">[] | null | undefined,
+): string | null {
+  const a = (authority ?? "").trim();
+  if (!a) return null;
+  // Both are free text: "Town of Truckee Building Dept" on the permit and "Town of Truckee" on the
+  // row are the same visitor, and the row's name is cut to AUTHORITY_MAX when it is saved — so
+  // compare the cut names, and let either contain the other.
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, AUTHORITY_MAX);
+  const key = norm(a);
+  const same = (r: Pick<PermitInspection, "authority">) => {
+    const k = norm(r.authority);
+    return !!k && (k === key || k.includes(key) || key.includes(k));
+  };
+  return (rows ?? []).some(same) ? null : a;
+}
+
+/** A permit's visits can be added only while it is LIVE: issued, booked, or failed and waiting on
+ *  the next visit. Not before it is issued, not once it is closed, and not on a permit hand-marked
+ *  passed before 0378 (adding a row would flip that word to "issued"). */
+export const PERMIT_STATUSES_OPEN_TO_VISITS: ReadonlySet<string> = new Set(["issued", "inspection_scheduled", "scheduled", "failed"]);
+
 /** Every visit still owed on this permit (the open rows, in order) — what "who still has to come" means. */
 export function outstandingInspections(rows: readonly PermitInspection[] | null | undefined): PermitInspection[] {
   return inOrder(rows).filter(isOpenInspection);
@@ -362,7 +399,7 @@ export const allInspectionsPassed = (rows: readonly PermitInspection[] | null | 
  * THE ONE LINE THE JOB AND THE CARD SAY. Plain words, the reader is an electrician between jobs.
  *   "Waiting on Liberty Utilities — Thu Oct 15, morning"
  *   "Town of Truckee inspection to book"
- *   "Town of Truckee was booked Oct 15 — record the inspection status"
+ *   "Town of Truckee was booked Oct 15 — say how it went"
  *   "Town of Truckee failed Oct 15 — book another visit"
  */
 export function standLine(stand: InspectionStand): string | null {
@@ -381,7 +418,7 @@ export function standLine(stand: InspectionStand): string | null {
     case "to_book":
       return `${who} inspection to book`;
     case "overdue":
-      return `${who} was booked ${on(stand.day)} — record the inspection status`;
+      return `${who} was booked ${on(stand.day)} — say how it went`;
     case "needs_another": {
       const said = stand.row?.result === "cancelled" ? "cancelled" : "failed";
       const d = on(stand.day);
