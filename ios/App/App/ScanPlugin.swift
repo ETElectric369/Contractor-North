@@ -1098,7 +1098,10 @@ struct Scan3DScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
             } else {
+                // Apple's area-mode guidance: no object reticle frame (there is no bounding-box step);
+                // the dot is a brush — Apple paints the surfaces it has captured as it moves over them.
                 ObjectCaptureView(session: session)
+                    .hideObjectReticle(true)
                     .ignoresSafeArea()
                 VStack {
                     HStack {
@@ -1156,8 +1159,8 @@ struct Scan3DScreen: View {
         case .initializing: return "Starting the camera…"
         case .ready: return "Stand where you can see the room or the site, then Start Capture."
         case .capturing:
-            if shots < Self.minShots { return "Walk slowly, pointing the phone at every surface — \(shots) of \(Self.minShots) photos." }
-            return passDone ? "Pass complete — Finish, or keep walking for more." : "\(shots) photos — keep walking for every surface, then Finish."
+            if shots < Self.minShots { return "Move the dot slowly over every surface like a brush — it takes the photos itself (\(shots) so far)." }
+            return passDone ? "Pass complete — Finish, or keep brushing for more." : "\(shots) photos. Keep brushing every surface you want in the model, then Finish."
         case .finishing: return "Finishing the capture…"
         case .completed: return "Captured. Building the model…"
         case .failed: return "The capture stopped. Cancel and try again."
