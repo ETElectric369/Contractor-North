@@ -25,6 +25,9 @@ type Plugin = {
   scan3d?(): Promise<Record<string, unknown>>;
   readChunk?(o: { path: string; offset: number; length: number }): Promise<{ data?: unknown; bytes?: unknown; total?: unknown }>;
   discard?(o: { path: string }): Promise<void>;
+  stageFile?(o: { name: string }): Promise<{ path?: unknown }>;
+  stageChunk?(o: { path: string; data: string }): Promise<{ bytes?: unknown }>;
+  previewFile?(o: { path: string }): Promise<void>;
 };
 
 function plugin(): Plugin | null {
@@ -285,4 +288,47 @@ export async function scan3dNative(now = Date.now()): Promise<ModelScanResult> {
   const model = await pullFile(p, path, total, `scan-3d-${now}.usdz`, USDZ_MIME);
   if (!model) return { ok: false, refused: "The model didn't come over from the camera whole. Tap Scan In 3D again to retry." };
   return { ok: true, kind: "model", model, path, shots: typeof r.shots === "number" ? r.shots : 0 };
+}
+
+// ── OPEN IN AR: Apple's Quick Look from inside the shell ─────────────────────────────────────────
+// A rel="ar" link is Safari's door; the app's web view ignores it (Erik, 10-16). The page holds the
+// bytes it drew, hands them to the shell in pieces (the reverse of pullFile), and the shell opens
+// Quick Look, which carries the AR tab. The staged copy goes when the viewer closes.
+
+/** Synchronous: can this shell open a model in Quick Look (a build with the staging doors). */
+export function arPreviewPresent(): boolean {
+  const p = plugin();
+  return typeof p?.stageFile === "function" && typeof p?.stageChunk === "function" && typeof p?.previewFile === "function";
+}
+
+/** Bytes → base64 (no spread of a huge array: a chunk at a time through a binary string). */
+export function base64Of(bytes: Uint8Array): string {
+  let bin = "";
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + step)));
+  return btoa(bin);
+}
+
+export type ArPreviewResult = { ok: true } | { ok: false; refused: string };
+
+/** Stage the model in the shell and open it in Quick Look; resolves when the viewer closes. */
+export async function openInAr(bytes: Uint8Array, name: string): Promise<ArPreviewResult> {
+  const p = plugin();
+  if (!p?.stageFile || !p.stageChunk || !p.previewFile) return { ok: false, refused: "Open In AR needs the North app on an iPhone." };
+  if (!bytes.length || bytes.length > MODEL_MAX_BYTES) return { ok: false, refused: "This model is too big to open in AR here." };
+  let path = "";
+  try {
+    const staged = await p.stageFile({ name });
+    path = typeof staged?.path === "string" ? staged.path : "";
+    if (!path) return { ok: false, refused: "The phone couldn't make room for the model." };
+    for (let at = 0; at < bytes.length; at += CHUNK_BYTES) {
+      await p.stageChunk({ path, data: base64Of(bytes.subarray(at, at + CHUNK_BYTES)) });
+    }
+    await p.previewFile({ path });
+    return { ok: true };
+  } catch (e: unknown) {
+    if (path && p.discard) await p.discard({ path }).catch(() => undefined);
+    const msg = (e as { message?: unknown })?.message;
+    return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : "Couldn't open the model in AR. Try again." };
+  }
 }

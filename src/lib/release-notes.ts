@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1118", date: "2026-10-16", line: "Open In AR works inside the North app: a 3D scan opens in Apple's viewer with its AR tab, straight from the 3D viewer's bar." },
   { version: "cn-v1117", date: "2026-10-16", line: "Scan In 3D on the task sheet: walk a room or a site and the phone builds a textured 3D model you can turn and zoom in North, drop into the room in AR on an iPhone, and show on the portal." },
   { version: "cn-v1116", date: "2026-10-16", line: "The measure and scan buttons sit in their own row under Measurements, and scanning a room or a site again replaces that scan's earlier rows instead of adding a second set." },
   { version: "cn-v1115", date: "2026-10-16", line: "Scan The Site and Scan The Room on the task sheet: walk the corners outdoors or the walls indoors, and the sides, area and perimeter land as rows with a to-scale plan drawing and a 3D file." },

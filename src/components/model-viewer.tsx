@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Box, Download, Loader2, X } from "lucide-react";
+import { arPreviewPresent, openInAr } from "@/lib/native-scan";
 
 /**
  * THE 3D VIEWER (LiDAR rung 2, Scan In 3D). Erik 2026-10-16: "it would render an image just fine,
@@ -10,6 +11,10 @@ import { Box, Download, Loader2, X } from "lucide-react";
  * Polycam — drawn right here with three.js (its USD loader reads Apple's binary USD, so one file
  * serves the phone, the office and the portal): spin, zoom, pan. On an iPhone, Open In AR hands
  * the same file to Apple's AR viewer, which drops it into the room.
+ *
+ * OPEN IN AR: in the North app the bytes the viewer drew go to the shell, which opens Apple's Quick
+ * Look with its AR tab (a rel="ar" link is Safari's door and the app's web view ignores it; Erik,
+ * 10-16). In Safari on an iPhone the rel="ar" link stays. Anywhere else there is no AR button.
  *
  * three.js is loaded only when the viewer opens (a dynamic import), never in the page's bundle.
  * A file the viewer cannot draw says so in one sentence and still offers the file itself. The
@@ -39,7 +44,37 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
   const mount = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
   const [why, setWhy] = useState<string | null>(null);
+  const [ar, setAr] = useState<"idle" | "opening" | "failed">("idle");
+  const [arWhy, setArWhy] = useState<string | null>(null);
+  /** The model's bytes as drawn, kept for Open In AR (fetched once, by the loader). */
+  const bytesRef = useRef<Uint8Array | null>(null);
   const kind = modelKind(name) ?? modelKind(url);
+  const inShell = arPreviewPresent();
+
+  async function openAr() {
+    if (ar === "opening") return;
+    setAr("opening");
+    setArWhy(null);
+    try {
+      let bytes = bytesRef.current;
+      if (!bytes) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("the file didn't download");
+        bytes = new Uint8Array(await res.arrayBuffer());
+        bytesRef.current = bytes;
+      }
+      const r = await openInAr(bytes, name);
+      if (!r.ok) {
+        setArWhy(r.refused);
+        setAr("failed");
+        return;
+      }
+      setAr("idle");
+    } catch (e: unknown) {
+      setArWhy((e as { message?: string })?.message ?? "it didn't open");
+      setAr("failed");
+    }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -151,13 +186,18 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
       <div className="flex items-center gap-2 px-3 pb-2 pt-[max(0.5rem,var(--sat,0px))] text-white">
         <Box className="h-5 w-5 shrink-0" aria-hidden />
         <div className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</div>
-        {isIPhone() && kind === "usdz" && (
+        {kind === "usdz" && inShell ? (
+          <button type="button" onClick={() => void openAr()} disabled={ar === "opening"} className={link}>
+            {ar === "opening" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+            Open In AR
+          </button>
+        ) : kind === "usdz" && isIPhone() ? (
           <a rel="ar" href={url} className={link}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={PIXEL} alt="" width={1} height={1} />
             Open In AR
           </a>
-        )}
+        ) : null}
         <a href={url} target="_blank" rel="noopener noreferrer" className={link} aria-label="Open The File">
           <Download className="h-4 w-4" aria-hidden />
         </a>
@@ -177,6 +217,7 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
           </div>
         )}
       </div>
+      {ar === "failed" && arWhy && <p className="px-3 pt-2 text-center text-xs text-amber-300">Couldn&apos;t open it in AR: {arWhy}</p>}
       <p className="px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] text-center text-xs text-white/60">Drag to turn · pinch or scroll to zoom · two fingers to move</p>
     </div>,
     document.body,

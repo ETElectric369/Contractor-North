@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { bytesOf, CHUNK_BYTES, discardScan, MODEL_MAX_BYTES, pullFile, scan3dNative, scanDoors, USDZ_MIME } from "@/lib/native-scan";
+import { arPreviewPresent, base64Of, bytesOf, CHUNK_BYTES, discardScan, MODEL_MAX_BYTES, openInAr, pullFile, scan3dNative, scanDoors, USDZ_MIME } from "@/lib/native-scan";
 import { modelKind } from "@/components/model-viewer";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -151,6 +151,66 @@ describe("the file comes over in pieces; the shell's copy goes only once the upl
   });
 });
 
+describe("Open In AR: the page stages the bytes it drew and the shell opens Quick Look", () => {
+  afterEach(() => {
+    shellOn = false;
+  });
+  function staging() {
+    const chunks: string[] = [];
+    let previewed = "";
+    let discarded = 0;
+    const plugin = {
+      scanSite: async () => ({}),
+      stageFile: async ({ name }: { name: string }) => ({ path: `/tmp/north-scans/stage-${name}.usdz` }),
+      stageChunk: async ({ data }: { path: string; data: string }) => {
+        chunks.push(data);
+        return { bytes: chunks.reduce((n, c) => n + Buffer.from(c, "base64").length, 0) };
+      },
+      previewFile: async ({ path }: { path: string }) => {
+        previewed = path;
+      },
+      discard: async () => {
+        discarded += 1;
+      },
+    };
+    return { plugin, chunks, previewed: () => previewed, discarded: () => discarded };
+  }
+  it("base64Of round-trips, big arrays included", () => {
+    const bytes = new Uint8Array(200_000);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 7) % 256;
+    expect(Buffer.from(base64Of(bytes), "base64").equals(Buffer.from(bytes))).toBe(true);
+  });
+  it("no shell, no door; with the staging doors the bytes go over in 2 MB pieces, then Quick Look opens the staged file", async () => {
+    expect(arPreviewPresent()).toBe(false);
+    expect(await openInAr(new Uint8Array(10), "a.usdz")).toEqual({ ok: false, refused: "Open In AR needs the North app on an iPhone." });
+    const st = staging();
+    const off = shell({ Scan: st.plugin });
+    try {
+      expect(arPreviewPresent()).toBe(true);
+      const bytes = new Uint8Array(CHUNK_BYTES + 5);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = i % 253;
+      expect(await openInAr(bytes, "scan-3d-1.usdz")).toEqual({ ok: true });
+      expect(st.chunks).toHaveLength(2);
+      expect(Buffer.concat(st.chunks.map((c) => Buffer.from(c, "base64"))).equals(Buffer.from(bytes))).toBe(true);
+      expect(st.previewed()).toBe("/tmp/north-scans/stage-scan-3d-1.usdz.usdz");
+      expect(st.discarded()).toBe(0);
+    } finally {
+      off();
+    }
+  });
+  it("a piece that fails drops the staged file and says why; an empty or monster model is refused", async () => {
+    const st = staging();
+    const off = shell({ Scan: { ...st.plugin, stageChunk: async () => { throw new Error("Couldn't write the model on this phone (disk full)."); } } });
+    try {
+      expect(await openInAr(new Uint8Array(10), "a.usdz")).toEqual({ ok: false, refused: "Couldn't write the model on this phone (disk full)." });
+      expect(st.discarded()).toBe(1);
+      expect(await openInAr(new Uint8Array(0), "a.usdz")).toEqual({ ok: false, refused: "This model is too big to open in AR here." });
+    } finally {
+      off();
+    }
+  });
+});
+
 describe("the wiring, pinned", () => {
   it("the Swift door: Object Capture + photogrammetry on the phone, area masking off, the file served only from its own folder, in pieces", () => {
     const swift = read("ios/App/App/ScanPlugin.swift");
@@ -180,6 +240,11 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("let length = min(max(1, call.getInt(\"length\") ?? 2_000_000), 4_000_000)");
     expect(swift).toContain("ObjectCaptureView(session: session)");
     expect(swift).toContain("if processing { photo?.cancel() } else { session.cancel() }");
+    // Open In AR: staging doors + Quick Look (the AR tab is Apple's); the staged file goes on dismiss.
+    for (const m of ["stageFile", "stageChunk", "previewFile"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}", returnType: CAPPluginReturnPromise)`);
+    expect(swift).toContain("final class ModelPreview: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate");
+    expect(swift).toContain("guard let url = Self.ownFile(call.getString(\"path\")) else {\n            call.reject(\"That file isn't a staged model of this app's.\")");
+    expect(swift).toContain("try? FileManager.default.removeItem(at: url)\n                call.resolve()");
     expect(swift).not.toMatch(/URLSession|URLRequest/);
     expect(read("package.json")).toContain('"three": "^0.186.1"');
   });
@@ -209,7 +274,11 @@ describe("the wiring, pinned", () => {
     const viewer = read("src/components/model-viewer.tsx");
     expect(viewer).toContain('await import("three/examples/jsm/loaders/USDLoader.js")');
     expect(viewer).toContain('await import("three/examples/jsm/loaders/GLTFLoader.js")');
+    // In the shell, Open In AR is the Quick Look door; in Safari on an iPhone the rel="ar" link; nowhere else.
+    expect(viewer).toContain('{kind === "usdz" && inShell ? (');
+    expect(viewer).toContain('onClick={() => void openAr()}');
     expect(viewer).toContain('<a rel="ar" href={url}');
+    expect(viewer).toContain("const inShell = arPreviewPresent();");
     expect(viewer).toContain("z-[120]");
     // Portaled onto <body> (a fixed box inside the portal's blurred card is clipped to the card);
     // the bar clears the notch; disposal is armed as soon as the context exists and frees it all.

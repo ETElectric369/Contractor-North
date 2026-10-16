@@ -1,6 +1,7 @@
 import ARKit
 import AVFoundation
 import Capacitor
+import QuickLook
 import RealityKit
 import SceneKit
 import SwiftUI
@@ -50,7 +51,79 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "scan3d", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "readChunk", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "discard", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stageFile", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stageChunk", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "previewFile", returnType: CAPPluginReturnPromise),
     ]
+
+    /// OPEN IN AR. A `rel="ar"` link is Safari's door and the app's web view ignores it (Erik, 10-16:
+    /// "Open in AR doesn't do anything"). The page already holds the model's bytes (it drew them), so
+    /// it STAGES them into the scan folder in pieces — the reverse of readChunk — and the shell opens
+    /// Apple's own Quick Look viewer, which carries the AR tab. No network from here: the bytes come
+    /// from the page. The staged file goes when the viewer closes.
+    @objc func stageFile(_ call: CAPPluginCall) {
+        let raw = (call.getString("name") ?? "model").replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        let base = raw.lowercased().hasSuffix(".usdz") ? String(raw.dropLast(5)) : raw
+        let url = Self.scanFolder.appendingPathComponent("stage-\(base.isEmpty ? "model" : base)-\(UUID().uuidString.prefix(8)).usdz")
+        do {
+            try FileManager.default.createDirectory(at: Self.scanFolder, withIntermediateDirectories: true)
+            guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+            call.resolve(["path": url.path])
+        } catch {
+            call.reject("Couldn't make room for the model on this phone (\(error.localizedDescription)).")
+        }
+    }
+
+    /// Appends one base64 piece to a staged file of ours.
+    @objc func stageChunk(_ call: CAPPluginCall) {
+        guard let url = Self.ownFile(call.getString("path")) else {
+            call.reject("That file isn't a staged model of this app's.")
+            return
+        }
+        guard let data = Data(base64Encoded: call.getString("data") ?? "") else {
+            call.reject("That piece of the model wasn't readable.")
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let handle = try FileHandle(forWritingTo: url)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                call.resolve(["bytes": (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0])
+            } catch {
+                call.reject("Couldn't write the model on this phone (\(error.localizedDescription)).")
+            }
+        }
+    }
+
+    private var preview: ModelPreview?
+
+    /// Opens a staged file in Quick Look (the AR tab is Apple's); resolves when it closes, and the file goes.
+    @objc func previewFile(_ call: CAPPluginCall) {
+        guard let url = Self.ownFile(call.getString("path")) else {
+            call.reject("That file isn't a staged model of this app's.")
+            return
+        }
+        Task { @MainActor in
+            guard self.preview == nil else {
+                call.reject("A model is already open. Close it first.")
+                return
+            }
+            guard var top = self.bridge?.viewController else {
+                call.reject("The app's screen isn't ready yet. Close and reopen the app, then try again.")
+                return
+            }
+            while let presented = top.presentedViewController { top = presented }
+            let preview = ModelPreview(url: url) { [weak self] in
+                self?.preview = nil
+                try? FileManager.default.removeItem(at: url)
+                call.resolve()
+            }
+            self.preview = preview
+            top.present(preview.controller, animated: true)
+        }
+    }
 
     /// One scan on screen at a time: a second call while one is up is answered, not stacked.
     private var presenting = false
@@ -1166,5 +1239,31 @@ struct Scan3DScreen: View {
         case .failed: return "The capture stopped. Cancel and try again."
         default: return "Frame the area, then Start Capture."
         }
+    }
+}
+
+// MARK: - Quick Look for a model (Open In AR)
+
+/// Holds a QLPreviewController and its one file for as long as it is up; the closure runs on dismiss.
+final class ModelPreview: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+    let controller = QLPreviewController()
+    private let url: URL
+    private let closed: () -> Void
+    private var done = false
+
+    init(url: URL, closed: @escaping () -> Void) {
+        self.url = url
+        self.closed = closed
+        super.init()
+        controller.dataSource = self
+        controller.delegate = self
+    }
+
+    func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { url as NSURL }
+    func previewControllerDidDismiss(_ controller: QLPreviewController) {
+        guard !done else { return }
+        done = true
+        closed()
     }
 }
