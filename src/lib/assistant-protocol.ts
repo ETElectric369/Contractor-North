@@ -310,3 +310,25 @@ export function screenBlocks(full: string): AgentScreen[] {
   }
   return out;
 }
+
+/** THE ENVELOPE'S JSON, read up to the next block. A directive (confirm / open / pick) rides at
+ *  the END of the stream, but the holding count (0394) rode AFTER it from 10-14 to 10-15, so
+ *  `JSON.parse(everything after the marker)` threw: no card, no spoken question, the mic opened on
+ *  a plain turn, and Nort "froze" with the screen locked (Erik, both nights). null when there is
+ *  no envelope or it does not read as an object. One reader for all three markers and the
+ *  recovered turn. */
+export function directivePayload<T extends object>(full: string, marker: string): T | null {
+  const at = full.indexOf(marker);
+  if (at < 0) return null;
+  let body = full.slice(at + marker.length);
+  for (const m of [HOLDING_OPEN, STATUS_OPEN, DRAFT_OPEN, HUD_OPEN, SCREEN_OPEN, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER]) {
+    const cut = body.indexOf(m);
+    if (cut >= 0) body = body.slice(0, cut);
+  }
+  try {
+    const v = JSON.parse(body);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as T) : null;
+  } catch {
+    return null;
+  }
+}

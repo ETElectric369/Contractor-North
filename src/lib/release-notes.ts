@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1111", date: "2026-10-16", line: "A yes-or-no question from Nort reaches the phone again: the card shows, the question is spoken, and your yes runs it, on screen or with the screen locked" },
   { version: "cn-v1110", date: "2026-10-15", line: "A confirm question Nort asks by voice is retried and traced if its clip fails; the appointment form has New Lead and New Customer in plain sight and an address picker; Nort reads no cost back" },
   { version: "cn-v1109", date: "2026-10-15", line: "Nort no longer keeps a price said with a materials line, and a list drafted from a scope carries no guessed prices or vendors: the price book and the supplier's bill are the cost" },
   { version: "cn-v1108", date: "2026-10-15", line: "New Inspection on the + menu; a tapped time on the schedule offers a new appointment there too; the materials checklist shows no prices (a bill is the cost) and says In Stock where Shop Stock has it" },

@@ -31,7 +31,10 @@ describe("catchUp drops the mic before it speaks", () => {
   });
 
   it("still re-opens the mic after the reply, for a normal turn or for the yes/no", () => {
-    expect(readOut).toContain("confirmListen();");
+    // The yes/no re-open goes through confirmAfterSaid (cn-v1110): it listens only when the
+    // question was HEARD, so a dark, lost clip never gates a write on a stray word.
+    expect(readOut).toContain("say(rec.confirm.prompt, confirmAfterSaid);");
+    expect(body("function confirmAfterSaid(", "function makeSpeakStream(")).toContain("if (heard) { confirmListen(); return; }");
     expect(readOut).toContain("startMic();");
   });
 

@@ -18,7 +18,7 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import * as speech from "@/lib/voice";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, HOLDING_OPEN, HOLDING_CLOSE,
-  SCREEN_OPEN, SCREEN_CLOSE, screenBlocks,
+  SCREEN_OPEN, SCREEN_CLOSE, screenBlocks, directivePayload,
   type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard,
 } from "@/lib/assistant-protocol";
 import { performScreen } from "@/lib/nort/screen-driver";
@@ -279,8 +279,7 @@ function splitRecovered(reply: string): { text: string; confirm: AgentConfirm | 
   const cut = reply.indexOf(CONFIRM_MARKER);
   if (cut < 0) return { text: reply, confirm: null, stale: false };
   const text = reply.slice(0, cut);
-  let parsed: (Partial<AgentConfirm> & { at?: string }) | null = null;
-  try { parsed = JSON.parse(reply.slice(cut + CONFIRM_MARKER.length)); } catch {}
+  const parsed = directivePayload<Partial<AgentConfirm> & { at?: string }>(reply, CONFIRM_MARKER);
   const ok = !!parsed && typeof parsed.name === "string" && !!parsed.name
     && typeof parsed.prompt === "string" && !!parsed.prompt
     && !!parsed.input && typeof parsed.input === "object";
@@ -1038,18 +1037,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
 
       // Directive markers (confirm / open-maps / contact-pick) come at the very end of the stream.
       const visibleText = parseStream(full).text;
-      let proposal: AgentConfirm | null = null;
-      if (full.includes(CONFIRM_MARKER)) {
-        try { proposal = JSON.parse(full.split(CONFIRM_MARKER)[1]); } catch {}
-      }
-      let openDir: AgentOpen | null = null;
-      if (full.includes(OPEN_MARKER)) {
-        try { openDir = JSON.parse(full.split(OPEN_MARKER)[1]); } catch {}
-      }
-      let pickDir: AgentPick | null = null;
-      if (full.includes(PICK_MARKER)) {
-        try { pickDir = JSON.parse(full.split(PICK_MARKER)[1]); } catch {}
-      }
+      // Each envelope is read up to the next block (directivePayload): the holding count rides at
+      // the end of every turn, and reading the envelope "to the end of the stream" swallowed it —
+      // no card, no spoken question, a plain-turn mic, and a "frozen" Nort on the lock screen.
+      const proposal = directivePayload<AgentConfirm>(full, CONFIRM_MARKER);
+      const openDir = directivePayload<AgentOpen>(full, OPEN_MARKER);
+      const pickDir = directivePayload<AgentPick>(full, PICK_MARKER);
 
       // A directive at the tail changes what we SAY (a specific phrase, not the streamed body). If we
       // opened a streamed speaker for the body, cut it now so we don't double-speak, then say the

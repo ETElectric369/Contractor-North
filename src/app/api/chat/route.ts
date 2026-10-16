@@ -769,6 +769,10 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       // the tech in the field could not read their own row; and the table is deliberately
       // immutable, so a consumed proposal could never be retired.)
       let confirmProposed: AgentConfirm | null = null;
+      // The envelope (confirm / open / pick) the stream ENDS with. Held until after the holding
+      // count: from 10-14 to 10-15 that count was emitted after the envelope, inside what the phone
+      // parsed as its JSON, and every proposal died unseen (no card, no question, a locked-screen freeze).
+      let directive = "";
       // Cache telemetry for the audit row — lets us verify hits from the DB (cache_read > 0).
       let cacheRead = 0;
       let outputTokens = 0;
@@ -1057,20 +1061,21 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           }
 
           if (pendingOpen) {
-            emit(OPEN_MARKER + JSON.stringify(pendingOpen));
+            directive = OPEN_MARKER + JSON.stringify(pendingOpen);
             break;
           }
 
           if (pendingPick) {
-            emit(PICK_MARKER + JSON.stringify(pendingPick));
+            directive = PICK_MARKER + JSON.stringify(pendingPick);
             break;
           }
 
           if (pendingConfirm) {
-            // Append the proposal as the LAST thing in the stream; the client splits it off,
-            // shows a confirm card (or speaks it), and runs it only on the user's yes.
+            // The proposal is the LAST thing in the stream (emitted below, after the holding
+            // count); the client splits it off, shows a confirm card (or speaks it), and runs it
+            // only on the user's yes.
             confirmProposed = pendingConfirm;
-            emit(CONFIRM_MARKER + JSON.stringify(pendingConfirm));
+            directive = CONFIRM_MARKER + JSON.stringify(pendingConfirm);
             break;
           }
 
@@ -1088,6 +1093,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
         } catch {
           /* the count is a courtesy; the reply already went */
         }
+        if (directive) emit(directive); // the envelope ends the stream
         controller.close();
       } catch (e: any) {
         // A failed turn used to reach the screen only, as a raw "[Error: …]", and never
