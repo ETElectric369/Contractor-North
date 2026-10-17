@@ -213,72 +213,78 @@ describe("Open In AR: the page stages the bytes it drew and the shell opens Quic
 });
 
 describe("the wiring, pinned", () => {
-  it("the Swift door: our own ARKit capture with visible coverage, then photogrammetry on the phone (depth + gravity per photo, masking off), the file served only from its own folder, in pieces", () => {
+  it("the Swift door: our own ARKit capture with visible coverage, then the mesh PAINTED from the frames it kept (no photogrammetry), the file served only from its own folder, in pieces", () => {
     const swift = read("ios/App/App/ScanPlugin.swift");
     for (const m of ["isSupported", "scan3d", "readChunk", "discard"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}", returnType: CAPPluginReturnPromise)`);
-    // Erik 2026-10-16: the site and room doors are gone; one door, one plugin.
-    for (const gone of ["scanSite", "scanRoom", "RoomPlan", "ObjectCaptureSession", "ObjectCaptureView", "SiteScanViewController", "RoomScanViewController"]) expect(swift).not.toContain(gone);
-    expect(swift).toContain("if #available(iOS 17.0, *) { return lidarPresent && PhotogrammetrySession.isSupported }");
+    // Erik 2026-10-16: the site and room doors are gone; photogrammetry is gone (13 photos gave
+    // nothing; Apple's constructor trapped on a sample feed); one door, one plugin, our own painter.
+    for (const gone of ["scanSite", "scanRoom", "RoomPlan", "ObjectCaptureSession", "ObjectCaptureView", "SiteScanViewController", "RoomScanViewController", "Photogrammetry", "captureHighResolutionFrame", "AudioServicesPlaySystemSound"]) expect(swift).not.toContain(gone);
+    expect(swift).toContain("if #available(iOS 17.0, *) { return lidarPresent }");
     expect(swift).toContain('"3D Scan needs iOS 17 or newer on an iPhone with a LiDAR sensor. Update the iPhone."');
-    // The capture: the mesh drawn blue, a 12 MP still by itself every 0.35 m / 15° (and on the shutter),
-    // the faces a photo saw (in front, within reach, facing, not behind something per the depth map)
-    // left out of the drawing — that is the clear; the coverage judged off the main thread.
+    // The walk: the mesh drawn blue, a frame of the feed kept every 0.3 m / 10° (and on the button),
+    // the faces a frame saw (in front, within reach, inside the picture, not behind something per
+    // the depth map, else facing the lens by ARKit's normals) left out of the drawing — the clear.
     expect(swift).toContain("config.sceneReconstruction = .mesh");
-    expect(swift).toContain("ARWorldTrackingConfiguration.recommendedVideoFormatForHighResolutionFrameCapturing");
-    expect(swift).toContain("sceneView.session.captureHighResolutionFrame { [weak self] hi, _ in");
-    expect(swift).toContain("DispatchQueue.main.async { self?.landShot(hi ?? frame, pose: frame) }");
-    expect(swift).toContain("static let moveStep: Float = 0.35");
-    expect(swift).toContain("static let turnStep: Float = 15 * .pi / 180");
+    expect(swift).toContain("static let moveStep: Float = 0.3");
+    expect(swift).toContain("static let turnStep: Float = 10 * .pi / 180");
+    expect(swift).toContain("static let maxFrames = 600");
     expect(swift).toContain("guard moved >= Self.moveStep || turned >= Self.turnStep else { return }");
-    expect(swift).toContain('shutter.accessibilityLabel = "Take A Photo"');
-    expect(swift).toContain("if z > reading + 0.08 + 0.06 * z { continue }");
-    expect(swift).toContain("if normal != .zero, simd_dot(normal, eye - centre) <= 0 { continue }");
+    expect(swift).toContain('shutter.accessibilityLabel = "Keep This View"');
+    // ONE RULE for "this frame saw this face" (skeptic #20): the blue and the painter ask the same
+    // function, so the blue never clears where the painter would leave grey.
+    expect(swift).toContain("static func score(_ a: simd_float3, _ b: simd_float3, _ c: simd_float3, normal: simd_float3, toCamera: simd_float4x4, eye: simd_float3, k: simd_float3x3, width: Float, height: Float, depth: UnsafeBufferPointer<Float>?, depthWidth: Int, depthHeight: Int) -> Float");
+    expect(swift).toContain("if Painter.score(a, b, c, normal: n / len, toCamera: toCamera, eye: eye, k: v.intrinsics, width: v.width, height: v.height, depth: depth, depthWidth: v.depthWidth, depthHeight: v.depthHeight) > 0 {");
+    expect(swift).toContain("let v = score(f.a, f.b, f.c, normal: f.normal, toCamera: toCamera, eye: eye, k: kf.intrinsics, width: kf.width, height: kf.height, depth: dp, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight)");
+    expect(swift).toContain("guard (frame.smoothedSceneDepth ?? frame.sceneDepth) != nil else { return }");
     expect(swift).toContain("guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { return .min }");
-    expect(swift).toContain("if !covered.contains(Self.key((a + b + c) / 3)) { idx.append(contentsOf: snap.faces[i..<i + 3]) }");
     expect(swift).toContain('private let work = DispatchQueue(label: "north.scan3d.coverage", qos: .userInitiated)');
     expect(swift).toContain("m.diffuse.contents = UIColor(red: 0.25, green: 0.55, blue: 1, alpha: 0.5)");
-    expect(swift).toContain("Blue is what the scan still needs; it clears as photos land.");
+    expect(swift).toContain("Blue is what the scan still needs; it clears as the camera sees it.");
     expect(swift).toContain("haptic.impactOccurred()");
-    // The build: Finish waits for ten photos AND for every photo to be on disk; the photos go to the
-    // session one at a time with their depth map (real size) and gravity (upright), in walking order.
-    expect(swift).toContain("static let minShots = 10");
-    expect(swift).toContain("guard finishWaiting, !processing, !finished, !shotInFlight, pendingWrites == 0 else { return }");
-    // The session is given the FOLDER of photos (its constructor over a sequence of samples trapped
-    // on Erik's phone, twice, the moment Finish was tapped — the crash reports of 10-16 16:39/16:41);
-    // each photo is a HEIC with the LiDAR depth map embedded, gravity written beside it.
-    expect(swift).toContain("photo = try PhotogrammetrySession(input: imagesDir, configuration: config)");
-    expect(swift).not.toContain("PhotogrammetrySample");
-    expect(swift).toContain('CGImageDestinationCreateWithData(out, "public.heic" as CFString, 1, nil)');
-    expect(swift).toContain("CGImageDestinationAddAuxiliaryDataInfo(dest, aux.type, aux.info)");
-    expect(swift).toContain("AVDepthData(fromDictionaryRepresentation: representation)");
-    expect(swift).toContain('name + "_gravity.txt"');
-    expect(swift).toContain("config.isObjectMaskingEnabled = false");
-    expect(swift).toContain("try photo.process(requests: [.modelFile(url: output, detail: .reduced)])");
-    // Kept from the first cut (skeptic #18): the phone must not lock; Cancel with work done asks;
-    // a failure before the screen is up is said once it is; the build's errors are plain
-    // sentences; stale scans sweep; the file is served only from the scan folder, in pieces.
+    // The paint: Finish waits for ten frames AND for every frame to be on disk; each face is given
+    // to the frame that saw it best (facing, near, whole face inside, depth-unoccluded) and its
+    // atlas cell painted from that frame; the mesh is set down on the floor; one JPEG texture;
+    // SceneKit writes the USDZ (the image itself when the writer refuses the file).
+    expect(swift).toContain("static let minFrames = 10");
+    expect(swift).toContain("guard finishWaiting, !processing, !finished, pendingWrites == 0 else { return }");
+    expect(swift).toContain("static func assign(_ faces: [Face], keyframes: [Keyframe], dir: URL, cancelled: Flag, progress: (Double) -> Void) -> [Int32]");
+    expect(swift).toContain("return facing / (d + 0.3)");
+    expect(swift).toContain("if reading.isFinite, reading > 0, pm.z > reading + 0.08 + 0.06 * pm.z { return 0 }");
+    expect(swift).toContain("DispatchQueue.concurrentPerform(iterations: chunks)");
+    expect(swift).toContain("static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [UInt8]");
+    expect(swift).toContain("let cell = max(4, min(12, (size / max(1, side)) & ~3))");
+    expect(swift).toContain("static let maxFaces = 1_000_000");
+    expect(swift).toContain('fail("This scan is too big to paint on this phone. Scan a smaller area.")');
+    expect(swift).toContain("let floor = ys.isEmpty ? lo.y : ys[min(ys.count - 1, ys.count / 100)]");
+    expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c) }");
+    expect(swift).toContain("guard seen * 20 >= faces.count else {");
+    // SceneKit's texture space is top-down (checked on the Mac, 10-16: v 0.2/0.8 in → USD 0.8/0.2
+    // out); the atlas rows are top-down too, so v = y / A — the first painted model wore every
+    // other face's patch with "1 -".
+    expect(swift).toContain("uv.append(simd_float2((cx + 1) / a, (cy + 1) / a))");
+    expect(swift).not.toContain("1 - (cy + 1) / a");
+    // An interruption starts the scan over for real: the session, the mesh, the frames.
+    expect(swift).toContain("meshes.removeAll()\n        snaps.removeAll()\n        dirty.removeAll()\n        meshSeen = false\n        keyframes.removeAll()");
+    expect(swift).toContain("static func writeTexture(_ pixels: inout [UInt8], size: Int, to url: URL) -> Bool");
+    expect(swift).toContain("let carried = wrote && ((try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0) > textureBytes");
+    expect(swift).toContain("var wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)");
+    expect(swift).toContain("m.lightingModel = .physicallyBased");
+    expect(swift).toContain("@_optimize(speed)");
+    // Kept from the earlier cuts (skeptics #18/#19): the phone must not lock; Cancel with work
+    // done asks; an outcome before the screen is up waits for it; the presenter dismisses; a
+    // failed capture drops its frames; stale scans sweep; the file is served only from the scan
+    // folder, in pieces; no network.
     expect(swift).toContain("UIApplication.shared.isIdleTimerDisabled = true");
     expect(swift).toContain("UIApplication.shared.isIdleTimerDisabled = false");
     expect(swift).toContain('UIAlertAction(title: "Drop It", style: .destructive)');
-    // Skeptic #19: an outcome before the screen is up waits for viewDidAppear; the presenter
-    // dismisses (an alert on top goes with it); a build that ends with nothing is said, never hung;
-    // photo ids never repeat; a failed capture drops its photos; the photo's own camera judges coverage.
     expect(swift).toContain("guard appeared else {\n            if pendingOutcome == nil { pendingOutcome = outcome }\n            return\n        }");
     expect(swift).toContain("(presentingViewController ?? self).dismiss(animated: true) { [done] in done(outcome) }");
-    expect(swift).toContain('finish(.failed("The model didn\'t finish building. Try again."))');
-    expect(swift).toContain("await MainActor.run { self?.buildEnded() }");
-    expect(swift).toContain("nextId += 1\n        let id = nextId");
-    expect(swift).toContain("let cam = frame.camera\n        let gravity = Self.gravity(in: cam.transform)");
-    expect(swift).toContain("static let maxShots: Int = {");
-    expect(swift).not.toContain("AudioServicesPlaySystemSound");
-    expect(swift).toContain("static func buildSentence(_ error: Error) -> String");
     expect(swift).toContain("static func sweepOldScans()");
     expect(swift).toContain('"path": output.path');
     expect(swift).toContain('guard url.path.hasPrefix(folder + "/"), url.pathExtension.lowercased() == "usdz" else { return nil }');
-    expect(swift).toContain('"mime": "model/vnd.usdz+zip", "shots": shots');
+    expect(swift).toContain('"mime": "model/vnd.usdz+zip", "shots": frames.count');
     expect(swift).toContain("let length = min(max(1, call.getInt(\"length\") ?? 2_000_000), 4_000_000)");
-    expect(swift).toContain("if processing { photo?.cancel() }");
-    // Open In AR: staging doors + Quick Look (the AR tab is Apple's); the staged file goes on dismiss.
+    expect(swift).toContain("paintCancelled.set()");
     for (const m of ["stageFile", "stageChunk", "previewFile"]) expect(swift).toContain(`CAPPluginMethod(name: "${m}", returnType: CAPPluginReturnPromise)`);
     expect(swift).toContain("final class ModelPreview: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate");
     expect(swift).toContain("guard let url = Self.ownFile(call.getString(\"path\")) else {\n            call.reject(\"That file isn't a staged model of this app's.\")");

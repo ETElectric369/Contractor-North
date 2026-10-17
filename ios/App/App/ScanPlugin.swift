@@ -2,35 +2,34 @@ import ARKit
 import AVFoundation
 import Capacitor
 import CoreImage
-import ImageIO
 import QuickLook
-import RealityKit
 import SceneKit
 import UIKit
 
 /// LIDAR — 3D SCAN (field feedback 10-13, item 5; Erik 2026-10-16, after Polycam: "collect all of
-/// the pixels for all surfaces and render an image … i want that", and after Apple's own area
-/// capture: "no dots and the scan came out all weird … lets group everything with a title called
-/// Lidar, get rid of the site scan and scan the room and lets keep measurements and measure area and
-/// 3d scan and lets get the 3D scan working great").
+/// the pixels for all surfaces and render an image … i want that"; "lets group everything with a
+/// title called Lidar … lets get the 3D scan working great"; and on the photogrammetry cut: "is
+/// there a way to make it do micro images that cluster instead of full size images … PolyCam was
+/// pretty good but i challenge you to do better").
 ///
 /// ONE DOOR. scan3d opens OUR OWN capture screen: ARKit tracks the walk and draws the LiDAR mesh
-/// blue; the phone takes 12 MP photos by itself as the walker moves (and on the shutter), and every
-/// face a photo saw turns clear — what is still blue is what the scan still needs. Finish hands the
-/// photos, their depth maps and gravity to PhotogrammetrySession, which builds a TEXTURED model on
-/// the phone — every surface wearing its real pixels — as a USDZ. The file can be tens of megabytes,
+/// blue; the phone keeps a frame of the camera feed every ~0.3 m or 10° of turn (and on the button),
+/// and every face a frame saw turns clear — what is still blue is what the scan still needs. Finish
+/// PAINTS the final mesh from the frames it kept (the Painter below: each face takes its pixels from
+/// the frame that saw it best) and writes the USDZ — the way Polycam's LiDAR mode works: no
+/// photogrammetry, no solver, nothing to fail on a plain wall, upright and life-size because the
+/// mesh already lives in ARKit's metric, gravity-aligned world. The file can be tens of megabytes,
 /// so it stays in the app's temp folder and the page pulls it through readChunk in 2 MB pieces
 /// (never one giant string over the bridge), then discards it. No numbers come from this door: the
 /// measurements are Measure's (MeasurePlugin), beside it under the Lidar title.
 ///
-/// The site and room doors of cn-v1115 (tapped corners; Apple's room capture) are gone by Erik's
-/// decision; rows they wrote keep their `scan` mark in the stored capture.
+/// The site and room doors of cn-v1115 (tapped corners; Apple's room capture) and the photogrammetry
+/// cut of cn-v1117–1119 (Apple's capture, then our 12 MP stills) are gone by Erik's decisions.
 ///
 /// No network from here (the agent security framework). A phone that cannot scan rejects with ONE
 /// plain sentence the page shows as-is (NOTHING SILENT); Cancel resolves {ok:false, cancelled:true}.
-/// A LOCAL plugin like MeasurePlugin: ARKit, SceneKit and RealityKit ship with iOS. The shell has
-/// to be REBUILT for it (the Debug build on the cabled phone).
-
+/// A LOCAL plugin like MeasurePlugin: ARKit and SceneKit ship with iOS. The shell has to be REBUILT
+/// for it (the Debug build on the cabled phone).
 @objc(ScanPlugin)
 public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "ScanPlugin"
@@ -122,10 +121,9 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
         ARWorldTrackingConfiguration.isSupported && ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
     }
 
-    /// A textured model is our capture (ARKit's 12 MP stills, iOS 16) plus photogrammetry on the
-    /// phone (iOS 17) over the LiDAR mesh.
+    /// A painted model is the LiDAR mesh and the camera feed (ARKit), written by SceneKit.
     static var modelSupported: Bool {
-        if #available(iOS 17.0, *) { return lidarPresent && PhotogrammetrySession.isSupported }
+        if #available(iOS 17.0, *) { return lidarPresent }
         return false
     }
 
@@ -318,7 +316,20 @@ class ScanViewController: UIViewController {
     }
 }
 
-// MARK: - 3D SCAN (our own capture: ARKit photos with visible coverage → photogrammetry)
+// MARK: - 3D SCAN (our own capture: the LiDAR mesh painted with the camera's own pixels)
+
+/// One frame kept during the walk: its camera, and where its picture and depth map sit on disk.
+struct Keyframe {
+    let id: Int
+    let transform: simd_float4x4
+    let intrinsics: simd_float3x3
+    let width: Float
+    let height: Float
+    let depthWidth: Int
+    let depthHeight: Int
+    let image: String
+    let depth: String?
+}
 
 /// A copy of one LiDAR mesh anchor, taken on the main thread so the coverage work can read it off
 /// the main thread without touching ARKit's recycled Metal buffers.
@@ -381,7 +392,7 @@ struct MeshSnap {
     }
 }
 
-/// What a photo saw: the camera it was taken with and the depth behind it, for the coverage test.
+/// What a frame saw: the camera it was taken with and the depth behind it, for the coverage test.
 struct ShotView {
     let transform: simd_float4x4
     let intrinsics: simd_float3x3
@@ -392,28 +403,278 @@ struct ShotView {
     let depthHeight: Int
 }
 
-/// THE SCAN ERIK ASKED FOR (10-16, after Apple's area capture showed no coverage and built a weird
-/// model): our own camera. ARKit tracks the walk and draws the LiDAR mesh BLUE; the phone takes a
-/// 12 MP photo by itself every ~0.35 m or 15° of turn (and on the shutter), and every mesh face a
-/// photo saw — in front of the lens, within reach, facing it, and not behind something per the depth
-/// map — turns CLEAR. What is still blue is what the scan still needs. Finish (ten photos or more)
-/// hands the photos, their depth maps and gravity to PhotogrammetrySession, which builds the
-/// textured USDZ on the phone; the file goes to the page in pieces (readChunk).
+/// A flag one thread sets and another reads (Cancel during the painting).
+final class Flag {
+    private let lock = NSLock()
+    private var on = false
+    func set() { lock.lock(); on = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return on }
+}
+
+/// THE PAINTER. Erik 2026-10-16: "is there a way to make it do micro images that cluster instead
+/// of full size images" — yes: this is how Polycam's LiDAR mode works. The LiDAR mesh is the shape;
+/// the camera's frames are the pixels. Every face of the final mesh is given to the keyframe that
+/// saw it best (facing it, near, the whole face inside the picture, not behind something nearer per
+/// the frame's depth map), and a small square of the texture atlas is painted for it straight out of
+/// that frame. No photogrammetry, no solver, nothing to fail on a plain wall; the mesh is already
+/// metric and gravity-aligned (ARKit's world), so the model stands upright at its real size.
+@available(iOS 17.0, *)
+enum Painter {
+    /// A face in world space (metres), its vertices in the order the atlas cell maps them.
+    struct Face {
+        let a: simd_float3
+        let b: simd_float3
+        let c: simd_float3
+        let normal: simd_float3
+    }
+
+    /// The texture: one square cell per face, `cell` texels on a side.
+    struct Atlas {
+        let size: Int
+        let cell: Int
+        var perRow: Int { size / cell }
+    }
+
+    /// 4096 texels across for a room, smaller for a nook; cells as big as the face count allows
+    /// (eight or more texels across a 5 cm triangle is a photo; three is the floor).
+    static func atlas(forFaces n: Int) -> Atlas {
+        let side = Int(ceil(sqrt(Double(max(1, n)))))
+        var size = 512
+        while size < side * 8 && size < 4096 { size *= 2 }
+        // Multiples of four: the viewer's smaller mip levels then stay inside a cell (no fringe).
+        let cell = max(4, min(12, (size / max(1, side)) & ~3))
+        return Atlas(size: size, cell: cell)
+    }
+
+    /// The most faces one atlas holds (4096² at four texels a cell): a house and its yard. Beyond
+    /// it the scan is refused in words rather than painted wrong.
+    static let maxFaces = 1_000_000
+
+    /// A world point in a frame's picture: (u, v) in its pixels, z the distance along the lens.
+    @inline(__always)
+    static func project(_ p: simd_float3, _ toCamera: simd_float4x4, _ k: simd_float3x3) -> (u: Float, v: Float, z: Float) {
+        let c = toCamera * simd_float4(p, 1)
+        let z = -c.z
+        guard z > 0.05 else { return (-1, -1, z) }
+        return (k.columns.0.x * (c.x / z) + k.columns.2.x, k.columns.1.y * (-c.y / z) + k.columns.2.y, z)
+    }
+
+    /// ONE RULE: how well a frame saw a face — 0 when it did not. Facing the lens (ARKit's normal),
+    /// near, the whole face inside the picture with a margin, and its centre not behind something
+    /// nearer per the frame's depth map. The coverage (the blue) and the painter both ask this, so
+    /// the blue never clears where the painter would leave grey.
+    @inline(__always)
+    static func score(_ a: simd_float3, _ b: simd_float3, _ c: simd_float3, normal: simd_float3, toCamera: simd_float4x4, eye: simd_float3, k: simd_float3x3, width: Float, height: Float, depth: UnsafeBufferPointer<Float>?, depthWidth: Int, depthHeight: Int) -> Float {
+        let margin: Float = 6
+        let centre = (a + b + c) / 3
+        let toEye = eye - centre
+        let d = simd_length(toEye)
+        guard d > 0.15, d < 6 else { return 0 }
+        let facing = simd_dot(normal, toEye / d)
+        guard facing > 0.25 else { return 0 }
+        let pa = project(a, toCamera, k)
+        let pb = project(b, toCamera, k)
+        let pc = project(c, toCamera, k)
+        guard pa.z > 0.05, pb.z > 0.05, pc.z > 0.05,
+              pa.u >= margin, pa.u < width - margin, pa.v >= margin, pa.v < height - margin,
+              pb.u >= margin, pb.u < width - margin, pb.v >= margin, pb.v < height - margin,
+              pc.u >= margin, pc.u < width - margin, pc.v >= margin, pc.v < height - margin else { return 0 }
+        if let depth, depthWidth > 0, depthHeight > 0, depth.count == depthWidth * depthHeight {
+            let pm = project(centre, toCamera, k)
+            let du = min(depthWidth - 1, max(0, Int(pm.u / width * Float(depthWidth))))
+            let dv = min(depthHeight - 1, max(0, Int(pm.v / height * Float(depthHeight))))
+            let reading = depth[dv * depthWidth + du]
+            if reading.isFinite, reading > 0, pm.z > reading + 0.08 + 0.06 * pm.z { return 0 }
+        }
+        return facing / (d + 0.3)
+    }
+
+    /// For every face, the keyframe that saw it best (-1: none did). Each frame's pass runs over
+    /// the faces on every core (disjoint slices of `best` and `score`).
+    @_optimize(speed)
+    static func assign(_ faces: [Face], keyframes: [Keyframe], dir: URL, cancelled: Flag, progress: (Double) -> Void) -> [Int32] {
+        var best = [Int32](repeating: -1, count: faces.count)
+        var bestScore = [Float](repeating: 0, count: faces.count)
+        let chunks = max(1, min(16, faces.count / 4096))
+        let per = (faces.count + chunks - 1) / chunks
+        for (k, kf) in keyframes.enumerated() {
+            if cancelled.isSet { return best }
+            let depth = kf.depth.flatMap { Scan3DViewController.depthFloats(at: dir.appendingPathComponent($0), count: kf.depthWidth * kf.depthHeight) }
+            let toCamera = simd_inverse(kf.transform)
+            let eye = Scan3DViewController.position(kf.transform)
+            // The depth map in a plain buffer for the pass (the cores read it, nothing writes it).
+            let dbuf = UnsafeMutableBufferPointer<Float>.allocate(capacity: max(1, depth?.count ?? 0))
+            defer { dbuf.deallocate() }
+            var dp: UnsafeBufferPointer<Float>? = nil
+            if let depth {
+                _ = dbuf.initialize(from: depth)
+                dp = UnsafeBufferPointer(dbuf)
+            }
+            faces.withUnsafeBufferPointer { fp in
+                best.withUnsafeMutableBufferPointer { bp in
+                    bestScore.withUnsafeMutableBufferPointer { sp in
+                        DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
+                            let lo = chunk * per, hi = min(fp.count, lo + per)
+                            var i = lo
+                            while i < hi {
+                                let f = fp[i]
+                                let v = score(f.a, f.b, f.c, normal: f.normal, toCamera: toCamera, eye: eye, k: kf.intrinsics, width: kf.width, height: kf.height, depth: dp, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight)
+                                if v > sp[i] {
+                                    sp[i] = v
+                                    bp[i] = Int32(k)
+                                }
+                                i += 1
+                            }
+                        }
+                    }
+                }
+            }
+            progress(Double(k + 1) / Double(max(1, keyframes.count)))
+        }
+        return best
+    }
+
+    /// The atlas, RGBA, row 0 at the top: every cell painted from its face's keyframe — the whole
+    /// square, the texels outside the triangle clamped onto it, so filtering at the edges never
+    /// pulls in a neighbour's colours. Faces no frame saw stay a quiet grey.
+    @_optimize(speed)
+    static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [UInt8] {
+        let size = atlas.size, cell = atlas.cell, perRow = atlas.perRow
+        var pixels = [UInt8](repeating: 150, count: size * size * 4)
+        var i = 3
+        while i < pixels.count { pixels[i] = 255; i += 4 }
+        var byFrame = [[Int]](repeating: [], count: keyframes.count)
+        for (face, b) in best.enumerated() where b >= 0 { byFrame[Int(b)].append(face) }
+        let span = Float(max(1, cell - 2))
+        for (k, list) in byFrame.enumerated() {
+            if cancelled.isSet { return pixels }
+            defer { progress(Double(k + 1) / Double(max(1, keyframes.count))) }
+            guard !list.isEmpty, let img = rgba(of: dir.appendingPathComponent(keyframes[k].image)) else { continue }
+            let kf = keyframes[k]
+            let toCamera = simd_inverse(kf.transform)
+            let sx = Float(img.width) / kf.width, sy = Float(img.height) / kf.height
+            let maxU = Float(img.width - 1), maxV = Float(img.height - 1)
+            let chunks = max(1, min(16, list.count / 512))
+            let per = (list.count + chunks - 1) / chunks
+            pixels.withUnsafeMutableBufferPointer { pp in
+                img.bytes.withUnsafeBufferPointer { ip in
+                    DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
+                        let lo = chunk * per, hi = min(list.count, lo + per)
+                        var n = lo
+                        while n < hi {
+                            let face = list[n]
+                            n += 1
+                            let f = faces[face]
+                            let cx = (face % perRow) * cell, cy = (face / perRow) * cell
+                            for ty in 0..<cell {
+                                for tx in 0..<cell {
+                                    var b1 = (Float(tx) + 0.5 - 1) / span
+                                    var b2 = (Float(ty) + 0.5 - 1) / span
+                                    b1 = max(0, b1)
+                                    b2 = max(0, b2)
+                                    if b1 + b2 > 1 {
+                                        let s = b1 + b2
+                                        b1 /= s
+                                        b2 /= s
+                                    }
+                                    let p = (1 - b1 - b2) * f.a + b1 * f.b + b2 * f.c
+                                    let pr = project(p, toCamera, kf.intrinsics)
+                                    let u = Int(max(0, min(maxU, pr.u * sx))), v = Int(max(0, min(maxV, pr.v * sy)))
+                                    let si = (v * img.width + u) * 4
+                                    let di = ((cy + ty) * size + cx + tx) * 4
+                                    pp[di] = ip[si]
+                                    pp[di + 1] = ip[si + 1]
+                                    pp[di + 2] = ip[si + 2]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return pixels
+    }
+
+    /// A frame's picture as RGBA bytes, row 0 at the top.
+    static func rgba(of url: URL) -> (bytes: [UInt8], width: Int, height: Int)? {
+        guard let cg = UIImage(contentsOfFile: url.path)?.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 0, h > 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        let ok: Bool = bytes.withUnsafeMutableBytes { buf in
+            guard let base = buf.baseAddress, let ctx = CGContext(data: base, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        return ok ? (bytes, w, h) : nil
+    }
+
+    /// The atlas as a JPEG on disk (SceneKit's USDZ writer carries a file into the package).
+    static func writeTexture(_ pixels: inout [UInt8], size: Int, to url: URL) -> Bool {
+        let image: CGImage? = pixels.withUnsafeMutableBytes { buf in
+            guard let base = buf.baseAddress, let ctx = CGContext(data: base, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return nil }
+            return ctx.makeImage()
+        }
+        guard let image, let data = UIImage(cgImage: image).jpegData(compressionQuality: 0.95) else { return false }
+        return (try? data.write(to: url)) != nil
+    }
+
+    /// The painted mesh: three vertices per face (each face owns its cell), normals, and the cell's
+    /// corners as texture coordinates. SceneKit's own texture space runs TOP-DOWN like the atlas
+    /// rows (its USD writer flips to USD's bottom-up itself — checked on the Mac with one triangle,
+    /// 10-16, after the first painted model wore every other face's patch).
+    static func geometry(_ faces: [Face], atlas: Atlas, texture: Any) -> SCNGeometry {
+        let a = Float(atlas.size), n = Float(atlas.cell), perRow = atlas.perRow
+        var pos = [simd_float3]()
+        var nor = [simd_float3]()
+        var uv = [simd_float2]()
+        pos.reserveCapacity(faces.count * 3)
+        nor.reserveCapacity(faces.count * 3)
+        uv.reserveCapacity(faces.count * 3)
+        for (i, f) in faces.enumerated() {
+            pos.append(f.a); pos.append(f.b); pos.append(f.c)
+            nor.append(f.normal); nor.append(f.normal); nor.append(f.normal)
+            let cx = Float(i % perRow) * n, cy = Float(i / perRow) * n
+            uv.append(simd_float2((cx + 1) / a, (cy + 1) / a))
+            uv.append(simd_float2((cx + n - 1) / a, (cy + 1) / a))
+            uv.append(simd_float2((cx + 1) / a, (cy + n - 1) / a))
+        }
+        var idx = [UInt32](repeating: 0, count: faces.count * 3)
+        for i in 0..<idx.count { idx[i] = UInt32(i) }
+        let vSrc = SCNGeometrySource(data: pos.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .vertex, vectorCount: pos.count, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float3>.stride)
+        let nSrc = SCNGeometrySource(data: nor.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .normal, vectorCount: nor.count, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float3>.stride)
+        let tSrc = SCNGeometrySource(data: uv.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .texcoord, vectorCount: uv.count, usesFloatComponents: true, componentsPerVector: 2, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float2>.stride)
+        let el = SCNGeometryElement(data: idx.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles, primitiveCount: faces.count, bytesPerIndex: 4)
+        let g = SCNGeometry(sources: [vSrc, nSrc, tSrc], elements: [el])
+        let m = SCNMaterial()
+        m.lightingModel = .physicallyBased
+        m.diffuse.contents = texture
+        m.roughness.contents = 1.0
+        m.metalness.contents = 0.0
+        m.isDoubleSided = true
+        g.materials = [m]
+        return g
+    }
+}
+
+/// THE SCAN ERIK ASKED FOR (10-16, after Polycam). ARKit tracks the walk and draws the LiDAR mesh
+/// BLUE; the phone keeps a frame of the camera feed every ~0.3 m or 10° of turn (and on the
+/// button), and every mesh face a frame saw — in front of the lens, within reach, facing it, and
+/// not behind something per the depth map — turns CLEAR. What is still blue is what the scan still
+/// needs. Finish paints the final mesh from the frames it kept (Painter) and writes the USDZ; the
+/// file goes to the page in pieces (readChunk).
 @available(iOS 17.0, *)
 final class Scan3DViewController: ScanViewController, ARSessionDelegate {
-    /// Photogrammetry wants a real set of photos: Finish opens at this many.
-    static let minShots = 10
-    /// The most photos one scan takes (a reduced-detail build of 200 is minutes on the phone; Apple's
-    /// own ceiling, where it is lower, wins).
-    static let maxShots: Int = {
-        let cap = PhotogrammetrySession.limits.maximumNumberOfInputImages
-        return cap > 0 ? min(200, cap) : 200
-    }()
-    /// A new photo after this much walking, or this much turning, with at least this gap between two.
-    static let moveStep: Float = 0.35
-    static let turnStep: Float = 15 * .pi / 180
-    static let shotGap: TimeInterval = 0.7
-    /// How far a photo counts as covering (meters), and the grid the coverage is kept on.
+    /// The painter wants a real walk: Finish opens at this many frames.
+    static let minFrames = 10
+    /// The most frames one scan keeps (~300 KB each on disk): a house side at 0.3 m a frame.
+    /// Erik 2026-10-16: "more coverage area wins over fine detail on this one".
+    static let maxFrames = 600
+    /// A new frame after this much walking, or this much turning, with at least this gap between two.
+    static let moveStep: Float = 0.3
+    static let turnStep: Float = 10 * .pi / 180
+    static let frameGap: TimeInterval = 0.25
+    /// How far a frame counts as covering (meters), and the grid the coverage is kept on.
     static let reach: Float = 5
     static let cell: Float = 0.1
 
@@ -428,54 +689,42 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     private let buildLabel = UILabel()
 
     private let folder: URL
-    /// The photos alone (the session reads EVERY image in the folder it is given — the checkpoints
-    /// live beside it, never in it).
+    /// The frames' pictures and depth maps.
     private let imagesDir: URL
-    private let checkpointDir: URL
     private let outputURL: URL
 
     private var trackingNormal = false
     private var meshSeen = false
-    private var shotInFlight = false
-    private var shots = 0
-    /// Photo ids only ever go up (a failed write takes the count down, never an id back).
+    private var keyframes: [Keyframe] = []
+    /// Frame ids only ever go up (a failed write takes its frame out, never an id back).
     private var nextId = 0
-    /// Said once: this phone gave no 12 MP still, so the photos are the camera feed's size.
-    private var saidLowRes = false
-    private var lastShotAt: TimeInterval = 0
-    private var lastShotTransform: simd_float4x4?
-    /// Photos still being written to disk; Finish waits for zero.
+    private var lastAt: TimeInterval = 0
+    private var lastTransform: simd_float4x4?
+    /// Frames still being written to disk; Finish waits for zero.
     private var pendingWrites = 0
     private var finishWaiting = false
-    /// The ids of the photos that are on disk.
-    private var records: [Int] = []
     private var processing = false
-    private var photo: PhotogrammetrySession?
-    /// The recommended high-resolution video format is tried first; if the session refuses it, the
-    /// default format is tried once before the failure is said.
-    private var formatRetried = false
-    private var startedAt = Date()
+    private let paintCancelled = Flag()
 
     /// The mesh as ARKit holds it (main thread), our copy of each anchor (refreshed for the anchors
-    /// that changed, at most four times a second — never every anchor on every photo) and the node
-    /// drawing each anchor's uncovered faces.
+    /// that changed, at most four times a second) and the node drawing each anchor's uncovered faces.
     private var meshes: [UUID: ARMeshAnchor] = [:]
     private var snaps: [UUID: MeshSnap] = [:]
     private var nodes: [UUID: SCNNode] = [:]
     private var dirty = Set<UUID>()
     private var flushScheduled = false
-    /// The coverage work: the voxels a photo saw, read and written on this queue only.
+    /// The coverage work: the voxels a frame saw, read and written on this queue only.
     private let work = DispatchQueue(label: "north.scan3d.coverage", qos: .userInitiated)
     private var covered = Set<Int64>()
     private let encode = DispatchQueue(label: "north.scan3d.encode", qos: .userInitiated)
+    private let paintQueue = DispatchQueue(label: "north.scan3d.paint", qos: .userInitiated)
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     override init(done: @escaping (ScanOutcome) -> Void) {
         let stamp = UUID().uuidString
         let base = ScanPlugin.scanFolder
         folder = base.appendingPathComponent("capture-\(stamp)", isDirectory: true)
-        imagesDir = folder.appendingPathComponent("images", isDirectory: true)
-        checkpointDir = folder.appendingPathComponent("checkpoint", isDirectory: true)
+        imagesDir = folder.appendingPathComponent("frames", isDirectory: true)
         outputURL = base.appendingPathComponent("model-\(stamp).usdz")
         super.init(done: done)
     }
@@ -487,13 +736,12 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         view.backgroundColor = .black
         do {
             try FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: checkpointDir, withIntermediateDirectories: true)
         } catch {
             // Said once the screen is up (ScanViewController.finish holds it until then).
             finish(.failed("Couldn't make room for the scan on this phone (\(error.localizedDescription)). Free some space and try again."))
             return
         }
-        // A capture and a build take minutes: the phone must not lock in the middle of them.
+        // A walk and a paint take minutes: the phone must not lock in the middle of them.
         UIApplication.shared.isIdleTimerDisabled = true
 
         sceneView.frame = view.bounds
@@ -527,7 +775,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         shutter.tintColor = .black
         shutter.backgroundColor = .white
         shutter.layer.cornerRadius = 36
-        shutter.accessibilityLabel = "Take A Photo"
+        shutter.accessibilityLabel = "Keep This View"
         shutter.addTarget(self, action: #selector(shutterTapped), for: .touchUpInside)
         for b in [cancelButton, finishButton, shutter] {
             b.translatesAutoresizingMaskIntoConstraints = false
@@ -539,7 +787,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         buildBox.isHidden = true
         view.addSubview(buildBox)
         let buildTitle = UILabel()
-        buildTitle.text = "Building the model…"
+        buildTitle.text = "Painting the model…"
         buildTitle.font = .systemFont(ofSize: 22, weight: .bold)
         buildTitle.textColor = .white
         buildTitle.textAlignment = .center
@@ -547,7 +795,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         buildLabel.textColor = UIColor.white.withAlphaComponent(0.8)
         buildLabel.textAlignment = .center
         buildLabel.numberOfLines = 2
-        buildLabel.text = "0% — a few minutes on the phone; keep the app open"
+        buildLabel.text = "0% — a minute or two on the phone; keep the app open"
         buildBar.progressTintColor = .white
         buildBar.trackTintColor = UIColor.white.withAlphaComponent(0.25)
         let buildCancel = UIButton(type: .system)
@@ -594,7 +842,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             stack.trailingAnchor.constraint(equalTo: buildBox.trailingAnchor, constant: -32),
             buildBar.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
-        counter.text = "  0 photos  "
+        refreshCounter()
         say("Finding the surfaces — move the phone slowly")
     }
 
@@ -602,7 +850,18 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         super.viewWillAppear(animated)
         guard pendingOutcome == nil else { return }
         haptic.prepare()
-        run(highResolution: true)
+        run()
+    }
+
+    /// World tracking with the LiDAR mesh and the depth map, from a fresh origin.
+    private func run() {
+        let config = ARWorldTrackingConfiguration()
+        config.sceneReconstruction = .mesh
+        config.environmentTexturing = .none
+        config.worldAlignment = .gravity
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) { config.frameSemantics.insert(.smoothedSceneDepth) }
+        else if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) { config.frameSemantics.insert(.sceneDepth) }
+        sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -615,64 +874,53 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         super.finish(outcome)
     }
 
-    /// World tracking with the LiDAR mesh, the depth map and — first try — the video format that
-    /// gives 12 MP stills (iOS 16's captureHighResolutionFrame).
-    private func run(highResolution: Bool) {
-        let config = ARWorldTrackingConfiguration()
-        config.sceneReconstruction = .mesh
-        config.environmentTexturing = .none
-        config.worldAlignment = .gravity
-        if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) { config.frameSemantics.insert(.smoothedSceneDepth) }
-        else if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) { config.frameSemantics.insert(.sceneDepth) }
-        if highResolution, let format = ARWorldTrackingConfiguration.recommendedVideoFormatForHighResolutionFrameCapturing { config.videoFormat = format }
-        startedAt = Date()
-        sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
-    }
-
     private func say(_ s: String) {
         hint.text = "  \(s)  "
     }
 
     private func refreshCounter() {
-        counter.text = "  \(shots) photo\(shots == 1 ? "" : "s")  "
-        finishButton.isEnabled = shots >= Self.minShots && !processing && !finishWaiting
+        let n = keyframes.count
+        counter.text = "  \(n) frame\(n == 1 ? "" : "s")  "
+        finishButton.isEnabled = n >= Self.minFrames && !processing && !finishWaiting
     }
 
     private var walkHint: String {
-        if shots >= Self.maxShots { return "That's the most photos for one scan — Finish." }
-        if shots >= Self.minShots { return "Keep going until the blue is gone, then Finish." }
-        return "Walk slowly and point at every surface. Blue is what the scan still needs; it clears as photos land."
+        let n = keyframes.count
+        if n >= Self.maxFrames { return "That's the most frames for one scan — Finish." }
+        if n >= Self.minFrames { return "Keep going until the blue is gone, then Finish." }
+        return "Walk slowly and point at every surface. Blue is what the scan still needs; it clears as the camera sees it."
     }
 
     // MARK: Buttons
 
     @objc private func shutterTapped() {
-        guard !processing, !finishWaiting, !shotInFlight, shots < Self.maxShots else { return }
+        guard !processing, !finishWaiting, keyframes.count < Self.maxFrames else { return }
         guard let frame = sceneView.session.currentFrame else { return }
         guard trackingNormal else {
             say("Hold on — the camera is still finding its place")
             return
         }
-        takeShot(frame)
+        keep(frame)
     }
 
     @objc private func finishTapped() {
-        guard !finished, !processing, !finishWaiting, shots >= Self.minShots else { return }
+        guard !finished, !processing, !finishWaiting, keyframes.count >= Self.minFrames else { return }
         finishWaiting = true
         finishButton.isEnabled = false
         shutter.isEnabled = false
-        say("Finishing the capture…")
-        startBuildWhenWritten()
+        say("Finishing the walk…")
+        startPaintWhenWritten()
     }
 
-    /// Cancel with photos taken, or mid-build, asks first: one tap must not throw away minutes of walking.
+    /// Cancel with frames kept, or mid-paint, asks first: one tap must not throw away minutes of walking.
     @objc private func cancelTapped() {
         guard !finished else { return }
-        if shots == 0 && !processing {
+        if keyframes.isEmpty && !processing {
             dropScan()
             return
         }
-        let alert = UIAlertController(title: processing ? "Drop This Model?" : "Drop This Scan?", message: processing ? "The model is still building. Dropping it throws the photos away." : "\(shots) photo\(shots == 1 ? "" : "s") so far would be thrown away.", preferredStyle: .alert)
+        let n = keyframes.count
+        let alert = UIAlertController(title: processing ? "Drop This Model?" : "Drop This Scan?", message: processing ? "The model is still being painted. Dropping it throws the walk away." : "\(n) frame\(n == 1 ? "" : "s") so far would be thrown away.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Keep Going", style: .cancel))
         alert.addAction(UIAlertAction(title: "Drop It", style: .destructive) { [weak self] _ in self?.dropScan() })
         (presentedViewController ?? self).present(alert, animated: true)
@@ -680,67 +928,51 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
 
     private func dropScan() {
         guard !finished else { return }
-        if processing { photo?.cancel() }
+        paintCancelled.set()
         cleanup(keepModel: false)
         finish(.cancelled)
     }
 
-    // MARK: The photos
+    // MARK: The frames
 
-    /// Every frame: a new photo once the walk has moved or turned enough since the last one.
+    /// Every frame: a new keyframe once the walk has moved or turned enough since the last one.
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        guard trackingNormal, !shotInFlight, !processing, !finishWaiting, !finished, shots < Self.maxShots else { return }
-        guard frame.timestamp - lastShotAt >= Self.shotGap else { return }
+        guard trackingNormal, meshSeen, !processing, !finishWaiting, !finished, keyframes.count < Self.maxFrames else { return }
+        guard frame.timestamp - lastAt >= Self.frameGap else { return }
+        // A frame with no depth map cannot say what is behind what: not kept by itself.
+        guard (frame.smoothedSceneDepth ?? frame.sceneDepth) != nil else { return }
         let t = frame.camera.transform
-        if let last = lastShotTransform {
+        if let last = lastTransform {
             let moved = simd_distance(Self.position(t), Self.position(last))
             let turned = Self.angle(Self.forward(t), Self.forward(last))
             guard moved >= Self.moveStep || turned >= Self.turnStep else { return }
-        } else if !meshSeen {
-            return
         }
-        takeShot(frame)
+        keep(frame)
     }
 
     static func position(_ t: simd_float4x4) -> simd_float3 { simd_float3(t.columns.3.x, t.columns.3.y, t.columns.3.z) }
     static func forward(_ t: simd_float4x4) -> simd_float3 { -simd_float3(t.columns.2.x, t.columns.2.y, t.columns.2.z) }
     static func angle(_ a: simd_float3, _ b: simd_float3) -> Float { acos(max(-1, min(1, simd_dot(simd_normalize(a), simd_normalize(b))))) }
 
-    /// Asks ARKit for the 12 MP still; the frame in hand is the fallback (its 1920×1440 image) and
-    /// the pose the coverage is judged from.
-    private func takeShot(_ frame: ARFrame) {
-        shotInFlight = true
-        lastShotAt = frame.timestamp
-        lastShotTransform = frame.camera.transform
-        sceneView.session.captureHighResolutionFrame { [weak self] hi, _ in
-            DispatchQueue.main.async { self?.landShot(hi ?? frame, pose: frame) }
-        }
-    }
-
-    /// The photo is in hand: counted, felt, written off the main thread; the faces it saw go clear.
-    /// `frame` is the photo (its own camera judges what it saw); `pose` is the frame the request
-    /// rode, kept for its depth map when the photo carries none.
-    private func landShot(_ frame: ARFrame, pose: ARFrame) {
-        shotInFlight = false
-        guard !finished, !processing else { return }
-        shots += 1
+    /// A frame is kept: counted, felt, written off the main thread; the faces it saw go clear.
+    private func keep(_ frame: ARFrame) {
+        lastAt = frame.timestamp
+        lastTransform = frame.camera.transform
         nextId += 1
         let id = nextId
+        let cam = frame.camera
+        let image = frame.capturedImage
+        let depthMap = (frame.smoothedSceneDepth ?? frame.sceneDepth)?.depthMap
+        let depth = depthMap.flatMap(Self.floats(of:))
+        let imageName = String(format: "frame-%04d.jpg", id)
+        let depthName = depth == nil ? nil : String(format: "frame-%04d.depth", id)
+        let kf = Keyframe(id: id, transform: cam.transform, intrinsics: cam.intrinsics, width: Float(cam.imageResolution.width), height: Float(cam.imageResolution.height), depthWidth: depth?.width ?? 0, depthHeight: depth?.height ?? 0, image: imageName, depth: depthName)
+        keyframes.append(kf)
         refreshCounter()
         haptic.impactOccurred()
-        if frame === pose, !saidLowRes {
-            saidLowRes = true
-            say("This phone gave no full-size photo — the scan uses the camera feed's; the model will be rougher.")
-        } else {
-            say(walkHint)
-        }
+        say(walkHint)
 
-        let image = frame.capturedImage
-        let depthMap = (frame.smoothedSceneDepth ?? frame.sceneDepth ?? pose.smoothedSceneDepth ?? pose.sceneDepth)?.depthMap
-        let depth = depthMap.flatMap(Self.floats(of:))
-        let cam = frame.camera
-        let gravity = Self.gravity(in: cam.transform)
-        let seen = ShotView(transform: cam.transform, intrinsics: cam.intrinsics, width: Float(cam.imageResolution.width), height: Float(cam.imageResolution.height), depth: depth?.floats ?? [], depthWidth: depth?.width ?? 0, depthHeight: depth?.height ?? 0)
+        let seen = ShotView(transform: cam.transform, intrinsics: cam.intrinsics, width: kf.width, height: kf.height, depth: depth?.floats ?? [], depthWidth: kf.depthWidth, depthHeight: kf.depthHeight)
         let snaps = Array(self.snaps.values)
         work.async { [weak self] in
             guard let self else { return }
@@ -751,71 +983,33 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         pendingWrites += 1
         let dir = imagesDir
         encode.async { [weak self] in
-            let name = String(format: "shot-%04d", id)
             var saved = false
-            if let bytes = Self.heic(of: image, depth: depth) ?? Self.jpeg(of: image) {
-                do {
-                    try bytes.write(to: dir.appendingPathComponent(name + (bytes.isHEIC ? ".heic" : ".jpg")))
-                    try? "\(gravity.x),\(gravity.y),\(gravity.z)".write(to: dir.appendingPathComponent(name + "_gravity.txt"), atomically: true, encoding: .utf8)
-                    saved = true
-                } catch {
-                    saved = false
-                }
+            if let jpeg = Self.jpeg(of: image), (try? jpeg.write(to: dir.appendingPathComponent(imageName))) != nil {
+                saved = true
+                if let depth, let depthName { try? depth.data.write(to: dir.appendingPathComponent(depthName)) }
             }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.pendingWrites -= 1
-                if saved { self.records.append(id) }
-                else if !self.finished {
-                    self.shots = max(0, self.shots - 1)
-                    self.refreshCounter()
-                    self.say("A photo couldn't be saved. Free some space on the phone.")
+                if !saved {
+                    self.keyframes.removeAll { $0.id == id }
+                    if !self.finished {
+                        self.refreshCounter()
+                        self.say("A frame couldn't be saved. Free some space on the phone.")
+                    }
                 }
-                if self.finishWaiting { self.startBuildWhenWritten() }
+                if self.finishWaiting { self.startPaintWhenWritten() }
             }
         }
     }
 
     static let jpegContext = CIContext(options: [.useSoftwareRenderer: false])
 
-    /// The photo as a HEIC with the LiDAR depth map embedded as Apple's auxiliary depth image — the
-    /// form Apple's own capture writes and the session reads for the model's real size. Nil when the
-    /// encoder refuses (the JPEG without depth is the fallback).
-    static func heic(of image: CVPixelBuffer, depth: (data: Data, floats: [Float], width: Int, height: Int)?) -> Data? {
-        let ci = CIImage(cvPixelBuffer: image)
-        guard let cg = jpegContext.createCGImage(ci, from: ci.extent) else { return nil }
-        let out = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(out, "public.heic" as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
-        if let depth, let aux = auxiliaryDepth(depth) { CGImageDestinationAddAuxiliaryDataInfo(dest, aux.type, aux.info) }
-        guard CGImageDestinationFinalize(dest), out.length > 0 else { return nil }
-        return out as Data
-    }
-
-    /// The depth map as the auxiliary-image dictionary ImageIO embeds in a HEIC.
-    static func auxiliaryDepth(_ d: (data: Data, floats: [Float], width: Int, height: Int)) -> (type: CFString, info: CFDictionary)? {
-        let description: [String: Any] = [
-            kCGImagePropertyWidth as String: d.width,
-            kCGImagePropertyHeight as String: d.height,
-            kCGImagePropertyBytesPerRow as String: d.width * 4,
-            kCGImagePropertyPixelFormat as String: Int(kCVPixelFormatType_DepthFloat32),
-        ]
-        let representation: [AnyHashable: Any] = [
-            kCGImageAuxiliaryDataInfoData: d.data,
-            kCGImageAuxiliaryDataInfoDataDescription: description,
-            kCGImageAuxiliaryDataInfoMetadata: CGImageMetadataCreateMutable(),
-        ]
-        guard let depthData = try? AVDepthData(fromDictionaryRepresentation: representation) else { return nil }
-        var type: NSString?
-        guard let info = depthData.dictionaryRepresentation(forAuxiliaryDataType: &type), let type else { return nil }
-        return (type as CFString, info as CFDictionary)
-    }
-
     static func jpeg(of image: CVPixelBuffer) -> Data? {
         let ci = CIImage(cvPixelBuffer: image)
         guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
-        return jpegContext.jpegRepresentation(of: ci, colorSpace: space, options: [quality: 0.92])
+        return jpegContext.jpegRepresentation(of: ci, colorSpace: space, options: [quality: 0.85])
     }
 
     /// The depth map's meters, copied out of ARKit's buffer: raw bytes for the disk, floats for the test.
@@ -831,58 +1025,40 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         return (data, floats, w, h)
     }
 
-    /// Gravity in the device's frame (CoreMotion's: x out the right edge, y out the top, z out of
-    /// the screen), written beside each photo. ARKit's camera frame has x running from the front
-    /// camera toward the bottom of the phone and y across it, so world "down" is carried into the
-    /// camera frame and turned.
-    static func gravity(in camera: simd_float4x4) -> simd_float3 {
-        let r = simd_float3x3(columns: (
-            simd_float3(camera.columns.0.x, camera.columns.0.y, camera.columns.0.z),
-            simd_float3(camera.columns.1.x, camera.columns.1.y, camera.columns.1.z),
-            simd_float3(camera.columns.2.x, camera.columns.2.y, camera.columns.2.z)))
-        let g = r.transpose * simd_float3(0, -1, 0)
-        return simd_float3(g.y, -g.x, g.z)
+    /// A depth map back off the disk; nil when the file is not the size it should be.
+    static func depthFloats(at url: URL, count: Int) -> [Float]? {
+        guard count > 0, let data = try? Data(contentsOf: url), data.count == count * 4 else { return nil }
+        return data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
 
     // MARK: Coverage (the `work` queue)
 
-    /// A face a photo saw: its centre is in front of the lens, within reach, inside the picture,
-    /// facing the lens, and — where the depth map has a reading there — not behind something nearer.
+    /// A face a frame saw: its centre is in front of the lens, within reach, inside the picture,
+    /// and — where the depth map has a reading there — not behind something nearer; where it has
+    /// none, the face must at least face the lens (ARKit's own normals; a zero one is trusted).
     private func mark(_ v: ShotView, over snaps: [MeshSnap]) {
         let toCamera = simd_inverse(v.transform)
-        let fx = v.intrinsics.columns.0.x, fy = v.intrinsics.columns.1.y
-        let cx = v.intrinsics.columns.2.x, cy = v.intrinsics.columns.2.y
         let eye = Self.position(v.transform)
-        let hasDepth = v.depthWidth > 0 && v.depth.count == v.depthWidth * v.depthHeight
-        for snap in snaps {
-            var i = 0
-            while i + 2 < snap.faces.count {
-                let ia = snap.faces[i], ib = snap.faces[i + 1], ic = snap.faces[i + 2]
-                i += 3
-                let a = snap.world(ia), b = snap.world(ib), c = snap.world(ic)
-                let centre = (a + b + c) / 3
-                let p = toCamera * simd_float4(centre, 1)
-                let z = -p.z
-                guard z > 0.1, z < Self.reach else { continue }
-                let u = fx * (p.x / z) + cx
-                let w = fy * (-p.y / z) + cy
-                guard u >= 0, u < v.width, w >= 0, w < v.height else { continue }
-                // Behind something nearer, per the depth map; where the map has no reading there,
-                // the face must at least face the lens (ARKit's own normals — a zero one is trusted).
-                var reading: Float = 0
-                if hasDepth {
-                    let du = min(v.depthWidth - 1, Int(u / v.width * Float(v.depthWidth)))
-                    let dv = min(v.depthHeight - 1, Int(w / v.height * Float(v.depthHeight)))
-                    let d = v.depth[dv * v.depthWidth + du]
-                    if d.isFinite, d > 0 { reading = d }
+        v.depth.withUnsafeBufferPointer { dp in
+            let depth: UnsafeBufferPointer<Float>? = v.depthWidth > 0 && dp.count == v.depthWidth * v.depthHeight ? dp : nil
+            for snap in snaps {
+                var i = 0
+                while i + 2 < snap.faces.count {
+                    let ia = snap.faces[i], ib = snap.faces[i + 1], ic = snap.faces[i + 2]
+                    i += 3
+                    let a = snap.world(ia), b = snap.world(ib), c = snap.world(ic)
+                    var n = snap.worldNormal(ia) + snap.worldNormal(ib) + snap.worldNormal(ic)
+                    var len = simd_length(n)
+                    if len < 0.1 {
+                        n = simd_cross(b - a, c - a)
+                        len = simd_length(n)
+                    }
+                    guard len > 0 else { continue }
+                    // The same rule the painter uses — plus a slightly longer reach for the blue.
+                    if Painter.score(a, b, c, normal: n / len, toCamera: toCamera, eye: eye, k: v.intrinsics, width: v.width, height: v.height, depth: depth, depthWidth: v.depthWidth, depthHeight: v.depthHeight) > 0 {
+                        covered.insert(Self.key((a + b + c) / 3))
+                    }
                 }
-                if reading > 0 {
-                    if z > reading + 0.08 + 0.06 * z { continue }
-                } else {
-                    let normal = snap.worldNormal(ia) + snap.worldNormal(ib) + snap.worldNormal(ic)
-                    if normal != .zero, simd_dot(normal, eye - centre) <= 0 { continue }
-                }
-                covered.insert(Self.key(centre))
             }
         }
     }
@@ -1018,59 +1194,63 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {
-        // The high-resolution video format refused at start: once more with the default one.
-        if !formatRetried, !processing, Date().timeIntervalSince(startedAt) < 5 {
-            formatRetried = true
-            run(highResolution: false)
-            return
-        }
         cleanup(keepModel: false)
         finish(.failed("The camera couldn't scan (\(error.localizedDescription)). Try again."))
     }
 
-    /// An interruption (a call, the app put away) can move the world origin: the coverage is judged
-    /// in that origin, so the blue starts over; the photos are kept (the model does not care).
+    /// An interruption (a call, the app put away) can move the world origin: the mesh, the coverage
+    /// and the frames kept before it would all sit in the old one, so the scan starts over — the
+    /// session reset, the mesh and the frames dropped (skeptic #20).
     func sessionWasInterrupted(_ session: ARSession) {
         trackingNormal = false
-        lastShotTransform = nil
+        lastTransform = nil
     }
 
     func sessionInterruptionEnded(_ session: ARSession) {
+        guard !processing, !finished else { return }
         work.async { [weak self] in self?.covered.removeAll() }
-        redrawAll()
-        say("Scanning was interrupted — the photos are kept; the blue starts over")
+        for node in nodes.values { node.removeFromParentNode() }
+        nodes.removeAll()
+        meshes.removeAll()
+        snaps.removeAll()
+        dirty.removeAll()
+        meshSeen = false
+        keyframes.removeAll()
+        finishWaiting = false
+        shutter.isEnabled = true
+        let dir = imagesDir
+        encode.async {
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        refreshCounter()
+        run()
+        say("Scanning was interrupted — the scan starts over")
     }
 
     func sessionShouldAttemptRelocalization(_ session: ARSession) -> Bool { false }
 
     // MARK: The model
 
-    private func startBuildWhenWritten() {
-        guard finishWaiting, !processing, !finished, !shotInFlight, pendingWrites == 0 else { return }
-        buildModel()
+    private func startPaintWhenWritten() {
+        guard finishWaiting, !processing, !finished, pendingWrites == 0 else { return }
+        paintModel()
     }
 
-    /// Photogrammetry's errors in plain words (the raw ones read "The operation couldn't be completed").
-    static func buildSentence(_ error: Error) -> String {
-        if let e = error as? PhotogrammetrySession.Error {
-            switch e {
-            case .insufficientStorage: return "This phone is out of space for the model. Free some space and try again."
-            case .invalidImages: return "The photos couldn't be used for a model. Try again with more light and a slower walk."
-            case .invalidOutput: return "The model couldn't be written on this phone. Try again."
-            @unknown default: break
-            }
-        }
-        return "The model didn't build. Try again with more light, a slower walk and at least 10 photos."
+    private func setProgress(_ fraction: Double) {
+        buildBar.setProgress(Float(fraction), animated: true)
+        buildLabel.text = "\(Int(fraction * 100))% — a minute or two on the phone; keep the app open"
     }
 
-    /// The photos are on disk: the camera stops, the mesh goes, and the model builds from them.
-    private func buildModel() {
+    /// The frames are on disk: the camera stops, the mesh goes, and the model is painted from them.
+    private func paintModel() {
         guard !finished, !processing else { return }
-        guard records.count >= Self.minShots else {
+        guard keyframes.count >= Self.minFrames else {
             finishWaiting = false
             shutter.isEnabled = true
             refreshCounter()
-            say("Only \(records.count) photo\(records.count == 1 ? " was" : "s were") saved — take at least \(Self.minShots), then Finish.")
+            let n = keyframes.count
+            say("Only \(n) frame\(n == 1 ? " was" : "s were") saved — keep walking to at least \(Self.minFrames), then Finish.")
             return
         }
         processing = true
@@ -1079,91 +1259,123 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         nodes.removeAll()
         sceneView.isHidden = true
         buildBox.isHidden = false
-        let shots = records.count
-        var config = PhotogrammetrySession.Configuration()
-        // A room or a site, not one thing on a table: nothing is cut away as "background". The
-        // session is given the FOLDER and reads the photos itself: its constructor over a sequence
-        // of samples trapped on this phone the moment Finish was tapped (two crash reports, 10-16).
-        config.isObjectMaskingEnabled = false
-        config.checkpointDirectory = checkpointDir
-        let photo: PhotogrammetrySession
-        do {
-            photo = try PhotogrammetrySession(input: imagesDir, configuration: config)
-        } catch {
-            cleanup(keepModel: false)
-            finish(.failed("The phone couldn't start building the model (\(error.localizedDescription)). Try again."))
-            return
-        }
-        self.photo = photo
+        // The final mesh, copied now, is what gets painted.
+        let final = meshes.values.map(MeshSnap.init)
+        let frames = keyframes
+        let dir = imagesDir
         let output = outputURL
-        Task { [weak self] in
-            do {
-                try photo.process(requests: [.modelFile(url: output, detail: .reduced)])
-                for try await o in photo.outputs {
-                    switch o {
-                    case .requestProgress(_, let fraction):
-                        await MainActor.run {
-                            self?.buildBar.setProgress(Float(fraction), animated: true)
-                            self?.buildLabel.text = "\(Int(fraction * 100))% — a few minutes on the phone; keep the app open"
-                        }
-                    case .requestError(_, let error):
-                        await MainActor.run {
-                            guard let self, !self.finished else { return }
-                            self.cleanup(keepModel: false)
-                            self.finish(.failed(Self.buildSentence(error)))
-                        }
-                        return
-                    case .processingCancelled:
-                        // A cancel of ours set `finished` first; any other end is said.
-                        await MainActor.run { self?.buildEnded() }
-                        return
-                    case .requestComplete(_, .modelFile):
-                        await MainActor.run {
-                            guard let self, !self.finished else { return }
-                            let bytes = (try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0
-                            self.cleanup(keepModel: true)
-                            guard bytes > 0 else {
-                                self.finish(.failed("The model came out empty. Try again with more light and a slower walk."))
-                                return
-                            }
-                            self.finish(.scanned(["ok": true, "kind": "model", "path": output.path, "bytes": bytes, "mime": "model/vnd.usdz+zip", "shots": shots]))
-                        }
-                        return
-                    default:
-                        break
-                    }
-                }
-                // The stream closed without a model, an error or a cancel.
-                await MainActor.run { self?.buildEnded() }
-            } catch {
-                await MainActor.run {
+        let textureURL = folder.appendingPathComponent("texture.jpg")
+        let cancelled = paintCancelled
+        paintQueue.async { [weak self] in
+            func fail(_ sentence: String) {
+                DispatchQueue.main.async {
                     guard let self, !self.finished else { return }
                     self.cleanup(keepModel: false)
-                    self.finish(.failed(Self.buildSentence(error)))
+                    self.finish(.failed(sentence))
                 }
+            }
+            func progress(_ f: Double) {
+                DispatchQueue.main.async { self?.setProgress(f) }
+            }
+            // Every face in world space, with its normal, then the whole lot set down on the floor.
+            var faces: [Painter.Face] = []
+            for snap in final {
+                var i = 0
+                while i + 2 < snap.faces.count {
+                    let ia = snap.faces[i], ib = snap.faces[i + 1], ic = snap.faces[i + 2]
+                    i += 3
+                    let a = snap.world(ia)
+                    var b = snap.world(ib), c = snap.world(ic)
+                    var n = snap.worldNormal(ia) + snap.worldNormal(ib) + snap.worldNormal(ic)
+                    var len = simd_length(n)
+                    if len < 0.1 {
+                        n = simd_cross(b - a, c - a)
+                        len = simd_length(n)
+                    }
+                    guard len > 0, simd_length(a).isFinite, simd_length(b).isFinite, simd_length(c).isFinite else { continue }
+                    // The winding follows the normal (into the open), so a viewer that draws one
+                    // side sees the surfaces from inside the room.
+                    if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c) }
+                    faces.append(Painter.Face(a: a, b: b, c: c, normal: n / len))
+                }
+            }
+            guard !faces.isEmpty else {
+                fail("The scan has no surfaces to paint. Walk the room again, slowly.")
+                return
+            }
+            guard faces.count <= Painter.maxFaces else {
+                fail("This scan is too big to paint on this phone. Scan a smaller area.")
+                return
+            }
+            // The floor: the lowest percent of the vertices, not one stray point through a window.
+            var lo = faces[0].a, hi = faces[0].a
+            var ys: [Float] = []
+            ys.reserveCapacity(min(faces.count, 60_000))
+            let step = max(1, faces.count / 20_000)
+            for (i, f) in faces.enumerated() {
+                lo = simd_min(lo, simd_min(f.a, simd_min(f.b, f.c)))
+                hi = simd_max(hi, simd_max(f.a, simd_max(f.b, f.c)))
+                if i % step == 0 { ys.append(f.a.y); ys.append(f.b.y); ys.append(f.c.y) }
+            }
+            ys.sort()
+            let floor = ys.isEmpty ? lo.y : ys[min(ys.count - 1, ys.count / 100)]
+            let shift = simd_float3((lo.x + hi.x) / 2, floor, (lo.z + hi.z) / 2)
+            let kept = frames.map { kf -> Keyframe in
+                var t = kf.transform
+                t.columns.3 = simd_float4(t.columns.3.x - shift.x, t.columns.3.y - shift.y, t.columns.3.z - shift.z, 1)
+                return Keyframe(id: kf.id, transform: t, intrinsics: kf.intrinsics, width: kf.width, height: kf.height, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight, image: kf.image, depth: kf.depth)
+            }
+            faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal) }
+            let atlas = Painter.atlas(forFaces: faces.count)
+            let best = Painter.assign(faces, keyframes: kept, dir: dir, cancelled: cancelled) { progress($0 * 0.45) }
+            if cancelled.isSet { return }
+            let seen = best.reduce(0) { $0 + ($1 >= 0 ? 1 : 0) }
+            guard seen * 20 >= faces.count else {
+                fail("The scan saw too little of the surfaces to paint them. Walk closer and slower, then try again.")
+                return
+            }
+            var pixels = Painter.paint(faces, best: best, keyframes: kept, dir: dir, atlas: atlas, cancelled: cancelled) { progress(0.45 + $0 * 0.45) }
+            if cancelled.isSet { return }
+            guard Painter.writeTexture(&pixels, size: atlas.size, to: textureURL) else {
+                fail("The model's picture couldn't be written on this phone. Free some space and try again.")
+                return
+            }
+            pixels = []
+            let textureBytes = (try? FileManager.default.attributesOfItem(atPath: textureURL.path)[.size] as? NSNumber)?.intValue ?? 0
+            progress(0.92)
+            let scene = SCNScene()
+            scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, texture: textureURL)))
+            var wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)
+            let carried = wrote && ((try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0) > textureBytes
+            if !carried, let image = UIImage(contentsOfFile: textureURL.path) {
+                // The writer refused the file, or wrote the mesh without it: the picture goes in as an image.
+                let again = SCNScene()
+                again.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, texture: image)))
+                wrote = again.write(to: output, options: nil, delegate: nil, progressHandler: nil)
+            }
+            if cancelled.isSet {
+                try? FileManager.default.removeItem(at: output)
+                return
+            }
+            let bytes = wrote ? ((try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0) : 0
+            guard bytes > 0 else {
+                fail("The model couldn't be written on this phone. Try again.")
+                return
+            }
+            DispatchQueue.main.async {
+                guard let self, !self.finished else { return }
+                self.cleanup(keepModel: true)
+                self.finish(.scanned(["ok": true, "kind": "model", "path": output.path, "bytes": bytes, "mime": "model/vnd.usdz+zip", "shots": frames.count]))
             }
         }
     }
 
-    /// The build stopped with nothing to show (the system cancelled it, the stream closed): said,
-    /// so the screen never sits on "Building the model…" for good (skeptic #19).
-    private func buildEnded() {
-        guard !finished else { return }
-        cleanup(keepModel: false)
-        finish(.failed("The model didn't finish building. Try again."))
-    }
-
-    /// The photos, depth maps and checkpoints go as soon as the model is built (or the scan is
+    /// The frames, depth maps and the picture go as soon as the model is written (or the scan is
     /// dropped); the model stays for the page to read, and goes on its discard.
     private func cleanup(keepModel: Bool) {
         try? FileManager.default.removeItem(at: folder)
         if !keepModel { try? FileManager.default.removeItem(at: outputURL) }
     }
-}
-
-private extension Data {
-    /// A HEIC starts with an ISO box whose type is "ftyp" at byte 4.
-    var isHEIC: Bool { count > 12 && self[4] == 0x66 && self[5] == 0x74 && self[6] == 0x79 && self[7] == 0x70 }
 }
 
 // MARK: - Quick Look for a model (Open In AR)
