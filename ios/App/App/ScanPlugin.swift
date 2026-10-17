@@ -597,12 +597,13 @@ enum Painter {
         return (out, next)
     }
 
-    /// The most faces one scan paints: about four full sheets at two faces a cell (~250 MB of texels
-    /// while they are made, a model of ~100 MB — the page sends up to `maxModelBytes`, the viewer
-    /// holds four sheets). Beyond it the scan is refused in words rather than painted wrong (skeptic #22).
-    static let maxFaces = 450_000
+    /// The most faces one scan paints: about six full sheets at two faces a cell (~380 MB of texels
+    /// while they are made, a model of ~120 MB — the page sends up to `maxModelBytes`). Beyond it the
+    /// scan is refused in words rather than painted wrong (skeptic #22). Erik's lamp-off walk of the
+    /// office on 10-16 was refused at the old 450,000 (a walk of ~310,000 faces the time before).
+    static let maxFaces = 700_000
     /// And never more sheets than that, however the faces paired up.
-    static let maxSheets = 4
+    static let maxSheets = 6
     /// The biggest model the page will take over the bridge — MODEL_MAX_BYTES in src/lib/native-scan.ts.
     static let maxModelBytes = 200_000_000
 
@@ -1818,6 +1819,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 return
             }
             guard faces.count <= Painter.maxFaces else {
+                NSLog("[Scan3D] refused: %d faces in %d cells (the most is %d faces)", faces.count, cells, Painter.maxFaces)
                 fail("This scan is too big to paint on this phone. Scan a smaller area.")
                 return
             }
@@ -1844,6 +1846,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             // The cap on faces assumes about two to a cell; a mesh that pairs badly must not grow
             // past the four sheets the phone and the viewer are known to hold (skeptic #24).
             guard atlas.sheets <= Painter.maxSheets else {
+                NSLog("[Scan3D] refused: %d faces in %d cells would take %d sheets (the most is %d)", faces.count, cells, atlas.sheets, Painter.maxSheets)
                 fail("This scan is too big to paint on this phone. Scan a smaller area.")
                 return
             }

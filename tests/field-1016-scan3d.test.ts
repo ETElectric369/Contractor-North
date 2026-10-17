@@ -307,13 +307,15 @@ describe("the wiring, pinned", () => {
     expect(swift).not.toContain("atlas(forFaces");
     // Skeptic #24: the sheets stay bounded however the faces paired; a face can't be its own mate;
     // a face with a repeated vertex (no area) is dropped where the faces are read.
-    expect(swift).toContain("static let maxSheets = 4");
+    expect(swift).toContain("static let maxSheets = 6");
+    expect(swift).toContain('NSLog("[Scan3D] refused: %d faces in %d cells (the most is %d faces)"');
+    expect(swift).toContain('NSLog("[Scan3D] refused: %d faces in %d cells would take %d sheets (the most is %d)"');
     expect(swift).toContain("guard atlas.sheets <= Painter.maxSheets else {");
     expect(swift).toContain("guard j >= 0, j != i, mate[j] < 0 else { return false }");
     expect(swift).toContain("guard ia != ib, ib != ic, ic != ia, len > 0, simd_length(a).isFinite");
     expect(swift).toContain("bytes[count - 4] = UInt8(truncatingIfNeeded: index + 1)");
     expect(swift).toContain("CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue");
-    expect(swift).toContain("static let maxFaces = 450_000");
+    expect(swift).toContain("static let maxFaces = 700_000");
     expect(swift).toContain("static let maxModelBytes = 200_000_000");
     expect(MODEL_MAX_BYTES).toBe(200_000_000);
     expect(swift).toContain("guard bytes <= Painter.maxModelBytes else {");
