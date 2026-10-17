@@ -40,6 +40,7 @@ import { Box, Ruler } from "lucide-react";
 import { discardScan, NO_SCAN_DOORS, scan3dNative, scanDoors, type ScanDoors } from "@/lib/native-scan";
 import { ModelViewer } from "@/components/model-viewer";
 import { jobFilePath } from "@/lib/job-file-upload";
+import { uploadRefusal } from "@/lib/upload-words";
 import { addDocument } from "../../jobs/actions";
 import { inspectorDoors } from "@/lib/inspection/doors";
 
@@ -822,6 +823,8 @@ export function Inspector({
   // on a job. No rows: this door is the picture; the numbers are Measure's, beside it under Lidar.
   /** A model whose upload failed, kept for a retry without another walk (the shell's copy stays too). */
   const unsentModelRef = useRef<{ model: File; path: string } | null>(null);
+  /** Set by upload() when storage's refusal is FINAL (the file is over its limit): no tap will change it. */
+  const uploadFinalRef = useRef(false);
   async function scan3dInto(taskId: string | null) {
     if (measuringRef.current) return;
     measuringRef.current = true;
@@ -846,7 +849,16 @@ export function Inspector({
       pendingTaskRef.current = taskId;
       const stored = await upload([model], { caption: "3D model", about: "3D Scan" });
       if (!stored.length) {
-        // upload() said why (the signal, a size limit); the model waits here for one more tap.
+        if (uploadFinalRef.current) {
+          // Over storage's limit: sending it again would meet the same answer, so the shell's copy
+          // goes; upload() said the size and the one action, a smaller walk. The limit is the
+          // company's setting, not the walker's, so keeping a copy against a raised limit would only
+          // make the next tap re-send instead of scan (skeptic #27 weighed it; the walk is the cost).
+          unsentModelRef.current = null;
+          await discardScan(path);
+          return;
+        }
+        // upload() said why (the signal); the model waits here for one more tap.
         unsentModelRef.current = { model, path };
         setError((e) => `${e ?? "The 3D model didn't upload."} It's kept on this phone — tap 3D Scan again to send it without scanning.`);
         return;
@@ -1032,12 +1044,17 @@ export function Inspector({
     pendingTaskRef.current = null;
     setUploading(true);
     setError(null);
+    uploadFinalRef.current = false;
+    /** The file on its way up when storage answers, so the refusal can name it and its size. */
+    let sending: File | null = null;
     try {
       const supabase = createClient();
       const added: CapturePhoto[] = [];
       for (const raw of files) {
+        sending = raw;
         // An image gets downscaled for the truck's connection; a document uploads untouched.
         const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
+        sending = file;
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const path = `${orgId}/appointments/${appointmentId}/${Date.now()}-${safe}`;
         const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
@@ -1045,6 +1062,7 @@ export function Inspector({
         const { data } = await supabase.storage.from("documents").createSignedUrl(path, 3600);
         added.push({ path, url: data?.signedUrl ?? null });
       }
+      sending = null; // every file is up; what follows is the row, and a refusal there is not a file's
       const next = [...photosRef.current, ...added];
       photosRef.current = next;
       setPhotos(next);
@@ -1067,7 +1085,11 @@ export function Inspector({
         queueCapture({ photo_meta: meta });
       }
     } catch (e: unknown) {
-      setError((e as { message?: string })?.message ?? "Upload failed.");
+      // Storage's sentence in plain words; a 3D model is named as one, a photo by its file.
+      const model = extra?.about === "3D Scan";
+      const r = uploadRefusal(e, { what: model ? "The 3D model" : sending?.name ?? "The file", bytes: sending?.size ?? 0, action: model ? "Scan a smaller area." : "Send a smaller file." });
+      uploadFinalRef.current = r.final;
+      setError(r.sentence);
     } finally {
       setUploading(false);
     }
@@ -1791,12 +1813,15 @@ export function Inspector({
         if (!files.length) return;
         setUploading(true);
         setError(null);
+        let sending: File | null = null;
         try {
           const supabase = createClient();
           const added: string[] = [];
           for (const raw of files) {
             if (!isAllowedUpload(raw.name)) throw new Error(`${raw.name} isn't a file type we accept.`);
+            sending = raw;
             const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
+            sending = file;
             const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
             const path = `${orgId}/appointments/${appointmentId}/${Date.now()}-${safe}`;
             const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
@@ -1805,7 +1830,7 @@ export function Inspector({
           }
           setAnswer(n.key, [...have, ...added]);
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Upload failed.");
+          setError(uploadRefusal(err, { what: sending?.name ?? "The file", bytes: sending?.size ?? 0, action: "Send a smaller file." }).sentence);
         } finally {
           setUploading(false);
         }

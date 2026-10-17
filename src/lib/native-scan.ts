@@ -65,7 +65,7 @@ export type ModelScanResult = ModelScan | { ok: false; cancelled: true } | { ok:
 
 /** How much comes over the bridge per call (base64 of this many bytes). */
 export const CHUNK_BYTES = 2_000_000;
-/** The biggest model the page will assemble (a reduced-detail room is a few to a few tens of MB). */
+/** The biggest model the page will assemble, the cap the phone's painter holds too (a room painted whole is 40 to 130 MB). */
 export const MODEL_MAX_BYTES = 200_000_000;
 
 /** Base64 → bytes; null when it is not base64. */

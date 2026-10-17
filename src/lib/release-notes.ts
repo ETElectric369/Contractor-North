@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1120", date: "2026-10-16", line: "3D Scan paints a truer model at a third of the size: even light along a wall, the picture as the camera saw it, a whole room or shop no longer refused; a file too big to send says so in words." },
   { version: "cn-v1119", date: "2026-10-16", line: "3D Scan rebuilt: the phone photographs as you walk and the surfaces stay blue until a photo has them, then Finish builds the model. Measure, Measure Area and 3D Scan sit together under Lidar." },
   { version: "cn-v1118", date: "2026-10-16", line: "Open In AR works inside the North app: a 3D scan opens in Apple's viewer with its AR tab, straight from the 3D viewer's bar." },
   { version: "cn-v1117", date: "2026-10-16", line: "Scan In 3D on the task sheet: walk a room or a site and the phone builds a textured 3D model you can turn and zoom in North, drop into the room in AR on an iPhone, and show on the portal." },
