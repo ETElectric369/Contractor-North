@@ -249,7 +249,21 @@ describe("the wiring, pinned", () => {
     // an image (a file handed to SceneKit's writer on iOS is left out) and the USDZ is read back for it.
     expect(swift).toContain("static let minFrames = 10");
     expect(swift).toContain("guard finishWaiting, !processing, !finished, pendingWrites == 0 else { return }");
-    expect(swift).toContain("static func assign(_ faces: [Face], keyframes: [Keyframe], dir: URL, cancelled: Flag, progress: (Double) -> Void) -> [Int32]");
+    expect(swift).toContain("static func assign(_ faces: [Face], keyframes: [Keyframe], dir: URL, cancelled: Flag, progress: (Double) -> Void) -> Assignment");
+    // The best TWO frames per face, the second blended in by its weight (seams fade); each texel the
+    // average of the camera pixels under it (no speckle) — Erik 10-16: "distorted on a fine scale".
+    expect(swift).toContain("blend[i] = ramp * secondScore[i] / (bestScore[i] + secondScore[i])");
+    // Only neighbouring frames blend (drift between far-apart frames paints a doubled edge), ramped
+    // by how close the second came; one decode per frame, each frame ADDING its share into a cell
+    // that starts black; a 5 × 5 lattice spread over the texel's footprint (skeptic #23).
+    expect(swift).toContain("guard apart <= 0.75 else { continue }");
+    expect(swift).toContain("let ramp = max(0, min(1, (ratio - 0.5) / 0.3))");
+    expect(swift).toContain("guard let img = autoreleasepool(invoking: { rgba(of: dir.appendingPathComponent(kf.image)) }) else {");
+    expect(swift).toContain("let share: Float = part == 0 ? 1 - assigned.blend[face] : assigned.blend[face]");
+    expect(swift).toContain("let step = perTexel.isFinite ? max(1, Int(perTexel / 5)) : 1");
+    expect(swift).toContain("pp[di] = UInt8(min(255, Float(pp[di]) + Float(sr) / count * share).rounded())");
+    expect(swift).toContain("@_optimize(speed)\n    static func assign(");
+    expect(swift).toContain("@_optimize(speed)\n    static func paint(");
     expect(swift).toContain("return facing / (d + 0.3)");
     expect(swift).toContain("if reading.isFinite, reading > 0, pm.z > reading + 0.08 + 0.06 * pm.z { return 0 }");
     expect(swift).toContain("DispatchQueue.concurrentPerform(iterations: chunks)");
@@ -273,7 +287,7 @@ describe("the wiring, pinned", () => {
     expect(MODEL_MAX_BYTES).toBe(200_000_000);
     expect(swift).toContain("guard bytes <= Painter.maxModelBytes else {");
     expect(swift).toContain("let bases = sheets.map { $0.bytes }");
-    expect(swift).toContain("static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [Sheet]");
+    expect(swift).toContain("static func paint(_ faces: [Face], assigned: Assignment, keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [Sheet]");
     expect(swift).toContain("let data = Data(bytesNoCopy: UnsafeMutableRawPointer(bytes), count: width * height * 4, deallocator: .custom { p, _ in p.deallocate() })");
     expect(swift).toContain("deinit { if !handed { bytes.deallocate() } }");
     expect(swift).toContain("static func geometry(_ faces: [Face], atlas: Atlas, sheet: Int, texture: Any) -> SCNGeometry");

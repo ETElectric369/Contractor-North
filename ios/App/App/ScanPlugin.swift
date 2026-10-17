@@ -584,16 +584,28 @@ enum Painter {
         return facing / (d + 0.3)
     }
 
-    /// For every face, the keyframe that saw it best (-1: none did). Each frame's pass runs over
-    /// the faces on every core (disjoint slices of `best` and `score`).
+    /// Each face's best two frames, and how much the second weighs in the blend (0 to 0.5; 0 when
+    /// there is no second). Neighbouring faces painted from one frame each made a patchwork of small
+    /// exposure steps (Erik 10-16: "it looks pretty distorted on a fine scale"); blending the two
+    /// frames that saw a face best fades those seams instead of jumping across them.
+    struct Assignment {
+        var best: [Int32]
+        var second: [Int32]
+        var blend: [Float]
+    }
+
+    /// For every face, the two keyframes that saw it best (-1: none did). Each frame's pass runs
+    /// over the faces on every core (disjoint slices of the four arrays).
     @_optimize(speed)
-    static func assign(_ faces: [Face], keyframes: [Keyframe], dir: URL, cancelled: Flag, progress: (Double) -> Void) -> [Int32] {
+    static func assign(_ faces: [Face], keyframes: [Keyframe], dir: URL, cancelled: Flag, progress: (Double) -> Void) -> Assignment {
         var best = [Int32](repeating: -1, count: faces.count)
+        var second = [Int32](repeating: -1, count: faces.count)
         var bestScore = [Float](repeating: 0, count: faces.count)
+        var secondScore = [Float](repeating: 0, count: faces.count)
         let chunks = max(1, min(16, faces.count / 4096))
         let per = (faces.count + chunks - 1) / chunks
         for (k, kf) in keyframes.enumerated() {
-            if cancelled.isSet { return best }
+            if cancelled.isSet { break }
             let depth = kf.depth.flatMap { Scan3DViewController.depthFloats(at: dir.appendingPathComponent($0), count: kf.depthWidth * kf.depthHeight) }
             let toCamera = simd_inverse(kf.transform)
             let eye = Scan3DViewController.position(kf.transform)
@@ -607,18 +619,27 @@ enum Painter {
             }
             faces.withUnsafeBufferPointer { fp in
                 best.withUnsafeMutableBufferPointer { bp in
-                    bestScore.withUnsafeMutableBufferPointer { sp in
-                        DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
-                            let lo = chunk * per, hi = min(fp.count, lo + per)
-                            var i = lo
-                            while i < hi {
-                                let f = fp[i]
-                                let v = score(f.a, f.b, f.c, normal: f.normal, toCamera: toCamera, eye: eye, k: kf.intrinsics, width: kf.width, height: kf.height, depth: dp, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight)
-                                if v > sp[i] {
-                                    sp[i] = v
-                                    bp[i] = Int32(k)
+                    second.withUnsafeMutableBufferPointer { b2 in
+                        bestScore.withUnsafeMutableBufferPointer { sp in
+                            secondScore.withUnsafeMutableBufferPointer { s2 in
+                                DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
+                                    let lo = chunk * per, hi = min(fp.count, lo + per)
+                                    var i = lo
+                                    while i < hi {
+                                        let f = fp[i]
+                                        let v = score(f.a, f.b, f.c, normal: f.normal, toCamera: toCamera, eye: eye, k: kf.intrinsics, width: kf.width, height: kf.height, depth: dp, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight)
+                                        if v > sp[i] {
+                                            s2[i] = sp[i]
+                                            b2[i] = bp[i]
+                                            sp[i] = v
+                                            bp[i] = Int32(k)
+                                        } else if v > s2[i] {
+                                            s2[i] = v
+                                            b2[i] = Int32(k)
+                                        }
+                                        i += 1
+                                    }
                                 }
-                                i += 1
                             }
                         }
                     }
@@ -626,61 +647,127 @@ enum Painter {
             }
             progress(Double(k + 1) / Double(max(1, keyframes.count)))
         }
-        return best
+        var blend = [Float](repeating: 0, count: faces.count)
+        let eyes = keyframes.map { Scan3DViewController.position($0.transform) }
+        for i in 0..<faces.count where secondScore[i] > 0 {
+            // Two frames far apart see a face from different angles, and a few centimetres of tracking
+            // drift between them would paint a doubled edge: only neighbouring frames blend, and a
+            // second that saw the face much less well adds little (skeptic #23).
+            let apart = simd_distance(eyes[Int(best[i])], eyes[Int(second[i])])
+            guard apart <= 0.75 else { continue }
+            let ratio = secondScore[i] / bestScore[i]
+            let ramp = max(0, min(1, (ratio - 0.5) / 0.3))
+            blend[i] = ramp * secondScore[i] / (bestScore[i] + secondScore[i])
+        }
+        return Assignment(best: best, second: second, blend: blend)
     }
 
-    /// The atlas, RGBA, row 0 at the top: every cell painted from its face's keyframe — the whole
+    /// The sheets, RGBA, row 0 at the top: every cell painted from its face's frames — the whole
     /// square, the texels outside the triangle clamped onto it, so filtering at the edges never
-    /// pulls in a neighbour's colours. Faces no frame saw stay a quiet grey.
+    /// pulls in a neighbour's colours. Each frame is decoded ONCE; the faces it saw best and the
+    /// faces it saw second-best each take their share of its colour, added into a cell that starts
+    /// black (so the order of the two frames does not matter). Each texel is the AVERAGE of the
+    /// camera pixels under it (a texel at twelve to a 5 cm triangle covers a few of them; one
+    /// picked at random was speckle). Faces no frame saw stay a quiet grey.
     @_optimize(speed)
-    static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [Sheet] {
+    static func paint(_ faces: [Face], assigned: Assignment, keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [Sheet] {
         let size = atlas.size, cell = atlas.cell
         let sheets = (0..<atlas.sheets).map { Sheet(width: size, height: atlas.height(of: $0, count: faces.count), index: $0) }
         let bases = sheets.map { $0.bytes }
-        var byFrame = [[Int]](repeating: [], count: keyframes.count)
-        for (face, b) in best.enumerated() where b >= 0 { byFrame[Int(b)].append(face) }
         let span = Float(max(1, cell - 2))
-        for (k, list) in byFrame.enumerated() {
+        // Texels painted inside the triangle, for the footprint of one texel in camera pixels.
+        let texelsInside = span * span / 2
+        var byBest = [[Int]](repeating: [], count: keyframes.count)
+        var bySecond = [[Int]](repeating: [], count: keyframes.count)
+        for (face, b) in assigned.best.enumerated() where b >= 0 {
+            byBest[Int(b)].append(face)
+            let second = assigned.second[face]
+            if second >= 0, assigned.blend[face] > 0 { bySecond[Int(second)].append(face) }
+            // The cell starts black: each frame adds its share.
+            let slot = atlas.slot(face)
+            for ty in 0..<cell { memset(bases[slot.sheet] + ((slot.y + ty) * size + slot.x) * 4, 0, cell * 4) }
+        }
+        let grey = { (face: Int) in
+            let slot = atlas.slot(face)
+            for ty in 0..<cell { memset(bases[slot.sheet] + ((slot.y + ty) * size + slot.x) * 4, 150, cell * 4) }
+        }
+        for (k, kf) in keyframes.enumerated() {
             if cancelled.isSet { return sheets }
             defer { progress(Double(k + 1) / Double(max(1, keyframes.count))) }
-            guard !list.isEmpty, let img = rgba(of: dir.appendingPathComponent(keyframes[k].image)) else { continue }
-            let kf = keyframes[k]
+            let own = byBest[k], other = bySecond[k]
+            guard !own.isEmpty || !other.isEmpty else { continue }
+            guard let img = autoreleasepool(invoking: { rgba(of: dir.appendingPathComponent(kf.image)) }) else {
+                // A picture that will not decode (never seen; the frames were checked as written): its
+                // faces go grey rather than black.
+                NSLog("[Scan3D] frame %@ would not decode; %d faces stay grey", kf.image, own.count)
+                for face in own { grey(face) }
+                continue
+            }
             let toCamera = simd_inverse(kf.transform)
             let sx = Float(img.width) / kf.width, sy = Float(img.height) / kf.height
-            let maxU = Float(img.width - 1), maxV = Float(img.height - 1)
-            let chunks = max(1, min(16, list.count / 512))
-            let per = (list.count + chunks - 1) / chunks
-            bases.withUnsafeBufferPointer { bp in
-                img.bytes.withUnsafeBufferPointer { ip in
-                    DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
-                        let lo = chunk * per, hi = min(list.count, lo + per)
-                        var n = lo
-                        while n < hi {
-                            let face = list[n]
-                            n += 1
-                            let f = faces[face]
-                            let slot = atlas.slot(face)
-                            let pp = bp[slot.sheet]
-                            let cx = slot.x, cy = slot.y
-                            for ty in 0..<cell {
-                                for tx in 0..<cell {
-                                    var b1 = (Float(tx) + 0.5 - 1) / span
-                                    var b2 = (Float(ty) + 0.5 - 1) / span
-                                    b1 = max(0, b1)
-                                    b2 = max(0, b2)
-                                    if b1 + b2 > 1 {
-                                        let s = b1 + b2
-                                        b1 /= s
-                                        b2 /= s
+            let w = img.width, h = img.height
+            let maxU = Float(w - 1), maxV = Float(h - 1)
+            for part in 0..<2 {
+                let list = part == 0 ? own : other
+                guard !list.isEmpty else { continue }
+                let chunks = max(1, min(16, list.count / 512))
+                let per = (list.count + chunks - 1) / chunks
+                bases.withUnsafeBufferPointer { bp in
+                    img.bytes.withUnsafeBufferPointer { ip in
+                        DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
+                            let lo = chunk * per, hi = min(list.count, lo + per)
+                            var n = lo
+                            while n < hi {
+                                let face = list[n]
+                                n += 1
+                                let f = faces[face]
+                                // This frame's share of the face: the rest of it, or the blend.
+                                let share: Float = part == 0 ? 1 - assigned.blend[face] : assigned.blend[face]
+                                let slot = atlas.slot(face)
+                                let pp = bp[slot.sheet]
+                                let cx = slot.x, cy = slot.y
+                                // The face in camera pixels → pixels across one texel → a lattice of up to
+                                // 5 × 5 samples spread over that footprint.
+                                let pa = project(f.a, toCamera, kf.intrinsics), pb = project(f.b, toCamera, kf.intrinsics), pc = project(f.c, toCamera, kf.intrinsics)
+                                let abu = (pb.u - pa.u) * sx, abv = (pb.v - pa.v) * sy
+                                let acu = (pc.u - pa.u) * sx, acv = (pc.v - pa.v) * sy
+                                let area = abs(abu * acv - acu * abv) / 2
+                                let perTexel = (area / texelsInside).squareRoot()
+                                let r = perTexel.isFinite ? min(2, Int(perTexel / 2)) : 0
+                                let step = perTexel.isFinite ? max(1, Int(perTexel / 5)) : 1
+                                let count = Float((2 * r + 1) * (2 * r + 1))
+                                for ty in 0..<cell {
+                                    for tx in 0..<cell {
+                                        var b1 = (Float(tx) + 0.5 - 1) / span
+                                        var b2 = (Float(ty) + 0.5 - 1) / span
+                                        b1 = max(0, b1)
+                                        b2 = max(0, b2)
+                                        if b1 + b2 > 1 {
+                                            let s = b1 + b2
+                                            b1 /= s
+                                            b2 /= s
+                                        }
+                                        let p = (1 - b1 - b2) * f.a + b1 * f.b + b2 * f.c
+                                        let pr = project(p, toCamera, kf.intrinsics)
+                                        let u = Int(max(0, min(maxU, pr.u * sx))), v = Int(max(0, min(maxV, pr.v * sy)))
+                                        var sr = 0, sg = 0, sb = 0
+                                        var iy = -r
+                                        while iy <= r {
+                                            let yy = max(0, min(h - 1, v + iy * step))
+                                            var ix = -r
+                                            while ix <= r {
+                                                let xx = max(0, min(w - 1, u + ix * step))
+                                                let si = (yy * w + xx) * 4
+                                                sr += Int(ip[si]); sg += Int(ip[si + 1]); sb += Int(ip[si + 2])
+                                                ix += 1
+                                            }
+                                            iy += 1
+                                        }
+                                        let di = ((cy + ty) * size + cx + tx) * 4
+                                        pp[di] = UInt8(min(255, Float(pp[di]) + Float(sr) / count * share).rounded())
+                                        pp[di + 1] = UInt8(min(255, Float(pp[di + 1]) + Float(sg) / count * share).rounded())
+                                        pp[di + 2] = UInt8(min(255, Float(pp[di + 2]) + Float(sb) / count * share).rounded())
                                     }
-                                    let p = (1 - b1 - b2) * f.a + b1 * f.b + b2 * f.c
-                                    let pr = project(p, toCamera, kf.intrinsics)
-                                    let u = Int(max(0, min(maxU, pr.u * sx))), v = Int(max(0, min(maxV, pr.v * sy)))
-                                    let si = (v * img.width + u) * 4
-                                    let di = ((cy + ty) * size + cx + tx) * 4
-                                    pp[di] = ip[si]
-                                    pp[di + 1] = ip[si + 1]
-                                    pp[di + 2] = ip[si + 2]
                                 }
                             }
                         }
@@ -1492,14 +1579,14 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             }
             faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal) }
             let atlas = Painter.atlas(forFaces: faces.count)
-            let best = Painter.assign(faces, keyframes: kept, dir: dir, cancelled: cancelled) { progress($0 * 0.45) }
+            let assigned = Painter.assign(faces, keyframes: kept, dir: dir, cancelled: cancelled) { progress($0 * 0.45) }
             if cancelled.isSet { return }
-            let seen = best.reduce(0) { $0 + ($1 >= 0 ? 1 : 0) }
+            let seen = assigned.best.reduce(0) { $0 + ($1 >= 0 ? 1 : 0) }
             guard seen * 20 >= faces.count else {
                 fail("The scan saw too little of the surfaces to paint them. Walk closer and slower, then try again.")
                 return
             }
-            let sheets = Painter.paint(faces, best: best, keyframes: kept, dir: dir, atlas: atlas, cancelled: cancelled) { progress(0.45 + $0 * 0.45) }
+            let sheets = Painter.paint(faces, assigned: assigned, keyframes: kept, dir: dir, atlas: atlas, cancelled: cancelled) { progress(0.45 + $0 * 0.45) }
             if cancelled.isSet { return }
             // SceneKit's USDZ writer leaves out a texture handed to it as a file ("Failed to resolve
             // reference"; the first painted models carried theirs only through the image fallback):
