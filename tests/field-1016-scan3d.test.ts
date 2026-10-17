@@ -276,9 +276,9 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("chosen = Atlas(size: sheetSize, cell: cell, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)");
     expect(swift).toContain("func slot(_ i: Int) -> (sheet: Int, x: Int, y: Int)");
     // The last sheet is only as tall as its rows; v runs over that height; the sheet's number sits
-    // in its last texel so no two sheets are byte-identical (the writer packs each — Mac check,
-    // three nodes, two identical pictures → three PNGs); 24-bit; four sheets at most, and a model
-    // over the page's cap is refused on the phone in words (skeptic #22).
+    // in its last texel as a mark (it kept the PNG-era writer from packing two identical sheets as
+    // one; each sheet now goes in by its own file); RGB only; a model over the page's cap is
+    // refused on the phone in words (skeptic #22).
     expect(swift).toContain("func height(of sheet: Int, cells count: Int) -> Int");
     expect(swift).toContain("uv.append(simd_float2((cx + o) / a, (cy + o) / h))");
     // PAIRS (Erik 10-16 on the blended model: faint lines along the walls; and 425,654 faces on a
@@ -293,8 +293,8 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("func faces(on sheet: Int, of faces: [Face]) -> Range<Int>");
     expect(swift).toContain("let je = u.x == q && u.y == p ? 0 : u.y == q && u.z == p ? 1 : u.z == q && u.x == p ? 2 : -1");
     expect(swift).toContain("guard je >= 0 else { return false }");
-    expect(swift).toContain("case 0: return (f.c, f.a, f.b, f.nc, f.na, f.nb)");
-    expect(swift).toContain("default: return (f.b, f.c, f.a, f.nb, f.nc, f.na)");
+    expect(swift).toContain("case 0: return (f.c, f.a, f.b)");
+    expect(swift).toContain("default: return (f.b, f.c, f.a)");
     expect(swift).toContain("if half == 1 { if tx + ty >= cell { continue } } else if half == 2 { if tx + ty < cell { continue } }");
     expect(swift).toContain("if half == 2 { b1 = 1 - b1; b2 = 1 - b2 }");
     expect(swift).toContain("let span = Float(max(1, cell - 2 * inset))");
@@ -335,17 +335,30 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("let data = Data(bytesNoCopy: UnsafeMutableRawPointer(bytes), count: width * height * 4, deallocator: .custom { p, _ in p.deallocate() })");
     expect(swift).toContain("deinit { if !handed { bytes.deallocate() } }");
     expect(swift).toContain("static func geometry(_ faces: [Face], atlas: Atlas, sheet: Int, texture: Any) -> SCNGeometry");
-    expect(swift).toContain("scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: image)))");
     expect(swift).toContain('fail("This scan is too big to paint on this phone. Scan a smaller area.")');
     expect(swift).toContain("let floor = ys.isEmpty ? lo.y : ys[min(ys.count - 1, ys.count / 100)]");
-    expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc); swap(&nb, &nc) }");
+    expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc) }");
     // SMOOTH NORMALS + LEVELLING (Erik 10-16 on the paired model: fine vertical stripes on the walls
     // = the mesh grid shaded flat face by face; a quilt of lighter and darker patches = the camera's
-    // exposure drifting between frames). Each vertex keeps ARKit's own normal; every face two frames
+    // exposure drifting between frames). The vertex normals of that round went again with the unlit
+    // material (nothing lights the picture); every face two frames
     // saw measures how the frames differ, one gain per frame and channel is solved from all of them
     // (log space, relaxation, mean held at 1, within a half and double) and each face's texels are
     // scaled by its frames' gains mixed as its colours were.
-    expect(swift).toContain("nor.append(f.na); nor.append(f.nb); nor.append(f.nc)");
+    // SIZE (Erik's shop walked whole: 167 MB, 33 under the cap): the sheets go to JPEGs BESIDE the
+    // model and into the material by path (the phone's SceneKit packs a file from the model's own
+    // folder as it is — probe 10-16: 0/sheet.jpg; from another folder it "failed to resolve"), the
+    // JPEGs go once the model is written; no normals in the file (nothing lights the picture, so the
+    // faces carry none); a pair shares its diagonal's two corners (four vertices, not six).
+    expect(swift).toContain("static let sheetQuality: CGFloat = 0.9");
+    expect(swift).toContain('let picture = output.deletingPathExtension().appendingPathExtension("sheet\\(i).jpg")');
+    expect(swift).toContain("guard let image = sheet.image(), let jpeg = image.jpegData(compressionQuality: Painter.sheetQuality), (try? jpeg.write(to: picture, options: .atomic)) != nil else {");
+    expect(swift).toContain("scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: picture)))");
+    expect(swift).toContain("let wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)\n            dropPictures()");
+    expect(swift).toContain("idx.append(contentsOf: [base, base + 1, base + 2, base + 3, base + 2, base + 1])");
+    expect(swift).toContain("let g = SCNGeometry(sources: [vSrc, tSrc], elements: [el])");
+    expect(swift).not.toContain("semantic: .normal");
+    expect(swift).not.toContain("let na: simd_float3");
     // UNLIT (Erik's whole-room model: the ceiling's rough dark mesh shaded into crumpled foil): the
     // sheet is the EMISSION over a black diffuse — SceneKit has no unlit material (Mac check 10-16:
     // .constant still writes a lit diffuse) but writes emission as USD's emissiveColor.
@@ -377,7 +390,6 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("meshes.removeAll()\n        snaps.removeAll()\n        dirty.removeAll()\n        meshSeen = false\n        keyframes.removeAll()");
     expect(swift).not.toContain("jpegData(compressionQuality: 0.95)");
     // The texture goes in as an image (the file form never carried) and the USDZ is read back for it.
-    expect(swift).toContain("guard let image = sheet.image() else {");
     expect(swift).not.toContain("textureURL");
     expect(swift).toContain("let wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)");
     expect(swift).toContain("static func images(in url: URL) -> Int");

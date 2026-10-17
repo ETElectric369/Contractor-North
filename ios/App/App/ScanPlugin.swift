@@ -437,17 +437,12 @@ enum Painter {
         let b: simd_float3
         let c: simd_float3
         let normal: simd_float3
-        /// ARKit's own normal at each vertex, so the viewer shades the surface smoothly: a wall shaded
-        /// flat face by face showed the mesh grid as light and dark stripes (Erik 10-16).
-        let na: simd_float3
-        let nb: simd_float3
-        let nc: simd_float3
         let cell: Int32
         let half: UInt8
     }
 
     /// How many images a USDZ carries: its zip's central directory (always the true sizes, whatever
-    /// the writer put in the local headers) names the image entries (SceneKit's: 0/texgen_0.png …).
+    /// the writer put in the local headers) names the image entries (SceneKit's: 0/model_…_sheet0.jpg).
     static func images(in url: URL) -> Int {
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 22 else { return 0 }
         let u16 = { (i: Int) -> Int in Int(data[i]) | Int(data[i + 1]) << 8 }
@@ -523,6 +518,10 @@ enum Painter {
     static let sheetSize = 4096
     static let cellSize = 16
     static let inset = 2
+    /// The JPEG quality of a sheet in the file (a 4096 sheet of a room: a few MB, against ~20 as a
+    /// PNG). Nine tenths: at twelve texels a cell the JPEG's blocks of eight straddle the cells, and
+    /// a little more quality keeps what leaks across into the two-texel ring below sight (skeptic #26).
+    static let sheetQuality: CGFloat = 0.9
 
     /// The cells a scan may get, biggest first: sixteen texels while the cells fit on `maxSheets`
     /// sheets (65,025 to a sheet), else twelve (116,281), else eight (261,121) — a bigger scan gets a
@@ -580,12 +579,12 @@ enum Painter {
             if pair(i, 0, t.x, t.y) || pair(i, 1, t.y, t.z) || pair(i, 2, t.z, t.x) { continue }
         }
         // The face turned so that its shared edge runs b → c (a rotation of the three, so the winding stays).
-        func turned(_ i: Int) -> (simd_float3, simd_float3, simd_float3, simd_float3, simd_float3, simd_float3) {
+        func turned(_ i: Int) -> (simd_float3, simd_float3, simd_float3) {
             let f = faces[i]
             switch shared[i] {
-            case 0: return (f.c, f.a, f.b, f.nc, f.na, f.nb)
-            case 1: return (f.a, f.b, f.c, f.na, f.nb, f.nc)
-            default: return (f.b, f.c, f.a, f.nb, f.nc, f.na)
+            case 0: return (f.c, f.a, f.b)
+            case 1: return (f.a, f.b, f.c)
+            default: return (f.b, f.c, f.a)
             }
         }
         var out: [Face] = []
@@ -595,20 +594,20 @@ enum Painter {
             let j = mate[i]
             if j < 0 {
                 let f = faces[i]
-                out.append(Face(a: f.a, b: f.b, c: f.c, normal: f.normal, na: f.na, nb: f.nb, nc: f.nc, cell: Int32(next), half: 0))
+                out.append(Face(a: f.a, b: f.b, c: f.c, normal: f.normal, cell: Int32(next), half: 0))
                 next += 1
             } else if j > i {
-                let (a1, b1, c1, na1, nb1, nc1) = turned(i)
-                let (a2, b2, c2, na2, nb2, nc2) = turned(j)
-                out.append(Face(a: a1, b: b1, c: c1, normal: faces[i].normal, na: na1, nb: nb1, nc: nc1, cell: Int32(next), half: 1))
-                out.append(Face(a: a2, b: b2, c: c2, normal: faces[j].normal, na: na2, nb: nb2, nc: nc2, cell: Int32(next), half: 2))
+                let (a1, b1, c1) = turned(i)
+                let (a2, b2, c2) = turned(j)
+                out.append(Face(a: a1, b: b1, c: c1, normal: faces[i].normal, cell: Int32(next), half: 1))
+                out.append(Face(a: a2, b: b2, c: c2, normal: faces[j].normal, cell: Int32(next), half: 2))
                 next += 1
             }
         }
         return (out, next)
     }
 
-    /// The most faces one scan paints — the phone's memory for the faces themselves (128 bytes each,
+    /// The most faces one scan paints — the phone's memory for the faces themselves (80 bytes each,
     /// twice over while they are set on the floor) and the viewer's for the model; the texels are
     /// bounded by `maxSheets` whatever the count, since the cells shrink to fit. Beyond it the scan is
     /// refused in words rather than painted wrong (skeptic #22). Erik's office walked whole came to
@@ -636,14 +635,15 @@ enum Painter {
             withUnsafeMutableBytes(of: &grey) { $0[0] = 150; $0[1] = 150; $0[2] = 150; $0[3] = 255 }
             memset_pattern4(bytes, &grey, count)
             // The sheet's number in its last texel (no cell reaches it: the last column of texels is
-            // kept free): two sheets are never byte-identical, so the USDZ writer packs each.
+            // kept free): two sheets are never byte-identical — moot now that each goes in by its own
+            // file, kept as a mark.
             bytes[count - 4] = UInt8(truncatingIfNeeded: index + 1)
         }
 
         deinit { if !handed { bytes.deallocate() } }
 
         /// The sheet as an image, which owns the texels from here on (no copy: four sheets would be
-        /// 250 MB twice over). RGB only — the alpha byte is skipped, so the PNG inside is 24-bit.
+        /// 250 MB twice over). RGB only — the alpha byte is skipped, so the JPEG has no alpha to carry.
         func image() -> UIImage? {
             guard !handed else { return nil }
             handed = true
@@ -1046,8 +1046,9 @@ enum Painter {
         return ok ? (bytes, w, h) : nil
     }
 
-    /// The painted mesh: three vertices per face (a cell is one face's, or two halves), normals, and
-    /// the cell's corners as texture coordinates. SceneKit's own texture space runs TOP-DOWN like the atlas
+    /// The painted mesh: a face alone is three vertices, a pair four (the diagonal's two corners
+    /// shared — the same point, the same texel), the cell's corners as texture coordinates, and no
+    /// normals, since nothing lights the picture. SceneKit's own texture space runs TOP-DOWN like the atlas
     /// rows (its USD writer flips to USD's bottom-up itself — checked on the Mac with one triangle,
     /// 10-16, after the first painted model wore every other face's patch).
     static func geometry(_ faces: [Face], atlas: Atlas, sheet: Int, texture: Any) -> SCNGeometry {
@@ -1056,36 +1057,48 @@ enum Painter {
         let cells = faces.last.map { Int($0.cell) + 1 } ?? 0
         let h = Float(atlas.height(of: sheet, cells: cells))
         var pos = [simd_float3]()
-        var nor = [simd_float3]()
         var uv = [simd_float2]()
-        pos.reserveCapacity(range.count * 3)
-        nor.reserveCapacity(range.count * 3)
-        uv.reserveCapacity(range.count * 3)
-        for i in range {
+        var idx = [UInt32]()
+        pos.reserveCapacity(range.count * 2 + 2)
+        uv.reserveCapacity(range.count * 2 + 2)
+        idx.reserveCapacity(range.count * 3)
+        var i = range.lowerBound
+        while i < range.upperBound {
             let f = faces[i]
-            pos.append(f.a); pos.append(f.b); pos.append(f.c)
-            nor.append(f.na); nor.append(f.nb); nor.append(f.nc)
             let slot = atlas.slot(Int(f.cell))
             let cx = Float(slot.x), cy = Float(slot.y)
-            if f.half == 2 {
-                // The upper-right half: a at the far corner, b and c at the diagonal's ends (the same
-                // two corners, the same way round, as the lower-left half's c and b).
-                uv.append(simd_float2((cx + n - o) / a, (cy + n - o) / h))
-                uv.append(simd_float2((cx + o) / a, (cy + n - o) / h))
-                uv.append(simd_float2((cx + n - o) / a, (cy + o) / h))
-            } else {
+            let base = UInt32(pos.count)
+            if f.half == 1, i + 1 < range.upperBound, faces[i + 1].cell == f.cell {
+                // A pair: the lower-left half's a, b, c and the upper-right's far corner; the
+                // upper-right half runs its own way round through the shared two (its b is the
+                // lower-left's c, its c the lower-left's b).
+                let g = faces[i + 1]
+                pos.append(f.a); pos.append(f.b); pos.append(f.c); pos.append(g.a)
                 uv.append(simd_float2((cx + o) / a, (cy + o) / h))
                 uv.append(simd_float2((cx + n - o) / a, (cy + o) / h))
                 uv.append(simd_float2((cx + o) / a, (cy + n - o) / h))
+                uv.append(simd_float2((cx + n - o) / a, (cy + n - o) / h))
+                idx.append(contentsOf: [base, base + 1, base + 2, base + 3, base + 2, base + 1])
+                i += 2
+            } else {
+                pos.append(f.a); pos.append(f.b); pos.append(f.c)
+                if f.half == 2 {
+                    uv.append(simd_float2((cx + n - o) / a, (cy + n - o) / h))
+                    uv.append(simd_float2((cx + o) / a, (cy + n - o) / h))
+                    uv.append(simd_float2((cx + n - o) / a, (cy + o) / h))
+                } else {
+                    uv.append(simd_float2((cx + o) / a, (cy + o) / h))
+                    uv.append(simd_float2((cx + n - o) / a, (cy + o) / h))
+                    uv.append(simd_float2((cx + o) / a, (cy + n - o) / h))
+                }
+                idx.append(contentsOf: [base, base + 1, base + 2])
+                i += 1
             }
         }
-        var idx = [UInt32](repeating: 0, count: range.count * 3)
-        for i in 0..<idx.count { idx[i] = UInt32(i) }
         let vSrc = SCNGeometrySource(data: pos.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .vertex, vectorCount: pos.count, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float3>.stride)
-        let nSrc = SCNGeometrySource(data: nor.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .normal, vectorCount: nor.count, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float3>.stride)
         let tSrc = SCNGeometrySource(data: uv.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .texcoord, vectorCount: uv.count, usesFloatComponents: true, componentsPerVector: 2, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float2>.stride)
-        let el = SCNGeometryElement(data: idx.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles, primitiveCount: range.count, bytesPerIndex: 4)
-        let g = SCNGeometry(sources: [vSrc, nSrc, tSrc], elements: [el])
+        let el = SCNGeometryElement(data: idx.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles, primitiveCount: idx.count / 3, bytesPerIndex: 4)
+        let g = SCNGeometry(sources: [vSrc, tSrc], elements: [el])
         // The sheet goes in as the EMISSION over a black diffuse: the picture already carries the
         // room's light, and a viewer lighting it again shaded the ceiling's rough mesh into crumpled
         // foil and left faint lines along the walls. SceneKit's writer has no unlit material (checked
@@ -1812,9 +1825,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                     let a = snap.world(ia)
                     var b = snap.world(ib), c = snap.world(ic)
                     var jb = ib, jc = ic
-                    let na = snap.worldNormal(ia)
-                    var nb = snap.worldNormal(ib), nc = snap.worldNormal(ic)
-                    var n = na + nb + nc
+                    var n = snap.worldNormal(ia) + snap.worldNormal(ib) + snap.worldNormal(ic)
                     var len = simd_length(n)
                     if len < 0.1 {
                         n = simd_cross(b - a, c - a)
@@ -1823,11 +1834,8 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                     guard ia != ib, ib != ic, ic != ia, len > 0, simd_length(a).isFinite, simd_length(b).isFinite, simd_length(c).isFinite else { continue }
                     // The winding follows the normal (into the open), so a viewer that draws one
                     // side sees the surfaces from inside the room.
-                    if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc); swap(&nb, &nc) }
-                    let fn = n / len
-                    // A vertex without a normal of its own takes the face's.
-                    let unit = { (v: simd_float3) -> simd_float3 in let l = simd_length(v); return l > 0.5 ? v / l : fn }
-                    raw.append(Painter.Face(a: a, b: b, c: c, normal: fn, na: unit(na), nb: unit(nb), nc: unit(nc), cell: 0, half: 0))
+                    if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc) }
+                    raw.append(Painter.Face(a: a, b: b, c: c, normal: n / len, cell: 0, half: 0))
                     tri.append(simd_uint3(ia, jb, jc))
                 }
                 let laid = Painter.lay(raw, tri: tri, from: cells)
@@ -1861,7 +1869,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 t.columns.3 = simd_float4(t.columns.3.x - shift.x, t.columns.3.y - shift.y, t.columns.3.z - shift.z, 1)
                 return Keyframe(id: kf.id, transform: t, intrinsics: kf.intrinsics, width: kf.width, height: kf.height, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight, image: kf.image, depth: kf.depth)
             }
-            faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal, na: $0.na, nb: $0.nb, nc: $0.nc, cell: $0.cell, half: $0.half) }
+            faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal, cell: $0.cell, half: $0.half) }
             let atlas = Painter.atlas(forCells: cells)
             // The cap on faces assumes about two to a cell; a mesh that pairs badly must not grow
             // past the four sheets the phone and the viewer are known to hold (skeptic #24).
@@ -1894,24 +1902,30 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             }
             let sheets = Painter.paint(faces, assigned: assigned, keyframes: kept, dir: dir, atlas: atlas, cancelled: cancelled) { progress(0.45 + $0 * 0.45) }
             if cancelled.isSet { return }
-            // SceneKit's USDZ writer leaves out a texture handed to it as a file ("Failed to resolve
-            // reference"; the first painted models carried theirs only through the image fallback):
-            // each sheet goes in as an image on its own node, and the file is read back for them all.
-            var images: [UIImage] = []
-            for sheet in sheets {
-                guard let image = sheet.image() else {
+            // Each sheet goes to a JPEG BESIDE the model and into its material by path: SceneKit's
+            // writer packs a picture given by file as it is when the file sits in the model's own
+            // folder (checked on the phone, 10-16 — one from another folder "failed to resolve", which
+            // is why the first painted models went in from memory, as PNGs four to six times the
+            // size), and the file is read back for them all. The JPEGs go once the model is written.
+            var pictures: [URL] = []
+            func dropPictures() { for picture in pictures { try? FileManager.default.removeItem(at: picture) } }
+            for (i, sheet) in sheets.enumerated() {
+                let picture = output.deletingPathExtension().appendingPathExtension("sheet\(i).jpg")
+                guard let image = sheet.image(), let jpeg = image.jpegData(compressionQuality: Painter.sheetQuality), (try? jpeg.write(to: picture, options: .atomic)) != nil else {
+                    dropPictures()
                     fail("The model's picture couldn't be made on this phone. Try again.")
                     return
                 }
-                images.append(image)
+                pictures.append(picture)
             }
             progress(0.92)
             NSLog("[Scan3D] painting %d faces in %d cells from %d frames on %d sheet(s) %d wide at %d texels a cell", faces.count, cells, kept.count, atlas.sheets, atlas.size, atlas.cell)
             let scene = SCNScene()
-            for (sheet, image) in images.enumerated() {
-                scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: image)))
+            for (sheet, picture) in pictures.enumerated() {
+                scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: picture)))
             }
             let wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)
+            dropPictures()
             if cancelled.isSet {
                 try? FileManager.default.removeItem(at: output)
                 return
