@@ -391,11 +391,12 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("static func clone(_ src: CVPixelBuffer) -> CVPixelBuffer?");
     expect(swift).toContain("private func mark(_ v: ShotView, over snaps: [MeshSnap]) -> [UUID]");
     expect(swift).toContain("if simd_length(toward) - snap.radius > Painter.reach { continue }");
+    // Ten metres of reach (Erik's shop: grey islands on the vaulted ceiling's ridge at six).
+    expect(swift).toContain("static let reach: Float = 10");
     expect(swift).toContain("if simd_dot(toward, ahead) < -snap.radius { continue }");
     // A pass that cleared any cell redraws every anchor it visited (a face's cell may have been
     // cleared by another anchor's face, now or earlier — skeptic #21); one reach for blue and paint.
     expect(swift).toContain("return cleared ? visited : []");
-    expect(swift).toContain("static let reach: Float = 6");
     expect(swift).toContain("guard d > 0.15, d < reach else { return 0 }");
     expect(swift).toContain("DispatchQueue.main.async { self.redraw(changed) }");
     expect(swift).not.toContain("redrawAll");

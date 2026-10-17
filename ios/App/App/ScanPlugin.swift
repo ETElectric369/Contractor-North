@@ -654,7 +654,9 @@ enum Painter {
         }
     }
     /// How far from the eye a face still counts as seen (meters) — the blue and the painter share it.
-    static let reach: Float = 6
+    /// Ten: the ridge of a vaulted ceiling from a walking camera (grey islands up there at six, on
+    /// Erik's shop, 10-16); the nearer frames still win the scoring.
+    static let reach: Float = 10
 
     /// A world point in a frame's picture: (u, v) in its pixels, z the distance along the lens.
     @inline(__always)
