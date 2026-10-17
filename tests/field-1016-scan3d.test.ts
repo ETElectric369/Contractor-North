@@ -271,15 +271,46 @@ describe("the wiring, pinned", () => {
     // had shrunk its cells from 12 texels to 8 on a 217-frame scan): a bigger scan gets more sheets,
     // never smaller cells; each sheet its own node + image; the file is read back for them all.
     expect(swift).toContain("static let sheetSize = 4096");
-    expect(swift).toContain("static let cellSize = 12");
+    expect(swift).toContain("static let cellSize = 16");
+    expect(swift).toContain("static let inset = 2");
     expect(swift).toContain("return Atlas(size: sheetSize, cell: cellSize, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)");
     expect(swift).toContain("func slot(_ i: Int) -> (sheet: Int, x: Int, y: Int)");
     // The last sheet is only as tall as its rows; v runs over that height; the sheet's number sits
     // in its last texel so no two sheets are byte-identical (the writer packs each — Mac check,
     // three nodes, two identical pictures → three PNGs); 24-bit; four sheets at most, and a model
     // over the page's cap is refused on the phone in words (skeptic #22).
-    expect(swift).toContain("func height(of sheet: Int, count: Int) -> Int");
-    expect(swift).toContain("uv.append(simd_float2((cx + 1) / a, (cy + 1) / h))");
+    expect(swift).toContain("func height(of sheet: Int, cells count: Int) -> Int");
+    expect(swift).toContain("uv.append(simd_float2((cx + o) / a, (cy + o) / h))");
+    // PAIRS (Erik 10-16 on the blended model: faint lines along the walls; and 425,654 faces on a
+    // "little more area", 94% of the cap): two faces that share an edge take ONE cell of sixteen,
+    // the shared edge on the diagonal, each face's triangle two texels in — the viewer's 2 × 2 and
+    // 4 × 4 blocks tile a cell of sixteen exactly, so they never mix the next cell into an edge;
+    // the vertices are turned, never mirrored; a pair wound the same way round stays two cells; the
+    // faces come in cell order; the last column of texels stays free for the sheet's stamp.
+    expect(swift).toContain("static func lay(_ faces: [Face], tri: [simd_uint3], from cell: Int) -> (faces: [Face], next: Int)");
+    expect(swift).toContain("var perRow: Int { (size - 1) / cell }");
+    expect(swift).toContain("static func atlas(forCells n: Int) -> Atlas");
+    expect(swift).toContain("func faces(on sheet: Int, of faces: [Face]) -> Range<Int>");
+    expect(swift).toContain("let je = u.x == q && u.y == p ? 0 : u.y == q && u.z == p ? 1 : u.z == q && u.x == p ? 2 : -1");
+    expect(swift).toContain("guard je >= 0 else { return false }");
+    expect(swift).toContain("case 0: return (f.c, f.a, f.b)");
+    expect(swift).toContain("default: return (f.b, f.c, f.a)");
+    expect(swift).toContain("if half == 1 { if tx + ty >= cell { continue } } else if half == 2 { if tx + ty < cell { continue } }");
+    expect(swift).toContain("if half == 2 { b1 = 1 - b1; b2 = 1 - b2 }");
+    expect(swift).toContain("let span = Float(max(1, cell - 2 * inset))");
+    expect(swift).toContain("let from = f.half == 2 ? cell - ty : 0");
+    expect(swift).toContain("let to = f.half == 1 ? cell - ty : cell");
+    expect(swift).toContain("uv.append(simd_float2((cx + n - o) / a, (cy + n - o) / h))");
+    expect(swift).toContain("let laid = Painter.lay(raw, tri: tri, from: cells)");
+    expect(swift).toContain("let atlas = Painter.atlas(forCells: cells)");
+    expect(swift).toContain("tri.append(simd_uint3(ia, jb, jc))");
+    expect(swift).not.toContain("atlas(forFaces");
+    // Skeptic #24: the sheets stay bounded however the faces paired; a face can't be its own mate;
+    // a face with a repeated vertex (no area) is dropped where the faces are read.
+    expect(swift).toContain("static let maxSheets = 4");
+    expect(swift).toContain("guard atlas.sheets <= Painter.maxSheets else {");
+    expect(swift).toContain("guard j >= 0, j != i, mate[j] < 0 else { return false }");
+    expect(swift).toContain("guard ia != ib, ib != ic, ic != ia, len > 0, simd_length(a).isFinite");
     expect(swift).toContain("bytes[count - 4] = UInt8(truncatingIfNeeded: index + 1)");
     expect(swift).toContain("CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue");
     expect(swift).toContain("static let maxFaces = 450_000");
@@ -294,7 +325,7 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: image)))");
     expect(swift).toContain('fail("This scan is too big to paint on this phone. Scan a smaller area.")');
     expect(swift).toContain("let floor = ys.isEmpty ? lo.y : ys[min(ys.count - 1, ys.count / 100)]");
-    expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c) }");
+    expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc) }");
     expect(swift).toContain("guard seen * 20 >= faces.count else {");
     // SceneKit's texture space is top-down (checked on the Mac, 10-16: v 0.2/0.8 in → USD 0.8/0.2
     // out); the atlas rows are top-down too, so v = y / A — the first painted model wore every

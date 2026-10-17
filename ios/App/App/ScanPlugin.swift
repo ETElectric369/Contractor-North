@@ -428,12 +428,17 @@ final class Flag {
 /// metric and gravity-aligned (ARKit's world), so the model stands upright at its real size.
 @available(iOS 17.0, *)
 enum Painter {
-    /// A face in world space (metres), its vertices in the order the atlas cell maps them.
+    /// A face in world space (metres), its vertices in the order its cell maps them: `a` at the
+    /// cell's corner, `b` and `c` along its two legs. Two faces that share an edge share ONE cell —
+    /// the first its lower-left half (1), the second its upper-right (2), the shared edge on the
+    /// diagonal; a face on its own takes the whole cell (0).
     struct Face {
         let a: simd_float3
         let b: simd_float3
         let c: simd_float3
         let normal: simd_float3
+        let cell: Int32
+        let half: UInt8
     }
 
     /// How many images a USDZ carries: its zip's central directory (always the true sizes, whatever
@@ -465,46 +470,134 @@ enum Painter {
         return images
     }
 
-    /// The texture: one square cell per face, `cell` texels on a side, on one or more SHEETS `size`
-    /// texels wide — a bigger scan gets more sheets, never smaller cells (Erik 10-16 on a 217-frame
-    /// scan: "the pixels are slightly more distorted than the last one"; one sheet had shrunk its
-    /// cells from 12 texels to 8). The last sheet (or the only one) is just as tall as its rows.
+    /// The texture: square cells of `cell` texels, two faces to a cell where they share an edge, on
+    /// one or more SHEETS `size` texels wide — a bigger scan gets more sheets, never smaller cells
+    /// (Erik 10-16 on a 217-frame scan: "the pixels are slightly more distorted than the last one";
+    /// one sheet had shrunk its cells from 12 texels to 8). The last sheet (or the only one) is just
+    /// as tall as its rows.
     struct Atlas {
         let size: Int
         let cell: Int
         let sheets: Int
-        var perRow: Int { size / cell }
+        /// Cells to a row: the last column of texels stays free, for the sheet's stamp.
+        var perRow: Int { (size - 1) / cell }
         var perSheet: Int { perRow * perRow }
-        /// Face i's cell: its sheet and the cell's top-left texel on it.
+        /// Cell i: its sheet and the cell's top-left texel on it.
         func slot(_ i: Int) -> (sheet: Int, x: Int, y: Int) {
             let r = i % perSheet
             return (i / perSheet, (r % perRow) * cell, (r / perRow) * cell)
         }
-        /// The faces on one sheet.
-        func faces(on sheet: Int, of count: Int) -> Range<Int> {
-            (Swift.min(count, sheet * perSheet))..<(Swift.min(count, (sheet + 1) * perSheet))
+        /// The cells on one sheet.
+        func cells(on sheet: Int, of count: Int) -> Int {
+            Swift.max(0, Swift.min(count, (sheet + 1) * perSheet) - sheet * perSheet)
         }
-        /// A sheet's height in texels: whole rows of cells, only as many as its faces fill.
-        func height(of sheet: Int, count: Int) -> Int {
-            let n = faces(on: sheet, of: count).count
+        /// The faces on one sheet — the faces come in cell order.
+        func faces(on sheet: Int, of faces: [Face]) -> Range<Int> {
+            func first(_ cell: Int32) -> Int {
+                var lo = 0, hi = faces.count
+                while lo < hi {
+                    let mid = (lo + hi) / 2
+                    if faces[mid].cell < cell { lo = mid + 1 } else { hi = mid }
+                }
+                return lo
+            }
+            return first(Int32(sheet * perSheet))..<first(Int32((sheet + 1) * perSheet))
+        }
+        /// A sheet's height in texels: whole rows of cells, only as many as its cells fill.
+        func height(of sheet: Int, cells count: Int) -> Int {
+            let n = cells(on: sheet, of: count)
             return Swift.max(1, (n + perRow - 1) / perRow) * cell
         }
     }
 
-    /// A sheet is 4096 texels wide (every viewer takes that), a cell 12 (a 5 cm triangle as a photo).
+    /// A sheet is 4096 texels wide (every viewer takes that); a cell 16 — two 5 cm triangles that
+    /// share an edge, each twelve texels along its legs, two texels in from the cell's edge: the
+    /// viewer's smaller copies of the texture (2 × 2 and 4 × 4 blocks of texels) tile a cell of
+    /// sixteen exactly, so none of them mixes the next cell into a face's edge (the faint lines
+    /// along the walls of the first blended model were that mixing, at twelve texels, one in).
     static let sheetSize = 4096
-    static let cellSize = 12
+    static let cellSize = 16
+    static let inset = 2
 
-    /// Sheets 4096 wide at twelve texels a cell, as many as the faces need (116,281 to a full sheet).
-    static func atlas(forFaces n: Int) -> Atlas {
-        let perSheet = (sheetSize / cellSize) * (sheetSize / cellSize)
+    /// Sheets 4096 wide at sixteen texels a cell, as many as the cells need (65,025 to a full sheet).
+    static func atlas(forCells n: Int) -> Atlas {
+        let perRow = (sheetSize - 1) / cellSize
+        let perSheet = perRow * perRow
         return Atlas(size: sheetSize, cell: cellSize, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)
     }
 
-    /// The most faces one scan paints: four full sheets (~250 MB of texels while they are made, a
-    /// model of ~100 MB — the page sends up to `maxModelBytes`, the viewer holds four sheets). Beyond
-    /// it the scan is refused in words rather than painted wrong (skeptic #22).
+    /// One anchor's faces laid into cells from `cell` on: two faces that share an edge take ONE cell
+    /// (the first its lower-left half, the second its upper-right, the shared edge on the diagonal,
+    /// so the texels either side of that edge are true neighbours at every size the viewer draws),
+    /// a face whose neighbours are all taken a cell of its own. A face's vertices are turned — never
+    /// mirrored, the winding stays — so the shared edge runs b → c, which the two halves map to the
+    /// same two corners; a pair whose edge runs the same way round in both (a mesh wound
+    /// inconsistently) stays two cells. `tri` holds each face's vertex indices in its vertex order.
+    static func lay(_ faces: [Face], tri: [simd_uint3], from cell: Int) -> (faces: [Face], next: Int) {
+        let n = faces.count
+        func key(_ p: UInt32, _ q: UInt32) -> UInt64 { p < q ? UInt64(p) << 32 | UInt64(q) : UInt64(q) << 32 | UInt64(p) }
+        var onEdge = [UInt64: (Int, Int)](minimumCapacity: n * 2)
+        func note(_ k: UInt64, _ i: Int) {
+            if let have = onEdge[k] { if have.1 < 0 { onEdge[k] = (have.0, i) } } else { onEdge[k] = (i, -1) }
+        }
+        for i in 0..<n {
+            let t = tri[i]
+            note(key(t.x, t.y), i); note(key(t.y, t.z), i); note(key(t.z, t.x), i)
+        }
+        var mate = [Int](repeating: -1, count: n)
+        // Which edge of face i (0: a → b, 1: b → c, 2: c → a) is the shared one.
+        var shared = [Int](repeating: 1, count: n)
+        // Face i's edge p → q, taken with its mate if the mate has it free and runs it q → p.
+        func pair(_ i: Int, _ e: Int, _ p: UInt32, _ q: UInt32) -> Bool {
+            guard let have = onEdge[key(p, q)] else { return false }
+            let j = have.0 == i ? have.1 : have.0
+            guard j >= 0, j != i, mate[j] < 0 else { return false }
+            let u = tri[j]
+            let je = u.x == q && u.y == p ? 0 : u.y == q && u.z == p ? 1 : u.z == q && u.x == p ? 2 : -1
+            guard je >= 0 else { return false }
+            mate[i] = j; mate[j] = i
+            shared[i] = e; shared[j] = je
+            return true
+        }
+        for i in 0..<n where mate[i] < 0 {
+            let t = tri[i]
+            if pair(i, 0, t.x, t.y) || pair(i, 1, t.y, t.z) || pair(i, 2, t.z, t.x) { continue }
+        }
+        // The face turned so that its shared edge runs b → c (a rotation of the three, so the winding stays).
+        func turned(_ i: Int) -> (simd_float3, simd_float3, simd_float3) {
+            let f = faces[i]
+            switch shared[i] {
+            case 0: return (f.c, f.a, f.b)
+            case 1: return (f.a, f.b, f.c)
+            default: return (f.b, f.c, f.a)
+            }
+        }
+        var out: [Face] = []
+        out.reserveCapacity(n)
+        var next = cell
+        for i in 0..<n {
+            let j = mate[i]
+            if j < 0 {
+                let f = faces[i]
+                out.append(Face(a: f.a, b: f.b, c: f.c, normal: f.normal, cell: Int32(next), half: 0))
+                next += 1
+            } else if j > i {
+                let (a1, b1, c1) = turned(i)
+                let (a2, b2, c2) = turned(j)
+                out.append(Face(a: a1, b: b1, c: c1, normal: faces[i].normal, cell: Int32(next), half: 1))
+                out.append(Face(a: a2, b: b2, c: c2, normal: faces[j].normal, cell: Int32(next), half: 2))
+                next += 1
+            }
+        }
+        return (out, next)
+    }
+
+    /// The most faces one scan paints: about four full sheets at two faces a cell (~250 MB of texels
+    /// while they are made, a model of ~100 MB — the page sends up to `maxModelBytes`, the viewer
+    /// holds four sheets). Beyond it the scan is refused in words rather than painted wrong (skeptic #22).
     static let maxFaces = 450_000
+    /// And never more sheets than that, however the faces paired up.
+    static let maxSheets = 4
     /// The biggest model the page will take over the bridge — MODEL_MAX_BYTES in src/lib/native-scan.ts.
     static let maxModelBytes = 200_000_000
 
@@ -524,8 +617,8 @@ enum Painter {
             var grey: UInt32 = 0
             withUnsafeMutableBytes(of: &grey) { $0[0] = 150; $0[1] = 150; $0[2] = 150; $0[3] = 255 }
             memset_pattern4(bytes, &grey, count)
-            // The sheet's number in its last texel (no cell reaches it: cells tile from the top-left
-            // in whole twelves): two sheets are never byte-identical, so the USDZ writer packs each.
+            // The sheet's number in its last texel (no cell reaches it: the last column of texels is
+            // kept free): two sheets are never byte-identical, so the USDZ writer packs each.
             bytes[count - 4] = UInt8(truncatingIfNeeded: index + 1)
         }
 
@@ -662,9 +755,9 @@ enum Painter {
         return Assignment(best: best, second: second, blend: blend)
     }
 
-    /// The sheets, RGBA, row 0 at the top: every cell painted from its face's frames — the whole
-    /// square, the texels outside the triangle clamped onto it, so filtering at the edges never
-    /// pulls in a neighbour's colours. Each frame is decoded ONCE; the faces it saw best and the
+    /// The sheets, RGBA, row 0 at the top: every face's own texels painted from its frames — its
+    /// half of the cell, or the whole square when it is alone, the texels outside the triangle
+    /// clamped onto it, so filtering at the edges never pulls in a neighbour's colours. Each frame is decoded ONCE; the faces it saw best and the
     /// faces it saw second-best each take their share of its colour, added into a cell that starts
     /// black (so the order of the two frames does not matter). Each texel is the AVERAGE of the
     /// camera pixels under it (a texel at twelve to a 5 cm triangle covers a few of them; one
@@ -672,25 +765,35 @@ enum Painter {
     @_optimize(speed)
     static func paint(_ faces: [Face], assigned: Assignment, keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [Sheet] {
         let size = atlas.size, cell = atlas.cell
-        let sheets = (0..<atlas.sheets).map { Sheet(width: size, height: atlas.height(of: $0, count: faces.count), index: $0) }
+        let cells = faces.last.map { Int($0.cell) + 1 } ?? 0
+        let sheets = (0..<atlas.sheets).map { Sheet(width: size, height: atlas.height(of: $0, cells: cells), index: $0) }
         let bases = sheets.map { $0.bytes }
-        let span = Float(max(1, cell - 2))
+        let o = Float(inset)
+        let span = Float(max(1, cell - 2 * inset))
         // Texels painted inside the triangle, for the footprint of one texel in camera pixels.
         let texelsInside = span * span / 2
+        // A face's own texels: its whole cell, or its half either side of the diagonal (the texels
+        // whose centres sit on the diagonal go with the lower-left half).
+        let fill = { (f: Face, value: Int32) in
+            let slot = atlas.slot(Int(f.cell))
+            let base = bases[slot.sheet]
+            for ty in 0..<cell {
+                let from = f.half == 2 ? cell - ty : 0
+                let to = f.half == 1 ? cell - ty : cell
+                guard to > from else { continue }
+                memset(base + ((slot.y + ty) * size + slot.x + from) * 4, value, (to - from) * 4)
+            }
+        }
         var byBest = [[Int]](repeating: [], count: keyframes.count)
         var bySecond = [[Int]](repeating: [], count: keyframes.count)
         for (face, b) in assigned.best.enumerated() where b >= 0 {
             byBest[Int(b)].append(face)
             let second = assigned.second[face]
             if second >= 0, assigned.blend[face] > 0 { bySecond[Int(second)].append(face) }
-            // The cell starts black: each frame adds its share.
-            let slot = atlas.slot(face)
-            for ty in 0..<cell { memset(bases[slot.sheet] + ((slot.y + ty) * size + slot.x) * 4, 0, cell * 4) }
+            // The face's texels start black: each frame adds its share.
+            fill(faces[face], 0)
         }
-        let grey = { (face: Int) in
-            let slot = atlas.slot(face)
-            for ty in 0..<cell { memset(bases[slot.sheet] + ((slot.y + ty) * size + slot.x) * 4, 150, cell * 4) }
-        }
+        let grey = { (face: Int) in fill(faces[face], 150) }
         for (k, kf) in keyframes.enumerated() {
             if cancelled.isSet { return sheets }
             defer { progress(Double(k + 1) / Double(max(1, keyframes.count))) }
@@ -723,9 +826,10 @@ enum Painter {
                                 let f = faces[face]
                                 // This frame's share of the face: the rest of it, or the blend.
                                 let share: Float = part == 0 ? 1 - assigned.blend[face] : assigned.blend[face]
-                                let slot = atlas.slot(face)
+                                let slot = atlas.slot(Int(f.cell))
                                 let pp = bp[slot.sheet]
                                 let cx = slot.x, cy = slot.y
+                                let half = f.half
                                 // The face in camera pixels → pixels across one texel → a lattice of up to
                                 // 5 × 5 samples spread over that footprint.
                                 let pa = project(f.a, toCamera, kf.intrinsics), pb = project(f.b, toCamera, kf.intrinsics), pc = project(f.c, toCamera, kf.intrinsics)
@@ -738,8 +842,12 @@ enum Painter {
                                 let count = Float((2 * r + 1) * (2 * r + 1))
                                 for ty in 0..<cell {
                                     for tx in 0..<cell {
-                                        var b1 = (Float(tx) + 0.5 - 1) / span
-                                        var b2 = (Float(ty) + 0.5 - 1) / span
+                                        // Only the half's own side of the diagonal (tx + ty = cell − 1 sits on it).
+                                        if half == 1 { if tx + ty >= cell { continue } } else if half == 2 { if tx + ty < cell { continue } }
+                                        var b1 = (Float(tx) + 0.5 - o) / span
+                                        var b2 = (Float(ty) + 0.5 - o) / span
+                                        // The upper-right half is the same triangle seen from the far corner.
+                                        if half == 2 { b1 = 1 - b1; b2 = 1 - b2 }
                                         b1 = max(0, b1)
                                         b2 = max(0, b2)
                                         if b1 + b2 > 1 {
@@ -792,14 +900,15 @@ enum Painter {
         return ok ? (bytes, w, h) : nil
     }
 
-    /// The painted mesh: three vertices per face (each face owns its cell), normals, and the cell's
-    /// corners as texture coordinates. SceneKit's own texture space runs TOP-DOWN like the atlas
+    /// The painted mesh: three vertices per face (a cell is one face's, or two halves), normals, and
+    /// the cell's corners as texture coordinates. SceneKit's own texture space runs TOP-DOWN like the atlas
     /// rows (its USD writer flips to USD's bottom-up itself — checked on the Mac with one triangle,
     /// 10-16, after the first painted model wore every other face's patch).
     static func geometry(_ faces: [Face], atlas: Atlas, sheet: Int, texture: Any) -> SCNGeometry {
-        let a = Float(atlas.size), n = Float(atlas.cell)
-        let range = atlas.faces(on: sheet, of: faces.count)
-        let h = Float(atlas.height(of: sheet, count: faces.count))
+        let a = Float(atlas.size), n = Float(atlas.cell), o = Float(inset)
+        let range = atlas.faces(on: sheet, of: faces)
+        let cells = faces.last.map { Int($0.cell) + 1 } ?? 0
+        let h = Float(atlas.height(of: sheet, cells: cells))
         var pos = [simd_float3]()
         var nor = [simd_float3]()
         var uv = [simd_float2]()
@@ -810,11 +919,19 @@ enum Painter {
             let f = faces[i]
             pos.append(f.a); pos.append(f.b); pos.append(f.c)
             nor.append(f.normal); nor.append(f.normal); nor.append(f.normal)
-            let slot = atlas.slot(i)
+            let slot = atlas.slot(Int(f.cell))
             let cx = Float(slot.x), cy = Float(slot.y)
-            uv.append(simd_float2((cx + 1) / a, (cy + 1) / h))
-            uv.append(simd_float2((cx + n - 1) / a, (cy + 1) / h))
-            uv.append(simd_float2((cx + 1) / a, (cy + n - 1) / h))
+            if f.half == 2 {
+                // The upper-right half: a at the far corner, b and c at the diagonal's ends (the same
+                // two corners, the same way round, as the lower-left half's c and b).
+                uv.append(simd_float2((cx + n - o) / a, (cy + n - o) / h))
+                uv.append(simd_float2((cx + o) / a, (cy + n - o) / h))
+                uv.append(simd_float2((cx + n - o) / a, (cy + o) / h))
+            } else {
+                uv.append(simd_float2((cx + o) / a, (cy + o) / h))
+                uv.append(simd_float2((cx + n - o) / a, (cy + o) / h))
+                uv.append(simd_float2((cx + o) / a, (cy + n - o) / h))
+            }
         }
         var idx = [UInt32](repeating: 0, count: range.count * 3)
         for i in 0..<idx.count { idx[i] = UInt32(i) }
@@ -1529,27 +1646,36 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             func progress(_ f: Double) {
                 DispatchQueue.main.async { self?.setProgress(f) }
             }
-            // Every face in world space, with its normal, then the whole lot set down on the floor.
+            // Every face in world space, with its normal, laid into cells anchor by anchor (two faces
+            // that share an edge to a cell), then the whole lot set down on the floor.
             var faces: [Painter.Face] = []
+            var cells = 0
             for snap in final {
+                var raw: [Painter.Face] = []
+                var tri: [simd_uint3] = []
                 var i = 0
                 while i + 2 < snap.faces.count {
                     let ia = snap.faces[i], ib = snap.faces[i + 1], ic = snap.faces[i + 2]
                     i += 3
                     let a = snap.world(ia)
                     var b = snap.world(ib), c = snap.world(ic)
+                    var jb = ib, jc = ic
                     var n = snap.worldNormal(ia) + snap.worldNormal(ib) + snap.worldNormal(ic)
                     var len = simd_length(n)
                     if len < 0.1 {
                         n = simd_cross(b - a, c - a)
                         len = simd_length(n)
                     }
-                    guard len > 0, simd_length(a).isFinite, simd_length(b).isFinite, simd_length(c).isFinite else { continue }
+                    guard ia != ib, ib != ic, ic != ia, len > 0, simd_length(a).isFinite, simd_length(b).isFinite, simd_length(c).isFinite else { continue }
                     // The winding follows the normal (into the open), so a viewer that draws one
                     // side sees the surfaces from inside the room.
-                    if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c) }
-                    faces.append(Painter.Face(a: a, b: b, c: c, normal: n / len))
+                    if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc) }
+                    raw.append(Painter.Face(a: a, b: b, c: c, normal: n / len, cell: 0, half: 0))
+                    tri.append(simd_uint3(ia, jb, jc))
                 }
+                let laid = Painter.lay(raw, tri: tri, from: cells)
+                faces.append(contentsOf: laid.faces)
+                cells = laid.next
             }
             guard !faces.isEmpty else {
                 fail("The scan has no surfaces to paint. Walk the room again, slowly.")
@@ -1577,8 +1703,14 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 t.columns.3 = simd_float4(t.columns.3.x - shift.x, t.columns.3.y - shift.y, t.columns.3.z - shift.z, 1)
                 return Keyframe(id: kf.id, transform: t, intrinsics: kf.intrinsics, width: kf.width, height: kf.height, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight, image: kf.image, depth: kf.depth)
             }
-            faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal) }
-            let atlas = Painter.atlas(forFaces: faces.count)
+            faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal, cell: $0.cell, half: $0.half) }
+            let atlas = Painter.atlas(forCells: cells)
+            // The cap on faces assumes about two to a cell; a mesh that pairs badly must not grow
+            // past the four sheets the phone and the viewer are known to hold (skeptic #24).
+            guard atlas.sheets <= Painter.maxSheets else {
+                fail("This scan is too big to paint on this phone. Scan a smaller area.")
+                return
+            }
             let assigned = Painter.assign(faces, keyframes: kept, dir: dir, cancelled: cancelled) { progress($0 * 0.45) }
             if cancelled.isSet { return }
             let seen = assigned.best.reduce(0) { $0 + ($1 >= 0 ? 1 : 0) }
@@ -1600,7 +1732,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 images.append(image)
             }
             progress(0.92)
-            NSLog("[Scan3D] painting %d faces from %d frames on %d sheet(s) %d wide at %d texels a cell", faces.count, kept.count, atlas.sheets, atlas.size, atlas.cell)
+            NSLog("[Scan3D] painting %d faces in %d cells from %d frames on %d sheet(s) %d wide at %d texels a cell", faces.count, cells, kept.count, atlas.sheets, atlas.size, atlas.cell)
             let scene = SCNScene()
             for (sheet, image) in images.enumerated() {
                 scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: image)))
