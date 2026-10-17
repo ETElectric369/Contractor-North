@@ -293,8 +293,8 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("func faces(on sheet: Int, of faces: [Face]) -> Range<Int>");
     expect(swift).toContain("let je = u.x == q && u.y == p ? 0 : u.y == q && u.z == p ? 1 : u.z == q && u.x == p ? 2 : -1");
     expect(swift).toContain("guard je >= 0 else { return false }");
-    expect(swift).toContain("case 0: return (f.c, f.a, f.b)");
-    expect(swift).toContain("default: return (f.b, f.c, f.a)");
+    expect(swift).toContain("case 0: return (f.c, f.a, f.b, f.nc, f.na, f.nb)");
+    expect(swift).toContain("default: return (f.b, f.c, f.a, f.nb, f.nc, f.na)");
     expect(swift).toContain("if half == 1 { if tx + ty >= cell { continue } } else if half == 2 { if tx + ty < cell { continue } }");
     expect(swift).toContain("if half == 2 { b1 = 1 - b1; b2 = 1 - b2 }");
     expect(swift).toContain("let span = Float(max(1, cell - 2 * inset))");
@@ -325,7 +325,30 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: image)))");
     expect(swift).toContain('fail("This scan is too big to paint on this phone. Scan a smaller area.")');
     expect(swift).toContain("let floor = ys.isEmpty ? lo.y : ys[min(ys.count - 1, ys.count / 100)]");
-    expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc) }");
+    expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc); swap(&nb, &nc) }");
+    // SMOOTH NORMALS + LEVELLING (Erik 10-16 on the paired model: fine vertical stripes on the walls
+    // = the mesh grid shaded flat face by face; a quilt of lighter and darker patches = the camera's
+    // exposure drifting between frames). Each vertex keeps ARKit's own normal; every face two frames
+    // saw measures how the frames differ, one gain per frame and channel is solved from all of them
+    // (log space, relaxation, mean held at 1, within a half and double) and each face's texels are
+    // scaled by its frames' gains mixed as its colours were.
+    expect(swift).toContain("nor.append(f.na); nor.append(f.nb); nor.append(f.nc)");
+    expect(swift).toContain("static func level(assigned: Assignment, frames: Int, meanBest: [simd_float3], meanSecond: [simd_float3]) -> (gains: [simd_float3], ties: Int, before: Float, after: Float)?");
+    expect(swift).toContain("static func apply(_ gains: [simd_float3], to faces: [Face], assigned: Assignment, atlas: Atlas, bases: [UnsafeMutablePointer<UInt8>])");
+    expect(swift).toContain("sum[bi] += L[si] + d[i]");
+    expect(swift).toContain("sum[si] += L[bi] - d[i]");
+    expect(swift).toContain("let measureOnly = share <= 0");
+    expect(swift).toContain("if second >= 0 { bySecond[Int(second)].append(face) }");
+    expect(swift).toContain("if part == 0 { mb[face] = mean } else { ms[face] = mean }");
+    expect(swift).toContain("if second >= 0, blend > 0 { g = g * (1 - blend) + gains[Int(second)] * blend }");
+    expect(swift).toContain('NSLog("[Scan3D] levelled %d frames from %d faces seen twice: gains %.2f to %.2f, mismatch %.3f to %.3f"');
+    expect(swift).toContain('NSLog("[Scan3D] frames left alone: %d faces seen twice, mismatch %.3f to %.3f"');
+    // Skeptic #25: both frames measured on the same texels; observations too dark, too bright or
+    // further apart than double are left out; the solve must close the gaps by a fifth or the frames stay.
+    expect(swift).toContain("if tx % 4 == 0, ty % 4 == 0 { tr += Float(sr) / count; tg += Float(sg) / count; tb += Float(sb) / count; tn += 1 }");
+    expect(swift).toContain("guard min(mb.x, mb.y, mb.z, ms.x, ms.y, ms.z) >= 20, max(mb.x, mb.y, mb.z, ms.x, ms.y, ms.z) <= 250 else { continue }");
+    expect(swift).toContain("guard max(abs(di.x), abs(di.y), abs(di.z)) <= log(Float(2)) else { continue }");
+    expect(swift).toContain("if levelled.after <= levelled.before * 0.8 {");
     expect(swift).toContain("guard seen * 20 >= faces.count else {");
     // SceneKit's texture space is top-down (checked on the Mac, 10-16: v 0.2/0.8 in → USD 0.8/0.2
     // out); the atlas rows are top-down too, so v = y / A — the first painted model wore every

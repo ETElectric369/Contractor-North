@@ -437,6 +437,11 @@ enum Painter {
         let b: simd_float3
         let c: simd_float3
         let normal: simd_float3
+        /// ARKit's own normal at each vertex, so the viewer shades the surface smoothly: a wall shaded
+        /// flat face by face showed the mesh grid as light and dark stripes (Erik 10-16).
+        let na: simd_float3
+        let nb: simd_float3
+        let nc: simd_float3
         let cell: Int32
         let half: UInt8
     }
@@ -564,12 +569,12 @@ enum Painter {
             if pair(i, 0, t.x, t.y) || pair(i, 1, t.y, t.z) || pair(i, 2, t.z, t.x) { continue }
         }
         // The face turned so that its shared edge runs b → c (a rotation of the three, so the winding stays).
-        func turned(_ i: Int) -> (simd_float3, simd_float3, simd_float3) {
+        func turned(_ i: Int) -> (simd_float3, simd_float3, simd_float3, simd_float3, simd_float3, simd_float3) {
             let f = faces[i]
             switch shared[i] {
-            case 0: return (f.c, f.a, f.b)
-            case 1: return (f.a, f.b, f.c)
-            default: return (f.b, f.c, f.a)
+            case 0: return (f.c, f.a, f.b, f.nc, f.na, f.nb)
+            case 1: return (f.a, f.b, f.c, f.na, f.nb, f.nc)
+            default: return (f.b, f.c, f.a, f.nb, f.nc, f.na)
             }
         }
         var out: [Face] = []
@@ -579,13 +584,13 @@ enum Painter {
             let j = mate[i]
             if j < 0 {
                 let f = faces[i]
-                out.append(Face(a: f.a, b: f.b, c: f.c, normal: f.normal, cell: Int32(next), half: 0))
+                out.append(Face(a: f.a, b: f.b, c: f.c, normal: f.normal, na: f.na, nb: f.nb, nc: f.nc, cell: Int32(next), half: 0))
                 next += 1
             } else if j > i {
-                let (a1, b1, c1) = turned(i)
-                let (a2, b2, c2) = turned(j)
-                out.append(Face(a: a1, b: b1, c: c1, normal: faces[i].normal, cell: Int32(next), half: 1))
-                out.append(Face(a: a2, b: b2, c: c2, normal: faces[j].normal, cell: Int32(next), half: 2))
+                let (a1, b1, c1, na1, nb1, nc1) = turned(i)
+                let (a2, b2, c2, na2, nb2, nc2) = turned(j)
+                out.append(Face(a: a1, b: b1, c: c1, normal: faces[i].normal, na: na1, nb: nb1, nc: nc1, cell: Int32(next), half: 1))
+                out.append(Face(a: a2, b: b2, c: c2, normal: faces[j].normal, na: na2, nb: nb2, nc: nc2, cell: Int32(next), half: 2))
                 next += 1
             }
         }
@@ -786,10 +791,16 @@ enum Painter {
         }
         var byBest = [[Int]](repeating: [], count: keyframes.count)
         var bySecond = [[Int]](repeating: [], count: keyframes.count)
+        // What each face's two frames made of it — its mean colour from its best frame and from its
+        // second — for the levelling of the frames against each other afterwards.
+        var meanBest = [simd_float3](repeating: .zero, count: faces.count)
+        var meanSecond = [simd_float3](repeating: .zero, count: faces.count)
         for (face, b) in assigned.best.enumerated() where b >= 0 {
             byBest[Int(b)].append(face)
             let second = assigned.second[face]
-            if second >= 0, assigned.blend[face] > 0 { bySecond[Int(second)].append(face) }
+            // Every face with a second frame goes on that frame's list: painted from it where the
+            // blend says so, and measured from it either way, for the levelling.
+            if second >= 0 { bySecond[Int(second)].append(face) }
             // The face's texels start black: each frame adds its share.
             fill(faces[face], 0)
         }
@@ -815,6 +826,7 @@ enum Painter {
                 guard !list.isEmpty else { continue }
                 let chunks = max(1, min(16, list.count / 512))
                 let per = (list.count + chunks - 1) / chunks
+                meanBest.withUnsafeMutableBufferPointer { mb in meanSecond.withUnsafeMutableBufferPointer { ms in
                 bases.withUnsafeBufferPointer { bp in
                     img.bytes.withUnsafeBufferPointer { ip in
                         DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
@@ -840,8 +852,12 @@ enum Painter {
                                 let r = perTexel.isFinite ? min(2, Int(perTexel / 2)) : 0
                                 let step = perTexel.isFinite ? max(1, Int(perTexel / 5)) : 1
                                 let count = Float((2 * r + 1) * (2 * r + 1))
-                                for ty in 0..<cell {
-                                    for tx in 0..<cell {
+                                // A frame with no share of the face only measures it, at every fourth texel.
+                                let measureOnly = share <= 0
+                                let by = measureOnly ? 4 : 1
+                                var tr: Float = 0, tg: Float = 0, tb: Float = 0, tn: Float = 0
+                                for ty in stride(from: 0, to: cell, by: by) {
+                                    for tx in stride(from: 0, to: cell, by: by) {
                                         // Only the half's own side of the diagonal (tx + ty = cell − 1 sits on it).
                                         if half == 1 { if tx + ty >= cell { continue } } else if half == 2 { if tx + ty < cell { continue } }
                                         var b1 = (Float(tx) + 0.5 - o) / span
@@ -871,19 +887,134 @@ enum Painter {
                                             }
                                             iy += 1
                                         }
+                                        // The measure takes every fourth texel each way in EVERY pass, so a
+                                        // face's two frames are compared on the same texels (skeptic #25).
+                                        if tx % 4 == 0, ty % 4 == 0 { tr += Float(sr) / count; tg += Float(sg) / count; tb += Float(sb) / count; tn += 1 }
+                                        if measureOnly { continue }
                                         let di = ((cy + ty) * size + cx + tx) * 4
                                         pp[di] = UInt8(min(255, Float(pp[di]) + Float(sr) / count * share).rounded())
                                         pp[di + 1] = UInt8(min(255, Float(pp[di + 1]) + Float(sg) / count * share).rounded())
                                         pp[di + 2] = UInt8(min(255, Float(pp[di + 2]) + Float(sb) / count * share).rounded())
                                     }
                                 }
+                                let mean = simd_float3(tr, tg, tb) / max(1, tn)
+                                if part == 0 { mb[face] = mean } else { ms[face] = mean }
                             }
                         }
                     }
                 }
+                } }
             }
         }
+        if cancelled.isSet { return sheets }
+        // LEVELLING: the camera's exposure and white balance drift from frame to frame, so faces
+        // painted from different frames met in a quilt of lighter and darker patches (Erik 10-16 on
+        // the paired model). Every face two frames saw measures how those frames differ; one gain
+        // per frame and channel, solved from all of them, flattens the quilt.
+        if let levelled = level(assigned: assigned, frames: keyframes.count, meanBest: meanBest, meanSecond: meanSecond) {
+            // A solve that did not close the gaps by a fifth was not measuring exposure: the frames stay.
+            if levelled.after <= levelled.before * 0.8 {
+                var lo: Float = 10, hi: Float = 0
+                for g in levelled.gains { lo = min(lo, g.x, g.y, g.z); hi = max(hi, g.x, g.y, g.z) }
+                NSLog("[Scan3D] levelled %d frames from %d faces seen twice: gains %.2f to %.2f, mismatch %.3f to %.3f", keyframes.count, levelled.ties, lo, hi, levelled.before, levelled.after)
+                apply(levelled.gains, to: faces, assigned: assigned, atlas: atlas, bases: bases)
+            } else {
+                NSLog("[Scan3D] frames left alone: %d faces seen twice, mismatch %.3f to %.3f", levelled.ties, levelled.before, levelled.after)
+            }
+        } else {
+            NSLog("[Scan3D] nothing to level: too few faces seen twice")
+        }
         return sheets
+    }
+
+    /// One gain per frame (R, G, B) from every face two frames saw: for such a face the frames should
+    /// agree, so gain(best) · meanBest ≈ gain(second) · meanSecond. Solved in log space by relaxation
+    /// (Brown & Lowe's gain compensation), a light pull to 1 for a frame few faces tie in, the mean
+    /// gain held at 1 so the model keeps its brightness, each gain kept within a half and double, and
+    /// the frames' mismatch (RMS of the log gaps) before and after, for the caller to judge. Nil when
+    /// too few faces tie the frames together.
+    static func level(assigned: Assignment, frames: Int, meanBest: [simd_float3], meanSecond: [simd_float3]) -> (gains: [simd_float3], ties: Int, before: Float, after: Float)? {
+        guard frames > 1 else { return nil }
+        var b: [Int32] = [], s: [Int32] = [], d: [simd_float3] = []
+        for i in 0..<meanBest.count {
+            let best = assigned.best[i], second = assigned.second[i]
+            guard best >= 0, second >= 0, second != best else { continue }
+            let mb = meanBest[i], ms = meanSecond[i]
+            // Neither blown out nor dark, in any channel; and no further apart than double — a bigger
+            // step is something else in the picture (a thing in the way, drift), not exposure.
+            guard min(mb.x, mb.y, mb.z, ms.x, ms.y, ms.z) >= 20, max(mb.x, mb.y, mb.z, ms.x, ms.y, ms.z) <= 250 else { continue }
+            let di = simd_float3(log(ms.x) - log(mb.x), log(ms.y) - log(mb.y), log(ms.z) - log(mb.z))
+            guard max(abs(di.x), abs(di.y), abs(di.z)) <= log(Float(2)) else { continue }
+            b.append(best); s.append(second); d.append(di)
+        }
+        guard d.count >= 8 else { return nil }
+        // log gain(best) − log gain(second) = d, so that gain(best) · meanBest = gain(second) · meanSecond.
+        var L = [simd_float3](repeating: .zero, count: frames)
+        var sum = [simd_float3](repeating: .zero, count: frames)
+        var cnt = [Float](repeating: 0, count: frames)
+        for i in 0..<d.count { cnt[Int(b[i])] += 1; cnt[Int(s[i])] += 1 }
+        let pull: Float = 2
+        func mismatch() -> Float {
+            var e: Float = 0
+            for i in 0..<d.count { e += simd_length_squared(L[Int(b[i])] - L[Int(s[i])] - d[i]) }
+            return (e / Float(3 * d.count)).squareRoot()
+        }
+        let before = mismatch()
+        for _ in 0..<200 {
+            for k in 0..<frames { sum[k] = .zero }
+            for i in 0..<d.count {
+                let bi = Int(b[i]), si = Int(s[i])
+                sum[bi] += L[si] + d[i]
+                sum[si] += L[bi] - d[i]
+            }
+            for k in 0..<frames where cnt[k] > 0 { L[k] = sum[k] / (cnt[k] + pull) }
+        }
+        let after = mismatch()
+        var mean = simd_float3.zero
+        for k in 0..<frames { mean += L[k] }
+        mean /= Float(frames)
+        let cap = simd_float3(repeating: log(Float(2)))
+        let gains = L.map { l -> simd_float3 in
+            let c = simd_min(simd_max(l - mean, -cap), cap)
+            return simd_float3(exp(c.x), exp(c.y), exp(c.z))
+        }
+        return (gains, d.count, before, after)
+    }
+
+    /// Each face's texels scaled by its frames' gains, the two mixed as its colours were.
+    @_optimize(speed)
+    static func apply(_ gains: [simd_float3], to faces: [Face], assigned: Assignment, atlas: Atlas, bases: [UnsafeMutablePointer<UInt8>]) {
+        let size = atlas.size, cell = atlas.cell
+        let chunks = max(1, min(16, faces.count / 4096))
+        let per = (faces.count + chunks - 1) / chunks
+        DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
+            let lo = chunk * per, hi = min(faces.count, lo + per)
+            var face = lo
+            while face < hi {
+                defer { face += 1 }
+                let best = assigned.best[face]
+                guard best >= 0 else { continue }
+                var g = gains[Int(best)]
+                let second = assigned.second[face], blend = assigned.blend[face]
+                if second >= 0, blend > 0 { g = g * (1 - blend) + gains[Int(second)] * blend }
+                if abs(g.x - 1) < 0.005, abs(g.y - 1) < 0.005, abs(g.z - 1) < 0.005 { continue }
+                let f = faces[face]
+                let slot = atlas.slot(Int(f.cell))
+                let pp = bases[slot.sheet]
+                for ty in 0..<cell {
+                    let from = f.half == 2 ? cell - ty : 0
+                    let to = f.half == 1 ? cell - ty : cell
+                    var di = ((slot.y + ty) * size + slot.x + from) * 4
+                    var tx = from
+                    while tx < to {
+                        pp[di] = UInt8(min(255, (Float(pp[di]) * g.x).rounded()))
+                        pp[di + 1] = UInt8(min(255, (Float(pp[di + 1]) * g.y).rounded()))
+                        pp[di + 2] = UInt8(min(255, (Float(pp[di + 2]) * g.z).rounded()))
+                        di += 4; tx += 1
+                    }
+                }
+            }
+        }
     }
 
     /// A frame's picture as RGBA bytes, row 0 at the top.
@@ -918,7 +1049,7 @@ enum Painter {
         for i in range {
             let f = faces[i]
             pos.append(f.a); pos.append(f.b); pos.append(f.c)
-            nor.append(f.normal); nor.append(f.normal); nor.append(f.normal)
+            nor.append(f.na); nor.append(f.nb); nor.append(f.nc)
             let slot = atlas.slot(Int(f.cell))
             let cx = Float(slot.x), cy = Float(slot.y)
             if f.half == 2 {
@@ -1660,7 +1791,9 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                     let a = snap.world(ia)
                     var b = snap.world(ib), c = snap.world(ic)
                     var jb = ib, jc = ic
-                    var n = snap.worldNormal(ia) + snap.worldNormal(ib) + snap.worldNormal(ic)
+                    let na = snap.worldNormal(ia)
+                    var nb = snap.worldNormal(ib), nc = snap.worldNormal(ic)
+                    var n = na + nb + nc
                     var len = simd_length(n)
                     if len < 0.1 {
                         n = simd_cross(b - a, c - a)
@@ -1669,8 +1802,11 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                     guard ia != ib, ib != ic, ic != ia, len > 0, simd_length(a).isFinite, simd_length(b).isFinite, simd_length(c).isFinite else { continue }
                     // The winding follows the normal (into the open), so a viewer that draws one
                     // side sees the surfaces from inside the room.
-                    if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc) }
-                    raw.append(Painter.Face(a: a, b: b, c: c, normal: n / len, cell: 0, half: 0))
+                    if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c); swap(&jb, &jc); swap(&nb, &nc) }
+                    let fn = n / len
+                    // A vertex without a normal of its own takes the face's.
+                    let unit = { (v: simd_float3) -> simd_float3 in let l = simd_length(v); return l > 0.5 ? v / l : fn }
+                    raw.append(Painter.Face(a: a, b: b, c: c, normal: fn, na: unit(na), nb: unit(nb), nc: unit(nc), cell: 0, half: 0))
                     tri.append(simd_uint3(ia, jb, jc))
                 }
                 let laid = Painter.lay(raw, tri: tri, from: cells)
@@ -1703,7 +1839,7 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 t.columns.3 = simd_float4(t.columns.3.x - shift.x, t.columns.3.y - shift.y, t.columns.3.z - shift.z, 1)
                 return Keyframe(id: kf.id, transform: t, intrinsics: kf.intrinsics, width: kf.width, height: kf.height, depthWidth: kf.depthWidth, depthHeight: kf.depthHeight, image: kf.image, depth: kf.depth)
             }
-            faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal, cell: $0.cell, half: $0.half) }
+            faces = faces.map { Painter.Face(a: $0.a - shift, b: $0.b - shift, c: $0.c - shift, normal: $0.normal, na: $0.na, nb: $0.nb, nc: $0.nc, cell: $0.cell, half: $0.half) }
             let atlas = Painter.atlas(forCells: cells)
             // The cap on faces assumes about two to a cell; a mesh that pairs badly must not grow
             // past the four sheets the phone and the viewer are known to hold (skeptic #24).
