@@ -253,9 +253,31 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("return facing / (d + 0.3)");
     expect(swift).toContain("if reading.isFinite, reading > 0, pm.z > reading + 0.08 + 0.06 * pm.z { return 0 }");
     expect(swift).toContain("DispatchQueue.concurrentPerform(iterations: chunks)");
-    expect(swift).toContain("static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [UInt8]");
-    expect(swift).toContain("let cell = max(4, min(12, (size / max(1, side)) & ~3))");
-    expect(swift).toContain("static let maxFaces = 1_000_000");
+    // SHEETS (Erik 10-16: "the pixels are slightly more distorted than the last one" — one 4096 sheet
+    // had shrunk its cells from 12 texels to 8 on a 217-frame scan): a bigger scan gets more sheets,
+    // never smaller cells; each sheet its own node + image; the file is read back for them all.
+    expect(swift).toContain("static let sheetSize = 4096");
+    expect(swift).toContain("static let cellSize = 12");
+    expect(swift).toContain("return Atlas(size: sheetSize, cell: cellSize, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)");
+    expect(swift).toContain("func slot(_ i: Int) -> (sheet: Int, x: Int, y: Int)");
+    // The last sheet is only as tall as its rows; v runs over that height; the sheet's number sits
+    // in its last texel so no two sheets are byte-identical (the writer packs each — Mac check,
+    // three nodes, two identical pictures → three PNGs); 24-bit; four sheets at most, and a model
+    // over the page's cap is refused on the phone in words (skeptic #22).
+    expect(swift).toContain("func height(of sheet: Int, count: Int) -> Int");
+    expect(swift).toContain("uv.append(simd_float2((cx + 1) / a, (cy + 1) / h))");
+    expect(swift).toContain("bytes[count - 4] = UInt8(truncatingIfNeeded: index + 1)");
+    expect(swift).toContain("CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue");
+    expect(swift).toContain("static let maxFaces = 450_000");
+    expect(swift).toContain("static let maxModelBytes = 200_000_000");
+    expect(MODEL_MAX_BYTES).toBe(200_000_000);
+    expect(swift).toContain("guard bytes <= Painter.maxModelBytes else {");
+    expect(swift).toContain("let bases = sheets.map { $0.bytes }");
+    expect(swift).toContain("static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [Sheet]");
+    expect(swift).toContain("let data = Data(bytesNoCopy: UnsafeMutableRawPointer(bytes), count: width * height * 4, deallocator: .custom { p, _ in p.deallocate() })");
+    expect(swift).toContain("deinit { if !handed { bytes.deallocate() } }");
+    expect(swift).toContain("static func geometry(_ faces: [Face], atlas: Atlas, sheet: Int, texture: Any) -> SCNGeometry");
+    expect(swift).toContain("scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: image)))");
     expect(swift).toContain('fail("This scan is too big to paint on this phone. Scan a smaller area.")');
     expect(swift).toContain("let floor = ys.isEmpty ? lo.y : ys[min(ys.count - 1, ys.count / 100)]");
     expect(swift).toContain("if simd_dot(simd_cross(b - a, c - a), n) < 0 { swap(&b, &c) }");
@@ -263,19 +285,17 @@ describe("the wiring, pinned", () => {
     // SceneKit's texture space is top-down (checked on the Mac, 10-16: v 0.2/0.8 in → USD 0.8/0.2
     // out); the atlas rows are top-down too, so v = y / A — the first painted model wore every
     // other face's patch with "1 -".
-    expect(swift).toContain("uv.append(simd_float2((cx + 1) / a, (cy + 1) / a))");
     expect(swift).not.toContain("1 - (cy + 1) / a");
     // An interruption starts the scan over for real: the session, the mesh, the frames.
     expect(swift).toContain("meshes.removeAll()\n        snaps.removeAll()\n        dirty.removeAll()\n        meshSeen = false\n        keyframes.removeAll()");
-    expect(swift).toContain("static func textureImage(_ pixels: inout [UInt8], size: Int) -> UIImage?");
     expect(swift).not.toContain("jpegData(compressionQuality: 0.95)");
     // The texture goes in as an image (the file form never carried) and the USDZ is read back for it.
-    expect(swift).toContain("guard let image = Painter.textureImage(&pixels, size: atlas.size) else {");
-    expect(swift).toContain("Painter.geometry(faces, atlas: atlas, texture: image)");
+    expect(swift).toContain("guard let image = sheet.image() else {");
     expect(swift).not.toContain("textureURL");
     expect(swift).toContain("let wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)");
-    expect(swift).toContain("static func carriesImage(_ url: URL) -> Bool");
-    expect(swift).toContain("guard Painter.carriesImage(output) else {");
+    expect(swift).toContain("static func images(in url: URL) -> Int");
+    expect(swift).toContain("guard Painter.images(in: output) >= atlas.sheets else {");
+    expect(swift).toContain('"shots": frames.count, "faces": faces.count, "sheets": atlas.sheets]');
     expect(swift).toContain('fail("The model was written without its picture. Try again.")');
     // v3.1 (Erik: the counter stopped at 99 and "i dont think it was capturing anymore"): the camera's
     // picture is copied out of ARKit's pool at once; a frame visits only the anchors in its reach and

@@ -436,10 +436,10 @@ enum Painter {
         let normal: simd_float3
     }
 
-    /// Whether a USDZ carries an image: its zip's central directory (always the true sizes, whatever
-    /// the writer put in the local headers) names an image entry (SceneKit's is 0/texgen_0.png).
-    static func carriesImage(_ url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 22 else { return false }
+    /// How many images a USDZ carries: its zip's central directory (always the true sizes, whatever
+    /// the writer put in the local headers) names the image entries (SceneKit's: 0/texgen_0.png …).
+    static func images(in url: URL) -> Int {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 22 else { return 0 }
         let u16 = { (i: Int) -> Int in Int(data[i]) | Int(data[i + 1]) << 8 }
         let u32 = { (i: Int) -> Int in u16(i) | u16(i + 2) << 16 }
         // The end-of-central-directory record sits in the last 64 KB + 22 bytes.
@@ -450,41 +450,98 @@ enum Painter {
             if data[i] == 0x50, data[i + 1] == 0x4B, data[i + 2] == 0x05, data[i + 3] == 0x06 { end = i; break }
             i -= 1
         }
-        guard end >= 0 else { return false }
+        guard end >= 0 else { return 0 }
         let entries = u16(end + 10)
         var at = u32(end + 16)
+        var images = 0
         for _ in 0..<entries {
-            guard at + 46 <= data.count, data[at] == 0x50, data[at + 1] == 0x4B, data[at + 2] == 0x01, data[at + 3] == 0x02 else { return false }
+            guard at + 46 <= data.count, data[at] == 0x50, data[at + 1] == 0x4B, data[at + 2] == 0x01, data[at + 3] == 0x02 else { return images }
             let nameLength = u16(at + 28), extraLength = u16(at + 30), commentLength = u16(at + 32)
-            guard at + 46 + nameLength <= data.count else { return false }
+            guard at + 46 + nameLength <= data.count else { return images }
             let name = String(decoding: data[(at + 46)..<(at + 46 + nameLength)], as: UTF8.self).lowercased()
-            if [".png", ".jpg", ".jpeg", ".exr", ".heic", ".heif", ".tif", ".tiff"].contains(where: { name.hasSuffix($0) }) { return true }
+            if [".png", ".jpg", ".jpeg", ".exr", ".heic", ".heif", ".tif", ".tiff"].contains(where: { name.hasSuffix($0) }) { images += 1 }
             at += 46 + nameLength + extraLength + commentLength
         }
-        return false
+        return images
     }
 
-    /// The texture: one square cell per face, `cell` texels on a side.
+    /// The texture: one square cell per face, `cell` texels on a side, on one or more SHEETS `size`
+    /// texels wide — a bigger scan gets more sheets, never smaller cells (Erik 10-16 on a 217-frame
+    /// scan: "the pixels are slightly more distorted than the last one"; one sheet had shrunk its
+    /// cells from 12 texels to 8). The last sheet (or the only one) is just as tall as its rows.
     struct Atlas {
         let size: Int
         let cell: Int
+        let sheets: Int
         var perRow: Int { size / cell }
+        var perSheet: Int { perRow * perRow }
+        /// Face i's cell: its sheet and the cell's top-left texel on it.
+        func slot(_ i: Int) -> (sheet: Int, x: Int, y: Int) {
+            let r = i % perSheet
+            return (i / perSheet, (r % perRow) * cell, (r / perRow) * cell)
+        }
+        /// The faces on one sheet.
+        func faces(on sheet: Int, of count: Int) -> Range<Int> {
+            (Swift.min(count, sheet * perSheet))..<(Swift.min(count, (sheet + 1) * perSheet))
+        }
+        /// A sheet's height in texels: whole rows of cells, only as many as its faces fill.
+        func height(of sheet: Int, count: Int) -> Int {
+            let n = faces(on: sheet, of: count).count
+            return Swift.max(1, (n + perRow - 1) / perRow) * cell
+        }
     }
 
-    /// 4096 texels across for a room, smaller for a nook; cells as big as the face count allows
-    /// (eight or more texels across a 5 cm triangle is a photo; three is the floor).
+    /// A sheet is 4096 texels wide (every viewer takes that), a cell 12 (a 5 cm triangle as a photo).
+    static let sheetSize = 4096
+    static let cellSize = 12
+
+    /// Sheets 4096 wide at twelve texels a cell, as many as the faces need (116,281 to a full sheet).
     static func atlas(forFaces n: Int) -> Atlas {
-        let side = Int(ceil(sqrt(Double(max(1, n)))))
-        var size = 512
-        while size < side * 8 && size < 4096 { size *= 2 }
-        // Multiples of four: the viewer's smaller mip levels then stay inside a cell (no fringe).
-        let cell = max(4, min(12, (size / max(1, side)) & ~3))
-        return Atlas(size: size, cell: cell)
+        let perSheet = (sheetSize / cellSize) * (sheetSize / cellSize)
+        return Atlas(size: sheetSize, cell: cellSize, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)
     }
 
-    /// The most faces one atlas holds (4096² at four texels a cell): a house and its yard. Beyond
-    /// it the scan is refused in words rather than painted wrong.
-    static let maxFaces = 1_000_000
+    /// The most faces one scan paints: four full sheets (~250 MB of texels while they are made, a
+    /// model of ~100 MB — the page sends up to `maxModelBytes`, the viewer holds four sheets). Beyond
+    /// it the scan is refused in words rather than painted wrong (skeptic #22).
+    static let maxFaces = 450_000
+    /// The biggest model the page will take over the bridge — MODEL_MAX_BYTES in src/lib/native-scan.ts.
+    static let maxModelBytes = 200_000_000
+
+    /// One sheet of texels while it is painted: owned here, then handed to the image without a copy.
+    final class Sheet {
+        let width: Int
+        let height: Int
+        let bytes: UnsafeMutablePointer<UInt8>
+        private var handed = false
+
+        init(width: Int, height: Int, index: Int) {
+            self.width = width
+            self.height = height
+            let count = width * height * 4
+            bytes = UnsafeMutablePointer<UInt8>.allocate(capacity: count)
+            // A quiet grey for the faces no frame saw.
+            var grey: UInt32 = 0
+            withUnsafeMutableBytes(of: &grey) { $0[0] = 150; $0[1] = 150; $0[2] = 150; $0[3] = 255 }
+            memset_pattern4(bytes, &grey, count)
+            // The sheet's number in its last texel (no cell reaches it: cells tile from the top-left
+            // in whole twelves): two sheets are never byte-identical, so the USDZ writer packs each.
+            bytes[count - 4] = UInt8(truncatingIfNeeded: index + 1)
+        }
+
+        deinit { if !handed { bytes.deallocate() } }
+
+        /// The sheet as an image, which owns the texels from here on (no copy: four sheets would be
+        /// 250 MB twice over). RGB only — the alpha byte is skipped, so the PNG inside is 24-bit.
+        func image() -> UIImage? {
+            guard !handed else { return nil }
+            handed = true
+            let data = Data(bytesNoCopy: UnsafeMutableRawPointer(bytes), count: width * height * 4, deallocator: .custom { p, _ in p.deallocate() })
+            let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+            guard let provider = CGDataProvider(data: data as CFData), let cg = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info, provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return nil }
+            return UIImage(cgImage: cg)
+        }
+    }
     /// How far from the eye a face still counts as seen (meters) — the blue and the painter share it.
     static let reach: Float = 6
 
@@ -576,16 +633,15 @@ enum Painter {
     /// square, the texels outside the triangle clamped onto it, so filtering at the edges never
     /// pulls in a neighbour's colours. Faces no frame saw stay a quiet grey.
     @_optimize(speed)
-    static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [UInt8] {
-        let size = atlas.size, cell = atlas.cell, perRow = atlas.perRow
-        var pixels = [UInt8](repeating: 150, count: size * size * 4)
-        var i = 3
-        while i < pixels.count { pixels[i] = 255; i += 4 }
+    static func paint(_ faces: [Face], best: [Int32], keyframes: [Keyframe], dir: URL, atlas: Atlas, cancelled: Flag, progress: (Double) -> Void) -> [Sheet] {
+        let size = atlas.size, cell = atlas.cell
+        let sheets = (0..<atlas.sheets).map { Sheet(width: size, height: atlas.height(of: $0, count: faces.count), index: $0) }
+        let bases = sheets.map { $0.bytes }
         var byFrame = [[Int]](repeating: [], count: keyframes.count)
         for (face, b) in best.enumerated() where b >= 0 { byFrame[Int(b)].append(face) }
         let span = Float(max(1, cell - 2))
         for (k, list) in byFrame.enumerated() {
-            if cancelled.isSet { return pixels }
+            if cancelled.isSet { return sheets }
             defer { progress(Double(k + 1) / Double(max(1, keyframes.count))) }
             guard !list.isEmpty, let img = rgba(of: dir.appendingPathComponent(keyframes[k].image)) else { continue }
             let kf = keyframes[k]
@@ -594,7 +650,7 @@ enum Painter {
             let maxU = Float(img.width - 1), maxV = Float(img.height - 1)
             let chunks = max(1, min(16, list.count / 512))
             let per = (list.count + chunks - 1) / chunks
-            pixels.withUnsafeMutableBufferPointer { pp in
+            bases.withUnsafeBufferPointer { bp in
                 img.bytes.withUnsafeBufferPointer { ip in
                     DispatchQueue.concurrentPerform(iterations: chunks) { chunk in
                         let lo = chunk * per, hi = min(list.count, lo + per)
@@ -603,7 +659,9 @@ enum Painter {
                             let face = list[n]
                             n += 1
                             let f = faces[face]
-                            let cx = (face % perRow) * cell, cy = (face / perRow) * cell
+                            let slot = atlas.slot(face)
+                            let pp = bp[slot.sheet]
+                            let cx = slot.x, cy = slot.y
                             for ty in 0..<cell {
                                 for tx in 0..<cell {
                                     var b1 = (Float(tx) + 0.5 - 1) / span
@@ -630,7 +688,7 @@ enum Painter {
                 }
             }
         }
-        return pixels
+        return sheets
     }
 
     /// A frame's picture as RGBA bytes, row 0 at the top.
@@ -647,43 +705,36 @@ enum Painter {
         return ok ? (bytes, w, h) : nil
     }
 
-    /// The atlas as an image for the USDZ (SceneKit's writer packs an image it is handed as a PNG;
-    /// a file handed to it on iOS is left out).
-    static func textureImage(_ pixels: inout [UInt8], size: Int) -> UIImage? {
-        let image: CGImage? = pixels.withUnsafeMutableBytes { buf in
-            guard let base = buf.baseAddress, let ctx = CGContext(data: base, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return nil }
-            return ctx.makeImage()
-        }
-        guard let image else { return nil }
-        return UIImage(cgImage: image)
-    }
-
     /// The painted mesh: three vertices per face (each face owns its cell), normals, and the cell's
     /// corners as texture coordinates. SceneKit's own texture space runs TOP-DOWN like the atlas
     /// rows (its USD writer flips to USD's bottom-up itself — checked on the Mac with one triangle,
     /// 10-16, after the first painted model wore every other face's patch).
-    static func geometry(_ faces: [Face], atlas: Atlas, texture: Any) -> SCNGeometry {
-        let a = Float(atlas.size), n = Float(atlas.cell), perRow = atlas.perRow
+    static func geometry(_ faces: [Face], atlas: Atlas, sheet: Int, texture: Any) -> SCNGeometry {
+        let a = Float(atlas.size), n = Float(atlas.cell)
+        let range = atlas.faces(on: sheet, of: faces.count)
+        let h = Float(atlas.height(of: sheet, count: faces.count))
         var pos = [simd_float3]()
         var nor = [simd_float3]()
         var uv = [simd_float2]()
-        pos.reserveCapacity(faces.count * 3)
-        nor.reserveCapacity(faces.count * 3)
-        uv.reserveCapacity(faces.count * 3)
-        for (i, f) in faces.enumerated() {
+        pos.reserveCapacity(range.count * 3)
+        nor.reserveCapacity(range.count * 3)
+        uv.reserveCapacity(range.count * 3)
+        for i in range {
+            let f = faces[i]
             pos.append(f.a); pos.append(f.b); pos.append(f.c)
             nor.append(f.normal); nor.append(f.normal); nor.append(f.normal)
-            let cx = Float(i % perRow) * n, cy = Float(i / perRow) * n
-            uv.append(simd_float2((cx + 1) / a, (cy + 1) / a))
-            uv.append(simd_float2((cx + n - 1) / a, (cy + 1) / a))
-            uv.append(simd_float2((cx + 1) / a, (cy + n - 1) / a))
+            let slot = atlas.slot(i)
+            let cx = Float(slot.x), cy = Float(slot.y)
+            uv.append(simd_float2((cx + 1) / a, (cy + 1) / h))
+            uv.append(simd_float2((cx + n - 1) / a, (cy + 1) / h))
+            uv.append(simd_float2((cx + 1) / a, (cy + n - 1) / h))
         }
-        var idx = [UInt32](repeating: 0, count: faces.count * 3)
+        var idx = [UInt32](repeating: 0, count: range.count * 3)
         for i in 0..<idx.count { idx[i] = UInt32(i) }
         let vSrc = SCNGeometrySource(data: pos.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .vertex, vectorCount: pos.count, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float3>.stride)
         let nSrc = SCNGeometrySource(data: nor.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .normal, vectorCount: nor.count, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float3>.stride)
         let tSrc = SCNGeometrySource(data: uv.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .texcoord, vectorCount: uv.count, usesFloatComponents: true, componentsPerVector: 2, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float2>.stride)
-        let el = SCNGeometryElement(data: idx.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles, primitiveCount: faces.count, bytesPerIndex: 4)
+        let el = SCNGeometryElement(data: idx.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles, primitiveCount: range.count, bytesPerIndex: 4)
         let g = SCNGeometry(sources: [vSrc, nSrc, tSrc], elements: [el])
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
@@ -1448,19 +1499,25 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 fail("The scan saw too little of the surfaces to paint them. Walk closer and slower, then try again.")
                 return
             }
-            var pixels = Painter.paint(faces, best: best, keyframes: kept, dir: dir, atlas: atlas, cancelled: cancelled) { progress(0.45 + $0 * 0.45) }
+            let sheets = Painter.paint(faces, best: best, keyframes: kept, dir: dir, atlas: atlas, cancelled: cancelled) { progress(0.45 + $0 * 0.45) }
             if cancelled.isSet { return }
             // SceneKit's USDZ writer leaves out a texture handed to it as a file ("Failed to resolve
             // reference"; the first painted models carried theirs only through the image fallback):
-            // the picture goes in as an image, and the file is read back for it before it counts.
-            guard let image = Painter.textureImage(&pixels, size: atlas.size) else {
-                fail("The model's picture couldn't be made on this phone. Try again.")
-                return
+            // each sheet goes in as an image on its own node, and the file is read back for them all.
+            var images: [UIImage] = []
+            for sheet in sheets {
+                guard let image = sheet.image() else {
+                    fail("The model's picture couldn't be made on this phone. Try again.")
+                    return
+                }
+                images.append(image)
             }
-            pixels = []
             progress(0.92)
+            NSLog("[Scan3D] painting %d faces from %d frames on %d sheet(s) %d wide at %d texels a cell", faces.count, kept.count, atlas.sheets, atlas.size, atlas.cell)
             let scene = SCNScene()
-            scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, texture: image)))
+            for (sheet, image) in images.enumerated() {
+                scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, sheet: sheet, texture: image)))
+            }
             let wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)
             if cancelled.isSet {
                 try? FileManager.default.removeItem(at: output)
@@ -1471,15 +1528,21 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 fail("The model couldn't be written on this phone. Try again.")
                 return
             }
-            guard Painter.carriesImage(output) else {
+            guard Painter.images(in: output) >= atlas.sheets else {
                 try? FileManager.default.removeItem(at: output)
                 fail("The model was written without its picture. Try again.")
                 return
             }
+            guard bytes <= Painter.maxModelBytes else {
+                try? FileManager.default.removeItem(at: output)
+                fail("The model came out too big to send (\(bytes / 1_000_000) MB; the most is \(Painter.maxModelBytes / 1_000_000)). Scan a smaller area.")
+                return
+            }
+            NSLog("[Scan3D] model %d bytes", bytes)
             DispatchQueue.main.async {
                 guard let self, !self.finished else { return }
                 self.cleanup(keepModel: true)
-                self.finish(.scanned(["ok": true, "kind": "model", "path": output.path, "bytes": bytes, "mime": "model/vnd.usdz+zip", "shots": frames.count]))
+                self.finish(.scanned(["ok": true, "kind": "model", "path": output.path, "bytes": bytes, "mime": "model/vnd.usdz+zip", "shots": frames.count, "faces": faces.count, "sheets": atlas.sheets]))
             }
         }
     }
