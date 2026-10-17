@@ -321,6 +321,12 @@ describe("the wiring, pinned", () => {
     // a coarser picture, never a refusal; the inset of two holds at every size.
     expect(swift).toContain("static let cellSizes = [cellSize, 12, 8]");
     expect(swift).toContain("if chosen.sheets <= maxSheets { break }");
+    // FLECKS (Erik's whole-room model: white flecks over the far wall = single faces no frame was
+    // credited with, grey): a face no frame saw takes its mate's frames (the two share an edge and a cell).
+    expect(swift).toContain("var assigned = Painter.assign(faces, keyframes: kept, dir: dir, cancelled: cancelled) { progress($0 * 0.45) }");
+    expect(swift).toContain("let j = f.half == 1 ? i + 1 : f.half == 2 ? i - 1 : -1");
+    expect(swift).toContain("guard j >= 0, j < faces.count, faces[j].cell == f.cell, assigned.best[j] >= 0 else { continue }");
+    expect(swift).toContain('NSLog("[Scan3D] %d faces no frame saw take their mate\'s frames", inherited)');
     expect(swift).toContain("static let maxModelBytes = 200_000_000");
     expect(MODEL_MAX_BYTES).toBe(200_000_000);
     expect(swift).toContain("guard bytes <= Painter.maxModelBytes else {");

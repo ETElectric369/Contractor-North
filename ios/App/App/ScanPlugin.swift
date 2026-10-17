@@ -1862,7 +1862,22 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                 fail("This scan is too big to paint on this phone. Scan a smaller area.")
                 return
             }
-            let assigned = Painter.assign(faces, keyframes: kept, dir: dir, cancelled: cancelled) { progress($0 * 0.45) }
+            var assigned = Painter.assign(faces, keyframes: kept, dir: dir, cancelled: cancelled) { progress($0 * 0.45) }
+            if cancelled.isSet { return }
+            // A face no frame was credited with takes its mate's frames — the two share an edge and a
+            // cell. A stray face with a bad normal on a wall every neighbour saw was coming out as a
+            // grey fleck (Erik's whole-room model, 10-16: white flecks over the far wall).
+            var inherited = 0
+            for i in 0..<faces.count where assigned.best[i] < 0 {
+                let f = faces[i]
+                let j = f.half == 1 ? i + 1 : f.half == 2 ? i - 1 : -1
+                guard j >= 0, j < faces.count, faces[j].cell == f.cell, assigned.best[j] >= 0 else { continue }
+                assigned.best[i] = assigned.best[j]
+                assigned.second[i] = assigned.second[j]
+                assigned.blend[i] = assigned.blend[j]
+                inherited += 1
+            }
+            if inherited > 0 { NSLog("[Scan3D] %d faces no frame saw take their mate's frames", inherited) }
             if cancelled.isSet { return }
             let seen = assigned.best.reduce(0) { $0 + ($1 >= 0 ? 1 : 0) }
             guard seen * 20 >= faces.count else {
