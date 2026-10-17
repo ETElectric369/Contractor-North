@@ -227,7 +227,9 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("config.sceneReconstruction = .mesh");
     expect(swift).toContain("static let moveStep: Float = 0.3");
     expect(swift).toContain("static let turnStep: Float = 10 * .pi / 180");
-    expect(swift).toContain("static let maxFrames = 600");
+    expect(swift).toContain("static let maxFrames = 1000");
+    expect(swift).toContain('"That\'s the most frames for one scan (\\(Self.maxFrames)) — Finish."');
+    expect(swift).toContain('return "Keep going until the blue is gone, then Finish — \\(left) frame\\(left == 1 ? "" : "s") left."');
     expect(swift).toContain("guard moved >= Self.moveStep || turned >= Self.turnStep else { return }");
     expect(swift).toContain('shutter.accessibilityLabel = "Keep This View"');
     // ONE RULE for "this frame saw this face" (skeptic #20): the blue and the painter ask the same
@@ -243,8 +245,8 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("haptic.impactOccurred()");
     // The paint: Finish waits for ten frames AND for every frame to be on disk; each face is given
     // to the frame that saw it best (facing, near, whole face inside, depth-unoccluded) and its
-    // atlas cell painted from that frame; the mesh is set down on the floor; one JPEG texture;
-    // SceneKit writes the USDZ (the image itself when the writer refuses the file).
+    // atlas cell painted from that frame; the mesh is set down on the floor; the atlas goes in as
+    // an image (a file handed to SceneKit's writer on iOS is left out) and the USDZ is read back for it.
     expect(swift).toContain("static let minFrames = 10");
     expect(swift).toContain("guard finishWaiting, !processing, !finished, pendingWrites == 0 else { return }");
     expect(swift).toContain("static func assign(_ faces: [Face], keyframes: [Keyframe], dir: URL, cancelled: Flag, progress: (Double) -> Void) -> [Int32]");
@@ -265,9 +267,41 @@ describe("the wiring, pinned", () => {
     expect(swift).not.toContain("1 - (cy + 1) / a");
     // An interruption starts the scan over for real: the session, the mesh, the frames.
     expect(swift).toContain("meshes.removeAll()\n        snaps.removeAll()\n        dirty.removeAll()\n        meshSeen = false\n        keyframes.removeAll()");
-    expect(swift).toContain("static func writeTexture(_ pixels: inout [UInt8], size: Int, to url: URL) -> Bool");
-    expect(swift).toContain("let carried = wrote && ((try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0) > textureBytes");
-    expect(swift).toContain("var wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)");
+    expect(swift).toContain("static func textureImage(_ pixels: inout [UInt8], size: Int) -> UIImage?");
+    expect(swift).not.toContain("jpegData(compressionQuality: 0.95)");
+    // The texture goes in as an image (the file form never carried) and the USDZ is read back for it.
+    expect(swift).toContain("guard let image = Painter.textureImage(&pixels, size: atlas.size) else {");
+    expect(swift).toContain("Painter.geometry(faces, atlas: atlas, texture: image)");
+    expect(swift).not.toContain("textureURL");
+    expect(swift).toContain("let wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)");
+    expect(swift).toContain("static func carriesImage(_ url: URL) -> Bool");
+    expect(swift).toContain("guard Painter.carriesImage(output) else {");
+    expect(swift).toContain('fail("The model was written without its picture. Try again.")');
+    // v3.1 (Erik: the counter stopped at 99 and "i dont think it was capturing anymore"): the camera's
+    // picture is copied out of ARKit's pool at once; a frame visits only the anchors in its reach and
+    // only the anchors whose blue changed are redrawn; the Debug build on the phone is optimized.
+    expect(swift).toContain("guard let image = Self.clone(frame.capturedImage) else {");
+    expect(swift).toContain("static func clone(_ src: CVPixelBuffer) -> CVPixelBuffer?");
+    expect(swift).toContain("private func mark(_ v: ShotView, over snaps: [MeshSnap]) -> [UUID]");
+    expect(swift).toContain("if simd_length(toward) - snap.radius > Painter.reach { continue }");
+    expect(swift).toContain("if simd_dot(toward, ahead) < -snap.radius { continue }");
+    // A pass that cleared any cell redraws every anchor it visited (a face's cell may have been
+    // cleared by another anchor's face, now or earlier — skeptic #21); one reach for blue and paint.
+    expect(swift).toContain("return cleared ? visited : []");
+    expect(swift).toContain("static let reach: Float = 6");
+    expect(swift).toContain("guard d > 0.15, d < reach else { return 0 }");
+    expect(swift).toContain("DispatchQueue.main.async { self.redraw(changed) }");
+    expect(swift).not.toContain("redrawAll");
+    // The copied picture keeps ARKit's colour tags and an IOSurface (skeptic #21); a camera that
+    // goes quiet for two seconds is said on the screen and in the log — never silent.
+    expect(swift).toContain("CVBufferPropagateAttachments(src, dst)");
+    expect(swift).toContain("kCVPixelBufferIOSurfacePropertiesKey");
+    expect(swift).toContain('NSLog("[Scan3D] no camera frame for %.1f s at %d frames", quiet, self.keyframes.count)');
+    expect(swift).toContain('say("The camera stopped sending pictures — hold on; if it stays stopped, Cancel and scan again")');
+    expect(swift).toContain("lastFrameSeen = CACurrentMediaTime()\n        if stalled {");
+    const pbx = read("ios/App/App.xcodeproj/project.pbxproj");
+    expect(pbx).toContain('SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;\n\t\t\t\tSWIFT_OPTIMIZATION_LEVEL = "-O";');
+    expect(pbx).not.toContain("-Onone");
     expect(swift).toContain("m.lightingModel = .physicallyBased");
     expect(swift).toContain("@_optimize(speed)");
     // Kept from the earlier cuts (skeptics #18/#19): the phone must not lock; Cancel with work

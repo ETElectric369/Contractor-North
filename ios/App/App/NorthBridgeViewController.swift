@@ -44,7 +44,7 @@ class NorthBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(GeofencePlugin())
         // Measure with the camera (LiDAR rung 1, field feedback 10-13, item 5).
         bridge?.registerPluginInstance(MeasurePlugin())
-        // Lidar — 3D Scan: our own capture with visible coverage, photogrammetry on the phone, the 3D file in pieces.
+        // Lidar — 3D Scan: our own capture with visible coverage, the LiDAR mesh painted from the frames on the phone, the 3D file in pieces.
         bridge?.registerPluginInstance(ScanPlugin())
         installNavigationFailureRelay()
         shareTheSpeaker()

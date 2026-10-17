@@ -343,6 +343,9 @@ struct MeshSnap {
     let normals: [simd_float3]
     /// Three indices per face.
     let faces: [UInt32]
+    /// A sphere round the anchor (world): a frame skips the anchors wholly out of its reach or behind it.
+    let center: simd_float3
+    let radius: Float
 
     init(_ anchor: ARMeshAnchor) {
         id = anchor.identifier
@@ -380,6 +383,11 @@ struct MeshSnap {
             for i in 0..<n { idx[i] = UInt32(p[i]) }
         }
         faces = idx
+        var lo = verts.first ?? .zero, hi = lo
+        for p in verts { lo = simd_min(lo, p); hi = simd_max(hi, p) }
+        let mid = transform * simd_float4((lo + hi) / 2, 1)
+        center = simd_float3(mid.x, mid.y, mid.z)
+        radius = simd_length(hi - lo) / 2
     }
 
     func world(_ i: UInt32) -> simd_float3 {
@@ -428,6 +436,34 @@ enum Painter {
         let normal: simd_float3
     }
 
+    /// Whether a USDZ carries an image: its zip's central directory (always the true sizes, whatever
+    /// the writer put in the local headers) names an image entry (SceneKit's is 0/texgen_0.png).
+    static func carriesImage(_ url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 22 else { return false }
+        let u16 = { (i: Int) -> Int in Int(data[i]) | Int(data[i + 1]) << 8 }
+        let u32 = { (i: Int) -> Int in u16(i) | u16(i + 2) << 16 }
+        // The end-of-central-directory record sits in the last 64 KB + 22 bytes.
+        var end = -1
+        var i = data.count - 22
+        let stop = Swift.max(0, data.count - 22 - 65_536)
+        while i >= stop {
+            if data[i] == 0x50, data[i + 1] == 0x4B, data[i + 2] == 0x05, data[i + 3] == 0x06 { end = i; break }
+            i -= 1
+        }
+        guard end >= 0 else { return false }
+        let entries = u16(end + 10)
+        var at = u32(end + 16)
+        for _ in 0..<entries {
+            guard at + 46 <= data.count, data[at] == 0x50, data[at + 1] == 0x4B, data[at + 2] == 0x01, data[at + 3] == 0x02 else { return false }
+            let nameLength = u16(at + 28), extraLength = u16(at + 30), commentLength = u16(at + 32)
+            guard at + 46 + nameLength <= data.count else { return false }
+            let name = String(decoding: data[(at + 46)..<(at + 46 + nameLength)], as: UTF8.self).lowercased()
+            if [".png", ".jpg", ".jpeg", ".exr", ".heic", ".heif", ".tif", ".tiff"].contains(where: { name.hasSuffix($0) }) { return true }
+            at += 46 + nameLength + extraLength + commentLength
+        }
+        return false
+    }
+
     /// The texture: one square cell per face, `cell` texels on a side.
     struct Atlas {
         let size: Int
@@ -449,6 +485,8 @@ enum Painter {
     /// The most faces one atlas holds (4096² at four texels a cell): a house and its yard. Beyond
     /// it the scan is refused in words rather than painted wrong.
     static let maxFaces = 1_000_000
+    /// How far from the eye a face still counts as seen (meters) — the blue and the painter share it.
+    static let reach: Float = 6
 
     /// A world point in a frame's picture: (u, v) in its pixels, z the distance along the lens.
     @inline(__always)
@@ -469,7 +507,7 @@ enum Painter {
         let centre = (a + b + c) / 3
         let toEye = eye - centre
         let d = simd_length(toEye)
-        guard d > 0.15, d < 6 else { return 0 }
+        guard d > 0.15, d < reach else { return 0 }
         let facing = simd_dot(normal, toEye / d)
         guard facing > 0.25 else { return 0 }
         let pa = project(a, toCamera, k)
@@ -609,14 +647,15 @@ enum Painter {
         return ok ? (bytes, w, h) : nil
     }
 
-    /// The atlas as a JPEG on disk (SceneKit's USDZ writer carries a file into the package).
-    static func writeTexture(_ pixels: inout [UInt8], size: Int, to url: URL) -> Bool {
+    /// The atlas as an image for the USDZ (SceneKit's writer packs an image it is handed as a PNG;
+    /// a file handed to it on iOS is left out).
+    static func textureImage(_ pixels: inout [UInt8], size: Int) -> UIImage? {
         let image: CGImage? = pixels.withUnsafeMutableBytes { buf in
             guard let base = buf.baseAddress, let ctx = CGContext(data: base, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return nil }
             return ctx.makeImage()
         }
-        guard let image, let data = UIImage(cgImage: image).jpegData(compressionQuality: 0.95) else { return false }
-        return (try? data.write(to: url)) != nil
+        guard let image else { return nil }
+        return UIImage(cgImage: image)
     }
 
     /// The painted mesh: three vertices per face (each face owns its cell), normals, and the cell's
@@ -667,15 +706,15 @@ enum Painter {
 final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     /// The painter wants a real walk: Finish opens at this many frames.
     static let minFrames = 10
-    /// The most frames one scan keeps (~300 KB each on disk): a house side at 0.3 m a frame.
-    /// Erik 2026-10-16: "more coverage area wins over fine detail on this one".
-    static let maxFrames = 600
+    /// The most frames one scan keeps (~300 KB each on disk): 300 m of walking at 0.3 m a frame.
+    /// Erik 2026-10-16: "more coverage area wins over fine detail on this one"; "if a contractor is
+    /// stopped dead at 99 frames we'll probably have issues".
+    static let maxFrames = 1000
     /// A new frame after this much walking, or this much turning, with at least this gap between two.
     static let moveStep: Float = 0.3
     static let turnStep: Float = 10 * .pi / 180
     static let frameGap: TimeInterval = 0.25
-    /// How far a frame counts as covering (meters), and the grid the coverage is kept on.
-    static let reach: Float = 5
+    /// The grid the coverage is kept on (meters); how far a frame reaches is `Painter.reach`.
     static let cell: Float = 0.1
 
     private let sceneView = ARSCNView()
@@ -695,6 +734,11 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
 
     private var trackingNormal = false
     private var meshSeen = false
+    /// When the camera last sent a picture, and whether its silence has been said (the walk can't go
+    /// on without pictures; a stall must never be silent — the counter stopped at 99 on 2026-10-16).
+    private var lastFrameSeen = CACurrentMediaTime()
+    private var stalled = false
+    private var stallTimer: Timer?
     private var keyframes: [Keyframe] = []
     /// Frame ids only ever go up (a failed write takes its frame out, never an id back).
     private var nextId = 0
@@ -853,6 +897,20 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         run()
     }
 
+    /// Once a second: two seconds without a picture from the camera is said, on the screen and in the log.
+    private func watchForStall() {
+        stallTimer?.invalidate()
+        lastFrameSeen = CACurrentMediaTime()
+        stallTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self, !self.finished, !self.processing, !self.finishWaiting, self.trackingNormal, self.meshSeen, !self.stalled else { return }
+            let quiet = CACurrentMediaTime() - self.lastFrameSeen
+            guard quiet > 2 else { return }
+            self.stalled = true
+            NSLog("[Scan3D] no camera frame for %.1f s at %d frames", quiet, self.keyframes.count)
+            self.say("The camera stopped sending pictures — hold on; if it stays stopped, Cancel and scan again")
+        }
+    }
+
     /// World tracking with the LiDAR mesh and the depth map, from a fresh origin.
     private func run() {
         let config = ARWorldTrackingConfiguration()
@@ -862,10 +920,13 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) { config.frameSemantics.insert(.smoothedSceneDepth) }
         else if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) { config.frameSemantics.insert(.sceneDepth) }
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        watchForStall()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        stallTimer?.invalidate()
+        stallTimer = nil
         sceneView.session.pause()
     }
 
@@ -886,7 +947,11 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
 
     private var walkHint: String {
         let n = keyframes.count
-        if n >= Self.maxFrames { return "That's the most frames for one scan — Finish." }
+        if n >= Self.maxFrames { return "That's the most frames for one scan (\(Self.maxFrames)) — Finish." }
+        if n >= Self.maxFrames - 100 {
+            let left = Self.maxFrames - n
+            return "Keep going until the blue is gone, then Finish — \(left) frame\(left == 1 ? "" : "s") left."
+        }
         if n >= Self.minFrames { return "Keep going until the blue is gone, then Finish." }
         return "Walk slowly and point at every surface. Blue is what the scan still needs; it clears as the camera sees it."
     }
@@ -937,6 +1002,11 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
 
     /// Every frame: a new keyframe once the walk has moved or turned enough since the last one.
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        lastFrameSeen = CACurrentMediaTime()
+        if stalled {
+            stalled = false
+            if trackingNormal, meshSeen, !processing, !finishWaiting, !finished { say(walkHint) }
+        }
         guard trackingNormal, meshSeen, !processing, !finishWaiting, !finished, keyframes.count < Self.maxFrames else { return }
         guard frame.timestamp - lastAt >= Self.frameGap else { return }
         // A frame with no depth map cannot say what is behind what: not kept by itself.
@@ -956,12 +1026,17 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
 
     /// A frame is kept: counted, felt, written off the main thread; the faces it saw go clear.
     private func keep(_ frame: ARFrame) {
+        // ARKit lends the camera's pictures from a small pool and the camera stops when none comes back:
+        // the picture is copied out here, before anything slow, never held while its JPEG is made.
+        guard let image = Self.clone(frame.capturedImage) else {
+            say("A frame couldn't be kept — the phone is low on memory.")
+            return
+        }
         lastAt = frame.timestamp
         lastTransform = frame.camera.transform
         nextId += 1
         let id = nextId
         let cam = frame.camera
-        let image = frame.capturedImage
         let depthMap = (frame.smoothedSceneDepth ?? frame.sceneDepth)?.depthMap
         let depth = depthMap.flatMap(Self.floats(of:))
         let imageName = String(format: "frame-%04d.jpg", id)
@@ -976,8 +1051,9 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         let snaps = Array(self.snaps.values)
         work.async { [weak self] in
             guard let self else { return }
-            self.mark(seen, over: snaps)
-            DispatchQueue.main.async { self.redrawAll() }
+            let changed = self.mark(seen, over: snaps)
+            guard !changed.isEmpty else { return }
+            DispatchQueue.main.async { self.redraw(changed) }
         }
 
         pendingWrites += 1
@@ -1004,6 +1080,34 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     }
 
     static let jpegContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    /// A copy of a camera picture in our own memory (row by row: the pool's rows may be padded),
+    /// with the picture's colour tags (the YCbCr matrix, the primaries) carried over — without them
+    /// Core Image would guess, and every painted texel could shift (skeptic #21).
+    static func clone(_ src: CVPixelBuffer) -> CVPixelBuffer? {
+        var made: CVPixelBuffer?
+        let attributes = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary] as CFDictionary
+        guard CVPixelBufferCreate(nil, CVPixelBufferGetWidth(src), CVPixelBufferGetHeight(src), CVPixelBufferGetPixelFormatType(src), attributes, &made) == kCVReturnSuccess, let dst = made else { return nil }
+        CVBufferPropagateAttachments(src, dst)
+        CVPixelBufferLockBaseAddress(src, .readOnly)
+        CVPixelBufferLockBaseAddress(dst, [])
+        defer {
+            CVPixelBufferUnlockBaseAddress(dst, [])
+            CVPixelBufferUnlockBaseAddress(src, .readOnly)
+        }
+        let planes = CVPixelBufferIsPlanar(src) ? CVPixelBufferGetPlaneCount(src) : 1
+        for plane in 0..<planes {
+            let planar = CVPixelBufferIsPlanar(src)
+            guard let s = planar ? CVPixelBufferGetBaseAddressOfPlane(src, plane) : CVPixelBufferGetBaseAddress(src),
+                  let d = planar ? CVPixelBufferGetBaseAddressOfPlane(dst, plane) : CVPixelBufferGetBaseAddress(dst) else { return nil }
+            let sRow = planar ? CVPixelBufferGetBytesPerRowOfPlane(src, plane) : CVPixelBufferGetBytesPerRow(src)
+            let dRow = planar ? CVPixelBufferGetBytesPerRowOfPlane(dst, plane) : CVPixelBufferGetBytesPerRow(dst)
+            let rows = planar ? CVPixelBufferGetHeightOfPlane(src, plane) : CVPixelBufferGetHeight(src)
+            let n = Swift.min(sRow, dRow)
+            for y in 0..<rows { memcpy(d + y * dRow, s + y * sRow, n) }
+        }
+        return dst
+    }
 
     static func jpeg(of image: CVPixelBuffer) -> Data? {
         let ci = CIImage(cvPixelBuffer: image)
@@ -1036,12 +1140,24 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
     /// A face a frame saw: its centre is in front of the lens, within reach, inside the picture,
     /// and — where the depth map has a reading there — not behind something nearer; where it has
     /// none, the face must at least face the lens (ARKit's own normals; a zero one is trusted).
-    private func mark(_ v: ShotView, over snaps: [MeshSnap]) {
+    /// Only the anchors within the frame's reach and in front of it are visited (the mesh grows with
+    /// the walk; the frame's view does not). It answers with the anchors to redraw: every anchor it
+    /// visited when the pass cleared any cell at all (a face's cell may have been cleared by another
+    /// anchor's face, now or in an earlier pass), none when it cleared nothing — never the whole
+    /// mesh (a 99-frame room drew every anchor 99 times over).
+    private func mark(_ v: ShotView, over snaps: [MeshSnap]) -> [UUID] {
         let toCamera = simd_inverse(v.transform)
         let eye = Self.position(v.transform)
+        let ahead = Self.forward(v.transform)
+        var visited: [UUID] = []
+        var cleared = false
         v.depth.withUnsafeBufferPointer { dp in
             let depth: UnsafeBufferPointer<Float>? = v.depthWidth > 0 && dp.count == v.depthWidth * v.depthHeight ? dp : nil
             for snap in snaps {
+                let toward = snap.center - eye
+                if simd_length(toward) - snap.radius > Painter.reach { continue }
+                if simd_dot(toward, ahead) < -snap.radius { continue }
+                visited.append(snap.id)
                 var i = 0
                 while i + 2 < snap.faces.count {
                     let ia = snap.faces[i], ib = snap.faces[i + 1], ic = snap.faces[i + 2]
@@ -1056,11 +1172,12 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
                     guard len > 0 else { continue }
                     // The same rule the painter uses — plus a slightly longer reach for the blue.
                     if Painter.score(a, b, c, normal: n / len, toCamera: toCamera, eye: eye, k: v.intrinsics, width: v.width, height: v.height, depth: depth, depthWidth: v.depthWidth, depthHeight: v.depthHeight) > 0 {
-                        covered.insert(Self.key((a + b + c) / 3))
+                        if covered.insert(Self.key((a + b + c) / 3)).inserted { cleared = true }
                     }
                 }
             }
         }
+        return cleared ? visited : []
     }
 
     /// The grid cell a point is in, packed into one integer (21 bits per axis, ±100 km at 10 cm).
@@ -1152,8 +1269,6 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             self.dirty.removeAll()
         }
     }
-
-    private func redrawAll() { redraw(Array(snaps.keys)) }
 
     /// The cached copies (main), the uncovered faces found on `work`, the nodes updated back here.
     private func redraw(_ ids: [UUID]) {
@@ -1264,7 +1379,6 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
         let frames = keyframes
         let dir = imagesDir
         let output = outputURL
-        let textureURL = folder.appendingPathComponent("texture.jpg")
         let cancelled = paintCancelled
         paintQueue.async { [weak self] in
             func fail(_ sentence: String) {
@@ -1336,23 +1450,18 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             }
             var pixels = Painter.paint(faces, best: best, keyframes: kept, dir: dir, atlas: atlas, cancelled: cancelled) { progress(0.45 + $0 * 0.45) }
             if cancelled.isSet { return }
-            guard Painter.writeTexture(&pixels, size: atlas.size, to: textureURL) else {
-                fail("The model's picture couldn't be written on this phone. Free some space and try again.")
+            // SceneKit's USDZ writer leaves out a texture handed to it as a file ("Failed to resolve
+            // reference"; the first painted models carried theirs only through the image fallback):
+            // the picture goes in as an image, and the file is read back for it before it counts.
+            guard let image = Painter.textureImage(&pixels, size: atlas.size) else {
+                fail("The model's picture couldn't be made on this phone. Try again.")
                 return
             }
             pixels = []
-            let textureBytes = (try? FileManager.default.attributesOfItem(atPath: textureURL.path)[.size] as? NSNumber)?.intValue ?? 0
             progress(0.92)
             let scene = SCNScene()
-            scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, texture: textureURL)))
-            var wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)
-            let carried = wrote && ((try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0) > textureBytes
-            if !carried, let image = UIImage(contentsOfFile: textureURL.path) {
-                // The writer refused the file, or wrote the mesh without it: the picture goes in as an image.
-                let again = SCNScene()
-                again.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, texture: image)))
-                wrote = again.write(to: output, options: nil, delegate: nil, progressHandler: nil)
-            }
+            scene.rootNode.addChildNode(SCNNode(geometry: Painter.geometry(faces, atlas: atlas, texture: image)))
+            let wrote = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)
             if cancelled.isSet {
                 try? FileManager.default.removeItem(at: output)
                 return
@@ -1360,6 +1469,11 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
             let bytes = wrote ? ((try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber)?.intValue ?? 0) : 0
             guard bytes > 0 else {
                 fail("The model couldn't be written on this phone. Try again.")
+                return
+            }
+            guard Painter.carriesImage(output) else {
+                try? FileManager.default.removeItem(at: output)
+                fail("The model was written without its picture. Try again.")
                 return
             }
             DispatchQueue.main.async {
