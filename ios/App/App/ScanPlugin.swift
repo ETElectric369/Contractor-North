@@ -1084,9 +1084,15 @@ enum Painter {
         let tSrc = SCNGeometrySource(data: uv.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .texcoord, vectorCount: uv.count, usesFloatComponents: true, componentsPerVector: 2, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<simd_float2>.stride)
         let el = SCNGeometryElement(data: idx.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles, primitiveCount: range.count, bytesPerIndex: 4)
         let g = SCNGeometry(sources: [vSrc, nSrc, tSrc], elements: [el])
+        // The sheet goes in as the EMISSION over a black diffuse: the picture already carries the
+        // room's light, and a viewer lighting it again shaded the ceiling's rough mesh into crumpled
+        // foil and left faint lines along the walls. SceneKit's writer has no unlit material (checked
+        // on the Mac, 10-16: `.constant` still comes out as a lit diffuse), but it writes an emission
+        // texture as USD's emissiveColor, which every viewer draws as is.
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
-        m.diffuse.contents = texture
+        m.diffuse.contents = UIColor.black
+        m.emission.contents = texture
         m.roughness.contents = 1.0
         m.metalness.contents = 0.0
         m.isDoubleSided = true

@@ -346,6 +346,12 @@ describe("the wiring, pinned", () => {
     // (log space, relaxation, mean held at 1, within a half and double) and each face's texels are
     // scaled by its frames' gains mixed as its colours were.
     expect(swift).toContain("nor.append(f.na); nor.append(f.nb); nor.append(f.nc)");
+    // UNLIT (Erik's whole-room model: the ceiling's rough dark mesh shaded into crumpled foil): the
+    // sheet is the EMISSION over a black diffuse — SceneKit has no unlit material (Mac check 10-16:
+    // .constant still writes a lit diffuse) but writes emission as USD's emissiveColor.
+    expect(swift).toContain("m.diffuse.contents = UIColor.black");
+    expect(swift).toContain("m.emission.contents = texture");
+    expect(swift).not.toContain("m.diffuse.contents = texture");
     expect(swift).toContain("static func level(assigned: Assignment, frames: Int, meanBest: [simd_float3], meanSecond: [simd_float3]) -> (gains: [simd_float3], ties: Int, before: Float, after: Float)?");
     expect(swift).toContain("static func apply(_ gains: [simd_float3], to faces: [Face], assigned: Assignment, atlas: Atlas, bases: [UnsafeMutablePointer<UInt8>])");
     expect(swift).toContain("sum[bi] += L[si] + d[i]");
