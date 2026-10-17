@@ -225,7 +225,7 @@ export function PermitInspections({
                             disabled={pending}
                             onClick={() =>
                               run(
-                                recordInspectionResult({ id: r.id, result: "passed", result_on: passedOnDay(r, todayStr), inspector: null, why: null }),
+                                recordInspectionResult({ id: r.id, result: "passed", result_on: passedOnDay(r, todayStr), inspector: null, why: null, expect_open: true }),
                                 "Couldn't save it — try again.",
                               )
                             }

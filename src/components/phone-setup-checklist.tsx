@@ -45,8 +45,8 @@ export async function PhoneSetupChecklist() {
               </div>
               {inShell ? (
                 <div className="text-xs text-slate-600">
-                  iPhone <span className="font-medium">Settings → Privacy &amp; Security → Location Services → North → &ldquo;While Using the App.&rdquo;</span>{" "}
-                  This powers GPS clock-in, job-site auto clock-out, the My&nbsp;Day weather, and mileage.
+                  iPhone <span className="font-medium">Settings → Privacy &amp; Security → Location Services → North → &ldquo;Always.&rdquo;</span>{" "}
+                  This powers GPS clock-in, the clock-out question when you leave a job site (for techs, even with the screen off), the My&nbsp;Day weather, and mileage.
                 </div>
               ) : (
                 <div className="text-xs text-slate-600">

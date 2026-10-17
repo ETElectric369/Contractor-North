@@ -54,7 +54,7 @@ describe("the page's doors", () => {
   });
   it("the fence arms iOS's circle when the anchor is known, disarms when the monitor goes, and an observed exit opens the same sheet with the time filled in", () => {
     const g = read("src/components/geofence-monitor.tsx");
-    expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel });");
+    expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);"); // readiness read back (audit v1120)
     expect(g).toContain("useEffect(() => () => { void disarmFence(); }, []);");
     expect(g).toContain('openPrompt("wake");\n      const ms = Date.parse(e.exitedAt);');
     expect(g).toContain('setPhase("picking");');

@@ -1219,6 +1219,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         setStreaming(false);
         setStatus(null);
       }
+      // A TURN may have handed over what Nort was holding (read_my_updates runs in /api/chat, not
+      // in a confirm): the Bell re-reads once the turn has settled, so his ring and the next
+      // greeting stop saying "holding" (0394; audit v1120, class 7).
+      if (turnSettled) { try { window.dispatchEvent(new Event("cn:bell-refresh")); } catch {} }
       scrollToBottom();
     }
   }
@@ -1281,7 +1285,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     const c = confirmRef.current;
     confirmRef.current = null;
     setPendingConfirm(null);
-    speech.stopListening({ discard: true }); // the yes/no is already decided — nothing else to send
+    // The yes/no is decided: the half-turn goes nowhere, but the CONVERSATION stays — a stop tore
+    // down the native session the screen-off design lives on (audit v1120, class 4), so the reply
+    // after a spoken yes played through the page and the next turn needed a tap. dropTurn keeps
+    // the session (and the web's live stream) for say() and startMic.
+    speech.dropTurn();
     setListening(false);
     if (!c) return;
     if (!yes) {

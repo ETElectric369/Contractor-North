@@ -6,7 +6,7 @@ import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { mergeCaptureSections, parseInspectorCapture, type CaptureItem, type CapturePatch } from "@/lib/inspection/capture";
+import { MAX_PHOTOS, PHOTOS_FULL, mergeCaptureSections, parseInspectorCapture, type CaptureItem, type CapturePatch } from "@/lib/inspection/capture";
 import { EMPTY_BIRTH, bornTasks, partsAsCaptureItems, tasksAnswered, tasksFromVisit, type Birth } from "@/lib/estimate/born-with-tasks";
 import { kitsReadWords, readTaskKits } from "@/lib/estimate/task-kits";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
@@ -747,10 +747,17 @@ export async function setAppointmentPlace(
  * writer that rebuilds without it silently un-files a written-up inspection off /inspections and
  * off the My Day money item.
  */
+// (PHOTOS_FULL is the lib's: a "use server" module exports only async functions.)
+const photosOverCap = (photos: unknown): boolean => Array.isArray(photos) && photos.filter((p) => typeof p === "string" && !!p.trim()).length > MAX_PHOTOS; // the raw valid list: what the parser clamps
+
 export async function saveInspectionCapture(
   id: string,
   patch: CapturePatch,
 ): Promise<Result> {
+  // NOTHING SILENT (audit v1120, carried 1): the list is clamped on read, so a photo past the cap
+  // was dropped while the save said ok — and the Inspector then let the phone's only copy of a 3D
+  // model go. Over the cap the save refuses in words and writes nothing.
+  if (photosOverCap(patch.photos)) return { ok: false, error: PHOTOS_FULL };
   // Decided (Erik, 2026-09-26: "crew leader yes tech no"): the office saves here, unchanged; a crew
   // lead ON this visit saves through save_walkthrough_capture (0356); a plain tech reads.
   const ctx = await requireStaff(); // defense-in-depth (RLS also scopes the write)
@@ -1064,6 +1071,7 @@ async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<R
     // the office took off isn't in what he sends to come back.
     const fixed: CapturePatch =
       patch.photos !== undefined ? { ...patch, photos: keepStoredPhotos(parseInspectorCapture(stored).photos, patch.photos) } : patch;
+    if (photosOverCap(fixed.photos)) return { failed: { ok: false, error: PHOTOS_FULL } as Result };
     return crew.supabase.rpc("save_walkthrough_capture", { p_appointment: id, p_capture: mergeCaptureSections(stored, fixed) });
   };
   let r = await attempt();

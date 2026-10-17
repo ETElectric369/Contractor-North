@@ -133,6 +133,10 @@ export interface InspectorCapture {
 }
 
 export const MAX_ITEMS = 200;
+/** The most photos (and 3D models) one visit holds; a save past it REFUSES, it never cuts (audit v1120). */
+export const MAX_PHOTOS = 200;
+/** The one sentence for a visit at its photo cap; nothing is written when it is said. */
+export const PHOTOS_FULL = `This visit holds ${MAX_PHOTOS} photos at most. Take some off before adding more.`;
 export const MAX_MEASURES = 50;
 export const MAX_PROSE = 8000;
 
@@ -141,7 +145,7 @@ export function parseInspectorCapture(raw: unknown): InspectorCapture {
   const c = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
   const photos = Array.isArray(c.photos)
-    ? clampList(c.photos.filter((p): p is string => typeof p === "string" && !!p.trim() && p.length < 2000), 60)
+    ? clampList(c.photos.filter((p): p is string => typeof p === "string" && !!p.trim() && p.length < 2000), MAX_PHOTOS)
     : [];
   const photoSet = new Set(photos);
 

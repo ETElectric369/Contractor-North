@@ -220,12 +220,10 @@ export default async function AppointmentCapturePage({
   const paths = (Array.isArray(capture.photos) ? capture.photos : []).filter(
     (p): p is string => typeof p === "string" && !!p,
   );
-  const photos: CapturePhoto[] = await Promise.all(
-    paths.map(async (path) => {
-      const { data } = await supabase.storage.from("documents").createSignedUrl(path, 3600);
-      return { path, url: data?.signedUrl ?? null };
-    }),
-  );
+  // ONE call for the list (up to MAX_PHOTOS of them), not one request per photo.
+  const signed = paths.length ? ((await supabase.storage.from("documents").createSignedUrls(paths, 3600)).data ?? []) : [];
+  const urlOf = new Map(signed.map((s) => [s.path, s.signedUrl ?? null]));
+  const photos: CapturePhoto[] = paths.map((path) => ({ path, url: urlOf.get(path) ?? null }));
 
   const dayStr = a.starts_at ? todayStrInTz(tz, new Date(a.starts_at)) : "";
   const who = a.customers?.name ?? a.inquiries?.name ?? null;

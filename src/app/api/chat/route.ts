@@ -28,7 +28,7 @@ import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
-import { HOLDING_OPEN, HOLDING_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
+import { envelope, stripMarkerChar, HOLDING_OPEN, HOLDING_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
 import { screenPromptBlock } from "@/lib/nort/screens";
 import { doorContextLines, seenLines } from "@/lib/nort/door-context";
 
@@ -854,22 +854,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // With Sales Tax off it carries no tax field (quoteDraftToolFor).
               tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax)] : []), SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, FILL_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             },
-            // Strip the directive markers from MODEL text so a prompt-injection can't forge a
-            // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
-            // by the server.
+            // Strip the marker CHARACTER from MODEL text so a prompt-injection can't forge a confirm
+            // card, a maps-open, a screen move or a fake quote preview — markers are only ever
+            // emitted by the server. The character, not the marker strings: a delta is a few tokens,
+            // and a marker split across two deltas passed a per-chunk match whole (audit v1120).
             onText: (text) => {
-              const clean = text
-                .split(CONFIRM_MARKER).join("")
-                .split(OPEN_MARKER).join("")
-                .split(PICK_MARKER).join("")
-                .split(STATUS_OPEN).join("")
-                .split(STATUS_CLOSE).join("")
-                .split(DRAFT_OPEN).join("")
-                .split(DRAFT_CLOSE).join("")
-                .split(HUD_OPEN).join("")
-                .split(HUD_CLOSE).join("")
-                .split(SCREEN_OPEN).join("")
-                .split(SCREEN_CLOSE).join("");
+              const clean = stripMarkerChar(text);
               if (needsRoundBreak && clean.trim()) {
                 needsRoundBreak = false;
                 if (!/\s$/.test(assistantReply) && !/^\s/.test(clean)) {
@@ -934,7 +924,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             // (the agent narrates as it fills the quote in). Not a DB write.
             if (tu.name === "quote_draft") {
               // Sales Tax off (0352): a rate the model sent anyway never reaches the preview.
-              emit(DRAFT_OPEN + JSON.stringify({ kind: "quote", ...quoteDraftShown(tu.input, salesTax) }) + DRAFT_CLOSE);
+              emit(envelope(DRAFT_OPEN, { kind: "quote", ...quoteDraftShown(tu.input, salesTax) }, DRAFT_CLOSE));
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, shown: true }) });
               continue;
             }
@@ -948,7 +938,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             // exactly this reason; href was the one that slipped through. Same predicate as ?next=
             // (safeNextPath): internal absolute paths only, everything else dropped to no-link.
             if (tu.name === "show_card") {
-              emit(HUD_OPEN + JSON.stringify(sanitizeHudCard(tu.input)) + HUD_CLOSE);
+              emit(envelope(HUD_OPEN, sanitizeHudCard(tu.input), HUD_CLOSE));
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, shown: true }) });
               continue;
             }
@@ -960,7 +950,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               const shown = sanitizeScreen(tu.input, { isStaff: isStaffCaller, voice: !!body.voice });
               const asked = (tu.input ?? {}) as Record<string, unknown>;
               const dropped = (["path", "anchor", "menu", "box"] as const).filter((k) => asked[k] != null && asked[k] !== "" && !(k in shown));
-              emit(SCREEN_OPEN + JSON.stringify(shown) + SCREEN_CLOSE);
+              emit(envelope(SCREEN_OPEN, shown, SCREEN_CLOSE));
               results.push({
                 type: "tool_result",
                 tool_use_id: tu.id,
@@ -977,7 +967,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               const wanted = fieldsIn ? { add: { door: asked.door, fields: fieldsIn } } : { fill: { door: asked.door, value: asked.value } };
               const typed = sanitizeScreen(wanted, { isStaff: isStaffCaller, voice: !!body.voice });
               if (typed.fill || typed.add) {
-                emit(SCREEN_OPEN + JSON.stringify(typed) + SCREEN_CLOSE);
+                emit(envelope(SCREEN_OPEN, typed, SCREEN_CLOSE));
                 results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, typing: typed.fill ?? typed.add, note: "sent to the screen — the next turn's context says what landed" }) });
               } else {
                 results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: false, not_used: Object.keys(asked), why: "door must be a name from BOXES ON THE SCREEN and value (or fields) plain text — say what you'd put where in words instead" }) });
@@ -1070,7 +1060,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                   // anchored on a saved estimate (the 400A-panel loop) — often spawning a
                   // duplicate save. The client clears the draft on `cleared: true`.
                   if (res.ok && (actionName === "quote.create" || actionName === "quote.convertToJob")) {
-                    emit(DRAFT_OPEN + JSON.stringify({ kind: "quote", cleared: true }) + DRAFT_CLOSE);
+                    emit(envelope(DRAFT_OPEN, { kind: "quote", cleared: true }, DRAFT_CLOSE));
                   }
                   // A FILL ALWAYS REACHES A BUTTON (fill vs execute). A registry READ that hands back
                   // a card (time.splitEntry: the Split This Shift sheet, filled in) is projected here,
@@ -1079,12 +1069,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                   // href clamp as show_card.
                   const card = (res.data as { card?: unknown } | undefined)?.card;
                   if (res.ok && readOnlyAction && card && typeof card === "object") {
-                    emit(HUD_OPEN + JSON.stringify(sanitizeHudCard(card)) + HUD_CLOSE);
+                    emit(envelope(HUD_OPEN, sanitizeHudCard(card), HUD_CLOSE));
                   }
                 }
               }
             } else {
-              emit(STATUS_OPEN + JSON.stringify({ label: statusLabel(tu.name) }) + STATUS_CLOSE); // transient "Searching…" pill
+              emit(envelope(STATUS_OPEN, { label: statusLabel(tu.name) }, STATUS_CLOSE)); // transient "Searching…" pill
               // THE HAND-OVER (0394) runs here, not in runDataTool: it needs the caller's id and the
               // service client for a tech's own report rows (bug_reports' read policy is staff-only).
               const raw =
@@ -1113,12 +1103,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           }
 
           if (pendingOpen) {
-            directive = OPEN_MARKER + JSON.stringify(pendingOpen);
+            directive = envelope(OPEN_MARKER, pendingOpen);
             break;
           }
 
           if (pendingPick) {
-            directive = PICK_MARKER + JSON.stringify(pendingPick);
+            directive = envelope(PICK_MARKER, pendingPick);
             break;
           }
 
@@ -1127,7 +1117,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             // count); the client splits it off, shows a confirm card (or speaks it), and runs it
             // only on the user's yes.
             confirmProposed = pendingConfirm;
-            directive = CONFIRM_MARKER + JSON.stringify(pendingConfirm);
+            directive = envelope(CONFIRM_MARKER, pendingConfirm);
             break;
           }
 
@@ -1141,7 +1131,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
         // this over their own copy, so a hand-over clears them at once. Best-effort, two indexed reads.
         try {
           const left = await holdingFor(user.id, createServiceClient(), supabase, orgS.timezone);
-          emit(HOLDING_OPEN + JSON.stringify(left) + HOLDING_CLOSE);
+          emit(envelope(HOLDING_OPEN, left, HOLDING_CLOSE));
         } catch {
           /* the count is a courtesy; the reply already went */
         }
@@ -1236,7 +1226,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // dropped rather than truncated: half a JSON object is not a proposal, and the
               // recovered turn then reads exactly as it does today (text, no card).
               let confirmTail = confirmProposed
-                ? "\n" + CONFIRM_MARKER + JSON.stringify({ ...confirmProposed, at: new Date().toISOString() })
+                ? "\n" + envelope(CONFIRM_MARKER, { ...confirmProposed, at: new Date().toISOString() })
                 : "";
               if (confirmTail.length > 4000) confirmTail = "";
               const replyBody = assistantReply.trim().slice(0, Math.max(0, 8000 - confirmTail.length));

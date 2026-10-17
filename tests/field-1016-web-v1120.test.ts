@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { megabytes, uploadRefusal } from "@/lib/upload-words";
 import { APP_VERSION } from "@/lib/version";
-import { RELEASE_NOTES } from "@/lib/release-notes";
+import { RELEASE_NOTES, versionNumber } from "@/lib/release-notes";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -80,10 +80,10 @@ describe("the page's model cap reads as it is", () => {
     expect(src).toContain("export const MODEL_MAX_BYTES = 200_000_000;");
   });
   it("the release note is the top entry and says what 3D Scan gained", () => {
-    expect(APP_VERSION).toBe("cn-v1120");
-    expect(RELEASE_NOTES[0]).toMatchObject({ version: "cn-v1120" });
-    expect(RELEASE_NOTES[0].line).toContain("3D Scan");
-    expect(RELEASE_NOTES[0].line).toContain("a third of the size");
-    expect(RELEASE_NOTES[0].line).toContain("too big to send");
+    expect(versionNumber(APP_VERSION)!).toBeGreaterThanOrEqual(1120);
+    const note = RELEASE_NOTES.find((r) => r.version === "cn-v1120");
+    expect(note?.line).toContain("3D Scan");
+    expect(note?.line).toContain("a third of the size");
+    expect(note?.line).toContain("too big to send");
   });
 });

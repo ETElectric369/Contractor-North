@@ -67,13 +67,25 @@ const no = (why: string): DoorResult => ({ ok: false, why });
 const short = (s: string, n = 60) => s.replace(/\s+/g, " ").trim().slice(0, n);
 const isEmptyWord = (s: string) => EMPTY_WORDS.has(s.trim().toLowerCase());
 
-/** ONE number, as said: "2.5", "12", "-3", "7 ft" (a unit word may trail). A range ("2 to 3",
- *  "12-14"), a fraction ("3/4"), a compound ("15 ft 6 in") or a word is refused — never the first
- *  figure out of it. `positive` refuses zero and below (hours, units, a measurement). */
-export function strictNumber(value: string, what: string, opts: { positive?: boolean } = {}): { n: number } | { why: string } {
+/** The words a box takes as its own unit, trailing the figure ("2 hrs" on the hours box). */
+export const HOURS_WORDS = ["h", "hr", "hrs", "hour", "hours"];
+export const UNITS_WORDS = ["x", "ea"];
+
+/** ONE number, as said: "2.5", "12", "-3", "2 hrs" when `units` lists the box's own unit words.
+ *  A range ("2 to 3", "12-14"), a fraction ("3/4"), a compound ("15 ft 6 in") or a word is
+ *  refused — never the first figure out of it. A trailing word that is NOT the box's unit is
+ *  refused too, naming the unit: "30 min" said to the hours box used to land as 30 hours (audit
+ *  v1120, class 5) — a hole asks, it never converts. `positive` refuses zero and below. */
+export function strictNumber(value: string, what: string, opts: { positive?: boolean; units?: string[] } = {}): { n: number } | { why: string } {
   const t = value.trim().replace(/,/g, "");
   const m = /^(-?\d+(?:\.\d+)?)\s*([a-z%"']{0,12})?$/i.exec(t);
   if (!m) return { why: `"${short(value, 40)}" isn't one number for ${what} — say the figure on its own.` };
+  const word = (m[2] ?? "").toLowerCase();
+  const units = (opts.units ?? []).map((u) => u.toLowerCase());
+  if (word && !units.includes(word)) {
+    const named = units.filter((u) => u.length > 2); // "hours", a slot's own unit; not the one-letter x
+    return { why: `${what} takes a number${named.length ? ` in ${named[named.length - 1]}` : ""} — "${short(value, 40)}" isn't one.` };
+  }
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return { why: `"${short(value, 40)}" isn't a number for ${what}.` };
   if (opts.positive && n <= 0) return { why: `${what} has to be above zero.` };
@@ -105,7 +117,7 @@ export function measureFromFields(fields: Record<string, string>): { row: Omit<C
   if (!label) return { why: "What was measured? A measurement needs a name (the north wall, the run to the panel)." };
   let value: number | null = null;
   if (valueText) {
-    const r = strictNumber(valueText, "a measurement", { positive: true });
+    const r = strictNumber(valueText, "a measurement", { positive: true, units: unit ? [unit] : [] }); // its unit is its own field
     if ("why" in r) return { why: r.why };
     value = r.n;
   }
@@ -164,7 +176,7 @@ export function needDoor(n: DoorNeed, ctx: InspectorDoorContext): NortDoor | nul
       now: current || undefined,
       fill: (value) => {
         if (isEmptyWord(value)) return no("Nothing to put in.");
-        const r = strictNumber(value, n.label);
+        const r = strictNumber(value, n.label, { units: slot.unit ? [slot.unit] : [] });
         if ("why" in r) return no(r.why);
         const cur = nowText(ctx.answerOf(n.key));
         ctx.setAnswer(n.key, r.n);
@@ -270,7 +282,7 @@ export function inspectorDoors(ctx: InspectorDoorContext): Record<string, NortDo
       now: t0.hours !== null ? `${t0.hours} h` : undefined,
       fill: (value) => {
         if (isEmptyWord(value)) return no("Nothing to put in.");
-        const r = strictNumber(value, "hours", { positive: true });
+        const r = strictNumber(value, "hours", { positive: true, units: HOURS_WORDS });
         if ("why" in r) return no(r.why);
         const t = fresh();
         if (!t) return no("That task is no longer on the sheet.");
@@ -285,7 +297,7 @@ export function inspectorDoors(ctx: InspectorDoorContext): Record<string, NortDo
         now: t0.units !== null ? `×${t0.units}` : undefined,
         fill: (value) => {
           if (isEmptyWord(value)) return no("Nothing to put in.");
-          const r = strictNumber(value, "units", { positive: true });
+          const r = strictNumber(value, "units", { positive: true, units: UNITS_WORDS });
           if ("why" in r) return no(r.why);
           const t = fresh();
           if (!t) return no("That task is no longer on the sheet.");

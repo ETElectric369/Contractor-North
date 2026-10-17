@@ -13,7 +13,7 @@ import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
 import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
-import { armFence, disarmFence, onFenceExit, takePendingExit, type PendingExit } from "@/lib/native-geofence";
+import { armFence, disarmFence, fenceReadiness, onFenceExit, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
 import type { GeoPoint } from "@/lib/types";
 
 /** Great-circle distance in meters. */
@@ -102,6 +102,7 @@ export function GeofenceMonitor({
   startedBySwitch = false,
   shiftStartIso = null,
   tz,
+  notify = true,
 }: {
   entryId: string;
   gpsIn: GeoPoint | null;
@@ -122,6 +123,8 @@ export function GeofenceMonitor({
   shiftStartIso?: string | null;
   /** The org's timezone: every time this sheet says or takes is on its clock (audit v994 TZ1). */
   tz?: string;
+  /** The lock-screen "Still on the clock?" alert: techs only, as the server push is (audit v1120). */
+  notify?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -181,6 +184,8 @@ export function GeofenceMonitor({
   const [error, setError] = useState<string | null>(null);
   /** Location permission is off/revoked — the fence can't watch, and he needs to know. */
   const [watchOff, setWatchOff] = useState(false);
+  /** iOS's fence can't work with the screen off (While Using, Denied, or no region monitoring): said, not swallowed. */
+  const [fenceDark, setFenceDark] = useState<FenceReadiness | null>(null);
 
   // The fence anchor. Depend on PRIMITIVE lat/lng everywhere — the layout re-renders on
   // every navigation and hands us a fresh gpsIn object ref, which would otherwise tear
@@ -624,7 +629,8 @@ export function GeofenceMonitor({
   useEffect(() => {
     if (typeof anchorLat !== "number" || typeof anchorLng !== "number") return;
     let cancelled = false;
-    void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel });
+    const dark = (r: FenceReadiness | null) => { if (!cancelled) setFenceDark(r === null || r === "ready" ? null : r); };
+    void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);
     const takeExit = (e: PendingExit) => {
       if (cancelled || doneRef.current || e.entryId !== entryId) return;
       if (phaseRef.current !== "idle" || Date.now() < snoozedUntil(entryId)) return;
@@ -638,12 +644,20 @@ export function GeofenceMonitor({
     void takePendingExit().then((e) => { if (e) takeExit(e); });
     let stop: () => void = () => {};
     void onFenceExit(takeExit).then((s) => { stop = s; });
-    const onVis = () => { if (document.visibilityState === "visible") void takePendingExit().then((e) => { if (e) takeExit(e); }); };
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      void takePendingExit().then((e) => { if (e) takeExit(e); });
+      void fenceReadiness().then(dark); // the Always prompt may have been answered while we were away
+    };
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis); // an in-app permission alert dismissed fires no visibility change
+    const settled = setTimeout(() => { if (!cancelled) void fenceReadiness().then(dark); }, 8000); // the Always prompt, answered
     return () => {
       cancelled = true;
       stop();
+      clearTimeout(settled);
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripKey, anchorLat, anchorLng, radiusM]);
@@ -656,6 +670,14 @@ export function GeofenceMonitor({
       <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
         Location is off for this app, so I can&rsquo;t offer to clock you out when you leave. Clock out
         yourself, or turn location back on in Settings.
+      </div>
+    ) : fenceDark ? (
+      <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        {fenceDark === "unavailable"
+          ? "This phone can\u2019t watch the job site with the screen off, so I\u2019ll only notice you leaving while North is open."
+          : fenceDark === "denied"
+            ? "Location is off for North, so I can\u2019t notice you leaving the job site with the screen off. Turn it on in Settings, under Location Services, North, Always."
+            : "Location for North is set to While Using, so I can\u2019t notice you leaving the job site with the screen off. Set it to Always in Settings, under Location Services, North."}
       </div>
     ) : anchorLost && typeof anchorLat !== "number" ? (
       <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

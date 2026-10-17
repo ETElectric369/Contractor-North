@@ -321,7 +321,11 @@ export function reexpandTaskDetail(d: TaskDetail, units: number | null, kit: Tas
   // what the kit gave — anything else on such a line is his and stands.
   const legacy = !d.materials.some((m) => m.from_kit === true) && d.hours_from_kit !== true;
   const asWas = legacy ? expandTaskKit(probe(d.units), kit, pricing) : null;
-  const kitHours = d.hours_from_kit === true || (asWas !== null && d.hours !== null && d.hours === asWas.hours);
+  // A LINE SEEDED ASKING — the kit task named with no count and no hours (field-1014) — takes the
+  // kit's hours with its first count: nothing on it was his to clear (audit v1120, class 1). A line
+  // that had a count and whose hours he cleared stays the hole it is.
+  const seededAsking = d.units === null && d.hours === null;
+  const kitHours = d.hours_from_kit === true || seededAsking || (asWas !== null && d.hours !== null && d.hours === asWas.hours);
   const untouched = new Map<string, number[]>();
   for (const m of asWas?.materials ?? []) untouched.set(partKey(m), [...(untouched.get(partKey(m)) ?? []), m.qty ?? -1]);
   const stillTheKits = (m: TaskDetailMaterial): boolean => {

@@ -139,6 +139,15 @@ let silentTurns = 0;
 function retryOrGiveUp(detail: string, branch: VoiceBranch, fact?: string) {
   const retrying = wantStream && silentTurns < MAX_SILENT_RETRIES;
   const line = retrying || !wantStream ? detail : `${detail} ${TRY_AGAIN_LINE}`;
+  // GIVING UP LETS THE MIC GO (audit v1120, class 4): the stream was still wanted, so the native
+  // engine, its audio session and the 0.5 s screen-off wake stayed on with nothing to end them —
+  // the same teardown cannotRecord does, before the line so it is not replayed into the next panel.
+  if (!retrying && wantStream) {
+    report(branch, line, fact); // before the teardown: the track and context are the evidence
+    stopListening({ discard: true });
+    status(line);
+    return;
+  }
   status(line);
   report(branch, line, fact);
   if (retrying) {
@@ -460,6 +469,7 @@ function beginNativeTurn() {
   if (active) return; // listening is listening: a re-tap mid-turn restarts nothing
   void wakeNative(false); // listening needs no waking: the plugin's turn event wakes the page itself
   active = true;
+  nativeDrop = false; // this turn is wanted, whatever was dropped before it
   nativeHeard = false;
   nativeSaidStill = false;
   armDeadman();
@@ -906,5 +916,40 @@ export function stopListening(opts?: { discard?: boolean }) {
   analyser = null;
   audioCtx = null;
   chunks = [];
+  emit();
+}
+
+/**
+ * THE LIVE TURN GOES NOWHERE; THE CONVERSATION STAYS. A yes or no said to a confirm card is already
+ * decided, so the half-turn is dropped — but the native session (what keeps Nort alive past the
+ * lock) and the web's live stream are kept for the reply and the next turn (audit v1120, class 4;
+ * stopListening here tore the session down). The red Stop still ends everything: stopListening.
+ */
+export function dropTurn() {
+  session++;
+  greeting = null;
+  if (nativeOn) {
+    clearDeadman();
+    nativeDrop = true; // a turn still in flight from the plugin goes nowhere; the next begun turn resets it
+    void cancelTurnNative();
+    active = false;
+    level = 0;
+    emit();
+    return;
+  }
+  active = false;
+  cancelAnimationFrame(rafId);
+  try {
+    if (recorder) {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+    }
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  } catch {
+    /* ignore */
+  }
+  recorder = null;
+  chunks = [];
+  level = 0;
   emit();
 }

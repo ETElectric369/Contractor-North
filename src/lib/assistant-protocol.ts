@@ -5,6 +5,15 @@
 // everything after is the proposal to confirm. ␞ (U+241E) won't occur in normal prose.
 export const CONFIRM_MARKER = "␞CN_CONFIRM␞";
 
+/** THE ONE CHARACTER EVERY MARKER IS BUILT ON (U+241E). Model text never carries it — the route
+ *  strips it from every delta, so no marker can be assembled across the chunks a stream cuts a
+ *  reply into (audit v1120, class 2: a per-chunk match of whole marker strings let a split marker
+ *  through) — and a directive's JSON never carries it inside a string, so a model-authored title
+ *  cannot close one block and open another. */
+export const stripMarkerChar = (s: string): string => s.replace(/\u241E/g, "");
+/** A directive as the server emits it: the markers around JSON that cannot contain a marker. */
+export const envelope = (open: string, payload: unknown, close = ""): string => open + stripMarkerChar(JSON.stringify(payload ?? null)) + close;
+
 /** The proposal the user must approve before the action actually runs. */
 export type AgentConfirm = {
   /** Canonical registry action name, e.g. "bill.create". */

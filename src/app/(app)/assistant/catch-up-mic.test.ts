@@ -40,6 +40,6 @@ describe("catchUp drops the mic before it speaks", () => {
 
   it("is the same order resolveConfirm keeps: stop listening, then speak", () => {
     const confirm = body("async function resolveConfirm(", "// When opened with ?q=");
-    expect(confirm.indexOf("speech.stopListening({ discard: true });")).toBeLessThan(confirm.indexOf("say("));
+    expect(confirm.indexOf("speech.dropTurn();")).toBeLessThan(confirm.indexOf("say(")); // the turn is dropped, the session kept (audit v1120)
   });
 });

@@ -405,7 +405,7 @@ describe("the wiring, pinned", () => {
     expect(route).toContain("SHOW_SCREEN_TOOL, FILL_SCREEN_TOOL,");
     const h = route.slice(route.indexOf('if (tu.name === "fill_screen")'), route.indexOf('if (tu.name === "open_maps")'));
     expect(h).toContain("sanitizeScreen(wanted, { isStaff: isStaffCaller, voice: !!body.voice })");
-    expect(h).toContain("emit(SCREEN_OPEN + JSON.stringify(typed) + SCREEN_CLOSE)");
+    expect(h).toContain("emit(envelope(SCREEN_OPEN, typed, SCREEN_CLOSE))");
     expect(h).toContain("continue;");
     expect(h).not.toContain("break;");
     expect(h).toContain("not_used: Object.keys(asked)");

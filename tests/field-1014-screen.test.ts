@@ -359,7 +359,7 @@ describe("the wiring, pinned", () => {
     expect(route).toContain("SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, FILL_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : [])");
     const h = route.slice(route.indexOf('if (tu.name === "show_screen")'), route.indexOf('if (tu.name === "open_maps")'));
     expect(h).toContain("sanitizeScreen(tu.input, { isStaff: isStaffCaller, voice: !!body.voice })");
-    expect(h).toContain("emit(SCREEN_OPEN + JSON.stringify(shown) + SCREEN_CLOSE)");
+    expect(h).toContain("emit(envelope(SCREEN_OPEN, shown, SCREEN_CLOSE))");
     expect(h).toContain("continue;");
     expect(h).not.toContain("break;");
     // What was dropped is SAID to the model, so it can say where the thing is in words instead.
@@ -370,8 +370,8 @@ describe("the wiring, pinned", () => {
     expect(route).toContain("systemPrompt += `\\n\\n${NORT_PRODUCT_MAP}\\n\\n${screenPromptBlock(isStaffCaller)}`;");
     expect(route).not.toContain("volatilePrompt += `${screenPromptBlock");
     const onText = route.slice(route.indexOf("onText: (text) => {"), route.indexOf("if (needsRoundBreak && clean.trim())"));
-    expect(onText).toContain(".split(SCREEN_OPEN).join(\"\")");
-    expect(onText).toContain(".split(SCREEN_CLOSE).join(\"\")");
+    expect(onText).toContain("const clean = stripMarkerChar(text);"); // the character, not the strings (audit v1120)
+    expect(onText).not.toContain(".split(SCREEN_CLOSE).join(\"\")"); // a per-chunk string match let a split marker through
   });
 
   it("the client strips the block from the words and performs each one once, in order, as it lands", () => {

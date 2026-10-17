@@ -48,10 +48,10 @@ describe("the route ends the stream with the envelope, after the holding count",
   const r = read("src/app/api/chat/route.ts");
   it("holds the directive and emits it last", () => {
     expect(r).toContain('let directive = "";');
-    expect(r).toContain("directive = OPEN_MARKER + JSON.stringify(pendingOpen);");
-    expect(r).toContain("directive = PICK_MARKER + JSON.stringify(pendingPick);");
-    expect(r).toContain("directive = CONFIRM_MARKER + JSON.stringify(pendingConfirm);");
-    expect(r).toMatch(/emit\(HOLDING_OPEN \+ JSON\.stringify\(left\) \+ HOLDING_CLOSE\);[\s\S]{0,200}if \(directive\) emit\(directive\);[^\n]*\n\s*controller\.close\(\);/);
+    expect(r).toContain("directive = envelope(OPEN_MARKER, pendingOpen);");
+    expect(r).toContain("directive = envelope(PICK_MARKER, pendingPick);");
+    expect(r).toContain("directive = envelope(CONFIRM_MARKER, pendingConfirm);");
+    expect(r).toMatch(/emit\(envelope\(HOLDING_OPEN, left, HOLDING_CLOSE\)\);[\s\S]{0,200}if \(directive\) emit\(directive\);[^\n]*\n\s*controller\.close\(\);/);
     for (const bad of ["emit(CONFIRM_MARKER", "emit(OPEN_MARKER", "emit(PICK_MARKER"]) expect(r).not.toContain(bad);
   });
 });

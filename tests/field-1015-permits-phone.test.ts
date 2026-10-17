@@ -67,7 +67,7 @@ describe("an inspection's result is one door, in words", () => {
     expect(passedOnDay({ scheduled_for: "2026-10-13" }, "")).toBe("2026-10-13"); // no company today handed down: the booked day
   });
   it("the row offers Passed and Failed on an open visit, Change It on one written up", () => {
-    expect(rows).toContain('recordInspectionResult({ id: r.id, result: "passed", result_on: passedOnDay(r, todayStr), inspector: null, why: null })');
+    expect(rows).toContain('recordInspectionResult({ id: r.id, result: "passed", result_on: passedOnDay(r, todayStr), inspector: null, why: null, expect_open: true })'); // open-only (audit v1120)
     expect(rows).toMatch(/isOpenInspection\(r\) \? \([\s\S]*>\s*Passed\s*<\/Button>[\s\S]*>\s*Failed\s*<\/Button>[\s\S]*\) : \([\s\S]*>\s*Change It\s*<\/Button>/);
     expect(rows).toContain('{ kind: "result", id: r.id, preset: "failed" }'); // Failed opens the form on Failed: a failure says why
     expect(rows).toContain('useState<string>(preset ?? row.result ?? "passed")');

@@ -11,10 +11,10 @@ import { isNativeShell } from "@/lib/native-shell";
 export type PendingExit = { entryId: string; label: string; exitedAt: string };
 
 type Plugin = {
-  arm(o: { entryId: string; lat: number; lng: number; radiusM: number; label: string }): Promise<{ ok: boolean; authorization: string }>;
+  arm(o: { entryId: string; lat: number; lng: number; radiusM: number; label: string; notify: boolean }): Promise<{ ok: boolean; authorization: string; monitorable?: boolean }>;
   disarm(): Promise<{ ok: boolean }>;
   readPendingExit(o: { clear?: boolean }): Promise<{ pending: unknown }>;
-  status(): Promise<{ authorization: string; armed: unknown }>;
+  status(): Promise<{ authorization: string; armed: unknown; monitorable?: boolean }>;
   addListener(ev: "exit", cb: (p: unknown) => void): Promise<{ remove: () => void }>;
 };
 
@@ -37,14 +37,38 @@ export function parsePendingExit(raw: unknown): PendingExit | null {
   return { entryId, label, exitedAt };
 }
 
-export async function armFence(o: { entryId: string; lat: number; lng: number; radiusM: number; label: string }): Promise<string | null> {
+/** WHETHER THE FENCE CAN DO ITS JOB with the screen off: "ready" only for Always on a device that
+ *  monitors regions. Anything else used to be discarded by the page, so a tech on While Using or
+ *  Denied was never told the fence was inert (audit v1120, class 6). Null off the shell. */
+export type FenceReadiness = "ready" | "whenInUse" | "denied" | "unavailable";
+export function readinessOf(r: { ok?: boolean; authorization?: string; monitorable?: boolean } | null | undefined): FenceReadiness | null {
+  if (!r || typeof r !== "object") return null;
+  if (r.ok === false || r.monitorable === false) return "unavailable";
+  if (r.authorization === "always") return "ready";
+  if (r.authorization === "denied" || r.authorization === "restricted") return "denied";
+  if (r.authorization === "whenInUse") return "whenInUse";
+  return null; // not yet answered: the Always prompt is up — nothing to say until it is read again
+}
+
+/** `notify`: the lock-screen "Still on the clock?" alert — techs only, as the server's push is. */
+export async function armFence(o: { entryId: string; lat: number; lng: number; radiusM: number; label: string; notify: boolean }): Promise<FenceReadiness | null> {
   const p = plugin();
   if (!p) return null;
   try {
-    const r = await p.arm(o);
-    return r?.authorization ?? null;
+    return readinessOf(await p.arm(o));
   } catch (e) {
     try { console.warn("[geofence] arm", e); } catch {}
+    return null;
+  }
+}
+
+/** The readiness as it stands now (after the Always prompt settles, on each foreground). */
+export async function fenceReadiness(): Promise<FenceReadiness | null> {
+  const p = plugin();
+  if (!p) return null;
+  try {
+    return readinessOf(await p.status());
+  } catch {
     return null;
   }
 }

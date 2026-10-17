@@ -17,6 +17,7 @@ import { reconcileBadge } from "@/lib/reconcile-kinds";
 import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
+import { FenceStandDown } from "@/components/fence-stand-down";
 import { OfflineDrain } from "@/components/offline-drain";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
@@ -278,6 +279,8 @@ export default async function AppLayout({
   // clock-in. Requiring gps_in here is what silently disabled the geofence for most
   // punches (the 30-hour open shift).
   let openEntry: OpenEntry | null = null;
+  /** The open-entry read answered (a thrown read leaves openEntry null too, and must not stand the fence down). */
+  let entryKnown = false;
   // THE SHIFT, NOT THE PIECE (audit v994 SW1): the monitor's "past twelve hours" counts from the
   // first piece of a switched shift (lib/shift-chain). One extra read, only for a switched clock.
   let openShiftStart: string | null = null;
@@ -290,6 +293,7 @@ export default async function AppLayout({
         .eq("status", "open")
         .maybeSingle();
       openEntry = (oe as any) ?? null;
+      entryKnown = true;
       if (openEntry?.split_from) {
         const chains = await loadShiftChains(
           supabase as any,
@@ -485,8 +489,13 @@ export default async function AppLayout({
           startedBySwitch={openEntry.split_how === "live"}
           shiftStartIso={openShiftStart}
           tz={tz}
+          notify={!isStaff}
         />
       )}
+      {/* NO OPEN ENTRY: the fence stands down. The monitor's unmount disarms only when this page saw
+          the clock-out; a close from the office, another device or the sweep left iOS's region armed
+          until the next clock-in (audit v1120, class 6). */}
+      {(!settings.geofence_logout || (entryKnown && !openEntry)) && <FenceStandDown />}
     </div>
   );
 }

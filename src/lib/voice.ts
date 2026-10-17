@@ -31,6 +31,13 @@ export function isListening(): boolean {
 export function stopListening(opts?: { discard?: boolean }) {
   backend().stopListening(opts);
 }
+/** The live turn goes nowhere, the conversation stays (a decided yes/no; audit v1120). The webkit
+ *  fallback has no turn to keep a session across, so there it is the discard-stop it always was. */
+export function dropTurn() {
+  const b = backend();
+  if ("dropTurn" in b && typeof b.dropTurn === "function") b.dropTurn();
+  else b.stopListening({ discard: true });
+}
 export function setMuted(b: boolean) {
   // Both expose setMuted; call the active one (calling both is harmless).
   backend().setMuted?.(b);

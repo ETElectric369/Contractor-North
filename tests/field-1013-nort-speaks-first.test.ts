@@ -193,7 +193,7 @@ describe("the doors (source pins)", () => {
     expect(c).toContain("if (liveHolding) setNortHolding(liveHolding);");
     expect(c).toContain("for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, SCREEN_OPEN]) {");
     const r2 = read("src/app/api/chat/route.ts");
-    expect(r2).toMatch(/const left = await holdingFor\(user\.id, createServiceClient\(\), supabase, orgS\.timezone\);\s*emit\(HOLDING_OPEN \+ JSON\.stringify\(left\) \+ HOLDING_CLOSE\);[\s\S]{0,200}controller\.close\(\);/);
+    expect(r2).toMatch(/const left = await holdingFor\(user\.id, createServiceClient\(\), supabase, orgS\.timezone\);\s*emit\(envelope\(HOLDING_OPEN, left, HOLDING_CLOSE\)\);[\s\S]{0,200}controller\.close\(\);/);
     const a = read("src/app/(app)/notification-actions.ts");
     expect(a).toMatch(/const holdingP = Promise\.resolve\(\)\s*\.then\(async \(\) => holdingFor\(user\.id, createServiceClient\(\), supabase, await orgTimezone\(supabase\)\)\)\s*\.catch\(\(\) => NO_HOLDING\);/);
     expect(read("src/app/(app)/timeclock/actions.ts")).toContain('.eq("title", `Daily report from ${name}`)');

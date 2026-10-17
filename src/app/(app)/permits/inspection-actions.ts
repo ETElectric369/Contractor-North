@@ -362,6 +362,10 @@ export async function recordInspectionResult(input: {
   inspector?: string | null;
   /** WHY IT FAILED. Required on a failure, ignored otherwise (Erik, 2026-10-03). */
   why?: string | null;
+  /** THE ONE-TAP BUTTON SENDS THIS: write only while the inspection is still open, so a result
+   *  another screen recorded meanwhile is never overwritten unread (audit v1120, class 3). The
+   *  form's Change It omits it — a deliberate correction still writes. */
+  expect_open?: boolean;
 }): Promise<InspectionRecorded> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -398,14 +402,21 @@ export async function recordInspectionResult(input: {
   // The reason rides with the result it explains. Written on a failure; on a pass or a cancellation
   // an earlier failure's reason is LEFT ALONE, because it is the history of why they came back.
   if (why) patch.notes = why;
-  const { data: saved, error } = await supabase
-    .from("permit_inspections")
-    .update(patch)
-    .eq("id", input.id)
-    .eq("org_id", ctx.orgId)
-    .select("id");
+  let write = supabase.from("permit_inspections").update(patch).eq("id", input.id).eq("org_id", ctx.orgId);
+  if (input.expect_open) write = write.is("result", null);
+  const { data: saved, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!saved?.length) return { ok: false, error: "Nothing was saved — that inspection was removed from another screen." };
+  if (!saved?.length) {
+    if (input.expect_open) {
+      // Zero rows with the open-only clause: read what stands and say it, never guess.
+      const { data: now } = await supabase.from("permit_inspections").select("result, result_on").eq("id", input.id).eq("org_id", ctx.orgId).maybeSingle();
+      const stands = now?.result
+        ? `${row.authority} was already ${String(now.result)}${now.result_on ? ` on ${shortDayWords(String(now.result_on)) ?? String(now.result_on)}` : ""} from another screen`
+        : "that inspection was removed from another screen";
+      return { ok: false, error: `Nothing was saved — ${stands}. Reload the job.` };
+    }
+    return { ok: false, error: "Nothing was saved — that inspection was removed from another screen." };
+  }
 
   // ── CARRY IT FORWARD ───────────────────────────────────────────────────────────────────────────
   // Read the permit's rows back and ask the one rule where it stands now. Never guess from the row

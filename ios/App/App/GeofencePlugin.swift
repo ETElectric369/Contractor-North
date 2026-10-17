@@ -28,6 +28,12 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
     static let regionId = "cn.job-fence"
     private static let pendingKey = "cn.geofence.pending"
     private static let armedKey = "cn.geofence.armed"
+    /// When the lock-screen alert last went: one site exit must not ring on every GPS flicker.
+    private static let notifiedKey = "cn.geofence.notified"
+    static let notifyEvery: TimeInterval = 30 * 60
+
+    /// A device that cannot monitor regions at all (an old iPad, a simulator): arm() refuses and says so.
+    static func monitorable() -> Bool { CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) }
 
     private let manager = CLLocationManager()
     /// The page attached to a live app, when there is one, to hear exits straight away.
@@ -45,7 +51,14 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
         _ = manager.monitoredRegions
     }
 
-    func arm(entryId: String, lat: Double, lng: Double, radiusM: Double, label: String) {
+    /// `notify`: whether an exit posts the lock-screen alert — the page says false for the office,
+    /// the same techs-only rule the server's push keeps (audit v1120, class 6). False = not armed.
+    @discardableResult
+    func arm(entryId: String, lat: Double, lng: Double, radiusM: Double, label: String, notify: Bool) -> Bool {
+        guard GeofenceCore.monitorable() else {
+            print("[Geofence] region monitoring is not available on this device")
+            return false
+        }
         let status = manager.authorizationStatus
         if status == .notDetermined || status == .authorizedWhenInUse {
             manager.requestAlwaysAuthorization()
@@ -58,8 +71,9 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
         region.notifyOnEntry = false
         region.notifyOnExit = true
         manager.startMonitoring(for: region)
-        UserDefaults.standard.set(["entryId": entryId, "label": label, "lat": lat, "lng": lng, "radiusM": radius, "armedAt": ISO8601DateFormatter().string(from: Date())], forKey: GeofenceCore.armedKey)
-        print("[Geofence] armed \(entryId) r=\(Int(radius))m auth=\(status.rawValue)")
+        UserDefaults.standard.set(["entryId": entryId, "label": label, "lat": lat, "lng": lng, "radiusM": radius, "notify": notify, "armedAt": ISO8601DateFormatter().string(from: Date())], forKey: GeofenceCore.armedKey)
+        print("[Geofence] armed \(entryId) r=\(Int(radius))m auth=\(status.rawValue) notify=\(notify)")
+        return true
     }
 
     func disarm() {
@@ -68,6 +82,7 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
         }
         UserDefaults.standard.removeObject(forKey: GeofenceCore.armedKey)
         UserDefaults.standard.removeObject(forKey: GeofenceCore.pendingKey)
+        UserDefaults.standard.removeObject(forKey: GeofenceCore.notifiedKey)
         print("[Geofence] disarmed")
     }
 
@@ -105,6 +120,13 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
         UserDefaults.standard.set(pending, forKey: GeofenceCore.pendingKey)
         print("[Geofence] exit at \(exitedAt) for \(pending["entryId"] ?? "")")
         if let onExit { onExit(pending) }
+        // THE ALERT IS THE TECH'S, AND AT MOST ONE PER HALF HOUR: the page arms the office with
+        // notify=false (the server's push is techs-only too), and a boundary GPS flickers across
+        // must not ring the phone on every step (audit v1120, class 6). The exit itself is kept above
+        // either way, for the sheet.
+        guard armed["notify"] as? Bool ?? true else { return }
+        if let last = UserDefaults.standard.object(forKey: GeofenceCore.notifiedKey) as? Date, Date().timeIntervalSince(last) < GeofenceCore.notifyEvery { return }
+        UserDefaults.standard.set(Date(), forKey: GeofenceCore.notifiedKey)
         let content = UNMutableNotificationContent()
         content.title = "Still on the clock?"
         content.body = "Looks like you left \(pending["label"] as? String ?? "the job site"). Open North to clock out or keep going."
@@ -150,9 +172,10 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let radius = call.getDouble("radiusM") ?? 150
         let label = call.getString("label") ?? "the job site"
+        let notify = call.getBool("notify") ?? true
         DispatchQueue.main.async {
-            GeofenceCore.shared.arm(entryId: entryId, lat: lat, lng: lng, radiusM: radius, label: label)
-            call.resolve(["ok": true, "authorization": GeofenceCore.shared.authorization()])
+            let ok = GeofenceCore.shared.arm(entryId: entryId, lat: lat, lng: lng, radiusM: radius, label: label, notify: notify)
+            call.resolve(["ok": ok, "authorization": GeofenceCore.shared.authorization(), "monitorable": GeofenceCore.monitorable()])
         }
     }
 
@@ -176,6 +199,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve([
                 "authorization": GeofenceCore.shared.authorization(),
                 "armed": GeofenceCore.shared.armed() as Any,
+                "monitorable": GeofenceCore.monitorable(),
             ])
         }
     }
