@@ -273,7 +273,7 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("static let sheetSize = 4096");
     expect(swift).toContain("static let cellSize = 16");
     expect(swift).toContain("static let inset = 2");
-    expect(swift).toContain("return Atlas(size: sheetSize, cell: cellSize, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)");
+    expect(swift).toContain("chosen = Atlas(size: sheetSize, cell: cell, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)");
     expect(swift).toContain("func slot(_ i: Int) -> (sheet: Int, x: Int, y: Int)");
     // The last sheet is only as tall as its rows; v runs over that height; the sheet's number sits
     // in its last texel so no two sheets are byte-identical (the writer packs each — Mac check,
@@ -315,7 +315,12 @@ describe("the wiring, pinned", () => {
     expect(swift).toContain("guard ia != ib, ib != ic, ic != ia, len > 0, simd_length(a).isFinite");
     expect(swift).toContain("bytes[count - 4] = UInt8(truncatingIfNeeded: index + 1)");
     expect(swift).toContain("CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue");
-    expect(swift).toContain("static let maxFaces = 700_000");
+    expect(swift).toContain("static let maxFaces = 1_200_000");
+    // TIERS (Erik's office walked whole, unplugged: 798,521 faces / 419,919 cells, refused at 700k):
+    // a scan that will not fit on six sheets at sixteen texels a cell takes twelve, then eight —
+    // a coarser picture, never a refusal; the inset of two holds at every size.
+    expect(swift).toContain("static let cellSizes = [cellSize, 12, 8]");
+    expect(swift).toContain("if chosen.sheets <= maxSheets { break }");
     expect(swift).toContain("static let maxModelBytes = 200_000_000");
     expect(MODEL_MAX_BYTES).toBe(200_000_000);
     expect(swift).toContain("guard bytes <= Painter.maxModelBytes else {");

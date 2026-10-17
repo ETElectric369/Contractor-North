@@ -524,11 +524,22 @@ enum Painter {
     static let cellSize = 16
     static let inset = 2
 
-    /// Sheets 4096 wide at sixteen texels a cell, as many as the cells need (65,025 to a full sheet).
+    /// The cells a scan may get, biggest first: sixteen texels while the cells fit on `maxSheets`
+    /// sheets (65,025 to a sheet), else twelve (116,281), else eight (261,121) — a bigger scan gets a
+    /// coarser picture rather than a refusal. Erik's office walked whole, unplugged, came to 419,919
+    /// cells (798,521 faces) on 10-16: seven sheets at sixteen, four at twelve.
+    static let cellSizes = [cellSize, 12, 8]
+
+    /// Sheets 4096 wide, as many as the cells need at the biggest cell that keeps to `maxSheets`.
     static func atlas(forCells n: Int) -> Atlas {
-        let perRow = (sheetSize - 1) / cellSize
-        let perSheet = perRow * perRow
-        return Atlas(size: sheetSize, cell: cellSize, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)
+        var chosen = Atlas(size: sheetSize, cell: cellSize, sheets: 1)
+        for cell in cellSizes {
+            let perRow = (sheetSize - 1) / cell
+            let perSheet = perRow * perRow
+            chosen = Atlas(size: sheetSize, cell: cell, sheets: (Swift.max(1, n) + perSheet - 1) / perSheet)
+            if chosen.sheets <= maxSheets { break }
+        }
+        return chosen
     }
 
     /// One anchor's faces laid into cells from `cell` on: two faces that share an edge take ONE cell
@@ -597,11 +608,12 @@ enum Painter {
         return (out, next)
     }
 
-    /// The most faces one scan paints: about six full sheets at two faces a cell (~380 MB of texels
-    /// while they are made, a model of ~120 MB — the page sends up to `maxModelBytes`). Beyond it the
-    /// scan is refused in words rather than painted wrong (skeptic #22). Erik's lamp-off walk of the
-    /// office on 10-16 was refused at the old 450,000 (a walk of ~310,000 faces the time before).
-    static let maxFaces = 700_000
+    /// The most faces one scan paints — the phone's memory for the faces themselves (128 bytes each,
+    /// twice over while they are set on the floor) and the viewer's for the model; the texels are
+    /// bounded by `maxSheets` whatever the count, since the cells shrink to fit. Beyond it the scan is
+    /// refused in words rather than painted wrong (skeptic #22). Erik's office walked whole came to
+    /// 798,521 faces on 10-16, after a 450,000 cap and then a 700,000 one had each refused a walk.
+    static let maxFaces = 1_200_000
     /// And never more sheets than that, however the faces paired up.
     static let maxSheets = 6
     /// The biggest model the page will take over the bridge — MODEL_MAX_BYTES in src/lib/native-scan.ts.
