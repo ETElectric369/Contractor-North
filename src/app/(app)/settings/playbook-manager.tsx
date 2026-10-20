@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { stampNeeds } from "@/lib/playbook/stamp";
+import { scopeWordRenames } from "@/lib/playbook/scope";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
@@ -85,7 +86,7 @@ const kindOf = (n: Need): Kind =>
             : "text";
 
 /** Changing the kind keeps whatever the old kind had that the new one can still use. */
-function slotForKind(kind: Kind, prev: NeedSlot | undefined, remembered?: string[]): NeedSlot | undefined {
+export function slotForKind(kind: Kind, prev: NeedSlot | undefined, remembered?: string[]): NeedSlot | undefined {
   // `remembered` is the last list this question HAD, kept by the editor across a round trip
   // (cn-v700). Without it the carry-over only worked select→select, so a contractor who opened
   // "The project", tried "Typed in — short" to see what it looked like, and came back to
@@ -98,7 +99,12 @@ function slotForKind(kind: Kind, prev: NeedSlot | undefined, remembered?: string
   // false about it: a select→select change can obviously still use it. The cost was silent —
   // flipping "many" to "one" and back unticked "Let me write my own answer too" with no warning,
   // and the free-text answers behind it coerce to null on the next autosave.
-  const keepOther = prev && prev.type === "select" && prev.other ? { other: true as const } : {};
+  //
+  // A SCOPE ALWAYS HAD THAT DOOR: the Inspector takes his own word whether the scope is picked from
+  // his words or typed freely. Turning it into Pick One / Pick Any keeps the door open, so the
+  // words already typed on open visits (a "Gazebo" nobody listed) are not cleared by the next
+  // autosave.
+  const keepOther = prev && ((prev.type === "select" && prev.other) || prev.type === "scope") ? { other: true as const } : {};
   switch (kind) {
     case "open":
       return undefined;
@@ -168,6 +174,8 @@ export function PlaybookManager({
   const lastOptions = useRef(new Map<string, string[]>());
   /** Option value at focus time, keyed need:index — what a blur-commit rename renames FROM. */
   const optionRenameFrom = useRef(new Map<string, string>());
+  /** The scope's words box at focus time, keyed by question — what a blur-commit rename renames FROM. */
+  const scopeWordsFrom = useRef(new Map<string, string[]>());
   // ?form=<id> WINS. The default below is a guess about which set you probably meant; a link that
   // names one is not a guess. /forms/[id]'s "edit it in Settings → Playbook" banner carries the id,
   // because without it Andrew followed that link from his WEBSITE form and landed on the
@@ -592,6 +600,20 @@ export function PlaybookManager({
                           rows={Math.min(10, Math.max(3, n.slot.options.length + 1))}
                           value={n.slot.options.join("\n")}
                           placeholder={"Deck\nRemodel\nRepair"}
+                          onFocus={(e) => {
+                            // Same rule as the choices below: the rename commits ON BLUR against
+                            // what the box held when it was entered (audit 7), never per keystroke.
+                            scopeWordsFrom.current.set(n.key, e.currentTarget.value.split("\n"));
+                          }}
+                          onBlur={(e) => {
+                            // A WORD RENAMED HERE RENAMES THE RULES THAT WAIT ON IT, like a chip
+                            // (renameOptionInRules): "Deck" → "Decking" must not leave every
+                            // question gated on Deck quiet on every visit.
+                            const from = scopeWordsFrom.current.get(n.key);
+                            scopeWordsFrom.current.delete(n.key);
+                            if (!from) return;
+                            for (const r of scopeWordRenames(from, e.currentTarget.value.split("\n"))) renameOptionInRules(n.key, r.from, r.to);
+                          }}
                           onChange={(e) => {
                             const options = e.target.value.split("\n").map((w) => w.slice(0, 60));
                             lastOptions.current.set(n.key, options.map((w) => w.trim()).filter(Boolean));

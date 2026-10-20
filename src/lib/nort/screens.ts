@@ -96,7 +96,9 @@ export const SCREENS: Screen[] = [
     say: "?task=<task id> opens one task",
     spots: [
       { name: "insp-where", say: "Where" },
-      { name: "need-tasks", say: "the Tasks" },
+      // insp-tasks, not need-<key>: a playbook's keys are its owner's own (the editor makes q_<time>),
+      // so no fixed need-… name is ever on a real company's page. The Tasks block carries this id.
+      { name: "insp-tasks", say: "the Tasks" },
       { name: "insp-photos", say: "Photos" },
       { name: "insp-notes", say: "Notes (when the sheet has a notes box)" },
       { name: "task-<id>", say: "one task's row" },

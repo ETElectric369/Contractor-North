@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1123", date: "2026-10-20", line: "43 audit findings closed: an address or caption is saved only when the write says so, a taken-back punch puts the job back on hold, and Nort looks before he says a job is not there or where you are." },
   { version: "cn-v1122", date: "2026-10-19", line: "Nort says a thing was done only when the app did it, a job you name at clock-in is the job the punch lands on, and the clock and the site fence follow his punches at once." },
   { version: "cn-v1121", date: "2026-10-17", line: "An audit's fixes: a kit task's hours follow its first count, a one-tap Passed never overwrites a result the office recorded, Nort's hours box refuses minutes, and his voice stays on after a yes." },
   { version: "cn-v1120", date: "2026-10-16", line: "3D Scan paints a truer model at a third of the size: even light along a wall, the picture as the camera saw it, a whole room or shop no longer refused; a file too big to send says so in words." },

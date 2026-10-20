@@ -36,6 +36,13 @@ export function modelKind(pathOrName: string | null | undefined): ModelKind | nu
 /** AR Quick Look wants an <img> as the link's child: a transparent pixel does. */
 const PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
+/** The model's bytes, in one fetch. A 3D Scan model is 40 to 130 MB: it must never come down twice. */
+async function fetchModelBytes(url: string): Promise<Uint8Array> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("the file didn't download");
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 function isIPhone(): boolean {
   return typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
@@ -46,7 +53,8 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
   const [why, setWhy] = useState<string | null>(null);
   const [ar, setAr] = useState<"idle" | "opening" | "failed">("idle");
   const [arWhy, setArWhy] = useState<string | null>(null);
-  /** The model's bytes as drawn, kept for Open In AR (fetched once, by the loader). */
+  /** The model's bytes as drawn, kept for Open In AR. In the app the viewer fetches them ONCE and the
+   *  loader reads that same copy from a blob URL, so Open In AR never downloads the model again. */
   const bytesRef = useRef<Uint8Array | null>(null);
   const kind = modelKind(name) ?? modelKind(url);
   const inShell = arPreviewPresent();
@@ -58,9 +66,7 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
     try {
       let bytes = bytesRef.current;
       if (!bytes) {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("the file didn't download");
-        bytes = new Uint8Array(await res.arrayBuffer());
+        bytes = await fetchModelBytes(url);
         bytesRef.current = bytes;
       }
       const r = await openInAr(bytes, name);
@@ -131,7 +137,29 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
         let object: import("three").Object3D;
         if (kind === "usdz") {
           const { USDLoader } = await import("three/examples/jsm/loaders/USDLoader.js");
-          object = await new USDLoader().loadAsync(url);
+          const loader = new USDLoader();
+          // In the app the same bytes serve Open In AR: fetched once here, drawn from a blob URL, kept
+          // in bytesRef. The sheets beside the model are found by relative path, so the loader is told
+          // where the ORIGINAL file lives. A fetch that fails falls back to loading by URL, as before.
+          let drawFrom = url;
+          let objectUrl: string | null = null;
+          if (arPreviewPresent()) {
+            try {
+              const bytes = bytesRef.current ?? (await fetchModelBytes(url));
+              bytesRef.current = bytes;
+              objectUrl = URL.createObjectURL(new Blob([bytes as BlobPart]));
+              const bare = url.split(/[?#]/)[0];
+              loader.setResourcePath(bare.slice(0, bare.lastIndexOf("/") + 1));
+              drawFrom = objectUrl;
+            } catch {
+              /* the URL load below says what is wrong, if anything is */
+            }
+          }
+          try {
+            object = await loader.loadAsync(drawFrom);
+          } finally {
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+          }
         } else {
           const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
           object = (await new GLTFLoader().loadAsync(url)).scene;

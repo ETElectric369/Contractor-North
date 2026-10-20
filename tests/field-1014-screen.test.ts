@@ -278,8 +278,9 @@ describe("the registry: every spot named is a real data-tour or id in the markup
   const markup = allMarkup();
   const settingsIds = [...read("src/app/(app)/settings/page.tsx").matchAll(/^\s*id: "([a-z-]+)"/gm)].map((m) => m[1]);
   const dockKeys = DOCK.map((s) => s.key);
-  // need-<key>: the Inspector renders one block per playbook need; "tasks" is the fixed key of the task need.
-  const families: Record<string, string[]> = { dock: dockKeys, sections: dockKeys, menu: dockKeys, settings: settingsIds, need: ["tasks"] };
+  // need-<key> is NOT a family: a playbook's keys are its owner's own (the editor makes q_<time>), so a
+  // literal need-… name in the registry would be a guess that CI could not tell from a real anchor.
+  const families: Record<string, string[]> = { dock: dockKeys, sections: dockKeys, menu: dockKeys, settings: settingsIds };
 
   it.each(literalAnchorNames())("[%s] is in the markup", (name) => {
     const literal = markup.includes(`data-tour="${name}"`) || markup.includes(`id="${name}"`) || markup.includes(`barAnchor="${name}"`);
@@ -384,7 +385,7 @@ describe("the wiring, pinned", () => {
     expect(loop).toContain("{ here: () => window.location.pathname + window.location.search, push: (p) => router.push(p) },");
     // A miss is said under the chat and the box comes back; so does a new card, a picker or a confirm.
     expect(loop).toContain("onMiss: (s) => {");
-    expect(loop).toContain("setMissNote(`Couldn't find ${s.label ?? s.anchor ?? \"that\"} on this screen.`)");
+    expect(loop).toContain("setMissNote(spotMissNote(s.label))"); // the model's label, else "that spot" — never the anchor name (cn-v1123)
     expect(chat).toContain("const statusText = status ?? missNote ??");
     expect(chat).toContain("if (pickDir || proposal) openBox();");
     expect(chat).toContain("if (key !== lastCardRef.current) {\n            lastCardRef.current = key;\n            openBox();");

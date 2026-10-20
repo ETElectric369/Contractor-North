@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { megabytes, uploadRefusal } from "@/lib/upload-words";
+import { keptWords } from "@/lib/native-scan";
 import { APP_VERSION } from "@/lib/version";
 import { RELEASE_NOTES, versionNumber } from "@/lib/release-notes";
 
@@ -63,12 +64,14 @@ describe("the Inspector's two upload roads say it in plain words", () => {
     expect(src).toContain("uploadFinalRef.current = false;");
     const door = src.slice(src.indexOf("async function scan3dInto("), src.indexOf("async function fileOnJob("));
     expect(door).toContain("if (uploadFinalRef.current) {");
-    expect(door).toContain("unsentModelRef.current = null;\n          await discardScan(path);\n          return;");
+    // (cn-v1123: the keep goes through keep(), which moves the ref AND the Discard button's state)
+    expect(door).toContain("keep(null);\n          await discardScan(path);\n          return;");
     expect(door).not.toContain("Scan a smaller area."); // upload() said the action; the door only drops the copy
-    expect(door).toContain("unsentModelRef.current = { model, path };");
-    expect(door).toContain("tap 3D Scan again to send it without scanning.");
+    expect(door).toContain("keep({ model, path, taskId, landed: null });");
+    expect(door).toContain("keptWords(false)");
+    expect(keptWords(false)).toContain("tap 3D Scan again to send it without scanning.");
     // the final branch returns before the keep
-    expect(door.indexOf("if (uploadFinalRef.current) {")).toBeLessThan(door.indexOf("unsentModelRef.current = { model, path };"));
+    expect(door.indexOf("if (uploadFinalRef.current) {")).toBeLessThan(door.indexOf("keep({ model, path, taskId, landed: null });"));
   });
 });
 

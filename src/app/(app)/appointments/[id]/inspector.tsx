@@ -37,7 +37,7 @@ import type { InspectionAccess } from "@/lib/inspection/inspection-access";
 import { registerNortDoors, type NortDoor } from "@/lib/nort/doors";
 import { measureNative, measurePluginPresent, type MeasureMode } from "@/lib/native-measure";
 import { Box, Ruler } from "lucide-react";
-import { discardScan, NO_SCAN_DOORS, scan3dNative, scanDoors, type ScanDoors } from "@/lib/native-scan";
+import { DISCARD_KEPT_LABEL, discardScan, jobFilingWords, keptElsewhereWords, keptStep, keptWords, NO_SCAN_DOORS, scan3dNative, scanDoors, type KeptModel, type ScanDoors } from "@/lib/native-scan";
 import { ModelViewer } from "@/components/model-viewer";
 import { jobFilePath } from "@/lib/job-file-upload";
 import { uploadRefusal } from "@/lib/upload-words";
@@ -155,6 +155,20 @@ export type BookRow = { code: string; description: string; unit: string; price: 
 /** The kit preview prices nothing: the kits arrive with every money field dropped, and the
  *  preview reads names and counts only. */
 const KIT_PREVIEW_PRICING = { orgDefaultPct: 0 };
+
+/** The resolved parts of a picked address: what rides along with the line (0177). */
+type PickedParts = { city: string | null; state: string | null; zip: string | null };
+
+/** Two capture patches that have not landed yet, as one. A patch names a whole section, so the newer
+ *  one replaces the older — EXCEPT photo_meta: its keys are only the photos this phone changed, the
+ *  server merges the map key by key, and a second upload or a retry must keep the first one's keys. */
+export function mergeCapturePatches(older: Record<string, unknown>, newer: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...older, ...newer };
+  const a = older.photo_meta;
+  const b = newer.photo_meta;
+  if (a && b && typeof a === "object" && typeof b === "object") merged.photo_meta = { ...a, ...b };
+  return merged;
+}
 
 /**
  * ONE SMART INSPECTOR.
@@ -574,6 +588,38 @@ export function Inspector({
    *  write the same line again bare — setAppointmentPlace would then judge it typed and could clear
    *  the parts it just stored (skeptic, 2026-10-13); and the leave-page flush must not either. */
   const savedPlaceRef = useRef<string | null>(null);
+  /** A pick's (or Use My Location's) line WITH its parts, until a write says it landed. A failed
+   *  write leaves it here, so the autosave's retry writes the line with its town — written bare it
+   *  would be judged typed and the parts would be dropped. */
+  const unsavedPickRef = useRef<{ line: string; parts: PickedParts } | null>(null);
+  const partsForLine = (line: string): PickedParts | undefined => {
+    const u = unsavedPickRef.current;
+    return u && u.line.trim() === line.trim() ? u.parts : undefined;
+  };
+  /** The line is marked saved only when the write's RESULT says ok. A refusal or a dead zone is said
+   *  in words and the line stays unsaved, so the next autosave tries it again (with its parts). */
+  function savePick(line: string, parts: PickedParts) {
+    unsavedPickRef.current = { line, parts };
+    start(async () => {
+      try {
+        const w = await setAppointmentPlace(appointmentId, line, parts);
+        if (!w.ok) {
+          setSavedAt(null); // a stale green tick must never stand over an address that is not written
+          setError(w.error ?? "Couldn't save the address — still trying.");
+          if (!w.refused) schedule();
+          return;
+        }
+        savedPlaceRef.current = line;
+        if (unsavedPickRef.current?.line === line) unsavedPickRef.current = null;
+        router.refresh();
+      } catch {
+        // No signal. Nothing is written; the line is held here and goes as soon as there are bars.
+        setSavedAt(null);
+        setError("No signal — the address is held on this phone and will save when you're back in range.");
+        schedule();
+      }
+    });
+  }
   const initialLocationRef = useRef(initialLocation);
   initialLocationRef.current = initialLocation;
   const officeRef = useRef(office);
@@ -618,15 +664,10 @@ export function Inspector({
         setLocatedNote("No street address at this spot — type the number and street.");
         return;
       }
-      savedPlaceRef.current = line;
       setPlace(line);
       setWhereKey((k) => k + 1);
       setLocatedNote(`From your phone, within ${m} m.`);
-      start(async () => {
-        const w = await setAppointmentPlace(appointmentId, line, { city: found.city ?? null, state: found.state ?? null, zip: found.zip ?? null });
-        if (!w.ok) setError(w.error ?? "Couldn't save the address.");
-        else router.refresh();
-      });
+      savePick(line, { city: found.city ?? null, state: found.state ?? null, zip: found.zip ?? null });
     } catch {
       setLocatedNote("No signal — type the address for now.");
     } finally {
@@ -635,7 +676,7 @@ export function Inspector({
   }
 
   function queueCapture(patch: Record<string, unknown>) {
-    capturePatchRef.current = { ...capturePatchRef.current, ...patch };
+    capturePatchRef.current = mergeCapturePatches(capturePatchRef.current, patch);
     schedule();
   }
   function queueAnswers() {
@@ -680,7 +721,7 @@ export function Inspector({
     // off the visit, the office's update not in yet), trying again every 900ms changes nothing: the
     // work is kept and the reason stays on screen, and the next thing he types or presses tries again.
     const restore = (msg: string, again = true) => {
-      capturePatchRef.current = { ...patch, ...capturePatchRef.current };
+      capturePatchRef.current = mergeCapturePatches(patch, capturePatchRef.current);
       if (wantAnswers) answersDirty.current = true;
       setSavedAt(null); // a stale green tick must never stand over unwritten work
       setError(msg);
@@ -694,8 +735,10 @@ export function Inspector({
           if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.", !r.refused);
         }
         if (placeDirty) {
-          const r = await setAppointmentPlace(appointmentId, latestPlace);
+          const r = await setAppointmentPlace(appointmentId, latestPlace, partsForLine(latestPlace));
           if (!r.ok) return restore(r.error ?? "Couldn't save the address — still trying.");
+          savedPlaceRef.current = latestPlace;
+          if (unsavedPickRef.current?.line.trim() === latestPlace.trim()) unsavedPickRef.current = null;
         }
         if (wantAnswers) {
           const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answersRef.current) as never);
@@ -735,8 +778,11 @@ export function Inspector({
       // in this box. A line a pick already wrote with its parts is not written again bare.
       const latestPlace = placeRef.current.trim();
       if (officeRef.current && latestPlace !== initialLocationRef.current.trim() && latestPlace !== (savedPlaceRef.current ?? "").trim()) {
-        savedPlaceRef.current = placeRef.current;
-        void setAppointmentPlace(appointmentId, placeRef.current).catch(() => {});
+        const line = placeRef.current;
+        // Marked saved only when the write says ok: a page that is backgrounded, not closed, retries.
+        void setAppointmentPlace(appointmentId, line, partsForLine(line))
+          .then((r) => { if (r.ok) savedPlaceRef.current = line; })
+          .catch(() => {});
       }
       if (answersDirty.current) {
         answersDirty.current = false;
@@ -821,49 +867,78 @@ export function Inspector({
   // blue until a photo has them), the phone builds the textured model, and it lands on the task (or
   // the visit) as a 3D file the tile opens in the viewer — and on the job's papers when the visit is
   // on a job. No rows: this door is the picture; the numbers are Measure's, beside it under Lidar.
-  /** A model whose upload failed, kept for a retry without another walk (the shell's copy stays too). */
-  const unsentModelRef = useRef<{ model: File; path: string } | null>(null);
+  /** A model whose trip did not finish, kept for one more tap without another walk. It belongs to
+   *  the place it was scanned for (keptStep), and it is let go by a button, never only by luck. */
+  const unsentModelRef = useRef<KeptModel | null>(null);
+  const [keptModel, setKeptModel] = useState<KeptModel | null>(null);
+  /** Keep a model, or let go of it: the ref the taps read, the state the Discard button is drawn from. */
+  function keep(k: KeptModel | null) {
+    unsentModelRef.current = k;
+    setKeptModel(k);
+  }
+  /** Set by upload(): the files that REACHED storage whose row did not save. The two faults are
+   *  different, and the retry for the row never sends the file a second time. */
+  const uploadLandedRef = useRef<CapturePhoto[]>([]);
   /** Set by upload() when storage's refusal is FINAL (the file is over its limit): no tap will change it. */
   const uploadFinalRef = useRef(false);
   async function scan3dInto(taskId: string | null) {
     if (measuringRef.current) return;
+    const step = keptStep(unsentModelRef.current, taskId);
+    if (step.step === "elsewhere") {
+      // The kept model is for another place: the old room's model never lands here, and the sentence
+      // says where it waits (a task that has been removed can only be discarded).
+      const at = step.kept.taskId;
+      const t = at === null ? null : tasksNow().find((x) => x.id === at);
+      setError(keptElsewhereWords(at === null ? "the visit" : t ? `"${t.name.trim() || "A task with no name yet"}"` : null));
+      return;
+    }
     measuringRef.current = true;
     setMeasuring(true);
     setError(null);
     try {
       let model: File;
       let path: string;
-      const unsent = unsentModelRef.current;
-      if (unsent) {
-        // The last model never landed: send it again, no camera.
-        ({ model, path } = unsent);
-      } else {
+      let landed: CapturePhoto | null = null;
+      if (step.step === "scan") {
         const r = await scan3dNative();
         if (!r.ok) {
           if ("refused" in r) setError(r.refused);
           return;
         }
         ({ model, path } = r);
+      } else {
+        // The last model never finished its trip: finish it, no camera. When its file is already
+        // up, only the visit's row is saved again.
+        ({ model, path, landed } = step.kept);
       }
       if (taskId) openTask(taskId);
       pendingTaskRef.current = taskId;
-      const stored = await upload([model], { caption: "3D model", about: "3D Scan" });
+      const stored = await upload(landed ? [] : [model], { caption: "3D model", about: "3D Scan" }, landed ? [landed] : undefined);
       if (!stored.length) {
         if (uploadFinalRef.current) {
           // Over storage's limit: sending it again would meet the same answer, so the shell's copy
           // goes; upload() said the size and the one action, a smaller walk. The limit is the
           // company's setting, not the walker's, so keeping a copy against a raised limit would only
           // make the next tap re-send instead of scan (skeptic #27 weighed it; the walk is the cost).
-          unsentModelRef.current = null;
+          keep(null);
           await discardScan(path);
           return;
         }
-        // upload() said why (the signal); the model waits here for one more tap.
-        unsentModelRef.current = { model, path };
-        setError((e) => `${e ?? "The 3D model didn't upload."} It's kept on this phone — tap 3D Scan again to send it without scanning.`);
+        const up = uploadLandedRef.current[0] ?? null;
+        if (up) {
+          // The FILE is up and the visit's row is what did not save: the shell's copy goes (the model
+          // is safe in storage) and the next tap saves the row alone, never a second upload.
+          await discardScan(path);
+          keep({ model, path, taskId, landed: up });
+          setError((e) => `${e ?? "The visit didn't save the 3D model."} ${keptWords(true)}`);
+          return;
+        }
+        // upload() said why (the signal); the model waits here for one more tap, for this place.
+        keep({ model, path, taskId, landed: null });
+        setError((e) => `${e ?? "The 3D model didn't upload."} ${keptWords(false)}`);
         return;
       }
-      unsentModelRef.current = null;
+      keep(null);
       await discardScan(path);
       if (jobId) {
         const filed = await fileOnJob(jobId, stored[0], model.name, model.size);
@@ -875,24 +950,49 @@ export function Inspector({
     }
   }
 
+  /** Let go of the kept model whole: the shell's copy, and, if its file had gone up before the row
+   *  failed, its tile and its file in storage too (one thing, taken back whole). */
+  async function dropKept(kept: KeptModel) {
+    keep(null);
+    setError(null);
+    await discardScan(kept.path);
+    const up = kept.landed;
+    if (!up) return;
+    const left = photosRef.current.filter((p) => p.path !== up.path);
+    photosRef.current = left;
+    setPhotos(left);
+    // Through the one door that takes a photo off a visit (removePhoto's): it drops the path from the
+    // stored list and deletes the file, so a save that threw after the server had committed cannot
+    // leave the visit pointing at a file that is gone.
+    const stillThere = () => setError("The 3D model is off the visit, but its file is still in storage.");
+    await removeInspectionPhoto(appointmentId, up.path).then((r) => { if (!r.ok) stillThere(); }, stillThere);
+  }
+  async function discardKept() {
+    const kept = unsentModelRef.current;
+    if (!kept || measuringRef.current) return;
+    if (!confirm("Discard the kept 3D model? The room would need scanning again.")) return;
+    await dropKept(kept);
+  }
+
   /** A COPY of the visit's file goes on the job's papers — never one object with two owners, since
    *  deleting a job document removes its file and would blank the visit's. */
   async function fileOnJob(job: string, from: string, name: string, size: number): Promise<{ ok: true } | { ok: false; error: string }> {
     const to = jobFilePath(orgId, job, name);
     const storage = createClient().storage.from("documents");
     const { error: copyErr } = await storage.copy(from, to);
-    if (copyErr) return { ok: false, error: `The 3D file is on the visit but didn't file on the job (${copyErr.message}).` };
-    let why: string | null = null;
+    // Storage's own sentence never reaches the contractor (jobFilingWords says it in the app's words).
+    if (copyErr) return { ok: false, error: jobFilingWords(copyErr) };
+    let failed: { why: unknown } | null = null;
     try {
       const r = await addDocument({ job_id: job, name, category: "Other", file_url: to, size_bytes: size });
-      if (!r.ok) why = r.error ?? "unknown";
+      if (!r.ok) failed = { why: r.error ?? null };
     } catch (e: unknown) {
-      why = (e as { message?: string })?.message ?? "the connection dropped";
+      failed = { why: e };
     }
-    if (why === null) return { ok: true };
+    if (failed === null) return { ok: true };
     // No row points at the copy: take it back out, so nothing orphaned sits in the job's folder.
     await storage.remove([to]).then(() => undefined, () => undefined);
-    return { ok: false, error: `The 3D file is on the visit but didn't file on the job (${why}).` };
+    return { ok: false, error: jobFilingWords(failed.why) };
   }
 
   // THE LIDAR GROUP (Erik 2026-10-16: "lets group everything with a title called Lidar … keep
@@ -916,9 +1016,18 @@ export function Inspector({
             </>
           )}
           {scanOn.model && (
-            <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scan3dInto(taskId)}>
-              <Box className="h-4 w-4" /> 3D Scan
-            </Button>
+            <>
+              <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scan3dInto(taskId)}>
+                <Box className="h-4 w-4" /> 3D Scan
+              </Button>
+              {/* A kept model has a way out in words: without it a refusal that never changes (a login
+                  that cannot write) would keep every tap on this page re-sending the same file. */}
+              {keptModel && (
+                <Button type="button" variant="secondary" disabled={measuring} onClick={() => void discardKept()}>
+                  {DISCARD_KEPT_LABEL}
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1034,9 +1143,10 @@ export function Inspector({
   photosRef.current = photos;
   const photoMetaRef = useRef(photoMeta);
   photoMetaRef.current = photoMeta;
-  async function upload(files: File[], extra?: Partial<CapturePhotoMeta>): Promise<string[]> {
+  async function upload(files: File[], extra?: Partial<CapturePhotoMeta>, landed?: CapturePhoto[]): Promise<string[]> {
     const stored: string[] = [];
-    if (!files.length) return stored;
+    // `landed` is files ALREADY in storage whose row did not save (a kept 3D model): no upload, only the row.
+    if (!files.length && !landed?.length) return stored;
     // Taken from inside a task's sheet: placed on that task (read once, then cleared, so the
     // visit's own Take / Add never inherits it). `extra` is what Measure knows about its snapshot
     // (the figure as its caption) — merged the same way, after the photo is stored.
@@ -1045,11 +1155,12 @@ export function Inspector({
     setUploading(true);
     setError(null);
     uploadFinalRef.current = false;
+    uploadLandedRef.current = [];
     /** The file on its way up when storage answers, so the refusal can name it and its size. */
     let sending: File | null = null;
+    const added: CapturePhoto[] = [...(landed ?? [])];
     try {
       const supabase = createClient();
-      const added: CapturePhoto[] = [];
       for (const raw of files) {
         sending = raw;
         // An image gets downscaled for the truck's connection; a document uploads untouched.
@@ -1063,7 +1174,8 @@ export function Inspector({
         added.push({ path, url: data?.signedUrl ?? null });
       }
       sending = null; // every file is up; what follows is the row, and a refusal there is not a file's
-      const next = [...photosRef.current, ...added];
+      // A file kept from the last try is already on the page: it joins once, never as a second tile.
+      const next = [...photosRef.current, ...added.filter((a) => !photosRef.current.some((p) => p.path === a.path))];
       photosRef.current = next;
       setPhotos(next);
       // Persist immediately — a closed tab must not lose the shots. A crew lead sends only the ones
@@ -1072,19 +1184,37 @@ export function Inspector({
       const r = crew
         ? await addInspectionPhotos(appointmentId, added.map((p) => p.path))
         : await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
-      if (!r.ok) setError(r.error ?? "Couldn't save the photos.");
-      else setSavedAt(Date.now());
+      if (!r.ok) {
+        setError(r.error ?? "Couldn't save the photos.");
+        uploadLandedRef.current = added; // the files are up; the row is what is owed
+      } else setSavedAt(Date.now());
       if (r.ok) stored.push(...added.map((a) => a.path));
       if ((forTask || extra) && r.ok) {
         // AFTER the photos are stored, never before: the capture's parse drops placement for a
         // photo it does not have yet, so meta that landed first would be lost.
         const meta = { ...photoMetaRef.current };
-        for (const a of added) meta[a.path] = { ...(meta[a.path] ?? {}), ...(extra ?? {}), ...(forTask ? { task_id: forTask } : {}) };
+        // Only the photos THIS upload added go to the server. This phone's whole map is from when the
+        // page opened; the server merges by key, so sending it would put back every caption and
+        // placement the office changed since.
+        const mine: Record<string, CapturePhotoMeta> = {};
+        for (const a of added) {
+          meta[a.path] = { ...(meta[a.path] ?? {}), ...(extra ?? {}), ...(forTask ? { task_id: forTask } : {}) };
+          mine[a.path] = meta[a.path];
+        }
         photoMetaRef.current = meta;
         setPhotoMeta(meta);
-        queueCapture({ photo_meta: meta });
+        queueCapture({ photo_meta: mine });
       }
     } catch (e: unknown) {
+      if (extra?.about === "3D Scan" && sending === null && added.length && !stored.length) {
+        // A 3D MODEL only (it is the one file kept and re-saved by a tap): every file is up and it was
+        // the ROW that threw (a dead zone mid-save), so the file is not the fault, the caller is told
+        // the file landed and nothing sends it a second time. An ordinary photo has no such tap: it
+        // keeps the sentence below, whose action is to try again.
+        uploadLandedRef.current = added;
+        setError("Couldn't save the photos.");
+        return stored;
+      }
       // Storage's sentence in plain words; a 3D model is named as one, a photo by its file.
       const model = extra?.about === "3D Scan";
       const r = uploadRefusal(e, { what: model ? "The 3D model" : sending?.name ?? "The file", bytes: sending?.size ?? 0, action: model ? "Scan a smaller area." : "Send a smaller file." });
@@ -1098,6 +1228,13 @@ export function Inspector({
 
   function removePhoto(p: CapturePhoto) {
     if (!confirm("Remove this?")) return;
+    // The tile of a model that is up but unsaved IS the kept model: removing it lets go of the whole
+    // thing, or the next tap would put it back.
+    const kept = unsentModelRef.current;
+    if (kept?.landed?.path === p.path) {
+      void dropKept(kept);
+      return;
+    }
     setPhotos((cur) => cur.filter((x) => x.path !== p.path));
     // The one photo, named: the server takes it off the stored list and deletes its file, so a crew
     // lead's save can't put it back (0356). Never this page's whole list, which may be missing a
@@ -1444,7 +1581,9 @@ export function Inspector({
         </option>
       );
       return (
-        <div className="space-y-2">
+        // id="insp-tasks": the one fixed name for the Tasks (lib/nort/screens). The wrapper's own
+        // need-<key> is the playbook owner's key, so it cannot be a name Nort is told.
+        <div id="insp-tasks" className="space-y-2">
           {/* HOW THE KITS READ WENT (item 3): one sentence, once, when it was not whole. */}
           {kitsNote && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{kitsNote}</p>}
           {!readOnly && offer.length > 0 && word && (
@@ -1703,18 +1842,18 @@ export function Inspector({
                     {taskPhotos.map((p) => (
                       <div key={p.path} className="relative aspect-square overflow-hidden rounded-lg bg-slate-100">
                         {isImage(p.path) ? (
-                          <button type="button" onClick={() => p.url && setViewing(p)} className="h-full w-full" disabled={readOnly}>
+                          <TapTile readOnly={readOnly} onClick={() => p.url && setViewing(p)} className="h-full w-full">
                             {p.url && (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img src={p.url} alt="" className="h-full w-full object-cover" />
                             )}
-                          </button>
+                          </TapTile>
                         ) : is3d(p.path) ? (
-                          <button type="button" onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-slate-500">
+                          <TapTile readOnly={readOnly} onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-slate-500">
                             <Box className="h-5 w-5 shrink-0 text-slate-400" />
                             <span className="line-clamp-2 break-all leading-tight">{fileLabel(p.path)}</span>
                             <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>
-                          </button>
+                          </TapTile>
                         ) : (
                           <a href={p.url ?? "#"} target="_blank" rel="noopener noreferrer" className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-slate-500">
                             <FileText className="h-5 w-5 shrink-0 text-slate-400" />
@@ -1764,11 +1903,15 @@ export function Inspector({
                   onChange={(e) => patchTask(i, { note: e.target.value || null })}
                 />
               </div>
-              {!readOnly && (
-                <div className="mt-3 flex justify-end">
+              {/* A view-only reader opened this sheet too, so he gets the way back: a tile, not a Button
+                  (the read-only fieldset disables every button). */}
+              <div className="mt-3 flex justify-end">
+                {readOnly ? (
+                  <TapTile readOnly onClick={() => openTask(null)} className="inline-flex h-11 items-center justify-center rounded-lg bg-slate-100 px-4 text-sm font-medium text-slate-900 active:bg-slate-200">Done</TapTile>
+                ) : (
                   <Button type="button" variant="secondary" onClick={() => openTask(null)}>Done</Button>
-                </div>
-              )}
+                )}
+              </div>
               </>
               )}
             </div>
@@ -1997,15 +2140,12 @@ export function Inspector({
                 // `formatted` is the full one-line address — appointments.location is a single
                 // text column, so the whole thing is what belongs in it.
                 const line = parts.formatted || parts.line1 || "";
-                savedPlaceRef.current = line;
                 setPlace(line);
                 // Resolved from autocomplete → the PARTS ride along (0177), so the city is stored
-                // rather than left to be guessed out of a string later.
-                if (line && line !== initialLocation)
-                  start(async () => {
-                    await setAppointmentPlace(appointmentId, line, { city: parts.city, state: parts.state, zip: parts.zip });
-                    router.refresh();
-                  });
+                // rather than left to be guessed out of a string later. Marked saved only when the
+                // write says ok (savePick); with nothing to write there is nothing to retry.
+                if (line && line !== initialLocation) savePick(line, { city: parts.city, state: parts.state, zip: parts.zip });
+                else savedPlaceRef.current = line;
               }}
             />
             {/* Its own row under the box (a 375 px phone keeps the box and its dropdown whole); the
@@ -2431,11 +2571,11 @@ export function Inspector({
                   ) : is3d(p.path) ? (
                     /* A 3D FILE OPENS IN THE VIEWER (3D Scan's model, a dropped GLB): spin it here;
                        Open In AR from inside it on an iPhone. */
-                    <button type="button" onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+                    <TapTile readOnly={readOnly} onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
                       <Box className="h-6 w-6 shrink-0 text-slate-400" />
                       <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
                       <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>
-                    </button>
+                    </TapTile>
                   ) : (
                     /* A PDF SHOWS ITS FACE (Erik: "i cant see an image of the pdf"). The browser's
                        own renderer paints page one right in the tile — zero dependencies — and the
@@ -2594,6 +2734,27 @@ export function Inspector({
       {viewing3d?.url && <ModelViewer url={viewing3d.url} name={fileLabel(viewing3d.path)} onClose={() => setViewing3d(null)} />}
     </Card>
     </>
+  );
+}
+
+/** Something to tap that has to keep working in a view-only visit. Everything inside the read-only
+ *  fieldset is disabled, a <button> included, so a tile drawn as one is a picture of a button that
+ *  does nothing. A view-only reader gets the task row's own shape instead: a div that is a button to
+ *  the finger, the keyboard and the screen reader. */
+export function TapTile({ readOnly, onClick, className, children }: { readOnly: boolean; onClick: () => void; className?: string; children: React.ReactNode }) {
+  if (!readOnly) {
+    return <button type="button" onClick={onClick} className={className}>{children}</button>;
+  }
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      className={`${className ?? ""} cursor-pointer`}
+    >
+      {children}
+    </div>
   );
 }
 

@@ -220,12 +220,13 @@ export function stopSpeaking() {
   } catch {}
 }
 
-function browserSpeak(text: string, fire: () => void) {
+function browserSpeak(text: string, fire: () => void, onStart?: () => void) {
   try {
     const synth = window.speechSynthesis;
     if (!synth) { fire(); return; }
     synth.cancel();
     const u = tuneUtterance(new SpeechSynthesisUtterance(text));
+    if (onStart) u.onstart = () => onStart();
     u.onend = fire;
     u.onerror = fire;
     synth.speak(u);
@@ -359,8 +360,12 @@ async function clipTwice(t: string, alive: () => boolean = () => true): Promise<
 
 /** Speak `text` with the neural voice; fall back to the browser voice only if there's no
  *  provider or playback is blocked — and never while the page is dark (pageHidden). onEnd always
- *  fires exactly once. */
-export function speakSmart(text: string, onEnd?: (heard: boolean) => void) {
+ *  fires exactly once. `onStart` fires once, only when a sound has actually begun (a clip still
+ *  being fetched, or a fetch that never answers, has not started anything): a caller that treats
+ *  the line as audible, or listens over it, waits for this and never assumes it. */
+export function speakSmart(text: string, onEnd?: (heard: boolean) => void, onStart?: () => void) {
+  let began = false;
+  const begin = () => { if (began) return; began = true; onStart?.(); };
   let fired = false;
   // `heard`: false when nothing could be heard (the dark, no clip) — a caller that would listen for
   // an answer to a question must not listen for one nobody heard.
@@ -368,7 +373,7 @@ export function speakSmart(text: string, onEnd?: (heard: boolean) => void) {
   const t = speakable((text || "").trim());
   if (!t) { fire(); return; }
   const dark = () => nativePlaybackOn() && pageHidden();
-  if (neuralDisabled) { if (dark()) fire(false); else browserSpeak(t, fire); return; }
+  if (neuralDisabled) { if (dark()) fire(false); else browserSpeak(t, fire, begin); return; }
   const mine = sayEpoch;
   const alive = () => sayEpoch === mine;
   trace("say sent", `${t.length} chars`);
@@ -378,7 +383,7 @@ export function speakSmart(text: string, onEnd?: (heard: boolean) => void) {
     if ("why" in got) {
       trace("say failed", got.why);
       if (dark()) { fire(false); return; } // nothing can be heard in the dark: the caller is told so
-      browserSpeak(t, fire);
+      browserSpeak(t, fire, begin);
       return;
     }
     const blob = got.blob;
@@ -387,20 +392,30 @@ export function speakSmart(text: string, onEnd?: (heard: boolean) => void) {
       trace("say clip", `${blob.size}b native`);
       // The element's contract: onEnd at the end (or a failure, so a caller waiting to re-arm
       // the mic is never left hanging), never on a cut — a Stop re-arms by its own hand.
-      void playNative(blob).done.then((o) => {
+      const np = playNative(blob);
+      void np.started.then((sent) => { if (sent) begin(); }, () => {}); // a refusal is settled below, by `done`
+      void np.done.then((o) => {
         trace("say done", o);
-        if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire); }
-        else if (o !== "stopped") fire();
+        // A clip that broke after it started, with the SCREEN ON: nothing would ask again (the re-ask
+        // runs only when the screen comes back), so a hands-free person would wait on a card with no
+        // voice. The browser voice says the line, and the caller is told whether THAT was heard. In the
+        // dark the browser voice is silent, so the caller is told the line was not heard (below).
+        if (o === "failed" && !dark()) { browserSpeak(t, fire, begin); return; }
+        // Only a clip that played to its end was HEARD: one that broke after it started was not,
+        // and a caller that would listen for a yes must not open the mic for a question nobody
+        // finished hearing (the confirm gate).
+        if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin); }
+        else if (o !== "stopped") fire(o === "ended");
       });
       return;
     }
     const url = URL.createObjectURL(blob);
     const a = getAudio();
-    if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire); return; }
+    if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire, begin); return; }
     quietBrowserVoice();
     a.onended = () => { URL.revokeObjectURL(url); releaseElement(a); fire(); };
     a.src = url;
-    a.play().catch(() => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire); });
+    a.play().then(() => begin(), () => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire, begin); });
   });
 }
 

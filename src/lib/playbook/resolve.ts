@@ -1,5 +1,5 @@
 import type { Answers, AnswerValue, Clause, Fill, Need, Playbook } from "./types";
-import { scopeKey } from "./scope";
+import { sameScope } from "./scope";
 import { coerceTasks, mergeHeardTasks, screenHeardTask } from "./tasks";
 
 /**
@@ -23,7 +23,7 @@ export function isAnswered(v: AnswerValue | undefined): boolean {
   return true;
 }
 
-function clauseHolds(c: Clause, answers: Answers): boolean {
+function clauseHolds(c: Clause, answers: Answers, target?: Need): boolean {
   const v = answers[c.key];
   // ASK IT ONLY IF WE COULDN'T WORK IT OUT. The one clause that holds on ABSENCE, so a question
   // whose answer is derivable stays quiet while the inputs are there and reappears the moment
@@ -34,9 +34,15 @@ function clauseHolds(c: Clause, answers: Answers): boolean {
   // MULTI-SELECT MATTERS HERE. Erik's job was outlets AND lights — a router that only holds one
   // value is the shipped sheet's failure rebuilt one layer up. Any overlap counts.
   const held = Array.isArray(v) ? v.map(String) : [String(v)];
-  // Blind to case, spacing and punctuation, like the kit offer: a scope typed "deck" holds a rule
-  // written on the chip "Deck". A select's options are distinct words, so nothing is lost.
-  return held.some((x) => c.in.some((o) => o === x || scopeKey(o) === scopeKey(x)));
+  // A choice is a choice: the exact word always counts, and on a pick it is the only thing that does.
+  if (held.some((x) => c.in.includes(x))) return true;
+  // The scope alone answers in a free word, so only the scope is read blind to case, spacing,
+  // punctuation and a plural, like the kit offer: a scope typed "deck" holds a rule written on the
+  // chip "Deck". Two DIFFERENT chips never match one rule ("Outlet" is not "Outlets" when he
+  // listed both), and a string with no letters in it is not a word (sameScope).
+  if (target?.slot?.type !== "scope") return false;
+  const words = target.slot.options ?? [];
+  return held.some((x) => c.in.some((o) => sameScope(o, x) && !(words.includes(x) && words.includes(o))));
 }
 
 /**
@@ -47,7 +53,8 @@ function clauseHolds(c: Clause, answers: Answers): boolean {
  * for one of them, so it was either asked too early (meaningless) or not at all.
  */
 export function applicableNeeds(pb: Playbook, answers: Answers): Need[] {
-  return pb.needs.filter((n) => !n.when?.length || n.when.every((c) => clauseHolds(c, answers)));
+  const byKey = new Map(pb.needs.map((n) => [n.key, n]));
+  return pb.needs.filter((n) => !n.when?.length || n.when.every((c) => clauseHolds(c, answers, byKey.get(c.key))));
 }
 
 /**

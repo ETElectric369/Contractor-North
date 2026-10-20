@@ -24,7 +24,8 @@ describe("a punch taken back", () => {
     expect(UNDO_PUNCH_SENTENCE).toBe("That punch is gone — it was under two minutes old, so nothing was recorded and nothing is paid.");
     const door = read("src/app/(app)/timeclock/actions.ts");
     // By hand only, and only a punch nobody put work on (a Switch Job's second part, a note, miles, a lunch are a day).
-    expect(door).toContain('const untouched = !ent?.split_from && !(ent?.notes ?? "").trim() && !input.miles && !(input.notes ?? "").trim() && !input.lunch_minutes && !input.lunch_on_entry_id;');
+    // The clock's own sealed line (what a clock-in took off hold, carried-1123) is not a note a person wrote.
+    expect(door).toContain('const untouched = !ent?.split_from && !withoutHeldCrumb(ent?.notes) && !input.miles && !withoutHeldCrumb(input.notes) && !input.lunch_minutes && !input.lunch_on_entry_id;');
     expect(door).toContain('if (ent?.status === "open" && entClockIn && untouched && !input.auto && !input.at && !input.picked && !input.autoClosedReason) {');
     expect(door).toContain("if (Number.isFinite(ciMs) && age >= 0 && age < UNDO_PUNCH_MS) {");
     // ON THE SERVICE CLIENT (the only DELETE policy on time_entries is the office's): scoped by hand,

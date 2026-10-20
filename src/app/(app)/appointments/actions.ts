@@ -199,11 +199,44 @@ function placeParts(formData: FormData): { city?: string | null; state?: string 
 }
 
 /** The form's New Lead, after its visit is written: the appointment page's own door, with the phone
- *  typed beside the name. Returns the sentence to say when the lead could not be made. */
-async function attachNewLead(appointmentId: string, lead: { name: string; phone: string | null }): Promise<string | undefined> {
+ *  typed beside the name. Returns the sentence to say when the lead could not be made.
+ *
+ *  `hadCustomer` is an EDIT of a visit that already had a customer: the edit left that customer on the
+ *  row (a lead that cannot be made must leave the visit as it was), so it goes only once the lead
+ *  exists, and a failed lead says the visit keeps it. */
+async function attachNewLead(
+  appointmentId: string,
+  lead: { name: string; phone: string | null },
+  hadCustomer = false,
+): Promise<string | undefined> {
   const made = await linkAppointmentToNewLead(appointmentId, lead.name, lead.phone);
-  if (made.ok) return made.note || undefined; // the door's own word (named like an existing customer, say) is said too
-  return `Saved, but the lead wasn't made: ${made.error ?? "add them from the visit's For box."}`;
+  if (!made.ok) {
+    const why = made.error ?? "add them from the visit's For box.";
+    if (!hadCustomer) return `Saved, but the lead wasn't made: ${why}`;
+    return `Saved, but the lead wasn't made: ${why.replace(/[.!\s]+$/, "")}. The visit keeps its customer.`;
+  }
+  const kept = hadCustomer && made.id ? await dropReplacedCustomer(appointmentId, made.id) : undefined;
+  // the door's own word (named like an existing customer, say) is said too
+  return [made.note, kept].filter(Boolean).join(" ") || undefined;
+}
+
+/** The edit's New Lead replaced the visit's customer, and the lead now exists: take the old customer
+ *  off the visit — unless the lead came with a customer of its own (linkAppointmentTo already put that
+ *  one on). Returns the sentence to say when the old customer could not be taken off. */
+async function dropReplacedCustomer(appointmentId: string, leadId: string): Promise<string | undefined> {
+  const STAYS = "The lead was made, but the old customer is still on this visit — change it from the visit's For box.";
+  const ctx = await requireStaff();
+  if ("error" in ctx) return STAYS;
+  const { data: l } = await ctx.supabase.from("inquiries").select("customer_id").eq("id", leadId).maybeSingle();
+  if (!l) return STAYS; // can't tell whose it is, so nothing is taken off
+  if (l.customer_id) return undefined;
+  const { data, error } = await ctx.supabase
+    .from("appointments")
+    .update({ customer_id: null, updated_at: new Date().toISOString() })
+    .eq("id", appointmentId)
+    .select("id");
+  if (error || !data?.length) return STAYS;
+  return undefined;
 }
 
 /** "Start An Inspection" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
@@ -625,7 +658,7 @@ export async function linkAppointmentTo(
 
 /**
  * A NAME TYPED FROM MEMORY BECOMES THE LEAD THIS VISIT IS FOR (Erik, 2026-10-14 00:53, on the
- * Claudio inspection: "now ive typed in the owner's name multiple times from memory but it does
+ * Catbird inspection: "now ive typed in the owner's name multiple times from memory but it does
  * not save to who is it for"). The For box only searched what existed — a lead, a customer, a job
  * — so a new person's name matched nothing and was dropped with "carry on, you can connect this
  * later". Dead end. The record a new person gets BEFORE the win is a lead (the deferred-customer
@@ -1137,8 +1170,8 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   // THE ROW'S OWN KIND (W2-06): an edit may keep a kind nobody can pick any more (a Client Meeting
   // stays one), so the guard needs to know what is stored. RLS scopes the read; a missing row is
   // the zero-row write below, said in words.
-  const { data: cur } = await supabase.from("appointments").select("type, city, state, zip, inquiry_id").eq("id", id).maybeSingle();
-  const row = cur as { type?: string | null; city?: string | null; state?: string | null; zip?: string | null; inquiry_id?: string | null } | null;
+  const { data: cur } = await supabase.from("appointments").select("type, city, state, zip, inquiry_id, customer_id").eq("id", id).maybeSingle();
+  const row = cur as { type?: string | null; city?: string | null; state?: string | null; zip?: string | null; inquiry_id?: string | null; customer_id?: string | null } | null;
   const typed = resolveType(formData, "other", row?.type ?? null);
   if (typed.error) return { ok: false, error: typed.error };
   // ONE LEAD PER VISIT: New Lead on a visit that already has one would make a second lead and point
@@ -1158,7 +1191,9 @@ export async function updateAppointment(id: string, formData: FormData): Promise
       starts_at: startIso,
       ends_at: endIso,
       job_id: emptyToNull(formData.get("job_id")),
-      customer_id: customerId,
+      // New Lead: the visit's customer stays until the lead exists (attachNewLead takes it off after),
+      // so a lead that cannot be made leaves the visit as it was.
+      ...(cust.lead ? {} : { customer_id: customerId }),
       location: emptyToNull(formData.get("location")),
       ...parts,
       notes: emptyToNull(formData.get("notes")),
@@ -1171,7 +1206,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   if (!wroteAppt?.length) return { ok: false, error: "That appointment could not be found." };
 
   await pushCalendarItem("appointment", id); // live Google push (fire-safe)
-  const warning = cust.lead ? await attachNewLead(id, cust.lead) : undefined;
+  const warning = cust.lead ? await attachNewLead(id, cust.lead, !!row?.customer_id) : undefined;
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync

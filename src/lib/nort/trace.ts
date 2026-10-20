@@ -13,11 +13,19 @@ import { reportClientError } from "@/app/report-client-error";
  * it, which is how the 00:52 test went unread. So the lines of a turn are also kept, and the moment
  * the screen comes back after any of them ran hidden, the whole turn goes to the ops sink as ONE
  * row (client:nort-voice, title "trace turn N"): no audio, no words, only stage names and clocks.
+ *
+ * EVERY ROW HAS ITS OWN TITLE. The sink dedupes on the title and a repeat REPLACES the payload, and
+ * the turn counter restarts with every page load — and one turn can flush twice (the screen coming
+ * back, then the next turn) — so "trace turn 1" alone let a later row overwrite an unread earlier
+ * one before the daily read. The title also carries this page load's id and the flush's number.
  */
 const lines: string[] = [];
 let hiddenSeen = false;
 let turnNo = 0;
 let installed = false;
+// This page load's own mark: the ms it began plus two random characters (two loads in the same ms).
+const loadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+let flushNo = 0;
 
 function clock(d = new Date()): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}.${String(d.getMilliseconds()).padStart(3, "0")}`;
@@ -61,7 +69,7 @@ export function flushTrace(why: string) {
   hiddenSeen = false;
   if (!wasHidden || !isNativeShell()) return;
   try {
-    void reportClientError("nort-voice", `trace turn ${turnNo}`, { why, at: clock(), lines: mine.join("\n") }).catch(() => {});
+    void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\n") }).catch(() => {});
   } catch {
     /* reporting must never break the loop */
   }

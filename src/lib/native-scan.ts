@@ -90,7 +90,8 @@ export async function discardScan(path: string): Promise<void> {
 }
 
 /** Pull one file out of the shell in pieces and hand it back as a File. Each piece is asked twice
- *  before giving up; the shell's copy is left where it is (discardScan takes it later). */
+ *  before giving up. It never discards: the caller owns the shell's copy (scan3dNative drops it and
+ *  says the model is lost, since nothing holds its path to pull it again). */
 export async function pullFile(p: Plugin, path: string, total: number, name: string, type: string): Promise<File | null> {
   if (!p.readChunk || !Number.isFinite(total) || total <= 0 || total > MODEL_MAX_BYTES) return null;
   const parts: Uint8Array[] = [];
@@ -111,6 +112,73 @@ export async function pullFile(p: Plugin, path: string, total: number, name: str
   }
   if (got !== total) return null;
   return new File(parts as BlobPart[], name, { type });
+}
+
+/** A model that never made it over the bridge is gone: said as lost, with the one action left. */
+export const MODEL_LOST_WORDS = "The model didn't come over from the camera whole, so it's lost. Tap 3D Scan to scan again.";
+
+// ── A MODEL THAT DID NOT FINISH ITS TRIP ───────────────────────────────────────────────────────
+// A minutes-long walk must survive a bad-signal upload, so the page keeps the model for one more
+// tap. Two different faults leave it kept, and the tap does a different thing for each:
+//   "the file did not upload"  → the file is sent again (no camera);
+//   "the row did not save"     → the file is ALREADY in storage; only the visit's row is saved
+//                                again, never a second upload of the same model.
+// And a kept model belongs to the place it was scanned for (a task, or the visit): a tap on any
+// other place never sends the old room's model there; it says where the model is waiting.
+
+export type KeptModel = {
+  model: File;
+  /** The shell's copy; the shell has already let go of it once the file is in storage. */
+  path: string;
+  /** The task the model was scanned for; null is the visit itself. */
+  taskId: string | null;
+  /** Set when the file reached storage and only the visit's row is owed. */
+  landed: { path: string; url: string | null } | null;
+};
+
+export type KeptStep =
+  | { step: "scan" }
+  | { step: "upload" | "row" | "elsewhere"; kept: KeptModel };
+
+/** What a tap on 3D Scan at `taskId` does: scan (nothing kept), send the file again, save the row
+ *  alone, or (the model is kept for another place) neither. */
+export function keptStep(kept: KeptModel | null, taskId: string | null): KeptStep {
+  if (!kept) return { step: "scan" };
+  if (kept.taskId !== taskId) return { step: "elsewhere", kept };
+  return { step: kept.landed ? "row" : "upload", kept };
+}
+
+/** The one action after a failed trip, to follow the sentence that said what failed. */
+export function keptWords(landed: boolean): string {
+  return landed
+    ? "The model is up on the visit, so tap 3D Scan again to save it."
+    : "It's kept on this phone — tap 3D Scan again to send it without scanning.";
+}
+
+/** The label of the button that lets go of a kept model (the page draws it; the sentence below names it). */
+export const DISCARD_KEPT_LABEL = "Discard Kept 3D Model";
+
+/** A tap on 3D Scan somewhere the kept model is not for. `place` names where it waits ("the visit",
+ *  or a task in quotes); null is a task that has since been removed, where it can only be discarded. */
+export function keptElsewhereWords(place: string | null): string {
+  if (place === null) return `The kept 3D model was scanned for a task that has been removed. Tap ${DISCARD_KEPT_LABEL}.`;
+  return `The 3D model scanned for ${place} is still waiting to send. Tap 3D Scan there to send it.`;
+}
+
+/** The job's papers did not get their copy of a model that IS on the visit. What went wrong is said
+ *  in a few of the app's own words and storage's sentence never reaches him ("new row violates
+ *  row-level security policy"): a dropped connection is "no signal", a refusal of access is "this
+ *  login can't file there", and anything else is not guessed at. The one action is the office's,
+ *  since nothing on this page can send the copy again. `e` is whatever came back (an error from
+ *  storage, a thrown error, or the app's own refusal sentence). */
+export function jobFilingWords(e: unknown): string {
+  const msg = (typeof e === "string" ? e : typeof (e as { message?: unknown } | null)?.message === "string" ? (e as { message: string }).message : "").trim();
+  const why = /failed to fetch|fetch failed|load failed|networkerror|network request failed|connection dropped/i.test(msg)
+    ? "no signal"
+    : /row-level security|permission denied|unauthori[sz]ed|forbidden|not allowed|don't have access|not signed in/i.test(msg)
+      ? "this login can't file there"
+      : "";
+  return `The 3D model is on the visit, but it didn't file on the job${why ? `: ${why}` : ""}. Tell the office to file it.`;
 }
 
 /** Open the capture screen, wait for the model, and bring it over. The tap that calls this is the camera ask. */
@@ -136,7 +204,13 @@ export async function scan3dNative(now = Date.now()): Promise<ModelScanResult> {
     return { ok: false, refused: `The model is too big to send (${Math.round(total / 1_000_000)} MB). Scan a smaller area.` };
   }
   const model = await pullFile(p, path, total, `scan-3d-${now}.usdz`, USDZ_MIME);
-  if (!model) return { ok: false, refused: "The model didn't come over from the camera whole. Tap 3D Scan again to retry." };
+  if (!model) {
+    // Nothing keeps this path to pull from again, so the shell's copy (up to 200 MB) goes now
+    // rather than sit in the phone's temp folder, and the sentence says what is true: it is lost,
+    // and the one thing left is a new walk. It never promises a retry that is a whole new scan.
+    await discardScan(path);
+    return { ok: false, refused: MODEL_LOST_WORDS };
+  }
   return { ok: true, kind: "model", model, path, shots: typeof r.shots === "number" ? r.shots : 0 };
 }
 

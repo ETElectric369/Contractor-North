@@ -9,7 +9,7 @@ import { GOOGLE_KEY, googleUrlHeaders } from "@/lib/google-server";
  * Location (Erik, 2026-10-13, in front of a client with no address on the visit: "a use my
  * location button right there would have been gold"). And the app shell asks forward once per
  * company so every address box can be BIASED to the company's own ground (lib/place-bias) — the
- * Claudio visit took a Georgia street because the autocomplete ranked the whole country.
+ * Catbird visit took a Georgia street because the autocomplete ranked the whole country.
  *
  * The fuse is the same hard daily ceiling the routes carry (Erik, after attaching a card to Google
  * Cloud: "i cant figure out what its going to charge me"): DB-backed, shared across instances,

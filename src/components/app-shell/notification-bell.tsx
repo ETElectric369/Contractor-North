@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { ToastProvider, useToast } from "@/components/toast";
 import { getMyBell, markNotificationsRead, type Notif } from "@/app/(app)/notification-actions";
 import { BELL_MORE_LINE, bellBadge, bellWhen } from "@/lib/bell-words";
-import { setNortHolding } from "@/lib/nort-holding";
+import { getNortHolding, setNortHolding } from "@/lib/nort-holding";
 
 /**
  * The in-app notification bell — the ALWAYS-WORKS channel (independent of push permission,
@@ -43,17 +43,28 @@ function BellInner() {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const badge = bellBadge(unread);
+  // The newest poll that has left. A slow poll answered after a newer one is older news.
+  const latest = useRef(0);
 
   const load = useCallback(() => {
+    const mine = ++latest.current;
+    const held = getNortHolding(); // what the store said when this poll left
     getMyBell()
       .then((r) => {
+        if (mine !== latest.current) return; // a newer poll left after this one: its answer is the fresher
         setItems(r.items);
         setUnread(r.unread);
         setMore(r.more);
         setFailed(r.failed);
-        setNortHolding(r.holding); // the top bar's Nort ring and the greeting read this (0394)
+        // The chat sets the hold from a turn's own count the moment Nort hands something over. If the
+        // store moved while this poll was out, that count is fresher than this answer: a poll that
+        // saw three unheard updates must not put them back after they were heard. The next poll
+        // (the refresh the chat sends, or the minute) brings the database's own.
+        if (getNortHolding() === held) setNortHolding(r.holding); // the top bar's Nort ring and the greeting read this (0394)
       })
-      .catch(() => setFailed(true));
+      .catch(() => {
+        if (mine === latest.current) setFailed(true); // a stale poll that fails after a newer one answered is old news
+      });
   }, []);
 
   useEffect(() => {

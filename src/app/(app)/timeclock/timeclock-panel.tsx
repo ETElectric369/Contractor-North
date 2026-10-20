@@ -35,6 +35,7 @@ import { WhichJobSheet } from "../planner/which-job";
 import { askAfterPunch, type WhichJobAsk } from "./which-job-choices";
 import { noticeOnScreen, tellAppChose, type AppChoseNotice } from "./clock-told";
 import { AppChoseJobNotice } from "./app-chose-notice";
+import { withoutHeldCrumb } from "@/lib/held-crumb";
 
 interface JobOption {
   id: string;
@@ -172,10 +173,10 @@ export function TimeclockPanel({
   const [startAt, setStartAt] = useState(""); // "" = now; otherwise a chosen ISO
 
   // clock-out form
-  const [notes, setNotes] = useState(openEntry?.notes ?? "");
+  const [notes, setNotes] = useState(withoutHeldCrumb(openEntry?.notes));
   // Last notes value the server has — the debounced mid-shift autosave only fires
   // when the textarea actually moved past this.
-  const lastSavedNotes = useRef(openEntry?.notes ?? "");
+  const lastSavedNotes = useRef(withoutHeldCrumb(openEntry?.notes));
   const [miles, setMiles] = useState(0);
   // Unpaid lunch — off by default; nothing is deducted unless the tech says so.
   const [tookLunch, setTookLunch] = useState(false);
@@ -348,8 +349,8 @@ export function TimeclockPanel({
         }
         // The note typed so far stayed on the part that just closed; the new part starts clean
         // (or, on a re-point, carries the note with its breadcrumb).
-        lastSavedNotes.current = res.notes ?? "";
-        setNotes(res.notes ?? "");
+        lastSavedNotes.current = withoutHeldCrumb(res.notes);
+        setNotes(withoutHeldCrumb(res.notes));
         setTookLunch(false);
         setLunchOnPrevious(false);
         setSwitching(false);

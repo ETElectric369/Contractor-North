@@ -145,8 +145,11 @@ export async function playGreeting(text: string, rms: () => number | null): Prom
       void clip.playing.then(armBarge);
     } else {
       cutSound = stopSpeaking;
-      armBarge();
-      speakSmart(t, () => settle("heard"));
+      // speakSmart says whether anyone could hear it: nothing plays in the dark with no clip, and a
+      // greeting nobody heard is skipped, never marked asked (the question would not be asked again).
+      // It also says when a sound BEGAN, and only then is the greeting audible (a clip fetch that hangs
+      // past the cap has said nothing: the cap reads that as skipped, never as cut and asked).
+      speakSmart(t, (heard) => settle(heard ? "heard" : "skipped"), armBarge);
     }
   });
 }

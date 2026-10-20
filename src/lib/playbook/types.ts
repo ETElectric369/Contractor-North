@@ -103,7 +103,7 @@ export type NeedSlot =
   /**
    * THE SCOPE — what kind of job this is, in the company's own words, as the FIRST why line.
    *
-   * Erik (2026-10-13, after the Claudio visit): "every job has a scope and this can be the first
+   * Erik (2026-10-13, after the Catbird visit): "every job has a scope and this can be the first
    * why line … Deck/Remodel drops down the tasks preset with all the kits" — and the correction
    * that made it a setting: "the scope should be a setting in the playbook first and foremost,
    * i may choose to keep it set as type freely for a while until i setup the kits and that should

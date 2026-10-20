@@ -91,9 +91,32 @@ describe("the page follows a write", () => {
   });
 });
 
+describe("the law covers what Nort looked up and what he knows (the 10-19 phone tries' nits)", () => {
+  it("a lookup is a deed: no 'can't find it' without the search tool in THIS turn", () => {
+    expect(ASSISTANT_SYSTEM_PROMPT).toContain("THE SAME LAW COVERS WHAT YOU LOOKED UP AND WHAT YOU KNOW.");
+    expect(ASSISTANT_SYSTEM_PROMPT).toContain("A lookup is a deed: never say \"there's no job named that\" or \"I can't find it\" unless the search tool (list_jobs, the customer or item search) ran in THIS turn — run it, or say you did not look.");
+  });
+  it("where someone IS is a read in THIS turn, never a memory", () => {
+    expect(ASSISTANT_SYSTEM_PROMPT).toContain("the screen can close a punch between two of your turns, so read it again in THIS turn (who_is_clocked_in, time.listEntries, the schedule) before you say it.");
+  });
+  it("the resolver's zero-match sentence names ONE action; it no longer offers a tech a thing he cannot do", () => {
+    const r = src("src/lib/actions/resolve-id.ts");
+    expect(r).toContain('error: `No ${thing} named "${raw}" — is it spelled right?`');
+    expect(r).not.toContain("or should I create it?` ");
+  });
+  it("time.switchJob reads the running shift before it resolves the job", () => {
+    const t = src("src/lib/actions/entities/time.ts");
+    const body = t.slice(t.indexOf('"time.switchJob": {'), t.indexOf("WHICH SHIFT DID THEY MEAN?"));
+    const openRead = body.indexOf('if (!open) return { ok: false, error: "You\'re not clocked in." };');
+    const resolve = body.indexOf("const job = await resolveJobId(supabase, i.job_id ?? null);");
+    expect(openRead).toBeGreaterThan(0);
+    expect(resolve).toBeGreaterThan(openRead);
+  });
+});
+
 describe("the release carries the round", () => {
-  it("cn-v1122 is the running build and its note names the three", () => {
-    expect(APP_VERSION).toBe("cn-v1122");
+  it("the running build carries cn-v1122's note, which names the three", () => {
+    expect(Number(APP_VERSION.replace("cn-v", ""))).toBeGreaterThanOrEqual(1122);
     const note = RELEASE_NOTES.find((r) => r.version === "cn-v1122");
     expect(note?.date).toBe("2026-10-19");
     expect(note?.line).toContain("only when the app did it");

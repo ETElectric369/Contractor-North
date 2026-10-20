@@ -56,11 +56,12 @@ describe("the page's doors", () => {
     const g = read("src/components/geofence-monitor.tsx");
     expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);"); // readiness read back (audit v1120)
     expect(g).toContain("useEffect(() => () => { void disarmFence(); }, []);");
-    expect(g).toContain('openPrompt("wake");\n      const ms = Date.parse(e.exitedAt);');
+    expect(g).toContain('if (how === "open") openPrompt("wake", notify);\n      const ms = Date.parse(e.exitedAt);'); // carried 1123: the shell already rang, so the server does not
     expect(g).toContain('setPhase("picking");');
-    // Never over a snooze, never for another entry, never while a sheet is already up.
-    expect(g).toContain("if (phaseRef.current !== \"idle\" || Date.now() < snoozedUntil(entryId)) return;");
-    expect(g).toContain("e.entryId !== entryId) return;");
+    // Never over a snooze, never for another entry or trip. A sheet already up no longer discards the exit: exitHandoff
+    // fills or keeps it (carried 1123, #24 — tests/carried-1123-geofence.test.ts).
+    expect(g).toContain("snoozed: Date.now() < snoozedUntil(entryId),");
+    expect(g).toContain("ours: e.entryId === entryId && tripKey === tripKeyRef.current,");
   });
   it("parsePendingExit keeps only a real exit: an entry id and a parseable time; the label defaults", () => {
     expect(parsePendingExit({ entryId: "t1", exitedAt: "2026-10-14T23:10:00Z", label: "the Bayberry job" })).toEqual({ entryId: "t1", exitedAt: "2026-10-14T23:10:00Z", label: "the Bayberry job" });

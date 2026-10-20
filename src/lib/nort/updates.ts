@@ -26,9 +26,12 @@ const FROM = /^Daily report from (.+)$/i;
  * This was 8, a page: Erik's first night found 31 unheard (a backlog the old digest never
  * stamped), said "sure" twice, got eight each time, and the ring kept pulsing and the greeting
  * kept asking — "its still repeating and pulsing after the report". A hold is finite: one yes
- * empties it — the stamp is BY FILTER (every unheard resolved report of theirs), never by the
- * page of ids, so even past the cap nothing is left to ask about again. The prompt reads the
- * newest few as lines and sums the rest from `summary`, which is computed here, not by the model.
+ * empties it. A yes marks heard EXACTLY the reports it read out, by id — never "every unheard
+ * one" by filter, which also marked the ones past the cap and any resolved after the read
+ * as heard though no one had heard them. Past the cap the rest stay held and the next greeting
+ * names them (a report is heard, or it is still being asked about — never lost). The prompt
+ * reads the newest few as lines and sums the rest from `summary`, which is computed here, not
+ * by the model.
  */
 export const REPORTS_LIMIT = 100;
 const DEFAULT_TZ = "UTC";
@@ -95,6 +98,9 @@ export function outcomeWords(status: string): string {
 
 const sinceIso = () => new Date(Date.now() - DAILY_REPORT_AGE_MS).toISOString();
 
+// A read that fails HERE is a greeting that does not ask this time — nothing is stamped by looking,
+// so the next Talk asks again. The hand-over below (readMyUpdates) is the one that says its read
+// failures to the person: it is the one a yes is waiting on.
 export async function holdingFor(userId: string, service: Client, rls: Client, tz: string = DEFAULT_TZ): Promise<NortHolding> {
   const [reports, daily] = await Promise.all([
     service.from("bug_reports").select("id, created_at").eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).order("created_at", { ascending: false }).limit(REPORTS_LIMIT),
@@ -150,7 +156,8 @@ export type MyUpdates = {
   /** After a skip: the crew's daily reports are NOT skipped (they are the office's real news, not
    *  stale) — still held, by who filed them, so Nort can say so. */
   stillHolding?: { dailyReports: string[] };
-  /** A stamp that did not land: said, so the same lines are offered again next time. */
+  /** A read or a stamp that did not land: said in words, so the person is never told "nothing"
+   *  about a hold that could not be read, and the same lines are offered again next time. */
   unstamped?: string;
 };
 
@@ -183,7 +190,7 @@ export async function readMyUpdates(userId: string, service: Client, rls: Client
   if (opts?.skip === true) return skipMyUpdates(userId, service, rls);
   const tz = opts?.tz || DEFAULT_TZ;
   const nowMs = Date.now();
-  const [{ data: shipped }, { data: daily }] = await Promise.all([
+  const [{ data: shipped, error: shippedErr }, { data: daily, error: dailyErr }] = await Promise.all([
     service.from("bug_reports").select("id, note, status, created_at").eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).order("created_at", { ascending: false }).limit(REPORTS_LIMIT),
     rls.from("notifications").select("id, title, body, url").eq("user_id", userId).eq("type", "daily_report").is("read_at", null).gte("created_at", sinceIso()).order("created_at", { ascending: false }).limit(10),
   ]);
@@ -208,19 +215,32 @@ export async function readMyUpdates(userId: string, service: Client, rls: Client
     line: String(n.body ?? "").replace(/[<>]/g, "").slice(0, 140),
     url: n.url ?? null,
   }));
+  // A READ THAT FAILED IS NOT AN EMPTY HOLD. The person said yes to "want them now?"; answering
+  // "nothing to read" would be a lie, and the ring would pulse on. Say which could not be read —
+  // none of it was stamped, so it is still held and a second ask gets it.
+  const unread: string[] = [];
+  if (shippedErr) unread.push("the report updates");
+  if (dailyErr) unread.push("the daily reports");
   const misses: string[] = [];
   const now = new Date().toISOString();
   if (rows.length) {
-    // BY FILTER, not by the page of ids: one yes empties the hold even past REPORTS_LIMIT, so the
-    // greeting can never ask about the same backlog twice. At least the rows read must stamp.
+    // EXACTLY THE ROWS READ OUT, by id: a yes marks heard what the person heard. Not "every unheard
+    // one" by filter, which also marked the ones past REPORTS_LIMIT and any resolved after the
+    // read. The status and unheard guards stay, so a row reopened since is left alone. Every row
+    // read must stamp.
+    const ids = rows.map((r) => r.id);
     const { data, error } = await service.from("bug_reports").update({ filer_notified_at: now })
-      .eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).select("id");
-    if (error || (data ?? []).length < rows.length) misses.push("the report updates");
+      .in("id", ids).eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).select("id");
+    if (error || (data ?? []).length < ids.length) misses.push("the report updates");
   }
   if (daily?.length) {
     const ids = (daily as { id: string }[]).map((n) => n.id);
     const { data, error } = await rls.from("notifications").update({ read_at: now }).in("id", ids).eq("user_id", userId).select("id");
     if (error || (data ?? []).length !== ids.length) misses.push("the daily reports");
   }
-  return { reports, ...(rows.length ? { summary } : {}), dailyReports, ...(misses.length ? { unstamped: `Couldn't mark ${misses.join(" and ")} as heard — they will be offered again.` } : {}) };
+  const said = [
+    ...(unread.length ? [`Couldn't read ${unread.join(" and ")} just now — they are still held, so ask me again.`] : []),
+    ...(misses.length ? [`Couldn't mark ${misses.join(" and ")} as heard — they will be offered again.`] : []),
+  ];
+  return { reports, ...(rows.length ? { summary } : {}), dailyReports, ...(said.length ? { unstamped: said.join(" ") } : {}) };
 }

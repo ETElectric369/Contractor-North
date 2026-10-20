@@ -128,7 +128,7 @@ describe("the page's door (native-audio.ts)", () => {
     const tr = read("src/lib/nort/trace.ts");
     expect(tr).toContain('if (visible) flushTrace("screen back");');
     expect(tr).toContain("if (!wasHidden || !isNativeShell()) return;");
-    expect(tr).toContain('void reportClientError("nort-voice", `trace turn ${turnNo}`, { why, at: clock(), lines: mine.join("\\n") })');
+    expect(tr).toContain('void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\\n") })'); // every row its own title (carried-1123-voice.test.ts)
     expect(read("src/lib/voice-stream.ts")).toContain('if (nativeOn) flushTrace("stop");');
     // The unlock-stop hunt: the panel's unmount, the assistant's mount/unmount and the screen's state are in the trace.
     expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain('trace("panel unmounted"');
@@ -155,7 +155,7 @@ describe("the reply's voice (tts.ts ↔ native-audio.ts)", () => {
     expect(door).toContain('armDeadman((seconds > 0 ? seconds * 1000 : PLAY_UNKNOWN_MS) + PLAY_SLACK_MS);');
     expect(door).toContain('started.catch(() => finish("refused"));'); // refused (fall back) is not failed (never twice)
     expect(tts).toContain('if (o === "refused") { resolvePlaying(); browserSpeak(speakable(fallbackText), () => fire("ended")); return; }');
-    expect(tts).toContain("else if (o !== \"stopped\") fire();"); // speakSmart: never onEnd on a cut (the element's contract)
+    expect(tts).toContain("else if (o !== \"stopped\") fire(o === \"ended\");"); // speakSmart: never onEnd on a cut (the element's contract); a clip that broke is not heard
     expect(swift).toContain('stopPlayer("stopped") // the player is invalid after a reset');
     expect(door).not.toMatch(/console\.log\([^\n]*(d\?\.audio|b64|base64)/); // the bytes are never echoed
     // The three players and the one stop all branch on the same switch.

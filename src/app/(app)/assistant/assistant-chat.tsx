@@ -19,10 +19,11 @@ import * as speech from "@/lib/voice";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, HOLDING_OPEN, HOLDING_CLOSE,
   WROTE_OPEN, WROTE_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, screenBlocks, directivePayload,
-  type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard, type AgentWrote,
+  type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard, type AgentWrote, type AgentScreen,
 } from "@/lib/assistant-protocol";
 import { performScreen } from "@/lib/nort/screen-driver";
 import { listNortDoors } from "@/lib/nort/doors";
+import { SCREENS } from "@/lib/nort/screens";
 import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, recoverTurn, type PickerContact } from "./actions";
 import { ContactPicker } from "./contact-picker";
 import { DriverCard } from "@/components/driver-card";
@@ -170,7 +171,9 @@ interface Msg {
 // is the only thing that makes a reload check, so clearing it there made that door a dead one.
 const PENDING_KEY = "cn:nort:pending";
 const PENDING_MAX_AGE_MS = 15 * 60_000;
-type PendingTurn = { content: string; at: string; voice: boolean };
+/** `screen`: the turn could have carried screen steps (see screenStepsPossible). A marker written before
+ *  this field existed has none, and counts as yes: the sentence is the safe side. */
+type PendingTurn = { content: string; at: string; voice: boolean; screen?: boolean };
 function readPendingTurn(): PendingTurn | null {
   try {
     const raw = localStorage.getItem(PENDING_KEY);
@@ -180,7 +183,7 @@ function readPendingTurn(): PendingTurn | null {
       localStorage.removeItem(PENDING_KEY);
       return null;
     }
-    return { content: p.content, at: p.at, voice: !!p.voice };
+    return { content: p.content, at: p.at, voice: !!p.voice, screen: p.screen !== false };
   } catch {
     return null;
   }
@@ -279,6 +282,47 @@ const RELOAD_UNANSWERED_SENTENCE = "Your last question didn't get an answer befo
  *  proposal is NOT re-offered — the turn is shown and the user is told to ask again. */
 const RECOVERED_CONFIRM_MAX_AGE_MS = 10 * 60_000;
 const EXPIRED_CONFIRM_SENTENCE = "That one needed a yes or no while the connection was down, and it's too old to answer now. Ask again if you still want it.";
+/** A RECOVERED REPLY IS THE WORDS ONLY. The typing and pointing Nort did rode the stream as screen
+ *  blocks (show_screen / fill_screen) and the route persists none of them, so after a drop the saved
+ *  sentence ("Put that in the visit notes") can describe a box that was never typed into. Whether
+ *  a block was lost is not knowable from here, so it is said as what it is — it may not have run —
+ *  with the one thing to do about it. Written for the eyes and the ears alike (it is read out too). */
+const SCREEN_STEPS_LOST_SENTENCE = "The connection dropped mid-answer, so anything typed or pointed at on your screen may not have happened — if a box is empty, say it again.";
+
+/** COULD THIS TURN HAVE CARRIED SCREEN STEPS? Only then is the sentence above true to say: a plain
+ *  question on a page Nort has no screen entry for (his own chat) typed nothing and pointed at
+ *  nothing, and a line about a screen that was never touched, read aloud, is noise. It could when the
+ *  page listed boxes Nort may type into (the `doors` the request carried), or when the page is one of
+ *  the registry's screens (lib/nort/screens), where he can ring a spot. */
+const SCREEN_ROOTS = new Set(SCREENS.map((s) => s.path.split("/")[1]));
+export function screenStepsPossible(pathname: string, doorCount: number): boolean {
+  return doorCount > 0 || SCREEN_ROOTS.has(pathname.split("/")[1] ?? "");
+}
+
+/** WHICH FILL MAY NOT RUN. A fill lands on the screen its boxes were listed from (skeptic #16, M1).
+ *  Two ways that screen is gone: it already moved (the person's own tap, or a show_screen that
+ *  committed), or THIS turn's earlier block just moved it — router.push has not committed when the
+ *  next block in the same pass is read, so the pathname still says the old page and the old page's
+ *  boxes are still mounted. Returns the line the next turn carries to the server (what did NOT
+ *  happen), or null when the fill may run. A block that carries its own path moves first and waits
+ *  for the page, so it is never refused here. */
+export function refuseStaleFill(step: AgentScreen, pathNow: string, pathAtSend: string, movedThisTurn: boolean): string | null {
+  const typing = step.fill ?? step.add;
+  if (!typing || step.path) return null;
+  if (pathNow !== pathAtSend) return `${typing.door}: NOT filled — the screen moved from ${pathAtSend} to ${pathNow} since its boxes were listed; use the next turn's list`;
+  if (movedThisTurn) return `${typing.door}: NOT filled — this same turn moved the screen on from ${pathAtSend}, where its boxes were listed; use the next turn's list`;
+  return null;
+}
+
+/** A box Nort named that is not on the screen: said under the chat in plain words. The door's NAME
+ *  is never shown — it carries record ids (task-hours-<uuid>, need-q_xxx) — and one action is named. */
+export const MISSING_BOX_NOTE = "That box isn't on this screen — say that again.";
+
+/** A spot Nort pointed at that never showed. The anchor name is for the page, not the person: with
+ *  no label from the model it is "that spot", never the raw name. */
+export function spotMissNote(label?: string | null): string {
+  return `Couldn't find ${label?.trim() || "that spot"} on this screen.`;
+}
 
 /** A recovered turn arrives as the persisted reply, which may END with the confirm envelope the
  *  dropped stream never delivered. Split it: the text the user reads, and the proposal to put back
@@ -308,11 +352,14 @@ function splitRecovered(reply: string): { text: string; confirm: AgentConfirm | 
 /** The assistant line(s) a recovered turn becomes. A turn that only PROPOSED has no sentence of
  *  its own, so the read-back is the line — exactly what the live path shows when the reply is the
  *  proposal. An expired proposal says so on its own line: nothing silent. */
-function recoveredLines(r: { text: string; confirm: AgentConfirm | null; stale: boolean }): Msg[] {
+export function recoveredLines(r: { text: string; confirm: AgentConfirm | null; stale: boolean }, screen = true): Msg[] {
   const body = r.text.trim();
   const head = body || r.confirm?.prompt || EXPIRED_CONFIRM_SENTENCE;
   const lines: Msg[] = [{ role: "assistant", content: head }];
   if (r.stale && head !== EXPIRED_CONFIRM_SENTENCE) lines.push({ role: "assistant", content: EXPIRED_CONFIRM_SENTENCE });
+  // A recovered reply is a stream that did not finish: the screen steps in it, if it could have carried
+  // any (`screen`: screenStepsPossible, asked when the turn left), are not known to have run.
+  if (screen) lines.push({ role: "assistant", content: SCREEN_STEPS_LOST_SENTENCE });
   return lines;
 }
 
@@ -771,7 +818,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       // back, still gated — nothing runs until the user says yes, and the yes still goes through
       // the server-side gate.
       const rec = splitRecovered(reply);
-      const lines = recoveredLines(rec);
+      const lines = recoveredLines(rec, p.screen !== false);
       setMessages((cur) => {
         // While the marker stood, whatever the stored transcript holds after this question is at
         // best a half-streamed reply or a residual "didn't get an answer" line — never the answer
@@ -955,7 +1002,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         .catch(() => {});
     };
     document.addEventListener("visibilitychange", onVisible);
-    writePendingTurn({ content, at: sentAt, voice: viaVoice });
+    // Asked as the turn leaves: a drop later recovers the words only, and the sentence about lost screen
+    // steps is said only for a turn that could have had any (the marker carries it across a reload).
+    const screenTurn = screenStepsPossible(window.location.pathname, listNortDoors().length);
+    writePendingTurn({ content, at: sentAt, voice: viaVoice, screen: screenTurn });
     trace("chat sent", viaVoice ? "voice" : "typed");
     const seenNow = seenRef.current.slice();
     turnPathRef.current = window.location.pathname;
@@ -1028,6 +1078,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
 
       full = "";
       screenDoneRef.current = 0;
+      // Did an earlier block of THIS turn move the screen? Its push has not committed when the next
+      // block is read (the location still says the old page), so the guard below needs to be told.
+      let movedThisTurn = false;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1041,24 +1094,25 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         while (screenDoneRef.current < moves.length) {
           const step = moves[screenDoneRef.current++];
           // A FILL LANDS ON THE SCREEN ITS BOXES WERE LISTED FROM. If the screen moved since the turn
-          // was sent (a show_screen in this same turn, or the person's own tap), the door names Nort
-          // holds belong to the page that is leaving — refused and said, never typed into the wrong
-          // visit; the next turn lists the new screen's boxes (skeptic #16, M1).
-          const typing = step.fill ?? step.add;
-          if (typing && !step.path && window.location.pathname !== turnPathRef.current) {
-            seenRef.current.push(`${typing.door}: NOT filled — the screen moved from ${turnPathRef.current} to ${window.location.pathname} since its boxes were listed; use the next turn's list`);
+          // was sent (the person's own tap, a show_screen that committed, or one earlier in THIS
+          // turn whose push has not committed yet), the door names Nort holds belong to the page that
+          // is leaving — refused and said, never typed into the wrong visit; the next turn lists the
+          // new screen's boxes (skeptic #16, M1).
+          const stale = refuseStaleFill(step, window.location.pathname, turnPathRef.current, movedThisTurn);
+          if (stale) {
+            seenRef.current.push(stale);
             noteUnder("The screen changed — say that again.");
             if (viaVoice) say("The screen changed. Say that again.");
             continue;
           }
           try {
-            performScreen(
+            const did = performScreen(
               step,
               { here: () => window.location.pathname + window.location.search, push: (p) => router.push(p) },
               window,
               {
                 onMiss: (s) => {
-                  setMissNote(`Couldn't find ${s.label ?? s.anchor ?? "that"} on this screen.`);
+                  setMissNote(spotMissNote(s.label));
                   if (missTimerRef.current) clearTimeout(missTimerRef.current);
                   missTimerRef.current = setTimeout(() => setMissNote(null), 8000);
                   openBox();
@@ -1070,13 +1124,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   if (o.result.ok) seenRef.current.push(`${o.door}: landed — ${o.result.landed}`);
                   else {
                     seenRef.current.push(`${o.door}: NOT filled — ${o.result.why}`);
-                    const words = "missing" in o.result ? `No box called ${o.door} on this screen.` : `Couldn't put that in: ${o.result.why}`;
+                    const words = "missing" in o.result ? MISSING_BOX_NOTE : `Couldn't put that in: ${o.result.why}`;
                     noteUnder(words);
                     if (viaVoice) say("missing" in o.result ? "That box isn't on this screen." : `That didn't go in. ${o.result.why}`);
                   }
                 },
               },
             );
+            if (did.moved) movedThisTurn = true;
           } catch {
             /* a point not made is not a broken turn */
           }
@@ -1213,7 +1268,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
             // reply and the Yes/No card goes back on screen instead of a money read-back nobody
             // can answer. Re-armed, never re-run: the yes still runs the server-side gate.
             const rec = splitRecovered(reply);
-            const lines = recoveredLines(rec);
+            const lines = recoveredLines(rec, screenTurn);
             const head = lines[0].content;
             setAssistantTail(head);
             if (lines.length > 1) setMessages((m) => [...m, ...lines.slice(1)]);
@@ -1227,7 +1282,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               if (rec.confirm) say(rec.confirm.prompt, confirmAfterSaid);
               else {
                 const unspoken = stripTrailingTag(partial && head.startsWith(partial) ? head.slice(spokenLen) : head).trim();
-                if (unspoken) say(unspoken, () => { if (voiceModeRef.current) startMic(); });
+                // The rest of the recovered lines are read out too (the screen steps that may not have
+                // run), so a reply that sounds like a deed is never the last thing heard after a drop.
+                const tail = lines.slice(1).map((l) => l.content).join(" ");
+                const toSay = [unspoken, tail].filter(Boolean).join(" ");
+                if (toSay) say(toSay, () => { if (voiceModeRef.current) startMic(); });
                 else if (voiceModeRef.current) startMic();
               }
             }

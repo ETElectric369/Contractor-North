@@ -17,13 +17,42 @@ export function scopeNeed(pb: Playbook | null | undefined): Need | null {
   return pb?.needs.find((n) => n.slot?.type === "scope") ?? null;
 }
 
-/** The scope as answered: a trimmed string, or null. */
+/**
+ * The longest a scope can be and still be a WORD: the same 60 a kit's category is cut at
+ * (MAX_KIT_CATEGORY in lib/estimate/kit-from-task — a test holds the two together).
+ */
+export const MAX_SCOPE_WORD = 60;
+
+/**
+ * The scope as answered: a trimmed string, or null. A scope typed freely may be a whole paragraph
+ * (answers.ts keeps it whole), but a paragraph is not a word: it offers no kit, and it is never
+ * the category a kit files under — Remember As A Kit would store its first 60 characters, cut
+ * mid-word, as the kit's scope. Null here leaves that box empty and ASKS for the word.
+ */
 export function scopeWord(pb: Playbook | null | undefined, answers: Answers | null | undefined): string | null {
   const n = scopeNeed(pb);
   if (!n) return null;
   const v = answers?.[n.key];
   const s = String((Array.isArray(v) ? v[0] : v) ?? "").trim();
-  return s || null;
+  return s && s.length <= MAX_SCOPE_WORD ? s : null;
+}
+
+/**
+ * The scope words that were RENAMED between two edits of the words box, paired by POSITION: the
+ * line that stood at place i and the line that stands there now. Only an unambiguous edit counts —
+ * the same number of words before as after, and a pair is a rename only when the old word is gone
+ * from the list and the new one is new to it (so a reorder or a swap renames nothing, a word that
+ * is added or deleted outright is left for the author to resolve, the same call the select editor
+ * makes, and a reorder with two renames in one visit never crosses them: a line that moved is not
+ * a rename). The editor feeds each pair to renameOptionInRules, so a question that waits on "Deck"
+ * follows it to "Decking" instead of going quiet on every visit.
+ */
+export function scopeWordRenames(before: readonly string[], after: readonly string[]): { from: string; to: string }[] {
+  const words = (list: readonly string[]) => list.map((w) => w.trim()).filter(Boolean);
+  const b = words(before);
+  const a = words(after);
+  if (b.length !== a.length) return [];
+  return b.flatMap((from, i) => (!a.includes(from) && !b.includes(a[i]) ? [{ from, to: a[i] }] : []));
 }
 
 /** "Deck", " deck ", "DECK", "deck." → "deck": the comparison key for a scope word or a kit category. */

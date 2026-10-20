@@ -1,5 +1,5 @@
 /**
- * A NAME TYPED FROM MEMORY STICKS (bug b5d65868, Erik 2026-10-14 00:53, the Claudio inspection):
+ * A NAME TYPED FROM MEMORY STICKS (bug b5d65868, Erik 2026-10-14 00:53, the Catbird inspection):
  * "now ive typed in the owner's name multiple times from memory but it does not save to who is it
  * for". The visit's For box only searched existing leads, customers and jobs, so a new person's
  * name matched nothing and was dropped with "carry on, you can connect this later" — a dead end
@@ -47,10 +47,10 @@ describe("the For box: a typed name becomes the lead this visit is for", () => {
   });
 
   it("makes the lead with the visit's own place and links the visit to it; the person's title is untouched", async () => {
-    const r = await linkAppointmentToNewLead("a1", "  Claudio   Bayberry ");
+    const r = await linkAppointmentToNewLead("a1", "  Catbird   Bayberry ");
     expect(r.ok).toBe(true);
     const lead = s.db!.inserted.inquiries?.[0];
-    expect(lead).toMatchObject({ name: "Claudio Bayberry", address: "12 Bayberry Rd", city: "Carnelian Bay", state: "CA", zip: "96140", status: "new", source: "manual", created_by: "u1" });
+    expect(lead).toMatchObject({ name: "Catbird Bayberry", address: "12 Bayberry Rd", city: "Carnelian Bay", state: "CA", zip: "96140", status: "new", source: "manual", created_by: "u1" });
     const a = s.db!.tables.appointments[0];
     expect(a.inquiry_id).toBe(lead!.id);
     expect(a.title).toBe("Bayberry - Tahoe City"); // named by a person: never replaced
@@ -61,9 +61,9 @@ describe("the For box: a typed name becomes the lead this visit is for", () => {
     s.db = fakeDb({
       appointments: [visit()],
       inquiries: [],
-      customers: [{ id: "c9", name: "Claudio Bayberry", phone: "5305550133", email: null, address: null, city: null, state: null, zip: null, company_name: null }],
+      customers: [{ id: "c9", name: "Catbird Bayberry", phone: "5305550133", email: null, address: null, city: null, state: null, zip: null, company_name: null }],
     });
-    const r = await linkAppointmentToNewLead("a1", "Claudio Bayberry");
+    const r = await linkAppointmentToNewLead("a1", "Catbird Bayberry");
     expect(r.ok).toBe(true);
     // The phone is carried as the customer row holds it (carryFromCustomer copies, it never reformats).
     expect(s.db!.inserted.inquiries?.[0]).toMatchObject({ customer_id: "c9", phone: "5305550133" });
@@ -73,7 +73,7 @@ describe("the For box: a typed name becomes the lead this visit is for", () => {
   it("refuses an empty or one-letter name, and a visit that is not there, in words", async () => {
     expect(await linkAppointmentToNewLead("a1", " ")).toEqual({ ok: false, error: "Type the person's name first." });
     expect(await linkAppointmentToNewLead("a1", "C")).toEqual({ ok: false, error: "Type the person's name first." });
-    expect(await linkAppointmentToNewLead("nope", "Claudio")).toEqual({ ok: false, error: "Appointment not found." });
+    expect(await linkAppointmentToNewLead("nope", "Catbird")).toEqual({ ok: false, error: "Appointment not found." });
     expect(s.db!.inserted.inquiries ?? []).toEqual([]);
   });
 });

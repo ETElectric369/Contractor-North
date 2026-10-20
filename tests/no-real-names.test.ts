@@ -111,6 +111,11 @@ const SCRUBBED = new Map<string, string>([
   // that relationship IS what the reconcile tests check.
   ["457ac003745bdd95", "Honey (the truncation of Honeysuckle)"],
   ["bdccb445f746cbe6", "Haneysuckle (the one-letter typo)"],
+  // Found 2026-10-20 in comments and fixtures from the 10-13 and 10-14 field rounds: a visit's
+  // first name, and the street (with its house number) a record on production carried.
+  ["9b3260b3522ecc01", "Catbird"],
+  ["8fcfe1574b3b354a", "Egret"],
+  ["7974d9c6d87e516c", "4127 Egret"],
 ]);
 
 /**
@@ -186,6 +191,7 @@ const PAIR_STARTS = new Set<string>([
   "435bb1648b1161d2",
   "84d54e1543675fce",
   "3e39781674cdd0ab",
+  "2f6f2723f9e8ced3",
 ]);
 
 /**
@@ -502,5 +508,67 @@ describe("no shipped file names a real customer, street, phone or account", () =
           `one the scrub left behind; write ${[...(fixtureNumbers.get(h.street) ?? [])].sort().join(" or ") || "the fixtures' number"} instead`,
       );
     expect(stranded, `${stranded.length} real house number(s) are still here:\n${stranded.join("\n")}`).toEqual([]);
+  });
+});
+
+/**
+ * THE 2026-10-20 SCRUB (audit of cn-v1089 to cn-v1120, findings 11, 22, 33 and 38).
+ *
+ * A visit's first name and the street a production record carried were written into comments and
+ * fixtures in the field rounds of 10-13 and 10-14. Each is stamped now, so the repo-wide scan above
+ * refuses them wherever they come back; the blocks below pin the specific files the audit named, so
+ * a regression says which finding it reopens. The real words are never spelled here — only their
+ * stamps, and the invented words that stand in for them.
+ */
+const STANDS_IN = [
+  ["9b3260b3522ecc01", "Catbird"],
+  ["8fcfe1574b3b354a", "Egret"],
+  ["7974d9c6d87e516c", "4127 Egret"],
+] as const;
+
+/** What the scrubbed words still find in a file, read whole so a name wrapped over a line is seen. */
+const namesLeftIn = (rel: string): string[] => scrubbedNamesIn(readFileSync(path.join(ROOT, rel), "utf8"));
+
+const itIsStamped = () =>
+  it("is stamped: the first name, the street and the number + street phrase map to their stand-ins", () => {
+    for (const [key, standIn] of STANDS_IN) expect(SCRUBBED.get(key), `${key} is not stamped`).toBe(standIn);
+    // The phrase is a pair, and a pair is only read after its first word is a pair start.
+    expect(PAIR_STARTS.has("2f6f2723f9e8ced3"), "the house number does not start a pair").toBe(true);
+  });
+
+describe("Real client names and a real street with house number are in comments added in this range", () => {
+  itIsStamped();
+  it("site-address.ts names neither the visit's first name nor the street, and its test uses the stand-in number", () => {
+    expect(namesLeftIn("src/lib/site-address.ts")).toEqual([]);
+    expect(namesLeftIn("tests/field-1013-address.test.ts")).toEqual([]);
+    expect(readFileSync(path.join(ROOT, "src/lib/site-address.ts"), "utf8")).toContain('standing under "4127 Egret" in Tahoe');
+  });
+});
+
+describe("A real customer's street is in a comment and fixtures", () => {
+  itIsStamped();
+  it("the places route and the address test beside it carry only the invented street", () => {
+    expect(namesLeftIn("src/app/api/places/route.ts")).toEqual([]);
+    expect(namesLeftIn("tests/field-1013-address.test.ts")).toEqual([]);
+    expect(readFileSync(path.join(ROOT, "src/app/api/places/route.ts"), "utf8")).toContain('"4127 Egret" came back as a Georgia street');
+    // The fixture the street sat in still tests what it tested: the typed line is the invented street.
+    expect(readFileSync(path.join(ROOT, "tests/field-1013-address.test.ts"), "utf8")).toContain('typedLineKeepsParts("4127 Egret"');
+  });
+});
+
+describe("Real customer name in new comments (the visit's first name)", () => {
+  itIsStamped();
+  it("the lead picker and the For-name test say the stand-in, not the customer", () => {
+    expect(namesLeftIn("src/app/(app)/appointments/[id]/link-picker.tsx")).toEqual([]);
+    expect(namesLeftIn("tests/field-1014-for-name.test.ts")).toEqual([]);
+    expect(readFileSync(path.join(ROOT, "src/app/(app)/appointments/[id]/link-picker.tsx"), "utf8")).toContain("the Catbird visit");
+  });
+});
+
+describe("A customer's first name sits in a type comment", () => {
+  itIsStamped();
+  it("the playbook's scope-slot comment says the stand-in", () => {
+    expect(namesLeftIn("src/lib/playbook/types.ts")).toEqual([]);
+    expect(readFileSync(path.join(ROOT, "src/lib/playbook/types.ts"), "utf8")).toContain("after the Catbird visit");
   });
 });

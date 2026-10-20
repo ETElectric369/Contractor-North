@@ -138,6 +138,12 @@ final class MeasureViewController: UIViewController, ARSCNViewDelegate, ARSessio
     private let done: (MeasureOutcome) -> Void
     /// Set once the outcome is on its way (or the view never came up); every door checks it.
     var finished = false
+    /// The screen is up (viewDidAppear). An outcome before that waits in `pendingOutcome`: UIKit drops
+    /// a dismiss asked of a screen still animating in, the completion never runs, and the page's
+    /// promise would hang on a frozen camera with dead buttons (the same hole ScanViewController
+    /// closed, skeptic #19).
+    private var appeared = false
+    private var pendingOutcome: MeasureOutcome?
     /// Points are taken only while tracking is NORMAL: a point dropped while the camera is still
     /// finding its place (or after an interruption moved the world origin) is in another frame, and a
     /// length across two frames is a wrong number with a confident face (skeptic #16, M11).
@@ -290,6 +296,15 @@ final class MeasureViewController: UIViewController, ARSCNViewDelegate, ARSessio
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        appeared = true
+        if let pendingOutcome {
+            self.pendingOutcome = nil
+            finish(pendingOutcome)
+        }
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         sceneView.session.pause()
@@ -359,9 +374,26 @@ final class MeasureViewController: UIViewController, ARSCNViewDelegate, ARSessio
 
     private func finish(_ outcome: MeasureOutcome) {
         guard !finished else { return }
+        guard appeared else {
+            // Decided while the screen is still coming up (ARKit can fail inside the animation):
+            // stop the camera and the buttons now, answer from viewDidAppear.
+            if pendingOutcome == nil {
+                pendingOutcome = outcome
+                sceneView.session.pause()
+                view.isUserInteractionEnabled = false
+            }
+            return
+        }
         finished = true
         sceneView.session.pause()
-        dismiss(animated: true) { [done] in done(outcome) }
+        // The presenter takes the whole stack down. With no presenter the screen is already off
+        // (taken down from outside), there is nothing to dismiss and UIKit would never call back:
+        // answer now.
+        guard let presenter = presentingViewController else {
+            done(outcome)
+            return
+        }
+        presenter.dismiss(animated: true) { [done] in done(outcome) }
     }
 
     // MARK: - The figure

@@ -4,7 +4,28 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Link2, Loader2, Search, UserPlus, X } from "lucide-react";
 import { Input, Label } from "@/components/ui/input";
+import { useToast } from "@/components/toast";
 import { linkAppointmentTo, linkAppointmentToNewLead, searchLinkTargets, type LinkTarget } from "../actions";
+
+/** What a tap that never reached the server says (the same words the visit's other buttons use). */
+export const LINK_NO_SIGNAL_LINE = "No connection, so that didn't go through. Try again when you have a bar or two.";
+
+/** What a link write came to: its answer, or the ONE line to show. A refusal speaks in the action's own
+ *  words (or the caller's fallback); a throw is a tap that never landed. Never rethrows — a rejected
+ *  server action used to escape the transition with nothing said and the picker still open. */
+export async function settleLink<T extends { ok: boolean; error?: string }>(
+  what: Promise<T>,
+  fallback: string,
+): Promise<{ res: T } | { error: string }> {
+  let res: T;
+  try {
+    res = await what;
+  } catch {
+    return { error: LINK_NO_SIGNAL_LINE };
+  }
+  if (!res?.ok) return { error: res?.error ?? fallback };
+  return { res };
+}
 
 /**
  * WHAT IS THIS VISIT FOR — one control over three tables.
@@ -49,6 +70,7 @@ export function LinkPicker({
   label?: string | null;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<LinkTarget[]>([]);
@@ -57,7 +79,7 @@ export function LinkPicker({
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqId = useRef(0);
-  // A NAME THAT MATCHES NOTHING IS OFFERED AS A NEW LEAD (Erik 2026-10-14, the Claudio visit: the
+  // A NAME THAT MATCHES NOTHING IS OFFERED AS A NEW LEAD (Erik 2026-10-14, the Catbird visit: the
   // owner's name typed from memory "does not save to who is it for"). Only what the person TYPED
   // (never the address seed), only where a lead may be picked, and never while a search is running.
   const typed = q.replace(/\s+/g, " ").trim();
@@ -162,11 +184,16 @@ export function LinkPicker({
                 onClick={() =>
                   start(async () => {
                     setError(null);
-                    const res = await linkAppointmentToNewLead(appointmentId, typed);
-                    if (res.ok) {
-                      setOpen(false);
-                      router.refresh();
-                    } else setError(res.error ?? "Couldn't make the lead.");
+                    const done = await settleLink(linkAppointmentToNewLead(appointmentId, typed), "Couldn't make the lead.");
+                    if ("error" in done) {
+                      setError(done.error);
+                      return;
+                    }
+                    // The lead door's own word (several customers share the name, so it is linked to
+                    // none) must be READ: the picker closes on ok, as the form does.
+                    if (done.res.note) toast(done.res.note, "info", undefined, { sticky: true });
+                    setOpen(false);
+                    router.refresh();
                   })
                 }
                 className="flex min-h-[44px] w-full items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-left active:bg-emerald-100"
@@ -190,11 +217,15 @@ export function LinkPicker({
                 disabled={pending}
                 onClick={() =>
                   start(async () => {
-                    const res = await linkAppointmentTo(appointmentId, r.kind, r.id);
-                    if (res.ok) {
-                      setOpen(false);
-                      router.refresh();
+                    setError(null);
+                    const done = await settleLink(linkAppointmentTo(appointmentId, r.kind, r.id), "Couldn't connect it — try again.");
+                    if ("error" in done) {
+                      setError(done.error);
+                      return;
                     }
+                    if (done.res.warning) toast(done.res.warning, "info", undefined, { sticky: true });
+                    setOpen(false);
+                    router.refresh();
                   })
                 }
                 className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left active:bg-slate-50"

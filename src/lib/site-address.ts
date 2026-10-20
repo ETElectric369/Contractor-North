@@ -131,7 +131,7 @@ export function siteLines(site: ResolvedSite | null): string[] {
  *
  * The Inspector's Where writes a typed line WITHOUT parts (0177: guessing a city from a line is
  * how a wrong address gets on a record), and the stored city/state/zip stayed as they were. On
- * 2026-10-13 that left a Georgia pick's state GA / zip 30014 standing under "3812 Dinah" in Tahoe
+ * 2026-10-13 that left a Georgia pick's state GA / zip 30014 standing under "4127 Egret" in Tahoe
  * City after Erik typed over the pick — a record that says two places. So: each stored part must
  * still appear in the typed line as a whole word ("CA" is not the "ca" in Cathedral City); any
  * part the line no longer carries means the pick is gone, and the parts go with it (the amber

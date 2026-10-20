@@ -97,7 +97,7 @@ describe("the layout and the middleware act on the answer, not on an empty hand"
     expect(m).toContain('return new NextResponse("Your session expired — please sign in again.", { status: 401 });');
     expect(m).toContain(">Try Again</button>");
   });
-  it("the Try Again page lives outside the app shell and goes back on a tap", () => {
+  it("the Try Again page lives outside the app shell and its button goes to the page named in ?next=, else back inside the app, else My Day", () => {
     expect(read("src/app/sign-in-check/page.tsx")).toContain("<SignInCheckFailed />");
     const c = read("src/components/sign-in-check-failed.tsx");
     expect(c).toContain("Nothing was lost");

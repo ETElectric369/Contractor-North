@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { arPreviewPresent, base64Of, bytesOf, CHUNK_BYTES, discardScan, MODEL_MAX_BYTES, openInAr, pullFile, scan3dNative, scanDoors, USDZ_MIME } from "@/lib/native-scan";
+import { arPreviewPresent, base64Of, bytesOf, CHUNK_BYTES, discardScan, keptWords, MODEL_MAX_BYTES, openInAr, pullFile, scan3dNative, scanDoors, USDZ_MIME } from "@/lib/native-scan";
 import { modelKind } from "@/components/model-viewer";
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -456,12 +456,15 @@ describe("the wiring, pinned", () => {
     for (const gone of ["scanInto(", "scanNative", "scanLanding", "planImageFile", "Scan The Site", "Scan The Room", "Scan In 3D"]) expect(insp).not.toContain(gone);
     const fn = insp.slice(insp.indexOf("async function scan3dInto("), insp.indexOf("/** A COPY of the visit's file"));
     expect(fn).toContain("const r = await scan3dNative();");
-    expect(fn).toContain('const stored = await upload([model], { caption: "3D model", about: "3D Scan" });');
-    // A failed upload keeps the model (and the shell's copy) for one more tap; the shell's copy goes
-    // only after the upload landed; upload()'s own reason is kept, not overwritten.
-    expect(fn).toContain("unsentModelRef.current = { model, path };");
-    expect(fn).toContain("tap 3D Scan again to send it without scanning.");
-    expect(fn).toContain("unsentModelRef.current = null;\n      await discardScan(path);");
+    // (cn-v1123: a kept model whose file is already up sends nothing, only the row is saved again)
+    expect(fn).toContain('const stored = await upload(landed ? [] : [model], { caption: "3D model", about: "3D Scan" }, landed ? [landed] : undefined);');
+    // A failed upload keeps the model (and the shell's copy) for one more tap, for the place it was
+    // scanned for; the shell's copy goes only after the upload landed; upload()'s own reason is
+    // kept, not overwritten.
+    expect(fn).toContain("keep({ model, path, taskId, landed: null });");
+    expect(fn).toContain("keptWords(false)");
+    expect(keptWords(false)).toContain("tap 3D Scan again to send it without scanning.");
+    expect(fn).toContain("keep(null);\n      await discardScan(path);");
     expect(fn).toContain("const filed = await fileOnJob(jobId, stored[0], model.name, model.size);");
     expect(insp).toContain("const is3d = (p: string) => /\\.(usdz|glb|gltf)($|\\?)/i.test(p);");
     expect((insp.match(/onClick=\{\(\) => p\.url && setViewing3d\(p\)\}/g) ?? []).length).toBe(2);

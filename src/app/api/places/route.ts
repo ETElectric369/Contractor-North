@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   const sessionToken = typeof body?.sessionToken === "string" && body.sessionToken ? body.sessionToken : undefined;
   if (input.length < 3) return NextResponse.json({ suggestions: [] });
   // WHERE TO LOOK FIRST. Without a bias Google ranks the whole country: on 2026-10-13, in front of
-  // a client in Tahoe City, "3812 Dinah" came back as a Georgia street (state GA, zip 30014 landed
+  // a client in Tahoe City, "4127 Egret" came back as a Georgia street (state GA, zip 30014 landed
   // on the visit). The client sends the phone's last fix, else the company's own ground
   // (lib/place-bias); a bias is a preference, never a fence — the right address anywhere still
   // wins when typed in full. 50 km is Google's ceiling for a circle, and Truckee to Tahoe City is 25.

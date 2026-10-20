@@ -30,8 +30,8 @@ describe("the say path and the reply queue (lib/tts)", () => {
     expect(tts).toContain("if ([400, 401, 403, 404].includes(r.status)) return { why };");
     expect(tts).toContain('if (buf.byteLength >= 1024) return { blob: new Blob([buf], { type: "audio/mpeg" }) };');
     // The caller is told whether anything was heard.
-    expect(tts).toContain("export function speakSmart(text: string, onEnd?: (heard: boolean) => void) {");
-    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire); }');
+    expect(tts).toContain("export function speakSmart(text: string, onEnd?: (heard: boolean) => void, onStart?: () => void) {");
+    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin); }');
     expect(tts).toContain("for (let attempt = 0; attempt < 2; attempt++) {");
     expect(tts).toContain('if (!attempt) trace("clip retry", why);');
     for (const line of ['trace("say sent", `${t.length} chars`);', 'trace("say failed", got.why);', 'trace("say clip", `${blob.size}b native`);', 'trace("say done", o);']) expect(tts).toContain(line);
@@ -46,8 +46,8 @@ describe("the say path and the reply queue (lib/tts)", () => {
     expect(tts).toContain('if (r.ok && (!ct || ct.startsWith("audio/")))');
     expect(tts).toContain('why = r.ok ? "tts not audio" : `tts ${r.status}`;');
   });
-  it("keeps the player's contract: onEnd at the end or a failure, never on a cut", () => {
-    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire); }\n        else if (o !== "stopped") fire();');
+  it("keeps the player's contract: onEnd at the end or a failure (a failure is unheard), never on a cut", () => {
+    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin); }\n        else if (o !== "stopped") fire(o === "ended");');
   });
 });
 
@@ -107,15 +107,16 @@ describe("the appointment writers: a new lead goes through the visit page's own 
   const acts = src("src/app/(app)/appointments/actions.ts");
   it("__lead__ makes the lead after the visit exists, with the phone, on create, edit and propose", () => {
     expect(acts).toContain('if (customerId === "__lead__") {\n    if (!newName) return { customerId: null, error: "Enter a name for the new lead." };');
-    expect(acts).toContain("async function attachNewLead(appointmentId: string, lead: { name: string; phone: string | null }): Promise<string | undefined> {");
+    // (the edit passes whether the visit had a customer, so a failed lead leaves it: carried-1123-link-picker)
+    expect(acts).toContain("async function attachNewLead(\n  appointmentId: string,\n  lead: { name: string; phone: string | null },\n  hadCustomer = false,\n): Promise<string | undefined> {");
     expect(acts).toContain("const made = await linkAppointmentToNewLead(appointmentId, lead.name, lead.phone);");
     expect(acts).toContain("const warning = cust.lead ? await attachNewLead(data.id, cust.lead) : undefined;");
-    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(id, cust.lead) : undefined;");
+    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(id, cust.lead, !!row?.customer_id) : undefined;");
     expect(acts).toContain("const warning = cust.lead ? await attachNewLead(res.appointmentId, cust.lead) : undefined;");
     expect(acts).toContain('if (phone) fd.set("phone", phone);');
     expect(acts).toContain("return { ok: true, id: data.id, ...(warning ? { warning } : {}) };");
     expect(acts).toContain("return { ok: true, ...(warning ? { warning } : {}) };");
-    expect(acts).toContain("if (made.ok) return made.note || undefined;");
+    expect(acts).toContain('return [made.note, kept].filter(Boolean).join(" ") || undefined;');
     // One lead per visit.
     expect(acts).toContain('if (cust.lead && row?.inquiry_id) return { ok: false, error: "This visit already has a lead attached — change who it\'s for from the visit\'s page." };');
   });

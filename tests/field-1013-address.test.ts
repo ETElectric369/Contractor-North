@@ -1,8 +1,8 @@
 /**
- * THE ADDRESS PICKER, AFTER THE CLAUDIO VISIT (Erik, 2026-10-13): "it couldnt find the address then
+ * THE ADDRESS PICKER, AFTER THE CATBIRD VISIT (Erik, 2026-10-13): "it couldnt find the address then
  * deleted what i typed … a use my location button right there would have been gold."
  *
- * The record on production said it all: location "3812 Dinah", state GA, zip 30014 under a Tahoe
+ * The record on production said it all: location "4127 Egret", state GA, zip 30014 under a Tahoe
  * City title — an unbiased Google pick, a thumb's touch taken as a pick, and a typed override that
  * left the pick's parts standing. Five rules, pinned here:
  *   1. every autocomplete search carries a bias: the phone's last fix, else the company's ground;
@@ -22,17 +22,17 @@ const read = (p: string) => readFileSync(p, "utf8");
 describe("a reverse lookup becomes an address with its parts", () => {
   it("reads Google's long/short components into the four stored parts", () => {
     const parts = partsFromComponents([
-      { long_name: "3812", short_name: "3812", types: ["street_number"] },
+      { long_name: "4127", short_name: "4127", types: ["street_number"] },
       { long_name: "Bayberry Road", short_name: "Bayberry Rd", types: ["route"] },
       { long_name: "Tahoe City", short_name: "Tahoe City", types: ["locality", "political"] },
       { long_name: "California", short_name: "CA", types: ["administrative_area_level_1", "political"] },
       { long_name: "96145", short_name: "96145", types: ["postal_code"] },
     ]);
-    expect(parts).toEqual({ line1: "3812 Bayberry Road", city: "Tahoe City", state: "CA", zip: "96145" });
+    expect(parts).toEqual({ line1: "4127 Bayberry Road", city: "Tahoe City", state: "CA", zip: "96145" });
   });
   it("takes a street address over a plus code, and nothing when only a plus code answers", () => {
     const plus = { formatted_address: "8FWH+2V Tahoe City, CA", types: ["plus_code"] };
-    const street = { formatted_address: "3812 Bayberry Rd, Tahoe City, CA 96145, USA", types: ["street_address"] };
+    const street = { formatted_address: "4127 Bayberry Rd, Tahoe City, CA 96145, USA", types: ["street_address"] };
     const route = { formatted_address: "Bayberry Rd, Tahoe City, CA", types: ["route"] };
     expect(pickReverse([plus, route, street])).toBe(street);
     // a bare road is not an address a job can carry: the person types the number
@@ -48,11 +48,11 @@ describe("a reverse lookup becomes an address with its parts", () => {
 });
 
 describe("a typed line keeps a pick's parts only while it still says them", () => {
-  it("the Claudio case: a Georgia pick's parts do not outlive a typed Tahoe street", () => {
-    expect(typedLineKeepsParts("3812 Dinah", { city: null, state: "GA", zip: "30014" })).toBe(false);
+  it("the Catbird case: a Georgia pick's parts do not outlive a typed Tahoe street", () => {
+    expect(typedLineKeepsParts("4127 Egret", { city: null, state: "GA", zip: "30014" })).toBe(false);
   });
   it("a full line that still carries the state and zip keeps the parts; whole words only", () => {
-    expect(typedLineKeepsParts("3812 Bayberry Rd, Tahoe City, CA 96145, USA", { city: "Tahoe City", state: "CA", zip: "96145" })).toBe(true);
+    expect(typedLineKeepsParts("4127 Bayberry Rd, Tahoe City, CA 96145, USA", { city: "Tahoe City", state: "CA", zip: "96145" })).toBe(true);
     expect(typedLineKeepsParts("10 Bayberry Dr, Cathedral City", { city: null, state: "CA", zip: null })).toBe(false);
     // the state and zip judge, never the city: a borough stored under its postal city keeps its parts
     expect(typedLineKeepsParts("350 5th Ave, New York, NY 10118, USA", { city: "Manhattan", state: "NY", zip: "10118" })).toBe(true);
@@ -131,7 +131,8 @@ describe("the doors carry the rules (source pins)", () => {
     expect(s).toContain("onTextChange={(v) => { if (v !== placeRef.current) setLocatedNote(null); setPlace(v); }}");
     expect(s).not.toContain("onTextChange={(v) => { setPlace(v); schedule(); }}");
     // the leave-page flush writes the address too, and never rewrites a line a pick wrote with parts
-    expect(s).toMatch(/const send = \(\) => \{[\s\S]*void setAppointmentPlace\(appointmentId, placeRef\.current\)\.catch/);
+    // (cn-v1123: it writes the pick's parts too, and marks the line saved only when the write says ok)
+    expect(s).toMatch(/const send = \(\) => \{[\s\S]*void setAppointmentPlace\(appointmentId, line, partsForLine\(line\)\)[\s\S]*\.catch/);
     expect(s).toContain('latestPlace.trim() !== (savedPlaceRef.current ?? "").trim()');
     // no speculation: a loose fix or a numberless road fills nothing and says the one thing to do
     expect(s).toContain("const LOCATE_SURE_M = 150;");
@@ -144,7 +145,9 @@ describe("the doors carry the rules (source pins)", () => {
     expect(s).toContain("/api/geocode?latlng=${fix.coords.lat},${fix.coords.lng}");
     expect(s).toContain("key={whereKey}");
     // the located line is written WITH its parts, and a refusal names one action
-    expect(s).toMatch(/setAppointmentPlace\(appointmentId, line, \{ city: found\.city \?\? null, state: found\.state \?\? null, zip: found\.zip \?\? null \}\)/);
+    // (cn-v1123: through savePick, which writes it and marks it saved only on ok)
+    expect(s).toMatch(/savePick\(line, \{ city: found\.city \?\? null, state: found\.state \?\? null, zip: found\.zip \?\? null \}\)/);
+    expect(s).toContain("await setAppointmentPlace(appointmentId, line, parts)");
     expect(s).toContain("Location is off for North — turn it on in Settings.");
   });
   it("setAppointmentPlace reads the stored parts and clears them when a typed line drops them", () => {

@@ -504,7 +504,10 @@ function onNativeLevel(l: NativeLevel) {
 /** A turn the plugin closed: by the pause rule, by a cap, by hand, or with no speech at all. */
 function onNativeTurn(t: NativeTurn) {
   trace("turn", `${t.why} ${t.bytes}b ${t.seconds}s`);
-  void wakeNative(true); // transcribe and the chat need the page awake between their stages
+  // A hand-tapped stop delivers its final turn AFTER the conversation is over (nativeOn is already
+  // false): a wake sent now lands on a plugin that has torn down and leaves the fast tick set for
+  // the NEXT conversation's first seconds, where the voice faded. A live conversation only.
+  if (nativeOn) void wakeNative(true); // transcribe and the chat need the page awake between their stages
   clearDeadman();
   level = 0;
   active = false;

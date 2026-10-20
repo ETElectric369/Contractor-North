@@ -1,6 +1,8 @@
 "use server";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
+import { HELD_CRUMB, withoutHeldCrumb } from "@/lib/held-crumb";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -136,6 +138,125 @@ async function resolveTechJobToday(
     return null;
   } catch {
     return null; // the punch must never wait on / fail over job resolution
+  }
+}
+
+/**
+ * WHAT A CLOCK-IN TOOK OFF HOLD, KEPT SO THE TAKE-BACK CAN PUT IT BACK (audit v1120, carried; Erik's
+ * "the last door closes": a thing that pertains to another stays attached both ways).
+ *
+ * Clocking into a held job wakes it, and the database then clears the hold's reason, its day and who
+ * held it (jobs_hold_day, 0366). A punch taken back inside two minutes (clockOut, UNDO_PUNCH_MS)
+ * deleted the row and left the job working with the reason gone: a tech taps the wrong job, J-048,
+ * waiting on the permit; forty seconds later they take it back, "nothing was recorded", and Needs You
+ * never brings J-048 back. So the clock-in writes what it cleared onto its own punch, as one line in
+ * the notes (the way Switch Job leaves its crumb), and the take-back reads it and puts exactly that
+ * back and nothing more.
+ *
+ * SEALED, because the notes are a column a tech can type into and the take-back writes the job on
+ * the service client: an unsealed line would let a typed note put any job in the company on hold.
+ * The seal is an HMAC of THIS punch's id and the line's own JSON, keyed with the service key, so a
+ * line cannot be made by hand or copied from another punch. No key, no line, no restore: today's
+ * behaviour, never a guess.
+ */
+type HeldBefore = { j: string; r: string | null; d: string | null; b: string | null };
+
+function heldSeal(entryId: string, json: string): string | null {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) return null;
+  return createHmac("sha256", key).update(`${entryId}|${json}`).digest("hex").slice(0, 16);
+}
+
+/** The sealed line, read back: null unless it is whole, sealed for THIS punch, and shaped exactly as it is written. */
+function heldBefore(notes: string | null | undefined, entryId: string): HeldBefore | null {
+  const m = HELD_CRUMB.exec(notes ?? "");
+  const want = m ? heldSeal(entryId, m[1]) : null;
+  if (!m || !want || m[2].length !== want.length || !timingSafeEqual(Buffer.from(m[2]), Buffer.from(want))) return null;
+  try {
+    const v = JSON.parse(m[1]) as Partial<HeldBefore>;
+    const id = (x: unknown) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x);
+    const text = (x: unknown) => x === null || typeof x === "string";
+    if (!id(v.j) || !text(v.r) || !(v.d === null || (typeof v.d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.d))) || !(v.b === null || id(v.b))) return null;
+    return { j: v.j as string, r: v.r ?? null, d: v.d ?? null, b: v.b ?? null };
+  } catch {
+    return null;
+  }
+}
+
+/** The hold a job is in right now, read BEFORE the clock-in wakes it (the wake clears it). Null when not held or unread. */
+async function heldJobBefore(supabase: Pick<SupabaseClient, "from">, jobId: string): Promise<HeldBefore | null> {
+  try {
+    const { data, error } = await supabase.from("jobs").select("status, hold_reason, hold_until, hold_by").eq("id", jobId).maybeSingle();
+    if (error) throw error;
+    const job = data as { status?: string | null; hold_reason?: string | null; hold_until?: string | null; hold_by?: string | null } | null;
+    if (job?.status !== "on_hold") return null;
+    return { j: jobId, r: job.hold_reason ?? null, d: job.hold_until ?? null, b: job.hold_by ?? null };
+  } catch (e) {
+    reportError("timeclock.clockIn.heldBefore", e, { jobId });
+    return null;
+  }
+}
+
+/** Write the sealed line onto the punch the clock-in just made (its own, still open, still without a note). */
+async function noteHeldBefore(supabase: Pick<SupabaseClient, "from">, userId: string, entryId: string, was: HeldBefore): Promise<void> {
+  const json = JSON.stringify({ j: was.j, r: was.r, d: was.d, b: was.b });
+  const seal = heldSeal(entryId, json);
+  if (!seal) {
+    reportError("timeclock.clockIn.heldNote", new Error("no service key to seal the line with"), { entryId });
+    return;
+  }
+  const { data, error } = await supabase
+    .from("time_entries")
+    .update({ notes: `[This punch took the job off hold. Before: ${json} #${seal}]` })
+    .eq("id", entryId)
+    .eq("profile_id", userId)
+    .eq("status", "open")
+    .is("notes", null)
+    .select("id");
+  if (error || !data?.length) reportError("timeclock.clockIn.heldNote", error ?? new Error("the punch took no note"), { entryId });
+}
+
+/**
+ * THE TAKE-BACK'S HALF: the punch is gone, so the hold it cleared goes back, and the answer says so.
+ * Returns the sentence to add to the take-back's, or null when there is nothing to say (no line, a
+ * line that is not this punch's own, somebody else is working the job now, or the job has moved
+ * since: a job that is no longer the way the clock-in left it is nobody's to put back).
+ * ON THE SERVICE CLIENT (jobs_write is the office's), scoped by hand: this job, this company, only
+ * while it is still in progress, rows read back. A write that fails is said, never swallowed.
+ */
+async function putHeldJobBack(notes: string | null | undefined, entryId: string, orgId: string | null | undefined): Promise<string | null> {
+  const was = orgId ? heldBefore(notes, entryId) : null;
+  if (!was || !orgId) return null;
+  try {
+    const service = createServiceClient();
+    const { data: others, error: othersErr } = await service
+      .from("time_entries")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("job_id", was.j)
+      .eq("status", "open")
+      .neq("id", entryId)
+      .limit(1);
+    if (othersErr) throw othersErr;
+    if (others?.length) return null; // somebody is on the clock there: the job IS being worked
+    const { data: back, error } = await service
+      .from("jobs")
+      .update({ status: "on_hold", hold_reason: was.r, hold_until: was.d, hold_by: was.b })
+      .eq("id", was.j)
+      .eq("org_id", orgId)
+      .eq("status", "in_progress")
+      .select("id, job_number, name");
+    if (error) throw error;
+    const job = (back ?? [])[0] as { job_number?: string | null; name?: string | null } | undefined;
+    if (!job) return null;
+    revalidatePath(`/jobs/${was.j}`);
+    revalidatePath("/jobs");
+    revalidatePath("/schedule"); // the held card is back on the rail
+    const why = (was.r ?? "").trim().replace(/[.\s]+$/, "");
+    return `${jobLabel(job)} is back on hold${why ? ` (${why})` : ""}.`;
+  } catch (e) {
+    reportError("timeclock.clockOut.undoHold", e, { entryId, jobId: was.j });
+    return "That job was on hold before this punch and I couldn't put it back. Set it on hold again from the job.";
   }
 }
 
@@ -299,6 +420,9 @@ async function clockInInner(
     }
   }
 
+  // A held job is read now, beside the insert, because the wake below clears the hold it would read.
+  const heldRead = jobId ? heldJobBefore(supabase, jobId) : null;
+
   // The DB has a unique index preventing two open entries; surface a friendly msg.
   // The row comes back so the door knows WHICH punch to ask about when it landed on no job.
   const { data: made, error } = await supabase.from("time_entries").insert({
@@ -338,7 +462,11 @@ async function clockInInner(
   // back as the result's warning, which every clock door shows.
   let offHold: string | null = null;
   if (jobId) {
+    const held = heldRead ? await heldRead : null; // settled BEFORE the wake, never racing it
     offHold = (await promoteJobToInProgress(supabase, jobId))?.offHold ?? null;
+    // The wake took it off hold: the punch keeps what was cleared, so taking the punch back can return it.
+    const punchId = (made as { id?: string } | null)?.id;
+    if (offHold && held && punchId) await noteHeldBefore(supabase, user.id, punchId, held);
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
     if (offHold) revalidatePath("/schedule"); // the rail's held card goes
@@ -819,7 +947,7 @@ export async function clockOut(input: {
   // stop time somebody picked, or an unattended close — those are statements about a shift that
   // ran. Nor for a punch somebody put WORK on: the second part of a Switch Job (its first part
   // already closed at the switch), a typed note, miles, or a lunch — those are a day, not a slip.
-  const untouched = !ent?.split_from && !(ent?.notes ?? "").trim() && !input.miles && !(input.notes ?? "").trim() && !input.lunch_minutes && !input.lunch_on_entry_id;
+  const untouched = !ent?.split_from && !withoutHeldCrumb(ent?.notes) && !input.miles && !withoutHeldCrumb(input.notes) && !input.lunch_minutes && !input.lunch_on_entry_id;
   if (ent?.status === "open" && entClockIn && untouched && !input.auto && !input.at && !input.picked && !input.autoClosedReason) {
     const ciMs = Date.parse(entClockIn);
     const age = Date.now() - ciMs;
@@ -845,6 +973,9 @@ export async function clockOut(input: {
         revalidatePath("/timeclock");
         revalidatePath("/timecards");
         revalidatePath("/planner");
+        // A hold this punch took off a job goes back on it (the punch's own sealed line), said beside the sentence.
+        const heldBack = await putHeldJobBack(ent?.notes, input.entry_id, ent?.org_id);
+        if (heldBack) return { ok: true, id: input.entry_id, undone: true, warning: `${UNDO_PUNCH_SENTENCE} ${heldBack}` };
         return { ok: true, id: input.entry_id, undone: true, warning: UNDO_PUNCH_SENTENCE };
       }
     }
@@ -946,7 +1077,13 @@ export async function clockOut(input: {
           tz: lateStop.tz,
         })
       : null;
-  const notesOut = lateCrumb ? withStopCrumb(typedNotes ?? ent?.notes ?? null, lateCrumb) : typedNotes;
+  const notesWithCrumb = lateCrumb ? withStopCrumb(typedNotes ?? ent?.notes ?? null, lateCrumb) : typedNotes;
+  // A FINISHED PUNCH NEVER CARRIES THE CLOCK'S OWN TAKE-BACK LINE (it was read from the OPEN row above,
+  // before this close; after it the line is a stale note the tech sees raw and the end-of-day reminder
+  // counts as documented). The line goes whether the close carries notes or not.
+  const notesOut = notesWithCrumb && HELD_CRUMB.test(notesWithCrumb) ? withoutHeldCrumb(notesWithCrumb) || null : notesWithCrumb;
+  // Nothing new to write but the row carries the line: write what the row said without it, never a blank over a note.
+  const crumbOnly = !notesOut && HELD_CRUMB.test(ent?.notes ?? "") ? { notes: withoutHeldCrumb(ent?.notes) || null } : {};
 
   const { data: closedRows, error } = await supabase
     .from("time_entries")
@@ -959,7 +1096,7 @@ export async function clockOut(input: {
       // Nort both pass "". The office then reads a blank card, the EOD cron texts the tech to
       // fill in a note they already wrote, and the breadcrumb the office needs to re-derive a
       // split is gone. An empty string means "not supplied", not "delete it".
-      ...(notesOut ? { notes: notesOut } : {}),
+      ...(notesOut ? { notes: notesOut } : crumbOnly),
       gps_out: input.gps,
       status: "closed",
       // 'auto_gps' even when the person PICKED the stop time in the geofence sheet (checked
@@ -3053,18 +3190,22 @@ export async function fileDailyReport(input: {
 
   // One row per (org, person, day) — re-filing revises. org_id passed explicitly
   // (belt) on top of the set_org_id stamp trigger (suspenders).
-  const { error } = await supabase.from("daily_reports").upsert(
-    {
-      org_id: me.org_id,
-      profile_id: user.id,
-      report_date: todayStr,
-      did_today: did || null,
-      materials_tomorrow: mats || null,
-      gps_summary: summary,
-      status: "filed",
-    },
-    { onConflict: "org_id,profile_id,report_date" },
-  );
+  const { data: filed, error } = await supabase
+    .from("daily_reports")
+    .upsert(
+      {
+        org_id: me.org_id,
+        profile_id: user.id,
+        report_date: todayStr,
+        did_today: did || null,
+        materials_tomorrow: mats || null,
+        gps_summary: summary,
+        status: "filed",
+      },
+      { onConflict: "org_id,profile_id,report_date" },
+    )
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
 
   // Tell the office — bell (always works) + push, suppressing the filer.
@@ -3076,7 +3217,7 @@ export async function fileDailyReport(input: {
   const payload = {
     title: `Daily report from ${name}`,
     body: (did || mats).split("\n")[0].slice(0, 140),
-    url: "/planner",
+    url: reportBellUrl((filed as { id?: string } | null)?.id),
   };
   await createNotifications(me.org_id, staff, { type: "daily_report", ...payload });
   await sendPushToProfiles(staff, "daily_report", payload);
@@ -3084,6 +3225,15 @@ export async function fileDailyReport(input: {
   revalidatePath("/planner"); // THE Daily Reports card — the only page that renders a report
   return { ok: true, summary };
 }
+
+/**
+ * THE BELL LINE CARRIES ITS REPORT. A report's bell line and push land on My Day's Daily Reports card
+ * ("/planner"); the report's id rides on the same link, so the line is tied to ONE report, not to the
+ * filer's name (a rename or a missing name lost the line, and one person's two reports shared a title).
+ * Reviewing a report closes exactly the lines that carry its id. A report with no id to carry falls
+ * back to the card alone.
+ */
+const reportBellUrl = (reportId: string | null | undefined): string => (reportId ? `/planner?report=${reportId}` : "/planner");
 
 /**
  * Office review: flip a daily report filed → reviewed (the second half of 0128's
@@ -3106,26 +3256,35 @@ export async function markDailyReportReviewed(id: string): Promise<ClockResult> 
     .maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
   if (!hit) return { ok: false, error: "That report isn't there any more — My Day is catching up." };
-  // Reviewed here is heard: the reviewer's own unread bell row for this filer's report is read too,
-  // so Nort stops holding it (0394). Best-effort — the Bell row is a courtesy, the review is the deed.
+  // Reviewed here is heard: the reviewer's own unread bell rows for THIS report are read too, so Nort
+  // stops holding them (0394). Best-effort — the Bell row is a courtesy, the review is the deed, but a
+  // write that fails is reported, not swallowed.
   try {
     const {
       data: { user },
     } = await ctx.supabase.auth.getUser();
-    const { data: filer } = await ctx.supabase.from("profiles").select("full_name").eq("id", (hit as { profile_id?: string | null }).profile_id ?? "").maybeSingle();
-    const name = (filer as { full_name?: string | null } | null)?.full_name;
-    if (user && name) {
-      await ctx.supabase
-        .from("notifications")
-        .update({ read_at: new Date().toISOString() })
-        .eq("user_id", user.id)
-        .eq("type", "daily_report")
-        .is("read_at", null)
-        .eq("title", `Daily report from ${name}`)
-        .select("id");
+    const filerId = (hit as { profile_id?: string | null }).profile_id ?? "";
+    if (user) {
+      const unread = () =>
+        ctx.supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("user_id", user.id).eq("type", "daily_report").is("read_at", null);
+      // The lines that carry this report's id: ONLY this report's, whoever filed it and whatever they are called now.
+      const { error: lineErr } = await unread().eq("url", reportBellUrl(id)).select("id");
+      if (lineErr) reportError("timeclock.reviewReport.bell", lineErr, { reportId: id });
+      // Lines filed before they carried an id (the card alone) are told apart only by the filer's name, so
+      // they close only when this filer has no other report still waiting: never another report's line.
+      const waiting = filerId ? await ctx.supabase.from("daily_reports").select("id").eq("profile_id", filerId).eq("status", "filed").limit(1) : null;
+      if (waiting?.error) reportError("timeclock.reviewReport.bell", waiting.error, { reportId: id });
+      if (waiting && !waiting.error && !(waiting.data ?? []).length) {
+        const { data: filer } = await ctx.supabase.from("profiles").select("full_name").eq("id", filerId).maybeSingle();
+        const name = (filer as { full_name?: string | null } | null)?.full_name;
+        if (name) {
+          const { error: oldErr } = await unread().eq("url", "/planner").eq("title", `Daily report from ${name}`).select("id");
+          if (oldErr) reportError("timeclock.reviewReport.bell", oldErr, { reportId: id });
+        }
+      }
     }
-  } catch {
-    /* the review stands either way */
+  } catch (e) {
+    reportError("timeclock.reviewReport.bell", e, { reportId: id }); // the review stands either way
   }
   revalidatePath("/planner"); // the Daily Reports card's reviewed badge + the "N to review" count
   return { ok: true };

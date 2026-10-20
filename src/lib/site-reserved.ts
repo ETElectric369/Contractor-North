@@ -22,6 +22,10 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // Auth / onboarding (the login flow is the one app path reachable from an org's public site)
   "login", "logout", "forgot", "reset", "set-password", "account-deactivated", "onboarding",
   "subscribe", "auth",
+  // The Try Again screen the (app) layout sends a person to when the sign-in check got NO ANSWER
+  // (cn-v1113). Not listed, an org host rewrote it to the builder page route and the person saw the
+  // company's signed-out homepage with no words: the false sign-out that route exists to remove.
+  "sign-in-check",
   // Public + short-link routes
   "estimate", "inquire", "voice", "portal", "print", "pick", "content", "c", "i", "q",
   // App surfaces (the (app) route group — all at root)
@@ -29,7 +33,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "bugs", "calendar", "change-orders", "compliance", "crm", "dashboard", "employee-docs", "forms",
   "handbook", "insurance", "inventory", "jobs", "leads", "map", "materials", "organize", "payments",
   "payroll", "permits", "petty-cash", "planner", "plans", "price-list", "purchasing", "quotes",
-  "recurring", "resources", "safety", "schedule", "settings", "tasks", "tax-report", "team",
+  "recurring", "reconcile", "resources", "safety", "schedule", "settings", "tasks", "tax-report", "team",
   "timecards", "timeclock", "tools", "work-orders",
   // audit v921: these three shipped after this list was written and drifted out of it — the dock
   // links /inspections and Settings links /doc-studio and /site-studio, so on an org host the page

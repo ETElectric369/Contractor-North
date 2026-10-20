@@ -44,6 +44,27 @@ import { deleteInspection, recordInspectionResult, reopenInspection, saveInspect
  * ONE LINE EACH, and the whole explanation behind the info icon as bullets (Erik, 2026-10-03).
  */
 
+/** The words for a tap that never reached the server (a dead zone): the same line the clock and the
+ *  timecards say. A rejected action used to be thrown out of the transition and take the job page to
+ *  its error boundary with nothing said, the Add button still hidden behind it. */
+export const NO_SIGNAL_LINE = "No connection, so that didn't go through. Try again when you have a bar or two.";
+
+/** What a write came to: its answer, or the ONE line to show. A refusal speaks in the action's own
+ *  words (or the caller's fallback); a throw is a tap that never landed. Never rethrows. */
+export async function settleWrite<T extends { ok: boolean; error?: string }>(
+  what: Promise<T>,
+  fallback: string,
+): Promise<{ res: T } | { error: string }> {
+  let res: T;
+  try {
+    res = await what;
+  } catch {
+    return { error: NO_SIGNAL_LINE };
+  }
+  if (!res?.ok) return { error: res?.error ?? fallback };
+  return { res };
+}
+
 const standTone = (s: InspectionStand): Tone =>
   s.state === "clear" ? "green" : s.state === "needs_another" || s.state === "overdue" ? "red" : s.hisToDo ? "amber" : "blue";
 
@@ -112,17 +133,22 @@ export function PermitInspections({
     setAddedFor(null);
   }, [rows]);
 
+  /** `onFail` runs when the write did not land — refused OR never reached the server — so a door that
+   *  hid itself on the tap (the Add button) comes back with the words, never stuck hidden. */
   const run = (
     what: Promise<{ ok: boolean; error?: string; message?: string; next?: string | null; href?: string | null }>,
     fallback: string,
+    onFail?: () => void,
   ) =>
     start(async () => {
       setError(null);
-      const res = await what;
-      if (!res?.ok) {
-        setError(res?.error ?? fallback);
+      const done = await settleWrite(what, fallback);
+      if ("error" in done) {
+        setError(done.error);
+        onFail?.();
         return;
       }
+      const res = done.res;
       setForm(null);
       toast(res.message ?? "Saved", "success");
       // The chain's third leg: carry what the write made true, and the next door, onto the screen.
@@ -167,11 +193,9 @@ export function PermitInspections({
             onClick={() => {
               setAddedFor(missing);
               run(
-                saveInspection({ authority: missing, scheduled_for: null, scheduled_window: null, permit_id: permitId, first: true }).then((res) => {
-                  if (!res?.ok) setAddedFor(null);
-                  return res;
-                }),
+                saveInspection({ authority: missing, scheduled_for: null, scheduled_window: null, permit_id: permitId, first: true }),
                 "Couldn't add it — try again.",
+                () => setAddedFor(null),
               );
             }}
           >

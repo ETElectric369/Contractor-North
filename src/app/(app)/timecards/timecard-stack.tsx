@@ -10,6 +10,7 @@ import { useEndlessStack } from "@/components/use-endless-stack";
 import { spanLabel } from "@/lib/schedule/span-label";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { initials } from "@/lib/utils";
+import { withoutHeldCrumb } from "@/lib/held-crumb";
 import {
   hoursInPeriod,
   periodLabel,
@@ -239,7 +240,7 @@ function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
           {e.controls && <span className="pointer-events-auto ml-auto flex shrink-0 items-center">{e.controls}</span>}
         </div>
 
-        {e.notes && <p className="pl-[18px] text-xs text-slate-500">{e.notes}</p>}
+        {withoutHeldCrumb(e.notes) && <p className="pl-[18px] text-xs text-slate-500">{withoutHeldCrumb(e.notes)}</p>}
 
       </div>
     </li>

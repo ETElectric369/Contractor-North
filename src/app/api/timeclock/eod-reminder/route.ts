@@ -5,6 +5,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { todayBoundsInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
+import { withoutHeldCrumb } from "@/lib/held-crumb";
 
 /**
  * End-of-day "fill out your form" reminder. Runs on an evening schedule (Vercel
@@ -75,7 +76,7 @@ export async function GET(request: Request) {
       if (todays.length === 0) continue; // never clocked in — handled by /nudge
 
       const stillOpen = todays.some((e) => e.status === "open");
-      const anyDocumented = todays.some((e) => e.notes && e.notes.trim());
+      const anyDocumented = todays.some((e) => withoutHeldCrumb(e.notes)); // the clock's own take-back line is not a note
 
       let message = "";
       if (stillOpen) {

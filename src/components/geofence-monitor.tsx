@@ -68,6 +68,61 @@ function setSnooze(entryId: string, until: number) {
 type Phase = GeofencePhase;
 
 /**
+ * WHAT THE SHEET DOES WITH AN EXIT IOS OBSERVED (carried 1123, #24).
+ *
+ * The phone forgets an exit the moment the page reads it (takePendingExit clears its copy), so every
+ * early return between that read and the sheet used to be a deletion: reopen the app while the sheet
+ * was already up, or let the effect re-run between the read and its .then, and the observed time was
+ * gone and the person typed it by hand — the very thing the fence was built to remove. Now only an
+ * exit that is truly MOOT is let go (the shift is over, it belongs to another shift, he already said
+ * Still Working, this very exit is already on the sheet, or he was seen at the site AFTER it: he came
+ * back, and "Looks like you left" over a man on site is a lie). Every other one is used or kept:
+ *   open — the sheet is down: open it with the time filled in.
+ *   fill — the sheet is up asking the question and promising nothing: put the time in its picker.
+ *   keep — the sheet is up and busy (a live prompt that promises its own observed time, a picker he is
+ *          using, a close in flight) or the effect that read it was torn down: hold it for the next
+ *          free sheet / the effect that replaced this one.
+ */
+export type ExitHandoff = "open" | "fill" | "keep" | "drop";
+export function exitHandoff(s: {
+  /** The shift this monitor fences has been closed. */
+  done: boolean;
+  /** The exit is about THIS entry on THIS trip (a switch re-points the trip). */
+  ours: boolean;
+  /** He answered "Still Working" and the quiet is still running. */
+  snoozed: boolean;
+  /** This very exit (same entry, same moment) has already been put on the sheet. */
+  handled: boolean;
+  /** The effect that read the exit has been torn down since. */
+  cancelled: boolean;
+  phase: GeofencePhase;
+  /** The sheet promises to close the shift on its own (fallbackArmed) — a time stated over it would end that promise. */
+  armed: boolean;
+  /** When iOS observed the exit (ms; NaN or absent = unknown, which never makes it moot). */
+  exitedAtMs?: number;
+  /** The last time a fix confirmed him AT the site on this trip (ms; 0 or absent = never confirmed). */
+  insideAtMs?: number;
+}): ExitHandoff {
+  if (s.done || !s.ours || s.snoozed || s.handled) return "drop";
+  // Seen at the site after the exit was observed: he is back. Moot beats busy and beats cancelled, so a
+  // kept exit is not replayed over a man on site when the sheet that kept it closes.
+  if (s.exitedAtMs != null && s.insideAtMs != null && s.insideAtMs > s.exitedAtMs) return "drop";
+  if (s.cancelled) return "keep";
+  if (s.phase === "idle") return "open";
+  if (s.phase === "prompt" && !s.armed) return "fill";
+  return "keep";
+}
+
+/**
+ * WHETHER OPENING THE SHEET ASKS THE SERVER TO RING (carried 1123, #43). One site exit rings once: the
+ * shell's own "Still on the clock?" already rang for an exit it saw (`alreadyRang`), and the server's
+ * "Clock out?" is the same alert on the same phone. Once per entry per page-life, as before.
+ */
+export function shouldPushExit(s: { sentFor: string | null; entryId: string; alreadyRang: boolean }): boolean {
+  return s.sentFor !== s.entryId && !s.alreadyRang;
+}
+
+/**
  * Global geofence watcher (mounted in the app shell while the user is clocked in).
  * Layered, honest-within-web-physics design — an iOS PWA gets NO background
  * geolocation, so everything here runs while the app is foregrounded:
@@ -160,6 +215,14 @@ export function GeofenceMonitor({
   const exitPushSentRef = useRef<string | null>(null);
   const exitPushCtxRef = useRef({ entryId, jobLabel });
   exitPushCtxRef.current = { entryId, jobLabel };
+  // An exit iOS saw that the sheet could not take yet (see exitHandoff). The phone cleared its own
+  // copy when the page read it, so this ref is the only one left; takeKeptRef is how the live fence
+  // effect takes it up again once a sheet is free (or when it replaced the effect that read it).
+  const keptExitRef = useRef<PendingExit | null>(null);
+  const takeKeptRef = useRef<() => void>(() => {});
+  // The exit already on the sheet ("entry|moment"): iOS hands the same one over twice while the app is
+  // awake (the live event, then the next foreground read) and the second must not pull him back.
+  const handledExitRef = useRef("");
 
   const [phase, setPhase] = useState<Phase>("idle");
   const phaseRef = useRef(phase);
@@ -231,13 +294,14 @@ export function GeofenceMonitor({
     streamGapRef.current = false;
     firstOutsideMsRef.current = null;
     promptShownAtRef.current = 0;
+    keptExitRef.current = null; // an exit from the last trip's site means nothing at this one
     setPhase("idle");
     setError(null);
     setClosedAt(null);
   }, [tripKey, clockInIso]);
 
   // Opens the sheet. Only touches refs + stable setters, so a stale closure is harmless.
-  function openPrompt(source: "live" | "wake") {
+  function openPrompt(source: "live" | "wake", alreadyRang = false) {
     promptSourceRef.current = source;
     promptShownAtRef.current = Date.now();
     setPickedIso(null);
@@ -252,11 +316,12 @@ export function GeofenceMonitor({
     // only renders while the app is foregrounded; the push also lands on the lock screen.
     // Fire-and-forget (never delays the sheet); the server no-ops for staff and for anyone
     // no longer clocked in. Detection behavior itself is untouched.
+    // `alreadyRang`: the shell's own alert rang for this exit (carried 1123, #43) — the server's would be
+    // the same alert twice on the same phone, so it is told once and not sent.
     const pushCtx = exitPushCtxRef.current;
-    if (exitPushSentRef.current !== pushCtx.entryId) {
-      exitPushSentRef.current = pushCtx.entryId;
-      notifyGeofenceExit(pushCtx.jobLabel).catch(() => {});
-    }
+    const push = shouldPushExit({ sentFor: exitPushSentRef.current, entryId: pushCtx.entryId, alreadyRang });
+    exitPushSentRef.current = pushCtx.entryId;
+    if (push) notifyGeofenceExit(pushCtx.jobLabel).catch(() => {});
     try {
       navigator.vibrate?.(40);
     } catch {}
@@ -631,19 +696,52 @@ export function GeofenceMonitor({
     let cancelled = false;
     const dark = (r: FenceReadiness | null) => { if (!cancelled) setFenceDark(r === null || r === "ready" ? null : r); };
     void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);
+    // The phone cleared its copy when the page read this one, so nothing here may just return (carried
+    // 1123, #24): exitHandoff says whether it opens the sheet, fills the one that is up, is kept for the next
+    // free sheet, or is truly moot.
     const takeExit = (e: PendingExit) => {
-      if (cancelled || doneRef.current || e.entryId !== entryId) return;
-      if (phaseRef.current !== "idle" || Date.now() < snoozedUntil(entryId)) return;
-      openPrompt("wake");
+      if (keptExitRef.current === e) keptExitRef.current = null;
+      const key = `${e.entryId}|${e.exitedAt}`;
+      const how = exitHandoff({
+        done: doneRef.current,
+        ours: e.entryId === entryId && tripKey === tripKeyRef.current,
+        snoozed: Date.now() < snoozedUntil(entryId),
+        handled: handledExitRef.current === key,
+        cancelled,
+        exitedAtMs: Date.parse(e.exitedAt),
+        insideAtMs: seenInsideRef.current ? lastInsideMsRef.current : 0,
+        phase: phaseRef.current,
+        armed: fallbackArmed({
+          phase: phaseRef.current,
+          longPrompt: longPromptRef.current,
+          picked: pickedIsoRef.current != null,
+          source: promptSourceRef.current,
+          lastInsideMs: lastInsideMsRef.current,
+          streamGap: streamGapRef.current,
+        }),
+      });
+      if (how === "drop") return;
+      if (how === "keep") {
+        keptExitRef.current = e;
+        if (cancelled) takeKeptRef.current(); // the effect that replaced this one takes it up
+        return;
+      }
+      handledExitRef.current = key;
+      // `notify`: the shell's "Still on the clock?" rang for this exit (or one within the half hour), so the
+      // server's "Clock out?" must not ring it twice (#43).
+      if (how === "open") openPrompt("wake", notify);
       const ms = Date.parse(e.exitedAt);
       if (Number.isFinite(ms) && ms <= Date.now()) {
         setPickedIso(new Date(ms).toISOString());
         setPhase("picking");
       }
     };
+    takeKeptRef.current = () => { const k = keptExitRef.current; if (k) takeExit(k); };
+    takeKeptRef.current(); // an exit the last effect read and could not place
     void takePendingExit().then((e) => { if (e) takeExit(e); });
     let stop: () => void = () => {};
-    void onFenceExit(takeExit).then((s) => { stop = s; });
+    // A listener that arrives after this effect was torn down must not be left listening.
+    void onFenceExit(takeExit).then((s) => { if (cancelled) s(); else stop = s; });
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
       void takePendingExit().then((e) => { if (e) takeExit(e); });
@@ -654,6 +752,7 @@ export function GeofenceMonitor({
     const settled = setTimeout(() => { if (!cancelled) void fenceReadiness().then(dark); }, 8000); // the Always prompt, answered
     return () => {
       cancelled = true;
+      takeKeptRef.current = () => {};
       stop();
       clearTimeout(settled);
       document.removeEventListener("visibilitychange", onVis);
@@ -661,6 +760,10 @@ export function GeofenceMonitor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripKey, anchorLat, anchorLng, radiusM]);
+  // A sheet that closes (he came back inside, or answered) frees the place a kept exit was waiting for.
+  useEffect(() => {
+    if (phase === "idle") takeKeptRef.current();
+  }, [phase]);
   // Clock-out unmounts the monitor (the layout renders it only while an entry is open): the
   // region goes with it.
   useEffect(() => () => { void disarmFence(); }, []);
@@ -762,8 +865,9 @@ export function GeofenceMonitor({
                   startExpanded
                   fieldLabel="Stop"
                   /* A long shift starts the picker on the clock-in's day and time, so a man who
-                     forgot yesterday is not handed today as the answer. */
-                  initialIso={longShift ? clockInIso : undefined}
+                     forgot yesterday is not handed today as the answer. An exit iOS observed is
+                     already the picked time when the picker mounts: the fields show what will be saved. */
+                  initialIso={pickedIso ?? (longShift ? clockInIso : undefined)}
                   tz={tz}
                   /* A long shift's picker starts at the clock-in, which is not a stop time anybody
                      chose, so it never says "the time above" until he has picked one (SI7). */

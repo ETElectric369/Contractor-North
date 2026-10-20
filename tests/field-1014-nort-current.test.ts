@@ -140,7 +140,7 @@ describe("the whole backlog, once; or skipped", () => {
     expect(h.reportsBack).toBe(expectedBack(34, LA));
     expect(holdingWords(h)).toMatch(/^Brian's daily report and 16 updates on things you reported, filed as far back as /);
   });
-  it("on yes every line is handed over newest first with its filing day, old ones marked, the outcomes SUMMED IN CODE, and nothing left held — even past the cap", async () => {
+  it("on yes every line is handed over newest first with its filing day, old ones marked, the outcomes SUMMED IN CODE, and nothing read is left held", async () => {
     const db = fakeDb(tables(120));
     const u = await readMyUpdates(me, db.sb, db.sb, { tz: LA });
     expect(u.reports).toHaveLength(121);
@@ -153,7 +153,7 @@ describe("the whole backlog, once; or skipped", () => {
     expect(u.summary?.filedTo).toBe(filedWords(ago(1), LA));
     expect(u.skipped).toBeUndefined();
     expect(u.unstamped).toBeUndefined();
-    // stamped BY FILTER: all of mine, none of theirs, open ones untouched
+    // stamped by the ids that were read (the fake ignores the limit, so all of them here): all of mine, none of theirs, open ones untouched
     expect(db.tables.bug_reports.filter((r) => r.reported_by === me && r.status !== "open" && !r.filer_notified_at)).toHaveLength(0);
     expect(db.tables.bug_reports.find((r) => r.id === "open")?.filer_notified_at).toBeNull();
     expect(db.tables.bug_reports.find((r) => r.id === "theirs")?.filer_notified_at).toBeNull();
@@ -196,11 +196,14 @@ describe("the whole backlog, once; or skipped", () => {
     expect(r.split("EVERY not-being-built or closed one is its own line").length - 1).toBe(2);
     expect(r.split("the rest in ONE sentence from the tool's summary numbers (never counted by you)").length - 1).toBe(2);
     expect(r.split("if the result names stillHolding").length - 1).toBe(2);
-    expect(r.split("unstamped").length - 1).toBe(2);
+    // unstamped: told on the skip branch AND on the yes branch (the read-failure sentence of a yes that came back with nothing), in both prompts
+    expect(r.split("if the result carries unstamped, say that sentence after the lines, or instead of them when there are none").length - 1).toBe(2);
+    expect(r.split("unstamped").length - 1).toBe(4);
     expect(r.split(`\${holding.reportsBack ? ' — and because they were filed weeks ago add "or say skip."' : ""}`).length - 1).toBe(2);
     const tool = DATA_TOOLS.find((t) => t.name === "read_my_updates") as { description: string; input_schema: { properties: Record<string, unknown> } };
     expect(Object.keys(tool.input_schema.properties)).toEqual(["skip"]);
     expect(tool.description).toContain("a crew daily report is never skipped");
+    expect(tool.description).toContain("If the result carries `unstamped`, say that sentence after the lines, or instead of them when there are none.");
     expect(read("src/app/(app)/notification-actions.ts")).toContain("holdingFor(user.id, createServiceClient(), supabase, await orgTimezone(supabase))");
   });
 });

@@ -24,7 +24,7 @@ vi.mock("../resolve-id", () => ({
   resolveJobId: vi.fn(async (_s: unknown, v: string | null) => {
     if (v == null || !v.trim()) return { id: null };
     // The resolver's own sentence for zero matches (resolve-id.ts), word for word.
-    return state.resolved.get(v) ?? { error: `No job named "${v}" — is it spelled right, or should I create it?` };
+    return state.resolved.get(v) ?? { error: `No job named "${v}" — is it spelled right?` };
   }),
   resolveProfileId: vi.fn(async (_s: unknown, v: string | null) => ({ id: v })),
 }));
@@ -81,7 +81,7 @@ describe("time.clockIn resolves a spoken job name before the punch", () => {
   it("a name that matches no job ASKS and never punches (the app must not pick instead)", async () => {
     const { timeActions } = await import("./time");
     const res = await timeActions["time.clockIn"].handler({ job_id: "Thistlewood" } as any, {} as any);
-    expect(res).toEqual({ ok: false, error: 'No job named "Thistlewood" — is it spelled right, or should I create it?' });
+    expect(res).toEqual({ ok: false, error: 'No job named "Thistlewood" — is it spelled right?' });
     expect(state.punches).toHaveLength(0);
   });
 

@@ -76,7 +76,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     // and the service client for a tech's own report rows); it never reaches runDataTool.
     name: "read_my_updates",
     description:
-      "Hand over what Nort is holding for this person — the updates on things they reported and the crew's unread daily reports — and mark them heard. Call ONLY after they say yes / now / go ahead to 'want them now?'. With skip=true (they said skip / drop them / don't need them) the updates on things THEY reported are marked heard WITHOUT being read back; a crew daily report is never skipped (it stays held — the result names who). Never call it to check whether there are any (the prompt already says). What's new in the APP itself is a different question: whats_new.",
+      "Hand over what Nort is holding for this person — the updates on things they reported and the crew's unread daily reports — and mark them heard. Call ONLY after they say yes / now / go ahead to 'want them now?'. With skip=true (they said skip / drop them / don't need them) the updates on things THEY reported are marked heard WITHOUT being read back; a crew daily report is never skipped (it stays held — the result names who). If the result carries `unstamped`, say that sentence after the lines, or instead of them when there are none. Never call it to check whether there are any (the prompt already says). What's new in the APP itself is a different question: whats_new.",
     input_schema: {
       type: "object",
       properties: {

@@ -87,7 +87,12 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var preview: ModelPreview?
 
-    /// Opens a staged file in Quick Look (the AR tab is Apple's); resolves when it closes, and the file goes.
+    static let couldNotOpenModel = "Open In AR couldn't open over this screen. Close what's open and try again."
+
+    /// Opens a staged file in Quick Look (the AR tab is Apple's); resolves when it closes, and the file
+    /// goes. It settles on every path: closed by the user or from outside, a screen mid-way in or out
+    /// (UIKit drops the present without an error: said, not hung), and a present that never came up
+    /// (said after 1.5 s, the staged copy goes, the next model is free to open).
     @objc func previewFile(_ call: CAPPluginCall) {
         guard let url = Self.ownFile(call.getString("path")) else {
             call.reject("That file isn't a staged model of this app's.")
@@ -103,6 +108,10 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
             while let presented = top.presentedViewController { top = presented }
+            guard !top.isBeingDismissed, !top.isBeingPresented else {
+                call.reject(Self.couldNotOpenModel)
+                return
+            }
             let preview = ModelPreview(url: url) { [weak self] in
                 self?.preview = nil
                 try? FileManager.default.removeItem(at: url)
@@ -110,6 +119,12 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             self.preview = preview
             top.present(preview.controller, animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak preview] in
+                guard let self, let preview, preview.controller.presentingViewController == nil, preview.claim() else { return }
+                self.preview = nil
+                try? FileManager.default.removeItem(at: url)
+                call.reject(Self.couldNotOpenModel)
+            }
         }
     }
 
@@ -188,7 +203,9 @@ public class ScanPlugin: CAPPlugin, CAPBridgedPlugin {
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
                 try handle.seek(toOffset: UInt64(offset))
-                let data = handle.readData(ofLength: length)
+                // The throwing read: readData(ofLength:) raises an Objective-C exception on an I/O
+                // error that Swift cannot catch (the app would abort instead of reaching the catch).
+                let data = try handle.read(upToCount: length) ?? Data()
                 call.resolve(["data": data.base64EncodedString(), "bytes": data.count, "total": total])
             } catch {
                 call.reject("Couldn't read the scan file (\(error.localizedDescription)).")
@@ -1965,8 +1982,10 @@ final class Scan3DViewController: ScanViewController, ARSessionDelegate {
 // MARK: - Quick Look for a model (Open In AR)
 
 /// Holds a QLPreviewController and its one file for as long as it is up; the closure runs on dismiss.
+/// The answer is given ONCE: whoever reaches `claim()` first (the user's close, a dismissal from
+/// outside, or the plugin's "never came up" timer) owns it.
 final class ModelPreview: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
-    let controller = QLPreviewController()
+    let controller = ModelPreviewController()
     private let url: URL
     private let closed: () -> Void
     private var done = false
@@ -1977,13 +1996,33 @@ final class ModelPreview: NSObject, QLPreviewControllerDataSource, QLPreviewCont
         super.init()
         controller.dataSource = self
         controller.delegate = self
+        controller.gone = { [weak self] in self?.dismissed() }
+    }
+
+    func claim() -> Bool {
+        guard !done else { return false }
+        done = true
+        return true
     }
 
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
     func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { url as NSURL }
-    func previewControllerDidDismiss(_ controller: QLPreviewController) {
-        guard !done else { return }
-        done = true
+    func previewControllerDidDismiss(_ controller: QLPreviewController) { dismissed() }
+
+    private func dismissed() {
+        guard claim() else { return }
         closed()
+    }
+}
+
+/// Quick Look tells its delegate only about a close the USER made; a dismissal from outside (the
+/// stack under it taken down) is silent, and the page's call would never settle. This hears both.
+final class ModelPreviewController: QLPreviewController {
+    var gone: (() -> Void)?
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Covered by something of Quick Look's own (the AR view) is still presented: not a close.
+        if isBeingDismissed || presentingViewController == nil { gone?() }
     }
 }

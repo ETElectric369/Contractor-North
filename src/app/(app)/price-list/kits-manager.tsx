@@ -494,7 +494,7 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
         <ImportKitsButton />
         {!addOpen && (name.trim() || category.trim()) && (
           <span className="text-xs text-slate-500">
-            The kit you started{name.trim() ? ` (${name.trim().slice(0, 40)})` : ` (category ${category.trim().slice(0, 30)})`} is kept. Add New Kit picks it back up.
+            The kit you started{name.trim() ? ` (${name.trim().slice(0, 40)})` : ` (scope ${category.trim().slice(0, 30)})`} is kept. Add New Kit picks it back up.
           </span>
         )}
       </div>

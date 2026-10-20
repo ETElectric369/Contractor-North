@@ -71,7 +71,9 @@ export type ResolveOpts = {
  *  · a uuid                            → { id: value } UNCHANGED (existence still checked downstream)
  *  · a placeholder token              → { error: "That looks like a placeholder…" }
  *  · a name, EXACTLY one match        → { id }
- *  · a name, ZERO matches             → { error: 'No <thing> named "…" — spelled right, or create it?' }
+ *  · a name, ZERO matches             → { error: 'No <thing> named "…" — is it spelled right?' }
+ *    (2026-10-19: it used to add "or should I create it?" — an offer a tech cannot take up, and a
+ *    refusal names ONE action; Nort offers to create a thing himself only when he holds that verb)
  *  · a name, TWO+ matches             → { error: 'Several <thing> match "…" — which one?' }
  *
  * The lookup runs through the passed RLS-scoped client, so it can only ever see (and match)
@@ -135,7 +137,7 @@ export async function resolveEntityId(
   if (!escaped) {
     // The name was ONLY structural/punctuation characters — nothing to match on, and nothing
     // worth a literal lookup either (no record is named "(),:").
-    return { error: `No ${thing} named "${raw}" — is it spelled right, or should I create it?` };
+    return { error: `No ${thing} named "${raw}" — is it spelled right?` };
   }
 
   // 1) EXACT match, across the name columns (OR'd). ilike with no wildcards is a
@@ -166,7 +168,7 @@ export async function resolveEntityId(
 
   // Nothing matched either way.
   return {
-    error: `No ${thing} named "${raw}" — is it spelled right, or should I create it?`,
+    error: `No ${thing} named "${raw}" — is it spelled right?`,
   };
 }
 

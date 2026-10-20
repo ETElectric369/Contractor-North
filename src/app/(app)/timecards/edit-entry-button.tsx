@@ -19,6 +19,7 @@ import { StopClockSheet } from "./stop-clock-sheet";
 import { COPY_TO_SOMEONE_ELSE, DuplicateEntryButton } from "./duplicate-entry-button";
 import { deleteConfirmWords, type DeletingPiece } from "./delete-words";
 import { clockDoorWords } from "@/lib/long-shift";
+import { withoutHeldCrumb } from "@/lib/held-crumb";
 
 /**
  * WHERE THIS SHIFT'S TIME CAME FROM, SAID IN THE EDITOR (0168: DISCLOSURE IS THE GUARD).
@@ -280,7 +281,7 @@ export function EditEntryButton({
   // save must never silently clear a supervisor override back to base pay.
   const [rate, setRate] = useState(entry.rate_override == null ? 0 : Number(entry.rate_override));
   const [rateDirty, setRateDirty] = useState(false);
-  const [notes, setNotes] = useState(entry.notes ?? "");
+  const [notes, setNotes] = useState(withoutHeldCrumb(entry.notes));
   // Pay-rate guardrails: anchor the free Rate input to the selected person's REAL
   // base rate, and trip a non-blocking amber warning when the typed value is their
   // BILL rate — the $75-in-the-pay-slot mistake can never happen silently again.
@@ -328,7 +329,7 @@ export function EditEntryButton({
     lunchMin !== (entry.lunch_minutes ?? 0) ||
     miles !== (entry.miles ?? 0) ||
     rateUnsaved ||
-    notes !== (entry.notes ?? "");
+    notes !== withoutHeldCrumb(entry.notes);
 
   function save() {
     setError(null);

@@ -405,9 +405,10 @@ export const timeActions: Record<string, ActionDef> = {
       const { data: me } = await supabase.auth.getUser();
       const meId = me?.user?.id;
       if (!meId) return { ok: false, error: "Not signed in." };
-      const job = await resolveJobId(supabase, i.job_id ?? null);
-      if ("error" in job) return { ok: false, error: job.error };
-      if (!job.id) return { ok: false, missingFields: ["job_id"], error: "Which job are you switching to?" };
+      // THE PUNCH FIRST, THE JOB SECOND (2026-10-19). With no shift running there is nothing to
+      // switch, whatever was said — and the refusal has to say THAT, the true state, not "No job
+      // named 'just no job'" from the resolver, after which Nort told the person where he was on
+      // the clock from memory, a minute after the screen had closed the punch.
       const { data: open } = await supabase
         .from("time_entries")
         .select("id, notes, job_id")
@@ -415,6 +416,9 @@ export const timeActions: Record<string, ActionDef> = {
         .eq("status", "open")
         .maybeSingle();
       if (!open) return { ok: false, error: "You're not clocked in." };
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      if (!job.id) return { ok: false, missingFields: ["job_id"], error: "Which job are you switching to?" };
       const wasOn = (open as { job_id?: string | null }).job_id ?? null;
       const res = await switchJob({
         entry_id: (open as { id: string }).id,

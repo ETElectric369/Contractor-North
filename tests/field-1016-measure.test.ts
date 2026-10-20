@@ -152,10 +152,11 @@ describe("the wiring, pinned", () => {
     expect(fn).toContain("queueCapture({ measures: next });");
     expect(fn).toContain("await upload([r.photo], { caption: r.caption, about: label });");
     expect(fn).toContain("document.getElementById(`measure-label-${id}`)?.focus()");
-    expect(insp).toContain("async function upload(files: File[], extra?: Partial<CapturePhotoMeta>): Promise<string[]>");
+    // (cn-v1123: a third argument, the files a kept 3D model already has in storage; Measure never passes it)
+    expect(insp).toContain("async function upload(files: File[], extra?: Partial<CapturePhotoMeta>, landed?: CapturePhoto[]): Promise<string[]>");
     expect(insp).toContain("...(extra ?? {}), ...(forTask ? { task_id: forTask } : {})");
     // The upload writes the list as it stands when it FINISHES (refs), never a stale copy.
-    expect(insp).toContain("const next = [...photosRef.current, ...added];\n      photosRef.current = next;");
+    expect(insp).toContain("const next = [...photosRef.current, ...added.filter((a) => !photosRef.current.some((p) => p.path === a.path))];\n      photosRef.current = next;");
     expect(insp).toContain("const meta = { ...photoMetaRef.current };");
   });
 });

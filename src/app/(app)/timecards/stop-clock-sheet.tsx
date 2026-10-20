@@ -37,6 +37,7 @@ import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
 import { LONG_SHIFT_PHRASE, clockDoorWords, clockedOutWords, forgottenReason, stopProblem } from "@/lib/long-shift";
 import type { JobCode } from "@/lib/types";
+import { withoutHeldCrumb } from "@/lib/held-crumb";
 import { stopShift, updateOpenEntry } from "../timeclock/actions";
 
 export interface StopClockEntry {
@@ -140,7 +141,7 @@ export function StopClockSheet({
   const [lunchMin, setLunchMin] = useState(entry.lunch_minutes ?? 0);
   const [jobId, setJobId] = useState(entry.job_id ?? "");
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
-  const [notes, setNotes] = useState(entry.notes ?? "");
+  const [notes, setNotes] = useState(withoutHeldCrumb(entry.notes));
 
   // An ordinary clock-out's stop time is "now" until a person touches it: it follows the minute hand,
   // so a sheet left open while the phone rang still clocks him out at the moment of the tap's
@@ -205,7 +206,7 @@ export function StopClockSheet({
     () =>
       (jobId || "") !== (entry.job_id ?? "") ||
       (jobCode || "") !== (entry.job_code ?? "") ||
-      notes !== (entry.notes ?? ""),
+      notes !== withoutHeldCrumb(entry.notes),
     [jobId, jobCode, notes, entry.job_id, entry.job_code, entry.notes],
   );
 
@@ -245,7 +246,7 @@ export function StopClockSheet({
       const patch: { id: string; job_id?: string | null; job_code?: string | null; notes?: string } = { id: entry.id };
       if ((jobId || "") !== (entry.job_id ?? "")) patch.job_id = jobId || null;
       if ((jobCode || "") !== (entry.job_code ?? "")) patch.job_code = jobCode || null;
-      if (notes !== (entry.notes ?? "")) patch.notes = notes;
+      if (notes !== withoutHeldCrumb(entry.notes)) patch.notes = notes;
       let res: { ok: boolean; error?: string };
       try {
         res = await updateOpenEntry(patch);
