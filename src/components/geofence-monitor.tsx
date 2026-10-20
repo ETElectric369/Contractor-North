@@ -13,8 +13,19 @@ import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
 import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
-import { armFence, disarmFence, fenceReadiness, onFenceExit, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
+import { armFence, disarmFence, fenceReadiness, onFenceExit, shellMayReadLocation, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
+import { trace } from "@/lib/nort/trace";
 import type { GeoPoint } from "@/lib/types";
+
+/**
+ * May the fence read the phone's location without a tap? Off the shell, the web rule (geo.ts: a live
+ * grant, never a read in "prompt" — the installed PWA silently denies an off-gesture prompt and it can
+ * persist). Inside the shell, the phone's own answer (native-geofence shellMayReadLocation): the app
+ * holds location permission itself, so a voice punch's fence can take the fix that adopts its site.
+ */
+async function mayReadLocation(): Promise<boolean> {
+  return (await shellMayReadLocation()) ?? ((await geoPermission()) === "granted");
+}
 
 /** Great-circle distance in meters. */
 function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -553,7 +564,7 @@ export function GeofenceMonitor({
     let stop: () => void = () => {};
     const arm = async () => {
       if (disposed || doneRef.current) return;
-      if ((await geoPermission()) !== "granted") {
+      if (!(await mayReadLocation())) {
         if (!warnedGate) {
           warnedGate = true;
           console.warn("[geofence] location not granted yet — live exit tracking waits for the first granted fix");
@@ -563,6 +574,7 @@ export function GeofenceMonitor({
       if (disposed || doneRef.current) return;
       stop();
       stop = watchPosition(onFix, onErr, opts);
+      trace("fence watch", "armed");
     };
     void arm();
     // iOS quietly kills the watch when the PWA suspends — re-arm it on every return
@@ -601,7 +613,9 @@ export function GeofenceMonitor({
         // installed PWA silently denies and can PERSIST. Gate on granted (live or memoized by the
         // clock-in tap's fix) and hand the throttle slot back, so the first wake after the grant
         // isn't muted for 60s.
-        if ((await geoPermission()) !== "granted") {
+        const may = await mayReadLocation();
+        trace("fence check", `${may ? "may read" : "no read"} anchor=${typeof anchorLat === "number" ? "yes" : "none"}`);
+        if (!may) {
           if (lastWakeCheckRef.current === now) lastWakeCheckRef.current = 0;
           return;
         }
@@ -624,13 +638,16 @@ export function GeofenceMonitor({
           const fromMs = Math.max(isNaN(ciMs) ? 0 : ciMs, tripStartMsRef.current || 0);
           if (!fromMs || now - fromMs > adoptWindowMs(switched)) {
             // NOTHING SILENT: the window closed with no anchor, so the fence is off for this shift.
+            trace("fence window closed");
             if (fromMs && !cancelled) setAnchorLost(true);
             return;
           }
           const r = await getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
+          trace("fence fix", r.status === "ok" ? `ok acc=${Math.round(r.accuracy ?? 0)}` : r.status);
           if (cancelled || doneRef.current || r.status !== "ok" || (r.accuracy ?? 0) > 150) return;
           const fix = { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy };
           const res = await adoptGeofenceAnchor(entryId, fix);
+          trace("fence adopt", res.ok ? "ok" : "refused");
           if (!cancelled && res.ok) setAnchor(fix); // arms the live watch
           return;
         }

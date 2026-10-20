@@ -73,6 +73,23 @@ export async function fenceReadiness(): Promise<FenceReadiness | null> {
   }
 }
 
+/**
+ * THE SHELL'S OWN ANSWER (2026-10-20). Inside the app the WebView's Permissions API reports "prompt"
+ * for the site's geolocation even after location was allowed, and the web rule (geo.ts: never read
+ * off-gesture in "prompt", because the installed PWA silently denies such a prompt and it can persist)
+ * then kept a voice punch's fence from ever asking for the fix that adopts its site — five minutes of
+ * screen-on, no fix asked, no anchor, no arm. The shell holds the phone's location permission itself,
+ * the one the native fence reads, so there a silent read is safe whenever the app may use location at
+ * all. null off the shell, or while the phone has not answered yet (the caller falls back to the web
+ * rule); false when the phone said no or regions are unavailable.
+ */
+export async function shellMayReadLocation(): Promise<boolean | null> {
+  if (!plugin()) return null;
+  const r = await fenceReadiness();
+  if (r === null) return null;
+  return r === "ready" || r === "whenInUse";
+}
+
 export async function disarmFence(): Promise<void> {
   const p = plugin();
   if (!p) return;
