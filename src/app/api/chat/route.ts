@@ -28,7 +28,8 @@ import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
-import { envelope, stripMarkerChar, HOLDING_OPEN, HOLDING_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
+import { versionNumber } from "@/lib/release-notes";
+import { envelope, stripMarkerChar, HOLDING_OPEN, HOLDING_CLOSE, WROTE_OPEN, WROTE_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
 import { screenPromptBlock } from "@/lib/nort/screens";
 import { doorContextLines, seenLines } from "@/lib/nort/door-context";
 
@@ -514,7 +515,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     // calling ANY tool — nothing was saved anywhere. These two rules close both halves of that hole.
     systemPrompt +=
       "\n\nWRITE IT DOWN: when the user gives you an idea, a feature request, an app suggestion, a note, or any thought to keep ('capture this', 'write this down', 'remember this idea') — call capture.quick with the FULL text; it saves instantly to Needs You, on their My Day, for later filing. Use it too whenever they describe something you have no other tool for but that clearly shouldn't be lost." +
-      "\n\nTHE HONESTY RULE (absolute): NEVER say 'captured', 'saved', 'added', 'done', or read back a record as if it exists unless a tool call actually SUCCEEDED in this conversation. If you have no tool for what they asked, say so plainly in one sentence and offer capture.quick so the thought still lands somewhere real. A confident claim with no write behind it is the worst thing you can do — it silently loses their work. Corollary: never claim a LINK you didn't write — 'attached to John' / 'pinned to the job' is true only if that exact id was an argument of a call that succeeded, or a write that succeeded says it made that link in its `recorded` line (customer.create links the one visit you just booked for that person and says so); a missing link gets ADDED (quote.setCustomer, quote.attachJob, appointment.linkCustomer), the document never re-created. Corollary 2 (edits): after you change line items, the NEW TOTAL is real ONLY if you RE-READ the record (get_quote) after the write tools returned ok — do NOT do the arithmetic in your head and report that figure as saved. Write → get the ok → re-read → THEN read back the real total (and show_card it). If you run low on tool rounds, prioritize the write over the readback: it's better to say 'saved — pull it up to see the new total' than to recite a total you never confirmed." +
+      "\n\nTHE HONESTY RULE (absolute) is the deeds law above — a deed is a tool result in THIS turn, never your word. Here that means: never say 'captured', 'saved', 'added', 'done', or read back a record as if it exists without that ok; and when you have no tool for a thought they want kept, say so in one sentence and offer capture.quick so it still lands somewhere real. Corollary: never claim a LINK you didn't write — 'attached to John' / 'pinned to the job' is true only if that exact id was an argument of a call that succeeded, or a write that succeeded says it made that link in its `recorded` line (customer.create links the one visit you just booked for that person and says so); a missing link gets ADDED (quote.setCustomer, quote.attachJob, appointment.linkCustomer), the document never re-created. Corollary 2 (edits): after you change line items, the NEW TOTAL is real ONLY if you RE-READ the record (get_quote) after the write tools returned ok — do NOT do the arithmetic in your head and report that figure as saved. Write → get the ok → re-read → THEN read back the real total (and show_card it). If you run low on tool rounds, prioritize the write over the readback: it's better to say 'saved — pull it up to see the new total' than to recite a total you never confirmed." +
       // The Clover night (2026-07-01): one estimate saved three times (E-009/010/011) + three
       // calls failed on names/placeholders passed as ids. These two rules close both holes.
       "\n\nSAVE ONCE: a document already saved this conversation is NEVER created again — a later 'save it' about the same doc means confirm its number and EDIT it (quote.addItem/updateItem/deleteItem, quote.setType, quote.setCustomer, quote.attachJob). Duplicate drafts cost the user cleanup and trust." +
@@ -818,6 +819,8 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       // mass-create — bounds the blast radius of the tier-1 write exposure.
       const MAX_WRITES = 3;
       let writeCount = 0;
+      // The registry writes that ran and said ok this turn, for the page under the chat (WROTE).
+      const wroteActions: string[] = [];
       // The model's text before a tool call and its text after it are two blocks the stream
       // simply concatenated — "I'll pull that job's numbers.J-011, 13897 Honeysuckle" is what
       // the 2026-09-11 transcript holds, and what the screen showed. One paragraph break between
@@ -1050,6 +1053,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                   // invents that this list doesn't carry is dropped in silence. The allowlist lives
                   // in lib/actions/agent-tool-result so a test can read what Nort is handed.
                   const body = agentToolResultBody(res, switched.dropped);
+                  if (res.ok && !readOnlyAction) wroteActions.push(actionName);
                   // A registry READ is a database read like runDataTool's (time.listEntries hands
                   // back job and person names), so it gets the same fence (audit v994 TL4). A
                   // write's result is the app's own words about what it did, and stays bare.
@@ -1127,6 +1131,10 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             emit("\n\n[Reached the tool-call limit — answering with what I have.]");
           }
         }
+        // WHAT THIS TURN WROTE: the page under the chat re-reads once (the fence, the clock), never
+        // for a turn that only read or only proposed. Only to a bundle that strips the block: a tab
+        // still on an older build would show it as text and speak it (skeptic #29).
+        if (wroteActions.length && (versionNumber(phoneVersion) ?? 0) >= 1122) emit(envelope(WROTE_OPEN, { actions: wroteActions }, WROTE_CLOSE));
         // WHAT NORT STILL HOLDS, after this turn (0394): the phone's ring and its next greeting take
         // this over their own copy, so a hand-over clears them at once. Best-effort, two indexed reads.
         try {

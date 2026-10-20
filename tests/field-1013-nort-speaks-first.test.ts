@@ -191,7 +191,7 @@ describe("the doors (source pins)", () => {
     // the server's own count after every turn, taken over the phone's copy at once
     expect(read("src/lib/assistant-protocol.ts")).toContain('export const HOLDING_OPEN = "␞CN_HOLDING␞";');
     expect(c).toContain("if (liveHolding) setNortHolding(liveHolding);");
-    expect(c).toContain("for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, SCREEN_OPEN]) {");
+    expect(c).toContain("for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, WROTE_OPEN, SCREEN_OPEN]) {");
     const r2 = read("src/app/api/chat/route.ts");
     expect(r2).toMatch(/const left = await holdingFor\(user\.id, createServiceClient\(\), supabase, orgS\.timezone\);\s*emit\(envelope\(HOLDING_OPEN, left, HOLDING_CLOSE\)\);[\s\S]{0,200}controller\.close\(\);/);
     const a = read("src/app/(app)/notification-actions.ts");

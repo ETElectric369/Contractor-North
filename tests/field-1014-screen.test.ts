@@ -376,8 +376,8 @@ describe("the wiring, pinned", () => {
 
   it("the client strips the block from the words and performs each one once, in order, as it lands", () => {
     expect(chat).toContain('const sre = new RegExp(SCREEN_OPEN + "([\\\\s\\\\S]*?)" + SCREEN_CLOSE, "g");');
-    expect(chat).toContain('.replace(nre, "").replace(sre, "")');
-    expect(chat).toContain("for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, SCREEN_OPEN])");
+    expect(chat).toContain('.replace(nre, "").replace(wre, "").replace(sre, "")');
+    expect(chat).toContain("for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, WROTE_OPEN, SCREEN_OPEN])");
     const loop = chat.slice(chat.indexOf('full = "";\n      screenDoneRef.current = 0;'), chat.indexOf("// Speak completed sentences as they land"));
     expect(loop).toContain("const moves = screenBlocks(full);");
     expect(loop).toContain("while (screenDoneRef.current < moves.length)");

@@ -796,7 +796,7 @@ export async function runDataTool(
         if (input.status) q = q.eq("status", String(input.status));
         if (input.search) {
           const s = sanitize(input.search);
-          if (s) q = q.or(`name.ilike.%${s}%,job_number.ilike.%${s}%,description.ilike.%${s}%`);
+          if (s) q = q.or(`name.ilike.%${s}%,job_number.ilike.%${s}%,description.ilike.%${s}%,address.ilike.%${s}%`);
         }
         if (input.customer_id) q = q.eq("customer_id", String(input.customer_id)); // narrow to one customer's jobs
         const { data, error } = await q;

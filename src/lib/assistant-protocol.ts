@@ -104,6 +104,16 @@ export const HUD_CLOSE = "␞/CN_HUD␞";
 export const HOLDING_OPEN = "␞CN_HOLDING␞";
 export const HOLDING_CLOSE = "␞/CN_HOLDING␞";
 
+// WHAT THIS TURN WROTE (2026-10-19): the registry actions that ran and said ok, emitted once
+// before the holding count. The page under the chat re-reads on it (router.refresh): a punch Nort
+// made changes what the layout mounts (the site fence reads the open entry) and what the clock
+// screens show, and neither followed until the next navigation — Erik, a minute after a Nort
+// clock-out, watching the timeclock: "It just went off." Same block rules as HOLDING: the client
+// keeps the LAST complete block and strips it from the text; nothing in it is shown or spoken.
+export const WROTE_OPEN = "␞CN_WROTE␞";
+export const WROTE_CLOSE = "␞/CN_WROTE␞";
+export type AgentWrote = { actions: string[] };
+
 export type HudFact = {
   /** Short label, e.g. "gate code", "balance due", "hours today". */
   label: string;
@@ -375,7 +385,7 @@ export function directivePayload<T extends object>(full: string, marker: string)
   const at = full.indexOf(marker);
   if (at < 0) return null;
   let body = full.slice(at + marker.length);
-  for (const m of [HOLDING_OPEN, STATUS_OPEN, DRAFT_OPEN, HUD_OPEN, SCREEN_OPEN, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER]) {
+  for (const m of [HOLDING_OPEN, WROTE_OPEN, STATUS_OPEN, DRAFT_OPEN, HUD_OPEN, SCREEN_OPEN, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER]) {
     const cut = body.indexOf(m);
     if (cut >= 0) body = body.slice(0, cut);
   }

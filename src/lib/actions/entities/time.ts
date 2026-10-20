@@ -79,7 +79,7 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.clockIn",
     group: "time",
     label: "Clock in",
-    description: "Start the clock for the current user, optionally on a job — ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts. WHEN NO job_id IS GIVEN THE APP PICKS THE JOB ITSELF: if the result carries `warning`, REPEAT IT WORD FOR WORD — it names the job the app chose and nobody picked, and the person has to hear it before those hours bill the wrong customer.",
+    description: "Start the clock for the current user, optionally on a job. job_id is the job's uuid, OR the job's name, number or street address EXACTLY as the person said it ('12 Larkspur Lane', 'J-099') — the app resolves a name itself and asks when none or several match. WHEN THE PERSON NAMES A JOB, PASS IT: never leave job_id empty for a named job, because an empty job_id makes the app pick the job on its own. ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts. WHEN NO job_id IS GIVEN THE APP PICKS THE JOB ITSELF: if the result carries `warning`, REPEAT IT WORD FOR WORD — it names the job the app chose and nobody picked, and the person has to hear it before those hours bill the wrong customer. When the result carries `recorded`, say it: it names the job the punch is on.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       job_code: z.string().nullable().optional(),
@@ -88,9 +88,25 @@ export const timeActions: Record<string, ActionDef> = {
     auth: "any", // a tech clocks themselves in
     effect: "write",
     handler: async (i) => {
+      const supabase = await createClient();
+      // A NAMED JOB IS THE JOB (2026-10-19; Erik, screen locked: "clock me in on 12 Larkspur Lane" —
+      // the punch landed on Snowbell, the day's scheduled job). The model passed the name where a uuid belongs, the
+      // clock's visibility check (visibleJobIdOrNull) read a name as a job it could not see and
+      // dropped it, and a job-less punch is the app's to place: the one job he named was the one
+      // job it never went to. time.switchJob has resolved its name since 0288; the punch now goes
+      // through the same resolver — a uuid passes, a name resolves on exactly one match, none or
+      // several ASK (no-speculation: a hole asks, never guesses). An empty job_id still means the
+      // app picks, and says so below.
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
       // The backdate is a model-supplied wall-clock time — third sibling, same conversion.
-      const toUtc = i.clock_in_at ? await orgLocalConverter(await createClient()) : null;
-      const res = await clockIn({ job_id: i.job_id ?? null, job_code: i.job_code ?? null, gps: null, clock_in_at: (toUtc ? toUtc(i.clock_in_at ?? undefined) : null) ?? null });
+      const toUtc = i.clock_in_at ? await orgLocalConverter(supabase) : null;
+      const punched = await clockIn({ job_id: job.id, job_code: i.job_code ?? null, gps: null, clock_in_at: (toUtc ? toUtc(i.clock_in_at ?? undefined) : null) ?? null });
+      // THE JOB THE PUNCH IS ON, said back (skeptic #29): a name resolves on a single CONTAINS hit,
+      // so the person hears which job the words matched, and the deeds law has a result to quote.
+      // Best effort — a label that cannot be read leaves the punch's answer exactly as it was.
+      const onJob = punched.ok && job.id ? await jobSaidAs(supabase, job.id) : null;
+      const res = onJob ? { ...punched, recorded: `Clocked in on ${onJob}.` } : punched;
       // NOTHING SILENT AT THIS DOOR EITHER — AND THIS IS THE ONE DOOR THAT CANNOT SHOW A BUTTON, so
       // the sentence has to reach the model or nothing reaches the person at all. It comes from the
       // ONE function every other door calls (clock-told: tellAppChose), so Nort cannot word it
@@ -377,7 +393,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Switch job",
     description:
-      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. IT DOES ONE OF TWO THINGS AND THE RESULT SAYS WHICH. A punch that STARTED IN THE LAST FIFTEEN MINUTES (or has no job yet) MOVES OVER WHOLE: every minute of it lands on the new job, which is how a punch the app put on the wrong job gets fixed while it is fresh. After that it CUTS: the part so far closes as its own timecard entry, the clock keeps running on the new job, and the hours already worked STAY on the job they were worked on — so once a shift has been running a while this is NOT a way to correct a wrong job, and you say where that is done instead (My Day's Now card, Timeclock, or the office on Timecards). Never promise which one it will do before you call it. Announce what the result's `speak` says, word for word, including where any hours before a cut stayed.",
+      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. IT DOES ONE OF TWO THINGS AND THE RESULT SAYS WHICH. A punch that STARTED IN THE LAST FIFTEEN MINUTES (or has no job yet) MOVES OVER WHOLE: every minute of it lands on the new job, which is how a punch the app put on the wrong job gets fixed while it is fresh. After that it CUTS: the part so far closes as its own timecard entry, the clock keeps running on the new job, and the hours already worked STAY on the job they were worked on — so once a shift has been running a while this is NOT a way to correct a wrong job, and you say where that is done instead (My Day's Now card, Timeclock, or the office on Timecards; the office can also move a whole entry with time.fixEntry and its job_id, which asks first). Never promise which one it will do before you call it, and never say a punch moved unless this tool's result says so. Announce what the result's `speak` says, word for word, including where any hours before a cut stayed.",
     input: z.object({
       job_id: z.string(),
       job_code: z.string().nullable().optional(),

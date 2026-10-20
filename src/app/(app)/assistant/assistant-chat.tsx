@@ -18,8 +18,8 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import * as speech from "@/lib/voice";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, HOLDING_OPEN, HOLDING_CLOSE,
-  SCREEN_OPEN, SCREEN_CLOSE, screenBlocks, directivePayload,
-  type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard,
+  WROTE_OPEN, WROTE_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, screenBlocks, directivePayload,
+  type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard, type AgentWrote,
 } from "@/lib/assistant-protocol";
 import { performScreen } from "@/lib/nort/screen-driver";
 import { listNortDoors } from "@/lib/nort/doors";
@@ -32,7 +32,7 @@ const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 
 /** Pull the visible text + the latest live quote draft + the transient tool-status out of the raw
  *  stream so far. */
-function parseStream(full: string): { text: string; draft: AgentDraft | null; card: AgentHudCard | null; status: string | null; holding: NortHolding | null } {
+function parseStream(full: string): { text: string; draft: AgentDraft | null; card: AgentHudCard | null; status: string | null; holding: NortHolding | null; wrote: AgentWrote | null } {
   let draft: AgentDraft | null = null;
   const dre = new RegExp(DRAFT_OPEN + "([\\s\\S]*?)" + DRAFT_CLOSE, "g");
   const blocks = [...full.matchAll(dre)];
@@ -56,6 +56,16 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null; ca
       if (h && typeof h.reports === "number" && Array.isArray(h.dailyReports)) holding = h;
     } catch {}
   }
+  // What this turn wrote (the page re-reads on it) — the LAST complete block, like HUD.
+  let wrote: AgentWrote | null = null;
+  const wre = new RegExp(WROTE_OPEN + "([\\s\\S]*?)" + WROTE_CLOSE, "g");
+  const wblocks = [...full.matchAll(wre)];
+  if (wblocks.length) {
+    try {
+      const w = JSON.parse(wblocks[wblocks.length - 1][1]);
+      if (w && Array.isArray(w.actions)) wrote = { actions: w.actions.filter((a: unknown) => typeof a === "string") };
+    } catch {}
+  }
   // Transient tool-status ("Searching…"): show ONLY when it's the most recent thing in the stream
   // (nothing meaningful streamed after it yet), so it appears during the silent tool call and clears
   // the moment the agent's reply resumes.
@@ -65,20 +75,20 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null; ca
   let status: string | null = null;
   const lastClose = full.lastIndexOf(STATUS_CLOSE);
   if (lastClose >= 0) {
-    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").replace(hre, "").replace(nre, "").replace(sre, "").trim();
+    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").replace(hre, "").replace(nre, "").replace(wre, "").replace(sre, "").trim();
     if (!after) {
       const sb = [...full.matchAll(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"))];
       try { status = JSON.parse(sb[sb.length - 1][1]).label ?? null; } catch {}
     }
   }
-  let text = full.replace(dre, "").replace(hre, "").replace(nre, "").replace(sre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
-  // Drop a half-arrived draft/card/status/holding/screen block at the tail so raw JSON never flashes on screen.
-  for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, SCREEN_OPEN]) {
+  let text = full.replace(dre, "").replace(hre, "").replace(nre, "").replace(wre, "").replace(sre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
+  // Drop a half-arrived draft/card/status/holding/wrote/screen block at the tail so raw JSON never flashes on screen.
+  for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN, HOLDING_OPEN, WROTE_OPEN, SCREEN_OPEN]) {
     const p = text.indexOf(m);
     if (p >= 0) text = text.slice(0, p);
   }
   text = text.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0].split(PICK_MARKER)[0];
-  return { text, draft, card, status, holding };
+  return { text, draft, card, status, holding, wrote };
 }
 
 /** The Estimator — the live estimate building in front of you (the assistant's preview box). */
@@ -476,6 +486,32 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     return () => clearInterval(id);
   }, [streaming]);
   const router = useRouter();
+  // THE PAGE FOLLOWS A WRITE, with RefreshOnVisible's guards (skeptic #29, 2026-10-19). A refresh
+  // whose fetch fails is a FULL navigation in Next (fetch-server-response → mpaNavigation), which
+  // unmounts the chat and ends a voice session — the one thing a punch made from a locked screen
+  // must never cause. So: never offline; never under an open sheet (its back gesture breaks, the
+  // same rule RefreshOnVisible follows); and while the screen is dark, once, the moment it comes
+  // back. The fence it mounts waits that long — before this it waited for the next navigation.
+  const refreshWhenVisibleRef = useRef(false);
+  const refreshIfClear = () => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    if (document.body.classList.contains("modal-open")) return;
+    router.refresh();
+  };
+  const followWrite = () => {
+    if (document.visibilityState !== "visible") { refreshWhenVisibleRef.current = true; return; }
+    refreshIfClear();
+  };
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !refreshWhenVisibleRef.current) return;
+      refreshWhenVisibleRef.current = false;
+      refreshIfClear();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
   // Screen moves performed so far THIS turn (item 6): every complete block is performed exactly
   // once, in order, as it lands — the count resets with the stream.
   const screenDoneRef = useRef(0);
@@ -1077,8 +1113,15 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       turnSettled = true; // every byte arrived — the marker has done its job
       setStatus(null);
 
+      const settled = parseStream(full);
+      // THE PAGE FOLLOWS A WRITE (2026-10-19): a punch Nort made changes what the layout mounts (the
+      // site fence reads the open entry) and what the clock screens show, and neither followed until
+      // the next navigation. The server names what ran and said ok (WROTE); the page re-reads once,
+      // under followWrite's guards. The chat lives in the app layout and stays mounted, so the reply
+      // and the voice carry on.
+      if (settled.wrote?.actions.length) followWrite();
       // Directive markers (confirm / open-maps / contact-pick) come at the very end of the stream.
-      const visibleText = parseStream(full).text;
+      const visibleText = settled.text;
       // Each envelope is read up to the next block (directivePayload): the holding count rides at
       // the end of every turn, and reading the envelope "to the end of the stream" swallowed it —
       // no card, no spoken question, a plain-turn mic, and a "frozen" Nort on the lock screen.
@@ -1300,6 +1343,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     setStreaming(true);
     try {
       const res = await confirmAgentAction(c.name, c.input);
+      // A confirmed action is always a write: the page re-reads (a closed punch stands the fence down).
+      if (res.ok) followWrite();
       const msg = res.message || (res.ok ? "Done." : "That didn't work.");
       setMessages((m) => [...m, { role: "assistant", content: (res.ok ? "✓ " : "") + msg }]);
       if (voiceModeRef.current) say(msg, () => { if (voiceModeRef.current) startMic(); });

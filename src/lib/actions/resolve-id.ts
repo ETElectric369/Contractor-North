@@ -252,9 +252,12 @@ export function resolveContactId(supabase: ResolverClient, value: string | null 
 }
 
 /** Job: match on the job name OR its display number (J-012) — the number is exactly what
- *  Nort sees on the card and says out loud, so accepting it kills the "grab the real id" loop. */
+ *  Nort sees on the card and says out loud, so accepting it kills the "grab the real id" loop —
+ *  OR its street address (2026-10-19): from the truck a job is named by its street ("clock me in
+ *  on <street>"), and the app's own labels are customer · street once job codes are off. Several
+ *  jobs at one address still ASK; a street that matches nothing says so. */
 export function resolveJobId(supabase: ResolverClient, value: string | null | undefined): Promise<ResolveResult> {
-  return resolveEntityId(supabase, "jobs", value, { nameColumns: ["name", "job_number"], thing: "job" });
+  return resolveEntityId(supabase, "jobs", value, { nameColumns: ["name", "job_number", "address"], thing: "job" });
 }
 
 /** Quote / estimate: match on its display number (E-010 / Q-012) or title — same reason as

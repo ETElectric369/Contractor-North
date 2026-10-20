@@ -56,7 +56,7 @@ describe("class 2: model text can never assemble a marker; a directive's JSON ne
     expect(r).not.toContain('.split(SCREEN_OPEN).join("")');
     expect(r).not.toContain('.split(CONFIRM_MARKER).join("")');
     expect(r).not.toMatch(/[A-Z_]+_(OPEN|MARKER) \+ JSON\.stringify\(/);
-    expect(r.split("envelope(").length - 1).toBe(12);
+    expect(r.split("envelope(").length - 1).toBe(13); // 12 directives + the WROTE block (cn-v1122)
     expect(r).toContain("emit(envelope(HOLDING_OPEN, left, HOLDING_CLOSE));");
   });
 });
