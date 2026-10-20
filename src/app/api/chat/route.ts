@@ -19,6 +19,7 @@ import { rateLimited } from "@/lib/rate-limit";
 import { reportError } from "@/lib/observe";
 import { after } from "next/server";
 import { todayStrInTz } from "@/lib/tz";
+import { clockStateLine, type OpenClockRow } from "@/lib/nort/clock-state";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { holdingFor, readMyUpdates } from "@/lib/nort/updates";
 import { holdingPronoun, holdingWords } from "@/lib/nort/greeting";
@@ -357,6 +358,24 @@ export async function POST(req: Request) {
     const tz = orgS.timezone;
     const stamp = new Date().toLocaleString("en-US", { timeZone: tz, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
     volatilePrompt += `\n\nRIGHT NOW: ${stamp} (${tz}). Today is ${todayStrInTz(tz)} — derive EVERY date/time you pass to a tool ('today', 'tomorrow', 'Friday', 'right now', 'in an hour') from this, never from memory. Pass times as this company's LOCAL wall-clock time (YYYY-MM-DDTHH:MM, no Z, no offset); the app converts. When a write's result carries \`recorded\`, that is what was stored: confirm from it, and if its time differs from what the user asked, say so instead of confirming.`;
+  }
+  // YOUR CLOCK RIGHT NOW (2026-10-20). Twice in one night Nort told the person where he was on the
+  // clock from an earlier turn — once after the screen had closed the punch, once "already on the
+  // clock at …" with no tool call at all, a punch closed fifteen minutes before. The deeds law says
+  // read first; a law is words, and this is the dots (lib/nort/clock-state): the caller's own open
+  // punch, read fresh every turn and put in front of him, so there is nothing to remember. Volatile:
+  // per person, and it changes with every punch. A failed read is said as such, never as "not on
+  // the clock".
+  {
+    const { data: openRow, error: openErr } = await supabase
+      .from("time_entries")
+      .select("clock_in, job_id, jobs(job_number, name, address)")
+      .eq("profile_id", user.id)
+      .eq("status", "open")
+      .order("clock_in", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    volatilePrompt += clockStateLine(openErr ? undefined : (openRow as OpenClockRow), orgS.timezone, !!openErr);
   }
   // HOW THIS PERSON WANTS TO BE TALKED TO (0183). PER-PERSON, so it belongs in the VOLATILE block —
   // putting it in the cached prefix would key the cache per user instead of per org/role and throw
