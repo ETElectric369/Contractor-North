@@ -22,6 +22,7 @@ vi.mock("@/lib/staff-guard", () => ({ requireStaff: async () => ({ supabase: sta
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(), createServiceClient: () => state.db }));
 vi.mock("@/lib/stripe", () => ({
   billingEnabled: true,
+  stripeLivemode: () => false,
   getStripe: () => ({ paymentIntents: { retrieve: vi.fn(async () => state.pi) } }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));

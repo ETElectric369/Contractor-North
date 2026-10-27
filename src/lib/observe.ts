@@ -26,9 +26,27 @@ function dedupKey(s: string): string {
 export function reportError(where: string, e: unknown, extra?: Record<string, unknown>): void {
   try {
     console.error(`[${where}]`, errorMessage(e), extra ?? "");
-    logToDb(where, e, extra);
+    void logToDb(where, e, extra);
   } catch {
     /* never let reporting throw */
+  }
+}
+
+/**
+ * THE SAME REPORT, WAITED FOR (cn-v1129): a route that answers on the very tick it files — the
+ * Stripe webhook's refusals — can have its function frozen the moment the response is out, and
+ * a fire-and-forget write may never leave. This one awaits the sink's write, two seconds at most,
+ * and still never throws. Use it only where the caller is about to return with nothing after.
+ */
+export async function reportErrorAwaited(where: string, e: unknown, extra?: Record<string, unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    console.error(`[${where}]`, errorMessage(e), extra ?? "");
+    await Promise.race([logToDb(where, e, extra), new Promise<void>((r) => { timer = setTimeout(r, 2000); })]);
+  } catch {
+    /* never let reporting throw */
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -52,12 +70,12 @@ export function errorMessage(e: unknown): string {
 }
 
 /** Fire-and-forget upsert into error_events, deduped by a hash of where+message. */
-function logToDb(where: string, e: unknown, extra?: Record<string, unknown>): void {
+function logToDb(where: string, e: unknown, extra?: Record<string, unknown>): Promise<void> {
   try {
     const message = errorMessage(e).slice(0, 500);
     const key = dedupKey(`${where}::${message}`);
     const sb = createServiceClient();
-    void sb
+    return sb
       .rpc("record_app_error", {
         p_key: key,
         p_title: message || where,
@@ -67,6 +85,6 @@ function logToDb(where: string, e: unknown, extra?: Record<string, unknown>): vo
       })
       .then(() => {}, () => {}); // swallow — logging must never throw or block
   } catch {
-    /* never let reporting throw */
+    return Promise.resolve(); // never let reporting throw
   }
 }

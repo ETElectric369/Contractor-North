@@ -10,9 +10,17 @@ import { fakeDb } from "@/lib/bank-transfer-fake.test-util";
  *        async_payment_failed books nothing, ends the mark, and tells the office once.
  * Every write stands behind the org<->connected-account check the payment itself does.
  */
-const state = vi.hoisted(() => ({ db: null as any, event: null as any, pushes: [] as any[] }));
+const state = vi.hoisted(() => ({ db: null as any, event: null as any, pushes: [] as any[], sigError: null as string | null, noKey: false }));
 vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({ webhooks: { constructEvent: () => state.event } }),
+  getStripe: () => ({
+    ...(state.noKey ? (() => { throw new Error("STRIPE_SECRET_KEY is not configured."); })() : {}),
+    webhooks: {
+      constructEvent: () => {
+        if (state.sigError) throw new Error(state.sigError);
+        return state.event;
+      },
+    },
+  }),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => state.db }));
 // The real notifyPeople runs (the Bell records every push): its bell line goes into the fake
@@ -28,10 +36,11 @@ vi.mock("@/lib/push", () => ({
 vi.mock("@/lib/invoice-recalc", () => ({ recalcInvoice: vi.fn(async () => true) }));
 vi.mock("@/lib/revalidate-money", () => ({ revalidateMoney: vi.fn() }));
 vi.mock("@/lib/processor-fee-capture", () => ({ captureProcessorFee: vi.fn(async () => undefined) }));
-vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/observe", () => ({ reportError: vi.fn(), reportErrorAwaited: vi.fn(async () => {}) }));
 
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
 import { POST } from "./route";
+import { reportError, reportErrorAwaited } from "@/lib/observe";
 
 const ORG = "org-et";
 const ACCT = "acct_et";
@@ -228,5 +237,83 @@ describe("the webhook and a bank transfer", () => {
       expect(state.db.tables.pending_bank_transfers[0].status).toBe("cleared");
       expect(state.pushes).toHaveLength(pushed);
     });
+  });
+});
+
+/**
+ * A REFUSAL IS FILED (cn-v1129, the review's sink-01): a wrong or missing signing secret after a
+ * key change refuses every event, and until now the 400 was the only word. Each refusal keeps its
+ * response and files one row, waited for — counts, the header's own timestamp and Stripe's reason
+ * words; never the secret, the body or the signature. A POST with no signature header is not
+ * Stripe: answered, not filed.
+ */
+describe("a refused webhook is filed, never only answered", () => {
+  const BODY = '{"id":"evt_x"}';
+  const call = (headers: Record<string, string>) =>
+    POST(new Request("https://app.example.com/api/stripe/webhook", { method: "POST", body: BODY, headers }));
+  const filed = () => vi.mocked(reportErrorAwaited).mock.calls.filter((c) => c[0] === "stripe:webhook:refused");
+  const filedLoose = () => vi.mocked(reportError).mock.calls.filter((c) => c[0] === "stripe:webhook:refused");
+
+  beforeEach(() => {
+    state.sigError = null;
+    state.noKey = false;
+    vi.mocked(reportError).mockClear();
+    vi.mocked(reportErrorAwaited).mockClear();
+    vi.unstubAllEnvs();
+  });
+
+  it("a signature that matches no secret: 400 as before, and one waited-for row with counts, the header's t= and Stripe's words", async () => {
+    state.sigError = "No signatures found matching the expected signature for payload";
+    const res = await call({ "stripe-signature": "t=1700000000,v1=deadbeef" });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Webhook signature failed");
+    expect(filed()).toHaveLength(1);
+    expect(filedLoose()).toHaveLength(0); // waited for, never fire-and-forget on a path that returns at once
+    const [, err, extra] = filed()[0];
+    expect((err as Error).message).toBe("signature matched no secret");
+    expect(extra).toEqual({ secretsTried: 1, bodyChars: BODY.length, sigTimestamp: "1700000000", reason: state.sigError });
+    const words = JSON.stringify(extra);
+    expect(words).not.toContain("whsec_test");
+    expect(words).not.toContain("deadbeef");
+    expect(words).not.toContain("evt_x");
+  });
+
+  it("a header whose t= is absurdly long is not read as a timestamp", async () => {
+    state.sigError = "bad";
+    await call({ "stripe-signature": "t=" + "9".repeat(40) + ",v1=x" });
+    expect((filed()[0][2] as any).sigTimestamp).toBeNull();
+  });
+
+  it("no stripe-signature header at all: 400 and NOT filed (not Stripe; scanner noise)", async () => {
+    const res = await call({});
+    expect(res.status).toBe(400);
+    expect(filed()).toHaveLength(0);
+    expect(filedLoose()).toHaveLength(0);
+  });
+
+  it("no signing secret configured on the server: 503, and the row says so", async () => {
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "");
+    vi.stubEnv("STRIPE_CONNECT_WEBHOOK_SECRET", "");
+    const res = await call({ "stripe-signature": "t=1,v1=x" });
+    expect(res.status).toBe(503);
+    expect(filed()).toHaveLength(1);
+    expect((filed()[0][1] as Error).message).toBe("no webhook secret configured");
+    expect(filed()[0][2]).toEqual({ secretsTried: 0 });
+  });
+
+  it("no Stripe secret key on the server: 503 and its own row, never a row that blames the signature", async () => {
+    state.noKey = true;
+    const res = await call({ "stripe-signature": "t=1,v1=x" });
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain("STRIPE_SECRET_KEY");
+    expect(filed()).toHaveLength(1);
+    expect((filed()[0][1] as Error).message).toBe("no Stripe secret key configured");
+  });
+
+  it("a good signature files nothing under that name", async () => {
+    state.event = { id: "evt_ok", type: "charge.refunded", account: ACCT, data: { object: {} } };
+    const res = await call({ "stripe-signature": "t=1,v1=x" });
+    expect(res.status).toBe(200);
+    expect(filed()).toHaveLength(0);
   });
 });

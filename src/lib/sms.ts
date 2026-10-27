@@ -26,6 +26,29 @@ function twilioAuth(): { sid: string; user: string; pass: string } | null {
   return null;
 }
 
+/**
+ * DOES THE TWILIO CREDENTIAL AUTHENTICATE (cn-v1129, the keys-health door): one free read — the
+ * newest message, one page of one — with the same auth every text uses, on the same resource
+ * texting writes, so a standard-type API key that may not read the account record itself still
+ * proves itself here. No message is sent. Never throws.
+ */
+export async function twilioAccountCheck(): Promise<{ ok: boolean; status?: number; error?: string }> {
+  const auth = twilioAuth();
+  if (!auth) return { ok: false, error: "TWILIO_ACCOUNT_SID with an API key pair or auth token is not set" };
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${auth.sid}/Messages.json?PageSize=1`, {
+      headers: { Authorization: "Basic " + Buffer.from(`${auth.user}:${auth.pass}`).toString("base64") },
+      cache: "no-store",
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) return { ok: true, status: res.status };
+    const text = await res.text().catch(() => "");
+    return { ok: false, status: res.status, error: `Twilio ${res.status}: ${text.slice(0, 200)}` };
+  } catch (e) {
+    return { ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+  }
+}
+
 /** What this server holds for texting, as presence only (never a value). */
 export function smsEnv(): SmsEnv {
   return {

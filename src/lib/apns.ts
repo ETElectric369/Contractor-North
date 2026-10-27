@@ -69,6 +69,21 @@ function providerToken(): string {
   return jwt;
 }
 
+/**
+ * DOES THE SIGNING KEY SIGN (cn-v1129, the keys-health door): makes the provider token and sends
+ * nothing. Proves the .p8 parses as an EC key and the key and team ids are present — the three
+ * things a rotation can get wrong — without a push. Never throws; the error is Node's own words.
+ */
+export function apnsSignCheck(): { ok: true } | { ok: false; error: string } {
+  if (!apnsConfigured()) return { ok: false, error: "APNS_KEY_ID, APNS_TEAM_ID or APNS_KEY_P8 is not set" };
+  try {
+    providerToken();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+  }
+}
+
 export type ApnsResult =
   | { ok: true; env: ApnsEnv }
   /** The token is dead — a reinstall, a restore, or the app was deleted. Prune the row. */

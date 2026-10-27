@@ -7,7 +7,7 @@ import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
 import { CommandBar } from "@/components/command-bar";
 import { SetupHost } from "@/components/setup-host";
-import { billingEnabled } from "@/lib/stripe";
+import { billingEnabled, stripeConfigAlarm } from "@/lib/stripe";
 import { hasActiveAccess, isCompedOrg, graceDaysLeft } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
 import { orgTrade } from "@/lib/org-trade";
@@ -222,6 +222,8 @@ export default async function AppLayout({
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
   // The operator's own house org (COMPED_ORG_IDS) is never paywalled.
+  // A missing key in production is said once in the error sink (cn-v1129), never a silent open wall.
+  stripeConfigAlarm();
   if (billingEnabled && org && !hasActiveAccess(org) && !isCompedOrg(profile.org_id)) {
     redirect("/subscribe");
   }

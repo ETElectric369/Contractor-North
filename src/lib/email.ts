@@ -1,4 +1,5 @@
 import "server-only";
+import { reportError } from "@/lib/observe";
 
 /**
  * Send a transactional email via Resend. Returns { ok, error }.
@@ -53,27 +54,47 @@ export async function sendEmail(input: {
     return { ok: false, error: "Email isn't set up yet. Add RESEND_API_KEY to enable it." };
   }
 
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [input.to],
-      subject: input.subject,
-      html: input.html,
-      ...(input.replyTo ? { reply_to: input.replyTo } : {}),
-      ...(input.bcc && input.bcc.length ? { bcc: input.bcc } : {}),
-    }),
-  });
+  // A SEND THAT DID NOT GO IS FILED (cn-v1129, the review's integrations-05): the result was
+  // returned and two callers dropped it, and a dropped connection escaped as a throw. Now both
+  // land in the error sink the way a text's failure does (lib/sms), and the caller still gets
+  // { ok: false } instead of an exception.
+  let res: Response;
+  try {
+    res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [input.to],
+        subject: input.subject,
+        html: input.html,
+        ...(input.replyTo ? { reply_to: input.replyTo } : {}),
+        ...(input.bcc && input.bcc.length ? { bcc: input.bcc } : {}),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (e) {
+    reportError("email:send", e, { toDomain: domainOf(input.to) });
+    return { ok: false, error: "Email failed: the mail service could not be reached." };
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    // The sink carries the status and the recipient's DOMAIN: a subject names a person and an
+    // address names a customer, and neither belongs in an ops log or the console.
+    reportError("email:send", new Error(`Resend ${res.status}: ${text.slice(0, 300)}`), { toDomain: domainOf(input.to), status: res.status });
     return { ok: false, error: `Email failed: ${res.status} ${text}`.slice(0, 200) };
   }
   return { ok: true };
+}
+
+/** The part of an address after the @, for the ops log; never the person. */
+function domainOf(address: string): string {
+  const at = address.lastIndexOf("@");
+  return at >= 0 ? address.slice(at + 1).toLowerCase() : "";
 }
 
 /** Money formatter usable in email HTML (no React/Intl context needed). */

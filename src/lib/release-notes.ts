@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1129", date: "2026-10-27", line: "A refused Stripe webhook, a missing Stripe key in production and an email that did not send are filed in the error log now, and one admin check proves the main service keys still work." },
   { version: "cn-v1128", date: "2026-10-27", line: "Nort, the estimator and site chat run on the 5.5 models; the plan's full-estimate allowance is enforced (past it, the lighter model, said once); Time Clock sits on Money; My Day has All Reminders." },
   { version: "cn-v1127", date: "2026-10-26", line: "The schedule shows today's clocked time too: a punch still running draws from its clock-in to now and reads \"on the clock since\"; a block on today is judged only once its booked time has passed." },
   { version: "cn-v1126", date: "2026-10-26", line: "The error log no longer gets a row every time the phone locks and unlocks with the app open; only a Nort turn or a fence read that ran with the screen dark is reported." },

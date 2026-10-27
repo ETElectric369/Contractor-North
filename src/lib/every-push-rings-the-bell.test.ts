@@ -131,7 +131,7 @@ vi.mock("@/lib/push", () => ({
     return push.pushed ?? (a[0] as string[]).filter((id) => id !== "office-2");
   },
 }));
-vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/observe", () => ({ reportError: vi.fn(), reportErrorAwaited: vi.fn(async () => {}) }));
 
 describe("notifyPeople", () => {
   beforeEach(() => {

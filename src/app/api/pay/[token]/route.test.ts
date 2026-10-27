@@ -9,6 +9,7 @@ import { fakeDb } from "@/lib/bank-transfer-fake.test-util";
 const state = vi.hoisted(() => ({ db: null as any, create: null as any }));
 vi.mock("@/lib/stripe", () => ({
   billingEnabled: true,
+  stripeLivemode: () => false,
   getStripe: () => ({ checkout: { sessions: { create: state.create } } }),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => state.db, createClient: async () => state.db }));

@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 import { createClient } from "@/lib/supabase/server";
 import { dbError } from "@/lib/db-error";
-import { getStripe, billingEnabled } from "@/lib/stripe";
+import { getStripe, billingEnabled, stripeLivemode } from "@/lib/stripe";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { needsSendRefusal, sendDraftForPayment, type NeedsSend } from "@/lib/pay-door-send";
@@ -104,16 +104,8 @@ async function callerRole(supabase: Awaited<ReturnType<typeof createClient>>, us
   return String((data as { role?: string | null } | null)?.role ?? "");
 }
 
-/**
- * Test keys → Stripe's SIMULATED Tap to Pay reader (works in the Simulator, needs no Apple
- * entitlement); live keys → the real one. The plugin's native default is `isTest: true`, which
- * would silently simulate in production, so the bridge always passes it explicitly from THIS
- * fact rather than trusting a default. Read from the key, not a flag, because a flag drifts.
- */
-function stripeLivemode(): boolean {
-  const key = process.env.STRIPE_SECRET_KEY ?? "";
-  return !!key && !/^(sk|rk)_test_/.test(key);
-}
+// stripeLivemode (test key → the simulated reader; live key → the real one) lives in lib/stripe
+// since cn-v1129, read from the key itself because a flag drifts.
 
 /**
  * WHO THE PHONE IS SIGNED IN AS — the stamp the bridge keys its page-long caches to

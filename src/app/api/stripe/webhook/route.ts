@@ -7,7 +7,7 @@ import { claimedInvoice, recordStripeInvoicePayment, tapPaymentKey, TAP_VIA, typ
 import { declineReason } from "@/lib/stripe-decline-words";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { tierForPriceId } from "@/lib/plans";
-import { reportError } from "@/lib/observe";
+import { reportError, reportErrorAwaited } from "@/lib/observe";
 import { checkoutPaymentMethod, isBankCheckout, noteTransferStarted, resolveTransfer } from "@/lib/bank-transfer";
 import type Stripe from "stripe";
 
@@ -57,25 +57,49 @@ export async function POST(req: Request) {
   const secrets = [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(
     (s): s is string => !!s,
   );
+  // A REFUSAL IS FILED, NEVER ONLY ANSWERED (cn-v1129, the review's sink-01): a wrong or missing
+  // signing secret after a key change means every subscription event and every customer card
+  // payment is refused here, and until now nobody heard it. Each refusal keeps its response
+  // (Stripe needs the 400/503 to retry and record) AND files one row, WAITED FOR, because this
+  // function answers on the same tick and a fire-and-forget write can freeze with it. The row
+  // holds counts, the header's own timestamp and Stripe's reason words — never the secret, the
+  // body or the signature. The sink dedups by where::message, so a storm is one row whose count
+  // climbs. A POST with no signature header at all is not Stripe (Stripe always signs): scanner
+  // noise, answered 400 and not filed, so the real rows stay readable.
   if (secrets.length === 0) {
+    await reportErrorAwaited("stripe:webhook:refused", new Error("no webhook secret configured"), { secretsTried: 0 });
     return new Response("STRIPE_WEBHOOK_SECRET not configured", { status: 503 });
   }
 
   const sig = req.headers.get("stripe-signature");
   if (!sig) return new Response("Missing signature", { status: 400 });
 
+  let stripe: Stripe;
+  try {
+    stripe = getStripe();
+  } catch {
+    await reportErrorAwaited("stripe:webhook:refused", new Error("no Stripe secret key configured"), { secretsTried: secrets.length });
+    return new Response("STRIPE_SECRET_KEY not configured", { status: 503 });
+  }
+
   const body = await req.text();
   let event: Stripe.Event | null = null;
   let lastErr = "";
   for (const secret of secrets) {
     try {
-      event = getStripe().webhooks.constructEvent(body, sig, secret);
+      event = stripe.webhooks.constructEvent(body, sig, secret);
       break;
     } catch (e: any) {
       lastErr = e?.message ?? "invalid signature";
     }
   }
   if (!event) {
+    await reportErrorAwaited("stripe:webhook:refused", new Error("signature matched no secret"), {
+      secretsTried: secrets.length,
+      bodyChars: body.length,
+      sigTimestamp: /(?:^|,)t=(\d{1,12})(?:,|$)/.exec(sig)?.[1] ?? null,
+      reason: lastErr.slice(0, 120),
+    });
     return new Response(`Webhook signature failed: ${lastErr}`, { status: 400 });
   }
 
