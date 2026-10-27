@@ -36,6 +36,7 @@ import {
   ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
+import { titleCase } from "@/lib/utils";
 import { JOB_STATUSES, jobStatusLabel, type JobStatus } from "./job-status";
 import { featureOn, type FeatureKey, type FeatureMap } from "./features";
 
@@ -98,9 +99,8 @@ export interface DockSection {
   whenOnly?: { rowId: string; label: string };
 }
 
-/** First-letter cap for generated labels ("in progress" → "In progress"). The words stay
- *  single-sourced in jobStatusLabel so the dock's copy can't drift from the spine again. */
-const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** The Jobs rows' words stay single-sourced in jobStatusLabel (Title Cased here, Erik's law for
+ *  clickables since cn-v1128) so the dock's copy can't drift from the spine again. */
 
 /** Icon per job status — the one presentation-only bit the job-status spine doesn't carry. */
 const JOB_STATUS_ICONS: Record<JobStatus, LucideIcon> = {
@@ -152,7 +152,7 @@ export const DOCK: DockSection[] = [
     icon: Clock,
     href: "/timeclock",
     techOnly: true,
-    children: [{ id: "ck-clock", label: "Timeclock", icon: Play, href: "/timeclock" }],
+    children: [{ id: "ck-clock", label: "Time Clock", icon: Play, href: "/timeclock" }],
   },
   {
     key: "sales",
@@ -192,7 +192,7 @@ export const DOCK: DockSection[] = [
       // cancelled, and a hand-written "Completed" vs canonical "complete". Guarded by dock.test.ts.
       ...JOB_STATUSES.map((s) => ({
         id: `j-${s}`,
-        label: capFirst(jobStatusLabel(s)),
+        label: titleCase(jobStatusLabel(s)), // Title Case, Erik's law (cn-v1128): To Be Scheduled, In Progress, On Hold
         icon: JOB_STATUS_ICONS[s],
         href: `/jobs?status=${s}`,
       })),
@@ -220,12 +220,15 @@ export const DOCK: DockSection[] = [
       // (its By Customer fold) and Payments (its Payments In fold) live inside it now; /billing/ar and
       // /payments redirect there, so they need no row of their own.
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
+      // TIME CLOCK, A ROW OF ITS OWN (cn-v1128): "Time Clock in Money beside Timecards", Erik
+      // 2026-10-26. Staff had no row anywhere (only the Now card's link and the palette), which the
+      // deep review named. The row lights itself, so Timecards no longer owns the route. A tech never
+      // sees this row; his /timeclock lights Clock. Two words, Title Case, as he spelled it. It owns
+      // its own detail routes (a split's page, /timeclock/<id>), which Timecards' owns used to cover.
+      { id: "m-clock", label: "Time Clock", icon: Clock, href: "/timeclock", staffOnly: true, owns: ["/timeclock"] },
       // Hours are money to the office (W1-08): Timecards moved here from the Clock tile, which is
-      // the crew's now. It owns /timeclock too, so staff on the Timeclock (reached from the Now
-      // card) light Money AND this row (activeRowHref rule 4) — "time clock point to money with
-      // timecards on the subnav", Erik 2026-09-30. A tech never sees this row, so his /timeclock
-      // lights Clock.
-      { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true, owns: ["/timeclock"] },
+      // the crew's now — "time clock point to money with timecards on the subnav", Erik 2026-09-30.
+      { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
       // Purchase Orders off: the row reads "Bills" and still owns /purchasing, so a PO opened by
       // a link lights Money (with the Off line on top).
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"], whenOff: { feature: "purchase_orders", label: "Bills" } },

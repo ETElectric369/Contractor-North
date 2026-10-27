@@ -123,7 +123,7 @@ export async function readWithModel(args: {
   const resp = await client.messages.create(
     {
       model,
-      max_tokens: 600,
+      max_tokens: 1500, // the 5.5 line may think inside the cap (cn-v1128)
       system: systemPrompt(categories),
       messages: [{ role: "user", content: `<page>\n${pageText}\n</page>\n\nReply with the JSON only.` }],
     },

@@ -4,7 +4,7 @@ import { rateLimited } from "@/lib/rate-limit";
 import { DEFAULT_MODEL } from "@/lib/anthropic";
 
 // Candidate models to probe when the configured one fails, best → most-available.
-const CANDIDATES = ["claude-opus-4-8", "claude-opus-4-5", "claude-sonnet-4-5"];
+const CANDIDATES = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
 
 async function tryModel(key: string, model: string) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {

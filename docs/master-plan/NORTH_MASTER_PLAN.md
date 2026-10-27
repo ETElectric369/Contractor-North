@@ -49,6 +49,8 @@ The thesis, in six bullets:
 
 ## 3. The tier ladder
 
+> **SUPERSEDED 2026-10-27.** The ladder that ships is `src/lib/plans.ts`: Handyman $59, Crew $129, Company $299, no per-seat charge, metered by full estimates a month (40 / 120 / unlimited), enforced since cn-v1128. The table below is the July draft, kept for history.
+
 Gate by business **shape**, not by holding revenue features hostage. Every tier keeps the full money pipeline and a write-capable assistant. Upgrades map to events in the customer's life: hire employee #1 → Crew; take on license-grade draw/compliance work → Shop. (Pricing architect's ladder, adopted verbatim; Handyman under $100 is law.)
 
 | | **Handyman** | **Crew** | **Shop** | **North Complete** |

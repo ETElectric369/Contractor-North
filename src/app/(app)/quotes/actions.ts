@@ -29,7 +29,8 @@ import {
 } from "@/lib/pricing/item-options";
 import { reviewAgainstBook, type BookReview } from "@/lib/pricing/book-review";
 import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
-import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
+import { recordAiUsage, aiSpendExceeded, currentOrgId, fullEstimatesThisMonth, orgPlanTier, noteEstimateRun, modelFor } from "@/lib/ai-cost";
+import { estimateTierFor, overFullEstimateAllowance, planByTier } from "@/lib/plans";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
@@ -1815,6 +1816,8 @@ export async function updateQuoteStatus(id: string, status: string) {
 async function runEstimatorTasks(opts: {
   client: ReturnType<typeof getAnthropic>;
   orgId: string | null;
+  /** The model this run prices on — the gate's answer (cn-v1128), never a constant. */
+  model: string;
   scope: string;
   trade: string;
   playbook: string | undefined;
@@ -1824,16 +1827,16 @@ async function runEstimatorTasks(opts: {
   levelPct: number | null;
   orgDefaultPct: number;
 }): Promise<{ items: DraftLineItem[]; questions: string[]; description: string }> {
-  const { client, orgId, scope, trade, playbook, rows } = opts;
+  const { client, orgId, model, scope, trade, playbook, rows } = opts;
   const msg = await client.messages.create({
-    model: DEFAULT_MODEL,
+    model: model,
     max_tokens: 8192,
     system: taskModePrompt({ trade, playbook }),
     messages: [{ role: "user", content: scope }],
   });
   // METERED (0162), into the same ledger and surface as the priced-lines path: one estimate is
   // one estimate on the bill whichever prompt it ran.
-  void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "estimator", usage: msg.usage as never });
+  void recordAiUsage({ orgId, model: model, surface: "estimator", usage: msg.usage as never });
   const text = msg.content
     .filter((b) => b.type === "text")
     .map((b) => (b as { text: string }).text)
@@ -1866,6 +1869,7 @@ async function runEstimator(
   content: any,
   markupPct?: number,
   laborRate?: number,
+  model: string = DEFAULT_MODEL,
 ): Promise<{ items: DraftLineItem[]; questions: string[]; description: string }> {
   const supabase = await createClient();
   const [{ data: org }, { data: book }] = await Promise.all([
@@ -1878,6 +1882,9 @@ async function runEstimator(
       .eq("archived", false)
       .eq("price_list_item_options.archived", false),
   ]);
+  // ONE RUN, ONE TICK (cn-v1128): counted here, past the gate and the input checks, so an empty
+  // scope or a refused upload never burns the month's allowance. Best-effort, never awaited.
+  void noteEstimateRun((org as { id?: string } | null)?.id);
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
   const rate = laborRateFor(laborRate, orgS.default_labor_rate); // THE one rule (lib/pricing/labor-rate)
@@ -1914,6 +1921,7 @@ async function runEstimator(
   // priced-lines path (mapEstimatorLine's labor branch) — a dictated rate is an instruction.
   if (typeof content === "string" && !catalogMode) {
     return runEstimatorTasks({
+      model,
       client,
       orgId: (org as { id?: string } | null)?.id ?? null,
       scope: content,
@@ -2016,7 +2024,7 @@ async function runEstimator(
   const LAST_ROUND = 2;
   for (let round = 0; round <= LAST_ROUND; round++) {
     msg = await client.messages.create({
-      model: DEFAULT_MODEL,
+      model: model,
       max_tokens: 8192, // headroom: a dense plan take-off can run long — don't truncate mid-JSON
       system,
       // On the FINAL round the tools come off, so the model has no choice but to answer. Otherwise
@@ -2039,7 +2047,7 @@ async function runEstimator(
     // cost. Metering only the last round would undercount an estimate that used its calculators.
     void recordAiUsage({
       orgId: (org as { id?: string } | null)?.id,
-      model: DEFAULT_MODEL,
+      model: model,
       surface: "estimator",
       usage: msg.usage as never,
     });
@@ -2173,7 +2181,10 @@ function estimatorError(e: any) {
  * No data leak, at least: price_list_read is staff-only (0056), so a tech's catalog came back
  * empty and the CED net pricing never reached him.
  */
-async function guardEstimator(): Promise<{ ok: true; orgId: string | null } | { ok: false; error: string }> {
+async function guardEstimator(): Promise<
+  | { ok: true; orgId: string | null; model: string; notes: string[] }
+  | { ok: false; error: string }
+> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "Only office staff can run the estimator." };
   // Per-user, because the ceiling below is per-ORG and a runaway loop would otherwise burn the
@@ -2182,8 +2193,25 @@ async function guardEstimator(): Promise<{ ok: true; orgId: string | null } | { 
     return { ok: false, error: "That's a lot of estimates in a row — give it a minute." };
   const orgId = await currentOrgId();
   if (await aiSpendExceeded(orgId))
-    return { ok: false, error: "Your company has reached this month's AI ceiling. It resets at the start of the month, or the office can raise it." };
-  return { ok: true, orgId };
+    return { ok: false, error: "Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it." };
+  // THE PLAN'S ALLOWANCE, ENFORCED (cn-v1128). plans.ts has promised "40 / 120 / unlimited full
+  // estimates a month" since July and nothing ever read it (the deep review's pricing-01). Past the
+  // month's line the run moves to the routine model and the draft SAYS so, as the first line of
+  // its questions — it never refuses (overFullEstimateAllowance's contract: degrade, don't block).
+  // One run = one 'estimator:run' tick on the ledger (left by runEstimator, after the input checks),
+  // so the count is runs, never model rounds, and a refused input never burns the month.
+  const [used, plan] = await Promise.all([fullEstimatesThisMonth(orgId), orgPlanTier(orgId)]);
+  const tier = estimateTierFor(plan);
+  const over = overFullEstimateAllowance(tier, used);
+  const notes: string[] = [];
+  if (over) {
+    const p = planByTier(tier);
+    const now = new Date();
+    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    const planWord = plan === "trial" ? "your trial" : `the ${p?.name} plan`;
+    notes.push(`Past this month's ${p?.fullEstimatesPerMonth} full estimates on ${planWord}, so this one ran on the lighter model. Full estimates come back ${next}.`);
+  }
+  return { ok: true, orgId, model: over ? modelFor("routine") : modelFor("reasoning"), notes };
 }
 
 export async function generateQuoteDraft(
@@ -2195,7 +2223,8 @@ export async function generateQuoteDraft(
   if (!gate.ok) return { ok: false, error: gate.error };
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
   try {
-    return { ok: true, ...(await runEstimator(scope, markupPct, laborRate)) };
+    const out = await runEstimator(scope, markupPct, laborRate, gate.model);
+    return { ok: true, ...out, questions: [...gate.notes, ...out.questions] };
   } catch (e) {
     return estimatorError(e);
   }
@@ -2352,13 +2381,16 @@ export async function generateQuoteDraftFromSupplier(
         ]
       : [{ type: "text", text: `${instruction}\n\nTHE QUOTE:\n${new TextDecoder().decode(up.bytes).slice(0, 200_000)}` }];
 
+    // A supplier quote is READ, not estimated: never counted against the allowance and never
+    // degraded (plans.ts counts plan take-offs and researched pricing, the skeptic's should-fix 3).
+    const model = modelFor("reasoning");
     const client = getAnthropic();
     const msg = await client.messages.create({
-      model: DEFAULT_MODEL,
+      model,
       max_tokens: 8192,
       messages: [{ role: "user", content: content as never }],
     });
-    void recordAiUsage({ orgId: (org as { id?: string } | null)?.id, model: DEFAULT_MODEL, surface: "estimator", usage: msg.usage as never });
+    void recordAiUsage({ orgId: (org as { id?: string } | null)?.id, model, surface: "estimator", usage: msg.usage as never });
     if (msg.stop_reason === "max_tokens")
       return { ok: false, error: "That quote ran longer than one pass — split the file and try again." };
     const text = msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
@@ -2469,7 +2501,8 @@ export async function generateQuoteDraftFromPlan(
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
       { type: "text", text: planTakeoffInstruction(note) },
     ];
-    return { ok: true, ...(await runEstimator(content, markupPct, laborRate)), kept };
+    const out = await runEstimator(content, markupPct, laborRate, gate.model);
+    return { ok: true, ...out, questions: [...gate.notes, ...out.questions], kept };
   } catch (e) {
     return { ...estimatorError(e), kept };
   }
@@ -2549,11 +2582,11 @@ export async function generateQuoteDraftFromLeadPlans(
     if (!docs.length) return { ok: false, error: "Couldn't read the customer's plans from storage." };
 
     const content = [...docs, { type: "text", text: planTakeoffInstruction(scope.trim()) }];
-    const out = await runEstimator(content, markupPct, laborRate);
+    const out = await runEstimator(content, markupPct, laborRate, gate.model);
     // NO SILENT CAPS: what didn't ride is a review item, not a secret.
     if (skipped.length)
       out.questions = [`Not read: ${skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}`, ...out.questions];
-    return { ok: true, ...out };
+    return { ok: true, ...out, questions: [...gate.notes, ...out.questions] };
   } catch (e) {
     return estimatorError(e);
   }

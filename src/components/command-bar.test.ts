@@ -97,9 +97,9 @@ describe("commandNavItems", () => {
       expect(hrefs(matchNavItems(tech, term)), term).toContain("/timeclock");
     }
     expect(staff.filter((i) => i.href === "/timeclock")).toHaveLength(1);
-    expect(find(staff, "/timeclock")).toMatchObject({ label: "Timeclock", sub: "Money" });
+    expect(find(staff, "/timeclock")).toMatchObject({ label: "Time Clock", sub: "Money" });
     expect(tech.filter((i) => i.href === "/timeclock")).toHaveLength(1);
-    expect(find(tech, "/timeclock")).toMatchObject({ label: "Timeclock", sub: "Clock" });
+    expect(find(tech, "/timeclock")).toMatchObject({ label: "Time Clock", sub: "Clock" });
   });
 
   it("each page is offered once: /handbook once for a tech (under You) and once for staff (Office)", () => {
@@ -359,5 +359,18 @@ describe("a doing row runs inside the tap that picked it", () => {
     expect(rows.flatMap((r) => ("request" in r ? [`${r.label}=${r.request}`] : [r.label]))).toEqual([
       "Start Here=questions", "Show Me How", "Take The Setup Again=questions",
     ]);
+  });
+});
+
+describe("short aliases never hijack a typed name (cn-v1128, the deep review's search-01)", () => {
+  it("a customer name holding 'ar' or 'ap' ranks no page; the aliases typed alone, or as a word, still open their pages", () => {
+    const staff = commandNavItems(true, ALL_ON);
+    expect(matchNavItems(staff, "Larkspur")).toEqual([]);
+    expect(matchNavItems(staff, "Snowbell Naples")).toEqual([]);
+    expect(matchNavItems(staff, "Stockton")).toEqual([]);
+    expect(hrefs(matchNavItems(staff, "bids"))).toContain("/quotes");
+    expect(hrefs(matchNavItems(staff, "ar"))).toContain("/billing");
+    expect(hrefs(matchNavItems(staff, "ap"))).toContain("/bills");
+    expect(hrefs(matchNavItems(staff, "who owes ar"))).toContain("/billing");
   });
 });

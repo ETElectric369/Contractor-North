@@ -50,6 +50,7 @@ export const SCREENS: Screen[] = [
     ],
   },
   { name: "Clock", path: "/timeclock", say: "a tech's clock tile (the two-button clock and Switch Job)" },
+  { name: "Reminders", path: "/tasks", say: "the full Reminders list (Overdue, Today, This Week, Later, Someday); everyone sees their own" },
   { name: "Jobs", path: "/jobs", say: "?status=<status>", spots: [{ name: "new-job", say: "New Job (office)" }] },
   {
     name: "A job",

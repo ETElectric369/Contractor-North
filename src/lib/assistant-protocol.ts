@@ -269,6 +269,7 @@ export const SCREEN_ANCHOR_RE = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 export const SCREEN_ROOTS = [
   "planner", "schedule", "timeclock", "jobs", "quotes", "billing", "bills", "crm", "leads", "inspections",
   "appointments", "settings", "timecards", "price-list", "analytics", "reconcile", "team",
+  "tasks", // Reminders (cn-v1128): the full list, everyone sees their own
 ] as const;
 /** The office's screens: a tech's drive there is refused (and the model is told), never a dead page. */
 export const SCREEN_ROOTS_STAFF_ONLY = new Set<string>([

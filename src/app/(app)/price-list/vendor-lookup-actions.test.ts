@@ -149,7 +149,7 @@ import { autoPick } from "./vendor-lookup-math";
 /** One scripted model response: the searches it ran, the pages they returned, and its JSON. */
 function reply(o: { pages?: string[]; json?: unknown; searches?: number; stop?: string; cited?: string[] }) {
   return {
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     stop_reason: o.stop ?? "end_turn",
     usage: { input_tokens: 15_000, output_tokens: 900, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, server_tool_use: { web_search_requests: o.searches ?? 1 } },
     content: [
@@ -215,7 +215,7 @@ describe("Look Up: refused before any money is spent", () => {
   });
 
   it("THE DAILY CAP: 98 lookups today leaves 2, so a chunk of 5 is refused whole and says how many are left", async () => {
-    db.ledger.push({ org_id: "org-1", usage_date: today(), model: "claude-sonnet-5", surface: "vendor-lookup", cost_usd: 9.8, calls: 98 });
+    db.ledger.push({ org_id: "org-1", usage_date: today(), model: "claude-sonnet-5-5", surface: "vendor-lookup", cost_usd: 9.8, calls: 98 });
     db.respond = () => reply({ json: { candidates: [] } });
     const res = await lookUpVendors({ names: ["A Co", "B Co", "C Co", "D Co", "E Co"].map((name) => ({ name })) });
     expect(res).toEqual({
@@ -227,7 +227,7 @@ describe("Look Up: refused before any money is spent", () => {
   });
 
   it("at 100 today, nothing more runs", async () => {
-    db.ledger.push({ org_id: "org-1", usage_date: today(), model: "claude-sonnet-5", surface: "vendor-lookup", cost_usd: 10, calls: 100 });
+    db.ledger.push({ org_id: "org-1", usage_date: today(), model: "claude-sonnet-5-5", surface: "vendor-lookup", cost_usd: 10, calls: 100 });
     db.respond = () => reply({ json: { candidates: [] } });
     const res = await lookUpVendors({ names: [{ name: "A Co" }] });
     expect(res).toMatchObject({ ok: false, leftToday: 0 });
@@ -237,8 +237,8 @@ describe("Look Up: refused before any money is spent", () => {
 
   it("the cap counts only THIS org's lookups TODAY: another org's, yesterday's and chat's don't", async () => {
     db.ledger.push(
-      { org_id: "org-2", usage_date: today(), model: "claude-sonnet-5", surface: "vendor-lookup", cost_usd: 1, calls: 500 },
-      { org_id: "org-1", usage_date: "2026-09-24", model: "claude-sonnet-5", surface: "vendor-lookup", cost_usd: 1, calls: 100 },
+      { org_id: "org-2", usage_date: today(), model: "claude-sonnet-5-5", surface: "vendor-lookup", cost_usd: 1, calls: 500 },
+      { org_id: "org-1", usage_date: "2026-09-24", model: "claude-sonnet-5-5", surface: "vendor-lookup", cost_usd: 1, calls: 100 },
       { org_id: "org-1", usage_date: today(), model: "claude-opus-4-8", surface: "chat", cost_usd: 1, calls: 300 },
     );
     db.respond = () => reply({ json: { candidates: [] } });
@@ -299,14 +299,14 @@ describe("Look Up: every field sourced, every lookup on the ledger, nothing save
     expect(a.near).toBe("Truckee");
 
     // The tool as sent: 3 searches at most, near Truckee, and NOT "Truckee, NV".
-    expect(db.calls[0].model).toBe("claude-sonnet-5");
+    expect(db.calls[0].model).toBe("claude-sonnet-5-5");
     expect(db.calls[0].tools).toEqual([{ type: "web_search_20250305", name: "web_search", max_uses: 3, user_location: { type: "approximate", city: "Truckee", country: "US" } }]);
     expect(userText(0)).toContain('"Granite Peak Plumbing" near Truckee (the office is in Reno, NV)');
 
     // ONE ledger row for the lookup: surface vendor-lookup, one call, tokens plus 3 searches at $0.01.
     const row = lookupRow();
-    expect(row).toMatchObject({ surface: "vendor-lookup", model: "claude-sonnet-5", calls: 1, input_tokens: 15_000, output_tokens: 900 });
-    expect(row!.cost_usd).toBeCloseTo(costOf("claude-sonnet-5", { input_tokens: 15_000, output_tokens: 900 }) + 0.03, 6);
+    expect(row).toMatchObject({ surface: "vendor-lookup", model: "claude-sonnet-5-5", calls: 1, input_tokens: 15_000, output_tokens: 900 });
+    expect(row!.cost_usd).toBeCloseTo(costOf("claude-sonnet-5-5", { input_tokens: 15_000, output_tokens: 900 }) + 0.03, 6);
 
     // A lookup saves nothing: the vendor table is exactly as it was.
     expect(JSON.stringify(db.tables.price_list_vendors)).toBe(before);
@@ -338,7 +338,7 @@ describe("Look Up: every field sourced, every lookup on the ledger, nothing save
     expect(res.results[0].answer).toEqual({ found: false, why: "nothing", dropped: 0, near: "Truckee" });
     expect(userText(0)).toContain("person's name, which is harder to find");
     expect(lookupRow()).toMatchObject({ calls: 1 });
-    expect(lookupRow()!.cost_usd).toBeCloseTo(costOf("claude-sonnet-5", { input_tokens: 15_000, output_tokens: 900 }) + 0.02, 6);
+    expect(lookupRow()!.cost_usd).toBeCloseTo(costOf("claude-sonnet-5-5", { input_tokens: 15_000, output_tokens: 900 }) + 0.02, 6);
     expect(db.tables.price_list_vendors.length).toBe(2);
   });
 
@@ -355,7 +355,7 @@ describe("Look Up: every field sourced, every lookup on the ledger, nothing save
     expect(db.calls[1].messages.map((m: { role: string }) => m.role)).toEqual(["user", "assistant"]);
     expect(res.results[0].answer.found).toBe(true);
     expect(lookupRow()).toMatchObject({ calls: 1, input_tokens: 30_000 });
-    expect(lookupRow()!.cost_usd).toBeCloseTo(costOf("claude-sonnet-5", { input_tokens: 30_000, output_tokens: 1_800 }) + 0.03, 6);
+    expect(lookupRow()!.cost_usd).toBeCloseTo(costOf("claude-sonnet-5-5", { input_tokens: 30_000, output_tokens: 1_800 }) + 0.03, 6);
   });
 
   it("a turn still paused after all 3 searches is not resumed (no fourth search is bought) and says it didn't finish", async () => {
@@ -392,7 +392,7 @@ describe("Read A Photo Or Scan: only a real picture or a real PDF is ever sent",
   };
   const listJson = { rows: [{ name: "Granite Peak Plumbing", phone: "530-555-0142" }, { name: "Coldwater Drywall" }, { name: "" }] };
   const readReply = () => ({
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     stop_reason: "end_turn",
     usage: { input_tokens: 1_500, output_tokens: 200 },
     content: [{ type: "text", text: JSON.stringify(listJson) }],

@@ -416,6 +416,12 @@ export function YourList({
               affordance, and this is progress, not a count to clear. */}
           <DoneMarks done={doneCount} total={doneToday + rows.length} />
         </div>
+        {/* THE STANDING DOOR (cn-v1128): the full list at /tasks was reachable only while something
+            was hidden ("N More For You"), the deep review's reminders-01 — Erik: "I only see 3 and
+            don't know where to find the full list". Always drawn, count or no count. */}
+        <Link href="/tasks" className="ml-auto text-sm font-medium text-brand hover:underline">
+          All Reminders
+        </Link>
       </div>
 
       <AddReminderLine jobs={jobs} todayStr={todayStr} />

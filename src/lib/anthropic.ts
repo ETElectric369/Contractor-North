@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 export const DEFAULT_MODEL =
-  process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+  process.env.ANTHROPIC_MODEL || "claude-opus-5-5"; // the 5.5 line since cn-v1128 (Opus 5.5 reasons; 20% under Opus 4.8)
 
 let _client: Anthropic | null = null;
 

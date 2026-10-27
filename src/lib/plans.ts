@@ -171,3 +171,12 @@ export function overFullEstimateAllowance(tier: string | null | undefined, usedT
   if (!plan || plan.fullEstimatesPerMonth === null) return false;
   return usedThisMonth >= plan.fullEstimatesPerMonth;
 }
+
+/**
+ * The tier whose estimate allowance applies to a stored plan value (cn-v1128): a trial runs on
+ * Handyman's line, a real tier on its own, anything unknown on none (no cap — never a surprise).
+ */
+export function estimateTierFor(plan: string | null | undefined): PlanTier | null {
+  if (plan === "trial") return "handyman";
+  return planByTier(plan)?.tier ?? null;
+}

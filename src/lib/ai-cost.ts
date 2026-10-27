@@ -19,9 +19,16 @@ import { reportError } from "@/lib/observe";
 /** USD per MILLION tokens. Cache reads are ~10% of input; cache writes ~125%. */
 type Price = { input: number; output: number };
 const PRICES: Record<string, Price> = {
+  // THE 5.5 LINE (cn-v1128, the model move): list prices as published 2026-10. Haiku 5.5's price
+  // is its ≤100k-input tier (a long statement scan can pass it and is then slightly underpriced).
+  "claude-opus-5-5": { input: 4, output: 20 },
+  "claude-sonnet-5-5": { input: 2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
+  "claude-fable-5-1": { input: 10, output: 50 },
+  // Earlier lines stay so the ledger's older rows keep pricing as they were billed.
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-fable-5": { input: 10, output: 50 },
-  "claude-sonnet-5": { input: 3, output: 15 },
+  "claude-sonnet-5": { input: 2, output: 10 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 /** Unknown model → price it as the most expensive we use, so a surprise never reads as free. */
@@ -83,11 +90,11 @@ export function modelFor(kind: WorkKind): string {
   switch (kind) {
     case "reasoning":
       // Honor the existing override so a deploy can pin the flagship model.
-      return envOverride || "claude-opus-4-8";
+      return envOverride || "claude-opus-5-5";
     case "routine":
-      return process.env.ANTHROPIC_MODEL_ROUTINE || "claude-sonnet-5";
+      return process.env.ANTHROPIC_MODEL_ROUTINE || "claude-sonnet-5-5";
     case "classify":
-      return process.env.ANTHROPIC_MODEL_CHEAP || "claude-haiku-4-5";
+      return process.env.ANTHROPIC_MODEL_CHEAP || "claude-haiku-5-5";
   }
 }
 
@@ -155,5 +162,64 @@ export async function aiSpendExceeded(orgId: string | null | undefined): Promise
     return Number(data ?? 0) >= MONTHLY_AI_CEILING_USD;
   } catch {
     return false;
+  }
+}
+
+/**
+ * THE ESTIMATE ALLOWANCE'S COUNT (cn-v1128). Full estimates run this calendar month (UTC), read from
+ * the ledger as the 'estimator:run' ticks noteEstimateRun leaves — one per run of the estimator's
+ * gate, never per model round (a plan take-off is up to three rounds and still one estimate).
+ * Fails OPEN to 0: a metering outage must never make an estimate simpler.
+ */
+export async function fullEstimatesThisMonth(orgId: string | null | undefined): Promise<number> {
+  if (!orgId) return 0;
+  try {
+    const sb = createServiceClient();
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+    const { data, error } = await sb
+      .from("ai_usage")
+      .select("calls")
+      .eq("org_id", orgId)
+      .eq("surface", "estimator:run")
+      .gte("usage_date", monthStart);
+    if (error || !data) return 0;
+    return (data as { calls?: number | null }[]).reduce((n: number, r) => n + Number(r.calls ?? 0), 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** One tick on the ledger per estimator run: zero tokens, zero dollars, calls + 1. Best-effort. */
+export async function noteEstimateRun(orgId: string | null | undefined): Promise<void> {
+  if (!orgId) return;
+  try {
+    const sb = createServiceClient();
+    const { error } = await sb.rpc("record_ai_usage", {
+      p_org_id: orgId,
+      p_model: "none",
+      p_surface: "estimator:run",
+      p_input: 0,
+      p_cache_read: 0,
+      p_cache_write: 0,
+      p_output: 0,
+      p_cost_usd: 0,
+    });
+    // NOTHING SILENT: a refused tick means the cap never bites — said in the sink, not swallowed.
+    if (error) reportError("noteEstimateRun", error, { orgId });
+  } catch (e) {
+    reportError("noteEstimateRun", e, { orgId });
+  }
+}
+
+/** The org's plan as stored (trial, handyman, crew, company); null on any failure. */
+export async function orgPlanTier(orgId: string | null | undefined): Promise<string | null> {
+  if (!orgId) return null;
+  try {
+    const sb = createServiceClient();
+    const { data } = await sb.from("organizations").select("plan").eq("id", orgId).maybeSingle();
+    return (data as { plan?: string | null } | null)?.plan ?? null;
+  } catch {
+    return null;
   }
 }

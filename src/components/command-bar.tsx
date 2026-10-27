@@ -58,7 +58,7 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/crm": ["customers", "clients", "people", "contact", "contacts"],
   // The Reminders page was "Tasks" until 0358, and people still type the old word.
   "/tasks": ["tasks", "to-do", "todo"],
-  "/timeclock": ["clock in", "punch", "clock"],
+  "/timeclock": ["clock in", "punch", "clock", "timeclock"], // the one word, since the label reads Time Clock (cn-v1128)
   "/timecards": ["hours", "timesheet"],
   "/schedule": ["calendar", "dispatch", "appointments"],
   // "All", the Jobs sub-nav's first row (b94497dd): the unfiltered page, which is what a person
@@ -130,11 +130,8 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, 
     // Reminders for everyone, Organize for the office (every save on it is requireStaff).
     { kind: "Go to", label: "Reminders", sub: "Today", href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
     { kind: "Go to", label: "Organize", sub: "Today", href: "/organize", staffOnly: true },
-    // The Clock tile is a tech's only (W1-08): staff clock in on My Day's Now card, and their
-    // Timecards row only OWNS /timeclock (owns is never a row). So the office finds the Timeclock
-    // (Switch Job, Split) here by name and by its words ("clock in", "punch"); a tech already has
-    // it once, from his Clock tile, so this entry is staff-only and he never sees it twice.
-    { kind: "Go to", label: "Timeclock", sub: "Money", href: "/timeclock", staffOnly: true, aliases: NAV_ALIASES["/timeclock"] },
+    // The Time Clock is a Money row of its own since cn-v1128 (dock.ts m-clock), so the dock feeds
+    // the palette and its words (NAV_ALIASES["/timeclock"]) ride on that leaf; a tech has his Clock tile.
     // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
     // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates.
     ...(featureOn(features, "estimates")
@@ -155,7 +152,14 @@ export function matchNavItems(navItems: Item[], q: string): Item[] {
     .map((i) => {
       const label = i.label.toLowerCase().includes(term);
       const sub = i.sub?.toLowerCase().includes(term) ?? false;
-      const alias = i.aliases?.some((a) => a.includes(term) || term.includes(a)) ?? false;
+      // An alias matches when it contains the typed text, or when the typed text holds the alias as
+      // a whole WORD (its plural too: "bids", "pos"), or holds a multi-word alias ("who owes"):
+      // "ar" and "ap" typed alone still open Invoices and Bills, but a customer name holding "ar"
+      // or "stock" (Larkspur, Stockton) no longer ranks a page first and takes Enter (cn-v1128,
+      // the deep review's search-01 and the skeptic's nit on 4+ letter aliases).
+      const words = term.split(/\s+/);
+      const alias =
+        i.aliases?.some((a) => a.includes(term) || words.includes(a) || words.includes(a + "s") || (a.includes(" ") && term.includes(a))) ?? false;
       return { i, hit: label || sub || alias, rank: label ? 0 : sub ? 1 : 2 };
     })
     .filter((s) => s.hit)

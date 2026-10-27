@@ -188,7 +188,7 @@ describe("a scanned bank statement becomes the one bank card, and nothing else",
     await drop();
     expect(state.calls).toHaveLength(2);
     // Reading forty money lines off a picture is not a classify job, and the budget says so.
-    expect(state.calls[0].max_tokens).toBeLessThan(1000);
+    expect(state.calls[0].max_tokens).toBeLessThan(4000); // a small cap, with room for the 5.5 line to think (cn-v1128)
     expect(state.calls[1].max_tokens).toBeGreaterThanOrEqual(16_000);
     expect(state.calls[0].model).not.toBe(state.calls[1].model);
     // The pages themselves go up, as the document block that reads his handwriting today.

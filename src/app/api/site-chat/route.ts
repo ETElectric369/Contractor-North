@@ -21,7 +21,7 @@ export const runtime = "nodejs";
  * model, bounded tool loop, input caps, and a distributed (Postgres-backed) per-IP rate limit keep
  * cost + abuse down. The LLM runs the conversation; prices come from the org's real catalog, not the model.
  */
-const MODEL = process.env.SITE_CHAT_MODEL || "claude-haiku-4-5";
+const MODEL = process.env.SITE_CHAT_MODEL || "claude-haiku-5-5";
 const MAX_ROUNDS = 6; // headroom for web_search pause_turn continuations on research-mode orgs
 const MAX_MESSAGES = 24;
 const MAX_LEN = 4000;
@@ -461,7 +461,7 @@ export async function POST(req: Request) {
       // stays after the breakpoint. Pure cost control; no behavior change.
       const resp = await client.messages.create({
         model: MODEL,
-        max_tokens: 900,
+        max_tokens: 1500, // the 5.5 line may think inside the cap (cn-v1128)
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         tools,
         messages: convo,

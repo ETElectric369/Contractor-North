@@ -21,6 +21,10 @@ vi.mock("@/lib/ai-cost", () => ({
   aiSpendExceeded: vi.fn(async () => false),
   currentOrgId: vi.fn(async () => ORG),
   modelFor: () => "claude-haiku-4-5",
+  // The allowance gate (cn-v1128): never over, no plan, the run tick a no-op.
+  fullEstimatesThisMonth: vi.fn(async () => 0),
+  orgPlanTier: vi.fn(async () => null),
+  noteEstimateRun: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/anthropic", () => ({ getAnthropic: () => s.model, DEFAULT_MODEL: "claude-opus-4-8" }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));

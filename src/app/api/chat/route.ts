@@ -291,7 +291,7 @@ export async function POST(req: Request) {
   // lock a contractor out of their own assistant mid-job.
   if (await aiSpendExceeded(orgId)) {
     return new Response(
-      "Nort has hit this month's usage ceiling for your company. Message us and we'll lift it.",
+      "Nort has hit your company's AI ceiling for the last 30 days. Message us and we'll lift it.",
       { status: 429 },
     );
   }

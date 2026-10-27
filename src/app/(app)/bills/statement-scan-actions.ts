@@ -136,7 +136,7 @@ export async function readStatementScan(input: {
     const msg = await client.messages.create(
       {
         model,
-        max_tokens: 300,
+        max_tokens: 1500, // the 5.5 line may think inside the cap (cn-v1128)
         system: SCAN_KIND_SYSTEM,
         messages: [{ role: "user", content: [paper, { type: "text", text: `Filename: ${name}. What is this paper?` }] }],
       },

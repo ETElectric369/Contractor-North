@@ -2,8 +2,19 @@ import { createClient } from "@/lib/supabase/server";
 import { formatDate, DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
 import { jobLabel } from "@/lib/schedule-options";
+import { JOB_STATUS_PRIORITY } from "@/lib/job-status";
 
 export const runtime = "nodejs";
+
+/**
+ * LIVE WORK FIRST (cn-v1128): the jobs read comes back newest-first from the database; this keeps
+ * that order inside each status and puts the statuses in the dock's spine order (in progress,
+ * scheduled, to be scheduled, on hold, complete, cancelled last). sort() is stable. The deep
+ * review's search-02: a broad word returned an arbitrary few, old and cancelled included.
+ */
+function liveFirst<T extends { status?: string | null }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => (JOB_STATUS_PRIORITY[a.status ?? ""] ?? 9) - (JOB_STATUS_PRIORITY[b.status ?? ""] ?? 9));
+}
 
 /**
  * Global search for the command bar. Runs through the caller's own RLS-scoped
@@ -26,21 +37,25 @@ export async function GET(req: Request) {
       .from("jobs")
       .select("id, job_number, name, status")
       .or(`name.ilike.${like},job_number.ilike.${like}`)
-      .limit(6),
+      .order("updated_at", { ascending: false })
+      .limit(12),
     supabase
       .from("customers")
       .select("id, name, company_name")
       .or(`name.ilike.${like},company_name.ilike.${like}`)
+      .order("updated_at", { ascending: false })
       .limit(5),
     supabase
       .from("quotes")
       .select("id, quote_number, title, status")
       .or(`quote_number.ilike.${like},title.ilike.${like}`)
+      .order("updated_at", { ascending: false })
       .limit(5),
     supabase
       .from("invoices")
       .select("id, invoice_number, status")
       .ilike("invoice_number", like)
+      .order("updated_at", { ascending: false })
       .limit(5),
     // Past appointments included on purpose — "when WAS the oven visit" is the
     // seek question; hits deep-link to the calendar's day drill.
@@ -55,7 +70,7 @@ export async function GET(req: Request) {
   ]);
 
   const results = [
-    ...(jobs.data ?? []).map((j: any) => ({
+    ...liveFirst(jobs.data ?? []).slice(0, 6).map((j: any) => ({
       type: "Job",
       label: jobLabel(j),
       sub: j.status,

@@ -73,11 +73,13 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
     expect((clock?.children ?? []).map((c) => c.href)).toEqual(["/timeclock"]);
   });
 
-  it("Timecards lives under Money, right after Invoices, office-only, and owns /timeclock", () => {
+  it("Time Clock is a Money row right after Invoices, then Timecards; office-only; nothing owns /timeclock (cn-v1128)", () => {
     const money = DOCK.find((s) => s.key === "invoices")!.children;
     const at = money.findIndex((c) => c.id === "ck-cards");
-    expect(money[at]).toMatchObject({ label: "Timecards", href: "/timecards", staffOnly: true, owns: ["/timeclock"] });
-    expect(money[at - 1]?.id).toBe("m-inv");
+    expect(money[at]).toMatchObject({ label: "Timecards", href: "/timecards", staffOnly: true });
+    expect(money[at].owns).toBeUndefined();
+    expect(money[at - 1]).toMatchObject({ id: "m-clock", label: "Time Clock", href: "/timeclock", staffOnly: true });
+    expect(money[at - 2]?.id).toBe("m-inv");
     expect(money[at + 1]?.id).toBe("m-bills");
   });
 
@@ -316,12 +318,13 @@ describe("activeRowHref — one lit row, or none", () => {
     expect(activeRowHref(rows("jobs", true), "/jobs", "/jobs")).toBe("/jobs");
   });
 
-  // Erik, 2026-09-30: "lets also have time clock point to money with timecards on the subnav".
-  it("the office standing on the TIME CLOCK lights Money's Timecards — the row that owns the page", () => {
-    expect(activeRowHref(rows("invoices", true), "/timeclock", "/timeclock")).toBe("/timecards");
+  // Erik, 2026-09-30: "time clock point to money with timecards on the subnav"; 2026-10-26: "Time Clock
+  // in Money beside Timecards" — the page has its own row now (cn-v1128), so it lights that row.
+  it("the office standing on the TIME CLOCK lights Money's own Time Clock row (cn-v1128)", () => {
+    expect(activeRowHref(rows("invoices", true), "/timeclock", "/timeclock")).toBe("/timeclock");
     // A detail route under it too (a split's own page), and the query-carrying case.
-    expect(activeRowHref(rows("invoices", true), "/timeclock/abc", "/timeclock/abc")).toBe("/timecards");
-    expect(activeRowHref(rows("invoices", true), "/timeclock", "/timeclock?day=2026-09-30")).toBe("/timecards");
+    expect(activeRowHref(rows("invoices", true), "/timeclock/abc", "/timeclock/abc")).toBe("/timeclock");
+    expect(activeRowHref(rows("invoices", true), "/timeclock", "/timeclock?day=2026-09-30")).toBe("/timeclock");
     // Timecards itself still wins by its own href, not by owning anything.
     expect(activeRowHref(rows("invoices", true), "/timecards", "/timecards")).toBe("/timecards");
   });
@@ -617,5 +620,15 @@ describe("visibleDock — role and switches, one filter", () => {
   it("a tech never gains a row from a switch (no staff-only door appears)", () => {
     const tech = new Set(rows(legacy(false)));
     for (const k of FEATURE_KEYS) for (const id of rows(visibleDock({ isStaff: false, features: off(k) }))) expect(tech.has(id), id).toBe(true);
+  });
+});
+
+describe("the Jobs status rows are Title Case (cn-v1128, Erik's law for every clickable)", () => {
+  it("To Be Scheduled, In Progress, On Hold — never a sentence-case row", () => {
+    const jobs = DOCK.find((s) => s.children.some((c) => c.href === "/jobs"))!;
+    const rows = jobs.children.filter((c) => c.href?.startsWith("/jobs?status="));
+    expect(rows.length).toBeGreaterThan(3);
+    for (const r of rows) expect(r.label, r.label).toMatch(/^([A-Z][a-z]*)( [A-Z][a-z]*)*$/);
+    expect(rows.map((r) => r.label)).toEqual(expect.arrayContaining(["To Be Scheduled", "In Progress", "On Hold"]));
   });
 });
