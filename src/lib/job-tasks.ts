@@ -36,10 +36,17 @@ export interface JobTaskRow {
   /** The task's note (the Task sheet shows it). Crew materials requests made before 2026-09-27 kept
    *  who asked and the whole text here; a request is a line on the materials list now. */
   notes: string | null;
+  /** THE TASK'S OWN MINUTES (0395, cn-v1131): the estimate line's labor rows' hours summed, born with
+   *  the task and kept in step by the sync; null = he gave none. The Overview Tasks card may print it
+   *  as "4 h" after the title. Absent before 0395. */
+  planned_minutes?: number | null;
 }
 
-/** After 0358: the stamps, the photos and the doer's name ride along. */
+/** After 0395: the task's own minutes ride along with 0358's stamps, photos and the doer's name. */
 export const JOB_TASK_COLUMNS =
+  "id, title, status, notes, created_by, created_at, completed_at, sort_order, photo_path, done_photo_path, done_by, planned_minutes, doer:done_by(full_name)";
+/** After 0358, before 0395: the stamps, the photos and the doer's name, no minutes yet. */
+export const JOB_TASK_COLUMNS_BEFORE_0395 =
   "id, title, status, notes, created_by, created_at, completed_at, sort_order, photo_path, done_photo_path, done_by, doer:done_by(full_name)";
 /** Before 0358: the columns every database has (notes is older than 0358). */
 export const JOB_TASK_COLUMNS_BEFORE_0358 = "id, title, status, notes, created_by, created_at, completed_at";
@@ -77,13 +84,16 @@ export function toJobTaskRow(r: Record<string, any>): JobTaskRow {
     done_photo_path: (r.done_photo_path ?? null) as string | null,
     sort_order: Number(r.sort_order ?? 0) || 0,
     notes: (r.notes ?? null) as string | null,
+    planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes) || null,
   };
 }
 
 /**
  * The job's whole list, in one read (a job's list is short; 500 is a ceiling, not a page). A
- * database without 0358 answers the new columns with "does not exist": read the old ones and say
- * stamps:false. Any other error: failed, so the card says it couldn't read the list.
+ * database without 0395 answers the minutes column with "does not exist": read 0358's columns (the
+ * stamps and photos still ride, the minutes wait). One without 0358 answers those the same way:
+ * read the old ones and say stamps:false. Any other error: failed, so the card says it couldn't
+ * read the list.
  */
 export async function readJobTasks(supabase: { from: (t: string) => any }, jobId: string): Promise<JobTasksRead> {
   const read = (cols: string): PromiseLike<{ data: Record<string, any>[] | null; error: unknown }> =>
@@ -92,6 +102,9 @@ export async function readJobTasks(supabase: { from: (t: string) => any }, jobId
     const first = await read(JOB_TASK_COLUMNS);
     if (!first.error) return { rows: (first.data ?? []).map(toJobTaskRow), stamps: true, failed: false };
     if (!isMissingColumn(first.error)) return { rows: [], stamps: false, failed: true };
+    const mid = await read(JOB_TASK_COLUMNS_BEFORE_0395);
+    if (!mid.error) return { rows: (mid.data ?? []).map(toJobTaskRow), stamps: true, failed: false };
+    if (!isMissingColumn(mid.error)) return { rows: [], stamps: false, failed: true };
     const old = await read(JOB_TASK_COLUMNS_BEFORE_0358);
     if (old.error) return { rows: [], stamps: false, failed: true };
     return { rows: (old.data ?? []).map(toJobTaskRow), stamps: false, failed: false };

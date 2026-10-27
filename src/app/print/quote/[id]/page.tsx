@@ -6,6 +6,7 @@ import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
+import { estimateFormatFor, normalizeDocStyle } from "@/lib/doc-style";
 import { QuoteDocument } from "@/components/quote-document";
 import { docLabel } from "@/lib/doc-label";
 import { docPageTitle, rowPlace } from "@/lib/doc-place";
@@ -56,6 +57,10 @@ export default async function QuotePrintPage({
   const co = companyFromOrg(org as Organization | null);
   const template = templateFor(org as Organization | null, "quote");
   const settings = getOrgSettings((org as any)?.settings);
+  // HOW THIS ESTIMATE'S TASK LINES READ (cn-v1131): its own estimate_format (0395, in the row's `*`)
+  // else the company's Doc Studio choice — through THE ONE READER, so this page, the PDF the API
+  // renders from it and the customer's /q link agree about one estimate.
+  const estimateFormat = estimateFormatFor(q as { estimate_format?: unknown }, normalizeDocStyle(settings.doc_style));
 
   const lineItems = (items ?? []) as QuoteLineItem[];
   // Quote = fixed price · Estimate = time & materials. Same record, the
@@ -101,6 +106,7 @@ export default async function QuotePrintPage({
         terms={settings.quote_terms}
         documentFooter={settings.document_footer}
         docStyle={settings.doc_style}
+        estimateFormat={estimateFormat}
       />
     </div>
   );

@@ -19,7 +19,9 @@ import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playb
 import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
 import { coerceTaskDetail, taskFlags, taskLines, type TaskBookRow } from "@/lib/estimate/task-lines";
+import { isMissingColumn } from "@/lib/job-tasks";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
+import { normalizeDocStyle, type EstimateFormat } from "@/lib/doc-style";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
@@ -54,26 +56,41 @@ export default async function NewQuotePage({
     taxRate?: number | null;
     validUntil?: string | null;
     items?: DraftLineItem[];
+    estimateFormat?: EstimateFormat | null;
   } | null = null;
   if (inquiry) {
     // The id alone is NOT an adoption (review of the Q-001/E-001 flap): a builder seeded with
     // an id but default-empty state would autosave that emptiness over the draft's real lines
     // on the first keystroke. Adopting means inheriting the CONTENT too; a session draft, when
     // one exists, still restores over this (it may be newer).
-    const { data: existing } = await supabase
-      .from("quotes")
-      .select("id, customer_id, doc_type, title, description, notes, tax_rate, valid_until, quote_line_items(description, quantity, unit, unit_price, category, sort_order, detail)")
-      .eq("inquiry_id", inquiry)
-      .eq("status", "draft")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    //
+    // TWO RUNGS for the paper switch's column (quotes.estimate_format, 0395): a deploy precedes
+    // its migration, and a select naming a column that is not there yet fails the WHOLE read —
+    // which here would mint a numbered twin of the draft it could not see. Without the column the
+    // draft adopts as before, with no format of its own.
+    const adoptionSelect = (withFormat: boolean) =>
+      supabase
+        .from("quotes")
+        .select(
+          `id, customer_id, doc_type, title, description, notes, tax_rate, valid_until${withFormat ? ", estimate_format" : ""}, quote_line_items(description, quantity, unit, unit_price, category, sort_order, detail)`,
+        )
+        .eq("inquiry_id", inquiry)
+        .eq("status", "draft")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    const first = await adoptionSelect(true);
+    const adopted = first.error && isMissingColumn(first.error) ? await adoptionSelect(false) : first;
+    // Through unknown: the select is built from a template, which the client's select-string
+    // parser cannot read into a row type (it is the same row either way).
+    const existing = adopted.data as unknown as {
+      id: string; customer_id: string | null; doc_type: string | null; title: string | null;
+      description: string | null; notes: string | null; tax_rate: number | null; valid_until: string | null;
+      estimate_format?: string | null;
+      quote_line_items?: { description: string; quantity: number; unit: string; unit_price: number; category: string | null; sort_order: number | null; detail?: unknown }[];
+    } | null;
     if (existing) {
-      const ex = existing as {
-        id: string; customer_id: string | null; doc_type: string | null; title: string | null;
-        description: string | null; notes: string | null; tax_rate: number | null; valid_until: string | null;
-        quote_line_items?: { description: string; quantity: number; unit: string; unit_price: number; category: string | null; sort_order: number | null; detail?: unknown }[];
-      };
+      const ex = existing;
       adoptedDraftId = ex.id;
       adoptedSeed = {
         customerId: ex.customer_id,
@@ -83,6 +100,8 @@ export default async function NewQuotePage({
         notes: ex.notes,
         taxRate: ex.tax_rate,
         validUntil: ex.valid_until,
+        // The draft's own paper format, or null for the company's (the builder's switch reads it).
+        estimateFormat: ex.estimate_format === "tasks" || ex.estimate_format === "detailed" ? ex.estimate_format : null,
         items: (ex.quote_line_items ?? [])
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
           // detail (0386): the task behind a line rides the adoption, or the first autosave drops it.
@@ -346,7 +365,7 @@ export default async function NewQuotePage({
       if (parts.length > 1) initialScope = parts.join("\n\n");
     }
   }
-  const [{ data: customers }, { data: leadRows }, { data: priceItems, error: priceItemsErr }, { data: taxRates }, kitsRead, { data: org }] =
+  const [{ data: customers }, { data: leadRows }, { data: priceItems, error: priceItemsErr }, { data: taxRates }, kitsRead, { data: org }, { data: peopleRows, error: peopleErr }] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
       // AN ESTIMATE IS OFTEN FOR A LEAD, NOT A CUSTOMER (Erik: "I should be able to select from
@@ -390,7 +409,18 @@ export default async function NewQuotePage({
       // beside the price list's, never a quietly kit-less estimate.
       readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+      // THE TEAM, for a labor row's Who select (cn-v1131): id, name and BILL rate off the staff-scoped
+      // profile_pay view — the same view the job's labor billing reads its rates from, so a task row
+      // that names a person quotes the hour at the figure their clocked hour will bill at. Active
+      // only: a row never offers somebody who has left. Never their pay rate.
+      supabase.from("profile_pay").select("id, full_name, bill_rate").eq("active", true).order("full_name"),
     ]);
+  if (peopleErr) reportError("quotes/new:people", peopleErr, { inquiry: inquiry ?? null, capture: capture ?? null });
+  const people = ((peopleRows ?? []) as { id: string; full_name: string | null; bill_rate: number | string | null }[]).map((p) => ({
+    id: p.id,
+    name: p.full_name ?? "Crew",
+    billRate: p.bill_rate == null || p.bill_rate === "" ? null : Number(p.bill_rate),
+  }));
   const kits = kitsRead.rows as Array<Record<string, unknown>> | null;
   if (kitsRead.state === "failed") reportError("quotes/new:kits", kitsRead.error, { inquiry: inquiry ?? null, capture: capture ?? null });
   // THE INSPECTION'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
@@ -407,7 +437,12 @@ export default async function NewQuotePage({
   );
   const seedCustomer = captureCustomerId ? ((customers ?? []) as any[]).find((c) => c.id === captureCustomerId) : undefined;
   const seedPricing = { levelPct: seedCustomer?.pricing_levels?.markup_pct ?? null, orgDefaultPct: settings.default_markup_pct };
-  const seedRate = laborRateFor(seedCustomer?.pricing_levels?.labor_rate, settings.default_labor_rate);
+  // The rule's answer for the visit's customer (no person on a seeded task: the Inspector's hours
+  // are the task's, whoever works them), through the one laborRateFor every door prices with.
+  const seedRate = laborRateFor({ levelRate: seedCustomer?.pricing_levels?.labor_rate, orgDefault: settings.default_labor_rate }).rate;
+  // The company's Doc Studio choice for how a task line reads on the paper: what the builder's
+  // switch calls "Company Default". Through the one normalizer, like every renderer.
+  const companyEstimateFormat = normalizeDocStyle(settings.doc_style).estimate_format;
   // HIS TASK KITS (0386, W4): a task that picked one expands here — his minutes per unit × the
   // units, the kit's parts × the units — through THE one expandTaskKit (task-lines.ts), the same
   // function the Inspector previewed it with.
@@ -527,6 +562,8 @@ export default async function NewQuotePage({
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
         defaultLaborRate={settings.default_labor_rate}
+        people={people}
+        companyEstimateFormat={companyEstimateFormat}
         estimatorTaskMode={settings.estimating_mode !== "catalog"}
         deckRateRows={deckRateRows}
         salesTax={featureOn(settings.features, "sales_tax")}

@@ -297,6 +297,10 @@ export interface Quote {
   total: number;
   valid_until: string | null;
   circuits: QuoteCircuit[] | null;
+  /** HOW THIS ESTIMATE'S TASK LINES READ ON PAPER (cn-v1131, 0395): "tasks" = one line per task,
+   *  "detailed" = the labor and parts printed beneath it; null / absent = the company's Doc Studio
+   *  choice. Every surface resolves it through estimateFormatFor (lib/doc-style). */
+  estimate_format?: "tasks" | "detailed" | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

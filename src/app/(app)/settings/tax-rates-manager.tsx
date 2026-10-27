@@ -9,6 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import type { OrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
+import { saveWords } from "@/lib/save-words";
 import {
   createTaxRate, updateTaxRate, setDefaultTaxRate, deleteTaxRate, updateOrgSettings,
   createPricingLevel, updatePricingLevel, setDefaultPricingLevel, deletePricingLevel,
@@ -50,6 +51,9 @@ export function TaxRatesManager({
   const [materialBuffer, setMaterialBuffer] = useState(settings.material_buffer_percent);
   const [defaultMarkup, setDefaultMarkup] = useState(settings.default_markup_pct);
   const [savedLabor, setSavedLabor] = useState(false);
+  // THE DEFAULTS ROW'S OWN REFUSAL (cn-v1131). The card's `error` line is drawn inside the Sales Tax
+  // section, which the switch board can hide, so a refusal of THIS row is said beside its Save.
+  const [defaultsError, setDefaultsError] = useState<string | null>(null);
 
   const [levelName, setLevelName] = useState("");
   const [levelMarkup, setLevelMarkup] = useState(0);
@@ -72,11 +76,18 @@ export function TaxRatesManager({
   function addLevel() {
     if (!levelName.trim()) return;
     const labor_rate = levelRate === "" ? null : Number(levelRate);
+    setError(null);
     start(async () => {
-      const res = editingLevelId
-        ? await updatePricingLevel(editingLevelId, { name: levelName, markup_pct: levelMarkup, labor_rate })
-        : await createPricingLevel({ name: levelName, markup_pct: levelMarkup, labor_rate, is_default: pricingLevels.length === 0 });
-      if (!res.ok) { setError(res.error ?? "Could not save."); return; }
+      // The server's answer, or the one line when the call itself threw (lib/save-words): a thrown
+      // action inside a transition used to reach the error boundary with no word on the card.
+      const said = await saveWords(
+        () =>
+          editingLevelId
+            ? updatePricingLevel(editingLevelId, { name: levelName, markup_pct: levelMarkup, labor_rate })
+            : createPricingLevel({ name: levelName, markup_pct: levelMarkup, labor_rate, is_default: pricingLevels.length === 0 }),
+        "Could not save.",
+      );
+      if (said) { setError(said); return; }
       cancelEditLevel();
       router.refresh();
     });
@@ -99,10 +110,11 @@ export function TaxRatesManager({
     setError(null);
     if (!name.trim()) return setError("Name is required.");
     start(async () => {
-      const res = editingId
-        ? await updateTaxRate(editingId, { name, rate })
-        : await createTaxRate({ name, rate, is_default: taxRates.length === 0 });
-      if (!res.ok) return setError(res.error ?? "Could not save.");
+      const said = await saveWords(
+        () => (editingId ? updateTaxRate(editingId, { name, rate }) : createTaxRate({ name, rate, is_default: taxRates.length === 0 })),
+        "Could not save.",
+      );
+      if (said) return setError(said);
       cancelEdit();
       router.refresh();
     });
@@ -114,13 +126,15 @@ export function TaxRatesManager({
 
   return (
     <div className="space-y-6">
+      {/* THE CARD'S REFUSAL, where every section can see it (cn-v1131): it used to be drawn inside the
+          Sales Tax section alone, so with that switch off a pricing level's refusal was invisible. */}
+      {error && <p className="text-sm text-red-600">{error}</p>}
       {salesTax && (
         <div>
           <h4 className="mb-2 text-sm font-semibold text-slate-900">Tax rates</h4>
           <p className="mb-3 text-sm text-slate-500">
             Add named rates for the areas you work (e.g. City vs County). The default applies to new quotes & invoices.
           </p>
-          {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
           {taxRates.length > 0 && (
             <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
               {taxRates.map((t) => (
@@ -190,9 +204,14 @@ export function TaxRatesManager({
           </p>
         )}
         <div className="flex flex-wrap items-end gap-3">
-          <div className="w-44">
+          {/* WHAT THIS RATE DRIVES, said where it is set (cn-v1131). Erik saw $145 on an estimate after
+              changing "the backend" to $135: he had changed his own Team bill rate, which bills his
+              CLOCKED hours and prices an estimate's hours only when a labor row names him; the hours
+              with no name price here. Two cards, two rates, neither said which was which. */}
+          <div className="w-56">
             <Label htmlFor="fin-labor">Default labor rate ($/hr)</Label>
             <NumberInput id="fin-labor" value={laborRate} onValueChange={setLaborRate} />
+            <p className="mt-1 text-xs text-slate-500">Prices the hours on an estimate when no person is named. A person&apos;s own rate is on the Team page.</p>
           </div>
           <div className="w-44">
             <Label htmlFor="fin-mileage">Mileage rate ($/mi)</Label>
@@ -221,12 +240,31 @@ export function TaxRatesManager({
           </div>
           <Button
             size="sm"
-            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate, default_markup_pct: defaultMarkup, material_markup_percent: materialMarkup, material_buffer_percent: materialBuffer }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
+            onClick={() => {
+              setDefaultsError(null);
+              start(async () => {
+                // THE SILENT-WRITE LAW: this button said "Saved" whatever the server answered — a
+                // refused or dead write flashed the green check. Only the server's ok earns the word;
+                // its refusal is said here in its own words, and a call that THREW (the network, the
+                // server) in the one unreachable line instead of the error boundary (lib/save-words).
+                const said = await saveWords(
+                  () => updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate, default_markup_pct: defaultMarkup, material_markup_percent: materialMarkup, material_buffer_percent: materialBuffer }),
+                  "Couldn't save the rates — try again.",
+                );
+                if (said) {
+                  setDefaultsError(said);
+                  return;
+                }
+                setSavedLabor(true);
+                setTimeout(() => setSavedLabor(false), 2000);
+              });
+            }}
             disabled={pending}
           >
             Save
           </Button>
           {savedLabor && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
+          {defaultsError && <span className="text-sm text-red-600">{defaultsError}</span>}
         </div>
         <p className="mt-1 text-xs text-slate-500">
           Default markup prices a price-book item when the item has no markup of its own and the customer has no pricing level — so a net-cost catalog import never quotes at cost. Materials markup applies when importing job costs to an invoice. Mileage rate is used only for the tax-report deduction estimate — payroll mileage is settled separately, by hand.

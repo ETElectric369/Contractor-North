@@ -40,26 +40,50 @@ export interface TaskDetailMaterial {
 }
 
 /**
- * HOW A TASK LINE WAS BUILT (quote_line_items.detail, 0386). The line's description / quantity /
- * unit_price stay the customer-facing numbers; this is the arithmetic behind them, so the document
- * can print labor and parts beneath the task when the company's format says so, the builder can
- * re-price the line when he types the hours, and the job can be born with its tasks and parts.
+ * ONE ROW OF LABOR UNDER A TASK (cn-v1131). A task used to hold one hours figure at one rate, so
+ * two people at two rates could not be on it; now it holds one row per rate. A row names a person
+ * (`person_id`, their Team bill rate through the one rule) or carries a label in his words ("Helper",
+ * "2-man crew") or neither (the first row of a task: just "Labor" at the customer's rate).
  *
- * `hours` null = HE HAS NOT GIVEN THEM: the line prices $0 and carries the "hours?" flag. It is
- * never a typical figure ([[no-speculation]]). `rate` is the $/h the hours were priced at
- * (laborRateFor), kept so a stored line still explains itself after the rate card changes.
+ * `hours` null = HE HAS NOT GIVEN THEM: the row prices $0 and the line carries "hours?". Never a
+ * typical figure ([[no-speculation]]). `rate` is the $/h the hours were priced at, kept so a stored
+ * line still explains itself after the rate card changes. `rate_from` says whose figure it is:
+ *   "rule"   — laborRateFor's answer when the row was priced; follows the rule while the estimate is a draft
+ *   "hand"   — typed over the chip; stands
+ *   "stated" — dictated in the scope he typed ("$200/hr for the two of us"); stands
+ *   "legacy" — a row read from the pre-1131 shape {hours, rate}; follows the rule only while its rate
+ *              still equals the rule's previous answer (the old heuristic), never over a hand figure.
+ * `from_kit` marks hours the kit derived (minutes per unit × units): a change of units re-derives
+ * them; typing hours clears it. The public wire (public_quote) ships label, hours and rate — NEVER
+ * person_id (0395 names its keys).
+ */
+export interface TaskLabor {
+  label: string | null;
+  person_id: string | null;
+  hours: number | null;
+  rate: number;
+  rate_from: "rule" | "hand" | "stated" | "legacy";
+  from_kit?: true;
+}
+
+/**
+ * HOW A TASK LINE WAS BUILT (quote_line_items.detail, 0386; labor rows 0395). The line's description /
+ * quantity / unit_price stay the customer-facing numbers; this is the arithmetic behind them, so the
+ * document can print labor and parts beneath the task when the estimate's format says so, the
+ * builder can re-price the line when he types the hours, and the job can be born with its tasks,
+ * their minutes and their parts.
+ *
+ * `labor` is one row per rate (TaskLabor); the line's labor money is their sum. The pre-1131 shape
+ * {hours, rate, hours_from_kit} is READ by coerceTaskDetail into one "legacy" row and never written
+ * again — nothing stored needs a data step.
  */
 export interface TaskDetail {
   task_id: string;
-  hours: number | null;
-  rate: number;
+  labor: TaskLabor[];
   /** How many of the unit when the task is a per-unit kit ("7 footings"); null = one. */
   units: number | null;
   kit_id: string | null;
   materials: TaskDetailMaterial[];
-  /** THE KIT GAVE THE HOURS (W4): minutes per unit × units, not his typed figure — so a change of
-   *  units re-derives them; typing hours clears it. Absent = his hours (or none). */
-  hours_from_kit?: true;
 }
 
 export interface DraftLineItem {

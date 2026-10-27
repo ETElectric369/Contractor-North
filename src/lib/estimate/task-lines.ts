@@ -1,4 +1,4 @@
-import type { DraftLineItem, TaskDetail, TaskDetailMaterial } from "./line-map";
+import type { DraftLineItem, TaskDetail, TaskDetailMaterial, TaskLabor } from "./line-map";
 import type { TaskMaterial, TaskValue } from "@/lib/playbook/tasks";
 import { describeChoice, priceBookLine, type BookPricing, type OptionedPriceItem } from "@/lib/pricing/item-options";
 import { kitLineView, type KitLineRaw, type KitPricing } from "@/lib/kit-line";
@@ -13,12 +13,21 @@ import { kitLineView, type KitLineRaw, type KitPricing } from "@/lib/kit-line";
  * can print labor and parts beneath the task when the company's format says so, and the builder can
  * re-price the line when he types the hours.
  *
+ * ── ONE OR MORE LABOR ROWS (cn-v1131) ───────────────────────────────────────────────────────
+ *
+ * A task used to hold ONE hours figure at ONE rate. Two people at two rates could not be on it, and
+ * the owner's own hour quoted at the Settings default while his Team rate billed it. Now a task holds
+ * `labor: TaskLabor[]` — one row per rate (a person, or a label in his words, hours, the rate it was
+ * priced at, and whose figure that rate is). The line's labor money is the rows' sum. The pre-1131
+ * shape {hours, rate, hours_from_kit} is READ by coerceTaskDetail into one "legacy" row and never
+ * written again, so nothing stored needs a data step.
+ *
  * ── NO SPECULATION ([[no-speculation]]) ──────────────────────────────────────────────────────
  *
- * A task without hours prices its labor at $0 and carries the flag "hours?". A part without a
- * count prices at $0 and asks "how many?". A part the book cannot price (his words only, or a code
- * the book no longer carries) prices at $0 and asks "price?". Nothing here ever fills a hole with a
- * typical figure: the line is a zero that ASKS, never a number that looks right.
+ * A row without hours prices at $0 and carries the flag "hours?". A part without a count prices at
+ * $0 and asks "how many?". A part the book cannot price (his words only, or a code the book no
+ * longer carries) prices at $0 and asks "price?". Nothing here ever fills a hole with a typical
+ * figure: the line is a zero that ASKS, never a number that looks right.
  *
  * Pure. The page that calls it has already resolved the rate (laborRateFor) and the customer's
  * markup; the same function serves the inspection seed, the estimator's task mode and the builder.
@@ -45,6 +54,10 @@ export interface TaskLineContext {
   book: Map<string, TaskBookRow>;
   /** The labor rate for this customer, already resolved by laborRateFor. 0 = none set. */
   rate: number;
+  /** Whose figure `rate` is on the row it seeds: laborRateFor's answer ("rule", the default), or
+   *  one he DICTATED in the scope ("stated" — the estimator's task mode). A stated rate stands
+   *  when the rule's answer changes; a rule rate follows it (repriceTaskLine). */
+  rateFrom?: "rule" | "stated";
   /** The customer's level markup (null = none) and the org default, for the parts. */
   pricing: BookPricing;
   /** Task kits by id, when the caller loaded them. Absent = a task's kit_id prices nothing extra. */
@@ -69,10 +82,48 @@ const nonNegative = (v: unknown): number | null => {
 };
 const str = (v: unknown, max: number): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
+const RATE_FROM: ReadonlySet<string> = new Set(["rule", "hand", "stated", "legacy"]);
+
+/** The longest label a labor row carries ("Helper", "2-man crew"). */
+export const MAX_LABOR_LABEL = 80;
+/** The most labor rows a task carries (the playbook caps a task's parts the same way, MAX_TASK_MATERIALS):
+ *  a hand edit of the JSON, or a runaway Add Labor, never grows a line past what a screen can hold. */
+export const MAX_LABOR_ROWS = 20;
+
+/** A random id for a task the builder starts from a line (no Inspector task behind it). */
+function randomId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** ONE LABOR ROW, READ BACK (the stored shape, the builder's edit, or the public page's redacted
+ *  {label, hours, rate}). Nothing here crashes a document: a junk field reads as the hole it is. */
+function coerceLaborRow(raw: unknown): TaskLabor | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const x = raw as Record<string, unknown>;
+  const from = typeof x.rate_from === "string" && RATE_FROM.has(x.rate_from) ? (x.rate_from as TaskLabor["rate_from"]) : "legacy";
+  return {
+    label: str(x.label, MAX_LABOR_LABEL) || null,
+    person_id: typeof x.person_id === "string" && x.person_id.trim() ? x.person_id.trim() : null,
+    hours: positive(x.hours),
+    rate: nonNegative(x.rate) ?? 0,
+    rate_from: from,
+    ...(x.from_kit === true ? { from_kit: true as const } : {}),
+  };
+}
+
 /**
  * READ A STORED BREAKDOWN BACK. Tolerant: the public page receives the REDACTED shape (no task_id,
  * no kit_id, no cost — public_quote strips them), an older row may carry nothing at all, and a hand
  * edit of the JSON must never crash a document. Null when it is not a breakdown.
+ *
+ * TWO SHAPES, ONE READER (cn-v1131). A row with a `labor` array is the new shape, row by row. A row
+ * without one — every line saved before cn-v1131 — is the old {hours, rate, hours_from_kit}, read as
+ * ONE "legacy" row so it prices exactly as it did (20 h × $145 is still 20 × 145). The public wire
+ * ships BOTH sets of keys (0395 keeps hours/rate beside the labor array so an old line still reads
+ * on the customer's page): an EMPTY labor array beside a legacy hours or rate is the old shape, not
+ * an empty new one. A new-shape row with no rows at all stays that way — it prices nothing and asks.
  */
 export function coerceTaskDetail(raw: unknown): TaskDetail | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -93,16 +144,44 @@ export function coerceTaskDetail(raw: unknown): TaskDetail | null {
       ...(x.from_kit === true ? { from_kit: true as const } : {}),
     });
   }
-  const hours = positive(o.hours);
+  const rows = Array.isArray(o.labor) ? (o.labor as unknown[]) : null;
+  const legacyFigure = num(o.hours) !== null || (o.rate !== undefined && o.rate !== null);
+  let labor: TaskLabor[];
+  if (rows && (rows.length > 0 || !legacyFigure)) {
+    labor = rows.map(coerceLaborRow).filter((r): r is TaskLabor => r !== null).slice(0, MAX_LABOR_ROWS);
+  } else {
+    const hours = positive(o.hours);
+    labor = [
+      {
+        label: null,
+        person_id: null,
+        hours,
+        rate: nonNegative(o.rate) ?? 0,
+        rate_from: "legacy",
+        ...(hours !== null && o.hours_from_kit === true ? { from_kit: true as const } : {}),
+      },
+    ];
+  }
   return {
     task_id: str(o.task_id, 80),
-    hours,
-    rate: nonNegative(o.rate) ?? 0,
+    labor,
     units: positive(o.units),
     kit_id: str(o.kit_id, 64) || null,
     materials,
-    ...(hours !== null && o.hours_from_kit === true ? { hours_from_kit: true as const } : {}),
   };
+}
+
+/**
+ * A LINE READ BACK FROM A STORED DRAFT — the session draft the builder restores, the draft row the
+ * page adopts. The breakdown comes through coerceTaskDetail (so a line saved by an older build, the
+ * one-figure {hours, rate} shape with no `labor` rows, is one legacy row and not a TypeError at the
+ * first `labor.map`), and the flag is rebuilt from it: the flag is build-time only, so an adopted
+ * "hours?" line still says so instead of reading as a $0 somebody chose. A line with no breakdown
+ * (none, or junk that is not one) keeps its words, its numbers and whatever flag it carried.
+ */
+export function coerceDraftLine<T extends DraftLineItem>(line: T): T {
+  const d = line.detail ? coerceTaskDetail(line.detail) : null;
+  return { ...line, detail: d ?? undefined, ...(d ? { flag: taskFlags(d) } : {}) };
 }
 
 /** A line's task name without the units it carries ("Footings ×7" → "Footings"). */
@@ -125,16 +204,18 @@ export function lineNameWithUnits(description: string, prevUnits: number | null,
  *  (coerceTaskDetail drops it on save, so what the screen sums is what the row will hold). */
 const named = (m: TaskDetailMaterial): boolean => m.name.trim().length > 0;
 
+/** One labor row with its figures rounded the one way (hours 2 dp, rate 2 dp, never negative). */
+const normalizeLabor = (r: TaskLabor): TaskLabor => ({ ...r, hours: positive(r.hours), rate: nonNegative(r.rate) ?? 0 });
+
 /**
  * THE SAME NUMBERS THE SAVE WILL KEEP. coerceTaskDetail rounds to cents on the way back in; if the
  * builder priced raw "1.333" hours the reloaded breakdown would no longer explain the line and the
- * paper would drop it as "set by hand". So every edit is rounded here first, the one way.
+ * paper would drop it as "set by hand". So every edit is rounded here first, the one way — every row.
  */
 export function normalizeTaskDetail(d: TaskDetail): TaskDetail {
   return {
     ...d,
-    hours: positive(d.hours),
-    rate: nonNegative(d.rate) ?? 0,
+    labor: d.labor.map(normalizeLabor),
     units: positive(d.units),
     materials: d.materials.map((m) => ({ ...m, qty: positive(m.qty), cost: nonNegative(m.cost), sell: nonNegative(m.sell) })),
   };
@@ -152,13 +233,25 @@ export function partMoney(m: Pick<TaskDetailMaterial, "qty" | "sell">): number {
   return Math.round((q * s) / 100) / 100;
 }
 
-/** The arithmetic behind a task line, in cents: labor = hours × rate, parts = Σ partMoney (each part
- *  rounded as printed, then summed — never the raw products summed and rounded once). */
+/** ONE LABOR ROW'S MONEY, IN CENTS — the figure the paper prints beside it: hours × rate, rounded as
+ *  printed. A row without hours is nothing (it asks). The line's labor is the sum of these, so the
+ *  rows the customer adds up equal the line to the cent, the same rule as the parts. */
+export function laborMoney(r: Pick<TaskLabor, "hours" | "rate">): number {
+  return r.hours === null ? 0 : round2(r.hours * r.rate);
+}
+
+/** The arithmetic behind a task line, in cents: labor = Σ laborMoney (each row rounded as printed,
+ *  then summed), parts = Σ partMoney the same way — never the raw products summed and rounded once. */
 export function taskMoney(d: TaskDetail): { labor: number; parts: number; total: number } {
-  const labor = d.hours === null ? 0 : round2(d.hours * d.rate);
+  const labor = round2(d.labor.reduce((t, r) => t + laborMoney(r), 0));
   const parts = round2(d.materials.filter(named).reduce((t, m) => t + partMoney(m), 0));
   return { labor, parts, total: round2(labor + parts) };
 }
+
+/** What a row is called when a flag has to name it among others: his label, else "labor". (A row
+ *  that names a person carries no name here — the breakdown screen prints the person; the flag
+ *  does not reach into the Team list.) */
+const rowWord = (r: TaskLabor): string => r.label?.trim() || "labor";
 
 /**
  * WHAT THE LINE IS STILL ASKING. Build-time only (DraftLineItem.flag): the office reads it in the
@@ -168,10 +261,18 @@ export function taskFlags(d: TaskDetail): string | undefined {
   const flags: string[] = [];
   // A KIT WITH NO COUNT (audit v1085, carried [5]; field feedback 10-13): the kit carries the hours
   // and parts PER UNIT, so the one thing the line asks is the count — "units?" — and until it is
-  // given the line prices nothing (buildTaskDetail seeds it asking). Typing 1 answers it.
+  // given the line prices nothing (buildTaskDetail seeds it asking). Typing 1 answers it. The kit's
+  // hours land on the FIRST row, so that row's hole is the count's, not its own.
   const uncounted = !!d.kit_id && d.units === null;
-  if (d.hours === null && !uncounted) flags.push("hours?");
-  else if (d.hours !== null && d.rate <= 0) flags.push("no company labor rate set");
+  const several = d.labor.length > 1;
+  let noRate = false;
+  if (d.labor.length === 0 && !uncounted) flags.push("hours?");
+  d.labor.forEach((r, i) => {
+    if (r.hours === null) {
+      if (!(uncounted && i === 0)) flags.push(several ? `hours? ${rowWord(r)}` : "hours?");
+    } else if (r.rate <= 0) noRate = true;
+  });
+  if (noRate) flags.push("no labor rate set");
   if (uncounted) flags.push("units?");
   for (const m of d.materials.filter(named)) {
     // A kit part with no count is the same one question ("units?"), not one per part.
@@ -270,7 +371,8 @@ function materialDetail(m: TaskMaterial, ctx: TaskLineContext): TaskDetailMateri
   return { code: m.code, name: m.words || m.code || "", qty: m.qty, cost: null, sell: null };
 }
 
-/** The breakdown for one task. HIS hours win over a kit's (fill holes, never overwrite a hand). */
+/** The breakdown for one task: ONE labor row at the rate the caller resolved. HIS hours win over a
+ *  kit's (fill holes, never overwrite a hand). */
 export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDetail {
   const kit = task.kit_id ? ctx.kits?.get(task.kit_id) ?? null : null;
   const fromKit = kit ? expandTaskKit(task, kit, { orgDefaultPct: ctx.pricing.orgDefaultPct ?? 0, levelPct: ctx.pricing.levelPct }) : null;
@@ -281,10 +383,17 @@ export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDeta
   // hours still win.
   const uncounted = !!kit && task.units === null;
   const kitHours = task.hours === null && !uncounted && fromKit?.hours !== null && fromKit?.hours !== undefined;
+  const row: TaskLabor = {
+    label: null,
+    person_id: null,
+    hours: task.hours ?? (uncounted ? null : fromKit?.hours ?? null),
+    rate: round2(Math.max(0, ctx.rate)),
+    rate_from: ctx.rateFrom === "stated" ? "stated" : "rule",
+    ...(kitHours ? { from_kit: true as const } : {}),
+  };
   return {
     task_id: task.id,
-    hours: task.hours ?? (uncounted ? null : fromKit?.hours ?? null),
-    rate: ctx.rate,
+    labor: [row],
     units: task.units,
     kit_id: kit ? kit.id : null,
     // The kit's parts are marked as the kit's, so a change of units re-derives them and leaves
@@ -293,7 +402,6 @@ export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDeta
       ...(fromKit?.materials ?? []).map((m) => ({ ...m, ...(uncounted ? { qty: null } : {}), from_kit: true as const })),
       ...task.materials.map((m) => materialDetail(m, ctx)),
     ],
-    ...(kitHours ? { hours_from_kit: true as const } : {}),
   };
 }
 
@@ -302,6 +410,11 @@ export function buildTaskDetail(task: TaskValue, ctx: TaskLineContext): TaskDeta
  * it gave and the parts it put there — are derived again for the new count through THE one
  * expandTaskKit; his typed hours and every part he added or edited by hand stand as they are. With
  * no kit to expand, only the count changes (it rides the name).
+ *
+ * THE KIT'S HOURS LAND ON THE FIRST ROW (cn-v1131). A kit has one minutes figure, so it feeds one
+ * row: the first. A first row he typed (no from_kit mark) stands, as his hours always have; every
+ * other row is his and is not touched. A breakdown with no rows at all has nowhere for the kit's
+ * hours to land — the line keeps asking ("hours?") rather than growing a row at a rate nobody gave.
  */
 export const MAX_UNITS = 100_000;
 
@@ -314,18 +427,19 @@ export function reexpandTaskDetail(d: TaskDetail, units: number | null, kit: Tas
   if (!kit) return { ...d, units: next };
   const probe = (u: number | null): TaskValue => ({ id: d.task_id, name: "", hours: null, units: u, kit_id: kit.id, materials: [] });
   const fromKit = expandTaskKit(probe(next), kit, pricing);
+  const first: TaskLabor | null = d.labor[0] ?? null;
 
   // A LINE SAVED BEFORE THE MARKS (cn-v1076), or one he has edited all over: nothing on it is
   // flagged. The kit's parts are then recognised only where they still read EXACTLY as the kit put
   // them for the old count (same code or words, same count), and its hours only when they equal
   // what the kit gave — anything else on such a line is his and stands.
-  const legacy = !d.materials.some((m) => m.from_kit === true) && d.hours_from_kit !== true;
+  const legacy = !d.materials.some((m) => m.from_kit === true) && first?.from_kit !== true;
   const asWas = legacy ? expandTaskKit(probe(d.units), kit, pricing) : null;
   // A LINE SEEDED ASKING — the kit task named with no count and no hours (field-1014) — takes the
   // kit's hours with its first count: nothing on it was his to clear (audit v1120, class 1). A line
   // that had a count and whose hours he cleared stays the hole it is.
-  const seededAsking = d.units === null && d.hours === null;
-  const kitHours = d.hours_from_kit === true || seededAsking || (asWas !== null && d.hours !== null && d.hours === asWas.hours);
+  const seededAsking = d.units === null && first !== null && first.hours === null;
+  const kitHours = first !== null && (first.from_kit === true || seededAsking || (asWas !== null && first.hours !== null && first.hours === asWas.hours));
   const untouched = new Map<string, number[]>();
   for (const m of asWas?.materials ?? []) untouched.set(partKey(m), [...(untouched.get(partKey(m)) ?? []), m.qty ?? -1]);
   const stillTheKits = (m: TaskDetailMaterial): boolean => {
@@ -353,15 +467,12 @@ export function reexpandTaskDetail(d: TaskDetail, units: number | null, kit: Tas
     if (!take) continue; // the kit no longer carries it: the kit's part follows the kit
     materials.push({ ...take, sell: m.sell ?? take.sell, cost: m.cost ?? take.cost, from_kit: true as const });
   }
-  const { hours_from_kit: _h, ...rest } = d;
-  return {
-    ...rest,
-    units: next,
-    kit_id: kit.id,
-    hours: kitHours ? fromKit.hours : d.hours,
-    materials,
-    ...(kitHours && fromKit.hours !== null ? { hours_from_kit: true as const } : {}),
-  };
+  let labor = d.labor;
+  if (first !== null && kitHours) {
+    const { from_kit: _k, ...rest } = first;
+    labor = [{ ...rest, hours: fromKit.hours, ...(fromKit.hours !== null ? { from_kit: true as const } : {}) }, ...d.labor.slice(1)];
+  }
+  return { ...d, units: next, kit_id: kit.id, labor, materials };
 }
 
 /** The line a breakdown prices to: the customer's numbers follow the arithmetic, the flag says what
@@ -371,11 +482,47 @@ export function lineFromDetail(line: DraftLineItem, raw: TaskDetail): DraftLineI
   return { ...line, unit_price: taskMoney(d).total, flag: taskFlags(d), detail: d };
 }
 
-/** Re-price a task line's LABOR at another rate (the customer changed). The parts keep the sell they
- *  were built with: the item's own markup is not in the breakdown, so re-marking them would guess. */
-export function repriceTaskLine(line: DraftLineItem, rate: number): DraftLineItem {
+/**
+ * THE RULE'S ANSWER CHANGED (the customer, their level, the company default): re-price the rows
+ * that carry the rule's figure. A "rule" row follows to `rule`. A "legacy" row (read from the old
+ * one-figure shape, which never said whose figure it was) follows only while its rate still equals
+ * the rule's PREVIOUS answer — the old heuristic, never over a figure he typed. A "hand" or
+ * "stated" row stands: he set it. The parts keep the sell they were built with: the item's own
+ * markup is not in the breakdown, so re-marking them would guess.
+ */
+export function repriceTaskLine(line: DraftLineItem, rule: number, prevRule: number): DraftLineItem {
   if (!line.detail) return line;
-  return lineFromDetail(line, { ...line.detail, rate: round2(Math.max(0, rate)) });
+  const to = round2(Math.max(0, Number(rule) || 0));
+  const was = round2(Math.max(0, Number(prevRule) || 0));
+  const labor = line.detail.labor.map((r) => {
+    if (r.rate_from === "rule") return { ...r, rate: to };
+    if (r.rate_from === "legacy" && round2(r.rate) === was) return { ...r, rate: to };
+    return r;
+  });
+  return lineFromDetail(line, { ...line.detail, labor });
+}
+
+/** A breakdown with nothing in it but the question: one labor row at the rule's rate, no hours
+ *  (the line asks "hours?"), no parts. What the builder starts from when he makes a task of a line. */
+export function emptyTaskDetail(rule: { rate: number }): TaskDetail {
+  return {
+    task_id: randomId(),
+    labor: [{ label: null, person_id: null, hours: null, rate: round2(Math.max(0, Number(rule.rate) || 0)), rate_from: "rule" }],
+    units: null,
+    kit_id: null,
+    materials: [],
+  };
+}
+
+/**
+ * MAKE A TASK OF A LINE HE TYPED. The line keeps its words and its numbers — the price he typed is
+ * a HAND price (detailExplains says no) until the breakdown adds up to it; it is never zeroed under
+ * him. The breakdown starts empty and asking, and the line lands under "Tasks" unless it already
+ * has a group.
+ */
+export function taskFromLine(line: DraftLineItem, rule: { rate: number }): DraftLineItem {
+  const detail = emptyTaskDetail(rule);
+  return { ...line, detail, group: line.group ?? "Tasks", flag: taskFlags(detail) };
 }
 
 /** One task → one line. Quantity is always 1: the units of a per-unit task ride the breakdown and
@@ -398,4 +545,19 @@ export function taskLine(task: TaskValue, ctx: TaskLineContext): DraftLineItem {
 /** The whole answer, in his order. */
 export function taskLines(tasks: TaskValue[], ctx: TaskLineContext): DraftLineItem[] {
   return tasks.map((t) => taskLine(t, ctx));
+}
+
+/** A task's labor in MINUTES — what the job's task carries (tasks.planned_minutes, 0395): Σ round(h × 60)
+ *  over the rows he gave hours to; a row still asking adds nothing, and no hours at all is null (the
+ *  task asks on the job as it did on the paper), never 0. */
+export function laborMinutes(labor: ReadonlyArray<Pick<TaskLabor, "hours">>): number | null {
+  let sum = 0;
+  let any = false;
+  for (const r of labor) {
+    if (r.hours !== null && Number.isFinite(r.hours) && r.hours > 0) {
+      sum += Math.round(r.hours * 60);
+      any = true;
+    }
+  }
+  return any && sum > 0 ? sum : null;
 }

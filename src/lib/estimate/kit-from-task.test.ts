@@ -9,10 +9,10 @@ import type { TaskDetail } from "./line-map";
  * that would let it be made. The database rule reads back every id, links codes to the book, keeps
  * one kit per name, and takes a kit away again when its parts fail.
  */
-const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
+/** A task with ONE labor row (`hours` = that row's hours); `labor` overrides it outright. */
+const detail = ({ hours = 14, ...over }: Partial<TaskDetail> & { hours?: number | null } = {}): TaskDetail => ({
   task_id: "t1",
-  hours: 14,
-  rate: 145,
+  labor: [{ label: null, person_id: null, hours, rate: 145, rate_from: "rule" }],
   units: 7,
   kit_id: null,
   materials: [
@@ -82,6 +82,32 @@ describe("kitFromTaskDetail: per unit, from his totals", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toContain("Give the task its hours first");
+    expect(kitFromTaskDetail(detail({ labor: [] }), { name: "Footing", unit: "footing" })).toEqual({ ok: false, error: "Give the task its hours first — a kit remembers your hours per unit." });
+  });
+
+  it("TWO LABOR ROWS (cn-v1131): the kit's minutes are the rows' hours summed over the units — no rate is kept", () => {
+    const two = detail({
+      labor: [
+        { label: null, person_id: null, hours: 8, rate: 145, rate_from: "rule" },
+        { label: "Helper", person_id: null, hours: 6, rate: 65, rate_from: "hand" },
+      ],
+      materials: [],
+    });
+    const r = kitFromTaskDetail(two, { name: "Footing", unit: "footing" });
+    expect(r.ok && r.value.kit).toEqual({ name: "Footing", unit: "footing", labor_minutes: 120, category: null }); // 14 h / 7 = 2 h each
+    expect(JSON.stringify(r)).not.toContain("rate");
+  });
+
+  it("a second row still asking blocks, named — its hours are not a figure the kit may guess", () => {
+    const asking = detail({
+      labor: [
+        { label: null, person_id: null, hours: 8, rate: 145, rate_from: "rule" },
+        { label: "Helper", person_id: null, hours: null, rate: 65, rate_from: "hand" },
+      ],
+    });
+    expect(kitFromTaskDetail(asking, { name: "Footing", unit: "footing" })).toEqual({ ok: false, error: "Give Helper its hours first — a kit remembers your hours per unit." });
+    const nameless = detail({ labor: [{ label: null, person_id: null, hours: 8, rate: 145, rate_from: "rule" }, { label: null, person_id: "p-1", hours: null, rate: 65, rate_from: "rule" }] });
+    expect(kitFromTaskDetail(nameless, { name: "Footing", unit: "footing" })).toEqual({ ok: false, error: "Give the task its hours first — a kit remembers your hours per unit." });
   });
 
   it("refuses a part without a count, naming it — a missing count is never a silent 1 per unit", () => {

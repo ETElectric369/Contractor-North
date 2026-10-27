@@ -84,6 +84,24 @@ export function normalizeDocStyle(raw: unknown): DocStyle {
   };
 }
 
+/**
+ * HOW THIS ESTIMATE'S TASK LINES READ — THE ONE READER (cn-v1131, 0395). The company's Doc Studio
+ * choice is the default; an estimate may say otherwise for itself (`quotes.estimate_format`, null =
+ * the company's). Every surface that prints or ships a breakdown (the print page, the PDF, the /q
+ * page through public_quote's coalesce, the studio sample) resolves the format HERE, so the paper
+ * and the public link never disagree about one estimate.
+ */
+export type EstimateFormat = DocStyle["estimate_format"];
+
+export function estimateFormatFor(
+  quote: { estimate_format?: unknown } | null | undefined,
+  docStyle: Pick<DocStyle, "estimate_format">,
+): EstimateFormat {
+  const own = quote?.estimate_format;
+  if (own === "detailed" || own === "tasks") return own;
+  return docStyle.estimate_format === "detailed" ? "detailed" : "tasks";
+}
+
 /** Row padding class per density — one map, both document tables. */
 export const DENSITY_ROW: Record<DocStyle["density"], string> = {
   compact: "py-1",

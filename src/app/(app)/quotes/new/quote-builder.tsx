@@ -18,12 +18,28 @@ import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import { formatCurrency } from "@/lib/utils";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
-import { laborRateFor } from "@/lib/pricing/labor-rate";
-import { detailExplains, lineFromDetail, lineNameWithUnits, partMoney, reexpandTaskDetail, repriceTaskLine, taskMoney, type TaskKit } from "@/lib/estimate/task-lines";
+import { laborRateFor, laborRateFromWords, type LaborRateFrom } from "@/lib/pricing/labor-rate";
+import {
+  coerceDraftLine,
+  detailExplains,
+  emptyTaskDetail,
+  laborMoney,
+  lineFromDetail,
+  lineNameWithUnits,
+  partMoney,
+  reexpandTaskDetail,
+  taskFlags,
+  taskFromLine,
+  taskMoney,
+  type TaskKit,
+} from "@/lib/estimate/task-lines";
+import { repriceRows, rowForWho, ruleInputsKey, type RuleInputs } from "@/lib/estimate/reprice-rows";
 import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";
 import { rememberTaskAsKit } from "../../price-list/kit-actions";
 import { sameTask } from "@/lib/playbook/tasks";
-import type { TaskDetail, TaskDetailMaterial } from "@/lib/estimate/line-map";
+import type { TaskDetail, TaskDetailMaterial, TaskLabor } from "@/lib/estimate/line-map";
+import type { EstimateFormat } from "@/lib/doc-style";
+import { PaperFormatSwitch } from "../paper-format-switch";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
@@ -69,6 +85,13 @@ interface TaxRateLite {
   is_default: boolean;
 }
 type KitLite = { id: string; name: string; kit_items: unknown[] };
+/** ONE PERSON ON THE TEAM, for a labor row's Who select (cn-v1131): their own bill rate (Team page)
+ *  is the top rung of the one labor-rate rule, so a row that names them prices at it. */
+interface PersonOption {
+  id: string;
+  name: string;
+  billRate: number | null;
+}
 
 
 /**
@@ -99,6 +122,8 @@ function LineDescInput({
   onText,
   onPick,
   onBlur,
+  onFocus,
+  autoFocus,
   priceItems,
   pricing,
   placeholder = "Description",
@@ -110,6 +135,10 @@ function LineDescInput({
   /** After the box loses focus (the dropdown's own close still runs). A task's part uses it to
    *  drop a row he left nameless. */
   onBlur?: () => void;
+  /** When the box takes focus. Add A Task uses it to let go of the line it just focused. */
+  onFocus?: () => void;
+  /** Focus this box as it mounts: the line Add A Task just made is the one he is about to name. */
+  autoFocus?: boolean;
   priceItems: PriceItemLite[];
   /** The document's pricing (customer level + org default): each row shows priceBookLine's price,
    *  the same number the pick writes. */
@@ -137,6 +166,7 @@ function LineDescInput({
         placeholder={placeholder}
         className={className}
         value={value}
+        autoFocus={autoFocus}
         onChange={(e) => {
           onText(e.target.value);
           setOpen(true);
@@ -148,6 +178,7 @@ function LineDescInput({
         // `value` — so this is about not covering the page mid-edit, not about size.)
         onFocus={() => {
           if (!value.trim()) setOpen(true);
+          onFocus?.();
         }}
         // Escape closes it without touching the line — a list you can't get out of is a trap
         // when the description you want is one you're typing by hand.
@@ -221,6 +252,15 @@ function LineDescInput({
  * reads "hours?", a part with no count "how many?", a part nobody priced "price?" — a $0 that ASKS,
  * never a figure typed for him ([[no-speculation]]).
  *
+ * LABOR IS ONE ROW PER RATE (cn-v1131). Erik: "im curious how to add time at a different pay rate
+ * and i noticed the 145 on there and i thought i had updated that in the backend to 135". The 145
+ * was the company default, the 135 his own Team rate, and the one Hours line said neither. Now each
+ * row says WHO (Labor · a person · his own word, "Helper") and, beside the figure, WHERE IT CAME
+ * FROM through the one rule (laborRateFor / laborRateFromWords): "company default", "the customer's
+ * level", "<name>'s rate" — or "typed" when he tapped the chip and wrote one, "from the scope" when
+ * he dictated it. Add Labor At Another Rate puts a second row under the task; the first row is the
+ * task's labor and never leaves.
+ *
  * A part is picked from the price book through the same autocomplete the line's description uses
  * (LineDescInput), so a pick lands the book's words with the vendor named (describeChoice), the
  * company's cost and the sell at THIS customer's markup (priceBookLine) — the one price. A part in
@@ -240,12 +280,21 @@ function TaskBreakdown({
   taskKits = [],
   kitsOn = true,
   scopeWord = null,
+  people = [],
+  levelRate = null,
+  defaultLaborRate = 0,
   onChange,
 }: {
   line: DraftLineItem;
   detail: TaskDetail;
   priceItems: PriceItemLite[];
   pricing: BookPricing;
+  /** The team, for a row's Who select; a row that names one prices at their own rate (the rule). */
+  people?: PersonOption[];
+  /** The two lower rungs of the rule for THIS estimate: the customer's level rate and the company
+   *  default. A row with no person prices at them; a row with one is held under the level. */
+  levelRate?: number | null;
+  defaultLaborRate?: number;
   /** The visit's scope word ("Deck"): what Remember As A Kit files the kit under, unless he
    *  changes it. Null when the estimate did not come from a visit with a scope. */
   scopeWord?: string | null;
@@ -269,10 +318,61 @@ function TaskBreakdown({
         return { ...rest, ...patch };
       }),
     });
-  const setHours = (n: number) => {
-    const { hours_from_kit: _h, ...rest } = d;
-    set({ ...rest, hours: n > 0 ? n : null });
+  // THE RULE FOR WHOEVER IS ON A ROW (laborRateFor): the person's Team rate under the customer's
+  // level, else the level, else the company default — recomputed live, so the chip beside the figure
+  // can say where it came from. The row's own `rate` is what prices the line; a "rule" row follows
+  // the rule (the builder's rule effect), a typed or dictated one stands.
+  const ruleFor = (personId: string | null) => {
+    const person = personId ? people.find((p) => p.id === personId) ?? null : null;
+    return { ...laborRateFor({ personRate: person?.billRate, levelRate, orgDefault: defaultLaborRate }), person };
   };
+  const setLabor = (i: number, patch: Partial<TaskLabor>) => set({ ...d, labor: d.labor.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+  // TYPED HOURS ARE HIS: the kit's hours on that row stop being the kit's (from_kit off), so a later
+  // change of units leaves them alone.
+  const setHours = (i: number, n: number) =>
+    set({
+      ...d,
+      labor: d.labor.map((r, j) => {
+        if (j !== i) return r;
+        const { from_kit: _k, ...rest } = r;
+        return { ...rest, hours: n > 0 ? n : null };
+      }),
+    });
+  // The rule's inputs for THIS estimate, in the shape the pure rules take (lib/estimate/reprice-rows).
+  const ruleInputs: RuleInputs = { levelRate, orgDefault: defaultLaborRate, people };
+  const pickWho = (i: number, v: string) => {
+    const row = d.labor[i];
+    // WHO THE ROW NAMES: a person, nobody ("Labor"), or his own word ("Other…", keeping a word already
+    // there). The rate follows through rowForWho: a rule or legacy row asks the rule again for whoever is
+    // named now; a typed or dictated rate is HIS and stands — who does the hours is not what they cost.
+    const who = v === "other" ? { personId: null, label: row.label ?? "" } : { personId: v.startsWith("person:") ? v.slice("person:".length) : null, label: null };
+    setLabor(i, rowForWho(row, who, ruleInputs));
+  };
+  const addLabor = () => set({ ...d, labor: [...d.labor, { label: null, person_id: null, hours: null, rate: ruleFor(null).rate, rate_from: "rule" }] });
+  const dropLabor = (i: number) => set({ ...d, labor: d.labor.filter((_, j) => j !== i) });
+  // The row whose rate chip is open as a box (one at a time; tapping the chip again closes it).
+  const [rateOpen, setRateOpen] = useState<number | null>(null);
+  // A figure the one way the rows carry it (two decimals), so a live answer is compared to a stored one as
+  // the row holds it and a rate like 133.333 does not read as a drift against its own 133.33.
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  // THE CHIP'S WORDS: the figure and where it came from. A typed or dictated rate names his act; a row
+  // read from the old one-figure shape says only what it was quoted at. A rule row names the rule's
+  // source — WHILE the stored figure is the rule's answer now. A draft saved at $145 after the default
+  // moved to $135 holds a rule row at 145 (the effect never runs on the first render: the seed carries
+  // its rate; or the person has since left), and "× $145.00/h · company default" would be a lie. It
+  // reads "quoted at $145.00/h · the rule says $135.00/h now", and the way back is named when the chip
+  // is open (backWords), exactly as it is for a typed figure.
+  const rateWords = (row: TaskLabor, live: { rate: number; from: LaborRateFrom; person: PersonOption | null }): string => {
+    const at = `${formatCurrency(row.rate)}/h`;
+    if (row.rate_from === "hand") return `× ${at} · typed`;
+    if (row.rate_from === "stated") return `× ${at} · from the scope`;
+    if (row.rate_from === "legacy") return `quoted at ${at}`;
+    if (cents(live.rate) === row.rate) return `× ${at} · ${laborRateFromWords(live.from, live.person?.name)}`;
+    return `quoted at ${at} · the rule says ${live.rate > 0 ? `${formatCurrency(live.rate)}/h` : "no rate"} now`;
+  };
+  // The one way back from a typed figure, named for what it goes back TO (a button, so Title Case).
+  const backWords = (live: { from: LaborRateFrom; person: PersonOption | null }): string | null =>
+    live.from === "person" && live.person ? `Use ${live.person.name}'s Rate` : live.from === "level" ? "Use The Customer's Level" : live.from === "default" ? "Use The Company Default" : null;
   // THE UNITS BOX on a kit-built line: the kit's hours and parts are derived again for the new
   // count through THE one expandTaskKit, his own stand, and the count rides the line's name.
   const setUnits = (n: number) => {
@@ -333,17 +433,87 @@ function TaskBreakdown({
   const planned = kitOpen ? kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit }) : null;
   return (
     <div className="mt-1.5 space-y-1 rounded-md border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
-      <div className="flex items-center gap-1.5">
-        <span className="w-12 shrink-0 text-slate-500">Hours</span>
-        <NumberInput
-          aria-label="Hours"
-          placeholder="hours?"
-          className={`${box} w-20`}
-          value={d.hours ?? 0}
-          onValueChange={setHours}
-        />
-        <span className="whitespace-nowrap">× {formatCurrency(d.rate)}/h</span>
-        <span className="ml-auto tabular-nums text-slate-700">{formatCurrency(money.labor)}</span>
+      {d.labor.map((row, i) => {
+        const live = ruleFor(row.person_id);
+        const who = row.person_id ? `person:${row.person_id}` : row.label !== null ? "other" : "";
+        // A row priced for somebody who has since left the team keeps a row to sit on, or the
+        // select would show the first option over a rate that is not its answer.
+        const known = !row.person_id || people.some((p) => p.id === row.person_id);
+        const words = rateWords(row, live);
+        // The way back is offered whenever the stored figure is not the rule's answer — a typed one, a
+        // dictated one, or a rule row the rule has moved out from under (the chip says so).
+        const back = cents(live.rate) !== row.rate ? backWords(live) : null;
+        return (
+          <div key={i} className="flex flex-wrap items-center gap-1.5">
+            <Select aria-label="Who" className={`${box} w-28 py-0`} value={who} onChange={(e) => pickWho(i, e.target.value)}>
+              <option value="">Labor</option>
+              {people.map((p) => (
+                <option key={p.id} value={`person:${p.id}`}>
+                  {p.name}
+                </option>
+              ))}
+              {!known && <option value={`person:${row.person_id}`}>Someone No Longer On The Team</option>}
+              <option value="other">Other…</option>
+            </Select>
+            {who === "other" && (
+              <Input
+                aria-label="Who, in your words"
+                placeholder="Helper, 2-man crew…"
+                className={`${box} w-28`}
+                value={row.label ?? ""}
+                onChange={(e) => setLabor(i, { label: e.target.value })}
+              />
+            )}
+            <NumberInput aria-label="Hours" placeholder="hours?" className={`${box} w-20`} value={row.hours ?? 0} onValueChange={(n) => setHours(i, n)} />
+            {/* THE RATE CHIP: the figure and where it came from (rateWords). Tapping it opens a box; a
+                typed figure is his ("typed") and stands until he goes back to the rule by name. */}
+            <button
+              type="button"
+              onClick={() => setRateOpen(rateOpen === i ? null : i)}
+              className="whitespace-nowrap rounded px-1 hover:bg-white hover:underline"
+              aria-label="Change The Rate"
+            >
+              {words}
+            </button>
+            {rateOpen === i && (
+              <>
+                <NumberInput
+                  aria-label="Rate"
+                  placeholder="$/h"
+                  className={`${box} w-20`}
+                  value={row.rate}
+                  autoFocus
+                  onValueChange={(n) => setLabor(i, { rate: n > 0 ? n : 0, rate_from: "hand" })}
+                />
+                {back && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLabor(i, { rate: cents(live.rate), rate_from: "rule" });
+                      setRateOpen(null);
+                    }}
+                    className="font-medium text-brand hover:underline"
+                  >
+                    {back}
+                  </button>
+                )}
+              </>
+            )}
+            <span className="ml-auto tabular-nums text-slate-700">{formatCurrency(laborMoney(row))}</span>
+            {/* The first row is the task's labor; a task always has one. The others can go. */}
+            {i > 0 && (
+              <button type="button" onClick={() => dropLabor(i)} className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Remove This Labor">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        );
+      })}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+        <button type="button" onClick={addLabor} className="font-medium text-brand hover:underline">
+          Add Labor At Another Rate
+        </button>
+        {d.labor.length > 1 && <span className="tabular-nums text-slate-500">Labor {formatCurrency(money.labor)}</span>}
       </div>
       {d.materials.map((m, i) => (
         <div key={i} className="flex flex-wrap items-center gap-1.5">
@@ -414,7 +584,7 @@ function TaskBreakdown({
                     asks "units?" until he types one; the kit prices at one unit meanwhile. */}
                 <NumberInput aria-label="Units" placeholder="units" className={`${box} w-20`} value={d.units ?? 0} onValueChange={setUnits} />
                 {fromKit.unit && <span className="text-slate-500">{fromKit.unit}</span>}
-                {d.hours !== null && d.hours_from_kit !== true && Number(fromKit.labor_minutes) > 0 && (
+                {d.labor.some((r) => r.hours !== null && r.from_kit !== true) && Number(fromKit.labor_minutes) > 0 && (
                   <span className="text-slate-400">· your hours stand; the kit&rsquo;s parts follow the units</span>
                 )}
               </>
@@ -482,6 +652,8 @@ export function QuoteBuilder({
   quoteExpiryDays = 30,
   defaultMarkupPct = 0,
   defaultLaborRate = 0,
+  people = [],
+  companyEstimateFormat = "tasks",
   estimatorTaskMode = false,
   deckRateRows,
   measured,
@@ -521,6 +693,8 @@ export function QuoteBuilder({
     taxRate?: number | null;
     validUntil?: string | null;
     items?: DraftLineItem[];
+    /** The draft's own paper format (quotes.estimate_format); null = the company's. */
+    estimateFormat?: EstimateFormat | null;
   } | null;
   /** The linked lead's own plan PDFs (intake uploads) — one-tap take-off, no re-upload. */
   leadPlans?: { path: string; name: string }[];
@@ -550,6 +724,12 @@ export function QuoteBuilder({
    *  rate of its own. A task line's hours price at the resolved rate; 0 = no rate set, and the line
    *  says so rather than guessing one. */
   defaultLaborRate?: number;
+  /** The org's active people (profile_pay: id, name, bill rate), for a labor row's Who select. A
+   *  row that names one prices at their own Team rate through the one rule. */
+  people?: PersonOption[];
+  /** The company's Doc Studio choice for how a task line reads on the paper (doc_style.estimate_format):
+   *  what "Company Default" means on the switch by the totals. */
+  companyEstimateFormat?: EstimateFormat;
   /** Draft With Estimator SPLITS the scope into tasks (research orgs' typed scope, quotes/actions.ts
    *  runEstimatorTasks) instead of pricing lines — the sentence under the button must say which. */
   estimatorTaskMode?: boolean;
@@ -585,6 +765,13 @@ export function QuoteBuilder({
   // The customer-facing document word — Estimate (T&M) by default, toggle to a
   // fixed-price Quote per document. Same control as the saved-quote editor.
   const [docType, setDocType] = useState<QuoteDocType>(adoptedSeed?.docType === "quote" ? "quote" : "estimate");
+  // HOW THE TASK LINES READ ON THIS PAPER (cn-v1131): "tasks" = the task and its price, "detailed" =
+  // its labor and parts printed beneath it, null = whatever the company chose in Doc Studio. Erik:
+  // "it would be nice to have the time and material line items for each task optionally visible on
+  // the estimate itself." Saved as quotes.estimate_format; the one reader is estimateFormatFor.
+  const [estimateFormat, setEstimateFormat] = useState<EstimateFormat | null>(
+    adoptedSeed?.estimateFormat === "tasks" || adoptedSeed?.estimateFormat === "detailed" ? adoptedSeed.estimateFormat : null,
+  );
   const [title, setTitle] = useState(adoptedSeed?.title ?? "");
   const [description, setDescription] = useState(adoptedSeed?.description ?? "");
   const [notes, setNotes] = useState(adoptedSeed?.notes ?? "");
@@ -623,11 +810,13 @@ export function QuoteBuilder({
   // `?? null`, never `?? 0`: a level ALWAYS wins, so a 0 here would sell every customer without a
   // level at net cost.
   const pricing: BookPricing = { levelPct: levelMarkup ?? null, orgDefaultPct: defaultMarkupPct ?? null };
-  // THE ONE LABOR RATE for the hours on this screen (laborRateFor): the customer's level rate when
-  // the level has one, else the org default, else 0 — which a task line reads as "no rate set" and
-  // SAYS, never a guessed hourly. The same function the server seed and the estimator price with,
-  // so a task's hours cost the same on every door ([[two-doors-one-thing]]).
-  const rate = laborRateFor(levelRate, defaultLaborRate);
+  // THE ONE LABOR RATE RULE for the hours on this screen (laborRateFor): the customer's level rate
+  // when the level has one, else the org default, else 0 — which a task line reads as "no rate set"
+  // and SAYS, never a guessed hourly. The same function the server seed, the estimator and the
+  // job's billing price with, so an hour costs the same on every door ([[two-doors-one-thing]]).
+  // This is the rule's answer for a row that names NOBODY; a row that names a person asks the rule
+  // again with their Team rate on top (TaskBreakdown's ruleFor).
+  const rule = laborRateFor({ levelRate, orgDefault: defaultLaborRate });
 
   /* ── WHO'S THIS FOR: one picker, two kinds of person, and it never confuses them ────────── */
   // The attached lead ALWAYS has a row to sit on, even if it's been won/lost or aged out of the
@@ -703,6 +892,24 @@ export function QuoteBuilder({
     setItems([...real, ...lines]);
   }
 
+  // ADD A TASK (cn-v1131): a task line by hand — no inspection, no estimator. It lands under Tasks
+  // reading "hours?" at $0 with its breakdown open (one labor row at the rule's rate, no parts:
+  // emptyTaskDetail), and the description box takes focus so the next thing he types is its name.
+  const [focusIdx, setFocusIdx] = useState<number | null>(null);
+  function addTask() {
+    dirtyRef.current = true;
+    const detail = emptyTaskDetail(rule);
+    setFocusIdx(items.length);
+    setItems((p) => [...p, { description: "", quantity: 1, unit: "ea", unit_price: 0, group: "Tasks", detail, flag: taskFlags(detail) }]);
+  }
+  // MAKE THIS A TASK: a plain line keeps its words, count and typed price (as a hand price — the
+  // amber note says the breakdown stays off the paper until the hours and parts explain it) and
+  // gains an empty breakdown to fill in (taskFromLine).
+  function makeTask(idx: number) {
+    dirtyRef.current = true;
+    setItems((p) => p.map((l, i) => (i === idx ? taskFromLine(l, rule) : l)));
+  }
+
   const [scope, setScope] = useState(initialScope ?? "");
   /**
    * WHAT THE ESTIMATOR PROPOSED AND HAS NOT YET BEEN PUT ON THE ESTIMATE.
@@ -767,8 +974,9 @@ export function QuoteBuilder({
   const draftState = useMemo(
     // proposed/questions ride too (Andrew's 45 plan lines lived ONLY in this state), and
     // quoteId keeps a refreshed tab autosaving the same draft row instead of minting twins.
-    () => ({ customerId, leadId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId }),
-    [customerId, leadId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId],
+    // estimateFormat rides too (cn-v1131), so a restore keeps the paper switch where he left it.
+    () => ({ customerId, leadId, docType, estimateFormat, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId }),
+    [customerId, leadId, docType, estimateFormat, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId],
   );
   const draft = useDraft(
     // inquiryId is in the key because a lead-sourced estimate (cn-v477 defers the customer, so it
@@ -798,6 +1006,9 @@ export function QuoteBuilder({
       setLeadId(typeof (d as { leadId?: unknown }).leadId === "string" ? (d as { leadId: string }).leadId : (inquiryId ?? ""));
       // Pre-toggle drafts carry no docType — they keep the estimate default.
       if (d.docType === "quote" || d.docType === "estimate") setDocType(d.docType);
+      // A draft from before the paper switch carries no estimateFormat (undefined) — it keeps the
+      // seed; null is a choice (the company's) and comes back as one.
+      if (d.estimateFormat === "tasks" || d.estimateFormat === "detailed" || d.estimateFormat === null) setEstimateFormat(d.estimateFormat);
       setTitle(d.title ?? "");
       setDescription(d.description ?? "");
       setNotes(d.notes ?? "");
@@ -807,8 +1018,12 @@ export function QuoteBuilder({
       }
       setTaxChoice(d.taxChoice ?? "");
       if (d.validUntil) setValidUntil(d.validUntil);
-      if (Array.isArray(d.items) && d.items.length) setItems(d.items);
-      if (Array.isArray(d.proposed) && d.proposed.length) setProposed(d.proposed);
+      // A DRAFT SAVED BY AN OLDER BUILD (cn-v1131): its task lines hold the one-figure {hours, rate} shape
+      // and no `labor` rows, and the breakdown threw on the first `labor.map` — on every reload until the
+      // session ended. Every restored line (and proposal) comes back through coerceDraftLine: the stored
+      // shape read as one legacy row by the same reader the page and the save use, the flag rebuilt.
+      if (Array.isArray(d.items) && d.items.length) setItems(d.items.map(coerceDraftLine));
+      if (Array.isArray(d.proposed) && d.proposed.length) setProposed(d.proposed.map(coerceDraftLine));
       if (Array.isArray(d.questions) && d.questions.length) setQuestions(d.questions);
       if (typeof d.quoteId === "string" && d.quoteId) {
         setQuoteId(d.quoteId);
@@ -1056,8 +1271,24 @@ export function QuoteBuilder({
   // EVERY FIELD A SAVE SENDS RIDES A REF (audit v800). A timer armed by one render used to fire
   // with THAT render's header — so a title/customer/tax-rate typed while a save was in flight was
   // overwritten by the pre-edit values on the coalesced re-run, under a green "autosaved".
-  const headerRef = useRef({ customerId, jobId, leadId, captureId, title, description, notes, taxRate, validUntil, docType });
-  headerRef.current = { customerId, jobId, leadId, captureId, title, description, notes, taxRate, validUntil, docType };
+  const headerRef = useRef({ customerId, jobId, leadId, captureId, title, description, notes, taxRate, validUntil, docType, estimateFormat });
+  headerRef.current = { customerId, jobId, leadId, captureId, title, description, notes, taxRate, validUntil, docType, estimateFormat };
+  // THE PAPER FORMAT IS SENT ONLY WHEN IT CHANGED. saveQuote writes it as one more statement after the
+  // draft RPC, so a payload that carried it every time cost a write per autosave. This holds what the
+  // row holds as far as the server has said: the adopted draft's own at mount, null (the company's) for a
+  // row not yet made; the payload carries the switch only while the screen says otherwise.
+  const formatSavedRef = useRef<EstimateFormat | null>(
+    adoptedSeed?.estimateFormat === "tasks" || adoptedSeed?.estimateFormat === "detailed" ? adoptedSeed.estimateFormat : null,
+  );
+  // What the row holds after a save that LANDED: the format the payload carried; on a row the save
+  // minted with none in the payload (the first save, or a stale id the server replaced with a fresh
+  // draft), the column's own null. When the screen says otherwise after that, the next autosave carries
+  // it — re-armed here, since nothing on the screen changed to arm it.
+  const noteFormatSaved = (payload: { id?: string; estimate_format?: EstimateFormat | null }, landedId: string) => {
+    if (payload.estimate_format !== undefined) formatSavedRef.current = payload.estimate_format;
+    else if (payload.id !== landedId) formatSavedRef.current = null;
+    if (headerRef.current.estimateFormat !== formatSavedRef.current) autosaveAgain.current = true;
+  };
   const quotePayload = (cleaned: DraftLineItem[]) => {
     const h = headerRef.current;
     return {
@@ -1073,6 +1304,9 @@ export function QuoteBuilder({
       tax_rate: h.taxRate,
       valid_until: h.validUntil || null,
       doc_type: h.docType,
+      // The paper switch (cn-v1131): null = the company's format, and saveQuote writes it as such.
+      // Omitted (undefined) while it is what the row already holds — the column is then not touched.
+      estimate_format: h.estimateFormat === formatSavedRef.current ? undefined : h.estimateFormat,
       items: cleaned,
     };
   };
@@ -1092,8 +1326,10 @@ export function QuoteBuilder({
     autosaveBusy.current = true;
     setAutoState("saving");
     try {
-      const res = await saveQuote(quotePayload(cleaned));
+      const payload = quotePayload(cleaned);
+      const res = await saveQuote(payload);
       if (res.ok) {
+        noteFormatSaved(payload, res.id);
         quoteIdRef.current = res.id;
         setQuoteId(res.id);
         setAutoNumber(res.quote_number ?? null);
@@ -1124,27 +1360,36 @@ export function QuoteBuilder({
   const runAutosaveRef = useRef(runAutosave);
   runAutosaveRef.current = runAutosave;
 
-  // THE RATE FOLLOWS THE CUSTOMER (0386). When the picker lands on a customer whose level carries
-  // its own rate, every task line's LABOR re-prices (repriceTaskLine: the parts keep the sell they
-  // were built with — their item markup is not in the breakdown, so re-marking them would guess).
-  // Not on the first render — the seed and a restored draft already carry their rate — and never
-  // over a line he priced by hand (detailExplains false): a customer switch is arithmetic, his
-  // typed Unit $ is a decision, and arithmetic does not overwrite a hand. dirtyRef only moves when
-  // a line actually changed, so a rate that equals the stored one costs no autosave.
-  const rateSeen = useRef(rate);
+  // THE RULE'S ANSWER FOLLOWS THE CUSTOMER AND THE CARDS (0386; rows cn-v1131). When the picker lands
+  // on a customer whose level carries its own rate, the company default changes under a draft, or a
+  // person's Team rate moves, every task line's LABOR re-prices through ONE pure pass (repriceRows,
+  // lib/estimate/reprice-rows): a "rule" row takes the rule's answer for whoever it names, a "legacy"
+  // row only while it still carried the old no-person answer, a typed or dictated row stands. The parts
+  // keep the sell they were built with (their item markup is not in the breakdown, so re-marking them
+  // would guess). KEYED ON EVERY INPUT of the rule (ruleInputsKey), not on the no-person figure alone: a
+  // level rate equal to the default left that figure still while a person's cap moved, and their rows
+  // stayed uncapped. Not on the first render — the seed and a restored draft already carry their rate —
+  // and never over a line he priced by hand (detailExplains false): a customer switch is arithmetic, his
+  // typed Unit $ is a decision, and arithmetic does not overwrite a hand. One pass per change of the key,
+  // and dirtyRef only moves when a line actually changed, so an answer equal to the stored one costs no
+  // autosave.
+  const ruleNow: RuleInputs = { levelRate, orgDefault: defaultLaborRate, people };
+  const ruleKey = ruleInputsKey(ruleNow);
+  const ruleSeen = useRef({ key: ruleKey, rate: rule.rate });
   useEffect(() => {
-    if (rateSeen.current === rate) return;
-    const prevRate = rateSeen.current;
-    rateSeen.current = rate;
+    if (ruleSeen.current.key === ruleKey) return;
+    const prevRate = ruleSeen.current.rate;
+    ruleSeen.current = { key: ruleKey, rate: rule.rate };
     const prev = itemsRef.current;
-    // Only a line priced at the rate that just changed follows the new one. A line built at a rate
-    // he DICTATED in the scope, or priced by hand, keeps its own (never overwrite a hand).
-    const next = prev.map((l) => (l.detail && l.detail.rate === prevRate && detailExplains(l.detail, l) ? repriceTaskLine(l, rate) : l));
-    if (next.some((l, i) => l !== prev[i])) {
+    const next = prev.map((l) => (l.detail && detailExplains(l.detail, l) ? repriceRows(l, ruleNow, prevRate) : l));
+    const changed = next.some((l, i) => l.unit_price !== prev[i].unit_price || JSON.stringify(l.detail) !== JSON.stringify(prev[i].detail));
+    if (changed) {
       dirtyRef.current = true;
       setItems(next);
     }
-  }, [rate]);
+    // The key stands for every input the pass reads (ruleNow, rule.rate are this render's answers for it).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ruleKey]);
   useEffect(() => {
     const cleaned = items.filter((i) => i.description.trim());
     if (!cleaned.length && !quoteIdRef.current) return; // nothing worth a row yet
@@ -1157,7 +1402,7 @@ export function QuoteBuilder({
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, title, description, notes, taxRate, validUntil, docType, customerId, leadId, jobId]);
+  }, [items, title, description, notes, taxRate, validUntil, docType, estimateFormat, customerId, leadId, jobId]);
 
   function onSave() {
     setSaveError(null);
@@ -1511,13 +1756,19 @@ export function QuoteBuilder({
           <CardContent className="py-5">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-900">Line items</h3>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setItems((p) => [...p, blankItem()])}
-              >
-                <Plus className="h-4 w-4" /> Add
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* A task is a line with its hours and parts behind it; a line is just a line. */}
+                <Button size="sm" variant="outline" onClick={addTask}>
+                  <ListPlus className="h-4 w-4" /> Add A Task
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setItems((p) => [...p, blankItem()])}
+                >
+                  <Plus className="h-4 w-4" /> Add A Line
+                </Button>
+              </div>
             </div>
 
             {/* ONE PICKER, THREE SURFACES. This was inline markup here and nowhere else, which is
@@ -1579,6 +1830,11 @@ export function QuoteBuilder({
                                 }}
                                 priceItems={priceItems}
                                 pricing={pricing}
+                                // The line Add A Task just made takes the cursor, once.
+                                autoFocus={focusIdx === idx}
+                                onFocus={() => {
+                                  if (focusIdx === idx) setFocusIdx(null);
+                                }}
                               />
                               {it.flag && (
                                 <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
@@ -1587,7 +1843,7 @@ export function QuoteBuilder({
                               )}
                               {/* THE TASK IS THE LINE (0386): a line built from a task shows its
                                   hours and parts here, and the Unit $ follows them. */}
-                              {it.detail && (
+                              {it.detail ? (
                                 <TaskBreakdown
                                   // Keyed by the TASK, not the row: a line deleted above must not
                                   // hand its kit panel and its "Remembered as…" to the next line.
@@ -1599,8 +1855,17 @@ export function QuoteBuilder({
                                   taskKits={taskKits}
                                   kitsOn={kitsOn}
                                   scopeWord={scopeWord}
+                                  people={people}
+                                  levelRate={levelRate ?? null}
+                                  defaultLaborRate={defaultLaborRate}
                                   onChange={(next) => updateItem(idx, next)}
                                 />
+                              ) : (
+                                // A plain line can become a task (cn-v1131): its words and price stay,
+                                // and the hours and parts open beneath it.
+                                <button type="button" onClick={() => makeTask(idx)} className="mt-1 text-[11px] text-slate-400 hover:text-brand hover:underline">
+                                  Make This A Task
+                                </button>
                               )}
                             </div>
                             <div className="col-span-3 sm:col-span-2">
@@ -1775,6 +2040,19 @@ export function QuoteBuilder({
 
         <Card>
           <CardContent className="space-y-2 py-5 text-sm">
+            {/* THE PAPER SWITCH (cn-v1131): whether the task lines print their labor and parts
+                beneath them on THIS estimate — the company's Doc Studio choice unless he says
+                otherwise here. It sits by the totals because it is about what the customer reads. */}
+            <div className="border-b border-slate-100 pb-3">
+              <PaperFormatSwitch
+                value={estimateFormat}
+                companyDefault={companyEstimateFormat}
+                onChange={(v) => {
+                  dirtyRef.current = true;
+                  setEstimateFormat(v);
+                }}
+              />
+            </div>
             <div className="flex justify-between text-slate-600">
               <span>Subtotal</span>
               <span>{formatCurrency(subtotal)}</span>

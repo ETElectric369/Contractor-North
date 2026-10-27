@@ -51,6 +51,13 @@ import { bornTasks, tasksFromLines, type BornTask, type LineRow } from "./born-w
  *    same exact title. Live tasks claim BEFORE a title dismissal bars, so a dismissal never costs a
  *    task that is there.
  *
+ *  - cn-v1131 (0395): A TASK'S OWN MINUTES follow its line under THE SIZE'S OWN RULE. tasks.planned_minutes
+ *    is the line's labor rows' hours summed; it moves to the line's figure now while the figure on the
+ *    task is still the line's — empty (born before 0395, or the line had no hours) or equal to what
+ *    the line said BEFORE the change (`tasksBefore`, read by the door before the status flipped, the
+ *    twin of `sizeBefore`) — compare-and-set on the value just read. Anything else is his (a figure
+ *    typed on the job) and STAYS, said by name. Without `tasksBefore` only an empty figure follows.
+ *
  *  Declining an accepted estimate does NOT run this (deliberate: a walk-back to edit would churn the
  *  list and lose photos on open tasks); accepting again does. The materials list follows the same
  *  doors through sync-job-materials (0390 gave its rows their line). Every write selects what it
@@ -76,6 +83,8 @@ export interface LineTask {
   has_steps?: boolean;
   /** True when the stored key is "gone:<source_key>": an orphan kept earlier, said then. */
   gone?: boolean;
+  /** The task's own minutes (0395), as stored; null or absent = none. */
+  planned_minutes?: number | null;
 }
 
 /** Any other task on the job: a visit's ("task:<id>") or one made by hand (no key). Never removed here. */
@@ -84,6 +93,7 @@ export interface OtherTask {
   source_key: string | null;
   title: string;
   status: string;
+  planned_minutes?: number | null;
 }
 
 /** Something a person added to the task: it is his now, and leaves only by his hand. */
@@ -237,8 +247,13 @@ export interface EstimateLines {
   lines: LineRow[];
   /** Σ his hours over those lines, in minutes (born-with-tasks minutesOf); null when none. */
   minutes: number | null;
+  /** Each task line's own minutes by its key ("line:<id>" → Σ its rows' hours × 60, null = none): the
+   *  per-task twin of `minutes`, handed back to the sync as `tasksBefore` by a door that read it first. */
+  taskMinutes: ReadonlyMap<string, number | null>;
   error?: string;
 }
+
+const NO_TASK_MINUTES: ReadonlyMap<string, number | null> = new Map();
 
 /**
  * THE JOB'S ACCEPTED ESTIMATES' LINES. A later-ACCEPTED estimate's lines sit AFTER the earlier one's
@@ -254,17 +269,17 @@ export async function estimateLines(
   let qq = sb.from("quotes").select("id, created_at, accepted_at").eq("job_id", who.jobId).eq("status", "accepted");
   if (who.orgId) qq = qq.eq("org_id", who.orgId);
   const { data: quotes, error: qErr } = await qq.order("accepted_at");
-  if (qErr) return { lines: [], minutes: null, error: dbError(qErr) };
+  if (qErr) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES, error: dbError(qErr) };
   const when = (q: { created_at: string | null; accepted_at?: string | null }) => String(q.accepted_at ?? q.created_at ?? "");
   const ordered = ((quotes ?? []) as Array<{ id: string; created_at: string | null; accepted_at?: string | null }>)
     .filter((q) => !who.except || q.id !== who.except)
     .sort((a, b) => when(a).localeCompare(when(b)) || String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
-  if (!ordered.length) return { lines: [], minutes: null };
+  if (!ordered.length) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES };
   const rank = new Map(ordered.map((q, i) => [q.id, i]));
   let lq = sb.from("quote_line_items").select("id, description, sort_order, detail, quote_id").in("quote_id", ordered.map((q) => q.id));
   if (who.orgId) lq = lq.eq("org_id", who.orgId);
   const { data, error } = await lq.order("sort_order");
-  if (error) return { lines: [], minutes: null, error: dbError(error) };
+  if (error) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES, error: dbError(error) };
   const rows = ((data ?? []) as Array<LineRow & { quote_id: string }>)
     .slice()
     .sort((a, b) => (rank.get(a.quote_id) ?? 0) - (rank.get(b.quote_id) ?? 0) || (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -283,7 +298,8 @@ export async function estimateLines(
     highest = Math.max(highest, own);
     lines.push({ id: r.id, description: r.description, sort_order: own + offset, detail: r.detail });
   }
-  return { lines, minutes: tasksFromLines(lines).plannedMinutes };
+  const birth = tasksFromLines(lines);
+  return { lines, minutes: birth.plannedMinutes, taskMinutes: new Map(birth.tasks.map((t) => [t.source_key, t.planned_minutes ?? null])) };
 }
 
 /**
@@ -312,6 +328,9 @@ export interface SyncWho {
   createdBy: string | null;
   /** The estimate's figure (estimateLines().minutes) as read BEFORE the change. undefined = leave the size alone. */
   sizeBefore?: number | null;
+  /** Each task line's figure (estimateLines().taskMinutes) as read BEFORE the change, by line key: a task
+   *  whose stored minutes still equal it follows its line. undefined = only an empty figure follows. */
+  tasksBefore?: ReadonlyMap<string, number | null>;
 }
 
 export interface SyncResult {
@@ -319,6 +338,10 @@ export interface SyncResult {
   rekeyed: number;
   removed: number;
   kept: number;
+  /** Tasks whose own minutes moved to their line's figure (0395). */
+  timed: number;
+  /** Tasks whose minutes differ from their line's and STAYED — his figure, typed on the job — by name. */
+  hoursStay?: string[];
   /** The kept orphans' names, for the sentence. */
   keptNames: string[];
   /** Wanted tasks a title dismissal barred (he deleted that task before), by name. */
@@ -335,7 +358,7 @@ export interface SyncResult {
   error?: string;
 }
 
-const NONE: SyncResult = { inserted: 0, rekeyed: 0, removed: 0, kept: 0, keptNames: [], leftOff: [], twice: [], sizeSet: false };
+const NONE: SyncResult = { inserted: 0, rekeyed: 0, removed: 0, kept: 0, timed: 0, keptNames: [], leftOff: [], twice: [], sizeSet: false };
 
 /** THE SYNC: read what the accepted estimates say and what the job has, plan, write, count. */
 export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<SyncResult> {
@@ -343,12 +366,14 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   if (est.error) return { ...NONE, error: est.error };
   const wanted = tasksFromLines(est.lines).tasks;
 
-  let tq = sb.from("tasks").select("id, source_key, title, status, notes, photo_path, parent_id").eq("job_id", who.jobId);
+  let tq = sb.from("tasks").select("id, source_key, title, status, notes, photo_path, parent_id, planned_minutes").eq("job_id", who.jobId);
   if (who.orgId) tq = tq.eq("org_id", who.orgId);
   const { data: rows, error: tErr } = await tq.order("sort_order").order("created_at");
   if (tErr) return { ...NONE, error: dbError(tErr) };
   type Row = Omit<LineTask, "source_key"> & { source_key: string | null; parent_id?: string | null };
   const all = (rows ?? []) as Row[];
+  // What each task held AS READ — the key and the minutes — before any write below moves either.
+  const asRead = new Map(all.map((t) => [t.id, { key: t.source_key, minutes: (t.planned_minutes ?? null) as number | null, title: t.title }]));
   // The tasks a LINE put there are the estimate's to keep in step — live ("line:") and tombstoned
   // ("gone:line:", kept earlier). A visit's ("task:") and hand-made tasks (no key) are candidates only —
   // a line may be theirs — and are never removed here. Steps under a task (parent_id) are the task's.
@@ -390,6 +415,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
 
   let rekeyed = 0;
   const twice: string[] = [];
+  const rekeyedOk: Array<{ id: string; source_key: string }> = [];
   for (const r of plan.rekey) {
     let rq = sb.from("tasks").update({ source_key: r.source_key }).eq("id", r.id).eq("job_id", who.jobId);
     if (who.orgId) rq = rq.eq("org_id", who.orgId); // the service client: the company's rows only
@@ -405,6 +431,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
     if (!data?.length) return { ...NONE, rekeyed, error: "A task could not be matched to its line." };
     rekeyed++;
+    rekeyedOk.push(r);
   }
 
   for (const t of plan.tombstone) {
@@ -451,11 +478,52 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     if (!data?.length) return { ...NONE, rekeyed, removed, kept, keptNames, error: "The job's deleted tasks could not be kept up." };
   }
 
+  // A TASK'S OWN MINUTES FOLLOW ITS LINE (0395), the size's rule per task: the task that holds each
+  // wanted line now (by key as read, or re-keyed just above) moves to the line's figure while its
+  // stored figure is still the line's — empty, or equal to what the line said before (`tasksBefore`)
+  // — compare-and-set on the value just read, so a figure typed meanwhile wins. Anything else is his
+  // and stays, said by name. A task the insert below births carries its minutes already.
+  const holder = new Map<string, string>(); // line key → the id of the task that holds it now
+  for (const t of have) if (!t.gone) holder.set(t.source_key, t.id);
+  for (const r of rekeyedOk) holder.set(r.source_key, r.id);
+  let timed = 0;
+  const hoursStay: string[] = [];
+  for (const w of wanted) {
+    const id = holder.get(w.source_key);
+    const read = id ? asRead.get(id) : undefined;
+    if (!id || !read) continue;
+    const want = w.planned_minutes ?? null;
+    if (read.minutes === want) continue;
+    const before = read.key ? who.tasksBefore?.get(read.key) : undefined;
+    if (!(read.minutes === null || (before !== undefined && read.minutes === before))) {
+      hoursStay.push(read.title);
+      continue;
+    }
+    let mq = sb.from("tasks").update({ planned_minutes: want }).eq("id", id).eq("job_id", who.jobId);
+    mq = read.minutes === null ? mq.is("planned_minutes", null) : mq.eq("planned_minutes", read.minutes);
+    if (who.orgId) mq = mq.eq("org_id", who.orgId);
+    const { data, error } = await mq.select("id");
+    if (error) return { ...NONE, rekeyed, removed, kept, keptNames, timed, error: dbError(error) };
+    if (data?.length) timed++; // zero rows: a figure typed between the read and the write wins
+  }
+
   // The birth's own insert: same row shape, dedupe by key, silent-write counts. Size left to the rule below.
   const born = await bornTasks(sb, { jobId: who.jobId, orgId: who.orgId, createdBy: who.createdBy }, { tasks: plan.insert, plannedMinutes: null, parts: [] });
-  if (born.error) return { ...NONE, rekeyed, removed, kept, keptNames, error: born.error };
+  if (born.error) return { ...NONE, rekeyed, removed, kept, keptNames, timed, error: born.error };
 
-  const done: SyncResult = { inserted: born.inserted, rekeyed, removed, kept, keptNames, leftOff: plan.leftOff, twice, sizeSet: false, ...(plan.leftAlone.length ? { leftAlone: plan.leftAlone } : {}) };
+  const done: SyncResult = {
+    inserted: born.inserted,
+    rekeyed,
+    removed,
+    kept,
+    timed,
+    keptNames,
+    leftOff: plan.leftOff,
+    twice,
+    sizeSet: false,
+    ...(hoursStay.length ? { hoursStay } : {}),
+    ...(plan.leftAlone.length ? { leftAlone: plan.leftAlone } : {}),
+  };
   if (who.sizeBefore !== undefined && est.minutes !== who.sizeBefore) {
     // The box still holds the estimate's figure (or nothing yet): it follows — compare-and-set on the value
     // just read, so a figure he types between the read and the write wins. Anything else is his: it stays, said.
@@ -528,6 +596,8 @@ export function syncWords(r: SyncResult, lead = "The job's list follows the esti
   if (r.leftOff?.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the job before`);
   if (r.twice?.length) bits.push(`${r.twice.length} on the list twice${few(r.twice)} — remove one`);
   if (r.leftAlone?.length) bits.push(`${r.leftAlone.length} left alone${few(r.leftAlone)} — an estimate not yet accepted still has them`);
+  if (r.timed) bits.push(`${r.timed} ${r.timed === 1 ? "task's" : "tasks'"} hours updated`);
+  if (r.hoursStay?.length) bits.push(`${r.hoursStay.length} kept ${r.hoursStay.length === 1 ? "its" : "their"} hours${few(r.hoursStay)} — set on the job`);
   if (r.sizeSet) bits.push(`the job's length is now ${hoursWords(r.sizeNow ?? null)}`);
   if (r.sizeStays) bits.push(`the job's length stays at ${hoursWords(r.sizeStays.box)} (the estimate now says ${hoursWords(r.sizeStays.estimate)})`);
   return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;

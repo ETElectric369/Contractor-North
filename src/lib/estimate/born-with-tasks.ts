@@ -4,7 +4,7 @@ import type { Answers, Playbook } from "@/lib/playbook/types";
 import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { dbError } from "@/lib/db-error";
-import { coerceTaskDetail, expandTaskKit, type TaskKit } from "./task-lines";
+import { coerceTaskDetail, expandTaskKit, laborMinutes, type TaskKit } from "./task-lines";
 
 /**
  * A JOB IS BORN WITH ITS TASKS (W3, cn-v1075).
@@ -25,8 +25,10 @@ import { coerceTaskDetail, expandTaskKit, type TaskKit } from "./task-lines";
  *    same two functions here: a pure reader that says what is born, and bornTasks that writes it.
  *  - ONLY A TASK IS A TASK. A line whose detail coerces (coerceTaskDetail) is a task; a plain line
  *    (a legacy estimate, a hand-typed material) is not, and is born exactly as before.
- *  - HIS HOURS, SUMMED, NEVER FILLED. planned_minutes is Σ round(hours × 60) over the tasks he gave
- *    hours to; a task still asking ("hours?") adds nothing — the sum is his figures, not a guess
+ *  - HIS HOURS, SUMMED, NEVER FILLED. A task's labor is one or more rows (cn-v1131, TaskLabor); its
+ *    minutes are Σ round(hours × 60) over the rows he gave hours to, written on the task itself
+ *    (tasks.planned_minutes, 0395), and the job's planned_minutes is the same sum over every task.
+ *    A row still asking ("hours?") adds nothing — the sum is his figures, not a guess
  *    ([[no-speculation]]). No hours at all → null, and the job's How Long box asks as it does today.
  *    A How Long the job already has WINS (the write lands only on a null); 0229's bound
  *    (0 < n ≤ 43200) is honoured by leaving an out-of-range sum null rather than clamping it.
@@ -47,6 +49,9 @@ export interface BornTask {
   /** The Inspector task the line was built from (detail.task_id), when it was: how a visit-born task
    *  ("task:<id>") finds the line of the estimate drafted from the same visit (sync-job-tasks). */
   task_id?: string | null;
+  /** THE TASK'S OWN MINUTES (tasks.planned_minutes, 0395): Σ its labor rows' hours × 60; null = he gave
+   *  none (the task asks on the job as it did on the paper). The job's planned_minutes is the sum. */
+  planned_minutes?: number | null;
 }
 
 /** One part of one task, as the job's materials list wants it. `cost` is the book's buy at the time
@@ -127,8 +132,8 @@ export function tasksFromLines(rows: ReadonlyArray<LineRow>): Birth {
     const title = String(r.description ?? "").trim();
     if (!title) return;
     const source_key = `line:${r.id}`;
-    tasks.push({ source_key, title, sort_order: typeof r.sort_order === "number" ? r.sort_order : i, task_id: d.task_id || null });
-    hours.push(d.hours);
+    tasks.push({ source_key, title, sort_order: typeof r.sort_order === "number" ? r.sort_order : i, task_id: d.task_id || null, planned_minutes: laborMinutes(d.labor) });
+    for (const l of d.labor) hours.push(l.hours);
     for (const m of d.materials) {
       if (!m.name.trim()) continue;
       parts.push({ source_key, code: m.code, name: m.name.trim(), qty: m.qty, cost: m.cost });
@@ -150,12 +155,13 @@ export function tasksFromVisit(tasks: ReadonlyArray<TaskValue>, kits?: ReadonlyM
     const name = t.name.trim();
     if (!name) return;
     const source_key = `task:${t.id}`;
-    out.push({ source_key, title: `${name}${unitsSuffix(t.units)}`, sort_order: i });
     // A TASK KIT (0386, W4): his minutes per unit × the units and the kit's parts × the units,
     // through THE one expandTaskKit the estimate seeds from. His own hours win over the kit's.
     const kit = t.kit_id && kits ? kits.get(t.kit_id) ?? null : null;
     const fromKit = kit ? expandTaskKit(t, kit, { orgDefaultPct: 0 }) : null;
-    hours.push(t.hours ?? fromKit?.hours ?? null);
+    const h = t.hours ?? fromKit?.hours ?? null;
+    out.push({ source_key, title: `${name}${unitsSuffix(t.units)}`, sort_order: i, planned_minutes: laborMinutes([{ hours: h }]) });
+    hours.push(h);
     for (const m of fromKit?.materials ?? []) parts.push({ source_key, code: m.code, name: m.name, qty: m.qty, cost: m.cost });
     for (const m of t.materials) {
       const words = (m.words ?? "").trim() || (m.code ?? "").trim();
@@ -250,6 +256,8 @@ export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth):
         sort_order: t.sort_order,
         // Explicit null, as createTask sends: a job's task has no category (never the DB default).
         category: null,
+        // The task's own minutes (0395): his rows' hours, or null — never a figure nobody gave.
+        planned_minutes: t.planned_minutes ?? null,
         created_by: who.createdBy,
       }));
     if (rows.length) {

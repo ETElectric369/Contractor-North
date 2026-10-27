@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_DOC_STYLE, TAGLINE_MAX, normalizeDocStyle } from "@/lib/doc-style";
+import { DEFAULT_DOC_STYLE, TAGLINE_MAX, estimateFormatFor, normalizeDocStyle } from "@/lib/doc-style";
 
 /**
  * doc_style.tagline (Wave 0): the line under a company's name on its letterhead. It rides the public
@@ -61,5 +61,34 @@ describe("normalizeDocStyle: the estimate format", () => {
 
   it("keeps the detailed format when the company chose it", () => {
     expect(normalizeDocStyle({ estimate_format: "detailed" }).estimate_format).toBe("detailed");
+  });
+});
+
+/**
+ * estimateFormatFor (cn-v1131, 0395): an estimate may say for itself how its task lines read
+ * (quotes.estimate_format); null is the company's Doc Studio choice. ONE reader for the print page,
+ * the PDF, the studio sample and the /q page's coalesce, so no two surfaces disagree about one estimate.
+ */
+describe("estimateFormatFor: the estimate's own word, else the company's", () => {
+  const company = (estimate_format: "tasks" | "detailed") => ({ estimate_format });
+
+  it("the estimate's own choice wins over the company's", () => {
+    expect(estimateFormatFor({ estimate_format: "detailed" }, company("tasks"))).toBe("detailed");
+    expect(estimateFormatFor({ estimate_format: "tasks" }, company("detailed"))).toBe("tasks");
+  });
+
+  it("null, absent or no estimate at all is the company's", () => {
+    expect(estimateFormatFor({ estimate_format: null }, company("detailed"))).toBe("detailed");
+    expect(estimateFormatFor({ estimate_format: null }, company("tasks"))).toBe("tasks");
+    expect(estimateFormatFor({}, company("detailed"))).toBe("detailed");
+    expect(estimateFormatFor(null, company("detailed"))).toBe("detailed");
+    expect(estimateFormatFor(undefined, company("tasks"))).toBe("tasks");
+  });
+
+  it("junk on the estimate is the company's; junk on the company is tasks", () => {
+    expect(estimateFormatFor({ estimate_format: "itemized" }, company("detailed"))).toBe("detailed");
+    expect(estimateFormatFor({ estimate_format: 1 }, company("tasks"))).toBe("tasks");
+    expect(estimateFormatFor({ estimate_format: "junk" }, { estimate_format: "nope" as never })).toBe("tasks");
+    expect(estimateFormatFor({ estimate_format: "detailed" }, { estimate_format: "nope" as never })).toBe("detailed");
   });
 });

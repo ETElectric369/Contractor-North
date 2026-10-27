@@ -299,7 +299,7 @@ describe("[15] a task's dismissal goes through the atomic door", () => {
 });
 
 describe("[5] a kit with no count asks; [31] an unlinked kit line names its part; [39] the switch hides the picker only; [40] the kit manager says so", () => {
-  const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({ task_id: "t1", hours: 2, rate: 100, units: null, kit_id: null, materials: [], ...over }) as TaskDetail;
+  const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({ task_id: "t1", labor: [{ label: null, person_id: null, hours: 2, rate: 100, rate_from: "rule" }], units: null, kit_id: null, materials: [], ...over });
   it("taskFlags asks 'units?' on a kit task with no count, and not once a count is typed", () => {
     expect(taskFlags(detail({ kit_id: "k1", units: null }))).toBe("units?");
     expect(taskFlags(detail({ kit_id: "k1", units: 1 }))).toBeUndefined();

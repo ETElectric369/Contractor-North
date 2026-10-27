@@ -44,14 +44,17 @@ export const SAMPLE_QUOTE_ITEMS: SampleItem[] = [
   line("q1", "Recessed lighting — great room\n5/6 in RL 900/1200LM 5CCT, dimmer-ready, patch & paint by others", 12, "ea", 118, null),
   line("q2", "Under-cabinet lighting run, kitchen", 1, "lot", 640, null),
   line("q3", "Dedicated 20A small-appliance circuit", 2, "ea", 385, null),
-  // A line BUILT FROM A TASK: 2 h × $125 + two breakers at $20 = $290, the same figure as the line,
-  // so the breakdown prints under the detailed format and the line alone under the plain one.
+  // A line BUILT FROM A TASK, with TWO LABOR ROWS (cn-v1131): 4 h × $125 + a helper's 4 h × $85 +
+  // two breakers at $20 = $880, the same figure as the line, so the breakdown prints under the
+  // detailed format (one bullet per row) and the line alone under the plain one.
   {
-    ...line("q4", "Panel work: two tandem breakers, labeling, torque check", 1, "ea", 290, null),
+    ...line("q4", "Panel work: two tandem breakers, labeling, torque check", 1, "ea", 880, null),
     detail: {
       task_id: "sample",
-      hours: 2,
-      rate: 125,
+      labor: [
+        { label: null, person_id: null, hours: 4, rate: 125, rate_from: "rule" },
+        { label: "Helper", person_id: null, hours: 4, rate: 85, rate_from: "hand" },
+      ],
       units: null,
       kit_id: null,
       materials: [{ code: null, name: "Tandem breaker, 20A", qty: 2, cost: null, sell: 20 }],

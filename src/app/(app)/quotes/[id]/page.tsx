@@ -19,6 +19,8 @@ import { EmailButton } from "@/components/email-button";
 import { ShareIconButton } from "@/components/share-icon-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { QuoteTypeToggle } from "./quote-type-toggle";
+import { PaperFormatControl } from "./paper-format-control";
+import { normalizeDocStyle } from "@/lib/doc-style";
 import type { NavTree } from "@/lib/nav-tree";
 import { createJobFromQuote, deleteQuote, quoteEditLock, quoteShareText } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
@@ -140,6 +142,11 @@ export default async function QuoteDetailPage({
   const kits = kitsRead.rows as Parameters<typeof partsKitsOnly>[0] | null;
   if (kitsRead.state === "failed") reportError("quotes/[id]:kits", kitsRead.error, { quoteId: id });
   const showCircuits = featureOn(orgS.features, "panel_map") || (Array.isArray(q.circuits) && q.circuits.length > 0);
+  // LABOR AND PARTS ON THE PAPER (cn-v1131): the estimate's own estimate_format (0395; it rides the
+  // row's `*` above) as stored, null = the company's Doc Studio choice, which the switch names.
+  const ownFormat = (q as { estimate_format?: unknown }).estimate_format;
+  const paperFormat = ownFormat === "detailed" || ownFormat === "tasks" ? ownFormat : null;
+  const companyPaperFormat = normalizeDocStyle(orgS.doc_style).estimate_format;
 
   // A REPLACED ESTIMATE MAKES NO MORE PAPER (audit v1085, carried): a superseded estimate offers no Create
   // door — its revision does; a revision not yet accepted makes no work order or list (a newer list would
@@ -346,6 +353,16 @@ export default async function QuoteDetailPage({
         // worse bug than the one this fixes.
         levelMarkupPct={(quote as any)?.customers?.pricing_levels?.markup_pct ?? null}
       />
+      {/* THIS ESTIMATE'S OWN PAPER FORMAT (cn-v1131), under the totals it explains: Show / Hide the
+          hours at the rate and the parts beneath each task, or the company default. Only while the
+          estimate is still editable — the lock's own words above say why a sent one is not. */}
+      {!lock && (
+        <Card className="mt-6">
+          <CardContent className="py-4">
+            <PaperFormatControl quoteId={q.id} value={paperFormat} companyDefault={companyPaperFormat} />
+          </CardContent>
+        </Card>
+      )}
       {showCircuits && (
         <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} panelJob={await panelJobFor(supabase, q)} />
       )}

@@ -13,7 +13,7 @@ const wanted = (over: Partial<BornTask> & { source_key: string }): BornTask => (
 const have = (over: Partial<LineTask> & { id: string }): LineTask => ({
   source_key: `line:${over.id}`, title: "Trench", status: "open", notes: null, photo_path: null, ...over,
 });
-const result = (over: Partial<SyncResult> = {}): SyncResult => ({ inserted: 0, rekeyed: 0, removed: 0, kept: 0, keptNames: [], leftOff: [], twice: [], sizeSet: false, ...over });
+const result = (over: Partial<SyncResult> = {}): SyncResult => ({ inserted: 0, rekeyed: 0, removed: 0, kept: 0, timed: 0, keptNames: [], leftOff: [], twice: [], sizeSet: false, ...over });
 
 describe("planLineSync — the plan", () => {
   it("keeps a task whose line is still on an accepted estimate, and inserts the wanted ones nobody has", () => {
@@ -196,6 +196,8 @@ describe("estimateLines — the accepted estimates' task lines, in order", () =>
     expect(est.error).toBeUndefined();
     expect(est.lines.map((l) => [l.id, l.sort_order])).toEqual([["a", 0], ["p", 1], ["a2", 2], ["b", 3]]);
     expect(est.minutes).toBe(210); // 2 h + 1.5 h; the hole asks, the plain line is not a task
+    // Each task line's own figure, by key — what a door hands back as `tasksBefore` (0395).
+    expect([...est.taskMinutes]).toEqual([["line:a", 120], ["line:a2", null], ["line:b", 90]]);
   });
 
   it("`except` leaves one estimate out — the figure before THIS acceptance", async () => {
@@ -213,7 +215,7 @@ describe("estimateLines — the accepted estimates' task lines, in order", () =>
 
   it("no accepted estimate → no lines, no figure, no second read", async () => {
     const est = await estimateLines(fakeDb({ quotes: [{ id: "q1", job_id: "j1", status: "sent" }] }).sb, { jobId: "j1", orgId: null });
-    expect(est).toEqual({ lines: [], minutes: null });
+    expect(est).toEqual({ lines: [], minutes: null, taskMinutes: new Map() });
   });
 });
 
@@ -230,7 +232,8 @@ const db = (
     },
     opts,
   );
-const task = (over: Record<string, unknown>) => ({ job_id: "j1", status: "open", notes: null, photo_path: null, parent_id: null, ...over });
+// A row as the database holds it: every column present, the minutes null until something writes them (0395).
+const task = (over: Record<string, unknown>) => ({ job_id: "j1", status: "open", notes: null, photo_path: null, parent_id: null, planned_minutes: null, ...over });
 
 describe("syncJobTasks — the writes", () => {
   it("inserts the wanted tasks nobody has, through the birth's own insert (source_key, title, sort_order, category null)", async () => {
@@ -255,10 +258,11 @@ describe("syncJobTasks — the writes", () => {
       ],
     });
     const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
-    expect(res).toEqual(result({ inserted: 1, rekeyed: 1, removed: 1, kept: 1, keptNames: ["Old noted"] }));
+    expect(res).toEqual(result({ inserted: 1, rekeyed: 1, removed: 1, kept: 1, timed: 1, keptNames: ["Old noted"] }));
     const byId = Object.fromEntries(tables.tasks.map((t) => [t.id, t]));
     expect(byId.t1.source_key).toBe("line:a"); // done, re-keyed, still done
     expect(byId.t1.status).toBe("done");
+    expect(byId.t1.planned_minutes).toBe(120); // it had no minutes of its own: the line's (0395)
     expect(byId.t2).toBeUndefined(); // bare and open: gone
     expect(byId.t3.source_key).toBe("gone:line:gone2"); // his notes: kept, under the tombstone so "kept" is said this once (cn-v1084)
     expect(byId.t3.notes).toBe("Keep");
@@ -305,11 +309,11 @@ describe("syncJobTasks — the writes", () => {
       tasks: [task({ id: "v", source_key: "task:t-a", title: "Trench, as the visit said it", status: "done" }), task({ id: "h", source_key: null, title: "Set the panel" })],
     });
     const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
-    expect(res).toEqual(result({ rekeyed: 2 }));
+    expect(res).toEqual(result({ rekeyed: 2, timed: 2 }));
     expect(tables.tasks.find((t) => t.id === "v")?.source_key).toBe("line:a");
     expect(tables.tasks.find((t) => t.id === "h")?.source_key).toBe("line:b");
     expect(inserted.tasks ?? []).toEqual([]);
-    expect(syncWords(res)).toBe("The job's list follows the estimate: 2 matched.");
+    expect(syncWords(res)).toBe("The job's list follows the estimate: 2 matched · 2 tasks' hours updated.");
   });
   it("a kept orphan is said once: it goes under the tombstone, the next sync says nothing, and the line finds it again if it returns", async () => {
     const { sb, tables } = db({ lines: [], tasks: [task({ id: "k", source_key: "line:a", title: "Trench", notes: "Keep" })] });
@@ -321,7 +325,7 @@ describe("syncJobTasks — the writes", () => {
     // The estimate's line "a" is back: the task is the line's again, no second copy.
     tables.quote_line_items.push(taskLine("a", "q1", "Trench", 2, 0));
     const back = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
-    expect(back).toEqual(result({ rekeyed: 1 }));
+    expect(back).toEqual(result({ rekeyed: 1, timed: 1 }));
     expect(tables.tasks).toHaveLength(1);
     expect(tables.tasks[0].source_key).toBe("line:a");
   });
@@ -419,6 +423,61 @@ describe("syncJobTasks — the size follows only while it is the estimate's figu
     expect(res.sizeSet).toBe(false);
     expect(res.sizeStays).toBeUndefined();
     expect(tables.jobs[0].planned_minutes).toBe(180);
+  });
+});
+
+describe("syncJobTasks — a task's own minutes follow its line under the size's rule (0395)", () => {
+  // The fixture's lines say Trench 2 h (line:a) and Set the panel 1 h (line:b).
+  const lineTasks = (over: { a?: number | null; b?: number | null } = {}) => [
+    task({ id: "ta", source_key: "line:a", title: "Trench", planned_minutes: over.a === undefined ? 120 : over.a }),
+    task({ id: "tb", source_key: "line:b", title: "Set the panel", planned_minutes: over.b === undefined ? 60 : over.b }),
+  ];
+
+  it("a task born before the column (null) takes the line's figure, with or without a before-figure", async () => {
+    const { sb, tables } = db({ tasks: lineTasks({ a: null, b: null }) });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res).toEqual(result({ timed: 2 }));
+    expect(tables.tasks.map((t) => t.planned_minutes)).toEqual([120, 60]);
+    expect(syncWords(res)).toBe("The job's list follows the estimate: 2 tasks' hours updated.");
+  });
+
+  it("the line's hours changed: a task still holding the OLD line figure follows; one he set on the job stays, said by name", async () => {
+    // Before the edit line:a said 3 h (180) and line:b 1 h (60); now they say 2 h and 1 h.
+    const { sb, tables } = db({ tasks: lineTasks({ a: 180, b: 45 }) });
+    const before = new Map<string, number | null>([["line:a", 180], ["line:b", 60]]);
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1", tasksBefore: before });
+    expect(res).toEqual(result({ timed: 1, hoursStay: ["Set the panel"] }));
+    expect(tables.tasks.map((t) => t.planned_minutes)).toEqual([120, 45]);
+    expect(syncWords(res)).toBe("The job's list follows the estimate: 1 task's hours updated · 1 kept its hours (Set the panel) — set on the job.");
+  });
+
+  it("without a before-figure a task with minutes of its own stays — the sync never guesses whose figure it is", async () => {
+    const { sb, tables } = db({ tasks: lineTasks({ a: 180 }) });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res).toEqual(result({ hoursStay: ["Trench"] }));
+    expect(tables.tasks[0].planned_minutes).toBe(180);
+  });
+
+  it("an unchanged figure is no write and no news; a re-keyed task follows by the key it HAD", async () => {
+    const quiet = db({ tasks: lineTasks() });
+    expect(await syncJobTasks(quiet.sb, { jobId: "j1", orgId: null, createdBy: "u1", tasksBefore: new Map([["line:a", 120]]) })).toEqual(result());
+    // The builder re-id'd the line (old key line:OLD, 3 h then); the task holds that old figure → it follows to line:a's 2 h.
+    const { sb, tables } = db({ tasks: [task({ id: "t", source_key: "line:OLD", title: "Trench", planned_minutes: 180 })] });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1", tasksBefore: new Map([["line:OLD", 180]]) });
+    expect(res).toEqual(result({ inserted: 1, rekeyed: 1, timed: 1 }));
+    expect(tables.tasks.find((t) => t.id === "t")?.planned_minutes).toBe(120);
+  });
+
+  it("a figure typed between the read and the write wins (zero rows is that answer, not a failure)", async () => {
+    const { sb, tables } = db({ tasks: lineTasks({ a: null }) }, {
+      onUpdate: (table, patch) => {
+        if (table === "tasks" && "planned_minutes" in patch) tables.tasks[0].planned_minutes = 999; // he typed meanwhile
+        return undefined;
+      },
+    });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res).toEqual(result());
+    expect(tables.tasks[0].planned_minutes).toBe(999);
   });
 });
 

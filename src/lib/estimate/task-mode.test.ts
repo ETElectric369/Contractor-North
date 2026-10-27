@@ -84,7 +84,8 @@ describe("taskModeDraft", () => {
     expect(line.quantity).toBe(1);
     expect(line.unit_price).toBe(435); // 3 h × $145; the breaker has no price yet
     expect(line.flag).toBe("price? 50 amp breaker");
-    expect(line.detail).toMatchObject({ hours: 3, rate: 145, units: null, kit_id: null });
+    expect(line.detail).toMatchObject({ units: null, kit_id: null });
+    expect(line.detail?.labor).toEqual([{ label: null, person_id: null, hours: 3, rate: 145, rate_from: "rule" }]);
     expect(line.detail?.materials).toEqual([{ code: null, name: "50 amp breaker", qty: 1, cost: null, sell: null }]);
     expect(out.questions).toEqual(["Is the hot tub pad already poured?"]);
   });
@@ -114,12 +115,15 @@ describe("taskModeDraft", () => {
     ]);
   });
 
-  it("the rate it is handed is the rate: a stated $/hr prices the hours, and no rate says so", () => {
+  it("the rate it is handed is the rate: a stated $/hr prices the hours as a 'stated' row, the rule's as a 'rule' row, and no rate says so", () => {
     const task = { name: "Install transfer switch", hours: 3, heard: "Install the transfer switch by the panel, about 3 hours" };
-    expect(taskModeDraft(SCOPE, { tasks: [task] }, { ...ctx, rate: 200 }).items[0].unit_price).toBe(600);
+    const stated = taskModeDraft(SCOPE, { tasks: [task] }, { ...ctx, rate: 200, rateFrom: "stated" }).items[0];
+    expect(stated.unit_price).toBe(600);
+    expect(stated.detail?.labor).toEqual([{ label: null, person_id: null, hours: 3, rate: 200, rate_from: "stated" }]);
+    expect(taskModeDraft(SCOPE, { tasks: [task] }, { ...ctx, rate: 200 }).items[0].detail?.labor[0].rate_from).toBe("rule");
     const none = taskModeDraft(SCOPE, { tasks: [task] }, { ...ctx, rate: 0 }).items[0];
     expect(none.unit_price).toBe(0);
-    expect(none.flag).toBe("no company labor rate set");
+    expect(none.flag).toBe("no labor rate set");
   });
 
   it("junk in is an empty draft out, never a throw", () => {
@@ -143,6 +147,9 @@ describe("the server action takes task mode on the free-text path only", () => {
     expect(branch).toBeLessThan(core.indexOf("const system: Anthropic.MessageCreateParams"));
     expect(core).toContain("return runEstimatorTasks({");
     expect(core).toContain("rate: stated ?? rate,");
+    // The row remembers whose figure the rate is (TaskLabor.rate_from): dictated stands, the rule's follows.
+    expect(core).toContain('rateFrom: stated ? "stated" : "rule",');
+    expect(helper).toContain("rateFrom: opts.rateFrom,");
     expect(core).toContain("levelPct: markupPct ?? null,");
   });
 

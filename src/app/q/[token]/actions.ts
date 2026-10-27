@@ -103,7 +103,15 @@ export async function finishPublicAcceptance(token: string): Promise<void> {
       // paperwork below is per estimate (safe); the office's Accept runs the sync when it retries.
       reportError("finishPublicAcceptance:supersede", new Error(sup.error), { quoteId: q.id, jobId });
     } else {
-      const born = await syncJobTasks(sb, { jobId, orgId: who.orgId, createdBy: who.userId, sizeBefore: before.error ? undefined : before.minutes });
+      const born = await syncJobTasks(sb, {
+        jobId,
+        orgId: who.orgId,
+        createdBy: who.userId,
+        // The figure before, whole and per task line (0395): a task still holding what its line said on
+        // the job's other accepted estimates follows that line, the same rule the office's Accept hands through.
+        sizeBefore: before.error ? undefined : before.minutes,
+        tasksBefore: before.error ? undefined : before.taskMinutes,
+      });
       if (born.error) reportError("finishPublicAcceptance:tasks", new Error(born.error), { quoteId: q.id, jobId });
     }
     const wo = await workOrderFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });

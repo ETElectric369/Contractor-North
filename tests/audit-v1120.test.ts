@@ -19,18 +19,19 @@ describe("class 1: a count typed on an uncounted kit task brings the kit's hours
   const ctx = { book: new Map(), rate: 100, pricing, kits: new Map([[kit.id, kit]]) } as never;
   it("the seeded-asking line takes the kit's hours with its first count, marked as the kit's", () => {
     const asking = buildTaskDetail({ id: "t1", name: "Footings", hours: null, units: null, kit_id: "k1", materials: [] }, ctx);
-    expect(asking.hours).toBeNull();
+    expect(asking.labor[0].hours).toBeNull();
     const counted = reexpandTaskDetail(asking, 7, kit, pricing);
-    expect(counted.hours).toBe(14);
-    expect(counted.hours_from_kit).toBe(true);
+    // The kit's hours land on the FIRST labor row (cn-v1131), marked as the kit's.
+    expect(counted.labor[0]).toMatchObject({ hours: 14, from_kit: true });
     expect(counted.materials.map((m) => [m.name, m.qty])).toEqual([["Concrete, 80 lb", 28]]);
   });
   it("a line that had a count and whose hours he cleared stays the hole it is", () => {
     const counted = buildTaskDetail({ id: "t1", name: "Footings", hours: null, units: 7, kit_id: "k1", materials: [] }, ctx);
-    const { hours_from_kit: _h, ...cleared } = { ...counted, hours: null };
+    const { from_kit: _h, ...row } = counted.labor[0];
+    const cleared = { ...counted, labor: [{ ...row, hours: null }] };
     const eight = reexpandTaskDetail(cleared, 8, kit, pricing);
-    expect(eight.hours).toBeNull();
-    expect(eight.hours_from_kit).toBeUndefined();
+    expect(eight.labor[0].hours).toBeNull();
+    expect(eight.labor[0].from_kit).toBeUndefined();
   });
 });
 

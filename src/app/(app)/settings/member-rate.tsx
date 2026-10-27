@@ -105,10 +105,17 @@ export function MemberRate({
           /hr
         </span>
       )}
-      <span className="flex items-center gap-1" title="What the customer is charged — invoice labor">
+      <span className="flex items-center gap-1" title="Bills this person's clocked hours on a T&M job, and prices their hours on an estimate that names them.">
         Bill $
         <NumberInput value={bill} onValueChange={setBill} onBlur={save} className="h-7 w-14 text-right text-xs" aria-label="Charge rate" />
         /hr
+      </span>
+      {/* WHAT THE BILL RATE DRIVES, in sight (cn-v1131): Erik changed his own Bill rate to $135 and
+          saw $145 on an estimate, because an estimate's hours price at this rate only when a labor
+          row names the person; unnamed hours price at Settings' default labor rate. A tooltip is no
+          hint on a phone, so the sentence is on the row. */}
+      <span className="basis-full text-[11px] text-slate-400">
+        Bill: bills this person&apos;s clocked hours on a T&amp;M job, and prices their hours on an estimate that names them.
       </span>
       {/* NEVER BILLED AT THEIR PAY (audit v994 PL2). With no bill rate, their hours bill at the
           customer's level rate or your default labor rate. Said here, where it is fixed. */}

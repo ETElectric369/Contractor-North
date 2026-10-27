@@ -106,9 +106,9 @@ describe("the word lights the kits", () => {
     const kits = taskKitsFrom([{ id: "k1", name: "Footing", category: "  Deck ", labor_minutes: 120, unit: "footing", kit_items: [] }, { id: "k2", name: "Parts only", category: "Deck", labor_minutes: null }]);
     expect(kits).toEqual([{ id: "k1", name: "Footing", labor_minutes: 120, unit: "footing", category: "Deck", items: [] }]);
     expect(kitsWithoutMoney(kits)[0].category).toBe("Deck");
-    const made = kitFromTaskDetail({ task_id: "t", name: "Footings", hours: 2, units: 1, materials: [] } as never, { name: "Footings", unit: "footing", category: "  deck  " });
+    const made = kitFromTaskDetail({ task_id: "t", labor: [{ label: null, person_id: null, hours: 2, rate: 100, rate_from: "rule" }], units: 1, kit_id: null, materials: [] }, { name: "Footings", unit: "footing", category: "  deck  " });
     expect(made.ok && made.value.kit.category).toBe("deck");
-    const bare = kitFromTaskDetail({ task_id: "t", name: "Footings", hours: 2, units: 1, materials: [] } as never, { name: "Footings", unit: "footing" });
+    const bare = kitFromTaskDetail({ task_id: "t", labor: [{ label: null, person_id: null, hours: 2, rate: 100, rate_from: "rule" }], units: 1, kit_id: null, materials: [] }, { name: "Footings", unit: "footing" });
     expect(bare.ok && bare.value.kit.category).toBeNull();
   });
 });
@@ -130,17 +130,17 @@ describe("a rule on the scope, and the estimate's seed of an uncounted kit task"
     const kit = { id: "k1", name: "Footings", labor_minutes: 120, unit: "footing", category: "Deck", items: [{ id: "i1", description: "Concrete, 80 lb", quantity: 4, unit: "ea", unit_price: 9, sort_order: 0 }] };
     const ctx = { book: new Map(), rate: 100, pricing: { orgDefaultPct: 0, levelPct: null }, kits: new Map([[kit.id, kit]]) } as never;
     const asking = buildTaskDetail({ id: "t1", name: "Footings", hours: null, units: null, kit_id: "k1", materials: [] }, ctx);
-    expect(asking.hours).toBeNull();
+    expect(asking.labor[0].hours).toBeNull();
     expect(asking.materials.map((m) => [m.name, m.qty])).toEqual([["Concrete, 80 lb", null]]);
     expect(taskMoney(asking).total).toBe(0);
     expect(taskFlags(asking)).toBe("units?");
     const counted = buildTaskDetail({ id: "t1", name: "Footings", hours: null, units: 7, kit_id: "k1", materials: [] }, ctx);
-    expect(counted.hours).toBe(14);
+    expect(counted.labor[0].hours).toBe(14);
     expect(counted.materials[0].qty).toBe(28);
     expect(taskMoney(counted).total).toBeGreaterThan(0);
     expect(taskFlags(counted)).toBeUndefined();
     // his own typed hours still win, even uncounted
     const his = buildTaskDetail({ id: "t1", name: "Footings", hours: 3, units: null, kit_id: "k1", materials: [] }, ctx);
-    expect(his.hours).toBe(3);
+    expect(his.labor[0].hours).toBe(3);
   });
 });

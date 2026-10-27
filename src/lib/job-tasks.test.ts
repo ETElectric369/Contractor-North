@@ -7,6 +7,7 @@ import {
   isMissingColumn,
   JOB_TASK_COLUMNS,
   JOB_TASK_COLUMNS_BEFORE_0358,
+  JOB_TASK_COLUMNS_BEFORE_0395,
   readJobTasks,
   splitJobTasks,
   taskPhoto,
@@ -132,15 +133,16 @@ describe("taskPhoto: the photo, or a plain word", () => {
   });
 });
 
-describe("readJobTasks: safe before 0358", () => {
-  /** A fake PostgREST: answers per column list. */
+describe("readJobTasks: safe before 0395 and before 0358", () => {
+  const missing = (col: string) => ({ data: null, error: { code: "42703", message: `column tasks.${col} does not exist` } });
+  /** A fake PostgREST: answers per column list — "new" (0395), "mid" (0358), "old" (before). */
   const fake = (answers: Record<string, { data: any[] | null; error: any }>) => {
     const asked: string[] = [];
     const client = {
       from: () => ({
         select: (cols: string) => {
           asked.push(cols);
-          const chain = { eq: () => chain, order: () => chain, limit: async () => answers[cols.includes("done_by") ? "new" : "old"] };
+          const chain = { eq: () => chain, order: () => chain, limit: async () => answers[cols.includes("planned_minutes") ? "new" : cols.includes("done_by") ? "mid" : "old"] };
           return chain;
         },
       }),
@@ -148,25 +150,38 @@ describe("readJobTasks: safe before 0358", () => {
     return { client, asked };
   };
 
-  it("with 0358: the stamps, the photo and the doer's name ride along", async () => {
+  it("with 0395: the stamps, the photo, the doer's name and the task's own minutes ride along", async () => {
     const { client } = fake({
-      new: { data: [{ id: "t1", title: "x", status: "done", created_at: "2026-09-20T17:00:00Z", completed_at: "2026-09-22T21:14:00Z", done_by: "u1", doer: { full_name: "Brian" }, photo_path: "o/j/a.jpg", sort_order: 0 }], error: null },
+      new: { data: [{ id: "t1", title: "x", status: "done", created_at: "2026-09-20T17:00:00Z", completed_at: "2026-09-22T21:14:00Z", done_by: "u1", doer: { full_name: "Brian" }, photo_path: "o/j/a.jpg", sort_order: 0, planned_minutes: 240 }], error: null },
       old: { data: [], error: null },
     });
     const r = await readJobTasks(client, "j1");
     expect(r).toMatchObject({ stamps: true, failed: false });
-    expect(r.rows[0]).toMatchObject({ done_by: "u1", done_by_name: "Brian", photo_path: "o/j/a.jpg" });
+    expect(r.rows[0]).toMatchObject({ done_by: "u1", done_by_name: "Brian", photo_path: "o/j/a.jpg", planned_minutes: 240 });
+  });
+
+  it("without 0395 (the minutes column doesn't exist yet): 0358's columns, the stamps still ride, the minutes wait", async () => {
+    const { client, asked } = fake({
+      new: missing("planned_minutes"),
+      mid: { data: [{ id: "t1", title: "x", status: "done", created_at: "2026-09-20T17:00:00Z", done_by: "u1", doer: { full_name: "Brian" }, sort_order: 2 }], error: null },
+      old: { data: [], error: null },
+    });
+    const r = await readJobTasks(client, "j1");
+    expect(asked).toHaveLength(2);
+    expect(r).toMatchObject({ stamps: true, failed: false });
+    expect(r.rows[0]).toMatchObject({ id: "t1", done_by: "u1", done_by_name: "Brian", sort_order: 2, planned_minutes: null });
   });
 
   it("without 0358 (the column doesn't exist): the old columns, stamps:false, the list still works", async () => {
     const { client, asked } = fake({
-      new: { data: null, error: { code: "42703", message: 'column tasks.done_by does not exist' } },
+      new: missing("planned_minutes"),
+      mid: missing("done_by"),
       old: { data: [{ id: "t1", title: "x", status: "open", created_at: "2026-09-20T17:00:00Z" }], error: null },
     });
     const r = await readJobTasks(client, "j1");
-    expect(asked).toHaveLength(2);
+    expect(asked).toHaveLength(3);
     expect(r).toMatchObject({ stamps: false, failed: false });
-    expect(r.rows[0]).toMatchObject({ id: "t1", done_by: null, photo_path: null, sort_order: 0 });
+    expect(r.rows[0]).toMatchObject({ id: "t1", done_by: null, photo_path: null, sort_order: 0, planned_minutes: null });
   });
 
   it("any other error is a failure the card says, never an empty list read as 'no tasks'", async () => {
@@ -182,13 +197,18 @@ describe("readJobTasks: safe before 0358", () => {
     expect(isMissingColumn(null)).toBe(false);
   });
 
-  it("toJobTaskRow fills what an old row lacks", () => {
-    expect(toJobTaskRow({ id: "t", title: "x", created_at: "c" })).toMatchObject({ status: "open", done_by_name: null, sort_order: 0, notes: null });
+  it("toJobTaskRow fills what an old row lacks; the minutes are a whole number or null, never 0", () => {
+    expect(toJobTaskRow({ id: "t", title: "x", created_at: "c" })).toMatchObject({ status: "open", done_by_name: null, sort_order: 0, notes: null, planned_minutes: null });
+    expect(toJobTaskRow({ id: "t", title: "x", created_at: "c", planned_minutes: "240" }).planned_minutes).toBe(240);
+    expect(toJobTaskRow({ id: "t", title: "x", created_at: "c", planned_minutes: 0 }).planned_minutes).toBeNull();
   });
 
-  it("the note rides along, before 0358 and after (a long materials request keeps its whole text there)", () => {
+  it("the note rides along, before 0358 and after (a long materials request keeps its whole text there); the minutes only after 0395", () => {
     expect(JOB_TASK_COLUMNS).toMatch(/\bnotes\b/);
     expect(JOB_TASK_COLUMNS_BEFORE_0358).toMatch(/\bnotes\b/);
+    expect(JOB_TASK_COLUMNS).toMatch(/\bplanned_minutes\b/);
+    expect(JOB_TASK_COLUMNS_BEFORE_0395).not.toMatch(/\bplanned_minutes\b/);
+    expect(JOB_TASK_COLUMNS_BEFORE_0395).toMatch(/\bdone_by\b/);
     expect(toJobTaskRow({ id: "t", title: "Materials: 3/4 EMT…", notes: "Brian on site: the whole request" }).notes).toBe(
       "Brian on site: the whole request",
     );

@@ -54,7 +54,7 @@ describe("the customer's own Accept link", () => {
   });
   it("runs the same three rules the office's accept runs, each with the company's id — the tasks through the one sync rule, sized by the job's OTHER estimates", () => {
     expect(finish).toMatch(/estimateLines\(sb, \{ jobId, orgId: who\.orgId, except: q\.id \}\)/);
-    expect(finish).toMatch(/syncJobTasks\(sb, \{ jobId, orgId: who\.orgId, createdBy: who\.userId, sizeBefore: before\.error \? undefined : before\.minutes \}\)/);
+    expect(finish).toMatch(/syncJobTasks\(sb, \{\s*jobId,\s*orgId: who\.orgId,\s*createdBy: who\.userId,[\s\S]{0,400}?sizeBefore: before\.error \? undefined : before\.minutes,\s*tasksBefore: before\.error \? undefined : before\.taskMinutes,\s*\}\)/); // whole and per task line (0395, cn-v1131)
     expect(finish).not.toContain("bornWithTasks(");
     expect(finish).toMatch(/workOrderFromQuote\(sb, \{ quoteId: q\.id, orgId: who\.orgId, userId: who\.userId \}\)/);
     expect(finish).toMatch(/takeOffFromQuote\(sb, \{ quoteId: q\.id, orgId: who\.orgId, userId: who\.userId \}\)/);

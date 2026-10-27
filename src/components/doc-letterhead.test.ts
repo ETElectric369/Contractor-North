@@ -75,6 +75,7 @@ describe("the letterhead prints the tagline only when the company set one", () =
         tax: 0,
         total: 0,
         docStyle: { tagline: TAG, density: "compact" },
+        estimateFormat: "tasks",
       }),
     );
     expect(text(html)).toContain(`Main Street Builders ${TAG}`);

@@ -59,7 +59,9 @@ describe("the doors", () => {
   it("Revise: a copy that keeps the job, the customer and the lead, keeps the title, and remembers what it revises — read back, or refused with the way out", () => {
     const fn = body(actions, "export async function duplicateQuote(");
     expect(fn).toContain("opts?: { revision?: boolean }");
-    expect(fn).toContain('.select("customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status")');
+    expect(fn).toContain('const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status" as const;');
+    expect(fn).toContain('select(`${columns}, estimate_format`)'); // the copy keeps the paper format (cn-v1131), two rungs across the 0395 gap
+    expect(fn).toContain("const withFormat = !(first.error && isMissingColumn(first.error));");
     expect(fn).toContain('"Only a sent or accepted estimate can be revised — edit this one instead."');
     expect(fn).toContain("job_id: revision ? ((quote as { job_id?: string | null }).job_id ?? null) : null,");
     expect(fn).toContain("title: revision ? (quote.title ?? \"Quote\") : `${quote.title ?? \"Quote\"} (copy)`,");

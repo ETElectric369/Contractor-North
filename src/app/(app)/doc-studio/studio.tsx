@@ -380,8 +380,10 @@ export function DocStudio({
         )}
         {/* HOW A TASK LINE READS (0386). Erik: the customer sees the estimate "in a per-company
             format". Tasks Only prints each task with its price; Tasks With Labor And Parts prints
-            his hours at the rate and each part beneath it. Only a line BUILT from a task has a
-            breakdown — the sample's last line is one, so the switch is visible in the preview. */}
+            each labor row (its hours at its rate) and each part beneath it. Only a line BUILT from a
+            task has a breakdown — the sample's last line is one, with two labor rows, so the switch
+            is visible in the preview. An estimate may choose for itself on its own page; this is
+            the company's default. */}
         {docKind === "quote" && (
           <div>
             <Label>Estimate Lines</Label>
@@ -441,6 +443,7 @@ export function DocStudio({
               terms={terms.quote || undefined}
               documentFooter={documentFooter || undefined}
               docStyle={style}
+              estimateFormat={style.estimate_format}
             />
           )}
 

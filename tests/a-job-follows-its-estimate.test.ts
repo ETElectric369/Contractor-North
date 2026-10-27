@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -60,7 +60,7 @@ describe("accepting an estimate that already has its job", () => {
     const write = status.indexOf(".update(patch)");
     expect(read).toBeGreaterThan(-1);
     expect(write).toBeGreaterThan(read);
-    expect(status).toContain("createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore } : undefined)");
+    expect(status).toContain("createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore } : undefined)");
   });
   it("the news is said under the status, apart from a warning", () => {
     expect(status).toContain("if (jobRes?.said) said = jobRes.said;");
@@ -73,7 +73,7 @@ describe("accepting an estimate that already has its job", () => {
     const branch = create.slice(linked, birth);
     expect(branch).toContain('status !== "accepted") return { ok: true, id: q.job_id }'); // a sent/draft linked estimate: the old answer, no sync
     expect(create).toContain('.select("id, job_id, status,');
-    expect(branch).toContain("jobFollows(supabase, { jobId: q.job_id, sizeBefore }, ctx)"); // the figure before: the caller's, or read before a revision's pin
+    expect(branch).toContain("jobFollows(supabase, { jobId: q.job_id, sizeBefore, tasksBefore }, ctx)"); // the figure before: the caller's, or read before a revision's pin
     expect(branch).toContain("createWorkOrderFromQuote(quoteId)");
     expect(branch).toContain("createMaterialListFromQuote(quoteId)");
     // The paperwork FIRST (cn-v1084): the take-off may adopt a visit-born job's list and leave its task
@@ -117,7 +117,7 @@ describe("the one rule, and nothing silent", () => {
   it("the rule's writes each select what they wrote", () => {
     const lines = src("src/lib/estimate/sync-job-tasks.ts").split("\n");
     const writes = lines.map((l, i) => (/\.(update|delete)\(/.test(l) ? i : -1)).filter((i) => i !== -1);
-    expect(writes.length).toBe(6); // rekey, unkey, remove, redismiss, size, retitle (the insert is bornTasks'; the dismissal retitle is 0393's own RPC)
+    expect(writes.length).toBe(7); // rekey, unkey, remove, redismiss, a task's minutes (0395), size, retitle (the insert is bornTasks'; the dismissal retitle is 0393's own RPC)
     for (const i of writes) expect(lines.slice(i, i + 7).join("\n"), `write at line ${i + 1}`).toContain('.select("id")');
     expect(lines.join("\n")).toContain("bornTasks(");
   });
@@ -258,5 +258,96 @@ describe("the deferred items (cn-v1084)", () => {
     expect(mats).toContain("const hand: HandRow[] = all.filter((r) => {"); // unkeyed, not his, and not the estimate's own plain-line row (audit v1085)
     expect(mats).toContain("if (r.source_key || isHisRow(r)) return false;");
     expect(mats).toContain("const next = [...now.filter((k) => !consumed.has(k)), ...plan.redismiss.filter((k) => !now.includes(k))];");
+  });
+});
+
+/*
+ * A TASK'S OWN MINUTES FOLLOW ITS LINE THROUGH THE REAL DOORS (0395; the skeptic's S5, cn-v1131).
+ * jobBehindQuote, setQuoteJob, createJobFromQuote, updateQuoteStatus and the customer's own Accept
+ * link each read the estimate's figure BEFORE their write and hand BOTH halves to the sync — the
+ * whole (sizeBefore) and each task line's own (tasksBefore). Without the second a task holding the
+ * figure its line said before could not follow a change of hours, and the sync said it "kept its
+ * hours — set on the job" when nobody set anything. The case that reaches it: a REVISION accepted
+ * over the original (the one door that changes an accepted line's hours), through the office's
+ * status select and through the customer's link, against the thenable fake. The other sync callers
+ * are mocked at their module seam; every read and write below is the real rule's.
+ */
+const ORG = "org-1";
+const detail = (hours: number) => ({ task_id: "t-trench", labor: [{ label: null, person_id: null, hours, rate: 145, rate_from: "rule" }], units: null, kit_id: null, materials: [] });
+const db = vi.hoisted(() => ({ current: null as any }));
+const revisionAccepted = (over: { revisionStatus: "sent" | "accepted"; acceptedAt?: string | null }) =>
+  fakeDb({
+    quotes: [
+      { id: "q1", org_id: ORG, job_id: "j1", status: "accepted", quote_number: "E-001", revises_quote_id: null, created_at: "2026-10-01T10:00:00Z", accepted_at: "2026-10-01T12:00:00Z", customer_id: "c1", inquiry_id: null, public_token: "tok-1", created_by: "u1" },
+      { id: "q2", org_id: ORG, job_id: "j1", status: over.revisionStatus, quote_number: "E-002", revises_quote_id: "q1", created_at: "2026-10-05T10:00:00Z", accepted_at: over.acceptedAt ?? null, customer_id: "c1", inquiry_id: null, public_token: "tok-2", created_by: "u1" },
+    ],
+    quote_line_items: [
+      { id: "l1", org_id: ORG, quote_id: "q1", description: "Trench", sort_order: 0, detail: detail(2) }, // the original: 2 h
+      { id: "l2", org_id: ORG, quote_id: "q2", description: "Trench", sort_order: 0, detail: detail(3) }, // the revision: 3 h
+    ],
+    // The task the original's acceptance gave birth to, still holding the original's 2 h.
+    tasks: [{ id: "t1", org_id: ORG, job_id: "j1", source_key: "line:l1", title: "Trench", status: "open", notes: null, photo_path: null, parent_id: null, planned_minutes: 120 }],
+    jobs: [{ id: "j1", org_id: ORG, planned_minutes: 120, dismissed_task_keys: [] }],
+    appointments: [],
+  });
+
+vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => db.current.sb), createServiceClient: vi.fn(() => db.current.sb) }));
+vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => ({ supabase: db.current.sb, userId: "u-office", orgId: ORG })) }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
+vi.mock("next/server", () => ({ after: vi.fn() }));
+vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/pdf-cache", async (importOriginal) => ({ ...(await importOriginal<object>()), bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
+vi.mock("@/lib/push", async (importOriginal) => ({ ...(await importOriginal<object>()), orgStaffIds: vi.fn(async () => []), sendPushToProfiles: vi.fn(async () => {}) }));
+vi.mock("@/lib/notifications", async (importOriginal) => ({ ...(await importOriginal<object>()), createNotifications: vi.fn(async () => {}) }));
+// The paperwork doors and the buy list are rules of their own, tested in their own files: here they answer ok and say nothing.
+vi.mock("@/app/(app)/work-orders/actions", async (importOriginal) => ({ ...(await importOriginal<object>()), createWorkOrderFromQuote: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/app/(app)/materials/actions", async (importOriginal) => ({ ...(await importOriginal<object>()), createMaterialListFromQuote: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/lib/estimate/sync-job-materials", async (importOriginal) => ({ ...(await importOriginal<object>()), syncJobMaterials: vi.fn(async () => ({})), materialsWords: () => null }));
+vi.mock("@/lib/estimate/work-order-from-quote", async (importOriginal) => ({ ...(await importOriginal<object>()), workOrderFromQuote: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/lib/estimate/take-off-from-quote", async (importOriginal) => ({ ...(await importOriginal<object>()), takeOffFromQuote: vi.fn(async () => ({ ok: true })), takeOffWords: () => null }));
+
+const { fakeDb } = await import("@/test/fake-supabase");
+const { updateQuoteStatus } = await import("@/app/(app)/quotes/actions");
+const { finishPublicAcceptance } = await import("@/app/q/[token]/actions");
+
+describe("a task's minutes follow its line through the real doors (0395)", () => {
+  it("the office accepts a revision: the task still holding the original's 2 h follows to the revision's 3 h, said as updated — never 'kept its hours'", async () => {
+    db.current = revisionAccepted({ revisionStatus: "sent" });
+    const res = await updateQuoteStatus("q2", "accepted");
+    expect(res.ok).toBe(true);
+    const said = String((res as { said?: string }).said ?? "");
+    expect(said).toContain("1 matched");
+    expect(said).toContain("1 task's hours updated");
+    expect(said).toContain("the job's length is now 3 h");
+    expect(said).not.toContain("kept its hours");
+    const t = db.current.tables.tasks.find((r: any) => r.id === "t1");
+    expect(t.planned_minutes).toBe(180);
+    expect(t.source_key).toBe("line:l2"); // re-keyed to the revision's line by its exact title
+    expect(db.current.tables.jobs[0].planned_minutes).toBe(180);
+    expect(db.current.tables.quotes.find((q: any) => q.id === "q1").status).toBe("superseded");
+  });
+
+  it("the customer accepts the revision through the link: the same rule, the same figure before (the job's OTHER accepted estimates), the task follows", async () => {
+    db.current = revisionAccepted({ revisionStatus: "accepted", acceptedAt: new Date().toISOString() });
+    await finishPublicAcceptance("tok-2");
+    const t = db.current.tables.tasks.find((r: any) => r.id === "t1");
+    expect(t.planned_minutes).toBe(180);
+    expect(t.source_key).toBe("line:l2");
+    expect(db.current.tables.jobs[0].planned_minutes).toBe(180);
+    expect(db.current.tables.quotes.find((q: any) => q.id === "q1").status).toBe("superseded");
+  });
+
+  it("every door hands the per-task figure through: jobBehindQuote, setQuoteJob (both jobs), createJobFromQuote, updateQuoteStatus, the link", () => {
+    expect(actions).toContain("const figureBefore = (est: Awaited<ReturnType<typeof estimateLines>>): FigureBefore =>");
+    expect(actions).toContain("est.error ? { sizeBefore: undefined, tasksBefore: undefined } : { sizeBefore: est.minutes, tasksBefore: est.taskMinutes }");
+    expect(actions).toContain("return { jobId, ...figureBefore(est) };"); // jobBehindQuote
+    expect(actions).toContain("sizeBefore: who.sizeBefore, tasksBefore: who.tasksBefore"); // jobFollows → the sync
+    expect(actions).toContain("pinned = figureBefore(est);");
+    expect(actions).toContain("left = { jobId: from, ...figureBefore(est), label:");
+    expect(actions).toContain("jobFollows(supabase, { jobId, ...pinned }, ctx)");
+    expect(actions).toContain("jobFollows(supabase, { jobId: left.jobId, sizeBefore: left.sizeBefore, tasksBefore: left.tasksBefore }, ctx, {");
+    expect(actions).toContain("({ sizeBefore, tasksBefore } = figureBefore(est));"); // a revision's pin inside createJobFromQuote
+    expect(actions).toContain("linked = { jobId, ...figureBefore(est) };"); // updateQuoteStatus
+    expect(src("src/app/q/[token]/actions.ts")).toContain("tasksBefore: before.error ? undefined : before.taskMinutes,");
   });
 });

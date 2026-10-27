@@ -1,5 +1,6 @@
 import { formatCurrency } from "@/lib/utils";
 import { tallyBuildTime } from "@/lib/build-time-cost";
+import { laborRateFor } from "@/lib/pricing/labor-rate";
 
 /** One billable-labor line for a worker on a job. `sourceIds` are the time_entry ids whose hours
  *  this line bills: the line's CLAIM on them (0255). A claim is what lets a second invoice bill only
@@ -180,8 +181,13 @@ export function computeJobLaborBilling(
   }
   const lines: LaborLine[] = [...perPerson.entries()].map(([personId, p]) => {
     const personal = p.realRate > 0 ? p.realRate : 0;
-    const rate = personal > 0 ? (level > 0 ? Math.min(personal, level) : personal) : level > 0 ? level : def;
-    const rateFrom: LaborLine["rateFrom"] = personal > 0 ? "bill_rate" : level > 0 ? "level" : def > 0 ? "default" : "none";
+    // THE ONE LABOR-RATE RULE (lib/pricing/labor-rate, cn-v1131): the person's own bill rate held
+    // under the level's ceiling, else the level, else the org default, else nothing. The same
+    // function prices an hour he is QUOTING, so his clocked hour and his quoted hour agree. The
+    // line's own word for "person" stays "bill_rate" — the importer and the editor read it.
+    const one = laborRateFor({ personRate: personal, levelRate: level, orgDefault: def });
+    const rate = one.rate;
+    const rateFrom: LaborLine["rateFrom"] = one.from === "person" ? "bill_rate" : one.from;
     const quantity = Math.round(p.hours * 4) / 4; // quarter-hour
     return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100, sourceIds: p.sourceIds, rateFrom };
   });

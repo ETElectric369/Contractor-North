@@ -63,8 +63,16 @@ export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; uni
   if (!name) return refuse("Give the kit a name.");
   const unit = (typeof input.unit === "string" ? input.unit : "").trim().slice(0, MAX_KIT_UNIT) || "ea";
   const category = (typeof input.category === "string" ? input.category : "").trim().replace(/\s+/g, " ").slice(0, MAX_KIT_CATEGORY) || null;
-  const hours = detail.hours;
-  if (hours === null || !(hours > 0)) return refuse("Give the task its hours first — a kit remembers your hours per unit.");
+  // THE KIT REMEMBERS MINUTES, NOT A RATE (0386): its hours are the labor rows' hours SUMMED (cn-v1131
+  // gave a task one row per rate), and a row still asking blocks exactly as a missing figure did —
+  // named, when it has a name, so he knows which row.
+  const rows = detail.labor;
+  const asking = rows.filter((r) => r.hours === null || !(r.hours > 0));
+  if (!rows.length || asking.length) {
+    const who = rows.length > 1 ? asking.find((r) => r.label?.trim())?.label?.trim() : null;
+    return refuse(who ? `Give ${who} its hours first — a kit remembers your hours per unit.` : "Give the task its hours first — a kit remembers your hours per unit.");
+  }
+  const hours = round2(rows.reduce((t, r) => t + (r.hours ?? 0), 0));
   const units = detail.units !== null && detail.units > 0 ? detail.units : 1;
   // THE ROUND TRIP MUST HOLD (the skeptic's probe): the kit stores whole minutes per unit and
   // counts to the cent, and the next task multiplies them back. What would come back different

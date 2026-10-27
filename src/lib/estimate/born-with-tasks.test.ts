@@ -22,17 +22,17 @@ import {
 
 const line = (id: string, description: string, sort_order: number, detail: unknown): LineRow => ({ id, description, sort_order, detail });
 
+/** A task line's breakdown with ONE labor row (the shape every line saved since cn-v1131 carries). */
 const detail = (hours: number | null, materials: unknown[] = []) => ({
   task_id: `t-${hours ?? "x"}`,
-  hours,
-  rate: 120,
+  labor: [{ label: null, person_id: null, hours, rate: 120, rate_from: "rule" }],
   units: null,
   kit_id: null,
   materials,
 });
 
 describe("tasksFromLines — what an accepted estimate gives birth to", () => {
-  it("only a line with a breakdown is a task; plain lines are left alone", () => {
+  it("only a line with a breakdown is a task; plain lines are left alone; each task carries its own minutes", () => {
     const b = tasksFromLines([
       line("a", "14/2 romex [W142]", 0, null),
       line("b", "Install transfer switch", 1, detail(3)),
@@ -40,9 +40,27 @@ describe("tasksFromLines — what an accepted estimate gives birth to", () => {
       line("d", "Run generator feed ×2", 3, detail(1.5)),
     ]);
     expect(b.tasks).toEqual([
-      { source_key: "line:b", title: "Install transfer switch", sort_order: 1, task_id: "t-3" },
-      { source_key: "line:d", title: "Run generator feed ×2", sort_order: 3, task_id: "t-1.5" },
+      { source_key: "line:b", title: "Install transfer switch", sort_order: 1, task_id: "t-3", planned_minutes: 180 },
+      { source_key: "line:d", title: "Run generator feed ×2", sort_order: 3, task_id: "t-1.5", planned_minutes: 90 },
     ]);
+  });
+
+  it("a task's minutes are its labor ROWS' hours summed (cn-v1131); a row still asking adds nothing; a line saved before the rows births the same", () => {
+    const two = {
+      task_id: "t-two",
+      labor: [
+        { label: null, person_id: null, hours: 2, rate: 145, rate_from: "rule" },
+        { label: "Helper", person_id: null, hours: 1.5, rate: 65, rate_from: "hand" },
+        { label: "Not yet", person_id: null, hours: null, rate: 65, rate_from: "hand" },
+      ],
+      units: null,
+      kit_id: null,
+      materials: [],
+    };
+    const legacy = { task_id: "t-old", hours: 2, rate: 145, units: null, kit_id: null, materials: [] };
+    const b = tasksFromLines([line("a", "Set panel", 0, two), line("b", "Trim out", 1, legacy), line("c", "Pull permit", 2, detail(null))]);
+    expect(b.tasks.map((t) => [t.title, t.planned_minutes])).toEqual([["Set panel", 210], ["Trim out", 120], ["Pull permit", null]]);
+    expect(b.plannedMinutes).toBe(330); // the job's figure is the same sum over every task
   });
 
   it("the key is the line's id, so a door run twice births nothing twice", () => {
@@ -112,9 +130,9 @@ describe("tasksFromVisit — Start The Job on an inspection", () => {
   it("his tasks in his order, keyed by the task's own id, ' ×N' for a per-unit task like the estimate line", () => {
     const b = tasksFromVisit([visit("t1", "Set panel", 4), visit("t2", "Footings", 1, { units: 7 }), visit("t3", "Trim out", null, { units: 1 })]);
     expect(b.tasks).toEqual([
-      { source_key: "task:t1", title: "Set panel", sort_order: 0 },
-      { source_key: "task:t2", title: "Footings ×7", sort_order: 1 },
-      { source_key: "task:t3", title: "Trim out", sort_order: 2 },
+      { source_key: "task:t1", title: "Set panel", sort_order: 0, planned_minutes: 240 },
+      { source_key: "task:t2", title: "Footings ×7", sort_order: 1, planned_minutes: 60 },
+      { source_key: "task:t3", title: "Trim out", sort_order: 2, planned_minutes: null },
     ]);
     expect(b.plannedMinutes).toBe(300);
   });
@@ -147,7 +165,7 @@ describe("tasksFromVisit — Start The Job on an inspection", () => {
     };
     const kits = new Map([[kit.id, kit]]);
     const b = tasksFromVisit([visit("t1", "Footings", null, { units: 7, kit_id: "k1", materials: [{ code: null, words: "Rebar stake", qty: 14 }] })], kits);
-    expect(b.tasks).toEqual([{ source_key: "task:t1", title: "Footings ×7", sort_order: 0 }]);
+    expect(b.tasks).toEqual([{ source_key: "task:t1", title: "Footings ×7", sort_order: 0, planned_minutes: 840 }]);
     expect(b.plannedMinutes).toBe(840);
     expect(b.parts).toEqual([
       { source_key: "task:t1", code: null, name: "Concrete, 80 lb", qty: 28, cost: null },
@@ -203,8 +221,8 @@ describe("tasksAnswered — the same read the estimate seed does", () => {
 const ORG = "org-1";
 const birth = {
   tasks: [
-    { source_key: "line:a", title: "Set panel", sort_order: 0 },
-    { source_key: "line:b", title: "Trim out", sort_order: 2 },
+    { source_key: "line:a", title: "Set panel", sort_order: 0, planned_minutes: 120 },
+    { source_key: "line:b", title: "Trim out", sort_order: 2, planned_minutes: 75 },
   ],
   plannedMinutes: 195,
   parts: [],
@@ -212,15 +230,19 @@ const birth = {
 const jobs = (planned: number | null) => [{ id: "job-1", org_id: ORG, planned_minutes: planned }];
 
 describe("bornTasks — the write", () => {
-  it("inserts the missing tasks with the company, the key, the order and who, and counts them", async () => {
+  it("inserts the missing tasks with the company, the key, the order, each task's own minutes and who, and counts them", async () => {
     const db = fakeDb({ tasks: [], jobs: jobs(null) });
     const res = await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, birth);
     expect(res).toEqual({ inserted: 2, plannedSet: true });
     expect(db.inserted.tasks).toEqual([
-      { id: "tasks-1", org_id: ORG, job_id: "job-1", title: "Set panel", source_key: "line:a", sort_order: 0, category: null, created_by: "u-1" },
-      { id: "tasks-2", org_id: ORG, job_id: "job-1", title: "Trim out", source_key: "line:b", sort_order: 2, category: null, created_by: "u-1" },
+      { id: "tasks-1", org_id: ORG, job_id: "job-1", title: "Set panel", source_key: "line:a", sort_order: 0, category: null, planned_minutes: 120, created_by: "u-1" },
+      { id: "tasks-2", org_id: ORG, job_id: "job-1", title: "Trim out", source_key: "line:b", sort_order: 2, category: null, planned_minutes: 75, created_by: "u-1" },
     ]);
     expect(db.tables.jobs[0].planned_minutes).toBe(195);
+    // A task with no minutes of its own is written as null — never 0, never a guess.
+    const none = fakeDb({ tasks: [], jobs: jobs(null) });
+    await bornTasks(none.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { ...birth, tasks: [{ source_key: "line:c", title: "Pull permit", sort_order: 0 }] });
+    expect(none.inserted.tasks[0].planned_minutes).toBeNull();
   });
 
   it("a replay births nothing twice: the keys already on the job are skipped", async () => {
@@ -279,16 +301,16 @@ describe("bornWithTasks — the estimate doors' half", () => {
     const db = fakeDb({
       quote_line_items: [
         { id: "l1", quote_id: "q-1", org_id: ORG, description: "14/2 romex", sort_order: 0, detail: null },
-        { id: "l2", quote_id: "q-1", org_id: ORG, description: "Set panel", sort_order: 1, detail: { task_id: "t", hours: 2, rate: 120, units: null, kit_id: null, materials: [] } },
-        { id: "l9", quote_id: "q-1", org_id: "org-2", description: "Not this company's", sort_order: 2, detail: { task_id: "t", hours: 9, rate: 1, units: null, kit_id: null, materials: [] } },
+        { id: "l2", quote_id: "q-1", org_id: ORG, description: "Set panel", sort_order: 1, detail: detail(2) },
+        { id: "l9", quote_id: "q-1", org_id: "org-2", description: "Not this company's", sort_order: 2, detail: detail(9) },
       ],
       tasks: [],
       jobs: jobs(null),
     });
     const res = await bornWithTasks(db.sb, { jobId: "job-1", quoteId: "q-1", orgId: ORG, createdBy: "author" });
     expect(res.inserted).toBe(1);
-    expect(res.birth.tasks).toEqual([{ source_key: "line:l2", title: "Set panel", sort_order: 1, task_id: "t" }]);
-    expect(db.inserted.tasks[0]).toMatchObject({ source_key: "line:l2", created_by: "author", org_id: ORG });
+    expect(res.birth.tasks).toEqual([{ source_key: "line:l2", title: "Set panel", sort_order: 1, task_id: "t-2", planned_minutes: 120 }]);
+    expect(db.inserted.tasks[0]).toMatchObject({ source_key: "line:l2", created_by: "author", org_id: ORG, planned_minutes: 120 });
     expect(db.tables.jobs[0].planned_minutes).toBe(120);
   });
 });

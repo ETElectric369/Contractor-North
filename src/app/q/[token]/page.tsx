@@ -43,6 +43,11 @@ export default async function PublicQuotePage({
   const co = companyFromOrg(org);
   const template = templateFor(org, "quote");
   const label = docLabel(q);
+  // THE FORMAT, AS public_quote RESOLVED IT (0387, 0395): the RPC ships a line's breakdown ONLY when
+  // the estimate reads "detailed" (its own choice else the company's), so any item carrying a detail
+  // means the format is detailed; none means "tasks" — and with no detail there is nothing to print
+  // either way. The format itself never rides the anonymous wire; the breakdown's presence is it.
+  const estimateFormat = (items as { detail?: unknown }[]).some((it) => it?.detail != null) ? "detailed" : "tasks";
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -63,6 +68,7 @@ export default async function PublicQuotePage({
           these two surfaces — which render the identical QuoteDocument — cannot drift. */}
       <QuoteDocument
         docStyle={(data.org as { doc_style?: unknown } | null)?.doc_style}
+        estimateFormat={estimateFormat}
         co={co}
         site={pickSite([
           ...(data.site_candidates ?? []),

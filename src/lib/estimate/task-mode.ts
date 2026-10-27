@@ -98,6 +98,10 @@ export interface TaskModeContext {
   book: Map<string, TaskBookRow>;
   /** The labor rate for this customer (laborRateFor), or the one he TYPED in the scope. 0 = none. */
   rate: number;
+  /** Whose figure `rate` is: the rule's ("rule", the default) or one he DICTATED in the scope
+   *  ("stated"). The row each task is built with remembers it (TaskLabor.rate_from), so a stated
+   *  rate stands when the customer's rate changes and a rule rate follows (repriceTaskLine). */
+  rateFrom?: "rule" | "stated";
   pricing: BookPricing;
 }
 
@@ -120,7 +124,7 @@ export function taskModeDraft(
   // never truncated — the prompt asks for two at most, and a third is his to read, not ours to lose.
   const asked = Array.isArray(p.questions) ? p.questions.map((q) => String(q).trim()).filter(Boolean) : [];
   const { tasks, dropped } = screenEstimatorTasks(scope, p.tasks);
-  const items = taskLines(tasks, { book: ctx.book, rate: ctx.rate, pricing: ctx.pricing });
+  const items = taskLines(tasks, { book: ctx.book, rate: ctx.rate, rateFrom: ctx.rateFrom === "stated" ? "stated" : "rule", pricing: ctx.pricing });
   return {
     items,
     questions: [...asked, ...dropped.map((d) => `Not taken: ${d}`)],

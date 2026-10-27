@@ -206,7 +206,7 @@ describe("the words and the doors (carried [16], [15], [38], [9], [43], [1], [19
   });
   it("[9] a copy and a revision keep the scope description; [43] a failed cleanup of a half-made revision is said", () => {
     const quotes = src("src/app/(app)/quotes/actions.ts");
-    expect(quotes).toContain('.select("customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status")');
+    expect(quotes).toContain('const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status" as const;'); // + estimate_format on the first rung (cn-v1131)
     expect(quotes).toContain("description: (quote as { description?: string | null }).description ?? null,");
     expect(quotes).toContain('const { data: gone, error: dErr } = await supabase.from("quotes").delete().eq("id", res.id).eq("status", "draft").select("id");');
   });
