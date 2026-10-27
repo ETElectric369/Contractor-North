@@ -10,6 +10,13 @@ import { findShelfProblems } from "@/lib/stock-reconcile-check";
 import { tellStaleBankTransfers } from "@/lib/bank-transfer-alerts";
 
 export const runtime = "nodejs";
+// The steps run one after another and the Nort review is a model call per company (cn-v1130):
+// Vercel's default minute would cut the night off mid-step with no row anywhere to say so.
+export const maxDuration = 300;
+
+/** The Nort review's share of the run, measured from the run's own start (the clock Vercel's 300 s
+ *  runs on): it is the slow step, and the three after it still need their turn. */
+const NORT_REVIEW_BUDGET_MS = 200_000;
 
 /**
  * The daily automation runner (Vercel Cron). One scheduled endpoint that does the
@@ -20,6 +27,9 @@ export const runtime = "nodejs";
  *   - push the "Close out your day" money-leak nudge (stray time / uncosted work /
  *     missing return visit — YESTERDAY's gaps, since this cron runs mornings).
  *
+ * The answer is honest (cn-v1130): `ok` is false and the status is 500 when ANY step failed (its
+ * *_error key says which) — see the end of GET.
+ *
  * Protected by CRON_SECRET (Vercel sends it automatically):
  *   GET /api/automations/daily   Authorization: Bearer <CRON_SECRET>
  */
@@ -27,6 +37,7 @@ export async function GET(request: Request) {
   const guard = requireCron(request);
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
+  const startedAt = Date.now();
 
   const result: Record<string, unknown> = { ok: true };
   try {
@@ -70,7 +81,19 @@ export async function GET(request: Request) {
   try {
     // Nort's self-review — read the crew's recent Nort conversations + bug reports and cluster them
     // into "what to build/fix next." The active half of the learning loop; staff read it back in-app.
-    result.nort_reviews = await generateNortReviewsForAllOrgs(supabase);
+    // A deadline rides along (cn-v1130): a model call per company adds up, and past its share of
+    // the run the review stops and files how many companies it did not reach, instead of Vercel
+    // cutting the function with the steps after it undone and no row anywhere.
+    const review = await generateNortReviewsForAllOrgs(supabase, { deadlineMs: startedAt + NORT_REVIEW_BUDGET_MS });
+    result.nort_reviews = review;
+    // A REVIEW THAT MADE NOTHING IS A FAILED STEP (cn-v1130, skeptic #34). The review files its own
+    // per-company rows and never throws for them, so a revoked key (every company failed) or a
+    // starved run (the deadline left companies unreviewed) would have answered a green 200.
+    if (review.failed > 0 && review.made === 0) {
+      result.nort_reviews_error = `every company with activity failed: ${review.failed}`;
+    } else if (review.left > 0) {
+      result.nort_reviews_error = `cut short: ${review.left} companies not reviewed`;
+    }
   } catch (e: any) {
     result.nort_reviews_error = e?.message ?? "failed";
     reportError("cron-nort-review", e);
@@ -93,7 +116,9 @@ export async function GET(request: Request) {
   try {
     // Housekeeping: drop stale public-endpoint rate-limit windows (>1 day old) so the
     // rate_limits table stays tiny. Cheap, idempotent, no-op when already clean.
-    await supabase.rpc("rate_limit_gc");
+    // supabase-js never throws on a database error: it hands it back (cn-v1130, skeptic #34).
+    const { error } = await supabase.rpc("rate_limit_gc");
+    if (error) throw error;
     result.rate_limit_gc = true;
   } catch (e: any) {
     result.rate_limit_gc_error = e?.message ?? "failed";
@@ -110,5 +135,12 @@ export async function GET(request: Request) {
     reportError("cron-storage-sweep", e);
   }
 
-  return NextResponse.json(result);
+  // SINK-07 (cn-v1130, rule changed by skeptic #34): a cron JSON nobody reads is not a report.
+  // Every step files its own row in the sink, but Vercel's cron log is the one place that goes red,
+  // and it reads only the status. So ANY failed step answers 500 with ok false and its *_error key.
+  // The first rule (500 only when EVERY step failed) could never fire: several steps fail closed
+  // without throwing, so "all eight" was unreachable and a failed step stayed green.
+  const errors = Object.keys(result).filter((k) => k.endsWith("_error"));
+  result.ok = errors.length === 0;
+  return NextResponse.json(result, { status: errors.length > 0 ? 500 : 200 });
 }

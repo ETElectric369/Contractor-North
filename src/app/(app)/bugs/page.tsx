@@ -16,7 +16,8 @@ export default async function BugsPage() {
   const supabase = await createClient();
   if (!(await isPlatformAdmin(supabase))) redirect("/planner");
 
-  const reports = await listBugReports();
+  // A failed read is said on the page (cn-v1130), never shown as "All clear".
+  const { rows, error } = await listBugReports();
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -25,7 +26,7 @@ export default async function BugsPage() {
         <p className="mb-4 text-sm text-slate-500">
           Every company&apos;s reports, newest first. Mark items fixed as they ship.
         </p>
-        <BugList initial={reports} />
+        <BugList initial={rows} readError={error} />
       </div>
       <div>
         <h2 className="mb-2 text-base font-semibold text-slate-900">AI Assistant</h2>

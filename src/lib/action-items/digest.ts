@@ -7,6 +7,8 @@ import { notifyPeople } from "@/lib/notifications";
 import { sixForPerson, type DigestTask } from "./digest-six";
 import { PUSH_POOL_LIMIT, RANK_POOL_SELECT, rankPoolQuery } from "@/lib/six-rank";
 import { inquiryDueFilter } from "./due-filters";
+import { readAllOrgs } from "@/lib/cron-orgs";
+import { reportError } from "@/lib/observe";
 
 /**
  * The morning "day ahead" push digest (run by the daily automations cron) — the
@@ -42,127 +44,140 @@ import { inquiryDueFilter } from "./due-filters";
  *
  * HOLDS ARE BACK (Wave 1, lane 5): the first decision line counts every job on hold whose day has
  * come or that has no day ("3 Holds Are Back"), the same holds My Day's "Holds Back" pile shows.
+ *
+ * ONE COMPANY'S FAILURE IS ITS OWN (cn-v1130, skeptic #34). The tasks read used to be a bare `.data`
+ * (a failed read was "no six, no push"), and a throw anywhere ended the loop for every company after
+ * it. Now a failed read throws, the company's whole body sits in a try, and the failure is counted in
+ * `failed` and filed as cron-day-ahead with the orgId; the next company still gets its morning.
  */
-export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number; pushed: number }> {
-  const counts = { orgs: 0, pushed: 0 };
+export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number; pushed: number; failed: number }> {
+  const counts = { orgs: 0, pushed: 0, failed: 0 };
   if (!pushConfigured()) return counts; // no VAPID keys → nothing to send
 
-  const { data: orgs } = await supabase.from("organizations").select("id, settings");
+  // Every company, whole, or a throw the daily cron files as cron-day-ahead (cn-v1130): a failed
+  // read used to be "0 orgs, 0 pushed" — a morning with no digest and no word why.
+  const orgs = await readAllOrgs(supabase);
 
-  for (const org of orgs ?? []) {
+  for (const org of orgs) {
     counts.orgs++;
-    const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
-    const today = todayStrInTz(tz);
+    try {
+      const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
+      const today = todayStrInTz(tz);
 
-    // Decision head-counts (+2 title rows each), and first THE HOLDS THAT ARE BACK (Wave 1, lane 5):
-    // every job on hold whose day is today or earlier, or that has no day at all (a hold from before
-    // 0366: it is due now, "No Day Set"), not only the ones that came back today. The service client
-    // reads every company, so it is filtered to this one by hand. Before 0366 (no hold_until) it
-    // counts 0: the old push never had the line, and it never guesses one.
-    const [holdsR, invR, leadR] = await Promise.all([
-      supabase
-        .from("jobs")
-        .select("id", { count: "exact", head: true })
-        .eq("org_id", org.id)
-        .eq("status", "on_hold")
-        .or(`hold_until.is.null,hold_until.lte.${today}`),
-      supabase
-        .from("invoices")
-        .select("invoice_number", { count: "exact" })
-        .eq("org_id", org.id)
-        .in("status", ["sent", "partial", "overdue"])
-        .lt("due_date", today)
-        .order("due_date", { ascending: true })
-        .limit(2),
-      supabase
-        .from("inquiries")
-        .select("name", { count: "exact" })
-        .eq("org_id", org.id)
-        .eq("status", "new")
-        .is("converted_at", null)
-        // A new lead snoozed to a later day waits for it here too: the rule Needs You and the Sales
-        // badge read with, so the push never names a lead My Day has in its Waiting fold.
-        .or(inquiryDueFilter(today))
-        .order("created_at", { ascending: true })
-        .limit(2),
-    ]);
+      // Decision head-counts (+2 title rows each), and first THE HOLDS THAT ARE BACK (Wave 1, lane 5):
+      // every job on hold whose day is today or earlier, or that has no day at all (a hold from before
+      // 0366: it is due now, "No Day Set"), not only the ones that came back today. The service client
+      // reads every company, so it is filtered to this one by hand. Before 0366 (no hold_until) it
+      // counts 0: the old push never had the line, and it never guesses one.
+      const [holdsR, invR, leadR] = await Promise.all([
+        supabase
+          .from("jobs")
+          .select("id", { count: "exact", head: true })
+          .eq("org_id", org.id)
+          .eq("status", "on_hold")
+          .or(`hold_until.is.null,hold_until.lte.${today}`),
+        supabase
+          .from("invoices")
+          .select("invoice_number", { count: "exact" })
+          .eq("org_id", org.id)
+          .in("status", ["sent", "partial", "overdue"])
+          .lt("due_date", today)
+          .order("due_date", { ascending: true })
+          .limit(2),
+        supabase
+          .from("inquiries")
+          .select("name", { count: "exact" })
+          .eq("org_id", org.id)
+          .eq("status", "new")
+          .is("converted_at", null)
+          // A new lead snoozed to a later day waits for it here too: the rule Needs You and the Sales
+          // badge read with, so the push never names a lead My Day has in its Waiting fold.
+          .or(inquiryDueFilter(today))
+          .order("created_at", { ascending: true })
+          .limit(2),
+      ]);
 
-    // THE PUSH CANDIDATES — the same cut, order and bound as My Day's card, through the ONE shared
-    // shaper (lib/six-rank rankPoolQuery, scope "push"). The pin arm used to be written out here by
-    // hand, matching focus_date to today EXACTLY, the same copy the planner carried — so a pin dropped
-    // out of the push at midnight exactly as it dropped out of the card. It is "on or before today" in
-    // both places now because it is the same line of code in both places.
-    //
-    // scope "push" is the ONE documented difference: a plain undated Reminder rides the card (Erik:
-    // "those reminders should be visible") but never a push, because a pushed number may not be the
-    // length of an undated set (the badge invariant above). Who made each one and who it is for ride
-    // along, so each person is handed only their own.
-    const { data: taskRows } = await rankPoolQuery(
-      supabase
-        .from("tasks")
-        .select(`${RANK_POOL_SELECT}, status, parent_id, created_by, assigned_to`)
-        .eq("org_id", org.id)
-        .eq("status", "open")
-        .is("parent_id", null)
-        .is("job_id", null),
-      { todayStr: today, scope: "push", limit: PUSH_POOL_LIMIT },
-    );
-    const pool = (taskRows ?? []) as DigestTask[];
-
-    const holdsBack = holdsBackCount(holdsR);
-    // The holds join the decisions: a morning with only holds back still pushes.
-    const decisions = holdsBack + (invR.count ?? 0) + (leadR.count ?? 0);
-    if (pool.length === 0 && decisions === 0) continue; // nothing needs attention → no push
-
-    // Decision titles: the holds line first ("2 Holds Are Back", the words the pile on My Day uses;
-    // it stands for all of them), then stream order (money → leads), "+N more" for the rest.
-    const decisionTitles: string[] = [];
-    let named = 0;
-    if (holdsBack > 0) {
-      decisionTitles.push(holdsBackLine(holdsBack));
-      named += holdsBack;
-    }
-    for (const t of [
-      ...((invR.data ?? []) as any[]).map((i) => `Invoice ${i.invoice_number} overdue`),
-      // Leads switched off (0352): the same people, called what My Day calls them.
-      ...((leadR.data ?? []) as any[]).map((l) => `${featureOn(getOrgSettings(org.settings).features, "leads") ? "New lead" : "New request"}: ${l.name}`),
-    ]) {
-      if (decisionTitles.length >= 2) break;
-      decisionTitles.push(t);
-      named += 1;
-    }
-    const moreDecisions = decisions - named;
-    const decisionLine = decisionTitles.join(" · ") + (moreDecisions > 0 ? ` · +${moreDecisions} more` : "");
-
-    const staff = await orgStaffIds(org.id);
-    if (!staff.length) continue;
-
-    // ONE PUSH PER PERSON, their own six in it. Lead with the six; decisions ride the body.
-    // Resilient when someone's six are empty: the decisions-only shape rather than a hollow
-    // "Today:" header; nobody with no six and no decisions is pushed at all.
-    for (const personId of staff) {
-      const six = sixForPerson(pool, personId, today);
-      if (six.length === 0 && decisions === 0) continue;
-      const sixLine =
-        six.slice(0, 2).map((t) => String(t.title)).join(" · ") + (six.length > 2 ? ` · +${six.length - 2}` : "");
-      const sixOverflow = six.slice(2).map((t) => String(t.title)).join(" · ");
-      await notifyPeople(
-        org.id,
-        [personId],
-        "day_ahead",
-        six.length
-          ? {
-              title: `Today: ${sixLine}`,
-              body: decisions > 0 ? decisionLine : sixOverflow || "Nothing waiting on a decision.",
-              url: "/planner",
-            }
-          : {
-              title: `Needs You: ${decisions}`,
-              body: decisionLine,
-              url: "/planner",
-            },
+      // THE PUSH CANDIDATES — the same cut, order and bound as My Day's card, through the ONE shared
+      // shaper (lib/six-rank rankPoolQuery, scope "push"). The pin arm used to be written out here by
+      // hand, matching focus_date to today EXACTLY, the same copy the planner carried — so a pin dropped
+      // out of the push at midnight exactly as it dropped out of the card. It is "on or before today" in
+      // both places now because it is the same line of code in both places.
+      //
+      // scope "push" is the ONE documented difference: a plain undated Reminder rides the card (Erik:
+      // "those reminders should be visible") but never a push, because a pushed number may not be the
+      // length of an undated set (the badge invariant above). Who made each one and who it is for ride
+      // along, so each person is handed only their own.
+      const { data: taskRows, error: taskErr } = await rankPoolQuery(
+        supabase
+          .from("tasks")
+          .select(`${RANK_POOL_SELECT}, status, parent_id, created_by, assigned_to`)
+          .eq("org_id", org.id)
+          .eq("status", "open")
+          .is("parent_id", null)
+          .is("job_id", null),
+        { todayStr: today, scope: "push", limit: PUSH_POOL_LIMIT },
       );
-      counts.pushed++;
+      if (taskErr) throw taskErr; // a failed read is not "no six": it pushes nothing for this company and says why
+      const pool = (taskRows ?? []) as DigestTask[];
+
+      const holdsBack = holdsBackCount(holdsR);
+      // The holds join the decisions: a morning with only holds back still pushes.
+      const decisions = holdsBack + (invR.count ?? 0) + (leadR.count ?? 0);
+      if (pool.length === 0 && decisions === 0) continue; // nothing needs attention → no push
+
+      // Decision titles: the holds line first ("2 Holds Are Back", the words the pile on My Day uses;
+      // it stands for all of them), then stream order (money → leads), "+N more" for the rest.
+      const decisionTitles: string[] = [];
+      let named = 0;
+      if (holdsBack > 0) {
+        decisionTitles.push(holdsBackLine(holdsBack));
+        named += holdsBack;
+      }
+      for (const t of [
+        ...((invR.data ?? []) as any[]).map((i) => `Invoice ${i.invoice_number} overdue`),
+        // Leads switched off (0352): the same people, called what My Day calls them.
+        ...((leadR.data ?? []) as any[]).map((l) => `${featureOn(getOrgSettings(org.settings).features, "leads") ? "New lead" : "New request"}: ${l.name}`),
+      ]) {
+        if (decisionTitles.length >= 2) break;
+        decisionTitles.push(t);
+        named += 1;
+      }
+      const moreDecisions = decisions - named;
+      const decisionLine = decisionTitles.join(" · ") + (moreDecisions > 0 ? ` · +${moreDecisions} more` : "");
+
+      const staff = await orgStaffIds(org.id);
+      if (!staff.length) continue;
+
+      // ONE PUSH PER PERSON, their own six in it. Lead with the six; decisions ride the body.
+      // Resilient when someone's six are empty: the decisions-only shape rather than a hollow
+      // "Today:" header; nobody with no six and no decisions is pushed at all.
+      for (const personId of staff) {
+        const six = sixForPerson(pool, personId, today);
+        if (six.length === 0 && decisions === 0) continue;
+        const sixLine =
+          six.slice(0, 2).map((t) => String(t.title)).join(" · ") + (six.length > 2 ? ` · +${six.length - 2}` : "");
+        const sixOverflow = six.slice(2).map((t) => String(t.title)).join(" · ");
+        await notifyPeople(
+          org.id,
+          [personId],
+          "day_ahead",
+          six.length
+            ? {
+                title: `Today: ${sixLine}`,
+                body: decisions > 0 ? decisionLine : sixOverflow || "Nothing waiting on a decision.",
+                url: "/planner",
+              }
+            : {
+                title: `Needs You: ${decisions}`,
+                body: decisionLine,
+                url: "/planner",
+              },
+        );
+        counts.pushed++;
+      }
+    } catch (e) {
+      counts.failed++;
+      reportError("cron-day-ahead", e, { orgId: org.id });
     }
   }
 

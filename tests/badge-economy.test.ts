@@ -191,7 +191,8 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     const digestSrc = src("lib/action-items/digest.ts");
     expect(digestSrc).toContain('.is("job_id", null)');
     // One person at a time, through the door that writes the bell line for whoever it went to (0366 wave).
-    expect(digestSrc).toContain("notifyPeople(\n        org.id,\n        [personId],\n        \"day_ahead\",");
+    // Whitespace-tolerant (cn-v1130, skeptic #34): the company's body moved inside a try, one indent deeper.
+    expect(digestSrc).toMatch(/notifyPeople\(\s*org\.id,\s*\[personId\],\s*"day_ahead",/);
     expect(digestSrc).not.toContain("sendPushToProfiles(");
     expect(digestSrc).not.toContain("scheduledJobIds");
     // The decisions headline is the card's own name: "Needs You: 3", never "Needs action: 3 items".

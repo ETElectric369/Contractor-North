@@ -43,7 +43,7 @@ beforeEach(() => {
 describe("the bug list is North's own", () => {
   it("gives a company's owner nothing", async () => {
     state.ctx = { error: "Only North's own team can do that." };
-    expect(await listBugReports()).toEqual([]);
+    expect(await listBugReports()).toEqual({ rows: [], error: null });
   });
 
   it("refuses a company's Mark Fixed in words", async () => {

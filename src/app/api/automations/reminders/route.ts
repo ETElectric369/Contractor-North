@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { sendDueReminders } from "@/lib/reminders-engine";
-import { reportError } from "@/lib/observe";
+import { reportErrorAwaited } from "@/lib/observe";
 
 export const runtime = "nodejs";
+// One email per due reminder across every company, in series (cn-v1130): Vercel's default minute
+// would cut a busy morning off mid-run.
+export const maxDuration = 300;
 
 /**
  * Customer reminders on a tighter cadence (Vercel Cron — the Pro plan lifts the once-daily cap).
@@ -26,7 +29,9 @@ export async function GET(request: Request) {
     const reminders = await sendDueReminders(guard.supabase);
     return NextResponse.json({ ok: true, reminders });
   } catch (e: unknown) {
-    reportError("cron-reminders-frequent", e);
+    // Waited for (cn-v1130, skeptic #34): the 500 below is answered on the tick it files, and a
+    // fire-and-forget write can freeze with it.
+    await reportErrorAwaited("cron-reminders-frequent", e);
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, { status: 500 });
   }
 }

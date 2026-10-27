@@ -14,17 +14,18 @@ import { generateDueTemplates } from "@/lib/recurring-engine";
  */
 type Call = { table: string; op: "select" | "update" | "insert"; payload?: any; filters: [string, unknown][] };
 
-function fakeDb(orgs: { id: string; settings: unknown }[], templates: any[]) {
+function fakeDb(orgs: { id: string; settings: unknown }[], templates: any[], opts: { templatesError?: { message: string } } = {}) {
   const calls: Call[] = [];
   const client = {
     from(table: string) {
       const call: Call = { table, op: "select", filters: [] };
       calls.push(call);
+      let pageFrom = 0; // readAllOrgs pages organizations (cn-v1130): the rows at 0, an empty page after
       const result = () => {
         if (call.op === "update") return { data: [{ id: "x" }], error: null };
         if (call.op === "insert") return { data: null, error: null };
-        if (table === "organizations") return { data: orgs, error: null };
-        if (table === "recurring_templates") return { data: templates, error: null };
+        if (table === "organizations") return { data: pageFrom > 0 ? [] : orgs, error: null };
+        if (table === "recurring_templates") return opts.templatesError ? { data: null, error: opts.templatesError } : { data: templates, error: null };
         return { data: [], error: null };
       };
       const b: any = {
@@ -32,6 +33,7 @@ function fakeDb(orgs: { id: string; settings: unknown }[], templates: any[]) {
         eq: (c: string, v: unknown) => (call.filters.push([c, v]), b),
         lte: (c: string, v: unknown) => (call.filters.push([c, v]), b),
         order: () => b,
+        range: (start: number) => ((pageFrom = start), b),
         limit: () => b,
         update: (p: any) => ((call.op = "update"), (call.payload = p), b),
         insert: (p: any) => ((call.op = "insert"), (call.payload = p), b),
@@ -136,6 +138,12 @@ describe("the recurring engine and the Recurring Billing switch", () => {
     const inserts = writes().filter((c) => c.table === "invoices" && c.op === "insert");
     expect(inserts).toHaveLength(1);
     expect(inserts[0].payload.org_id).toBe("org-on");
+  });
+
+  it("a failed templates read throws, and writes nothing: never a silent zero for the night (cn-v1130, skeptic #34)", async () => {
+    const { client, writes } = fakeDb([{ id: "org-a", settings: LA }], [invoiceTpl("org-a", "2026-09-01")], { templatesError: { message: "boom" } });
+    await expect(generateDueTemplates(client, null)).rejects.toThrow("recurring_templates could not be read: boom");
+    expect(writes()).toEqual([]);
   });
 
   it("Sales Tax or any other switch off changes nothing here", async () => {

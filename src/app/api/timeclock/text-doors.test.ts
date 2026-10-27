@@ -17,7 +17,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 const state = vi.hoisted(() => ({ client: null as any }));
-const spies = vi.hoisted(() => ({ push: [] as any[], notify: [] as any[], closeOut: 0 }));
+const spies = vi.hoisted(() => ({ push: [] as any[], notify: [] as any[], closeOut: 0, closeOutOrgs: undefined as unknown, closeOutFails: false }));
+// The hour gate with one switch: a timezone Intl cannot read throws in atLocalHour (cn-v1130, skeptic #34).
+const gate = vi.hoisted(() => ({ throwNext: false }));
 
 vi.mock("@/lib/cron-guard", () => ({ requireCron: vi.fn(() => ({ supabase: state.client })) }));
 vi.mock("@/lib/staff-guard", () => ({
@@ -33,7 +35,26 @@ vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/ser
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
 vi.mock("@/lib/revalidate-money", () => ({ revalidateMoney: vi.fn() }));
 vi.mock("@/lib/invoice-recalc", () => ({ recalcInvoice: vi.fn(async () => ({ ok: true })) }));
-vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+// reportErrorAwaited is what the 500 paths file through (cn-v1130, skeptic #34): they answer on the tick they file.
+// The real errorMessage stays (readAllOrgs words a failed read with it); only the two filers are spies.
+vi.mock("@/lib/observe", async (orig) => ({
+  ...(await orig<typeof import("@/lib/observe")>()),
+  reportError: vi.fn(),
+  reportErrorAwaited: vi.fn(async () => {}),
+}));
+vi.mock("@/lib/cron-orgs", async (orig) => {
+  const real = await orig<typeof import("@/lib/cron-orgs")>();
+  return {
+    ...real,
+    atLocalHour: vi.fn((...a: Parameters<typeof real.atLocalHour>) => {
+      if (gate.throwNext) {
+        gate.throwNext = false;
+        throw new RangeError("Invalid time zone specified: Mars/Olympus");
+      }
+      return real.atLocalHour(...a);
+    }),
+  };
+});
 vi.mock("@/lib/notifications", () => ({
   createNotifications: vi.fn(async (...a: any[]) => {
     spies.notify.push(a);
@@ -46,8 +67,11 @@ vi.mock("@/lib/push", () => ({
   orgStaffIdsOrThrow: vi.fn(async () => ["office-1"]),
 }));
 vi.mock("@/lib/action-items/eod-sweep", () => ({
-  sendCloseOutNudges: vi.fn(async () => {
+  // The evening cron hands the night debrief the companies at their own 6 PM (cn-v1130): recorded.
+  sendCloseOutNudges: vi.fn(async (_db: unknown, orgs: unknown) => {
     spies.closeOut++;
+    spies.closeOutOrgs = orgs;
+    if (spies.closeOutFails) throw new Error("the close-out read fell over");
     return { sent: 0 };
   }),
 }));
@@ -58,6 +82,7 @@ import { GET as longShift } from "./long-shift/route";
 import { textInvoice } from "@/app/(app)/billing/actions";
 import { textQuote } from "@/app/(app)/quotes/actions";
 import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
+import { reportError, reportErrorAwaited } from "@/lib/observe";
 
 // ── a routed PostgREST fake: an unrouted statement throws by name ────────────────────────────
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete"; cols: string; payload?: any; filters: any[] };
@@ -81,7 +106,7 @@ function fakeSupabase(route: (q: Q) => Reply) {
           try { resolve(answer(q)); } catch (e) { reject?.(e); }
         },
       };
-      for (const m of ["eq", "neq", "in", "is", "not", "gt", "gte", "lt", "lte", "or", "order", "limit"]) {
+      for (const m of ["eq", "neq", "in", "is", "not", "gt", "gte", "lt", "lte", "or", "order", "limit", "range"]) {
         chain[m] = (...args: any[]) => { q.filters.push([m, ...args]); return chain; };
       }
       return chain;
@@ -112,16 +137,39 @@ const sentTexts = () =>
 
 const TZ = { timezone: "America/Los_Angeles" };
 const ORG = { id: "org-1", name: "ET Electric", settings: { ...TZ } };
+const SECOND_ORG = { id: "org-2", name: "Snowbell Electric", settings: { ...TZ } };
+const BAD_ZONE_ORG = { id: "org-bad", name: "Larkspur Electric", settings: { ...TZ } };
 const req = () => new Request("https://app.test/api", { headers: { authorization: "Bearer x" } });
+
+/** The company list the way readAllOrgs pages it (cn-v1130): every row on the page at from=0, and
+ *  an empty page after it, so the read knows it is whole. */
+const orgPage = (q: Q, rows: any[]): Reply => {
+  const range = q.filters.find((f) => f[0] === "range");
+  return { data: range && range[1] > 0 ? [] : rows };
+};
+
+// Thursday 2001-01-04 in Pacific (PST, UTC-8); nobody worked it. The two texting crons are hourly
+// and a company is handled on the run in its OWN hour (cn-v1130), so the morning cases run at the
+// company's 7 AM and the evening ones at its 6 PM, which is already Friday in UTC.
+const SEVEN_AM = new Date("2001-01-04T15:00:00.000Z");
+const EIGHT_AM = new Date("2001-01-04T16:00:00.000Z");
+const SATURDAY_SEVEN_AM = new Date("2001-01-06T15:00:00.000Z");
+const SIX_PM = new Date("2001-01-05T02:00:00.000Z");
+const FIVE_PM = new Date("2001-01-05T01:00:00.000Z");
 
 beforeEach(() => {
   vi.unstubAllEnvs();
   for (const k of TWILIO_KEYS) vi.stubEnv(k, "");
   fetchSpy.mockClear();
   vi.stubGlobal("fetch", fetchSpy);
+  vi.mocked(reportError).mockClear();
+  vi.mocked(reportErrorAwaited).mockClear();
+  gate.throwNext = false;
+  spies.closeOutFails = false;
   spies.push = [];
   spies.notify = [];
   spies.closeOut = 0;
+  spies.closeOutOrgs = undefined;
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -131,11 +179,16 @@ afterEach(() => {
 
 describe("the morning nudge: no clock-in yet", () => {
   const routes = (q: Q): Reply => {
-    if (q.table === "organizations") return { data: [ORG] };
+    if (q.table === "organizations") return orgPage(q, [ORG]);
     if (q.table === "profiles") return { data: [{ id: "brian-1", full_name: "Brian Taylor", phone: "(530) 555-0100" }] };
     if (q.table === "time_entries") return { data: [] };
     return undefined;
   };
+  const failing = (table: string) => (q: Q): Reply => (q.table === table ? { error: { message: "boom" } } : routes(q));
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SEVEN_AM);
+  });
 
   it("not ready: nothing is sent, and the skip is counted", async () => {
     state.client = fakeSupabase(routes);
@@ -148,41 +201,161 @@ describe("the morning nudge: no clock-in yet", () => {
     textingReady();
     state.client = fakeSupabase(routes);
     const body = await (await nudge(req())).json();
-    expect(body).toMatchObject({ texted: 1, not_ready: 0 });
+    expect(body).toMatchObject({ texted: 1, not_ready: 0, due: 1, not_due_yet: 0, failed: 0 });
     expect(sentTexts()).toEqual([{ to: "+15305550100", body: expect.stringMatching(/haven't clocked in yet/) }]);
   });
 
   it("an org that turned the reminders off is never texted, ready or not", async () => {
     textingReady();
-    state.client = fakeSupabase((q) => (q.table === "organizations" ? { data: [{ ...ORG, settings: { ...TZ, remind_timeclock: false } }] } : routes(q)));
+    state.client = fakeSupabase((q) => (q.table === "organizations" ? orgPage(q, [{ ...ORG, settings: { ...TZ, remind_timeclock: false } }]) : routes(q)));
     const body = await (await nudge(req())).json();
     expect(body).toMatchObject({ texted: 0, not_ready: 0 });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("off the company's 7 AM, or on its Saturday, nothing is sent and the company is counted as not due yet", async () => {
+    textingReady();
+    for (const at of [EIGHT_AM, SATURDAY_SEVEN_AM]) {
+      vi.setSystemTime(at);
+      state.client = fakeSupabase(routes);
+      const body = await (await nudge(req())).json();
+      expect(body).toMatchObject({ due: 0, not_due_yet: 1, checked: 0, texted: 0, failed: 0 });
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("a failed punches read texts NOBODY: counted as failed and filed with the company", async () => {
+    textingReady();
+    state.client = fakeSupabase(failing("time_entries"));
+    const body = await (await nudge(req())).json();
+    expect(body).toMatchObject({ due: 1, checked: 0, texted: 0, failed: 1 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledWith("cron-nudge", { message: "boom" }, { orgId: "org-1" });
+  });
+
+  it("a failed techs read the same", async () => {
+    textingReady();
+    state.client = fakeSupabase(failing("profiles"));
+    const body = await (await nudge(req())).json();
+    expect(body).toMatchObject({ due: 1, checked: 0, texted: 0, failed: 1 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledWith("cron-nudge", { message: "boom" }, { orgId: "org-1" });
+  });
+
+  it("a failed company read is a 500 that is filed, never an empty run", async () => {
+    textingReady();
+    state.client = fakeSupabase(failing("organizations"));
+    const res = await nudge(req());
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ failed: 1, checked: 0, texted: 0 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // Filed through the WAITED-for door: this function answers on the tick it files (skeptic #34).
+    expect(reportErrorAwaited).toHaveBeenCalledWith("cron-nudge", expect.objectContaining({ message: "organizations could not be read: boom" }));
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("a company whose timezone THROWS in the hour gate is counted failed and filed; the next company is still texted", async () => {
+    textingReady();
+    state.client = fakeSupabase((q) => (q.table === "organizations" ? orgPage(q, [BAD_ZONE_ORG, SECOND_ORG]) : routes(q)));
+    gate.throwNext = true; // the first company's gate throws, the second's reads normally
+    const body = await (await nudge(req())).json();
+    expect(body).toMatchObject({ due: 1, not_due_yet: 0, failed: 1, texted: 1 });
+    expect(sentTexts()).toHaveLength(1);
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportError).toHaveBeenCalledWith("cron-nudge", expect.any(RangeError), { orgId: "org-bad" });
   });
 });
 
 describe("the evening reminder: still clocked in", () => {
   const routes = (q: Q): Reply => {
-    if (q.table === "organizations") return { data: [ORG] };
+    if (q.table === "organizations") return orgPage(q, [ORG]);
     if (q.table === "profiles") return { data: [{ id: "brian-1", full_name: "Brian Taylor", phone: "5305550100" }] };
     if (q.table === "time_entries") return { data: [{ profile_id: "brian-1", status: "open", notes: null }] };
     return undefined;
   };
+  const failing = (table: string) => (q: Q): Reply => (q.table === table ? { error: { message: "boom" } } : routes(q));
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SIX_PM);
+  });
 
-  it("not ready: nothing is sent, the skip is counted, and the night debrief still goes", async () => {
+  it("not ready: nothing is sent, the skip is counted, and the night debrief still goes to the companies at their 6 PM", async () => {
     state.client = fakeSupabase(routes);
     const body = await (await eod(req())).json();
-    expect(body).toMatchObject({ reminded: 0, not_ready: 1 });
+    expect(body).toMatchObject({ reminded: 0, not_ready: 1, due: 1, not_due_yet: 0 });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(spies.closeOut).toBe(1);
+    expect(spies.closeOutOrgs).toEqual([ORG]);
   });
 
   it("ready: the tech is texted", async () => {
     textingReady();
     state.client = fakeSupabase(routes);
     const body = await (await eod(req())).json();
-    expect(body).toMatchObject({ reminded: 1, not_ready: 0 });
+    expect(body).toMatchObject({ reminded: 1, not_ready: 0, due: 1, failed: 0 });
     expect(sentTexts()).toEqual([{ to: "+15305550100", body: expect.stringMatching(/still clocked in/) }]);
+  });
+
+  it("off the company's 6 PM nothing is sent, the company is counted as not due yet, and the debrief gets no company", async () => {
+    textingReady();
+    vi.setSystemTime(FIVE_PM);
+    state.client = fakeSupabase(routes);
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ due: 0, not_due_yet: 1, checked: 0, reminded: 0, failed: 0 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.closeOutOrgs).toEqual([]);
+  });
+
+  it("a failed entries read texts NOBODY: counted as failed and filed with the company; the debrief still goes", async () => {
+    textingReady();
+    state.client = fakeSupabase(failing("time_entries"));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ due: 1, checked: 0, reminded: 0, failed: 1 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1" });
+    expect(spies.closeOutOrgs).toEqual([ORG]);
+  });
+
+  it("a failed techs read the same", async () => {
+    textingReady();
+    state.client = fakeSupabase(failing("profiles"));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ due: 1, checked: 0, reminded: 0, failed: 1 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1" });
+  });
+
+  it("a failed company read is a 500 that is filed, and the debrief is not sent either", async () => {
+    textingReady();
+    state.client = fakeSupabase(failing("organizations"));
+    const res = await eod(req());
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ failed: 1, checked: 0, reminded: 0 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.closeOut).toBe(0);
+    expect(reportErrorAwaited).toHaveBeenCalledWith("cron-eod", expect.objectContaining({ message: "organizations could not be read: boom" }));
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("a company whose timezone THROWS in the hour gate is counted failed and filed; the next company is still reminded and gets the debrief", async () => {
+    textingReady();
+    state.client = fakeSupabase((q) => (q.table === "organizations" ? orgPage(q, [BAD_ZONE_ORG, SECOND_ORG]) : routes(q)));
+    gate.throwNext = true;
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ due: 1, not_due_yet: 0, failed: 1, reminded: 1 });
+    expect(sentTexts()).toHaveLength(1);
+    expect(spies.closeOutOrgs).toEqual([SECOND_ORG]);
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportError).toHaveBeenCalledWith("cron-eod", expect.any(RangeError), { orgId: "org-bad" });
+  });
+
+  it("a close-out that throws is filed AND counted in the run's own failed count", async () => {
+    textingReady();
+    spies.closeOutFails = true;
+    state.client = fakeSupabase(routes);
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ close_out: "failed", failed: 1, reminded: 1 });
+    expect(reportError).toHaveBeenCalledWith("cron-close-out", expect.objectContaining({ message: "the close-out read fell over" }));
   });
 });
 
@@ -199,7 +372,7 @@ describe("the 12-hour question, as a text too", () => {
     profiles: { full_name: "Brian Taylor", role: "tech", active: true, phone },
   });
   const routes = (phone: string | null, org: typeof ORG = ORG) => (q: Q): Reply => {
-    if (q.table === "organizations") return { data: [org] };
+    if (q.table === "organizations") return orgPage(q, [org]);
     if (q.table === "time_entries" && q.verb === "select") return { data: [row(phone)] };
     if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: "entry-1" }] }; // the claim
     return undefined;
@@ -256,6 +429,16 @@ describe("the 12-hour question, as a text too", () => {
     const p = (fetchSpy.mock.calls[0][1] as RequestInit).body as URLSearchParams;
     expect(p.get("From")).toBeNull();
     expect(p.get("MessagingServiceSid")).toBe("MG-test");
+  });
+
+  it("a failed company read is a 500 filed through the waited-for door, never an empty run", async () => {
+    state.client = fakeSupabase((q) => (q.table === "organizations" ? { error: { message: "boom" } } : routes("(530) 555-0100")(q)));
+    const res = await longShift(req());
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ failed: 1, orgs: 0, asked: 0 });
+    expect(reportErrorAwaited).toHaveBeenCalledWith("cron-long-shift", expect.objectContaining({ message: "organizations could not be read: boom" }));
+    expect(reportError).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("a text the service refuses is counted as failed and never costs the office its buzz", async () => {

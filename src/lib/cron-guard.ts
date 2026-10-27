@@ -7,7 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
  * CRON_SECRET bearer token (CONSTANT-TIME, so a byte-by-byte timing side-channel can't leak
  * the secret) and hands back a service-role client. Returns { error: NextResponse } on any
  * failure so the route can `const g = requireCron(request); if ("error" in g) return g.error;`.
- * One definition so the three cron routes can't drift on the secret check or its hardening.
+ * One definition so the six cron routes can't drift on the secret check or its hardening.
  */
 export function requireCron(
   request: Request,

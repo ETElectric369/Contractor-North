@@ -1,5 +1,6 @@
 import type { NortHolding } from "@/lib/nort/greeting";
 import { firstName } from "@/lib/nort/greeting";
+import { reportError } from "@/lib/observe";
 
 /**
  * WHAT NORT IS HOLDING FOR A PERSON, and the one door that hands it over (0394).
@@ -99,13 +100,17 @@ export function outcomeWords(status: string): string {
 const sinceIso = () => new Date(Date.now() - DAILY_REPORT_AGE_MS).toISOString();
 
 // A read that fails HERE is a greeting that does not ask this time — nothing is stamped by looking,
-// so the next Talk asks again. The hand-over below (readMyUpdates) is the one that says its read
-// failures to the person: it is the one a yes is waiting on.
+// so the next Talk asks again — AND IT IS FILED (cn-v1130): both reads used to drop their error on
+// the floor, so a broken read of the held reports was invisible to ops. The hand-over below
+// (readMyUpdates) is the one that says its read failures to the person: it is the one a yes is
+// waiting on.
 export async function holdingFor(userId: string, service: Client, rls: Client, tz: string = DEFAULT_TZ): Promise<NortHolding> {
   const [reports, daily] = await Promise.all([
     service.from("bug_reports").select("id, created_at").eq("reported_by", userId).in("status", RESOLVED).is("filer_notified_at", null).order("created_at", { ascending: false }).limit(REPORTS_LIMIT),
     rls.from("notifications").select("id, title").eq("user_id", userId).eq("type", "daily_report").is("read_at", null).gte("created_at", sinceIso()).order("created_at", { ascending: false }).limit(10),
   ]);
+  if (reports.error) reportError("nort:holding", reports.error, { userId });
+  if (daily.error) reportError("nort:holding", daily.error, { userId, read: "daily_report" });
   const seen = new Set<string>();
   const dailyReports: { from: string }[] = [];
   for (const n of (daily.data ?? []) as { title?: string | null }[]) {

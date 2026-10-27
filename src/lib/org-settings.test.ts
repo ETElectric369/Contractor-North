@@ -102,6 +102,14 @@ describe("getOrgSettings — the timezone can never be unparseable", () => {
       expect(() => new Intl.DateTimeFormat("en-US", { timeZone: tz(bad) })).not.toThrow();
     });
 
+  it.each([[" America/Los_Angeles"], ["America/New_York "], ["\tEurope/London\n"]])(
+    "keeps a real zone but TRIMMED (%j): the untrimmed string would make Intl throw (cn-v1130, skeptic #34)", (padded) => {
+      const kept = tz(padded);
+      expect(kept).toBe(String(padded).trim());
+      expect(() => new Intl.DateTimeFormat("en-US", { timeZone: kept })).not.toThrow();
+      expect(() => new Intl.DateTimeFormat("en-US", { timeZone: String(padded) })).toThrow(RangeError);
+    });
+
   it.each([[null], [undefined], [123], [{}], [[]], [true]])("falls back for the non-string %s", (bad) => {
     expect(() => new Intl.DateTimeFormat("en-US", { timeZone: tz(bad) })).not.toThrow();
   });

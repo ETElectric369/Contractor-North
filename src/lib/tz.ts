@@ -55,6 +55,13 @@ export function tzMinutesOfDay(at: string | Date, tz: string): number {
   return local.getUTCHours() * 60 + local.getUTCMinutes();
 }
 
+/** 0 (Sunday) … 6 (Saturday) for an instant in the given timezone: the company's own weekday,
+ *  never the server's UTC one (a Friday 11 PM Pacific is Saturday in UTC). */
+export function tzDayOfWeek(tz: string, at: Date = new Date()): number {
+  const name = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(at);
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(name);
+}
+
 /** An instant as a `<input type="datetime-local">` value ("YYYY-MM-DDTHH:MM") in the given
  *  timezone, the exact inverse of the naive local string the server stores through localToInstant.
  *  A form that fills this box in the PHONE's zone (Date#getHours) and saves it in the ORG's moves

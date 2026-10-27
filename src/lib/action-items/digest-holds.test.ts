@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * service client reads every company). It joins the decisions, so a morning with only holds back
  * still pushes. Before 0366 (no hold_until) the read fails and counts 0: no line, never a guess.
  */
-const { notifyPeople } = vi.hoisted(() => ({ notifyPeople: vi.fn(async () => undefined) }));
+const { notifyPeople, reportError } = vi.hoisted(() => ({ notifyPeople: vi.fn(async () => undefined), reportError: vi.fn() }));
+vi.mock("@/lib/observe", () => ({ reportError }));
 vi.mock("@/lib/push", () => ({ pushConfigured: () => true, orgStaffIds: async () => ["owner-1"] }));
 vi.mock("@/lib/notifications", () => ({ notifyPeople }));
 
@@ -15,13 +16,21 @@ import { holdsBackCount, holdsBackLine, sendDayAheadDigests } from "./digest";
 type Answer = { data?: unknown; error?: unknown; count?: number | null };
 
 /** A pretend service client: each table answers once, and every filter it was given is kept. */
-function fake(answers: Record<string, Answer>) {
+function fake(answers: Record<string, Answer | (() => Answer)>) {
   const filters: Record<string, unknown[][]> = {};
   const from = (table: string) => {
     filters[table] = filters[table] ?? [];
+    let pageFrom = 0; // readAllOrgs pages organizations (cn-v1130): the rows at 0, an empty page after
     const q: any = {
-      then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) =>
-        Promise.resolve({ data: answers[table]?.data ?? [], error: answers[table]?.error ?? null, count: answers[table]?.count ?? null }).then(res, rej),
+      then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => {
+        const a = typeof answers[table] === "function" ? (answers[table] as () => Answer)() : (answers[table] as Answer | undefined);
+        return Promise.resolve({ data: pageFrom > 0 ? [] : (a?.data ?? []), error: a?.error ?? null, count: a?.count ?? null }).then(res, rej);
+      },
+      range: (start: number, end: number) => {
+        filters[table].push(["range", start, end]);
+        pageFrom = start;
+        return q;
+      },
     };
     for (const m of ["select", "eq", "in", "is", "or", "lt", "lte", "order", "limit"]) {
       q[m] = (...args: unknown[]) => {
@@ -36,7 +45,10 @@ function fake(answers: Record<string, Answer>) {
 
 const ORG = { id: "org-1", settings: { timezone: "America/Los_Angeles" } };
 
-beforeEach(() => notifyPeople.mockClear());
+beforeEach(() => {
+  notifyPeople.mockClear();
+  reportError.mockClear();
+});
 
 describe("the holds line", () => {
   it("says how many, in Title Case, one or many", () => {
@@ -54,7 +66,7 @@ describe("the holds line", () => {
 describe("the morning push", () => {
   it("a morning with only holds back still pushes, and the line leads", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
-    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1 });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, failed: 0 });
     expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", { title: "Needs You: 2", body: "2 Holds Are Back", url: "/planner" });
     // Filtered to this company by hand; on hold; back today or earlier, or no day at all.
     const jobs = db.filters.jobs;
@@ -91,7 +103,41 @@ describe("the morning push", () => {
 
   it("before 0366 the holds read fails: no line, and nothing to push when nothing else waits", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { error: { code: "42703" }, count: null }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
-    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0 });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, failed: 0 });
     expect(notifyPeople).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A FAILED TASKS READ IS NOT "NO SIX", AND ONE COMPANY'S FAILURE IS ITS OWN (cn-v1130, skeptic #34).
+ * The tasks read was a bare `.data`: a failed one read as an empty pool, and the company was pushed
+ * only its decisions as if nothing else waited. Now it throws into the company's own catch: counted in
+ * `failed`, filed as cron-day-ahead with the orgId, nothing pushed for it, and the next company still
+ * gets its morning.
+ */
+describe("the morning push and a failed read", () => {
+  const boom = { message: "boom" };
+
+  it("a failed tasks read pushes nothing for the company (its decisions would have pushed), counts it, and files it with the orgId", async () => {
+    const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { error: boom } });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, failed: 1 });
+    expect(notifyPeople).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportError).toHaveBeenCalledWith("cron-day-ahead", boom, { orgId: "org-1" });
+  });
+
+  it("one company failing costs the next none of its morning", async () => {
+    let taskReads = 0;
+    const db = fake({
+      organizations: { data: [ORG, { id: "org-2", settings: { timezone: "America/Los_Angeles" } }] },
+      jobs: { count: 2 },
+      invoices: { count: 0 },
+      inquiries: { count: 0 },
+      tasks: () => (++taskReads === 1 ? { error: boom } : { data: [] }),
+    });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 2, pushed: 1, failed: 1 });
+    expect(notifyPeople).toHaveBeenCalledTimes(1);
+    expect(notifyPeople).toHaveBeenCalledWith("org-2", ["owner-1"], "day_ahead", { title: "Needs You: 2", body: "2 Holds Are Back", url: "/planner" });
+    expect(reportError).toHaveBeenCalledWith("cron-day-ahead", boom, { orgId: "org-1" });
   });
 });

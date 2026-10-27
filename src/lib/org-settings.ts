@@ -582,6 +582,10 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   // studio and the analytics toggle each write it too), so a write-side whitelist on any one of
   // them would leave the others open. Fixing it here also heals any row already poisoned, and
   // covers every writer added later without anyone remembering to.
+  // TRIMMED FIRST (cn-v1130, skeptic #34): isValidTz trims before it asks Intl, so " America/Los_Angeles"
+  // passed the check and was handed on UNtrimmed — and Intl throws a RangeError on the space. The
+  // hourly texting crons judge every company's hour from this value; the kept value is the trimmed one.
+  merged.timezone = String(merged.timezone ?? "").trim();
   if (!isValidTz(merged.timezone)) merged.timezone = DEFAULT_SETTINGS.timezone;
   // SANITIZE THE LEVER FIELDS ON READ (same doctrine as the timezone heal above): the studio
   // write path clamps via site-doc, but settings has other writers — a hostile or drifted

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Image as ImageIcon, Check, X, RotateCcw } from "lucide-react";
+import { Image as ImageIcon, AlertTriangle, Check, X, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { EmptyState } from "@/components/page-header";
 import { formatDate } from "@/lib/utils";
@@ -17,7 +17,9 @@ const TABS = [
 
 const statusOf = (r: BugReport) => r.status || "open";
 
-export function BugList({ initial }: { initial: BugReport[] }) {
+/** `readError`: the list read failed (cn-v1130). The page says so instead of "All clear" — a
+ *  failed read is never an empty run — and the Open tab shows no count it does not know. */
+export function BugList({ initial, readError = null }: { initial: BugReport[]; readError?: string | null }) {
   const [reports, setReports] = useState<BugReport[]>(initial);
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("open");
   const toast = useToast();
@@ -124,13 +126,15 @@ export function BugList({ initial }: { initial: BugReport[] }) {
           >
             <span className="relative z-10">
               {t.label}
-              {t.key === "open" && openCount > 0 ? ` (${openCount})` : ""}
+              {t.key === "open" && !readError && openCount > 0 ? ` (${openCount})` : ""}
             </span>
           </button>
         ))}
       </div>
 
-      {shown.length === 0 ? (
+      {readError ? (
+        <EmptyState icon={AlertTriangle} title="Couldn't read the reports" description={readError} />
+      ) : shown.length === 0 ? (
         <EmptyState
           icon={Check}
           title={tab === "open" ? "Nothing open" : "Nothing here"}

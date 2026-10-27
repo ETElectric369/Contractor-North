@@ -5,6 +5,8 @@ import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { claimedSourcesOnJob } from "@/lib/unbilled-work";
+import { readAllOrgs, type OrgRow } from "@/lib/cron-orgs";
+import { reportError } from "@/lib/observe";
 import {
   COSTED_INVOICE_COLUMNS,
   NEEDS_RETURN_DAYS,
@@ -18,138 +20,155 @@ import {
 } from "./leak-detectors";
 
 /**
- * The "Close out your day" nudge (run by the daily automations cron) — the push
+ * The "Close out your day" nudge (run by the evening timeclock cron) — the push
  * side of the end-of-day money-leak sweep. Reuses the SAME pure detectors as the
  * inbox (leak-detectors.ts): stray time entries, worked-but-uncosted jobs, worked
  * jobs with no return visit scheduled. When any detector fires for an org, its
  * staff get one push naming the top gaps, deep-linked to /planner?debrief=1
  * (which auto-opens Nort's debrief).
  *
- * TIMING: this rides the 6 PM run, /api/timeclock/eod-reminder (vercel.json "0 1 * * *",
- * 01:00 UTC, which is 6 PM Pacific in summer and 5 PM in winter), so "close out your day"
- * arrives the same evening the gaps were made, beside the tech-facing reminder that route
- * also sends. It is the OWNER's money view of the day that just ended.
+ * TIMING: this rides /api/timeclock/eod-reminder, which runs hourly (cn-v1130) and hands over
+ * `orgs`, the companies whose own 6 PM that run is (EOD_LOCAL_HOUR, in each company's timezone
+ * setting), so "close out your day" arrives the same evening the gaps were made, beside the
+ * tech-facing reminder that route also sends — never at 01:00 UTC, which was 6 PM Pacific in
+ * summer and 5 PM in winter. It is the OWNER's money view of the day that just ended. Called with
+ * no list it reads every company itself (readAllOrgs: whole, or a throw the caller files).
  *
  * The service client BYPASSES RLS: time_entries queries filter org_id explicitly,
  * and every job-level query is scoped through those org-owned job ids. Opt-out is
  * the same per-user toggle as the day-ahead digest (push_prefs.day_ahead, default
  * OFF, enforced inside sendPushToProfiles). No gaps → no push.
+ *
+ * ONE COMPANY'S FAILURE IS ITS OWN (cn-v1130, skeptic #34). The three opening reads (open entries,
+ * recent entries, the non-billable codes) used to be bare `.data`: a failed read was an empty day —
+ * "no gaps, no push" — and a throw anywhere ended the loop for every company after it. Now a failed
+ * read throws, the company's whole body sits in a try, and the failure is counted in `failed` and
+ * filed as cron-close-out with the orgId; the next company still gets its evening.
  */
-export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number; pushed: number }> {
-  const counts = { orgs: 0, pushed: 0 };
+export async function sendCloseOutNudges(supabase: any, orgs?: OrgRow[]): Promise<{ orgs: number; pushed: number; failed: number }> {
+  const counts = { orgs: 0, pushed: 0, failed: 0 };
   if (!pushConfigured()) return counts; // no VAPID keys → nothing to send
 
-  const { data: orgs } = await supabase.from("organizations").select("id, settings");
+  const list = orgs ?? (await readAllOrgs(supabase));
 
-  for (const org of orgs ?? []) {
+  for (const org of list) {
     counts.orgs++;
-    const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
-    const today = todayStrInTz(tz);
+    try {
+      const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
+      const today = todayStrInTz(tz);
 
-    const [openR, recentR, codesR] = await Promise.all([
-      supabase
-        .from("time_entries")
-        .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
-        .eq("org_id", org.id)
-        .eq("status", "open")
-        .limit(50),
-      supabase
-        .from("time_entries")
-        .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
-        .eq("org_id", org.id)
-        .gte("clock_in", daysAgoStr(today, NEEDS_RETURN_DAYS))
-        .limit(200),
-      // The codes a job-less entry may carry on purpose (billable = false), the labor-billing predicate.
-      supabase.from("job_codes").select("code").eq("org_id", org.id).eq("billable", false),
-    ]);
-    const nonBillable = new Set<string>(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
-
-    // The org's own calendar decides "a past day" (tz), not the UTC slice of the timestamp.
-    const found = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable, tz);
-    const worked = rollupWorkedJobs((recentR.data ?? []) as any[], today);
-
-    /* A CLOSED SHIFT ON NO JOB THAT A LIVE INVOICE HOLDS IS BILLED (0357: billed by hand on an
-       invoice with no job, TTUSD on INV-055). My Day drops its Needs You row for that (query.ts,
-       noJobStrayDoors over the same claims read), so the push does too: it never names a gap the
-       page it links to no longer shows. Pinned to this org by hand (the service client skips RLS).
-       A lost read keeps every finding: a nag too many, never a gap missed. */
-    const closedNoJob = found.filter((f) => !f.openStill).map((f) => f.entryId);
-    let billedNoJob = new Set<string>();
-    if (closedNoJob.length) {
-      try {
-        const held = await claimedSourcesOnJob(supabase, null, null, closedNoJob, { orgId: org.id });
-        billedNoJob = new Set([...held.owner.keys()].map(String));
-      } catch {
-        billedNoJob = new Set();
-      }
-    }
-    const stray = found.filter((f) => f.openStill || !billedNoJob.has(f.entryId));
-
-    // Detection only — name the gap, never fill in hours/dollars for the user.
-    const gaps: string[] = stray.map((f) =>
-      f.openStill ? `${f.name}'s entry is still open` : `${f.name}'s entry has no job`,
-    );
-
-    if (worked.size > 0) {
-      // Org-scoping note: jobIds come from the org-filtered time_entries above, so
-      // every .in("job_id", jobIds) below is org-scoped by construction.
-      const jobIds = [...worked.keys()].slice(0, 30);
-      const [jobsR, billsR, posR, matR, invR, apptR, segR] = await Promise.all([
-        supabase.from("jobs").select("id, job_number, name, status, scheduled_start").in("id", jobIds),
-        supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
-        supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
-        supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
-        // The kind of each invoice line rides along: a materials line on a live invoice is costs on
-        // the record (costedJobIds, the one rule My Day uses too).
-        supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", jobIds).limit(200),
+      const [openR, recentR, codesR] = await Promise.all([
         supabase
-          .from("appointments")
-          .select("job_id")
-          .in("job_id", jobIds)
-          .eq("absorbed", false) // the job's own segments carry an absorbed visit's dates (0237)
-          .eq("status", "scheduled")
-          .gte("starts_at", today)
+          .from("time_entries")
+          .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
+          .eq("org_id", org.id)
+          .eq("status", "open")
+          .limit(50),
+        supabase
+          .from("time_entries")
+          .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
+          .eq("org_id", org.id)
+          .gte("clock_in", daysAgoStr(today, NEEDS_RETURN_DAYS))
           .limit(200),
-        supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", today).limit(200),
+        // The codes a job-less entry may carry on purpose (billable = false), the labor-billing predicate.
+        supabase.from("job_codes").select("code").eq("org_id", org.id).eq("billable", false),
       ]);
+      // A failed read is not "a clean day" (skeptic #34): it throws into this company's catch below.
+      if (openR.error) throw openR.error;
+      if (recentR.error) throw recentR.error;
+      if (codesR.error) throw codesR.error;
+      const nonBillable = new Set<string>(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
 
-      const costed = costedJobIds({
-        bills: (billsR.data ?? []) as any[],
-        purchaseOrders: (posR.data ?? []) as any[],
-        materialLists: (matR.data ?? []) as any[],
-        invoices: (invR.data ?? []) as any[],
-      });
-      const invoicedJobIds = new Set<string>(
-        ((invR.data ?? []) as any[]).filter((i: any) => i.status !== "void" && i.job_id).map((i: any) => i.job_id as string),
+      // The org's own calendar decides "a past day" (tz), not the UTC slice of the timestamp.
+      const found = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable, tz);
+      const worked = rollupWorkedJobs((recentR.data ?? []) as any[], today);
+
+      /* A CLOSED SHIFT ON NO JOB THAT A LIVE INVOICE HOLDS IS BILLED (0357: billed by hand on an
+         invoice with no job, TTUSD on INV-055). My Day drops its Needs You row for that (query.ts,
+         noJobStrayDoors over the same claims read), so the push does too: it never names a gap the
+         page it links to no longer shows. Pinned to this org by hand (the service client skips RLS).
+         A lost read keeps every finding: a nag too many, never a gap missed. */
+      const closedNoJob = found.filter((f) => !f.openStill).map((f) => f.entryId);
+      let billedNoJob = new Set<string>();
+      if (closedNoJob.length) {
+        try {
+          const held = await claimedSourcesOnJob(supabase, null, null, closedNoJob, { orgId: org.id });
+          billedNoJob = new Set([...held.owner.keys()].map(String));
+        } catch {
+          billedNoJob = new Set();
+        }
+      }
+      const stray = found.filter((f) => f.openStill || !billedNoJob.has(f.entryId));
+
+      // Detection only — name the gap, never fill in hours/dollars for the user.
+      const gaps: string[] = stray.map((f) =>
+        f.openStill ? `${f.name}'s entry is still open` : `${f.name}'s entry has no job`,
       );
-      const futureApptJobIds = new Set<string>(((apptR.data ?? []) as any[]).map((a: any) => a.job_id as string));
-      const futureSegmentJobIds = new Set<string>(((segR.data ?? []) as any[]).map((s: any) => s.job_id as string));
-      const jobs = (jobsR.data ?? []) as any[];
 
-      for (const f of detectUnbilledWork({ jobs, worked, costedJobIds: costed, invoicedJobIds })) {
-        gaps.push(`${jobLabel(f.job)} has no costs recorded`);
+      if (worked.size > 0) {
+        // Org-scoping note: jobIds come from the org-filtered time_entries above, so
+        // every .in("job_id", jobIds) below is org-scoped by construction.
+        const jobIds = [...worked.keys()].slice(0, 30);
+        const [jobsR, billsR, posR, matR, invR, apptR, segR] = await Promise.all([
+          supabase.from("jobs").select("id, job_number, name, status, scheduled_start").in("id", jobIds),
+          supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
+          supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
+          supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
+          // The kind of each invoice line rides along: a materials line on a live invoice is costs on
+          // the record (costedJobIds, the one rule My Day uses too).
+          supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", jobIds).limit(200),
+          supabase
+            .from("appointments")
+            .select("job_id")
+            .in("job_id", jobIds)
+            .eq("absorbed", false) // the job's own segments carry an absorbed visit's dates (0237)
+            .eq("status", "scheduled")
+            .gte("starts_at", today)
+            .limit(200),
+          supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", today).limit(200),
+        ]);
+
+        const costed = costedJobIds({
+          bills: (billsR.data ?? []) as any[],
+          purchaseOrders: (posR.data ?? []) as any[],
+          materialLists: (matR.data ?? []) as any[],
+          invoices: (invR.data ?? []) as any[],
+        });
+        const invoicedJobIds = new Set<string>(
+          ((invR.data ?? []) as any[]).filter((i: any) => i.status !== "void" && i.job_id).map((i: any) => i.job_id as string),
+        );
+        const futureApptJobIds = new Set<string>(((apptR.data ?? []) as any[]).map((a: any) => a.job_id as string));
+        const futureSegmentJobIds = new Set<string>(((segR.data ?? []) as any[]).map((s: any) => s.job_id as string));
+        const jobs = (jobsR.data ?? []) as any[];
+
+        for (const f of detectUnbilledWork({ jobs, worked, costedJobIds: costed, invoicedJobIds })) {
+          gaps.push(`${jobLabel(f.job)} has no costs recorded`);
+        }
+        for (const f of detectNeedsReturn({ jobs, worked, todayStr: today, futureApptJobIds, futureSegmentJobIds })) {
+          gaps.push(`${jobLabel(f.job)} has nothing scheduled next`);
+        }
       }
-      for (const f of detectNeedsReturn({ jobs, worked, todayStr: today, futureApptJobIds, futureSegmentJobIds })) {
-        gaps.push(`${jobLabel(f.job)} has nothing scheduled next`);
-      }
+
+      if (gaps.length === 0) continue; // clean day → no push
+
+      const staff = await orgStaffIds(org.id);
+      if (!staff.length) continue;
+
+      const top = gaps.slice(0, 2);
+      const more = gaps.length - top.length;
+      // The bell records it for the people it went to (day_ahead is opt-in: notifyPeople).
+      await notifyPeople(org.id, staff, "day_ahead", {
+        title: "Close out your day",
+        body: top.join(" · ") + (more > 0 ? ` · +${more} more` : ""),
+        // Nort switched off (0352): plain My Day, whose Needs You list names the same gaps. The
+        // ?debrief=1 opener lives on Nort's button, which isn't drawn then.
+        url: featureOn(getOrgSettings(org.settings).features, "nort") ? "/planner?debrief=1" : "/planner",
+      });
+      counts.pushed++;
+    } catch (e) {
+      counts.failed++;
+      reportError("cron-close-out", e, { orgId: org.id });
     }
-
-    if (gaps.length === 0) continue; // clean day → no push
-
-    const staff = await orgStaffIds(org.id);
-    if (!staff.length) continue;
-
-    const top = gaps.slice(0, 2);
-    const more = gaps.length - top.length;
-    // The bell records it for the people it went to (day_ahead is opt-in: notifyPeople).
-    await notifyPeople(org.id, staff, "day_ahead", {
-      title: "Close out your day",
-      body: top.join(" · ") + (more > 0 ? ` · +${more} more` : ""),
-      // Nort switched off (0352): plain My Day, whose Needs You list names the same gaps. The
-      // ?debrief=1 opener lives on Nort's button, which isn't drawn then.
-      url: featureOn(getOrgSettings(org.settings).features, "nort") ? "/planner?debrief=1" : "/planner",
-    });
-    counts.pushed++;
   }
 
   return counts;

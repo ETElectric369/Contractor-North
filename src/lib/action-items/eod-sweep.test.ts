@@ -8,6 +8,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 
 const sent: { body: string }[] = [];
+const reportError = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/observe", () => ({ reportError }));
 // The push goes out through notifyPeople (the Bell records every push, 0366 wave): one call, one
 // message, the bell line and the buzz together.
 const kinds: string[] = [];
@@ -40,7 +42,7 @@ function fake(route: (table: string, filters: string[]) => Reply) {
           res({ data: r.data ?? null, error: r.error ?? null });
         },
       };
-      for (const m of ["eq", "neq", "in", "is", "not", "gte", "order", "limit", "overlaps"])
+      for (const m of ["eq", "neq", "in", "is", "not", "gte", "order", "limit", "overlaps", "range"])
         chain[m] = (...a: unknown[]) => {
           filters.push(`${m}:${String(a[0])}`);
           return chain;
@@ -60,9 +62,13 @@ const shift = (id: string, name: string) => ({
   profiles: { full_name: name },
 });
 
+/** The company list the way readAllOrgs pages it (cn-v1130): the one org at from=0, an empty page after. */
+const ORG_ROWS = [{ id: ORG, settings: { timezone: "America/Los_Angeles" } }];
+const orgPage = (filters: string[]): Reply => ({ data: filters.includes("range:0") ? ORG_ROWS : [] });
+
 function route(claims: Reply) {
   return (table: string, filters: string[]): Reply => {
-    if (table === "organizations") return { data: [{ id: ORG, settings: { timezone: "America/Los_Angeles" } }] };
+    if (table === "organizations") return orgPage(filters);
     if (table === "time_entries") return filters.includes("gte:clock_in") ? { data: [shift("t-ttusd", "JP Prince"), shift("t-open", "Brian Taylor")] } : { data: [] };
     if (table === "invoice_items") return claims;
     return { data: [] };
@@ -73,6 +79,7 @@ describe("the close-out push and hours on no job billed by hand", () => {
   beforeEach(() => {
     sent.length = 0;
     kinds.length = 0;
+    reportError.mockClear();
   });
 
   it("a shift a live invoice holds is not named; one nobody billed still is", async () => {
@@ -96,6 +103,18 @@ describe("the close-out push and hours on no job billed by hand", () => {
     await sendCloseOutNudges(fake(route({ error: { message: "timeout" } })));
     expect(kinds).toEqual(["day_ahead"]);
   });
+
+  it("handed the companies (the evening cron's ones at their own 6 PM, cn-v1130), it reads none itself", async () => {
+    const tables: string[] = [];
+    const db = fake((table, filters) => {
+      tables.push(table);
+      if (table === "organizations") return { error: { message: "must not be read" } };
+      return route({ error: { message: "timeout" } })(table, filters);
+    });
+    await sendCloseOutNudges(db, ORG_ROWS);
+    expect(tables).not.toContain("organizations");
+    expect(sent.map((m) => m.body)).toEqual(["JP's entry has no job · Brian's entry has no job"]);
+  });
 });
 
 /**
@@ -107,6 +126,7 @@ describe("the close-out push and the jobs it names", () => {
   beforeEach(() => {
     sent.length = 0;
     kinds.length = 0;
+    reportError.mockClear();
   });
 
   const worked = (id: string, job: string) => ({
@@ -119,7 +139,7 @@ describe("the close-out push and the jobs it names", () => {
     profiles: { full_name: "Brian Taylor" },
   });
   const routeJobs = (jobs: any[], extra: { bills?: any[]; invoices?: any[] } = {}) => (table: string, filters: string[]): Reply => {
-    if (table === "organizations") return { data: [{ id: ORG, settings: { timezone: "America/Los_Angeles" } }] };
+    if (table === "organizations") return orgPage(filters);
     if (table === "time_entries") return filters.includes("gte:clock_in") ? { data: jobs.map((j, i) => worked(`t${i}`, j.id)) } : { data: [] };
     if (table === "jobs") return { data: jobs };
     if (table === "bills") return { data: extra.bills ?? [] };
@@ -147,5 +167,53 @@ describe("the close-out push and the jobs it names", () => {
     sent.length = 0;
     await sendCloseOutNudges(fake(routeJobs([job], { invoices: [{ job_id: "j-9", status: "void", invoice_items: [{ line_kind: "materials" }] }] })));
     expect(sent.map((m) => m.body)).toEqual(["Honeysuckle has no costs recorded"]);
+  });
+});
+
+/**
+ * A FAILED READ IS NOT A CLEAN DAY, AND ONE COMPANY'S FAILURE IS ITS OWN (cn-v1130, skeptic #34). The
+ * three opening reads (the open entries, the recent entries, the non-billable codes) were bare
+ * `.data`: a failed one read as "no gaps, no push", and a throw ended the loop for every company
+ * after it. Now each throws into the company's own catch: counted in `failed`, filed as cron-close-out
+ * with the orgId, nothing pushed for it, and the next company still gets its evening.
+ */
+describe("the close-out push and a failed read", () => {
+  beforeEach(() => {
+    sent.length = 0;
+    kinds.length = 0;
+    reportError.mockClear();
+  });
+
+  const boom = { message: "boom" };
+
+  it.each([
+    ["the open entries", (table: string, filters: string[]) => table === "time_entries" && filters.includes("eq:status")],
+    ["the recent entries", (table: string, filters: string[]) => table === "time_entries" && filters.includes("gte:clock_in")],
+    ["the non-billable codes", (table: string) => table === "job_codes"],
+  ])("a failed read of %s: failed 1, filed with the orgId, and no push", async (_name, fails) => {
+    const ok = route({ data: [] });
+    const db = fake((table, filters) => (fails(table, filters) ? { error: boom } : ok(table, filters)));
+    expect(await sendCloseOutNudges(db)).toEqual({ orgs: 1, pushed: 0, failed: 1 });
+    expect(sent).toEqual([]);
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportError).toHaveBeenCalledWith("cron-close-out", boom, { orgId: ORG });
+  });
+
+  it("the same data with every read answering pushes and fails nothing", async () => {
+    expect(await sendCloseOutNudges(fake(route({ data: [] })))).toEqual({ orgs: 1, pushed: 1, failed: 0 });
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("one company failing costs the next none of its evening", async () => {
+    const ok = route({ error: { message: "timeout" } });
+    let codeReads = 0;
+    const db = fake((table, filters) => {
+      if (table === "job_codes" && ++codeReads === 1) return { error: boom }; // the first company's third read
+      return ok(table, filters);
+    });
+    const second = { id: "org-2", settings: { timezone: "America/Los_Angeles" } };
+    expect(await sendCloseOutNudges(db, [...ORG_ROWS, second])).toEqual({ orgs: 2, pushed: 1, failed: 1 });
+    expect(reportError).toHaveBeenCalledWith("cron-close-out", boom, { orgId: ORG });
+    expect(sent.map((m) => m.body)).toEqual(["JP's entry has no job · Brian's entry has no job"]);
   });
 });

@@ -80,7 +80,9 @@ export function BugReporter({
     setNote("");
     setError(null);
     setErrCount(getLogs().filter((l) => l.level === "error").length);
-    if (platformAdmin) listBugReports().then(setReports).catch(() => {});
+    // A failed read hands back rows [] beside its error: set the list only on a clean read, so it
+    // never wipes one that had loaded (cn-v1130, skeptic #34). Same on the read after a send.
+    if (platformAdmin) listBugReports().then((r) => { if (!r.error) setReports(r.rows); }).catch(() => {});
   }
 
   function submit() {
@@ -133,7 +135,7 @@ export function BugReporter({
       // closes its own sheet. The beat before closing is deliberate: the green "Sent"
       // is the only proof it went, and at 60mph an instant vanish reads as a crash.
       setTimeout(() => setOpen(false), 1200);
-      if (platformAdmin) listBugReports().then(setReports).catch(() => {});
+      if (platformAdmin) listBugReports().then((r) => { if (!r.error) setReports(r.rows); }).catch(() => {});
     });
   }
 

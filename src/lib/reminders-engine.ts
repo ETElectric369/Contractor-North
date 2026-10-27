@@ -8,6 +8,7 @@ import { rowPlace } from "@/lib/doc-place";
 import { docLabel } from "@/lib/doc-label";
 import { reminderSuppressed } from "@/lib/automations-math";
 import { pendingTransfers } from "@/lib/bank-transfer";
+import { readAllOrgs } from "@/lib/cron-orgs";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
  *  org that has turned a reminder toggle ON, find what's due, send a branded email,
@@ -24,11 +25,14 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
   const now = Date.now();
   const counts: Counts = { invoice_due: 0, quote_followup: 0, appointment: 0, skipped_no_email: 0, failed: 0 };
 
-  const { data: orgs } = await supabase
-    .from("organizations")
-    .select("id, name, phone, email, settings");
+  // Every company, whole, or a throw the reminders route answers 500 with and files (cn-v1130): a
+  // failed read used to be a run that sent nothing and counted zeros.
+  const orgs = await readAllOrgs<{ id: string; name: string | null; phone: string | null; email: string | null; settings: unknown }>(
+    supabase,
+    "id, name, phone, email, settings",
+  );
 
-  for (const org of orgs ?? []) {
+  for (const org of orgs) {
     try {
       const s = getOrgSettings(org.settings);
       if (!s.remind_invoice_due && !s.remind_quote_followup && !s.remind_appointments) continue;
@@ -82,12 +86,15 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
 
       // 1) Overdue invoices — remind at most weekly, max 3 total.
       if (s.remind_invoice_due) {
-        const { data: invs } = await supabase
+        const { data: invs, error: invErr } = await supabase
           .from("invoices")
           .select("id, invoice_number, total, amount_paid, public_token, customers(name, email, address), jobs(address)")
           .eq("org_id", org.id)
           .in("status", ["sent", "partial"])
           .lt("due_date", today);
+        // A failed read is not "nothing is overdue" (cn-v1130, skeptic #34): it throws into this company's
+        // catch below, which files it with the orgId; the next company still gets its reminders.
+        if (invErr) throw invErr;
         // NEVER CHASE MONEY THAT IS ALREADY MOVING (audit v994 BK3, 0338). A bank debit on its way
         // books nothing for 3-5 business days, so the balance still reads in full; the invoice is
         // skipped until it clears or fails. A read that fails skips every invoice this run (fail
@@ -128,13 +135,14 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         // Don't chase a DEAD quote (audit v921): once valid_until has passed the offer is expired,
         // so a follow-up "still thinking it over?" is wrong. Skip past-due ones (null = no expiry).
         const todayStr = new Date(now).toISOString().slice(0, 10);
-        const { data: qs } = await supabase
+        const { data: qs, error: qErr } = await supabase
           .from("quotes")
           .select("id, quote_number, public_token, doc_type, valid_until, address, customers(name, email, address), inquiry:inquiry_id(address), jobs(address)")
           .eq("org_id", org.id)
           .eq("status", "sent")
           .lt("updated_at", cutoff)
           .or(`valid_until.is.null,valid_until.gte.${todayStr}`);
+        if (qErr) throw qErr; // a failed read is not "no follow-ups due" (cn-v1130, skeptic #34)
         for (const q of qs ?? []) {
           const cust = (q as any).customers;
           if (!cust?.email) { counts.skipped_no_email++; continue; }
@@ -165,7 +173,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
       if (s.remind_appointments) {
         const nowIso = new Date(now).toISOString();
         const horizon = new Date(now + 36 * 3_600_000).toISOString();
-        const { data: appts } = await supabase
+        const { data: appts, error: apptErr } = await supabase
           .from("appointments")
           // A LEAD'S site visit carries inquiry_id with customer_id NULL, so its contact is on the
           // inquiry, not a customer (audit v921 high) — an auto-booked inspection reminded no one.
@@ -175,6 +183,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
           .eq("absorbed", false) // a visit absorbed into its job must not remind anyone (0237)
           .gte("starts_at", nowIso)
           .lte("starts_at", horizon);
+        if (apptErr) throw apptErr; // a failed read is not "no visits soon" (cn-v1130, skeptic #34)
         for (const a of appts ?? []) {
           // Prefer the customer, fall back to the lead — whichever carries the contact.
           const cust = ((a as any).customers ?? (a as any).inquiries) as { name?: string | null; email?: string | null } | null;
@@ -200,7 +209,9 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
       }
     } catch (e) {
       // One org's thrown send (DNS/network) used to abort the whole loop, so every org after it
-      // was skipped for that run (audit v921). Log it and carry on to the next tenant.
+      // was skipped for that run (audit v921). Log it and carry on to the next tenant. Counted too
+      // (cn-v1130, skeptic #34): a failed read above throws here, and the run's own `failed` says so.
+      counts.failed++;
       reportError("reminders-org", e, { orgId: org.id });
     }
   }

@@ -1,6 +1,8 @@
 import { recordAiUsage } from "@/lib/ai-cost";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { readAllOrgs } from "@/lib/cron-orgs";
+import { errorMessage, reportError } from "@/lib/observe";
 
 /**
  * NORT'S SELF-REVIEW — "the logic center gets a pulse."
@@ -135,13 +137,17 @@ function parseReview(text: string): { summary: string; findings: NortFinding[] }
 
 /**
  * Generate + persist one org's review over the last `hours` (default 36h → yesterday + today).
- * Uses the SERVICE client (cross-crew read + service-role write). Returns null when the AI is
- * unconfigured or on any failure — callers treat it as best-effort.
+ * Uses the SERVICE client (cross-crew read + service-role write). Returns null ONLY when nothing
+ * happened — no bug reports and no Nort messages in the window — so no model call and no empty row.
+ * Everything else THROWS (cn-v1130): a missing key, a model failure and a refused insert used to
+ * come back as the same null as a quiet night, so a broken nightly review read as "nothing happened"
+ * for weeks. The error carries the vendor's or PostgREST's words, never the key.
  */
 export async function generateNortReview(
   supabase: SupabaseClient,
   orgId: string,
   hours = 36,
+  timeoutMs = 120_000,
 ): Promise<NortReview | null> {
   const periodEnd = new Date();
   const periodStart = new Date(periodEnd.getTime() - hours * 3600_000);
@@ -150,25 +156,27 @@ export async function generateNortReview(
   // Nothing happened → don't burn a model call or write an empty review.
   if (counts.bug_reports === 0 && counts.messages === 0) return null;
 
-  let client;
-  try {
-    client = getAnthropic();
-  } catch {
-    return null; // AI not configured
-  }
+  // An unset key throws from here (its message names the env var, never a value): the caller files it.
+  const client = getAnthropic();
 
   let text = "";
   try {
-    const resp = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 1500,
-      system: [{ type: "text", text: ANALYST_SYSTEM, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: `Review the last ${Math.round(hours)} hours for this contractor:\n\n${digest}` }],
-    });
+    // The SDK's per-request options ride as the SECOND argument (cn-v1130, skeptic #34): a clock on the
+    // call and no retry, so a hung model cannot outlive the run — the deadline is checked BETWEEN
+    // companies, and a call with no clock of its own would sail past it to Vercel's kill.
+    const resp = await client.messages.create(
+      {
+        model: DEFAULT_MODEL,
+        max_tokens: 1500,
+        system: [{ type: "text", text: ANALYST_SYSTEM, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: `Review the last ${Math.round(hours)} hours for this contractor:\n\n${digest}` }],
+      },
+      { timeout: timeoutMs, maxRetries: 0 },
+    );
     void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "nort:review", usage: resp.usage as never });
     text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
-  } catch {
-    return null;
+  } catch (e) {
+    throw new Error(`model call failed: ${errorMessage(e)}`);
   }
 
   const { summary, findings } = parseReview(text);
@@ -181,21 +189,43 @@ export async function generateNortReview(
     counts,
   };
   const { data, error } = await supabase.from("nort_reviews").insert(row).select("id").single();
-  if (error) return null;
+  if (error) throw new Error(`nort_reviews insert failed: ${errorMessage(error)}`);
   return { id: (data as { id: string }).id, ...row };
 }
 
-/** Nightly cron entry: generate a review for every org that had activity. Best-effort per org. */
-export async function generateNortReviewsForAllOrgs(supabase: SupabaseClient): Promise<number> {
-  const { data: orgs } = await supabase.from("organizations").select("id");
-  let made = 0;
-  for (const o of (orgs ?? []) as { id: string }[]) {
+/**
+ * THE NIGHTLY RUN, EVERY COMPANY, SAID OUT LOUD (cn-v1130). The companies come through readAllOrgs
+ * — whole, or a throw the daily cron files as cron-nort-review (a bare select used to make a failed
+ * read an empty run). One company's failure is filed under nort:review with its orgId and counted,
+ * never swallowed, and the rest still run. `deadlineMs`: a model call per company adds up, and
+ * Vercel kills the function at maxDuration with no row to say so — past the deadline the runner
+ * stops and files ONE row saying how many companies it did not reach, so a month of missing
+ * reviews has a name in the sink instead of a quiet gap.
+ */
+export async function generateNortReviewsForAllOrgs(
+  supabase: SupabaseClient,
+  opts: { deadlineMs?: number } = {},
+): Promise<{ made: number; failed: number; left: number }> {
+  const orgs = await readAllOrgs<{ id: string }>(supabase, "id");
+  const out = { made: 0, failed: 0, left: 0 };
+  for (let i = 0; i < orgs.length; i++) {
+    if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
+      out.left = orgs.length - i;
+      // A FIXED message, the count in the extras (cn-v1130, skeptic #34): the sink dedupes on
+      // where + message, so a count inside the words gave every count its own row.
+      reportError("nort:review", new Error("cut short: companies not reviewed"), { left: out.left });
+      break;
+    }
     try {
-      const r = await generateNortReview(supabase, o.id);
-      if (r) made++;
-    } catch {
-      /* one org failing must not stop the rest */
+      // The call gets what is left of the run's share, between ten seconds and two minutes: a hung
+      // model must not outlive the deadline by more than it, and a nearly spent run still gets a real try.
+      const timeoutMs = opts.deadlineMs === undefined ? undefined : Math.min(120_000, Math.max(10_000, opts.deadlineMs - Date.now()));
+      const r = await generateNortReview(supabase, orgs[i].id, undefined, timeoutMs);
+      if (r) out.made++;
+    } catch (e) {
+      out.failed++;
+      reportError("nort:review", e, { orgId: orgs[i].id });
     }
   }
-  return made;
+  return out;
 }

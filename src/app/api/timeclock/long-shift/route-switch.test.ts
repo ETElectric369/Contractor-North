@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({ client: null as any }));
 const spies = vi.hoisted(() => ({ notify: [] as any[], push: [] as any[] }));
 
 vi.mock("@/lib/cron-guard", () => ({ requireCron: vi.fn(() => ({ supabase: state.client })) }));
-vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/observe", () => ({ reportError: vi.fn(), reportErrorAwaited: vi.fn(async () => {}) }));
 vi.mock("@/lib/notifications", () => ({
   createNotifications: vi.fn(async (...a: any[]) => {
     spies.notify.push(a);
@@ -34,7 +34,11 @@ function fakeSupabase(open: any[], family: any[] | { error: any }, calls: Q[]) {
       const q: Q = { table, verb: "select", cols: "", filters: [] };
       calls.push(q);
       const answer = () => {
-        if (table === "organizations") return { data: [{ id: "org-1", settings: { timezone: "America/Los_Angeles" } }], error: null };
+        if (table === "organizations") {
+          // Paged by readAllOrgs (cn-v1130): the one org on the page at from=0, an empty page after it.
+          const from = q.filters.find((f) => f[0] === "range")?.[1] ?? 0;
+          return { data: from > 0 ? [] : [{ id: "org-1", settings: { timezone: "America/Los_Angeles" } }], error: null };
+        }
         if (table === "time_entries" && q.verb === "select" && q.filters.some((f) => f[0] === "or" && String(f[1]).startsWith("id.in.")))
           return Array.isArray(family) ? { data: family, error: null } : { data: null, error: family.error };
         if (table === "time_entries" && q.verb === "select") return { data: open, error: null };
@@ -54,6 +58,8 @@ function fakeSupabase(open: any[], family: any[] | { error: any }, calls: Q[]) {
         eq: (...a: any[]) => (q.filters.push(["eq", ...a]), chain),
         is: (...a: any[]) => (q.filters.push(["is", ...a]), chain),
         or: (...a: any[]) => (q.filters.push(["or", ...a]), chain),
+        order: (...a: any[]) => (q.filters.push(["order", ...a]), chain),
+        range: (...a: any[]) => (q.filters.push(["range", ...a]), chain),
         then(ok: any, bad: any) {
           return Promise.resolve().then(answer).then(ok, bad);
         },

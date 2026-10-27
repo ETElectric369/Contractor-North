@@ -10,6 +10,7 @@ import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { jobNameFrom, typedNameMayBeATag } from "@/lib/job-name";
 import { featureOn } from "@/lib/features";
+import { readAllOrgs } from "@/lib/cron-orgs";
 
 /** The recurring jobs/expenses/invoices generation engine, extracted so BOTH the
  *  in-app "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
@@ -270,25 +271,32 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
   // Pacific, generating tomorrow's occurrences tonight. Fetch every reachable org's
   // settings once (service client = all orgs; user client = RLS-scoped to one), query
   // up to the LATEST local today among them, then gate each template on its own org's.
-  const { data: orgs } = await supabase.from("organizations").select("id, settings");
+  // Every reachable company, whole, or a throw (cn-v1130): a failed read used to be an EMPTY run that
+  // generated nothing and said nothing. Now the cron files it, and the next run makes up what is owed
+  // — a repeat invoice's one occurrence (exactly ONE per run, below), a job's or expense's periods.
+  const orgs = await readAllOrgs<{ id: string; settings: unknown }>(supabase);
   const todayByOrg: Record<string, string> = {};
   const settingsByOrg: Record<string, unknown> = {};
-  // Companies with Recurring Billing switched off (0352): their repeat invoices are skipped. A company
-  // whose row can't be read is not in here: missing = ON, today's engine.
+  // Companies with Recurring Billing switched off (0352): their repeat invoices are skipped. Every
+  // company read is in here (a read that fails fails the run), so a template whose org is missing
+  // has no company row at all: missing = ON, today's engine.
   const switchedOff = new Set<string>();
-  for (const o of orgs ?? []) {
+  for (const o of orgs) {
     settingsByOrg[o.id] = o.settings;
     const s = getOrgSettings(o.settings);
     todayByOrg[o.id] = todayStrInTz(s.timezone);
     if (!featureOn(s.features, "recurring_billing")) switchedOff.add(o.id);
   }
-  const fallbackToday = new Date().toISOString().slice(0, 10); // template whose org row is unreadable
+  const fallbackToday = new Date().toISOString().slice(0, 10); // a template whose org is not in the map (no company row)
   const latestToday = Object.values(todayByOrg).reduce((a, b) => (b > a ? b : a), fallbackToday);
-  const { data: due } = await supabase
+  const { data: due, error: dueErr } = await supabase
     .from("recurring_templates")
     .select("*")
     .eq("active", true)
     .lte("next_date", latestToday);
+  // A failed read is not "nothing is due" (cn-v1130, skeptic #34): the bare read answered a silent
+  // zero for the night. Thrown, so the cron files it and the next run makes up what is owed.
+  if (dueErr) throw new Error(`recurring_templates could not be read: ${dueErr.message}`);
   let count = 0;
   for (const t of due ?? []) {
     // Isolate each template: one malformed row (e.g. a bad next_date that makes new Date(...)

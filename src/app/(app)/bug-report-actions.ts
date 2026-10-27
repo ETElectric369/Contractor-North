@@ -70,16 +70,21 @@ export async function createBugReport(input: {
 /** Every company's recent reports, for North's own team (Wave 0: bug reports left the companies'
  *  inboxes). Platform-admin gated in the app layer (belt) on top of the RLS read policy
  *  (suspenders, 0176) — this action also does a narrow service-role name lookup, so the gate must
- *  hold even if the RLS policy ever loosens. Anyone else gets nothing. */
-export async function listBugReports(): Promise<BugReport[]> {
+ *  hold even if the RLS policy ever loosens. Anyone else gets nothing.
+ *
+ *  A FAILED READ IS NOT AN EMPTY LIST (cn-v1130, the deep review's ops finding): this returned []
+ *  on a refused or broken read, and Bug Watch said "All clear" over it. The read's error now rides
+ *  beside the rows so the page can say it; the gate's nothing stays a plain nothing (error null). */
+export async function listBugReports(): Promise<{ rows: BugReport[]; error: string | null }> {
   const ctx = await requirePlatformAdmin();
-  if ("error" in ctx) return [];
+  if ("error" in ctx) return { rows: [], error: null };
   const supabase = ctx.supabase;
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("bug_reports")
     .select("id, note, page, status, created_at, screenshot_path, reported_by, org_id, profiles:reported_by(full_name)")
     .order("created_at", { ascending: false })
     .limit(200);
+  if (error) return { rows: [], error: dbError(error) };
   const rows = (data ?? []) as any[];
 
   // Collaborator reporters: their profile (org_id NULL) is INVISIBLE under profiles RLS —
@@ -122,16 +127,19 @@ export async function listBugReports(): Promise<BugReport[]> {
     }
   }
 
-  return rows.map((r) => ({
-    id: r.id,
-    note: r.note,
-    page: r.page,
-    status: r.status,
-    created_at: r.created_at,
-    reporter: r.profiles?.full_name ?? collabNames.get(r.reported_by) ?? null,
-    screenshot_path: r.screenshot_path ?? null,
-    org: orgNames.get(r.org_id) ?? null,
-  }));
+  return {
+    rows: rows.map((r) => ({
+      id: r.id,
+      note: r.note,
+      page: r.page,
+      status: r.status,
+      created_at: r.created_at,
+      reporter: r.profiles?.full_name ?? collabNames.get(r.reported_by) ?? null,
+      screenshot_path: r.screenshot_path ?? null,
+      org: orgNames.get(r.org_id) ?? null,
+    })),
+    error: null,
+  };
 }
 
 const BUG_STATUSES = new Set(["open", "fixed", "wontfix"]);

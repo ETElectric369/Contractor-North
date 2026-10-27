@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { getOrgSettings } from "@/lib/org-settings";
-import { reportError } from "@/lib/observe";
+import { reportError, reportErrorAwaited } from "@/lib/observe";
 import { createNotifications } from "@/lib/notifications";
 import { orgStaffIdsOrThrow, sendPushToProfiles } from "@/lib/push";
 import { sendSms, smsReadiness } from "@/lib/sms";
@@ -9,6 +9,10 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, candidateStartMs, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
+import { readAllOrgs } from "@/lib/cron-orgs";
+
+// Every company in one run, one after another (cn-v1130).
+export const maxDuration = 300;
 
 /**
  * THE LONG-SHIFT JOB (2026-09-24). Hourly (vercel.json "0 * * * *").
@@ -75,13 +79,18 @@ export async function GET(request: Request) {
     office_buzzes: 0,
     failed: 0,
   };
-  const { data: orgs, error: orgErr } = await supabase.from("organizations").select("id, name, settings");
-  if (orgErr) {
-    reportError("cron-long-shift", orgErr);
+  // Every company, whole, or a filed 500 (readAllOrgs, cn-v1130): never an empty run.
+  let orgs: { id: string; name: string | null; settings: unknown }[];
+  try {
+    orgs = await readAllOrgs<{ id: string; name: string | null; settings: unknown }>(supabase, "id, name, settings");
+  } catch (e) {
+    // Waited for (cn-v1130, skeptic #34): this function answers on the tick it files, and a
+    // fire-and-forget write can freeze with it.
+    await reportErrorAwaited("cron-long-shift", e);
     return NextResponse.json({ ...counts, failed: 1 }, { status: 500 });
   }
 
-  for (const org of orgs ?? []) {
+  for (const org of orgs) {
     counts.orgs++;
     const tz = getOrgSettings(org.settings).timezone;
     const nowMs = Date.now();
