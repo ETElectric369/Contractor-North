@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1126", date: "2026-10-26", line: "The error log no longer gets a row every time the phone locks and unlocks with the app open; only a Nort turn or a fence read that ran with the screen dark is reported." },
   { version: "cn-v1125", date: "2026-10-20", line: "Nort is told on every turn whether you are on the clock and on which job, read fresh, so he never says it from memory of an earlier turn." },
   { version: "cn-v1124", date: "2026-10-20", line: "Inside the app the site fence may take a silent location fix, since the app holds that permission, so a punch made through Nort gets its fence; the fence says in the console what it did." },
   { version: "cn-v1123", date: "2026-10-20", line: "43 audit findings closed: an address or caption is saved only when the write says so, a taken-back punch puts the job back on hold, and Nort looks before he says a job is not there or where you are." },

@@ -20,6 +20,12 @@ import { reportClientError } from "@/app/report-client-error";
  * one before the daily read. The title also carries this page load's id and the flush's number.
  */
 const lines: string[] = [];
+/* THE SCREEN'S OWN LINES ARE NOT NEWS (sweep 2026-10-26). "screen hidden" is written while the page
+ * is hidden, so it carried the (hidden) mark and made every lock-and-unlock of the phone a row in
+ * the ops sink — thirty-two "trace turn 0" rows holding nothing but "screen hidden / screen
+ * visible", twenty-three in one evening of the app simply being in a pocket. Only a stage of a
+ * turn (or the fence) that ran dark makes the batch worth a row. */
+const SCREEN_LINES = new Set(["screen hidden", "screen visible"]);
 let hiddenSeen = false;
 let turnNo = 0;
 let installed = false;
@@ -50,7 +56,7 @@ export function trace(stage: string, extra?: string) {
     turnNo++;
   }
   const line = `${clock()} ${stage}${extra ? ` ${extra}` : ""}${hidden ? " (hidden)" : ""}`;
-  if (hidden) hiddenSeen = true;
+  if (hidden && !SCREEN_LINES.has(stage)) hiddenSeen = true;
   lines.push(line);
   if (lines.length > 40) lines.shift();
   try {
