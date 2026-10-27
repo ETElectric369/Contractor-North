@@ -151,6 +151,22 @@ describe("what happened, on a past block", () => {
     expect(html).toContain("padding-right:13px");
   });
 
+  it("a punch still running today is solid and grows to the live now line (today, 2026-10-26)", () => {
+    const running = block({
+      actual: {
+        people: [{ key: "p-jimmy", initials: "JR", dot: "bg-violet-500", spans: [{ startMin: 720, endMin: 780, open: true, running: true }] }],
+        sentence: "Booked 9–5 · Jimmy on the clock since 12",
+      },
+    });
+    // Judged at 1 PM, drawn at 3 PM: the bar runs 12 to 3 (180 min of 0.8px), no fade.
+    const html = grid({ events: [running], initialNow: { dayStr: "2026-09-22", min: 900 } });
+    expect(html).toMatch(/class="absolute rounded-full bg-violet-500" style="top:[\d.]+px;height:144px;right:2px;width:4px"/);
+    expect(html).not.toContain("mask-image");
+    // On another day's grid the same span keeps its own end.
+    const elsewhere = grid({ events: [running], initialNow: { dayStr: "2026-09-23", min: 900 } });
+    expect(elsewhere).toMatch(/class="absolute rounded-full bg-violet-500" style="top:[\d.]+px;height:48px;right:2px;width:4px"/);
+  });
+
   it("the range stretches to the 9 PM finish instead of clipping it at 7", () => {
     const html = grid({ events: [worked] });
     expect(html).toContain(">8 PM<");

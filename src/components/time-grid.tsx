@@ -69,11 +69,11 @@ export interface TimeGridEvent {
   ghost?: boolean;
 }
 
-/** A past block's worked time (see TimeGridEvent.actual). */
+/** A past or today's block's worked time (see TimeGridEvent.actual); a `running` stretch is today's punch still on the clock. */
 export interface TimeGridActual {
   /** Each person who clocked in, in their own color, with their stretches (minutes past midnight;
    *  `open` = never clocked out, drawn fading out). */
-  people: { key: string; initials: string; dot: string; spans: { startMin: number; endMin: number; open: boolean }[] }[];
+  people: { key: string; initials: string; dot: string; spans: { startMin: number; endMin: number; open: boolean; running?: true }[] }[];
   /** Booked, and no time clocked to it: the block keeps its border and type color, filled faint. */
   hollow?: boolean;
   /** The block's sentence ("Booked 9–5 · Erik 10–6 · 1h late"): its title and label. */
@@ -416,7 +416,8 @@ function TimeGridInner({
    * block's, never the bars'. Each person gets a 4px lane at the block's right edge (the next one step
    * left), a rounded bar in their color from their in to their out: a late start reads as a gap under
    * the block's top, an overrun as a bar past its bottom, an early finish as a bar stopping short, and
-   * one never clocked out fades away. A wide block (the day view, a lone week block) puts a 16px initials
+   * one never clocked out fades away, and one still running today runs solid to the live now line. A wide
+   * block (the day view, a lone week block) puts a 16px initials
    * chip at the top of each person's bar (blue and indigo look alike; the letters say who).
    */
   const barLayer = (e: TimeGridEvent & { col: number; cols: number }, wide: boolean) => {
@@ -435,7 +436,9 @@ function TimeGridInner({
         {people.map((p, i) =>
           p.spans.map((s, si) => {
             const top = y(s.startMin);
-            const height = Math.max(3, y(s.endMin) - top);
+            // A punch still running on today grows with the live now line, solid (never the runaway fade).
+            const end = s.running && now && now.dayStr === e.dayStr ? Math.max(s.endMin, now.min) : s.endMin;
+            const height = Math.max(3, y(end) - top);
             return (
               <div
                 key={`${p.key}-${si}`}
@@ -445,7 +448,7 @@ function TimeGridInner({
                   height,
                   right: laneRight(i),
                   width: LANE_PX,
-                  ...(s.open ? { maskImage: "linear-gradient(to bottom, black 55%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, black 55%, transparent)" } : {}),
+                  ...(s.open && !s.running ? { maskImage: "linear-gradient(to bottom, black 55%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, black 55%, transparent)" } : {}),
                 }}
               />
             );

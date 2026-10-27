@@ -26,6 +26,7 @@ import type { DayHours } from "@/lib/schedule-math";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { initials } from "@/lib/utils";
 import { GhostSheetBody, ghostTitle, type GhostTarget } from "./ghost-sheet";
+import { todayStrInTz } from "@/lib/tz";
 
 /**
  * TAP A BLOCK ON THE SCHEDULE: ONE SMALL SHEET with its day, its start and its length, and who's on it.
@@ -186,7 +187,7 @@ function tileId(t: TileTarget): string {
 /** The sheet's inside (exported for its render test). */
 export function TileSheetBody({ target, ...rest }: Shared & { target: TileTarget }) {
   if (target.kind === "ghost") {
-    return <GhostSheetBody day={target.day} ghost={target.ghost} canEdit={rest.canEdit} onClose={rest.onClose} voice={rest.voice} />;
+    return <GhostSheetBody day={target.day} ghost={target.ghost} today={target.day === todayStrInTz(rest.tz)} canEdit={rest.canEdit} onClose={rest.onClose} voice={rest.voice} />;
   }
   return target.kind === "job" ? (
     <JobSheet day={target.day} job={target.job} dayHours={target.dayHours ?? null} dayCrew={target.dayCrew ?? null} {...rest} />

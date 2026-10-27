@@ -44,10 +44,15 @@ export function ghostTitle(g: Pick<GhostTarget, "name" | "customer">): string {
   return who && !nameSays(g.name, who) ? `${g.name} · ${who}` : g.name;
 }
 
-/** What the sheet and the track say: "Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM. Nothing was booked this day." */
-export function ghostLine(g: Pick<GhostTarget, "people">): string {
-  return `${peopleWords(g.people)}. Nothing was booked this day.`;
+/** What the sheet and the track say: "Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM. Nothing was booked this day."
+ *  Today's (since 2026-10-26 the schedule draws today's clocked time too): "… Nothing is booked for today." */
+export function ghostLine(g: Pick<GhostTarget, "people">, today = false): string {
+  return `${peopleWords(g.people)}. ${today ? "Nothing is booked for today." : "Nothing was booked this day."}`;
 }
+
+/** Today's ghost has no Book This Day: bookWorkedDay takes only a day already past (the hours worked are
+ *  not known until the day is done), so the door would refuse — said here instead, as the one next step. */
+export const BOOK_TODAY_LATER = "Book it once the day is done.";
 
 /** What a sheet around this tells it (the tile sheet's SheetVoice): a write out, or a refusal in words. */
 type Voice = { pending: (busy: boolean) => void; refusal: (words: string | null) => void };
@@ -106,11 +111,12 @@ export function useBookWorkedDay(jobId: string, day: string, opts?: { onBooked?:
 
 const DOOR = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium";
 
-/** The ghost's two doors: Book This Day (the office) and Open The Job. 44px each. */
-function GhostDoors({ jobId, canEdit, pending, onBook }: { jobId: string; canEdit: boolean; pending: boolean; onBook: () => void }) {
+/** The ghost's two doors: Book This Day (the office; on a past day — today's says when instead) and Open The Job. 44px each. */
+function GhostDoors({ jobId, canEdit, pending, onBook, today = false }: { jobId: string; canEdit: boolean; pending: boolean; onBook: () => void; today?: boolean }) {
   return (
     <div className="flex flex-wrap gap-2">
-      {canEdit && (
+      {canEdit && today && <p className="text-xs text-slate-500">{BOOK_TODAY_LATER}</p>}
+      {canEdit && !today && (
         <Button type="button" onClick={onBook} disabled={pending} className="min-h-11">
           <CalendarPlus className="h-4 w-4" /> {pending ? "Booking…" : "Book This Day"}
         </Button>
@@ -126,12 +132,15 @@ function GhostDoors({ jobId, canEdit, pending, onBook }: { jobId: string; canEdi
 export function GhostSheetBody({
   day,
   ghost,
+  today = false,
   canEdit,
   onClose,
   voice,
 }: {
   day: string;
   ghost: GhostTarget;
+  /** The ghost is today's: work in progress, not yet bookable. */
+  today?: boolean;
   canEdit: boolean;
   onClose: () => void;
   voice?: Voice;
@@ -140,9 +149,9 @@ export function GhostSheetBody({
   return (
     <div className="space-y-4">
       {ghost.jobNumber && <p className="-mt-2 text-xs text-slate-400">{ghost.jobNumber}</p>}
-      <WorkedTrack booked={null} people={ghost.people} sentence={ghostLine(ghost)} />
+      <WorkedTrack booked={null} people={ghost.people} sentence={ghostLine(ghost, today)} />
       <div className="border-t border-slate-100 pt-4">
-        <GhostDoors jobId={ghost.jobId} canEdit={canEdit} pending={pending} onBook={book} />
+        <GhostDoors jobId={ghost.jobId} canEdit={canEdit} pending={pending} onBook={book} today={today} />
         {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       </div>
     </div>
@@ -150,7 +159,7 @@ export function GhostSheetBody({
 }
 
 /** The day drill's dashed "Worked, Not Booked" row: the track, the words, the same two doors. */
-export function GhostRow({ day, ghost, canEdit }: { day: string; ghost: GhostTarget; canEdit: boolean }) {
+export function GhostRow({ day, ghost, canEdit, today = false }: { day: string; ghost: GhostTarget; canEdit: boolean; today?: boolean }) {
   const { pending, error, book } = useBookWorkedDay(ghost.jobId, day);
   return (
     <div className="col-span-full rounded-lg border-2 border-dashed border-slate-400 bg-white/60 p-2.5 text-xs text-slate-700">
@@ -159,7 +168,7 @@ export function GhostRow({ day, ghost, canEdit }: { day: string; ghost: GhostTar
         <WorkedTrack booked={null} people={ghost.people} sentence={`${ghostTitle(ghost)} — ${peopleWords(ghost.people)}`} />
       </div>
       <div className="mt-2">
-        <GhostDoors jobId={ghost.jobId} canEdit={canEdit} pending={pending} onBook={book} />
+        <GhostDoors jobId={ghost.jobId} canEdit={canEdit} pending={pending} onBook={book} today={today} />
         {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       </div>
     </div>

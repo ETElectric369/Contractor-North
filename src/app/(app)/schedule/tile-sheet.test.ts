@@ -35,7 +35,7 @@ import { tzDateTimeUtc } from "@/lib/tz";
 import { crewChips } from "@/lib/schedule/block-info";
 import { pillColorForPerson } from "@/lib/employee-color";
 import { mergePeople } from "@/lib/schedule/plan-vs-actual";
-import { GhostRow, ghostTitle } from "./ghost-sheet";
+import { GhostRow, GhostSheetBody, ghostTitle } from "./ghost-sheet";
 
 const LA = "America/Los_Angeles";
 const WORK_DAY = { start: "09:00", end: "17:00" };
@@ -554,5 +554,19 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
     expect(t).toContain("Book This Day");
     expect(t).toContain("Open The Job");
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+  });
+
+  it("today's ghost (the schedule draws today's clocked time since 2026-10-26): no Book This Day, since the day is not done — the one next step in words", () => {
+    const g = (ghost as Extract<TileTarget, { kind: "ghost" }>).ghost;
+    const row = renderToStaticMarkup(createElement(GhostRow, { day: "2026-09-25", ghost: g, canEdit: true, today: true }));
+    expect(text(row)).not.toContain("Book This Day");
+    expect(text(row)).toContain("Book it once the day is done.");
+    expect(row).toMatch(/<a[^>]*href="\/jobs\/j11"[^>]*>Open The Job<\/a>/);
+    const body = renderToStaticMarkup(createElement(GhostSheetBody, { day: "2026-09-25", ghost: g, today: true, canEdit: true, onClose: () => {} }));
+    expect(text(body)).toContain("Nothing is booked for today.");
+    expect(text(body)).not.toContain("Book This Day");
+    // A crew member (no edit) sees neither the door nor the note; a past day keeps the door.
+    expect(text(renderToStaticMarkup(createElement(GhostRow, { day: "2026-09-25", ghost: g, canEdit: false, today: true })))).not.toContain("Book it once");
+    expect(text(renderToStaticMarkup(createElement(GhostRow, { day: "2026-09-25", ghost: g, canEdit: true })))).toContain("Book This Day");
   });
 });

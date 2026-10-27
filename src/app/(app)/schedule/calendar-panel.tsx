@@ -9,6 +9,7 @@ import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { dayRowsByDay, type CrewDayRow } from "@/lib/schedule/block-info";
 import { ACTUALS_PAGES, CREW_ROW_PAGES, actualsFrom, readPagesCapped, type ActualEntryRow } from "@/lib/schedule/plan-vs-actual";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import {
   CalendarView,
   type CalJob,
@@ -152,7 +153,8 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
      time" is retired). The schedule is the one time map: future days show what's booked; past days
      show what was booked AND what happened, inside the same block (lib/schedule/plan-vs-actual). The
      timesheet (editing, pay) stays on /timecards. ONE read, from the start of the window's oldest
-     company day up to the start of today on the company's clock, only entries on a job (a no-job punch
+     company day through the end of TODAY on the company's clock (today's punches too, the running one
+     included, since 2026-10-26: "schedule isn't showing today's timecard entries"), only entries on a job (a no-job punch
      is never guessed onto a block), newest first, A PAGE AT A TIME to a stated bound. NO PAY
      COLUMN: no rate, no paid, no miles, no notes. Names come from the entry's own person, so someone
      who has left still has initials on the days they worked. The job rides along so a ghost (part D)
@@ -171,6 +173,8 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
      clamp must never make a day look like a day nobody worked. The extra rows draw nothing of their own
      (the view ignores days before the window). */
   const actualsFromIso = tzDayStartUtc(new Date(Date.parse(`${winFromStr}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10), tz).toISOString();
+  // Through today: the read stops at the start of TOMORROW on the company's clock.
+  const tomorrowStr = new Date(Date.parse(`${todayStr}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
   const [historyReads, entriesRead] = await Promise.all([
     Promise.all(missingChunks.map((missingChunk) => supabase.from("jobs").select(JOB_COLS).in("id", missingChunk))),
     /* PAGED, NEWEST FIRST (readPagesCapped). A `.limit(4000)` is silently cut at PostgREST's own
@@ -183,7 +187,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         .select(ENTRY_COLS)
         .not("job_id", "is", null)
         .gte("clock_in", actualsFromIso)
-        .lt("clock_in", tzDayStartUtc(todayStr, tz).toISOString())
+        .lt("clock_in", tzDayStartUtc(tomorrowStr, tz).toISOString())
         .order("clock_in", { ascending: false })
         .order("id", { ascending: false })
         .range(from, to);
@@ -196,6 +200,10 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
 
   return (
     <div className="mx-auto max-w-5xl">
+      {/* Today's clocked time is on this page now (cn-v1127), and a running punch's bar grows on the
+          client's clock: when the tab comes back, re-read, so a bar never outlives its clock-out
+          (RefreshOnVisible's own guards: never offline, never under a sheet, deferred while dark). */}
+      <RefreshOnVisible />
       <CalendarView
         jobs={(jobs ?? []) as unknown as CalJob[]}
         segments={(segments ?? []) as unknown as CalSegment[]}

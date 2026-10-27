@@ -185,7 +185,7 @@ describe("the day drill", () => {
 
   it("a failed clocked-time read says so in one quiet line, and no block is hollow", () => {
     const html = render("week", PAST3, { actuals: null });
-    expect(html).toContain("Clocked time didn&#x27;t load, so past days show only what was booked.");
+    expect(html).toContain("Clocked time didn&#x27;t load, so today and past days show only what was booked.");
     expect(html).not.toContain("No time clocked to this job");
     expect(html).not.toContain("data-worked-bars");
   });

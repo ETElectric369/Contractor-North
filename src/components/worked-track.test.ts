@@ -38,6 +38,18 @@ describe("the track", () => {
     expect(html).toContain(`<p class="text-[11px] leading-snug text-slate-600">${sentence}</p>`);
   });
 
+  it("a punch still running today is solid to now, never faded", () => {
+    const running = mergePeople(
+      [{ profileId: "p-jimmy", name: "Jimmy Ruiz", jobId: "j46", dayStr: "2026-09-22", startMin: 720, endMin: null }],
+      (s) => Math.max(s + 1, 900),
+      true,
+    );
+    expect(running[0].spans).toEqual([{ startMin: 720, endMin: 900, open: true, running: true }]);
+    const html = renderToStaticMarkup(createElement(WorkedTrack, { booked: { startMin: 540, endMin: 1020 }, people: running, sentence: "Booked 9–5 · Jimmy on the clock since 12" }));
+    expect(html).not.toMatch(/mask-image/);
+    expect(html).toContain("Jimmy on the clock since 12");
+  });
+
   it("work nobody booked: the bars alone, no outline", () => {
     const html = renderToStaticMarkup(createElement(WorkedTrack, { booked: null, people, sentence: "Erik 10–6" }));
     expect(html).not.toContain("data-booked");

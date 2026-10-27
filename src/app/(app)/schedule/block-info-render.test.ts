@@ -229,7 +229,7 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
     expect(view).toMatch(/info: \{\s*place: placeLine\(\{ name: job\.name, street: job\.address/);
     // The crew as that day's Everyone's Day rows leave it (the day row wins; lib/schedule/block-info);
     // a past day judged shows what happened instead (Wave 2, SV-actual).
-    expect(view).toContain("crew: judged ? null : jobCrewOn(job, k)");
+    expect(view).toContain("crew: judged && k < todayK ? null : jobCrewOn(job, k)");
     expect(view).toContain("crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people })");
     expect(view).toContain("dayHours: ownHours.get(job.id)?.get(k) ?? null");
     const page = read("src/app/(app)/schedule/page.tsx");

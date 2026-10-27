@@ -13,7 +13,12 @@
  *                   timeEntryGridSpan uses); an overnight shift splits at midnight and its tail is drawn
  *                   on the next day from minute 0 (display only, instead of the 1440 clamp);
  *   no job          never guessed onto a block (it stays on Timecards and on Needs You's Hours On No Job);
- *   only past days  today and later draw no worked time;
+ *   today too       today draws what has happened so far (Erik, 2026-10-03: "schedule isn't showing
+ *                   today's timecard entries", built 2026-10-26); a punch still RUNNING draws from its
+ *                   in to now and reads "on the clock since 8", never "never clocked out"; a block on
+ *                   today is judged only once its booked end has passed (no hollow at 7 AM for a 9-to-5
+ *                   nobody has reached yet), and over/short wait for that too, since someone out at 12
+ *                   may be back at 1; days AFTER today draw no worked time;
  *   a block         takes the entries whose job is its job that day; with no job block that day, a
  *                   visit block on the same job (a return visit) takes them; otherwise they are
  *                   UNPLANNED (part D draws them as a dashed ghost);
@@ -65,8 +70,8 @@ const nextDay = (ymd: string) => {
 };
 
 /**
- * PAST-DAY SPANS, on the company's clock. An entry with no job is dropped (never guessed onto a block);
- * so is any day that is today or later. A shift over midnight is split: its first day runs to 24:00 and
+ * THE SPANS, through today, on the company's clock. An entry with no job is dropped (never guessed onto a
+ * block); so is any day after today. A shift over midnight is split: its first day runs to 24:00 and
  * every following day it covers starts at 0 (a runaway that was later closed spans at most `maxDays`).
  * An open entry is one span on its clock-in day, open.
  */
@@ -80,7 +85,7 @@ export function actualSpans(entries: readonly ActualEntry[], tz: string, todaySt
     const day = todayStrInTz(tz, inAt);
     const startMin = tzMinutesOfDay(inAt, tz);
     const push = (dayStr: string, s: number, en: number | null) => {
-      if (dayStr >= todayStr) return;
+      if (dayStr > todayStr) return;
       out.push({ profileId: e.profileId, name, jobId: e.jobId as string, dayStr, startMin: s, endMin: en });
     };
     if (!e.clockOut) {
@@ -253,9 +258,10 @@ export function unpackActuals(p: ActualsPayload | null | undefined): ActualSpan[
 /** A block the grid draws on a past day: a job's day (its own hours, else its usual) or a visit. */
 export type PlanBlock = { key: string; jobId: string | null; dayStr: string; startMin: number; endMin: number; kind: "job" | "visit" };
 
-/** One stretch a person worked: minutes past midnight; `open` = never clocked out (it runs to an end
- *  drawn for display: the block's end, or an hour for a ghost). */
-export type WorkedSpan = { startMin: number; endMin: number; open: boolean };
+/** One stretch a person worked: minutes past midnight; `open` = no clock-out yet (it runs to an end
+ *  drawn for display: the block's end, or an hour for a ghost); `running` = open on TODAY, still on the
+ *  clock, drawn to now and never faded (only ever present, and true, on such a stretch). */
+export type WorkedSpan = { startMin: number; endMin: number; open: boolean; running?: true };
 
 /** A person on a worked block, in their own color, with their merged stretches. */
 export type WorkedPerson = {
@@ -330,16 +336,17 @@ function firstOf(name: string): string {
 
 /**
  * EACH PERSON'S STRETCHES, merged: sorted, overlapping or touching intervals unioned (a switch-back
- * or a leftover duplicate pair counts once). `openEnd(start)` is where an open (never clocked out)
- * stretch is drawn to. People sort by their first clock-in.
+ * or a leftover duplicate pair counts once). `openEnd(start)` is where an open stretch is drawn to;
+ * `running` says the spans are today's, so an open one is a punch still on the clock, not a runaway.
+ * People sort by their first clock-in.
  */
-export function mergePeople(spans: readonly ActualSpan[], openEnd: (startMin: number) => number): WorkedPerson[] {
+export function mergePeople(spans: readonly ActualSpan[], openEnd: (startMin: number) => number, running = false): WorkedPerson[] {
   const byPerson = new Map<string, { name: string; iv: WorkedSpan[] }>();
   for (const s of spans) {
     const p = byPerson.get(s.profileId) ?? { name: s.name, iv: [] };
     const open = s.endMin == null;
     const end = open ? Math.max(s.startMin + 1, openEnd(s.startMin)) : Math.max(s.startMin + 1, s.endMin as number);
-    p.iv.push({ startMin: s.startMin, endMin: end, open });
+    p.iv.push(open && running ? { startMin: s.startMin, endMin: end, open, running: true } : { startMin: s.startMin, endMin: end, open });
     byPerson.set(s.profileId, p);
   }
   const out: WorkedPerson[] = [];
@@ -352,8 +359,11 @@ export function mergePeople(spans: readonly ActualSpan[], openEnd: (startMin: nu
         if (iv.endMin > last.endMin) {
           last.endMin = iv.endMin;
           last.open = iv.open;
+          if (iv.running) last.running = true;
+          else delete last.running;
         } else if (iv.endMin === last.endMin) {
           last.open = last.open || iv.open;
+          if (iv.running) last.running = true;
         }
       } else {
         merged.push({ ...iv });
@@ -374,9 +384,12 @@ export function mergePeople(spans: readonly ActualSpan[], openEnd: (startMin: nu
   return out.sort((a, b) => a.startMin - b.startMin || a.name.localeCompare(b.name));
 }
 
-/** One person's part of a sentence: "Erik 10–7:30", "Erik 8–12, 1–5", "Erik in at 10, never clocked out". */
+/** One person's part of a sentence: "Erik 10–7:30", "Erik 8–12, 1–5", "Erik in at 10, never clocked out",
+ *  and on today "Erik on the clock since 10". */
 function personPart(p: WorkedPerson): string {
-  const parts = p.spans.map((s) => (s.open ? `in at ${clockShort(s.startMin)}, never clocked out` : `${clockShort(s.startMin)}–${clockShort(s.endMin)}`));
+  const parts = p.spans.map((s) =>
+    s.open ? (s.running ? `on the clock since ${clockShort(s.startMin)}` : `in at ${clockShort(s.startMin)}, never clocked out`) : `${clockShort(s.startMin)}–${clockShort(s.endMin)}`,
+  );
   return `${p.first} ${parts.join(", ")}`;
 }
 
@@ -410,20 +423,24 @@ export function blockSentence(b: { startMin: number; endMin: number }, a: Pick<B
 }
 
 /**
- * THE BLOCKS AND WHAT HAPPENED IN THEM. `blocks` are exactly the ones the grid draws on past days;
- * `spans` the past-day stretches (actualSpans). Returns each block's actual by its key, and the groups
- * of work on a (job, day) that no drawn block took (part D's ghosts, when nothing was booked).
+ * THE BLOCKS AND WHAT HAPPENED IN THEM. `blocks` are exactly the ones the grid draws on past days and
+ * today; `spans` the stretches through today (actualSpans); `nowMin` today's minute on the company's
+ * clock (a running punch is drawn to it; a block on today is judged only once its booked end has
+ * passed it — left out, today counts as not begun: nothing hollow, nothing over or short). Returns each
+ * block's actual by its key, and the groups of work on a (job, day) that no drawn block took (part D's
+ * ghosts, when nothing was booked).
  */
-export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly ActualSpan[]; todayStr: string }): {
+export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly ActualSpan[]; todayStr: string; nowMin?: number }): {
   byKey: Map<string, BlockActual>;
   unplanned: UnplannedGroup[];
 } {
+  const nowMin = p.nowMin ?? 0;
   // Only a block ON A JOB is judged: time is clocked to jobs, so a visit with no job (a pre-sale
   // inspection) has nothing to be compared with, and "No time clocked to this job" would be a false zero.
-  const past = p.blocks.filter((b) => b.dayStr < p.todayStr && !!b.jobId);
+  const judged = p.blocks.filter((b) => b.dayStr <= p.todayStr && !!b.jobId);
   const jobBlock = new Map<string, PlanBlock>();
   const visitBlock = new Map<string, PlanBlock>();
-  for (const b of past) {
+  for (const b of judged) {
     const k = `${b.jobId}|${b.dayStr}`;
     if (b.kind === "job") {
       if (!jobBlock.has(k)) jobBlock.set(k, b);
@@ -431,7 +448,7 @@ export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly 
   }
   const groups = new Map<string, ActualSpan[]>();
   for (const s of p.spans) {
-    if (!s.jobId || s.dayStr >= p.todayStr) continue;
+    if (!s.jobId || s.dayStr > p.todayStr) continue;
     const k = `${s.jobId}|${s.dayStr}`;
     const g = groups.get(k) ?? [];
     g.push(s);
@@ -444,13 +461,15 @@ export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly 
     if (b) taken.set(b.key, [...(taken.get(b.key) ?? []), ...g]);
     else {
       const [jobId, dayStr] = k.split("|");
-      unplanned.push({ jobId, dayStr, people: mergePeople(g, (s) => s + 60) });
+      const today = dayStr === p.todayStr;
+      unplanned.push({ jobId, dayStr, people: mergePeople(g, (s) => (today ? Math.max(s + 1, nowMin) : s + 60), today) });
     }
   }
   const byKey = new Map<string, BlockActual>();
-  for (const b of past) {
+  for (const b of judged) {
     const g = taken.get(b.key) ?? [];
-    const people = mergePeople(g, (s) => Math.max(b.endMin, s + 15));
+    const today = b.dayStr === p.todayStr;
+    const people = mergePeople(g, (s) => (today ? Math.max(s + 1, nowMin) : Math.max(b.endMin, s + 15)), today);
     let lo = b.startMin;
     let hi = b.endMin;
     for (const person of people) for (const s of person.spans) {
@@ -458,13 +477,17 @@ export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly 
       hi = Math.max(hi, s.endMin);
     }
     if (!people.length) {
+      // Today's block is hollow only once its booked time has passed: at 7 AM a 9-to-5 is still ahead.
+      if (today && nowMin < b.endMin) continue;
       const a = { people, lateMin: null, overMin: null, shortMin: null };
       byKey.set(b.key, { ...a, state: "hollow", extent: { lo, hi }, sentence: blockSentence(b, a) });
       continue;
     }
     const firstIn = Math.min(...people.map((x) => x.startMin));
     const neverOut = people.some((x) => x.endMin == null);
-    const lastOut = neverOut ? null : Math.max(...people.map((x) => x.endMin as number));
+    // An out is final on a past day; on today only once the booked end has passed (back at 1 after 12).
+    const settled = !neverOut && (!today || nowMin >= b.endMin);
+    const lastOut = settled ? Math.max(...people.map((x) => x.endMin as number)) : null;
     const a = {
       people,
       lateMin: firstIn - b.startMin,
@@ -484,19 +507,21 @@ export type Ghost = {
   startMin: number;
   /** The latest out; null when someone never clocked out. */
   endMin: number | null;
-  /** Who, each with their stretches (an open one drawn an hour long, and faded). */
+  /** Who, each with their stretches (a past day's open one drawn an hour long and faded; today's
+   *  running one drawn to now). */
   people: WorkedPerson[];
 };
 
 /**
- * GHOSTS (part D): a (job, past day) with clocked time and NO booking that day. `booked` holds
+ * GHOSTS (part D): a (job, day through today) with clocked time and NO booking that day. `booked` holds
  * "jobId|YYYY-MM-DD" for every day a job was booked, built from the raw data (lib/schedule/booked-days),
- * never from what the grid happens to draw. Today and later never get one.
+ * never from what the grid happens to draw. A day after today never gets one; today's is work in
+ * progress, a running punch drawn to `nowMin`.
  */
-export function ghostsFor(spans: readonly ActualSpan[], booked: ReadonlySet<string>, todayK: string): Ghost[] {
+export function ghostsFor(spans: readonly ActualSpan[], booked: ReadonlySet<string>, todayK: string, nowMin = 0): Ghost[] {
   const groups = new Map<string, ActualSpan[]>();
   for (const s of spans) {
-    if (!s.jobId || s.dayStr >= todayK) continue;
+    if (!s.jobId || s.dayStr > todayK) continue;
     const k = `${s.jobId}|${s.dayStr}`;
     if (booked.has(k)) continue;
     const g = groups.get(k) ?? [];
@@ -506,7 +531,8 @@ export function ghostsFor(spans: readonly ActualSpan[], booked: ReadonlySet<stri
   const out: Ghost[] = [];
   for (const [k, g] of groups) {
     const [jobId, dayStr] = k.split("|");
-    const people = mergePeople(g, (s) => s + 60);
+    const today = dayStr === todayK;
+    const people = mergePeople(g, (s) => (today ? Math.max(s + 1, nowMin) : s + 60), today);
     const neverOut = people.some((x) => x.endMin == null);
     out.push({
       jobId,
@@ -520,9 +546,14 @@ export function ghostsFor(spans: readonly ActualSpan[], booked: ReadonlySet<stri
 }
 
 /** Who worked, in words, for a ghost's sheet and the day drill: "Brian 11:04 AM–1:46 PM · Erik
- *  12:30–5:30 PM" ("in at 7:00 AM, never clocked out" for a runaway). */
+ *  12:30–5:30 PM" ("in at 7:00 AM, never clocked out" for a runaway; "on the clock since 7:00 AM" today). */
 export function peopleWords(people: readonly WorkedPerson[]): string {
   return people
-    .map((p) => `${p.first} ${p.spans.map((s) => (s.open ? `in at ${clockWords(s.startMin)}, never clocked out` : rangeWords(s.startMin, s.endMin))).join(", ")}`)
+    .map(
+      (p) =>
+        `${p.first} ${p.spans
+          .map((s) => (s.open ? (s.running ? `on the clock since ${clockWords(s.startMin)}` : `in at ${clockWords(s.startMin)}, never clocked out`) : rangeWords(s.startMin, s.endMin)))
+          .join(", ")}`,
+    )
     .join(" · ");
 }

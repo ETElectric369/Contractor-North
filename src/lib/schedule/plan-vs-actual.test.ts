@@ -35,6 +35,7 @@ import { bookedKeys } from "./booked-days";
  */
 const LA = "America/Los_Angeles";
 const TODAY = "2026-09-28";
+const TOMORROW = "2026-09-29";
 const at = (ymd: string, hm: string) => tzDateTimeUtc(ymd, hm, LA) as string;
 const ERIK = { profileId: "p-erik", name: "Erik Taylor" };
 const JIMMY = { profileId: "p-jimmy", name: "Jimmy Ruiz" };
@@ -56,12 +57,13 @@ const block = (key: string, jobId: string | null, dayStr: string, startMin: numb
 const run = (blocks: PlanBlock[], entries: ActualEntry[]) => planVsActual({ blocks, spans: actualSpans(entries, LA, TODAY), todayStr: TODAY });
 
 describe("the entries, as past-day spans on the company's clock", () => {
-  it("an entry lands on its Pacific day and minutes; no job, today and later are dropped", () => {
+  it("an entry lands on its Pacific day and minutes; today is drawn; no job and days after today are dropped", () => {
     const spans = actualSpans(
       [
         entry(ERIK, "j46", "2026-09-22", "10:00", "18:00"),
         entry(ERIK, null, "2026-09-22", "07:00", "08:00"),
         entry(ERIK, "j46", TODAY, "08:00", "09:00"),
+        entry(ERIK, "j46", TOMORROW, "08:00", "09:00"),
         // 8:30 PM Pacific on the 22nd is the 23rd in UTC: it lands on the Pacific day.
         entry(JIMMY, "j46", "2026-09-22", "20:30", "21:30"),
       ],
@@ -70,6 +72,7 @@ describe("the entries, as past-day spans on the company's clock", () => {
     );
     expect(spans.map((s) => [s.profileId, s.dayStr, s.startMin, s.endMin])).toEqual([
       ["p-erik", "2026-09-22", 600, 1080],
+      ["p-erik", TODAY, 480, 540],
       ["p-jimmy", "2026-09-22", 1230, 1290],
     ]);
   });
@@ -82,13 +85,16 @@ describe("the entries, as past-day spans on the company's clock", () => {
     ]);
   });
 
-  it("a runaway later closed covers its days, at most a week; a tail that reaches today is not drawn", () => {
+  it("a runaway later closed covers its days, at most a week; its tail on today is drawn, a tail past today is not", () => {
     const spans = actualSpans([entry(ERIK, "j9", "2026-09-25", "08:00", "10:00", TODAY)], LA, TODAY);
     expect(spans.map((s) => [s.dayStr, s.startMin, s.endMin])).toEqual([
       ["2026-09-25", 480, 1440],
       ["2026-09-26", 0, 1440],
       ["2026-09-27", 0, 1440],
+      [TODAY, 0, 600],
     ]);
+    const past = actualSpans([entry(ERIK, "j9", "2026-09-26", "08:00", "10:00", TOMORROW)], LA, TODAY);
+    expect(past.map((s) => s.dayStr)).toEqual(["2026-09-26", "2026-09-27", TODAY]);
   });
 
   it("a spring-forward day reads the wall clock: 1:30 AM to 4:00 AM is drawn 1:30 to 4", () => {
@@ -211,7 +217,9 @@ describe("the calendar reads it and draws it (source)", () => {
     expect(q).toContain('.gte("clock_in", actualsFromIso)');
     expect(panel).toContain("const actualsFromIso = tzDayStartUtc(");
     expect(q).not.toContain('.gte("clock_in", jobFrom)');
-    expect(q).toContain('.lt("clock_in", tzDayStartUtc(todayStr, tz).toISOString())');
+    // Through today (2026-10-26): the read stops at the start of tomorrow on the company's clock.
+    expect(q).toContain('.lt("clock_in", tzDayStartUtc(tomorrowStr, tz).toISOString())');
+    expect(panel).toContain("const tomorrowStr = new Date(Date.parse(`${todayStr}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);");
     expect(q).toContain('.order("clock_in", { ascending: false })');
     // Paged, with a unique tiebreak, because a .limit() above PostgREST's ceiling can't see the cut.
     expect(q).toContain('.order("id", { ascending: false })');
@@ -241,9 +249,13 @@ describe("the calendar reads it and draws it (source)", () => {
   it("hollow is decided before the person filter; only days loaded whole are judged; blank is not zero", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
     expect(view).toContain('return { people, hollow: a.state === "hollow", sentence: a.sentence };');
-    expect(view).toContain("(k: string) => clockInUse && k < todayK && (!actualsCappedBefore || k >= actualsCappedBefore)");
+    expect(view).toContain("(k: string) => clockInUse && k <= todayK && (!actualsCappedBefore || k >= actualsCappedBefore)");
+    // Today's minute rides into the judging and the ghosts: a running punch is drawn to it.
+    expect(view).toContain("planVsActual({ blocks: judgedBlocks, spans, todayStr: todayK, nowMin: nowMinToday ?? undefined })");
     expect(view).toContain("Clocked time loads back to {dayWords(actualsCappedBefore)}.");
-    expect(view).toContain("Clocked time didn&apos;t load, so past days show only what was booked.");
+    expect(view).toContain("Clocked time didn&apos;t load, so today and past days show only what was booked.");
+    // The schedule re-reads when the tab comes back (2026-10-26): a running punch's bar never outlives its clock-out on a stale tab.
+    expect(read("src/app/(app)/schedule/calendar-panel.tsx")).toContain("<RefreshOnVisible />");
     // A visit on a job draws the time it took, but is never drawn hollow (a city inspection or a
     // meeting is booked time nobody clocks); only a job's day is.
     expect(view).toContain('const actual = visitActual?.state === "worked" ? gridActualOf(visitActual, personFilter) : undefined;');
@@ -252,12 +264,12 @@ describe("the calendar reads it and draws it (source)", () => {
 
   it("ghosts: booked from the raw rows, following the person filter, dashed on the grid and the month, a row in the day drill", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
-    expect(view).toContain("for (const g of ghostsFor(spans, booked, todayK)) {");
+    expect(view).toContain("for (const g of ghostsFor(spans, booked, todayK, nowMinToday ?? undefined)) {");
     expect(view).toContain("if (!actualsWhole(g.dayStr) || g.dayStr < winFrom) continue;");
     expect(view).toContain("const mine = g.people.filter((p) => p.profileId === personFilter);");
     expect(view).toContain('const GHOST_GRID_TONE = "border-2 border-dashed border-slate-400 bg-white/60 text-slate-700";');
     expect(view).toContain('ghost: "border border-dashed border-slate-400 bg-white/60 text-slate-700"');
-    expect(view).toContain("<GhostRow key={`ghost-${g.jobId}`} day={dayK} ghost={g} canEdit={canEdit} />");
+    expect(view).toContain("<GhostRow key={`ghost-${g.jobId}`} day={dayK} ghost={g} canEdit={canEdit} today={dayK === todayStrInTz(tz)} />");
     // A proposed visit keeps its type's tone with a thin dashed border, faded: never a ghost's look.
     expect(view).toContain('${a.status === "proposed" ? " border-dashed opacity-75" : ""}');
   });
@@ -407,9 +419,47 @@ describe("the other real shapes", () => {
     expect(a.sentence).toBe("Booked 9–5 · Erik in at 10, never clocked out · 1h late");
   });
 
-  it("only days before today are judged", () => {
-    const res = run([block("k", "j9", TODAY, 540, 1020)], []);
-    expect(res.byKey.has("k")).toBe(false);
+  it("a day after today is never judged; today's block waits for its booked end before it is hollow", () => {
+    expect(run([block("t", "j9", TOMORROW, 540, 1020)], []).byKey.has("t")).toBe(false);
+    const todayBlock = block("k", "j9", TODAY, 540, 1020);
+    // 7 AM: the 9-to-5 is still ahead — not judged, so the block draws as booked.
+    expect(planVsActual({ blocks: [todayBlock], spans: [], todayStr: TODAY, nowMin: 420 }).byKey.has("k")).toBe(false);
+    // nowMin left out: today counts as not begun.
+    expect(run([todayBlock], []).byKey.has("k")).toBe(false);
+    // 6 PM: the booked time has passed and nobody clocked to it — hollow, like a past day.
+    const evening = planVsActual({ blocks: [todayBlock], spans: [], todayStr: TODAY, nowMin: 1080 }).byKey.get("k")!;
+    expect(evening.state).toBe("hollow");
+    expect(evening.sentence).toBe("Booked 9–5 · No time clocked to this job");
+  });
+
+  it("today, a punch still running: drawn from its in to now, 'on the clock since', late said, over and short not yet", () => {
+    const spans = actualSpans([entry(ERIK, "j9", TODAY, "10:00", null)], LA, TODAY);
+    const a = planVsActual({ blocks: [block("k", "j9", TODAY, 540, 1020)], spans, todayStr: TODAY, nowMin: 780 }).byKey.get("k")!;
+    expect(a.state).toBe("worked");
+    expect(a.people[0].spans).toEqual([{ startMin: 600, endMin: 780, open: true, running: true }]);
+    expect(a.people[0].endMin).toBeNull();
+    expect([a.lateMin, a.overMin, a.shortMin]).toEqual([60, null, null]);
+    expect(a.extent).toEqual({ lo: 540, hi: 1020 });
+    expect(a.sentence).toBe("Booked 9–5 · Erik on the clock since 10 · 1h late");
+  });
+
+  it("today, everyone out: short and over wait for the booked end (back at 1 after 12), then are said", () => {
+    const spans = actualSpans([entry(ERIK, "j9", TODAY, "09:00", "12:00")], LA, TODAY);
+    const blocks = [block("k", "j9", TODAY, 540, 1020)];
+    const noon = planVsActual({ blocks, spans, todayStr: TODAY, nowMin: 750 }).byKey.get("k")!;
+    expect(noon.people[0].spans).toEqual([{ startMin: 540, endMin: 720, open: false }]);
+    expect([noon.lateMin, noon.overMin, noon.shortMin]).toEqual([0, null, null]);
+    expect(noon.sentence).toBe("Booked 9–5 · Erik 9–12");
+    const evening = planVsActual({ blocks, spans, todayStr: TODAY, nowMin: 1100 }).byKey.get("k")!;
+    expect([evening.overMin, evening.shortMin]).toEqual([-300, 300]);
+    expect(evening.sentence).toBe("Booked 9–5 · Erik 9–12 · 5h short");
+  });
+
+  it("a past day's open punch is still a runaway: drawn to the block's end, open and not running, 'never clocked out'", () => {
+    const spans = actualSpans([entry(ERIK, "j9", "2026-09-23", "10:00", null)], LA, TODAY);
+    const a = planVsActual({ blocks: [block("k", "j9", "2026-09-23", 540, 1020)], spans, todayStr: TODAY, nowMin: 780 }).byKey.get("k")!;
+    expect(a.people[0].spans).toEqual([{ startMin: 600, endMin: 1020, open: true }]);
+    expect(a.sentence).toBe("Booked 9–5 · Erik in at 10, never clocked out · 1h late");
   });
 });
 
@@ -490,7 +540,14 @@ describe("ghosts: work nobody booked (SV-ghost)", () => {
     expect(g[0].people[1].spans).toEqual([{ startMin: 750, endMin: 810, open: true }]);
   });
 
-  it("today and later never get a ghost; a punch on no job is never one", () => {
-    expect(ghosts([entry(ERIK, "j9", TODAY, "08:00", "09:00"), entry(ERIK, null, "2026-09-22", "08:00", "09:00")])).toEqual([]);
+  it("a day after today never gets a ghost; a punch on no job is never one; today's running punch is one, drawn to now", () => {
+    expect(ghosts([entry(ERIK, "j9", TOMORROW, "08:00", "09:00"), entry(ERIK, null, "2026-09-22", "08:00", "09:00")])).toEqual([]);
+    const g = ghostsFor(actualSpans([entry(ERIK, "j9", TODAY, "08:00", null)], LA, TODAY), booked({}), TODAY, 615);
+    expect(g).toHaveLength(1);
+    expect([g[0].dayStr, g[0].startMin, g[0].endMin]).toEqual([TODAY, 480, null]);
+    expect(g[0].people[0].spans).toEqual([{ startMin: 480, endMin: 615, open: true, running: true }]);
+    expect(peopleWords(g[0].people)).toBe("Erik on the clock since 8:00 AM");
+    // Without today's minute, a running punch is a sliver, never a false hour.
+    expect(ghostsFor(actualSpans([entry(ERIK, "j9", TODAY, "08:00", null)], LA, TODAY), booked({}), TODAY)[0].people[0].spans).toEqual([{ startMin: 480, endMin: 481, open: true, running: true }]);
   });
 });

@@ -116,7 +116,7 @@ describe("where the day's rows come from, and where the chips draw", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
     // Today and later (and a past day whose clocked time isn't loaded): who's on it. A past day judged
     // shows what happened instead (its bars, part C), never the plan's chips.
-    expect(view).toContain("crew: judged ? null : jobCrewOn(job, k)");
+    expect(view).toContain("crew: judged && k < todayK ? null : jobCrewOn(job, k)");
     expect(view).toContain("crew: actual ? null : visitCrewOn(a, k)");
     expect(view).toContain("crew={jobCrewOn ? jobCrewOn(job, dayK) : undefined}");
     expect(view).toContain("crew={visitCrewOn ? visitCrewOn(a, dayK) : undefined}");

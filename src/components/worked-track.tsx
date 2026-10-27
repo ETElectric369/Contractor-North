@@ -1,7 +1,7 @@
 import type { WorkedPerson } from "@/lib/schedule/plan-vs-actual";
 
 /**
- * THE WORKED TRACK (Wave 2, SV-actual; TEXT TO VISUAL): what happened on a past day, as a small
+ * THE WORKED TRACK (Wave 2, SV-actual; TEXT TO VISUAL): what happened on a day through today, as a small
  * horizontal track under the words. The booked span is an outline; each person's stretches are bars in
  * their own color beneath it (the same color as their chip on the tile and their bar on the grid), with
  * their initials; the sentence stays as the label for whoever reads. A ghost (work nobody booked) has no
@@ -61,7 +61,8 @@ export function WorkedTrack({
                   style={{
                     left: pct(s.startMin),
                     width: wid(s.startMin, s.endMin),
-                    ...(s.open ? { maskImage: "linear-gradient(to right, black 55%, transparent)", WebkitMaskImage: "linear-gradient(to right, black 55%, transparent)" } : {}),
+                    // A runaway fades; a punch still running today is solid to now.
+                    ...(s.open && !s.running ? { maskImage: "linear-gradient(to right, black 55%, transparent)", WebkitMaskImage: "linear-gradient(to right, black 55%, transparent)" } : {}),
                   }}
                 />
               ))}

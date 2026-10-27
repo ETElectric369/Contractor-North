@@ -683,19 +683,25 @@ export function CalendarView({
     [tz, wdStartMin, wdEndMin, ownHours],
   );
 
-  /* ── WHAT HAPPENED (Wave 2, SV-actual) ───────────────────────────────────────────────────────────
-     The past days' clocked time, matched to EXACTLY the blocks the grid draws (every job's days, each
+  /* ── WHAT HAPPENED (Wave 2, SV-actual; today too since 2026-10-26) ──────────────────────────────
+     Past days' and today's clocked time, matched to EXACTLY the blocks the grid draws (every job's days, each
      by its own hours; every visit on a job), for EVERYONE: hollow is decided before the person filter.
      Only days that are loaded whole are judged; with no clocked time in the window at all (a company
      that doesn't use the clock), nothing is: missing data is never "nobody went". */
   const spans = useMemo(() => unpackActuals(actuals), [actuals]);
   const clockInUse = spans.length > 0;
-  /** Is this past day's clocked time loaded whole (so a block with none of it is truly hollow)? */
+  /** Is this day's (through today) clocked time loaded whole (so a block with none of it is truly hollow)? */
   const actualsWhole = useCallback(
-    (k: string) => clockInUse && k < todayK && (!actualsCappedBefore || k >= actualsCappedBefore),
+    (k: string) => clockInUse && k <= todayK && (!actualsCappedBefore || k >= actualsCappedBefore),
     [clockInUse, todayK, actualsCappedBefore],
   );
-  const pastBlocks = useMemo(() => {
+  /** Today's minute on the company's clock: a running punch is drawn to it, and today's blocks are
+   *  judged only once their booked end has passed it. Null when `now` is not today there. */
+  const nowMinToday = useMemo(() => {
+    const d = new Date(now);
+    return todayStrInTz(tz, d) === todayK ? tzMinutesOfDay(d, tz) : null;
+  }, [now, tz, todayK]);
+  const judgedBlocks = useMemo(() => {
     const out: PlanBlock[] = [];
     const seen = new Set<string>();
     const add = (b: PlanBlock) => {
@@ -706,7 +712,7 @@ export function CalendarView({
     for (const job of jobs) {
       for (const keys of jobDayRanges(job, segByJob.get(job.id), dayOf)) {
         for (const k of keys) {
-          if (k >= todayK || k < winFrom) continue;
+          if (k > todayK || k < winFrom) continue;
           add({ key: `j-${job.id}-${k}`, jobId: job.id, dayStr: k, ...jobBlockOn(job, k), kind: "job" });
         }
       }
@@ -715,7 +721,7 @@ export function CalendarView({
       // Drawn visits only: not absorbed into their job, not a call (a call is pinned, not a block).
       if ((a as { absorbed?: boolean }).absorbed || a.type === "call" || !a.job_id) continue;
       for (const k of apptSpanDays(a, dayOf)) {
-        if (k >= todayK || k < winFrom) continue;
+        if (k > todayK || k < winFrom) continue;
         add({ key: `a-${a.id}-${k}`, jobId: a.job_id, dayStr: k, ...apptDayMinutes(a, k, dayOf, minOf, { startMin: wdStartMin, endMin: wdEndMin }), kind: "visit" });
       }
     }
@@ -723,10 +729,10 @@ export function CalendarView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs, segByJob, appointments, jobBlockOn, actualsWhole, todayK, winFrom, tz, wdStartMin, wdEndMin]);
   const pva = useMemo(
-    () => (clockInUse ? planVsActual({ blocks: pastBlocks, spans, todayStr: todayK }) : null),
-    [clockInUse, pastBlocks, spans, todayK],
+    () => (clockInUse ? planVsActual({ blocks: judgedBlocks, spans, todayStr: todayK, nowMin: nowMinToday ?? undefined }) : null),
+    [clockInUse, judgedBlocks, spans, todayK, nowMinToday],
   );
-  /** A past day's worked time for the day drill's card (the track under the block): the booked span
+  /** A day's worked time for the day drill's card (the track under the block): the booked span
    *  and who clocked in (person-filtered, like the grid), with the sentence. Null when not judged. */
   const dayActualFor = useCallback(
     (job: CalJob, k: string) => {
@@ -742,16 +748,16 @@ export function CalendarView({
     [actualsWhole, pva, personFilter, jobBlockOn],
   );
   /* ── WORK NOBODY BOOKED (Wave 2, SV-ghost) ────────────────────────────────────────────────────────
-     A job's past day with clocked time and NO booking that day draws as a dashed ghost. "Booked" is
-     read from the raw rows (lib/schedule/booked-days), never from what the grid draws after the person
-     filter. Only days loaded whole; today and later never get one. */
+     A job's day (through today) with clocked time and NO booking that day draws as a dashed ghost. "Booked"
+     is read from the raw rows (lib/schedule/booked-days), never from what the grid draws after the person
+     filter. Only days loaded whole; a day after today never gets one. */
   const booked = useMemo(() => bookedKeys({ segments, jobs, appointments, tz }), [segments, jobs, appointments, tz]);
   /** The jobs the clocked time names (its job embed): a ghost can name a job the window's reads didn't bring. */
   const actualJobs = useMemo(() => new Map((actuals?.jobs ?? []).map((j) => [j.id, j])), [actuals]);
   const ghostsByDay = useMemo(() => {
     const m = new Map<string, GhostTarget[]>();
     if (!clockInUse) return m;
-    for (const g of ghostsFor(spans, booked, todayK)) {
+    for (const g of ghostsFor(spans, booked, todayK, nowMinToday ?? undefined)) {
       if (!actualsWhole(g.dayStr) || g.dayStr < winFrom) continue;
       const known = actualJobs.get(g.jobId);
       const job = jobs.find((j) => j.id === g.jobId);
@@ -765,7 +771,7 @@ export function CalendarView({
       m.set(g.dayStr, [...(m.get(g.dayStr) ?? []), t]);
     }
     return m;
-  }, [clockInUse, spans, booked, todayK, actualsWhole, winFrom, actualJobs, jobs]);
+  }, [clockInUse, spans, booked, todayK, nowMinToday, actualsWhole, winFrom, actualJobs, jobs]);
   /* The tapped block's sheet target, looked up in what's loaded now (so the refresh after a save shows
      the sheet what was saved; a job whose date was cleared, or a ghost booked into a real block, simply
      leaves, and the sheet with it). */
@@ -810,7 +816,9 @@ export function CalendarView({
     for (const g of ghostsOn(k)) {
       const ends = g.people.flatMap((p) => p.spans.map((s) => s.endMin));
       const startMin = Math.min(...g.people.map((p) => p.startMin));
-      const endMin = Math.max(startMin + 15, ...ends);
+      // Today's punch still running: the pill is an open event, drawn to the grid's live now line like its bar.
+      const running = g.people.some((p) => p.spans.some((s) => s.running));
+      const endMin = running ? null : Math.max(startMin + 15, ...ends);
       const who = String(g.customer ?? "").trim();
       events.push({
         id: `g-${g.jobId}-${k}`,
@@ -846,7 +854,9 @@ export function CalendarView({
       return { events, allDay: tray };
     }
     /* A PAST DAY LOADED WHOLE shows what happened (the bars, hollow) instead of the crew as planned;
-       today and later, and a past day whose clocked time isn't loaded, show who's on it. */
+       TODAY shows both — who's on it as planned AND the bars of who has clocked in so far (the plan
+       still matters while the day is on); later days, and a past day whose clocked time isn't loaded,
+       show who's on it. */
     const judged = actualsWhole(k);
     for (const { job, pos } of data.jobs) {
       /* THE BLOCK IS WHAT WAS SAVED: its start, and the end its length gives it, in the org's clock
@@ -872,7 +882,7 @@ export function CalendarView({
           place: placeLine({ name: job.name, street: job.address, customer: job.customers?.name })?.text ?? null,
           town: job.city ?? null,
           time: pos ? `${spanShort(startMin, endMin)} · ${pos}` : spanShort(startMin, endMin),
-          crew: judged ? null : jobCrewOn(job, k),
+          crew: judged && k < todayK ? null : jobCrewOn(job, k),
         },
         ...(actual ? { actual } : {}),
         color: JOB_GRID_TONE,
@@ -1308,7 +1318,7 @@ export function CalendarView({
       {/* NOTHING SILENT: the clocked time didn't load, so no past block shows what happened (and
           none is drawn hollow: missing data is not nobody). One quiet line says so. */}
       {actuals === null && (
-        <p className="text-xs text-slate-500">Clocked time didn&apos;t load, so past days show only what was booked.</p>
+        <p className="text-xs text-slate-500">Clocked time didn&apos;t load, so today and past days show only what was booked.</p>
       )}
 
       {/* ARMED, AND SAYING SO WHERE THE TAP HAPPENS.
@@ -1856,7 +1866,7 @@ function DayDetail({
               words and the same two doors as its sheet (44px each: the guaranteed door when a ghost is
               squeezed in a week). */}
           {ghosts.map((g) => (
-            <GhostRow key={`ghost-${g.jobId}`} day={dayK} ghost={g} canEdit={canEdit} />
+            <GhostRow key={`ghost-${g.jobId}`} day={dayK} ghost={g} canEdit={canEdit} today={dayK === todayStrInTz(tz)} />
           ))}
         </div>
       </Card>
