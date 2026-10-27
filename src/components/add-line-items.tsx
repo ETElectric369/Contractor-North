@@ -95,6 +95,7 @@ export function AddLineItems({
   measured,
   onAdd,
   className = "",
+  disabled = false,
 }: {
   priceItems?: PriceItemLite[];
   kits?: KitForPicker[];
@@ -102,6 +103,9 @@ export function AddLineItems({
   measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
   onAdd: (lines: DraftLineItem[]) => void;
   className?: string;
+  /** While the document's save is on the wire: the box and the kit chips wait, so a pick cannot
+   *  land mid-flight (the one save model). */
+  disabled?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -166,6 +170,7 @@ export function AddLineItems({
           <Input
             placeholder="Add from Price List — tap to browse, or search…"
             value={query}
+            disabled={disabled}
             onChange={(e) => {
               setQuery(e.target.value);
               setOpen(true);
@@ -264,8 +269,9 @@ export function AddLineItems({
               <button
                 key={k.id}
                 type="button"
+                disabled={disabled}
                 onClick={() => setPickerKit(k)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
               >
                 <ListPlus className="h-3.5 w-3.5" />
                 {k.name}

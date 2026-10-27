@@ -69,8 +69,9 @@ describe("the doors", () => {
     expect(fn).toContain('.delete().eq("id", res.id).eq("status", "draft").select("id")'); // no half-made revision
     expect(fn).toContain("— Revise again.");
     expect(fn).toContain("valid_until: revision ? null : quote.valid_until ?? null,");
-    const page = src("src/app/(app)/quotes/[id]/page.tsx");
-    expect(page).toContain('(q.status === "sent" || q.status === "accepted") && <DuplicateQuoteButton id={q.id} revision />');
+    // cn-v1132: the door lives on the one editor now; the page only reads the row and mounts it.
+    const page = src("src/app/(app)/quotes/estimate-editor.tsx");
+    expect(page).toContain('(status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision />');
     expect(page).toContain("Superseded by{");
     expect(page).toContain("Revises{");
     const button = src("src/app/(app)/quotes/[id]/duplicate-quote-button.tsx");

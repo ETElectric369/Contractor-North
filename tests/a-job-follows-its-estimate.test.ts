@@ -108,11 +108,16 @@ describe("the one rule, and nothing silent", () => {
     expect(fn).toContain('revalidatePath("/schedule")');
     expect(fn).toContain("syncWords(res, lead?.tasks)");
   });
-  it("the quote editor shows what the job's list did after a delete or a rename, and shows what it could not do as an error", () => {
-    const editor = src("src/app/(app)/quotes/[id]/quote-items-editor.tsx");
-    expect(editor).toContain("setSaid(res.said ?? null)");
-    expect(editor).toContain("if (res.note) setError(res.note)");
-    expect(editor).toContain("{said && !detailsOpen && ");
+  it("the estimate editor shows what the job's list did after a delete or a rename, and shows what it could not do as a note", () => {
+    // The one editor (cn-v1132): the save model keeps the words per line (follow) and under the list
+    // after a delete (said); the editor draws them beside the line. Driven in use-quote-writes.test.ts.
+    const model = src("src/app/(app)/quotes/use-quote-writes.ts");
+    expect(model).toContain("const words = { ...(res.said ? { said: res.said } : {}), ...(res.note ? { note: res.note } : {}) };");
+    expect(model).toContain("said: res.said ?? (res.note ?? null),");
+    const editor = src("src/app/(app)/quotes/estimate-editor.tsx");
+    expect(editor).toContain('{follow?.said && <p className="mt-1 text-xs text-slate-500">{follow.said}</p>}');
+    expect(editor).toContain('{follow?.note && <p className="mt-1 text-xs text-amber-700">{follow.note}</p>}');
+    expect(editor).toContain('{state.said && <p className="mt-3 text-sm text-slate-500">{state.said}</p>}');
   });
   it("the rule's writes each select what they wrote", () => {
     const lines = src("src/lib/estimate/sync-job-tasks.ts").split("\n");

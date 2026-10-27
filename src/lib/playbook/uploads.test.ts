@@ -101,8 +101,10 @@ describe("AN UPLOAD MUST SURVIVE CONVERSION — Andrew's plan set 'disappeared' 
     for (const p of pages) {
       const src = readFileSync(p, "utf8");
       expect(/inquir(y:inquiry_id|ies)\([^)]*intake[^)]*\)/.test(src), `${p} must select inquiry intake`).toBe(true);
-      expect(src.includes("IntakeFiles"), `${p} must render IntakeFiles`).toBe(true);
+      // The estimate page hands the paths to the one editor (cn-v1132), which draws them; the others draw them in place.
+      expect(src.includes("IntakeFiles") || src.includes("intakePaths(q.inquiry.intake)"), `${p} must render IntakeFiles or hand its paths to the editor`).toBe(true);
     }
+    expect(readFileSync("src/app/(app)/quotes/estimate-editor.tsx", "utf8")).toContain("<IntakeFiles inquiryId={savedPage.lead.id} paths={savedPage.lead.intakePaths} />");
   });
 });
 

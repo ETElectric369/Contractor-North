@@ -19,19 +19,20 @@ const body = (text: string, fn: string): string => {
 };
 
 describe("the door on the estimate", () => {
-  const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
+  // The breakdown is the one editor's (cn-v1132): quotes/task-breakdown.tsx serves both estimate pages.
+  const builder = src("src/app/(app)/quotes/task-breakdown.tsx");
   it("sits inside the task breakdown and calls the one action with the line's own breakdown", () => {
-    expect(builder).toContain('import { rememberTaskAsKit } from "../../price-list/kit-actions";');
+    expect(builder).toContain('import { rememberTaskAsKit } from "../price-list/kit-actions";');
     expect(builder).toContain('import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";');
-    const breakdown = builder.slice(builder.indexOf("function TaskBreakdown("), builder.indexOf("export function QuoteBuilder("));
+    const breakdown = builder.slice(builder.indexOf("export function TaskBreakdown("));
     expect(breakdown).toContain("Remember As A Kit");
     expect(breakdown).toContain("rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d, category: kitCategory.trim() || null })");
     // The pure rule speaks BEFORE the round trip, so the door never opens onto a refusal.
     expect(breakdown).toContain("kitFromTaskDetail(d, { name: kitName || \"kit\", unit: kitUnit })");
   });
-  it("the page hands the builder the task kits by name", () => {
-    const page = src("src/app/(app)/quotes/new/page.tsx");
-    expect(page).toContain("taskKits={taskKits}");
+  it("both pages hand the editor the task kits by name", () => {
+    expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("taskKits,");
+    expect(src("src/app/(app)/quotes/[id]/page.tsx")).toContain("taskKits: kitsRead.kits,");
   });
 });
 
@@ -97,17 +98,18 @@ describe("Start The Job on a visit", () => {
 describe("the plain kit pickers never offer a task kit", () => {
   it("the new estimate, the estimate editor and the invoice keep task kits out of Add From Kit", () => {
     expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("partsKitsOnly(kits ?? [])");
-    expect(src("src/app/(app)/quotes/[id]/page.tsx")).toContain("kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as never}");
+    expect(src("src/app/(app)/quotes/[id]/page.tsx")).toContain("kits: (kitDoors ? partsKitsOnly(kits ?? []) : []) as never,");
     expect(src("src/app/(app)/billing/[id]/page.tsx")).toContain("kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as any}");
   });
-  it("the builder keys a task's breakdown by the task, not the row, and takes the Kits switch", () => {
-    const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
-    expect(builder).toContain("key={it.detail.task_id || `line-${idx}`}");
-    expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("kitsOn={kitDoors}");
+  it("the editor keys a task's breakdown by the task, not the row, and takes the Kits switch on both pages", () => {
+    const editor = src("src/app/(app)/quotes/estimate-editor.tsx");
+    expect(editor).toContain("key={it.detail.task_id || `line-${it.key}`}");
+    expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("kitsOn: kitDoors,");
+    expect(src("src/app/(app)/quotes/[id]/page.tsx")).toContain("kitsOn: kitDoors,");
   });
   it("the units box on a kit-built line re-derives the kit through the one rule and renames the line", () => {
-    const builder = src("src/app/(app)/quotes/new/quote-builder.tsx");
-    const breakdown = builder.slice(builder.indexOf("function TaskBreakdown("), builder.indexOf("export function QuoteBuilder("));
+    const builder = src("src/app/(app)/quotes/task-breakdown.tsx");
+    const breakdown = builder.slice(builder.indexOf("export function TaskBreakdown("));
     expect(breakdown).toContain("reexpandTaskDetail(d, n, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct })");
     expect(breakdown).toContain("description: lineNameWithUnits(line.description, d.units, next.units)");
     expect(breakdown).toContain('aria-label="Units"');

@@ -84,6 +84,6 @@ describe("the doors that send", () => {
     expect(page).not.toContain("<EmailButton");
     expect(body).toContain("<SendButton");
     expect(body).not.toContain("<EmailButton");
-    expect(readFileSync(join(process.cwd(), "src/app/(app)/quotes/[id]/page.tsx"), "utf8")).toContain("<EmailButton");
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/quotes/estimate-editor.tsx"), "utf8")).toContain("<EmailButton");
   });
 });

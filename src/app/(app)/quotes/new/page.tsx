@@ -1,7 +1,11 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { smsReadiness } from "@/lib/sms";
 import { scopeWord } from "@/lib/playbook/scope";
 import type { Answers } from "@/lib/playbook/types";
 import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
+import { captureQuoteId } from "@/lib/inspections";
+import { liveEstimateBehindVisit } from "@/lib/estimate/behind-visit";
 import { kitsReadWords, partsKitsOnly, readTaskKits } from "@/lib/estimate/task-kits";
 import { reportError } from "@/lib/observe";
 import { BackLink } from "@/components/back-link";
@@ -18,16 +22,14 @@ import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
 import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
-import { coerceTaskDetail, taskFlags, taskLines, type TaskBookRow } from "@/lib/estimate/task-lines";
-import { isMissingColumn } from "@/lib/job-tasks";
+import { taskLines, type TaskBookRow } from "@/lib/estimate/task-lines";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
-import { normalizeDocStyle, type EstimateFormat } from "@/lib/doc-style";
+import { normalizeDocStyle } from "@/lib/doc-style";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { playbookForForm } from "@/lib/playbook/parse";
-import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
-import { QuoteBuilder } from "./quote-builder";
+import { EstimateEditor } from "../estimate-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -38,81 +40,23 @@ export default async function NewQuotePage({
 }) {
   const { customer, job, inquiry, capture } = await searchParams;
   const supabase = await createClient();
-  // For the builder's storage-first uploads (#116) — RLS returns only the caller's own org.
+  // For the editor's storage-first uploads (#116) — RLS returns only the caller's own org.
   const { data: ownOrg } = await supabase.from("organizations").select("id").limit(1).maybeSingle();
   const orgId = String((ownOrg as { id?: string } | null)?.id ?? "");
-  // ADOPT-AT-MOUNT (review of cn-v796): if this lead already has an autosaved DRAFT, seed the
-  // builder with its id — a cross-session re-entry (or a different door) must update that one
-  // row, not mint a numbered twin. RLS-scoped; newest draft wins; sessionStorage still refines.
-  const { data: auth } = await supabase.auth.getUser();
-  const draftUserId = auth?.user?.id ?? null;
-  let adoptedDraftId: string | null = null;
-  let adoptedSeed: {
-    customerId?: string | null;
-    docType?: string | null;
-    title?: string | null;
-    description?: string | null;
-    notes?: string | null;
-    taxRate?: number | null;
-    validUntil?: string | null;
-    items?: DraftLineItem[];
-    estimateFormat?: EstimateFormat | null;
-  } | null = null;
+  // ONE DRAFT PER LEAD (review of cn-v796, kept in cn-v1132 without a browser copy): if this lead
+  // already has a draft, this door OPENS IT — a cross-session re-entry, or a different door, must
+  // edit that one row, never mint a numbered twin. The estimate is edited where it lives; nothing is
+  // adopted into the browser. RLS-scoped; newest draft wins.
   if (inquiry) {
-    // The id alone is NOT an adoption (review of the Q-001/E-001 flap): a builder seeded with
-    // an id but default-empty state would autosave that emptiness over the draft's real lines
-    // on the first keystroke. Adopting means inheriting the CONTENT too; a session draft, when
-    // one exists, still restores over this (it may be newer).
-    //
-    // TWO RUNGS for the paper switch's column (quotes.estimate_format, 0395): a deploy precedes
-    // its migration, and a select naming a column that is not there yet fails the WHOLE read —
-    // which here would mint a numbered twin of the draft it could not see. Without the column the
-    // draft adopts as before, with no format of its own.
-    const adoptionSelect = (withFormat: boolean) =>
-      supabase
-        .from("quotes")
-        .select(
-          `id, customer_id, doc_type, title, description, notes, tax_rate, valid_until${withFormat ? ", estimate_format" : ""}, quote_line_items(description, quantity, unit, unit_price, category, sort_order, detail)`,
-        )
-        .eq("inquiry_id", inquiry)
-        .eq("status", "draft")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-    const first = await adoptionSelect(true);
-    const adopted = first.error && isMissingColumn(first.error) ? await adoptionSelect(false) : first;
-    // Through unknown: the select is built from a template, which the client's select-string
-    // parser cannot read into a row type (it is the same row either way).
-    const existing = adopted.data as unknown as {
-      id: string; customer_id: string | null; doc_type: string | null; title: string | null;
-      description: string | null; notes: string | null; tax_rate: number | null; valid_until: string | null;
-      estimate_format?: string | null;
-      quote_line_items?: { description: string; quantity: number; unit: string; unit_price: number; category: string | null; sort_order: number | null; detail?: unknown }[];
-    } | null;
-    if (existing) {
-      const ex = existing;
-      adoptedDraftId = ex.id;
-      adoptedSeed = {
-        customerId: ex.customer_id,
-        docType: ex.doc_type,
-        title: ex.title,
-        description: ex.description,
-        notes: ex.notes,
-        taxRate: ex.tax_rate,
-        validUntil: ex.valid_until,
-        // The draft's own paper format, or null for the company's (the builder's switch reads it).
-        estimateFormat: ex.estimate_format === "tasks" || ex.estimate_format === "detailed" ? ex.estimate_format : null,
-        items: (ex.quote_line_items ?? [])
-          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-          // detail (0386): the task behind a line rides the adoption, or the first autosave drops it.
-          .map((li) => {
-            const d = coerceTaskDetail(li.detail);
-            // The flag is build-time only, so it is rebuilt from the breakdown: an adopted "hours?" line
-            // still says so instead of reading as a $0 somebody chose.
-            return { description: li.description, quantity: li.quantity, unit: li.unit, unit_price: li.unit_price, group: li.category ?? undefined, detail: d, ...(d ? { flag: taskFlags(d) } : {}) };
-          }),
-      };
-    }
+    const { data: existing } = await supabase
+      .from("quotes")
+      .select("id")
+      .eq("inquiry_id", inquiry)
+      .eq("status", "draft")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing?.id) redirect(`/quotes/${existing.id}`);
   }
 
   // ?capture=<appointment id> — an inspection's field capture prefills the
@@ -152,6 +96,13 @@ export default async function NewQuotePage({
       | null
       | undefined;
     if (appt) {
+      // THE VISIT'S ESTIMATE IS OPENED, NEVER TWINNED (S1): a second open of this door, a stale Start
+      // The Estimate link or a second tab must edit the row the visit already became — its first
+      // save would otherwise birth a twin and overwrite the visit's backlink (capture.quote_id, last
+      // writer wins). The same answer the Inspector's Open The Estimate reads; a superseded one opens
+      // its standing revision, and a declined or expired one hands this door back.
+      const standing = await liveEstimateBehindVisit(supabase, captureQuoteId((appt as any).capture));
+      if (standing) redirect(`/quotes/${standing}`);
       typedCapture = parseInspectorCapture((appt as any).capture);
       // THE TYPED ANSWERS GO FIRST, and are labelled as MEASURED (0165). The inspector already
       // stood in front of these numbers; making the estimator re-extract "85 ft" from a sentence
@@ -486,19 +437,6 @@ export default async function NewQuotePage({
       : // A TASK kit (0386) is a task's, not the plain picker's: dropped in there it would add one
         // unit's parts and lose his hours without a word. It is offered on a task (the Inspector).
         partsKitsOnly(kits ?? []);
-  // Deck generator rows (catalog orgs) — the deck price codes as RAW {code, buy, markup_pct}
-  // rows. The office builder prices them client-side through THE markup rule (effectiveMarkupPct
-  // with the selected customer's level + org default), so generator lines re-price when the
-  // customer changes and always agree with the hand-picker on the same page. (The PUBLIC
-  // configurator keeps buildDeckRates' item-markup-only freeze.) The dedupe contract is
-  // first-row-per-code-wins from NEWEST-FIRST rows; the query above orders by description
-  // for the picker, so re-sort the deck subset here.
-  const deckRateRows = catalogMode
-    ? (priceItems ?? [])
-        .filter((p: any) => p.code && (DECK_ESTIMATE_CODES as readonly string[]).includes(p.code))
-        .sort((a: any, b: any) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")))
-        .map((p: any) => ({ code: p.code, buy_price: p.buy_price, markup_pct: p.markup_pct }))
-    : undefined;
 
   return (
     <div>
@@ -532,41 +470,46 @@ export default async function NewQuotePage({
           <p className="mt-0.5 text-sm text-amber-800">{kitsReadWords(kitsRead.state)}</p>
         </div>
       )}
-      <QuoteBuilder
-        initialQuoteId={adoptedDraftId}
-        adoptedSeed={adoptedSeed}
-        draftUserId={draftUserId}
-        orgId={orgId}
-        measured={measured}
-        customers={(customers ?? []).map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          company_name: c.company_name,
-          level_markup: c.pricing_levels?.markup_pct ?? null,
-          level_rate: c.pricing_levels?.labor_rate ?? null,
-        }))}
-        leads={leadOptions}
-        preselected={customer ?? captureCustomerId}
-        jobId={job ?? captureJobId}
-        inquiryId={inquiry ?? captureInquiryId}
-        leadPlans={leadPlans}
-        captureId={captureApptId}
-        initialScope={initialScope}
-        seededLines={seededLines}
-        priceItems={(priceItems ?? []) as any}
-        taxRates={(taxRates ?? []) as any}
-        kits={estimateKits as any}
-        taskKits={taskKits}
-        kitsOn={kitDoors}
-        scopeWord={captureScopeWord}
-        quoteExpiryDays={expiryDays}
-        defaultMarkupPct={settings.default_markup_pct}
-        defaultLaborRate={settings.default_labor_rate}
-        people={people}
-        companyEstimateFormat={companyEstimateFormat}
-        estimatorTaskMode={settings.estimating_mode !== "catalog"}
-        deckRateRows={deckRateRows}
-        salesTax={featureOn(settings.features, "sales_tax")}
+      {/* THE ONE EDITOR, UNSAVED: the seed is rendered with no row; the first commit (or the mount,
+          when the seed carries real lines) saves it once and the URL becomes /quotes/<id>. */}
+      <EstimateEditor
+        mode="unsaved"
+        seed={{
+          customers: (customers ?? []).map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            company_name: c.company_name,
+            level_markup: c.pricing_levels?.markup_pct ?? null,
+            level_rate: c.pricing_levels?.labor_rate ?? null,
+          })),
+          leads: leadOptions,
+          preselected: customer ?? captureCustomerId,
+          jobId: job ?? captureJobId,
+          inquiryId: inquiry ?? captureInquiryId,
+          captureId: captureApptId,
+          initialScope,
+          items: seededLines,
+          quoteExpiryDays: expiryDays,
+        }}
+        catalog={{
+          orgId,
+          measured,
+          leadPlans: effInquiryId ? { leadId: effInquiryId, files: leadPlans } : undefined,
+          priceItems: (priceItems ?? []) as any,
+          taxRates: (taxRates ?? []) as any,
+          kits: estimateKits as any,
+          taskKits,
+          kitsOn: kitDoors,
+          scopeWord: captureScopeWord,
+          defaultMarkupPct: settings.default_markup_pct,
+          defaultLaborRate: settings.default_labor_rate,
+          people,
+          companyEstimateFormat,
+          estimatorTaskMode: settings.estimating_mode !== "catalog",
+          salesTax: featureOn(settings.features, "sales_tax"),
+          textReady: smsReadiness(org as { settings?: unknown } | null).ready,
+          estimatesOn: featureOn(settings.features, "estimates"),
+        }}
       />
     </div>
   );

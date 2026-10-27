@@ -11,8 +11,9 @@ import { join } from "node:path";
 const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
 describe("one arithmetic for a part's money", () => {
-  const surfaces = ["src/components/quote-document.tsx", "src/app/(app)/quotes/new/quote-builder.tsx"];
-  it("the document and the builder print a part through partMoney", () => {
+  // The breakdown is the one editor's (cn-v1132: quotes/task-breakdown.tsx serves both estimate pages).
+  const surfaces = ["src/components/quote-document.tsx", "src/app/(app)/quotes/task-breakdown.tsx"];
+  it("the document and the editor's breakdown print a part through partMoney", () => {
     for (const f of surfaces) {
       const text = src(f);
       expect(text, f).toContain("formatCurrency(partMoney(m))");

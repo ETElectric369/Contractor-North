@@ -106,17 +106,23 @@ describe("rowForWho — the Who select re-asks the rule only for a rule or legac
   });
 });
 
-describe("the builder goes through these two doors", () => {
-  const src = readFileSync(join(process.cwd(), "src/app/(app)/quotes/new/quote-builder.tsx"), "utf8");
-  it("the rule effect is keyed on every input and runs repriceRows once per change; the Who select goes through rowForWho", () => {
-    expect(src).toContain('import { repriceRows, rowForWho, ruleInputsKey, type RuleInputs } from "@/lib/estimate/reprice-rows";');
-    expect(src).toContain("const ruleNow: RuleInputs = { levelRate, orgDefault: defaultLaborRate, people };");
-    expect(src).toContain("const ruleKey = ruleInputsKey(ruleNow);");
-    expect(src).toContain("if (ruleSeen.current.key === ruleKey) return;");
-    expect(src).toContain("l.detail && detailExplains(l.detail, l) ? repriceRows(l, ruleNow, prevRate) : l");
-    expect(src).toContain("}, [ruleKey]);");
-    expect(src).not.toContain("withPeopleRates");
-    expect(src).not.toContain("}, [rule.rate]);");
-    expect(src).toContain("setLabor(i, rowForWho(row, who, ruleInputs));");
+describe("the editor goes through these two doors", () => {
+  // The one editor (cn-v1132): the rule pass lives in the save model (repricedLines, driven in
+  // use-quote-writes.test.ts); the editor keys its effect on every input of the rule and hands the pass
+  // to the session; the breakdown's Who select goes through rowForWho.
+  const editor = readFileSync(join(process.cwd(), "src/app/(app)/quotes/estimate-editor.tsx"), "utf8");
+  const model = readFileSync(join(process.cwd(), "src/app/(app)/quotes/use-quote-writes.ts"), "utf8");
+  const breakdown = readFileSync(join(process.cwd(), "src/app/(app)/quotes/task-breakdown.tsx"), "utf8");
+  it("the rule effect is keyed on every input and runs the pass once per change; the Who select goes through rowForWho", () => {
+    expect(editor).toContain('import { ruleInputsKey, type RuleInputs } from "@/lib/estimate/reprice-rows";');
+    expect(editor).toContain("const ruleNow: RuleInputs = { levelRate, orgDefault: defaultLaborRate, people };");
+    expect(editor).toContain("const ruleKey = ruleInputsKey(ruleNow);");
+    expect(editor).toContain("if (ruleSeen.current.key === ruleKey) return;");
+    expect(editor).toContain("void session.reprice(ruleNow, prevRate);");
+    expect(editor).toContain("}, [ruleKey]);");
+    expect(editor).not.toContain("withPeopleRates");
+    expect(editor).not.toContain("}, [rule.rate]);");
+    expect(model).toContain("l.detail && detailExplains(l.detail, l) ? (repriceRows(l, now, prevRate) as T) : l");
+    expect(breakdown).toContain("commit(laborWith(i, rowForWho(row, who, ruleInputs)));");
   });
 });

@@ -1,35 +1,17 @@
 import { revisionOf } from "@/lib/estimate/revision";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { smsReadiness } from "@/lib/sms";
 import { partsKitsOnly, plainKitsReadWords, readTaskKits } from "@/lib/estimate/task-kits";
 import { reportError } from "@/lib/observe";
 import { BackLink } from "@/components/back-link";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge, statusTone } from "@/components/ui/badge";
-import { formatDate } from "@/lib/utils";
-import { StatusControl } from "./status-control";
 import { getOrgSettings } from "@/lib/org-settings";
-import { QuoteItemsEditor } from "./quote-items-editor";
-import { CircuitScheduleCard } from "./circuit-schedule-card";
-import { CustomerSelect } from "./customer-select";
-import { DuplicateQuoteButton } from "./duplicate-quote-button";
-import { EmailButton } from "@/components/email-button";
-import { ShareIconButton } from "@/components/share-icon-button";
-import { SectionActionsMenu } from "@/components/section-actions-menu";
-import { QuoteTypeToggle } from "./quote-type-toggle";
-import { PaperFormatControl } from "./paper-format-control";
 import { normalizeDocStyle } from "@/lib/doc-style";
-import type { NavTree } from "@/lib/nav-tree";
-import { createJobFromQuote, deleteQuote, quoteEditLock, quoteShareText } from "../actions";
-import { createMaterialListFromQuote } from "../../materials/actions";
-import { createWorkOrderFromQuote } from "../../work-orders/actions";
-import { createInvoiceFromQuote } from "../../billing/actions";
-import { IntakeFiles } from "../../leads/intake-files";
-import { intakePaths } from "@/lib/playbook/uploads";
+import { quoteEditLock } from "../actions";
+import { EstimateEditor, type SavedLineRow, type SavedQuoteRow } from "../estimate-editor";
+import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
-import type { Quote, QuoteLineItem } from "@/lib/types";
+import type { Customer } from "@/lib/types";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
@@ -58,270 +40,123 @@ async function panelJobFor(
   return { id: j.id, label: [j.job_number, j.name].filter(Boolean).join(" ") || "the job" };
 }
 
-export default async function QuoteDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+/**
+ * THE SAVED ESTIMATE (cn-v1132): the page READS — the row, its lines, the book, the kits, the team,
+ * the switches, the lock — and hands all of it to THE one estimate editor in mode "saved". Every
+ * door the page used to draw itself (the header, the customer card, the paper pill, the circuit
+ * schedule, the ⋯ menu) is the editor's now, so the saved copy of an estimate has the same task
+ * layout, the same pickers and the same words as the one the visit opened on /quotes/new.
+ */
+export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
 
   const { data: quote, error: quoteErr } = await supabase
     .from("quotes")
     // pricing_levels nested INSIDE customers(*) — the star stays, because CustomerSelect's
-    // `customer` prop needs the full row for EditCustomerButton. Narrowing it to a field list
-    // would fix the markup and break that card.
+    // `customer` prop needs the full row for EditCustomerButton. The level's LABOR RATE rides too
+    // (cn-v1132): the editor prices a task's hours through the one rule, on this page as on the new one.
     // The lead's contact block rides along (PROJECTION LAW): the "Prepared for" card has to be
     // able to show WHO an estimate with no customer is for, and a lead is a person with a name,
     // a phone and an email — not a blank.
-    .select("*, customers(*, pricing_levels(markup_pct)), inquiry:inquiry_id(id, name, company_name, email, phone, intake)")
+    .select("*, customers(*, pricing_levels(markup_pct, labor_rate)), inquiry:inquiry_id(id, name, company_name, email, phone, intake)")
     .eq("id", id)
     .maybeSingle();
 
   if (quoteErr) throw quoteErr; // a real failure shouldn't masquerade as 404
   if (!quote) notFound();
-  const q = quote as Quote & { customers: any };
+  const q = quote as SavedQuoteRow & {
+    customers: (Customer & { pricing_levels?: { markup_pct?: number | null; labor_rate?: number | null } | null }) | null;
+    inquiry: { id: string; name: string | null; company_name: string | null; email: string | null; phone: string | null; intake: unknown } | null;
+  };
 
-  const { data: items } = await supabase
-    .from("quote_line_items")
-    .select("*")
-    .eq("quote_id", id)
-    .order("sort_order");
+  // EVERY COLUMN THE EDITOR SHOWS (projection law): the words, the count, the price, the group
+  // (category), the task behind the line (detail) and its place (sort_order).
+  const { data: items } = await supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order");
+  const lineItems = (items ?? []) as SavedLineRow[];
 
-  const lineItems = (items ?? []) as QuoteLineItem[];
+  // Has this quote already been turned into these records? (Drives idempotent UI: the map shows
+  // "View …" instead of minting a duplicate.) Plus the org's customers, the book, the kits, the
+  // team and the tax rates: the same catalog /quotes/new hands the editor.
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, kitsRead, { data: orgRow }, { data: visitBehind }, { data: taxRates }, { data: peopleRows, error: peopleErr }] =
+    await Promise.all([
+      supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+      supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+      supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+      supabase.from("customers").select("id, name, company_name").order("name"),
+      // THE SAME CATALOG THE COMPOSER GETS, AND THE MAKERS UNDER EACH CODE (0282). The archived
+      // filter lands on the EMBEDDED rows (no !inner), so an item keeps its place in the book even
+      // when every maker under it has been retired.
+      supabase
+        .from("price_list_items")
+        .select(`id, code, description, category, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
+        .eq("archived", false)
+        .eq("price_list_item_options.archived", false)
+        .order("description")
+        .limit(2000),
+      // THE SHARED SELECT SHAPE (kit-line.ts) — the read SAYS how it went (cn-v1084).
+      readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
+      supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
+      // THE VISIT THIS WAS WRITTEN UP FROM (cn-v1069): the backlink saveQuote stamps inside the visit's
+      // capture, read back here so the two stay attached both ways. Newest first if ever two claim it.
+      supabase
+        .from("appointments")
+        .select("id, starts_at, title")
+        .eq("capture->>quote_id", id)
+        .order("starts_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
+      // THE TEAM, for a labor row's Who select (cn-v1131): bill rates off the staff-scoped profile_pay
+      // view, active only, never their pay rate.
+      supabase.from("profile_pay").select("id, full_name, bill_rate").eq("active", true).order("full_name"),
+    ]);
+  if (peopleErr) reportError("quotes/[id]:people", peopleErr, { quoteId: id });
+  const people = ((peopleRows ?? []) as { id: string; full_name: string | null; bill_rate: number | string | null }[]).map((p) => ({
+    id: p.id,
+    name: p.full_name ?? "Crew",
+    billRate: p.bill_rate == null || p.bill_rate === "" ? null : Number(p.bill_rate),
+  }));
 
-  // Has this quote already been turned into these records? (Drives idempotent UI:
-  // the map shows "View …" instead of minting a duplicate.) Plus the org's
-  // customers so the attached customer can be changed inline.
-  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, kitsRead, { data: orgRow }, { data: visitBehind }] = await Promise.all([
-    supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
-    supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
-    supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
-    supabase.from("customers").select("id, name, company_name").order("name"),
-    // THE SAME CATALOG THE COMPOSER GETS. A saved estimate used to offer only a bare
-    // "Add a line item…" text box — no price list, no kits — so the one place you're most likely
-    // to be adjusting a real quote was the one place you had to type prices from memory.
-    // …AND THE MAKERS UNDER EACH CODE (0282). Same embed the composer reads, from the same
-    // constant, because this is the screen you are most likely to be on with a customer in front
-    // of you — the one place a code that has an Andersen, a Milgard and a Marvin must not quietly
-    // offer only its allowance. The archived filter lands on the EMBEDDED rows (no !inner), so an
-    // item keeps its place in the book even when every maker under it has been retired.
-    supabase
-      .from("price_list_items")
-      .select(`id, code, description, category, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
-      .eq("archived", false)
-      .eq("price_list_item_options.archived", false)
-      .order("description")
-      .limit(2000),
-    // THE SHARED SELECT SHAPE (kit-line.ts) — sizing + the 0240 price-list link, tolerant of
-    // either migration not having landed yet, so a linked kit line prices live for this customer.
-    // The read SAYS how it went (cn-v1084): a failed read used to empty the picker in silence.
-    readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-    // THE VISIT THIS WAS WRITTEN UP FROM (cn-v1069): the backlink saveQuote stamps inside the visit's
-    // capture, read back here so the two stay attached both ways. Newest first if ever two claim it.
-    supabase
-      .from("appointments")
-      .select("id, starts_at, title")
-      .eq("capture->>quote_id", id)
-      .order("starts_at", { ascending: false, nullsFirst: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
-
-  // The quote's seek door: what it can BECOME (idempotent conversion nodes —
-  // `run` creates the record then opens it; once minted they flip to "View …")
-  // plus Print (the page's only print door) and Delete, danger-styled, last.
-  // The Customer and All-quotes links were pruned: the CustomerSelect card and
-  // the Back breadcrumb already carry them on-page (one map per territory).
   // THE SWITCH BOARD (0352), from the settings row already read: Kits off hides the kit chips (never
   // in catalog mode, where kits price the estimate: rule i), and Panel Map off hides an EMPTY circuit
   // schedule. An estimate that has circuits keeps them: they are on the proposal the customer signs.
-  const orgS = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  const org = orgRow as { id?: string; settings?: unknown } | null;
+  const orgS = getOrgSettings(org?.settings);
   const kitDoors = featureOn(orgS.features, "kits") || orgS.estimating_mode === "catalog";
   const kits = kitsRead.rows as Parameters<typeof partsKitsOnly>[0] | null;
   if (kitsRead.state === "failed") reportError("quotes/[id]:kits", kitsRead.error, { quoteId: id });
   const showCircuits = featureOn(orgS.features, "panel_map") || (Array.isArray(q.circuits) && q.circuits.length > 0);
-  // LABOR AND PARTS ON THE PAPER (cn-v1131): the estimate's own estimate_format (0395; it rides the
-  // row's `*` above) as stored, null = the company's Doc Studio choice, which the switch names.
-  const ownFormat = (q as { estimate_format?: unknown }).estimate_format;
-  const paperFormat = ownFormat === "detailed" || ownFormat === "tasks" ? ownFormat : null;
   const companyPaperFormat = normalizeDocStyle(orgS.doc_style).estimate_format;
-
-  // A REPLACED ESTIMATE MAKES NO MORE PAPER (audit v1085, carried): a superseded estimate offers no Create
-  // door — its revision does; a revision not yet accepted makes no work order or list (a newer list would
-  // hide the crew's as the job's one list). View doors stay. The rules themselves refuse too.
-  const replaced = q.status === "superseded";
-  const noPaperYet = replaced || (!!(q as { revises_quote_id?: string | null }).revises_quote_id && q.status !== "accepted");
-  const quoteMap: NavTree = {
-    center: { label: q.quote_number, icon: "fileText" },
-    nodes: [
-      ...(existingInv
-        ? [{ id: "qm-inv", label: "View Invoice", icon: "receipt", href: `/billing/${existingInv.id}` }]
-        : replaced
-          ? []
-          : [{ id: "qm-inv", label: "Create Invoice", icon: "receipt", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" }]),
-      ...((q as any).job_id
-        ? [{ id: "qm-job", label: "View Job", icon: "briefcase", href: `/jobs/${(q as any).job_id}` }]
-        : replaced
-          ? []
-          : [{ id: "qm-job", label: "Create Job", icon: "briefcase", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" }]),
-      ...(lineItems.length > 0
-        ? [
-            ...(existingWo
-              ? [{ id: "qm-wo", label: "View Work Order", icon: "clipboardCheck", href: `/work-orders/${existingWo.id}` }]
-              : noPaperYet
-                ? []
-                : [{ id: "qm-wo", label: "Create Work Order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" }]),
-            ...(existingMl
-              ? [{ id: "qm-ml", label: "View Material List", icon: "boxes", href: `/materials/${existingMl.id}` }]
-              : noPaperYet
-                ? []
-                : [{ id: "qm-ml", label: "Create Material List", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" }]),
-          ]
-        : []),
-      { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/pdf-preview?doc=quote&id=${q.id}&back=/quotes/${q.id}` },
-      {
-        id: "qm-del",
-        label: "Delete Quote",
-        icon: "trash",
-        danger: true,
-        confirmText: `Delete quote ${q.quote_number}? Its line items go with it.`,
-        run: deleteQuote.bind(null, q.id),
-        href: "/quotes",
-      },
-    ],
-  };
 
   // Asked of the server rule itself, never guessed from the status: acceptance alone locks nothing,
   // so a status-only gate would have hidden controls that still work. null = every control stays
-  // live. Read once: the editor shows its reason, and the Duplicate door below follows it.
+  // live. Read once: the editor shows its reason, and the Duplicate door follows it.
   const lock = await quoteEditLock(q.id);
   const kitsNote = kitDoors && !lock ? plainKitsReadWords(kitsRead) : null; // only where the picker is
   // The revision chain (0391): what this estimate revises, and — when it is superseded — the accepted
   // revision that replaced it (newest, if ever two).
-  const revisesId = ((q as { revises_quote_id?: string | null }).revises_quote_id ?? null) as string | null;
+  const revisesId = q.revises_quote_id ?? null;
   const [{ data: revisesRow }, { data: supersededRow }] = await Promise.all([
     revisesId ? supabase.from("quotes").select("id, quote_number, status").eq("id", revisesId).maybeSingle() : Promise.resolve({ data: null }),
     q.status === "superseded" ? revisionOf(supabase, { quoteId: q.id, orgId: null }).then((r) => ({ data: r })) : Promise.resolve({ data: null }),
   ]);
   const revises = revisesRow as { id: string; quote_number: string | null; status: string | null } | null;
   const supersededBy = supersededRow as { id: string; quote_number: string | null } | null;
-  const revisesWords = !revises
-    ? ""
-    : revises.status === "superseded"
-      ? " — which it superseded when accepted."
-      : q.status === "accepted"
-        ? ` — that estimate stands as ${revises.status ?? "it was"}, not superseded.`
-        : q.status === "draft" || q.status === "sent"
-          ? " — accepting this one supersedes it."
-          : ".";
+
+  // The lead's own plan PDFs (intake uploads): one-tap take-off on this page too, no re-upload.
+  const leadPlans = q.inquiry
+    ? {
+        leadId: q.inquiry.id,
+        files: intakePaths(q.inquiry.intake)
+          .filter((p) => extOf(p) === "pdf")
+          .map((p) => ({ path: p, name: uploadDisplayName(p) })),
+      }
+    : undefined;
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div>
       <BackLink fallback="/quotes" fallbackLabel="Back to Quotes" />
-
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          {/* TWO LAYERS, NOT ONE ROW. The share is a sibling of the wrapping group, not its last
-              member: the type toggle is ~250px of nowrap pill (two labelled segments) that cannot
-              shrink, so as one flat row at 375–402px (343–370px of content inside main's p-4)
-              number + badge + toggle already ran ~440px and pushed the share clean off the right
-              edge. Wrapping that flat row would have carried the share down to the toggle's line.
-              Here the group takes the remaining width (flex-1 min-w-0) and wraps INSIDE itself —
-              number + badge on the first line, the toggle dropping under them — while the share
-              stays parked top-right on the first line at every width (items-start; its 32px box
-              matches the h1's 32px line). Narrowest case, 375px: 343 − 12 gap − 32 share = 299px
-              for the group; "EST-0042" + badge ≈ 175px fits line one, the ~250px toggle fits line
-              two, nothing scrolls sideways. */}
-          <div className="flex items-start gap-3">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-              <h1 className="min-w-0 text-2xl font-bold text-slate-900">{q.quote_number}</h1>
-              <Badge tone={statusTone(q.status)}>{q.status}</Badge>
-              {/* The status is what makes this gate work at all: unpassed, the toggle keeps
-                  rendering at every status and keeps flipping its visible selection before the
-                  server refuses, which is the UI telling a lie and then taking it back. */}
-              <QuoteTypeToggle id={q.id} status={q.status} value={(((q as any).doc_type ?? "quote") as "estimate" | "quote")} />
-            </div>
-            {/* The estimate page had NO share at all — only Email and Text, both of which need a
-                number or an address on file. Same tiny box-with-arrow as the invoice, same corner
-                (the right end of the title line — the page's true top-right once the verb row
-                wraps on a phone), same draft dance: a draft asks, then flips to sent as it goes. */}
-            <ShareIconButton load={quoteShareText.bind(null, q.id)} className="ml-auto shrink-0" />
-          </div>
-          {q.title && <p className="mt-1 text-slate-600">{q.title}</p>}
-          {/* REVISIONS (0391), both ways: a superseded estimate names the revision that replaced it (its
-              lines and history stay; the price is the revision's now); a revision names what it revises. */}
-          {supersededBy && (
-            <p className="mt-1 text-sm text-slate-600">
-              Superseded by{" "}
-              <Link href={`/quotes/${supersededBy.id}`} className="text-brand hover:underline">
-                {supersededBy.quote_number ?? "its revision"}
-              </Link>
-              {" "}— that estimate is the price for this work now.
-            </p>
-          )}
-          {revises && (
-            <p className="mt-1 text-sm text-slate-600">
-              Revises{" "}
-              <Link href={`/quotes/${revises.id}`} className="text-brand hover:underline">
-                {revises.quote_number ?? "an earlier estimate"}
-              </Link>
-              {revisesWords}
-            </p>
-          )}
-          {/* Provenance backlink — the lead this estimate was seeded from. */}
-          {(q as any).inquiry && (
-            <Link href={`/leads?focus=${(q as any).inquiry.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
-              ← from lead: {(q as any).inquiry.name}
-            </Link>
-          )}
-          {/* Provenance backlink — the visit this estimate was written up from (capture.quote_id). */}
-          {visitBehind && (
-            <Link href={`/appointments/${(visitBehind as { id: string }).id}`} className="mt-1 block text-sm text-brand hover:underline">
-              ← from the visit{(visitBehind as { starts_at?: string | null }).starts_at ? ` on ${formatDate((visitBehind as { starts_at?: string | null }).starts_at)}` : ""}
-            </Link>
-          )}
-          {/* What the customer attached at intake. The lead leaves the inbox on conversion, so
-              this estimate — the thing being priced FROM those plans — must carry them itself. */}
-          {(q as any).inquiry && (
-            <IntakeFiles inquiryId={(q as any).inquiry.id} paths={intakePaths((q as any).inquiry.intake)} />
-          )}
-          <p className="mt-1 text-sm text-slate-400">
-            Created {formatDate(q.created_at)}
-            {q.valid_until ? ` · Valid until ${formatDate(q.valid_until)}` : ""}
-          </p>
-        </div>
-        {/* Impulse verbs first (Send / advance status / Duplicate); the ⋯ Actions
-            menu rides LAST — the one seek door, holding conversions + Delete. */}
-        <div className="flex flex-wrap items-center gap-2">
-          <EmailButton id={q.id} kind="quote" textReady={smsReadiness(orgRow as { settings?: unknown } | null).ready} />
-          <StatusControl id={q.id} status={q.status} />
-          {/* Duplicate makes a new estimate: a door Estimates off takes away. The rest of the row
-              works this one, which still opens from its link under the Off line. A LOCKED estimate
-              keeps it: the lock's own words send him to "Revise it instead". */}
-          {(featureOn(orgS.features, "estimates") || lock) && <DuplicateQuoteButton id={q.id} />}
-          {/* REVISE (0391): a sent or accepted estimate gets a second door — a copy that keeps the job and
-              the lead and SUPERSEDES this one when accepted, so the job's price is never both added up. */}
-          {(featureOn(orgS.features, "estimates") || lock) && (q.status === "sent" || q.status === "accepted") && <DuplicateQuoteButton id={q.id} revision />}
-          <SectionActionsMenu tree={quoteMap} />
-        </div>
-      </div>
-
-      <Card className="mb-6">
-        <CardContent className="py-5">
-          <CustomerSelect
-            quoteId={q.id}
-            customer={q.customers ?? null}
-            // Erik: "shows me that it is from the lead 'Catherine' but still showing no customer
-            // as selected.. This needs to be separated." It always WAS separate in the data —
-            // this card just never asked for the lead, so it printed "No customer attached" over
-            // an estimate that knows exactly whose it is.
-            lead={(q as any).inquiry ?? null}
-            customers={(customers ?? []) as { id: string; name: string; company_name: string | null }[]}
-          />
-        </CardContent>
-      </Card>
 
       {/* NOTHING SILENT. The picker inside the editor renders nothing at all when it is handed no
           book, which on this page reads as a broken control rather than a failed read — and an
@@ -340,32 +175,43 @@ export default async function QuoteDetailPage({
           <p className="mt-0.5 text-sm text-amber-800">{kitsNote}</p>
         </div>
       )}
-      <QuoteItemsEditor
-        quote={q}
-        lock={lock}
-        items={lineItems}
-        priceItems={(priceItems ?? []) as never}
-        kits={(kitDoors ? partsKitsOnly(kits ?? []) : []) as never}
-        defaultMarkupPct={orgS.default_markup_pct}
-        salesTax={featureOn(orgS.features, "sales_tax")}
-        // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
-        // including 0, so a 0 here would price every customer-without-a-level at net cost — a
-        // worse bug than the one this fixes.
-        levelMarkupPct={(quote as any)?.customers?.pricing_levels?.markup_pct ?? null}
+      <EstimateEditor
+        mode="saved"
+        saved={{
+          quote: q,
+          items: lineItems,
+          lock,
+          customer: q.customers ?? null,
+          lead: q.inquiry ? { ...q.inquiry, intakePaths: intakePaths(q.inquiry.intake) } : null,
+          customers: (customers ?? []) as { id: string; name: string; company_name: string | null }[],
+          // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
+          // including 0, so a 0 here would price every customer-without-a-level at net cost.
+          level: { markup: q.customers?.pricing_levels?.markup_pct ?? null, rate: q.customers?.pricing_levels?.labor_rate ?? null },
+          existing: { invoice: existingInv?.id ?? null, workOrder: existingWo?.id ?? null, materialList: existingMl?.id ?? null },
+          revises,
+          supersededBy,
+          visitBehind: (visitBehind as { id: string; starts_at: string | null } | null) ?? null,
+          showCircuits,
+          panelJob: await panelJobFor(supabase, q),
+        }}
+        catalog={{
+          orgId: String(org?.id ?? ""),
+          priceItems: (priceItems ?? []) as never,
+          kits: (kitDoors ? partsKitsOnly(kits ?? []) : []) as never,
+          taskKits: kitsRead.kits,
+          kitsOn: kitDoors,
+          taxRates: (taxRates ?? []) as never,
+          people,
+          defaultMarkupPct: orgS.default_markup_pct,
+          defaultLaborRate: orgS.default_labor_rate,
+          companyEstimateFormat: companyPaperFormat,
+          salesTax: featureOn(orgS.features, "sales_tax"),
+          estimatorTaskMode: orgS.estimating_mode !== "catalog",
+          leadPlans,
+          textReady: smsReadiness(org).ready,
+          estimatesOn: featureOn(orgS.features, "estimates"),
+        }}
       />
-      {/* THIS ESTIMATE'S OWN PAPER FORMAT (cn-v1131), under the totals it explains: Show / Hide the
-          hours at the rate and the parts beneath each task, or the company default. Only while the
-          estimate is still editable — the lock's own words above say why a sent one is not. */}
-      {!lock && (
-        <Card className="mt-6">
-          <CardContent className="py-4">
-            <PaperFormatControl quoteId={q.id} value={paperFormat} companyDefault={companyPaperFormat} />
-          </CardContent>
-        </Card>
-      )}
-      {showCircuits && (
-        <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} panelJob={await panelJobFor(supabase, q)} />
-      )}
     </div>
   );
 }

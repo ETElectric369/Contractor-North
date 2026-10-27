@@ -121,7 +121,7 @@ describe("the take-off (carried [22], [29], [23], [36], [35])", () => {
     expect(await workOrderFromQuote(db.sb, { quoteId: "q-draft", userId: "u", orgId: null })).toMatchObject({ ok: false, error: expect.stringContaining("isn't accepted yet") });
     expect(db.inserted.material_lists).toBeUndefined();
     expect(db.inserted.work_orders).toBeUndefined();
-    const page = src("src/app/(app)/quotes/[id]/page.tsx");
+    const page = src("src/app/(app)/quotes/estimate-editor.tsx");
     expect(page).toContain('const replaced = q.status === "superseded";');
     expect(page).toContain("const noPaperYet = replaced ||");
     const quotes = src("src/app/(app)/quotes/actions.ts");

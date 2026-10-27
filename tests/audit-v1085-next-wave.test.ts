@@ -310,7 +310,7 @@ describe("[5] a kit with no count asks; [31] an unlinked kit line names its part
     expect(inspector).toContain("const unitsAsking = !!kit && t.units === null;");
     expect(inspector).toContain("units?");
     expect(inspector).toContain('{t.units === null ? `From the kit, per ${kit?.unit || "unit"}` : `From the kit, for ×${t.units}${kit?.unit ? ` ${kit.unit}` : ""}`}');
-    expect(src("src/app/(app)/quotes/new/quote-builder.tsx")).toContain('value={d.units ?? 0} onValueChange={setUnits}');
+    expect(src("src/app/(app)/quotes/task-breakdown.tsx")).toContain('value={d.units ?? 0} disabled={disabled} onValueChange={setUnits}');
   });
   it("an UNLINKED kit line that froze its book words drops the code lead; a hand-typed line with a dash keeps it", () => {
     const kit: TaskKit = {

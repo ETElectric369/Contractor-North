@@ -42,7 +42,7 @@ import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { closeVisitsBehindQuote, outcomeForQuoteStatus } from "@/lib/appointments/behind-quote";
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
-import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
+import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice, type TaskDetail } from "@/lib/estimate/line-map";
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
 import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
 import { estimateLines, retitleDismissal, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
@@ -58,7 +58,7 @@ import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
-import type { QuoteCircuit } from "@/lib/types";
+import type { EditorQuote, QuoteCircuit, QuoteLineItem } from "@/lib/types";
 import { promptCodeTable } from "@/lib/panel/breaker-catalog";
 import { isEstimatorStash, keepPlanUpload, type KeptPlan } from "@/lib/estimate/keep-plan-upload";
 
@@ -427,6 +427,77 @@ export async function quoteEditLock(quoteId: string): Promise<{ reason: string }
   return editable.ok ? null : { reason: editable.error };
 }
 
+/** THE COLUMNS THE ONE EDITOR READS (cn-v1132) — named (projection law), as the saved page's `*` once
+ *  carried them: the header, the money, the paper's words (doc_type, estimate_format), the pointers
+ *  (customer, job, lead, the estimate this revises), the offer's dates, the public link, the panel's
+ *  circuits and the row's own address. A const so each select is a string literal the client's select
+ *  parser can read into a row type, where a template built at run time is not. */
+const EDITOR_QUOTE_COLUMNS =
+  "id, quote_number, customer_id, job_id, inquiry_id, status, doc_type, title, description, notes, tax_rate, subtotal, tax, total, valid_until, follow_up_at, estimate_format, revises_quote_id, public_token, circuits, address, unit, city, state, zip, accepted_at, declined_at, created_by, created_at, updated_at" as const;
+const EDITOR_ITEM_COLUMNS = "id, quote_id, description, quantity, unit, unit_price, line_total, sort_order, category, detail" as const;
+
+/**
+ * THE ONE EDITOR'S READ (cn-v1132): the estimate's row and its lines, whole. STAFF ONLY — 0056's RLS
+ * keeps the quotes table staff-only, so a member gate here would only ever hand a tech "Quote not
+ * found." dressed as a door (a tech reaches the paper from a work order's Source Estimate, which is
+ * its own page and its own read). Both reads are scoped to the company beside RLS. Every line's
+ * breakdown comes through coerceTaskDetail (the pre-1131 one-figure shape reads as one legacy row),
+ * its group is null when it has none, and the money columns are numbers, not the wire's strings. A
+ * failed read is said; a row that is not here is "Quote not found."
+ */
+export async function readQuoteForEditor(
+  quoteId: string,
+): Promise<{ ok: true; quote: EditorQuote; items: QuoteLineItem[] } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const supabase: any = ctx.supabase;
+  const [q, li] = await Promise.all([
+    supabase.from("quotes").select(EDITOR_QUOTE_COLUMNS).eq("id", quoteId).eq("org_id", ctx.orgId).maybeSingle(),
+    supabase.from("quote_line_items").select(EDITOR_ITEM_COLUMNS).eq("quote_id", quoteId).eq("org_id", ctx.orgId).order("sort_order"),
+  ]);
+  if (q.error) return { ok: false, error: dbError(q.error) };
+  if (!q.data) return { ok: false, error: "Quote not found." };
+  if (li.error) return { ok: false, error: dbError(li.error) };
+  const n = (v: unknown): number => Number(v ?? 0) || 0;
+  const row = q.data as Record<string, unknown>;
+  const quote = { ...row, tax_rate: n(row.tax_rate), subtotal: n(row.subtotal), tax: n(row.tax), total: n(row.total) } as unknown as EditorQuote;
+  const items = ((li.data ?? []) as Record<string, unknown>[]).map(
+    (r) =>
+      ({
+        ...r,
+        quantity: n(r.quantity),
+        unit_price: n(r.unit_price),
+        line_total: n(r.line_total),
+        sort_order: n(r.sort_order),
+        category: typeof r.category === "string" && r.category ? r.category : null,
+        detail: coerceTaskDetail(r.detail),
+      }) as unknown as QuoteLineItem,
+  );
+  return { ok: true, quote, items };
+}
+
+/**
+ * THE READ-BACK AFTER BIRTH (cn-v1132, S4): the ids of an estimate's lines and where each sits —
+ * nothing else. The editor needs only these to write each line on its own after the first save
+ * (idsBySortOrder), and a lean read cannot dead-end a birth on a column the whole-row read names
+ * (a deploy ahead of its migration). Staff, scoped to the company beside RLS; a failed read is said.
+ */
+export async function readQuoteLineIds(
+  quoteId: string,
+): Promise<{ ok: true; items: { id: string; sort_order: number | null; description: string }[] } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const supabase: any = ctx.supabase;
+  const { data, error } = await supabase.from("quote_line_items").select("id, sort_order, description").eq("quote_id", quoteId).eq("org_id", ctx.orgId).order("sort_order");
+  if (error) return { ok: false, error: dbError(error) };
+  const items = ((data ?? []) as { id: string; sort_order?: number | string | null; description?: string | null }[]).map((r) => ({
+    id: String(r.id),
+    sort_order: r.sort_order == null ? null : Number(r.sort_order),
+    description: String(r.description ?? ""),
+  }));
+  return { ok: true, items };
+}
+
 /** The job an estimate is linked to, whatever its status — null when it has none. (A rename follows the
  *  job's task at ANY status: the task's own old-title guard is what protects a hand rename, and a task
  *  renamed only while accepted would otherwise disagree with its line for good after a walk-back.) */
@@ -574,6 +645,96 @@ export async function addQuoteItem(
 }
 
 /**
+ * APPEND LINES, ALL AT ONCE, WITH THEIR GROUP AND THEIR TASK (cn-v1132). The door for Generate, Upload
+ * Plans, Supplier Quote and the kit picker on a SAVED estimate: one insert for the whole batch (one
+ * sort_order run continued after the estimate's last line, one recalc), each line carrying its scope
+ * group (category) and the task behind it (detail) — appendQuoteLine wrote neither, which is how a
+ * kit's group went missing the moment its lines reached the saved screen.
+ *
+ * EACH LINE UNDER THE ID THE CLIENT CHOSE (B2): a Retry after a lost answer re-sends the same ids, and
+ * Postgres's unique-key refusal on the table's primary key is read as LANDED — the rows are re-read
+ * under this estimate and their ids handed back; a key taken by a row that is NOT this estimate's is a
+ * refusal in words (an id is never reused across estimates, so this is a foreign row). Without the ids
+ * every Retry after a throw doubled the lines.
+ *
+ * Refused in words: an empty list, a line with no words or no usable id, a locked estimate
+ * (requireEditableQuote's own sentence), a last-line read that failed (the new lines would land at the
+ * top), and an insert that came back short — fewer ids than lines is a write that did not all land
+ * (RLS refusing a foreign estimate's id comes back as zero rows and no error), never a success. The ids
+ * come back in the lines' order. org_id is the trigger's (0004 stamp_org_quote_line_items), as every
+ * insert here.
+ */
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const lineIdTaken = (e: { code?: string | null; message?: string | null }): boolean => e.code === "23505" && /\bquote_line_items_pkey\b/.test(e.message ?? "");
+
+export async function appendQuoteLines(
+  quoteId: string,
+  lines: (DraftLineItem & { id: string })[],
+): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const supabase = ctx.supabase;
+  if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: "There are no lines to add." };
+  const blank = lines.findIndex((l) => !String(l?.description ?? "").trim());
+  if (blank !== -1) return { ok: false, error: `Line ${blank + 1} has no description.` };
+  const noId = lines.findIndex((l) => !UUID_SHAPE.test(String(l?.id ?? "")));
+  if (noId !== -1) return { ok: false, error: `Line ${noId + 1} has no id to save under — reload the estimate and try again.` };
+  const ids = lines.map((l) => l.id.toLowerCase());
+  if (new Set(ids).size !== ids.length) return { ok: false, error: "Two of those lines carry the same id — reload the estimate and try again." };
+  const editable = await requireEditableQuote(supabase, quoteId);
+  if (!editable.ok) return editable;
+  const { data: last, error: lastErr } = await supabase
+    .from("quote_line_items")
+    .select("sort_order")
+    .eq("quote_id", quoteId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lastErr) return { ok: false, error: dbError(lastErr) };
+  const start = Number((last as { sort_order?: number | null } | null)?.sort_order ?? -1) + 1;
+  const rows = lines.map((l, idx) => ({
+    id: ids[idx],
+    quote_id: quoteId,
+    description: l.description.trim(),
+    quantity: Number(l.quantity) || 1,
+    unit: (l.unit ?? "").trim() || "ea",
+    unit_price: Number(l.unit_price) || 0,
+    sort_order: start + idx,
+    category: l.group?.trim() || null,
+    // Coerced, so a part he added and never named is not stored (coerceTaskDetail drops it).
+    detail: coerceTaskDetail(l.detail) ?? null,
+  }));
+  const { data: added, error } = await supabase.from("quote_line_items").insert(rows).select("id");
+  let landed: string[];
+  if (error) {
+    if (!lineIdTaken(error)) return { ok: false, error: dbError(error) };
+    // The key is taken: this batch landed on an earlier try whose answer was lost — if the rows are
+    // THIS estimate's. Read them back under it; anything short of all of them is a foreign row.
+    const { data: already, error: readErr } = await supabase.from("quote_line_items").select("id").eq("quote_id", quoteId).in("id", ids);
+    if (readErr) return { ok: false, error: dbError(readErr) };
+    const here = new Set(((already ?? []) as { id: string }[]).map((r) => String(r.id).toLowerCase()));
+    if (ids.some((id) => !here.has(id))) return { ok: false, error: "Those lines didn't save — one of their ids is already taken. Reload the estimate and try again." };
+    landed = ids;
+  } else {
+    const got = new Set(((added ?? []) as { id: string }[]).map((r) => String(r.id).toLowerCase()));
+    if (got.size < rows.length) {
+      return {
+        ok: false,
+        error:
+          got.size === 0
+            ? "Those lines didn't save. Reload the estimate and try again."
+            : `Only ${got.size} of ${rows.length} lines saved. Reload the estimate to see what landed.`,
+      };
+    }
+    landed = ids;
+  }
+  await recalcQuote(supabase, quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true, ids: landed };
+}
+
+/**
  * ADD A PRICE-LIST LINE BY ITS IDS, AND LET THE SERVER SAY WHAT IT COSTS.
  *
  * 0282 gave a code a list of makers — 830 "Windows (Materials) (Allowance)" can be filled by an
@@ -651,7 +812,17 @@ export async function addQuoteItemFromPriceItem(
 export async function updateQuoteItem(
   itemId: string,
   quoteId: string,
-  item: { description?: string; quantity?: number; unit?: string; unit_price?: number },
+  item: {
+    description?: string;
+    quantity?: number;
+    unit?: string;
+    unit_price?: number;
+    /** The task behind the line (cn-v1132): a breakdown to store (coerced on the way in), null to make
+     *  it a plain line again, undefined to leave it alone. */
+    detail?: TaskDetail | null;
+    /** The scope group (0104): a word, null for none, undefined to leave it alone. */
+    category?: string | null;
+  },
 ): Promise<{ ok: boolean; error?: string; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -666,6 +837,17 @@ export async function updateQuoteItem(
   if (item.quantity !== undefined) clean.quantity = item.quantity || 1;
   if (item.unit !== undefined) clean.unit = item.unit.trim() || "ea";
   if (item.unit_price !== undefined) clean.unit_price = item.unit_price || 0;
+  if (item.detail !== undefined) {
+    if (item.detail === null) clean.detail = null;
+    else {
+      // A breakdown that does not read as one is refused, never stored as null: clearing it would
+      // silently cut the line from the job's task (task_id) and drop the hours behind its price.
+      const d = coerceTaskDetail(item.detail);
+      if (!d) return { ok: false, error: "That line's breakdown couldn't be read — nothing was changed." };
+      clean.detail = d;
+    }
+  }
+  if (item.category !== undefined) clean.category = item.category === null ? null : item.category.trim() || null;
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
@@ -675,6 +857,12 @@ export async function updateQuoteItem(
     clean.description !== undefined
       ? await supabase.from("quote_line_items").select("description, detail").eq("id", itemId).eq("quote_id", quoteId).maybeSingle()
       : { data: null };
+  // THE JOB FOLLOWS THE FIGURE (S5): hours or parts behind an accepted, job-linked estimate's line
+  // (its breakdown), or its count or price, change what the job's tasks and buy list should be. The
+  // estimate's figure is read BEFORE the write, as the delete door reads it, so the sync can tell
+  // "still the estimate's" from his; the rules themselves run after the write lands.
+  const figureMoves = clean.detail !== undefined || clean.quantity !== undefined || clean.unit_price !== undefined;
+  const behind = figureMoves ? await jobBehindQuote(supabase, quoteId, ctx.orgId) : null;
   // SCOPE THE WRITE TO THE DOCUMENT WE AUTHORIZED (audit v800). The editable check ran against
   // quoteId, but the update matched on itemId ALONE — so a caller (Nort included) could pass a
   // draft's id to pass the lock and an itemId belonging to a DIFFERENT quote, and rewrite a line
@@ -707,6 +895,15 @@ export async function updateQuoteItem(
         if (d.error) reportError("updateQuoteItem:retitleDismissal", new Error(d.error), { jobId, itemId });
       }
     }
+  }
+  if (behind) {
+    // The same two rules the delete door runs (jobFollows): the job's tasks, then its buy list, with
+    // the figure read before the write. Said beside the rename's words when both happened.
+    const moved = await jobFollows(supabase, behind, ctx);
+    follow = {
+      ...([follow.said, moved.said].some(Boolean) ? { said: [follow.said, moved.said].filter(Boolean).join(" ") } : {}),
+      ...([follow.note, moved.note].some(Boolean) ? { note: [follow.note, moved.note].filter(Boolean).join(" ") } : {}),
+    };
   }
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -1046,6 +1243,11 @@ export async function resolveDuplicateDrafts(
   return { ok: true, deleted: losers.length };
 }
 
+/** The insert's id is already a row's: Postgres's unique-key refusal on the PRIMARY key, passed through by
+ *  PostgREST with its own code and words. Any other 23505 (the number, quotes_org_number_key) stays dbError's. */
+const idTaken = (e: { code?: string | null; message?: string | null }): boolean =>
+  e.code === "23505" && /\bquotes_pkey\b/.test(e.message ?? "");
+
 export async function saveQuote(input: SaveQuoteInput) {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
@@ -1078,11 +1280,24 @@ export async function saveQuote(input: SaveQuoteInput) {
   // at all. Read the pointer BEFORE the write; if it changes, the lead it left has to be released
   // afterwards or it sits stamped 'quoted' with nothing pointing at it. On an insert there is no
   // previous pointer, so this costs one small read only on the autosave/update path.
-  let prevInquiryId: string | null = null;
+  //
+  // ONE ESTIMATE PER ID (cn-v1132). The editor names its estimate before the first save, so a lost
+  // answer and a retry under the same id land on ONE row: an id standing here in this company is an
+  // update, an id nobody has is the insert, WITH that id. The one read serves both: the status (the
+  // draft lock is decided on it before the RPC is asked) and the lead pointer the estimate may be leaving.
+  type Standing = { id: string; status: string | null; inquiry_id: string | null };
+  const standingOf = async (id: string): Promise<Standing | null | { error: string }> => {
+    const { data, error } = await supabase.from("quotes").select("id, status, inquiry_id").eq("id", id).maybeSingle();
+    if (error) return { error: dbError(error) };
+    return (data as Standing | null) ?? null;
+  };
+  let standing: Standing | null = null;
   if (input.id) {
-    const { data: before } = await supabase.from("quotes").select("inquiry_id").eq("id", input.id).maybeSingle();
-    prevInquiryId = (before as { inquiry_id?: string | null } | null)?.inquiry_id ?? null;
+    const s = await standingOf(input.id);
+    if (s && "error" in s) return { ok: false as const, error: s.error };
+    standing = s;
   }
+  let prevInquiryId: string | null = standing?.inquiry_id ?? null;
 
   const fields = {
     customer_id: input.customer_id,
@@ -1105,70 +1320,95 @@ export async function saveQuote(input: SaveQuoteInput) {
     input.estimate_format === "tasks" || input.estimate_format === "detailed" ? input.estimate_format : input.estimate_format === null ? null : undefined;
   let quote: { id: string; quote_number?: string | null } | null = null;
   let updateItemsDone = false;
-  if (input.id) {
-    // AUTOSAVE UPDATE — one TRANSACTION via save_quote_draft (0211): row-locked,
-    // draft-locked, header + wholesale line replace atomically. The old three-REST-call
-    // shape let two writers interleave into doubled lines under a single-set total, and a
-    // failed insert left a zero-line draft (review of cn-v796, 3 confirmed HIGHs).
-    const { data: rpc, error: rpcErr } = await supabase.rpc("save_quote_draft", {
-      p_id: input.id,
-      p_fields: { ...fields, subtotal, tax, total },
-      p_items: input.items.map((it, idx) => ({
-        description: it.description,
-        quantity: it.quantity,
-        unit: it.unit || "ea",
-        unit_price: it.unit_price,
-        category: it.group ?? null,
-        sort_order: idx,
-        // The task behind the line (0386) rides every save, or the first autosave would drop it —
-        // coerced, so a part he added and never named is not stored (coerceTaskDetail drops it).
-        detail: coerceTaskDetail(it.detail),
-      })),
-    });
-    if (rpcErr) {
-      const msg = rpcErr.message ?? "";
-      if (msg.includes("QUOTE_NOT_DRAFT")) {
-        // Sent/accepted: the builder must stop and say so — never rewrite a live document.
+  // TWO PASSES AT MOST. A save whose id is standing here takes the update path; one with no id, or an
+  // id nobody has, takes the insert. The one case that needs a second pass: the insert finds its id
+  // TAKEN (the key) — a twin of this save still in flight, whose answer was lost on the wire, landed
+  // first. Then the row is this company's and the second pass updates it; a row this company cannot
+  // see is "Quote not found.", never a second estimate under a new number.
+  for (let pass = 0; pass < 2 && !quote; pass++) {
+    if (standing) {
+      // THE DRAFT LOCK, DECIDED ON WHAT WAS READ: the RPC holds the same lock under its row lock, so
+      // this is its refusal one round trip earlier, not a second rule.
+      if (standing.status !== "draft") {
         return { ok: false as const, code: "not_editable" as const, error: "That draft was sent — it can't be edited from the builder anymore." };
       }
-      if (msg.includes("EMPTY_REPLACE")) {
-        return {
-          ok: false as const,
-          code: "empty_replace" as const,
-          error: "Refused: this would wipe the draft's line items. Reload the estimate to pick up its saved lines, or delete the draft if you meant to start over.",
-        };
-      }
-      if (msg.includes("QUOTE_GONE")) {
-        // Deleted (or never ours): fall through and mint a fresh draft — a stale restored
-        // quoteId must not brick the session (review: "permanent no-save black hole").
+      // AUTOSAVE UPDATE — one TRANSACTION via save_quote_draft (0211): row-locked,
+      // draft-locked, header + wholesale line replace atomically. The old three-REST-call
+      // shape let two writers interleave into doubled lines under a single-set total, and a
+      // failed insert left a zero-line draft (review of cn-v796, 3 confirmed HIGHs).
+      const { data: rpc, error: rpcErr } = await supabase.rpc("save_quote_draft", {
+        p_id: standing.id,
+        p_fields: { ...fields, subtotal, tax, total },
+        p_items: input.items.map((it, idx) => ({
+          description: it.description,
+          quantity: it.quantity,
+          unit: it.unit || "ea",
+          unit_price: it.unit_price,
+          category: it.group ?? null,
+          sort_order: idx,
+          // The task behind the line (0386) rides every save, or the first autosave would drop it —
+          // coerced, so a part he added and never named is not stored (coerceTaskDetail drops it).
+          detail: coerceTaskDetail(it.detail),
+        })),
+      });
+      if (rpcErr) {
+        const msg = rpcErr.message ?? "";
+        if (msg.includes("QUOTE_NOT_DRAFT")) {
+          // Sent between the read and the lock: the builder must stop and say so — never rewrite a live document.
+          return { ok: false as const, code: "not_editable" as const, error: "That draft was sent — it can't be edited from the builder anymore." };
+        }
+        if (msg.includes("EMPTY_REPLACE")) {
+          return {
+            ok: false as const,
+            code: "empty_replace" as const,
+            error: "Refused: this would wipe the draft's line items. Reload the estimate to pick up its saved lines, or delete the draft if you meant to start over.",
+          };
+        }
+        if (msg.includes("QUOTE_GONE")) {
+          // Deleted between the read and the lock: fall through to the insert below, under the same id —
+          // a stale restored quoteId must not brick the session (review: "permanent no-save black hole").
+          standing = null;
+        } else {
+          return { ok: false as const, error: dbError(rpcErr) };
+        }
       } else {
-        return { ok: false as const, error: dbError(rpcErr) };
-      }
-    } else {
-      const row = Array.isArray(rpc) ? rpc[0] : rpc;
-      quote = row as { id: string; quote_number?: string | null };
-      updateItemsDone = true;
-      if (estimateFormat !== undefined) {
-        // ONE more statement after the RPC, read back (silent-write law), and only on a DRAFT, the
-        // same lock the RPC holds: the draft is still ours (the RPC just locked and wrote it), so zero
-        // rows means it went, or was sent, between the two. The builder sends the format only when it
-        // changed, so this is not a write per autosave.
-        const { data: fmt, error: fmtErr } = await supabase.from("quotes").update({ estimate_format: estimateFormat }).eq("id", quote.id).eq("status", "draft").select("id");
-        if (fmtErr) return { ok: false as const, error: dbError(fmtErr) };
-        if (!fmt?.length) return { ok: false as const, error: "The paper format didn't land — reload the estimate and try again." };
+        const row = Array.isArray(rpc) ? rpc[0] : rpc;
+        quote = row as { id: string; quote_number?: string | null };
+        updateItemsDone = true;
+        if (estimateFormat !== undefined) {
+          // ONE more statement after the RPC, read back (silent-write law), and only on a DRAFT, the
+          // same lock the RPC holds: the draft is still ours (the RPC just locked and wrote it), so zero
+          // rows means it went, or was sent, between the two. The builder sends the format only when it
+          // changed, so this is not a write per autosave.
+          const { data: fmt, error: fmtErr } = await supabase.from("quotes").update({ estimate_format: estimateFormat }).eq("id", quote.id).eq("status", "draft").select("id");
+          if (fmtErr) return { ok: false as const, error: dbError(fmtErr) };
+          if (!fmt?.length) return { ok: false as const, error: "The paper format didn't land — reload the estimate and try again." };
+        }
       }
     }
-  }
-  if (!quote) {
-    const { data: ins, error } = await supabase
-      .from("quotes")
-      .insert({ ...fields, ...(estimateFormat !== undefined ? { estimate_format: estimateFormat } : {}), created_by: ctx.userId })
-      // quote_number is stamped by the BEFORE-INSERT trigger (0004 next_doc_number),
-      // so insert-returning carries the real document number.
-      .select("id, quote_number")
-      .single();
-    if (error) return { ok: false as const, error: dbError(error) };
-    quote = ins as { id: string; quote_number?: string | null };
+    if (!quote) {
+      const { data: ins, error } = await supabase
+        .from("quotes")
+        // The client's own id when it named one (cn-v1132), so a retry lands on this row and not beside it.
+        // Status is never set here: the column's default, 'draft'.
+        .insert({ ...fields, ...(input.id ? { id: input.id } : {}), ...(estimateFormat !== undefined ? { estimate_format: estimateFormat } : {}), created_by: ctx.userId })
+        // quote_number is stamped by the BEFORE-INSERT trigger (0004 next_doc_number),
+        // so insert-returning carries the real document number.
+        .select("id, quote_number")
+        .single();
+      if (error) {
+        if (input.id && idTaken(error)) {
+          const twin = await standingOf(input.id);
+          if (twin && "error" in twin) return { ok: false as const, error: twin.error };
+          if (!twin) return { ok: false as const, error: "Quote not found." };
+          standing = twin;
+          prevInquiryId = twin.inquiry_id;
+          continue;
+        }
+        return { ok: false as const, error: dbError(error) };
+      }
+      quote = ins as { id: string; quote_number?: string | null };
+    }
   }
   if (!quote) return { ok: false as const, error: "The save didn't land." };
 

@@ -205,11 +205,8 @@ describe("the rest of the doors that read a vendor-priced line", () => {
 describe("every picker takes the one pricing input, and every picker page reads the vendors", () => {
   const root = join(__dirname, "..", "..", "..");
   const read = (p: string) => readFileSync(join(root, p), "utf8");
-  const pickers = [
-    "src/app/(app)/quotes/new/quote-builder.tsx",
-    "src/app/(app)/quotes/[id]/quote-items-editor.tsx",
-    "src/app/(app)/billing/[id]/invoice-detail.tsx",
-  ];
+  // The one estimate editor (cn-v1132) serves both estimate pages; the invoice keeps its own.
+  const pickers = ["src/app/(app)/quotes/estimate-editor.tsx", "src/app/(app)/billing/[id]/invoice-detail.tsx"];
 
   it("no AddLineItems caller hands it a markupFor closure; each passes pricing", () => {
     for (const p of pickers) {

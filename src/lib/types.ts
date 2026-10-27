@@ -11,6 +11,7 @@ import type { JobStatus } from "./job-status";
 import type { QuoteStatus, WorkOrderStatus } from "./statuses";
 import { INQUIRY_STATUSES } from "./statuses";
 import type { LeadBucket } from "./lead-triage";
+import type { TaskDetail } from "./estimate/line-map";
 export type { JobStatus, QuoteStatus, WorkOrderStatus, LeadBucket };
 export type ChangeOrderStatus = "pending" | "approved" | "rejected";
 export type TimeEntryStatus = "open" | "closed";
@@ -315,6 +316,33 @@ export interface QuoteLineItem {
   unit_price: number;
   line_total: number;
   sort_order: number;
+  /** The scope group the line sits under (0104: Framing, Decking, Electrical…); null = none. */
+  category: string | null;
+  /** The task behind the line (0386; labor rows 0395), read through coerceTaskDetail; null = a plain line. */
+  detail: TaskDetail | null;
+}
+
+/** THE ONE EDITOR'S ROW (cn-v1132, readQuoteForEditor): every column named. The saved page read `*`
+ *  with the customer and the lead embedded; this is that row's own columns, so nothing the page showed
+ *  is lost on the way to the editor, and nothing it never used rides along. */
+export interface EditorQuote extends Quote {
+  /** The lead this estimate was seeded from (0109); null when it started from scratch. */
+  inquiry_id: string | null;
+  estimate_format: "tasks" | "detailed" | null;
+  /** The day to ask the customer again (0366) — never valid_until, which is the offer's own window. */
+  follow_up_at: string | null;
+  /** The estimate this one revises (0391); accepting it supersedes that one. */
+  revises_quote_id: string | null;
+  /** The /q link's token (0012); null until the estimate is shared. */
+  public_token: string | null;
+  /** The row's own site (0177 address spine; 0187 unit) — the paper's place when the job has none. */
+  address: string | null;
+  unit: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  accepted_at: string | null;
+  declined_at: string | null;
 }
 
 export interface WorkOrder {

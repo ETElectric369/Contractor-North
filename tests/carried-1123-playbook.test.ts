@@ -99,7 +99,7 @@ describe("Remember As A Kit files the kit under a whole free-typed scope paragra
   });
 
   it("the kit sheet's Scope box is seeded from the word and from nothing else", () => {
-    expect(read("src/app/(app)/quotes/new/quote-builder.tsx")).toContain('useState(scopeWord ?? "")');
+    expect(read("src/app/(app)/quotes/task-breakdown.tsx")).toContain('useState(scopeWord ?? "")');
   });
 });
 
