@@ -4,9 +4,19 @@
 //
 //   node scripts/run-migrations.mjs            # run all
 //   node scripts/run-migrations.mjs --verify   # run all, then print a summary
+//
+// THE TEST DATABASE ONLY (cn-v1134). SUPABASE_DB_URL is whatever .env.local says; pointed at
+// production this would re-run every migration there. So after it connects and before it runs
+// anything, it reads the test database's marker row (scripts/test-db/guard.cjs, the same rule
+// rebuild.cjs and CI's check-test-db.cjs keep) and refuses in words when the marker is absent.
+// Production migrations go through ~/Developer/db/apply-migration.cjs, one file at a time.
 import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import pg from "pg";
+
+const require = createRequire(import.meta.url);
+const { checkMarker, DB_PUSH_REFUSAL } = require("./test-db/guard.cjs");
 
 const root = process.cwd();
 
@@ -35,7 +45,14 @@ const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized:
 
 try {
   await client.connect();
-  console.log(`Connected. Running ${files.length} migration(s)…\n`);
+  // The marker first, before a single statement of a migration: no marker, nothing runs.
+  const marker = await checkMarker(client);
+  if (!marker.ok) {
+    console.error(`✗ ${DB_PUSH_REFUSAL} (${marker.why}). Nothing was run.`);
+    await client.end();
+    process.exit(1);
+  }
+  console.log(`Guard passed: this is the test database. Running ${files.length} migration(s)…\n`);
   for (const f of files) {
     const sql = readFileSync(path.join(dir, f), "utf8");
     process.stdout.write(`→ ${f} … `);

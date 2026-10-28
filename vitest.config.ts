@@ -28,7 +28,8 @@ export default defineConfig({
         test: {
           name: "unit",
           // tests/ holds meta-tests about the harness itself (the CI-creds guard, the DB guard).
-          include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
+          // .tsx too (cn-v1134): a test that renders a screen with react-dom/server sits beside it.
+          include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
           exclude: [...configDefaults.exclude, ...DB_SUITES],
         },
       },

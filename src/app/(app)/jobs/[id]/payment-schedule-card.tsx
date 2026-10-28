@@ -271,7 +271,7 @@ function ScheduleEditor({
     <Modal
       open
       onClose={() => !pending && onClose()}
-      title="Payment schedule"
+      title="Payment Schedule"
       footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save Schedule" />}
     >
       <div className="space-y-3">

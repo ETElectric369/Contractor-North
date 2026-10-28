@@ -1165,7 +1165,7 @@ export async function deleteJob(
   const prelimServed = !!(lien as { prelim_sent_at: string | null } | null)?.prelim_sent_at;
   const blockers: string[] = [];
   if (signedContracts) blockers.push("a contract the customer has signed");
-  if (prelimServed) blockers.push("a served preliminary notice (your lien rights)");
+  if (prelimServed) blockers.push("a served California preliminary notice (your lien rights)");
   if (billedMilestones) blockers.push(`${billedMilestones} already-billed payment milestone${billedMilestones > 1 ? "s" : ""}`);
   if (blockers.length) {
     return {

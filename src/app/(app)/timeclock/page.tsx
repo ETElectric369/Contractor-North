@@ -19,6 +19,8 @@ import type { JobCode, TimeEntry } from "@/lib/types";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
+import { getCrewStatus, type CrewMember } from "@/lib/crew-status";
+import { WhosOnTheClock } from "./whos-on-the-clock";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +50,35 @@ export default async function TimeclockPage() {
   const lang = prof?.language ?? "en";
   const t = translator(lang);
   const isStaff = !!prof && isStaffRole(prof.role);
+
+  // WHO'S ON THE CLOCK (cn-v1134; Erik, 2026-10-27: "keep the who's on the clock with Time Clock
+  // instead of Timecards"): the office's live crew pulse, read the moment the role is known, STAFF
+  // ONLY — a tech's page reads nothing here (his "who else is on" is My Day's Now card, untouched).
+  // A failed read is null and SAID in the block, never an empty crew (getCrewStatus throws on a
+  // returned error). The shift starts ride along (lib/shift-chain) so a Switch Job's second piece
+  // reads "since" its shift began; a failed chain read is reported and the piece's own clock-in stands in.
+  const crewP: Promise<{ crew: CrewMember[] | null | undefined; starts: Map<string, string> }> = isStaff
+    ? getCrewStatus(supabase)
+        .then(async (crew) => {
+          const on = crew.filter((c) => c.clockedIn && c.entryId && c.clockIn);
+          let starts = new Map<string, string>();
+          try {
+            const chains = await loadShiftChains(
+              supabase as any,
+              on.map((c) => ({ id: c.entryId as string, clock_in: c.clockIn as string, split_from: c.splitFrom })),
+              null,
+            );
+            starts = new Map([...chains].map(([id, info]) => [id, info.startIso]));
+          } catch (e) {
+            reportError("timeclock-crew-shift-chain", e);
+          }
+          return { crew, starts };
+        })
+        .catch((e: unknown) => {
+          reportError("timeclock-crew-status", e);
+          return { crew: null, starts: new Map<string, string>() };
+        })
+    : Promise.resolve({ crew: undefined, starts: new Map<string, string>() });
 
   const [openRes, codesRes, jobsRes, weekRes, orgRes, leadRes] = await Promise.all([
     supabase
@@ -85,6 +116,7 @@ export default async function TimeclockPage() {
     supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle(),
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
+  const crewR = await crewP;
   // A crew lead files an end-of-day report at clock-out, only while Daily Reports is on (0352).
   const crewLead = !!(leadRes.data as any)?.crew_lead && featureOn(orgSettings.features, "daily_reports");
   // Codes on (default) = today's behavior everywhere. Codes off = no code pickers on
@@ -420,6 +452,20 @@ export default async function TimeclockPage() {
           >
             <NextUp userId={user.id} tz={orgSettings.timezone} />
           </Suspense>
+        )}
+
+        {/* WHO'S ON THE CLOCK — the office's live crew pulse, here instead of Money › Timecards
+            (Erik, 2026-10-27). Drawn only when the read ran (staff: crewR.crew is undefined for a
+            tech); a failed read is said inside the block. */}
+        {crewR.crew !== undefined && (
+          <WhosOnTheClock
+            crew={crewR.crew}
+            starts={crewR.starts}
+            selfId={user?.id ?? null}
+            tz={orgSettings.timezone}
+            todayStr={todayStrInTz(orgSettings.timezone)}
+            weekStart={orgSettings.week_start}
+          />
         )}
 
         {/* NO STAFF DOOR ROW (Wave 2): each door has its home. Money › Timecards (the crew's hours, and

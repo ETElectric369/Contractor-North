@@ -412,7 +412,7 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => void onHowTo()} disabled={guide.busy || enabling}>
               {guide.busy && <Loader2 className="animate-spin" />}
-              How to Tap
+              How To Tap
             </Button>
             <span className="text-slate-500">Apple&apos;s own walkthrough of taking a tap, PIN entry included.</span>
           </div>
@@ -445,7 +445,7 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
           </p>
           <Button size="sm" variant="outline" onClick={() => void onAnnounce()} disabled={announce.busy}>
             {announce.busy && <Loader2 className="animate-spin" />}
-            Announce Tap to Pay on iPhone to the Crew
+            Announce Tap to Pay on iPhone To The Crew
           </Button>
           {announce.line && <p className={announce.bad ? "text-rose-700" : "text-emerald-700"}>{announce.line}</p>}
         </div>

@@ -97,7 +97,7 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
     <Modal
       open={open}
       onClose={close}
-      title="Nort — end of day"
+      title="Nort — End Of Day"
       dirty={!filed && (!!did.trim() || !!mats.trim())}
       footer={
         filed ? (

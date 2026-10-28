@@ -385,7 +385,7 @@ export function OrganizeManager({
       <Modal
         open
         onClose={() => setEditing(null)}
-        title="Edit details"
+        title="Edit Details"
         footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={saving} />}
       >
         <div className="space-y-4">

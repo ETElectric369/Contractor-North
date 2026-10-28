@@ -1606,7 +1606,7 @@ export default async function JobDetailPage({
                                   rel="noreferrer"
                                   className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
                                 >
-                                  Check with City ↗
+                                  Check With City ↗
                                 </a>
                               )}
                             </div>
@@ -1933,7 +1933,7 @@ export default async function JobDetailPage({
                 {(pos ?? []).map((p: any) => (
                   <li key={p.id}>
                     <Link href={`/purchasing/${p.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                      <span>{p.po_number} · {p.vendor || "No vendor"}</span>
+                      <span>{p.po_number} · {p.vendor || "No Vendor"}</span>
                       <span className="text-slate-700">{formatCurrency(p.total)}</span>
                     </Link>
                   </li>
@@ -2035,7 +2035,7 @@ export default async function JobDetailPage({
                 href={`/materials?job=${j.id}`}
                 className="text-xs text-slate-400 hover:text-slate-600"
               >
-                other lists ({(jobLists ?? []).length - 1})
+                Other Lists ({(jobLists ?? []).length - 1})
               </Link>
             </div>
           )}
@@ -2312,7 +2312,7 @@ export default async function JobDetailPage({
               include putting it back." The origin lives on in the first chapter below. */}
           {(j as any).inquiry && (
             <Link href={`/jobs/${j.id}?tab=job#activity`} className="inline-flex min-h-11 items-center text-brand hover:underline">
-              ← from lead: {(j as any).inquiry.name}
+              ← From Lead: {(j as any).inquiry.name}
             </Link>
           )}
         </div>

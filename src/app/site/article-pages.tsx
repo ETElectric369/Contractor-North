@@ -111,7 +111,7 @@ export async function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; pos
                   <h2 className="mt-1.5 text-lg font-semibold leading-snug group-hover:underline">{p.title}</h2>
                   {p.description && <p className="mt-2 line-clamp-3 text-sm text-slate-600">{p.description}</p>}
                   <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: brand }}>
-                    Read more <ArrowRight className="h-4 w-4" />
+                    Read More <ArrowRight className="h-4 w-4" />
                   </span>
                 </div>
               </Link>
@@ -160,7 +160,7 @@ export async function ArticlePage({ org, post, base, nav }: { org: PublicOrg; po
       <SiteHeader chrome={chrome} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} current="articles" />
       <main className="mx-auto max-w-3xl px-4 py-12">
         <Link href={`${base}/blog`} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-4 w-4" /> All articles
+          <ArrowLeft className="h-4 w-4" /> All Articles
         </Link>
         <h1 className="mt-4 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{post.title}</h1>
         <p className="mt-3 text-sm text-slate-400">
@@ -190,7 +190,7 @@ export async function ArticlePage({ org, post, base, nav }: { org: PublicOrg; po
             className="mt-3 inline-flex items-center gap-2 rounded-lg px-6 py-3 text-base font-semibold text-white"
             style={{ backgroundColor: brand }}
           >
-            Get a free estimate <ArrowRight className="h-5 w-5" />
+            Get A Free Estimate <ArrowRight className="h-5 w-5" />
           </Link>
         </div>
       </main>

@@ -282,31 +282,59 @@ export interface BornResult {
   inserted: number;
   /** True when this call set the job's planned_minutes (it had none and the tasks had hours). */
   plannedSet: boolean;
+  /** Tasks NOT born because he deleted that key from this job before (jobs.dismissed_task_keys). */
+  leftOff: number;
   error?: string;
 }
+
+/**
+ * A DISMISSAL, as the delete door writes it since cn-v1084: "<key>#<title>". The key bars that line;
+ * the title bars the same task on a REBUILT line (the builder's autosave re-ids every line, so a key
+ * alone forgot the task the moment the estimate was touched). Entries from before carry the key alone.
+ * Here, below the sync (sync-job-tasks reads them through these), so the birth honors the same list.
+ */
+export const dismissalEntry = (key: string, title: string): string => `${key}#${title.trim()}`;
+export const dismissalKey = (e: string): string => (e.includes("#") ? e.slice(0, e.indexOf("#")) : e);
+export const dismissalTitle = (e: string): string | null => (e.includes("#") ? e.slice(e.indexOf("#") + 1).trim() || null : null);
 
 /**
  * WRITE THE BIRTH. Reads the job's existing keys, inserts the missing tasks, counts them, then
  * fills planned_minutes only where the job has none. Returns what it did; never throws for a
  * database answer (the job is already made — the door says what could not be listed).
  */
-/** The keys the job already has (its born tasks). */
-async function keysOnJob(sb: SupabaseClient, jobId: string, orgId: string | null = null): Promise<{ keys: Set<string | null>; error?: string }> {
+/** The keys the job already has (its born tasks), and the keys he DELETED from it by hand
+ *  (jobs.dismissed_task_keys, read as the sync reads them: the key half of each entry) — a dismissed
+ *  key is never born again, the sync's own rule (planLineSync), followed here by every door that births. */
+async function keysOnJob(sb: SupabaseClient, jobId: string, orgId: string | null = null): Promise<{ keys: Set<string | null>; dismissed: Set<string>; error?: string }> {
+  const none = { keys: new Set<string | null>(), dismissed: new Set<string>() };
   let q = sb.from("tasks").select("source_key").eq("job_id", jobId).not("source_key", "is", null);
   if (orgId) q = q.eq("org_id", orgId); // the service client: the company's rows only (audit v1085, carried)
   const { data, error } = await q;
-  if (error) return { keys: new Set(), error: dbError(error) };
-  return { keys: new Set(((data ?? []) as Array<{ source_key: string | null }>).map((r) => r.source_key)) };
+  if (error) return { ...none, error: dbError(error) };
+  let jq = sb.from("jobs").select("dismissed_task_keys").eq("id", jobId);
+  if (orgId) jq = jq.eq("org_id", orgId);
+  const { data: job, error: jErr } = await jq.maybeSingle();
+  if (jErr) return { ...none, error: dbError(jErr) };
+  const entries = (Array.isArray((job as { dismissed_task_keys?: unknown } | null)?.dismissed_task_keys) ? (job as { dismissed_task_keys: unknown[] }).dismissed_task_keys : []).filter(
+    (k): k is string => typeof k === "string",
+  );
+  return {
+    keys: new Set(((data ?? []) as Array<{ source_key: string | null }>).map((r) => r.source_key)),
+    dismissed: new Set(entries.map(dismissalKey)),
+  };
 }
 
 export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth): Promise<BornResult> {
   let inserted = 0;
+  let leftOff = 0;
   if (birth.tasks.length) {
     const have = await keysOnJob(sb, who.jobId, who.orgId);
-    if (have.error) return { inserted: 0, plannedSet: false, error: have.error };
+    if (have.error) return { inserted: 0, plannedSet: false, leftOff: 0, error: have.error };
     const seen = have.keys;
+    // A key he deleted from this job stays gone (the sync's rule, cn-v1134 here): not born, counted.
+    leftOff = birth.tasks.filter((t) => !seen.has(t.source_key) && have.dismissed.has(t.source_key)).length;
     const rows = birth.tasks
-      .filter((t) => !seen.has(t.source_key))
+      .filter((t) => !seen.has(t.source_key) && !have.dismissed.has(t.source_key))
       .map((t) => ({
         ...(who.orgId ? { org_id: who.orgId } : {}),
         job_id: who.jobId,
@@ -325,14 +353,14 @@ export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth):
         // TWO DOORS IN THE SAME SECOND (the customer's Accept and the office's): the loser's insert
         // hits tasks_job_source_key_uq (23505). The winner's rows ARE the birth, so re-read and, when
         // every key is now on the job, this call did its work by doing nothing. Any other refusal is said.
-        const raced = (error as { code?: string }).code === "23505" && (await keysOnJob(sb, who.jobId, who.orgId)).keys;
-        if (!raced || !birth.tasks.every((t) => raced.has(t.source_key))) {
-          return { inserted: 0, plannedSet: false, error: dbError(error) };
+        const raced = (error as { code?: string }).code === "23505" && (await keysOnJob(sb, who.jobId, who.orgId));
+        if (!raced || raced.error || !birth.tasks.every((t) => raced.keys.has(t.source_key) || raced.dismissed.has(t.source_key))) {
+          return { inserted: 0, plannedSet: false, leftOff, error: dbError(error) };
         }
       } else {
         inserted = data?.length ?? 0;
         if (inserted !== rows.length) {
-          return { inserted, plannedSet: false, error: `${rows.length - inserted} of ${rows.length} tasks did not save.` };
+          return { inserted, plannedSet: false, leftOff, error: `${rows.length - inserted} of ${rows.length} tasks did not save.` };
         }
       }
     }
@@ -342,10 +370,10 @@ export async function bornTasks(sb: SupabaseClient, who: BornWho, birth: Birth):
     let q = sb.from("jobs").update({ planned_minutes: birth.plannedMinutes }).eq("id", who.jobId).is("planned_minutes", null);
     if (who.orgId) q = q.eq("org_id", who.orgId);
     const { data, error } = await q.select("id");
-    if (error) return { inserted, plannedSet: false, error: dbError(error) };
+    if (error) return { inserted, plannedSet: false, leftOff, error: dbError(error) };
     plannedSet = (data?.length ?? 0) > 0; // zero rows = the job already had a size: his box wins
   }
-  return { inserted, plannedSet };
+  return { inserted, plannedSet, leftOff };
 }
 
 /** THE ESTIMATE DOORS' HALF: read the accepted estimate's lines, then bornTasks. */
@@ -357,7 +385,7 @@ export async function bornWithTasks(
   let q = sb.from("quote_line_items").select("id, description, sort_order, quantity, detail").eq("quote_id", who.quoteId);
   if (who.orgId) q = q.eq("org_id", who.orgId);
   const { data, error } = await q.order("sort_order");
-  if (error) return { inserted: 0, plannedSet: false, error: dbError(error), birth: EMPTY_BIRTH };
+  if (error) return { inserted: 0, plannedSet: false, leftOff: 0, error: dbError(error), birth: EMPTY_BIRTH };
   const birth = tasksFromLines((data ?? []) as LineRow[]);
   const res = await bornTasks(sb, who, birth);
   return { ...res, birth };

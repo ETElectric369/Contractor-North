@@ -58,7 +58,7 @@ export function NewWorkOrderButton({
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="New work order"
+          title="New Work Order"
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}
@@ -108,7 +108,7 @@ export function NewWorkOrderButton({
               <Select id="status" name="status" defaultValue="draft">
                 <option value="draft">Draft</option>
                 <option value="assigned">Assigned</option>
-                <option value="in_progress">In progress</option>
+                <option value="in_progress">In Progress</option>
               </Select>
             </div>
             <div>

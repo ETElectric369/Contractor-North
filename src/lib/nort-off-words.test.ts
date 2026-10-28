@@ -64,7 +64,7 @@ describe("the setup questions (Start Here with Nort off) say nothing as Nort", (
     const mounts = host.split("\n").filter((l) => l.includes("<SetupInterview "));
     expect(mounts).toHaveLength(2);
     for (const l of mounts) expect(l).toContain("nortOn={nortOn}");
-    expect(host).toContain('"A couple of things still missing"');
+    expect(host).toContain('"A Couple Of Things Still Missing"');
   });
 
   it("they are the PLAIN questions: no say-it box (a model call) while Nort is off", () => {

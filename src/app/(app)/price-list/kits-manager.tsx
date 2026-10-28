@@ -219,7 +219,7 @@ function LinkItemModal({ item, priceItems, orgDefaultPct, onClose }: { item: Kit
     });
   }
   return (
-    <Modal open onClose={onClose} title="Link to Item" size="md" footer={<ModalActions onCancel={onClose} onSave={onClose} saveLabel="Done" hideCancel />}>
+    <Modal open onClose={onClose} title="Link To Item" size="md" footer={<ModalActions onCancel={onClose} onSave={onClose} saveLabel="Done" hideCancel />}>
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
           <span className="font-medium text-slate-900">{item.description}</span> is a frozen line — it keeps the price it was
@@ -257,9 +257,9 @@ function SizingFields({ sizing, onChange, idPrefix, measurements = [] }: { sizin
               onChange({ ...sizing, sizedBy: "", qtyPer: "", perSqft: m === "sqft" ? sq || 1 : "", perLf: m === "lf" ? lf || 1 : "" });
             }}
           >
-            <option value="fixed">Fixed Quantity — typed on the estimate</option>
-            <option value="sqft">Per Sq Ft of the Job</option>
-            <option value="lf">Per Linear Ft of the Job</option>
+            <option value="fixed">Fixed Quantity — Typed On The Estimate</option>
+            <option value="sqft">Per Sq Ft Of The Job</option>
+            <option value="lf">Per Linear Ft Of The Job</option>
             {measurements.filter((m) => !m.builtIn).map((m) => (
               <option key={m.key} value={`m:${m.key}`}>
                 Per {m.label}{m.unit ? ` (${m.unit})` : ""}
@@ -282,9 +282,9 @@ function SizingFields({ sizing, onChange, idPrefix, measurements = [] }: { sizin
             <div>
               <Label htmlFor={`${idPrefix}-round`}>Round</Label>
               <Select id={`${idPrefix}-round`} value={sizing.rounding} onChange={(e) => onChange({ ...sizing, rounding: e.target.value })}>
-                <option value="up">Round up (whole units)</option>
+                <option value="up">Round Up (Whole Units)</option>
                 <option value="nearest">Nearest</option>
-                <option value="none">Exact — no rounding</option>
+                <option value="none">Exact — No Rounding</option>
               </Select>
             </div>
           </>
@@ -394,7 +394,7 @@ function EditItemModal({ item, orgDefaultPct, measurements = [], onClose }: { it
             </p>
             <p className="mt-1 text-xs text-slate-500">Priced from the book — edit the item in the Price List to change its name, unit or price.</p>
             <button type="button" onClick={unlink} disabled={pending} className="mt-2 text-xs text-slate-400 underline-offset-2 hover:text-red-600 hover:underline">
-              Unlink — Freeze at Today&rsquo;s Price
+              Unlink — Freeze At Today&rsquo;s Price
             </button>
           </div>
         ) : (

@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
 import { partsFromLines, type KeyedPart, type LineRow } from "./born-with-tasks";
 import { GONE_KEY, LINE_KEY, VISIT_KEY } from "./sync-job-tasks";
-import { HOW_MANY, few, insertKeyedRows, plainLineOf, plainRowHalf, plural, readPriceBook, taskPartRow } from "./take-off-from-quote";
+import { HOW_MANY, few, insertKeyedRows, isClaimableKey, plainLineOf, plainRowHalf, plural, readPriceBook, taskPartRow } from "./take-off-from-quote";
 
 /** The parts reader and its row type live with the birth (born-with-tasks, cn-v1133) so the figure a
  *  door reads before its write (estimateLines' partCounts) is the sync's own reading; found here still. */
@@ -83,7 +83,8 @@ export interface ListPartRow {
   unit?: string | null;
 }
 
-/** A row with no key that is not his (not bought, not a tool): typed by hand, or taken off before 0390. */
+/** A row with no key — or a typed row's "capture:" key (isClaimableKey) — that is not his (not bought, not a
+ *  tool): typed by hand or on site, or taken off before 0390. */
 export type HandRow = Pick<ListPartRow, "id" | "description" | "part_number" | "quantity">;
 
 /** The "#part" half of a key, without its ordinal — what survives the builder giving the line a new id. */
@@ -398,7 +399,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     if (p) plainHalves.set(p.half, (plainHalves.get(p.half) ?? 0) + 1);
   }
   const hand: HandRow[] = all.filter((r) => {
-    if (r.source_key || isHisRow(r)) return false;
+    if (!isClaimableKey(r.source_key) || isHisRow(r)) return false; // a typed row's "capture:" key is no claim (cn-v1134)
     const half = unkeyedHalf(r);
     const n = plainHalves.get(half) ?? 0;
     if (!n) return true;

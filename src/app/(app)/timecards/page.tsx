@@ -21,7 +21,6 @@ import { featureOn } from "@/lib/features";
 import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz, weekWindowInTz } from "@/lib/tz";
 import { balanceForPerson, drawIdsFrom, toPayPaymentRow, wagesOnly, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
-import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
 import { TimecardStack, type Grouping, type StackEntry } from "./timecard-stack";
 import { hmToMin } from "@/lib/tz";
@@ -32,7 +31,7 @@ import { OpenEntryEditor } from "./open-entry-editor";
 import { familyWasConverted, splitFamilies, splitNeighbors } from "@/lib/split-family";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
-import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
+import { LONG_SHIFT_HOURS, clockDoorWords } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
 import { NO_JOB_READ_CAP, companyTimeCode, readNoJobHours } from "@/lib/no-job-hours";
@@ -137,20 +136,13 @@ export default async function TimecardsPage({
   /** Add Time Entry's Job list reaches back this far for a FINISHED job (the one read Needs You uses
    *  for "done lately": complete, touched in the last 30 days). Older: the job's own Time tab. */
   const doneSince = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const [{ data: members }, { data: jobCodes }, { data: org }, crew, teammates, { data: activeJobs }, { data: doneJobs }] = await Promise.all([
+  const [{ data: members }, { data: jobCodes }, { data: org }, teammates, { data: activeJobs }, { data: doneJobs }] = await Promise.all([
     // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
     // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
     // above, so the rates never serialize into a tech's props.
     supabase.from("profile_pay").select("id, full_name, hourly_rate, bill_rate, paid_by_draw").eq("active", true).order("full_name"),
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-    // The live crew pulse (who's on the clock now) — moved here from My Day's
-    // CrewBoard so presence lives next to the hours it becomes (and, since 2026-10-13, drawn
-    // under My Day's own clock too). A failed read is null and SAID below, never an empty crew.
-    getCrewStatus(supabase).catch((e: unknown) => {
-      reportError("timecards-crew-status", e);
-      return null;
-    }),
     // Crew & Payroll's door below is quiet until a second person, as on the dock (rule j).
     countTeammates(supabase, me).catch(() => null),
     /* ADD TIME ENTRY'S JOB LIST: every job still in flight (no cap: a cap on newest-first drops the
@@ -489,7 +481,6 @@ export default async function TimecardsPage({
     dot: pillColorForPerson(pid).dot,
   }));
   const gridNow = { dayStr: todayStr, min: tzMinutesOfDay(new Date(), tz) };
-  const onClock = (crew ?? []).filter((c) => c.clockedIn);
 
   /* ── WHAT HE OWES, IN ONE ROW ──────────────────────────────────────────────────────────────
    *
@@ -783,92 +774,10 @@ export default async function TimecardsPage({
         </div>
       </PageHeader>
 
-      {/* Live presence — the crew pulse that used to be My Day's CrewBoard: who's on
-          the clock RIGHT NOW, living next to the hours it becomes (Erik, cn-v503). The block
-          stays exactly where cn-v503 put it and reads the same getCrewStatus; only the SIZE
-          changed. It was text-xs pills wrapped into one line, and this is the thing he checks
-          from a ladder in the sun — 10px of grey inside a pill is not readable at arm's length.
-          One person per row, at reading size. */}
-      {crew === null ? (
-        <Card className="mb-4">
-          <CardContent className="py-3">
-            <p className="text-sm text-amber-800">Couldn&rsquo;t read who&rsquo;s on the clock — reload to try again.</p>
-          </CardContent>
-        </Card>
-      ) : crew.length > 0 && (
-        <Card className="mb-4">
-          <CardContent className="py-3">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">On the clock</span>
-              <span className="text-xs text-slate-500">
-                {onClock.length} of {crew.length}
-              </span>
-            </div>
-            {onClock.length === 0 ? (
-              <p className="mt-1 text-base text-slate-400">Nobody right now</p>
-            ) : (
-              <ul className="mt-0.5">
-                {/* EACH ROW IS THE WAY TO CLOCK THAT PERSON OUT (2026-09-24). Erik could see
-                    Brian's clock running here and had nothing to tap; then: "an option to [end] an
-                    employees time clock and clock out for them". The row reads "Clock Out Brian"
-                    and opens the entry through the ?entry= door, the clock-out sheet. A clock
-                    running LONG_SHIFT_HOURS or more is tinted, because it was probably forgotten,
-                    and its sheet asks when it really stopped. */}
-                {onClock.map((c) => {
-                  // "since" is when the SHIFT began (the first piece after a Switch Job), and the
-                  // tint counts from there too (audit v994 SW1). The link still opens the running entry.
-                  const since0 = c.entryId && c.clockIn ? shiftStartOf({ id: c.entryId, clock_in: c.clockIn }) : c.clockIn;
-                  const inMs = since0 ? Date.parse(since0) : NaN;
-                  const long = Number.isFinite(inMs) && isLongOpenShift(inMs, Date.now());
-                  const inDay = c.clockIn ? todayStrInTz(tz, new Date(c.clockIn)) : todayStr;
-                  const sinceDay = since0 ? todayStrInTz(tz, new Date(since0)) : todayStr;
-                  const since = since0
-                    ? sinceDay === todayStr
-                      ? formatTime(since0, tz)
-                      : `${new Date(since0).toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${formatTime(since0, tz)}`
-                    : null;
-                  const body = (
-                    <>
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500" aria-hidden />
-                      {/* "since" gets its own line: it is the fact that shows a forgotten clock, and
-                          sharing one truncated line with the name, the job and the verb cut it off
-                          at 375px. */}
-                      <span className="flex min-w-0 flex-1 flex-col py-1">
-                        <span className="truncate">
-                          <span className="font-medium text-slate-900">{c.name}</span>
-                          {c.jobLabel && <span className="text-slate-500"> · {c.jobLabel}</span>}
-                        </span>
-                        {since && <span className={`truncate text-sm ${long ? "text-amber-800" : "text-slate-500"}`}>since {since}</span>}
-                      </span>
-                    </>
-                  );
-                  return (
-                    <li key={c.id}>
-                      {c.entryId ? (
-                        <Link
-                          href={hrefFor(weekOf(inDay), `entry=${c.entryId}`)}
-                          scroll={false}
-                          className={`-mx-2 flex min-h-[44px] items-center gap-2.5 rounded-lg px-2 text-base active:bg-slate-100 ${
-                            long ? "bg-amber-50 text-amber-900" : ""
-                          }`}
-                        >
-                          {body}
-                          <span className={`flex shrink-0 items-center gap-0.5 text-sm font-medium ${long ? "text-amber-800" : "text-slate-600"}`}>
-                            {clockDoorWords(c.name, { self: !!user?.id && c.id === user.id }).clockOut}
-                            <ChevronRight className="h-4 w-4" aria-hidden />
-                          </span>
-                        </Link>
-                      ) : (
-                        <div className="flex min-h-[44px] items-center gap-2.5 text-base">{body}</div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* WHO'S ON THE CLOCK LEFT FOR THE TIME CLOCK (cn-v1134; Erik, 2026-10-27: "keep the who's on the
+          clock with Time Clock instead of Timecards"). The block cn-v503 drew here — the live crew
+          pulse, one person per row, each row the way to clock that person out — is timeclock/
+          whos-on-the-clock.tsx now, for the office; its rows still open THIS page's ?entry= door. */}
 
       {/* ── THE LEDGER, ONCE ──────────────────────────────────────────────────────────────────
           The week as pills in their time allotment on a desktop, as a list of shifts on a phone,
@@ -966,7 +875,7 @@ export default async function TimecardsPage({
             ) : owedPeople === 0 ? (
               <>
                 {/* "The crew": the owner is paid by owner's draw and is never on this figure (0286). */}
-                <span className="block text-base font-semibold text-slate-900">The crew is paid up</span>
+                <span className="block text-base font-semibold text-slate-900">The Crew Is Paid Up</span>
                 <span className="block text-sm text-slate-500">Open Pay</span>
               </>
             ) : (

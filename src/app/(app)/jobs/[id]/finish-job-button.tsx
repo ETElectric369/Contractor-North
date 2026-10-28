@@ -160,7 +160,7 @@ export function FinishJobButton({
       <Modal
         open={open}
         onClose={() => !pending && setOpen(false)}
-        title="Finish this job"
+        title="Finish This Job"
         portal
         footer={
           done ? (

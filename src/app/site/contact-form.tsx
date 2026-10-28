@@ -59,7 +59,7 @@ export function ContactForm({ orgId, brand, heading }: { orgId: string; brand: s
       <input value={hp} onChange={(e) => setHp(e.target.value)} tabIndex={-1} autoComplete="off" className="hidden" aria-hidden />
       <button type="submit" disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white disabled:opacity-60" style={{ backgroundColor: brand }}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        {busy ? "Sending…" : "Send request"}
+        {busy ? "Sending…" : "Send Request"}
         {!busy && <ArrowRight className="h-4 w-4" />}
       </button>
     </form>

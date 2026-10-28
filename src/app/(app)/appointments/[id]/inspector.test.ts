@@ -121,7 +121,7 @@ describe("the office: unchanged", () => {
   const html = render("office");
   it("keeps the address box, the price book, the scope prices and their total", () => {
     expect(html).toContain('data-address-box="yes"');
-    expect(html).toContain("Add a line item");
+    expect(html).toContain("Add A Line Item");
     expect(html).toMatch(/Demo — \$243\.5\/EA/);
     expect(textOf(html)).toContain("$1,034.50"); // 2 × 517.25
   });
@@ -153,7 +153,7 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
 
   it("no price, no price book, no Start The Estimate, even with a price handed in", () => {
     expect(t).not.toMatch(PRICE);
-    expect(html).not.toContain("Add a line item");
+    expect(html).not.toContain("Add A Line Item");
     expect(t).not.toMatch(/Start The Estimate/i);
     expect(html).not.toContain("/quotes/new");
     // What was picked, and how many, and whose job the price is.
@@ -165,7 +165,9 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
     expect(html).not.toContain('data-address-box="yes"');
     expect(t).toContain("13125 Mayfern Rd");
     expect(t).toContain("Sara Dale");
-    expect(buttons(html).map((b) => b.text)).not.toContain("change");
+    // The office's render carries the link's Change door; the crew lead's never does.
+    expect(buttons(render("office")).map((b) => b.text)).toContain("Change");
+    expect(buttons(html).map((b) => b.text)).not.toContain("Change");
   });
 
   it("he adds photos and never takes one off", () => {
@@ -175,9 +177,9 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
 
   it("the sheet can't be switched once one is saved on the visit", () => {
     const two = [SHEET, { ...SHEET, id: "sheet-2", name: "Service call" }];
-    expect(render("crewLead", { templates: two })).not.toContain("Pick a sheet");
-    expect(render("crewLead", { templates: two, initialTemplateId: null })).toContain("Pick a sheet");
-    expect(render("office", { templates: two })).toContain("Pick a sheet");
+    expect(render("crewLead", { templates: two })).not.toContain("Pick A Sheet");
+    expect(render("crewLead", { templates: two, initialTemplateId: null })).toContain("Pick A Sheet");
+    expect(render("office", { templates: two })).toContain("Pick A Sheet");
   });
 
   it("every door he can reach is Title Case and 44px", () => {
@@ -252,7 +254,7 @@ describe("a plain tech: reads it", () => {
   });
   it("never a price, even with one handed in", () => {
     expect(t).not.toMatch(PRICE);
-    expect(html).not.toContain("Add a line item");
+    expect(html).not.toContain("Add A Line Item");
   });
   it("a crew lead before 0356 gets the same read-only sheet, with the page's line", () => {
     const before = textOf(render("view", { viewNote: "Crew leads can fill this in once the office finishes an update. Until then only the office can change it." }));

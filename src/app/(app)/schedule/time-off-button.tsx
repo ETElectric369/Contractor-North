@@ -103,10 +103,10 @@ export function TimeOffButton({
             <div>
               <Label htmlFor="to-who">Who</Label>
               <Select id="to-who" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-                <option value="">Pick someone…</option>
+                <option value="">Pick Someone…</option>
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.full_name ?? "Crew member"}
+                    {m.full_name ?? "Crew Member"}
                   </option>
                 ))}
               </Select>

@@ -220,7 +220,7 @@ describe("Or They Paid Another Way (Record Payment's machine) records Venmo like
   });
 
   it("says the QR sends the bill when it does, and never reads Saving over a read", () => {
-    expect(BODY).toContain('props.source === "invoice" ? "Show Venmo QR" : "Send the Bill & Show Venmo QR"');
+    expect(BODY).toContain('props.source === "invoice" ? "Show Venmo QR" : "Send The Bill & Show Venmo QR"');
     const qr = BODY.slice(BODY.indexOf("function showVenmoQr()"), BODY.indexOf("function venmoPaid()"));
     expect(qr).toContain("startQr(");
     expect(qr).not.toMatch(/\bstart\(/);

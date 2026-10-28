@@ -39,7 +39,7 @@ export function SetPasswordForm() {
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving</> : "Save password & continue"}
+        {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving</> : "Save Password & Continue"}
       </Button>
     </form>
   );

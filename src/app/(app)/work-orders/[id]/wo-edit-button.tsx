@@ -74,7 +74,7 @@ export function WoEditButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Edit work order"
+        title="Edit Work Order"
         portal
         footer={
           <ModalActions onCancel={() => setOpen(false)} submit formId="wo-edit-form" saving={pending} saveLabel="Save Changes" />

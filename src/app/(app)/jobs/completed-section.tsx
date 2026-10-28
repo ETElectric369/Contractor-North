@@ -71,7 +71,7 @@ export function CompletedJobsSection({ jobs, total }: { jobs: JobRowData[]; tota
             <p className="border-t border-slate-100 px-5 py-2 text-center text-xs text-slate-400">
               Showing the latest {jobs.length} of {total} —{" "}
               <Link href="/jobs?status=complete" className="text-brand hover:underline">
-                view all completed
+                View All Completed
               </Link>
             </p>
           )}

@@ -227,7 +227,7 @@ export function InsuranceManager({ items, orgId, canEdit, canAdd = canEdit }: { 
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title="Edit policy"
+        title="Edit Policy"
         footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} />}
       >
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}

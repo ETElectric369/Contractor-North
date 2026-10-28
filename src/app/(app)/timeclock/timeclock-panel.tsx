@@ -765,7 +765,7 @@ export function TimeclockPanel({
                               className="h-11 w-full"
                               aria-label="New job code"
                             >
-                              <option value="">Code (optional)</option>
+                              <option value="">Code (Optional)</option>
                               {codesForJob(switchJobId).map((c) => (
                                 <option key={c.id} value={c.code}>
                                   {c.code}{c.description ? ` · ${c.description}` : ""}
@@ -793,7 +793,7 @@ export function TimeclockPanel({
                         onClick={() => setClockingOut(true)}
                         className="w-full text-center text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
                       >
-                        Clock out with details…
+                        Clock Out With Details…
                       </button>
                     </div>
                   )}
@@ -892,7 +892,7 @@ export function TimeclockPanel({
                     </>
                   ) : (
                     <>
-                      <Square className="h-5 w-5" /> Confirm &amp; clock out
+                      <Square className="h-5 w-5" /> Confirm &amp; Clock Out
                     </>
                   )}
                 </Button>

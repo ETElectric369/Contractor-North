@@ -74,7 +74,7 @@ export default async function SiteHome({
           href="/site-studio"
           className="fixed bottom-4 left-4 z-50 rounded-full bg-slate-900/90 px-3.5 py-2 text-sm font-semibold text-white shadow-lg backdrop-blur hover:bg-slate-800"
         >
-          ← Back to North
+          ← Back To North
         </a>
       )}
       {draft && !liveEdit && <DraftPreviewBanner />}

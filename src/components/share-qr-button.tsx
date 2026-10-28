@@ -100,7 +100,7 @@ export function ShareQrButton() {
           its close handlers while that class is present — the host stays mounted. */}
       {open &&
         createPortal(
-          <Modal open={open} onClose={() => setOpen(false)} title="Share — request an estimate">
+          <Modal open={open} onClose={() => setOpen(false)} title="Share — Request An Estimate">
             {busy || !link ? (
               <div className="flex items-center justify-center py-10 text-slate-400">
                 <Loader2 className="h-5 w-5 animate-spin" />
@@ -121,7 +121,7 @@ export function ShareQrButton() {
                 </p>
                 <div className="flex gap-2">
                   <Button onClick={share} className="flex-1">
-                    <Share className="mr-1.5 h-4 w-4" /> Send the Link
+                    <Share className="mr-1.5 h-4 w-4" /> Send The Link
                   </Button>
                   {/* Icon-only, so the name lives in aria-label (VoiceOver) + title (mouse hover). */}
                   <Button onClick={copy} variant="outline" className="shrink-0" aria-label="Copy Link" title="Copy Link">

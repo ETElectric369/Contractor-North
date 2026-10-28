@@ -66,7 +66,7 @@ export function DuplicatesButton() {
         <CopyCheck className="h-4 w-4" /> Find Duplicates
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Find & merge duplicate contacts">
+      <Modal open={open} onClose={() => setOpen(false)} title="Find & Merge Duplicate Contacts">
         {loading || groups === null ? (
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
             <Loader2 className="h-4 w-4 animate-spin" /> Scanning your contact book…
@@ -121,7 +121,7 @@ export function DuplicatesButton() {
                   <div className="mt-2 flex justify-end">
                     <Button size="sm" onClick={() => mergeGroup(g)} disabled={busy}>
                       {mergingId === gid ? <Loader2 className="h-4 w-4 animate-spin" /> : <Merge className="h-4 w-4" />}
-                      Merge {g.members.length - 1} into kept
+                      Merge {g.members.length - 1} Into Kept
                     </Button>
                   </div>
                 </div>

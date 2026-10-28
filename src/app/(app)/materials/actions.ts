@@ -297,9 +297,25 @@ async function tellOfficeAboutAddition(supabase: Db, actor: Actor, listId: strin
 /** ONE LINE ONTO A LIST, the insert every door shares (the editor's Add, and a crew member's
  *  Tell The Office ask): the next sort_order, the money stripped for a non-staff writer, and the
  *  row proven (a refusal is an error, never a 204). Telling the office is the caller's business. */
-async function insertMaterialLine(supabase: Db, actor: Actor, listId: string, item: DraftMaterial): Promise<Result & { description?: string }> {
+async function insertMaterialLine(
+  supabase: Db,
+  actor: Actor,
+  listId: string,
+  item: DraftMaterial,
+): Promise<Result & { description?: string; /** The row with this key was already on the list: this call added nothing. */ kept?: boolean; /** He deleted this key from the list before (dismissed_keys, 0390): nothing was added. */ leftOff?: boolean }> {
   const description = String(item.description ?? "").trim();
   if (!description) return { ok: false, error: "Say what the item is." };
+
+  // A KEYED ROW HE DELETED STAYS GONE (cn-v1134): the delete door put its key on the list's
+  // dismissed_keys (0390) so the estimate's sync never births it again (sync-job-materials) — the same
+  // list bars a visit's row here, so Won · Pick The Job pressed again does not revive what he removed.
+  // Only a keyed row asks (a hand add has no key, and nothing to bar); a failed read is said.
+  if (item.source_key) {
+    const { data: list, error: lErr } = await supabase.from("material_lists").select("dismissed_keys").eq("id", listId).maybeSingle();
+    if (lErr) return { ok: false, error: dbError(lErr) };
+    const dismissed = (list as { dismissed_keys?: unknown } | null)?.dismissed_keys;
+    if (Array.isArray(dismissed) && dismissed.includes(item.source_key)) return { ok: true, description, leftOff: true };
+  }
 
   const { data: last } = await supabase
     .from("material_list_items")
@@ -331,7 +347,7 @@ async function insertMaterialLine(supabase: Db, actor: Actor, listId: string, it
   // or the estimate's take-off got there first. The row with that key IS this part — answered with it.
   if (error && item.source_key && isDuplicateKey(error)) {
     const { data: have } = await supabase.from("material_list_items").select("id").eq("list_id", listId).eq("source_key", item.source_key).maybeSingle();
-    if (have) return { ok: true, id: (have as { id: string }).id, description };
+    if (have) return { ok: true, id: (have as { id: string }).id, description, kept: true };
   }
   if (error) return { ok: false, error: dbError(error) };
   if (!inserted) return { ok: false, error: "You don't have permission to change this list." };
@@ -346,19 +362,29 @@ async function insertMaterialLine(supabase: Db, actor: Actor, listId: string, it
  * typed item onto the job's ONE list (ensureJobMaterialList), the book code as its part number, no
  * price (the office prices; the inspector rarely knows one). Best-effort by contract: the job is
  * made whatever happens here, and what could not be listed is SAID in the result, never swallowed.
+ *
+ * KEYED, SO A SECOND PRESS LISTS NOTHING TWICE (cn-v1134). A task's part arrives with its key
+ * ("task:<id>#<part>", partsAsCaptureItems); a row typed on site had none, so Won · Pick The Job
+ * pressed twice — or Start The Job retried after a lost answer — listed the typed rows again. Every
+ * row now carries a key: the one it came with, else "capture:<its capture id>" (the id the sheet
+ * stored with it, which a re-save keeps). insertMaterialLine answers a key already on the list with
+ * that row (0393's index), counted here as `kept`, so the door can say "already had" instead of
+ * "joined".
  */
 export async function addCaptureItemsToJobList(
   jobId: string,
   items: CaptureItem[],
-): Promise<Result & { added: number }> {
+): Promise<Result & { added: number; /** Rows already on the list under their key: nothing was added for them. */ kept: number; /** Rows he deleted from the list before (dismissed_keys): left off, never revived. */ leftOff: number }> {
   const rows = (items ?? []).filter((i) => String(i.description ?? "").trim());
-  if (!rows.length) return { ok: true, added: 0 };
+  if (!rows.length) return { ok: true, added: 0, kept: 0, leftOff: 0 };
   const supabase = await createClient();
   const actor = await actorOf(supabase);
-  if (!actor) return { ok: false, error: "Not signed in.", added: 0 };
+  if (!actor) return { ok: false, error: "Not signed in.", added: 0, kept: 0, leftOff: 0 };
   const list = await ensureJobMaterialList(jobId);
-  if (!list.ok || !list.id) return { ok: false, error: list.error ?? "The job has no materials list.", added: 0 };
+  if (!list.ok || !list.id) return { ok: false, error: list.error ?? "The job has no materials list.", added: 0, kept: 0, leftOff: 0 };
   let added = 0;
+  let kept = 0;
+  let leftOff = 0;
   const failed: string[] = [];
   for (const i of rows) {
     const line = await insertMaterialLine(supabase, actor, list.id, {
@@ -371,16 +397,20 @@ export async function addCaptureItemsToJobList(
       unit: i.unit || "ea",
       vendor: null,
       est_cost: null,
-      source_key: i.source_key ?? null,
+      // "capture:" is read as UNKEYED by both readers that claim typed rows — take-off-from-quote's adoption and sync-job-materials' hand rows (isClaimableKey).
+      source_key: i.source_key ?? (i.id ? `capture:${i.id}` : null),
     });
-    if (line.ok) added += 1;
-    else failed.push(i.description.trim());
+    if (line.ok) {
+      if (line.kept) kept += 1;
+      else if (line.leftOff) leftOff += 1;
+      else added += 1;
+    } else failed.push(i.description.trim());
   }
   revalidatePath(`/jobs/${jobId}`);
   if (failed.length) {
-    return { ok: false, id: list.id, added, error: `${failed.length} of ${rows.length} could not be listed: ${failed.join(", ")}.` };
+    return { ok: false, id: list.id, added, kept, leftOff, error: `${failed.length} of ${rows.length} could not be listed: ${failed.join(", ")}.` };
   }
-  return { ok: true, id: list.id, added };
+  return { ok: true, id: list.id, added, kept, leftOff };
 }
 
 export async function addMaterialItem(

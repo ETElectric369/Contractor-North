@@ -456,7 +456,7 @@ export function JobDocuments({
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title="Edit document"
+        title="Edit Document"
         size="sm"
         footer={
           <ModalActions

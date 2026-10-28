@@ -37,7 +37,8 @@ describe("the Report Back card", () => {
     expect(s).toContain("Dana hasn&#x27;t been told where it stands yet.");
     expect(s).toContain("Text Dana");
     expect(s).toContain(">Told Them<");
-    expect(s).toContain('href="sms:5305550100&amp;body=Hi%20Dana%2C%20quick%20update%20on%20the%20kitchen%20hood%20outlet%3A%20we%27re%20about%206%20hours%20in%20of%20the%208%20we%20figured.');
+    // encodeURIComponent leaves the apostrophe as is (a legal sub-delim in a URL), and React writes it as &#x27; in the markup.
+    expect(s).toContain('href="sms:5305550100&amp;body=Hi%20Dana%2C%20quick%20update%20on%20the%20kitchen%20hood%20outlet%3A%20we&#x27;re%20about%206%20hours%20in%20of%20the%208%20we%20figured.');
     const d = doors(s);
     expect(d).toHaveLength(2);
     for (const m of d) expect(m).toContain("min-h-[44px]");

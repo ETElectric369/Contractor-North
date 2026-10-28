@@ -190,7 +190,7 @@ export function JobEditButton({
             <div>
               <Label htmlFor="ej-template">Job-Code Template</Label>
               <Select id="ej-template" name="code_template_id" defaultValue={(job as { code_template_id?: string | null }).code_template_id ?? ""}>
-                <option value="">All codes</option>
+                <option value="">All Codes</option>
                 {templates.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}

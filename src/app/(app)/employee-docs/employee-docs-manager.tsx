@@ -199,7 +199,7 @@ function EditDocModal({
     <Modal
       open
       onClose={onClose}
-      title="Edit document"
+      title="Edit Document"
       footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} disabled={!name.trim() || !profileId} />}
     >
       <div className="space-y-4">

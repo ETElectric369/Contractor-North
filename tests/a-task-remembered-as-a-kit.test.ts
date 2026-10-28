@@ -86,12 +86,14 @@ describe("the inspector", () => {
 });
 
 describe("Start The Job on a visit", () => {
-  it("reads the task kits when a task picked one and births through the same expansion", () => {
+  it("reads the task kits when a task picked one and births through the same expansion — in the ONE visit read (lib/appointments/visit-work, cn-v1134)", () => {
     const fn = body(src("src/app/(app)/appointments/actions.ts"), "export async function createJobFromAppointment(");
-    expect(fn).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"))');
-    expect(fn).toContain("tasksFromVisit(answered, new Map((kitsRead?.kits ?? []).map((k) => [k.id, k])))");
-    expect(fn).toContain('reportError("createJobFromAppointment:kits"');
-    expect(fn).toContain("kitsReadWords(kitsRead.state)"); // the same words every page says
+    expect(fn).toContain('const work = await visitWork(supabase, appointmentId, "job");');
+    const rule = src("src/lib/appointments/visit-work.ts");
+    expect(rule).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"))');
+    expect(rule).toContain("tasksFromVisit(answered, new Map((kitsRead?.kits ?? []).map((k) => [k.id, k])))");
+    expect(rule).toContain('reportError("visit-work:kits"');
+    expect(rule).toContain("kitsReadWords(state)"); // the same words every page says
   });
 });
 

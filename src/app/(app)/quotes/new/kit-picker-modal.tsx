@@ -142,7 +142,7 @@ export function KitPickerModal({
                 disabled={sqft <= 0 && linearFt <= 0 && !Object.values(measured?.byKey ?? {}).some((v) => Number(v) > 0)}
                 className="h-10 rounded-lg bg-brand px-3 text-sm font-medium text-white disabled:opacity-40"
               >
-                Size to Job
+                Size To Job
               </button>
             </div>
           </div>

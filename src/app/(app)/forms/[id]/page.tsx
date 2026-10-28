@@ -114,7 +114,7 @@ export default async function FormDetailPage({
               so "edit it over there" landed on ten questions that were not the ones he came to
               change, and looked like a playbook that refused to show him his own work. */}
           <Link href={`/settings?tab=playbook&form=${form.id}`} className="font-medium underline underline-offset-2">
-            Edit it in Settings &rarr; Playbook
+            Edit It In Settings &rarr; Playbook
           </Link>
         </div>
       ) : null}

@@ -173,7 +173,7 @@ export function UnbilledCard({
               <p className="mt-1 text-sm text-slate-500">
                 {`Nothing new — every hour and bill so far is on ${draft}, still a draft. Anything else goes on it too: open it from the `}
                 <Link href="?tab=invoices" scroll={false} className="font-medium text-brand hover:underline">
-                  Invoices tab
+                  Invoices Tab
                 </Link>
                 .
               </p>

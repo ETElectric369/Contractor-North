@@ -159,6 +159,14 @@ export async function insertKeyedRows(
 
 const CODE_RE = /\[([^\]]+)\]/;
 
+/** A TYPED ROW'S KEY (cn-v1134, addCaptureItemsToJobList): "capture:<the id the sheet stored with it>", so a second
+ *  press of Won · Pick The Job lists nothing twice. To every reader it is UNKEYED still — a row typed on site that a
+ *  line may claim (the adoption below, the sync's hand rows) — never a line's claimed row: read as a claimed one it
+ *  would be passed over and the line's part written beside it, a second copy of what the crew already has. */
+export const CAPTURE_KEY = "capture:";
+/** A row a line may claim: no key, or a typed row's. */
+export const isClaimableKey = (key: string | null | undefined): boolean => !key || key.startsWith(CAPTURE_KEY);
+
 /** How an UNKEYED row on the sheet is matched to a plain line: by its code, else by its words slugged like a
  *  key (materialKey) — the "how many?" tail set aside. plainLineOf's `half` is this same string for the row
  *  the take-off writes, so the take-off and the sync recognise a row the same way. */
@@ -557,7 +565,7 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     if (hErr) return { ok: false, error: dbError(hErr) };
     for (const r of (had ?? []) as Array<{ id: string; sort_order: number | null; part_number: string | null; description: string | null; source_key: string | null; quantity: number | null; unit?: string | null; purchased: boolean | null; is_tool: boolean | null }>) {
       so = Math.max(so, (r.sort_order ?? -1) + 1);
-      if (r.source_key) continue;
+      if (!isClaimableKey(r.source_key)) continue; // a typed row's "capture:" key is no claim (cn-v1134)
       unkeyed.push({ id: r.id, half: plainRowHalf(r), quantity: r.quantity, description: String(r.description ?? ""), unit: r.unit ?? null, his: r.purchased === true || r.is_tool === true });
     }
   }

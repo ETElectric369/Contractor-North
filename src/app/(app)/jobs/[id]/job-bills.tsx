@@ -228,7 +228,7 @@ export function JobBills({
       <li key={p.id}>
         <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
           <div className="min-w-0 flex-1">
-            <div className="font-medium text-slate-900">{p.vendor || "No vendor yet"}</div>
+            <div className="font-medium text-slate-900">{p.vendor || "No Vendor Yet"}</div>
             <div className="text-xs text-slate-400">{p.po_number} · purchase order</div>
             {why && <div className="text-xs text-slate-500">{why}</div>}
           </div>
@@ -515,7 +515,7 @@ function JobBillEditModal({
             <div className="col-span-2">
               <Label htmlFor="be-po">Pays purchase order</Label>
               <Select id="be-po" value={poId} onChange={(e) => setPoId(e.target.value)}>
-                <option value="">Not a PO — a separate cost</option>
+                <option value="">Not A PO — A Separate Cost</option>
                 {poOptions.map((p) => (
                   <option key={p.id} value={p.id}>
                     {poLabel(p)}

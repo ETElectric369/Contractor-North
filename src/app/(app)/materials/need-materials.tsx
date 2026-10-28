@@ -79,7 +79,7 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
             })
           }
         >
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : "Tell the Office"}
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : "Tell The Office"}
         </Button>
         {err && <span className="text-sm text-rose-600">{err}</span>}
       </div>

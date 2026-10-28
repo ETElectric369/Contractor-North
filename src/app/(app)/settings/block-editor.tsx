@@ -55,7 +55,7 @@ export function BlockEditor({
         <span className="text-sm font-medium text-slate-700">Sections</span>
         {blocks.length > 0 && (
           <button type="button" onClick={() => setPreview((v) => !v)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50">
-            {preview ? <><Pencil className="h-3.5 w-3.5" /> Back to Editing</> : <><Eye className="h-3.5 w-3.5" /> Preview</>}
+            {preview ? <><Pencil className="h-3.5 w-3.5" /> Back To Editing</> : <><Eye className="h-3.5 w-3.5" /> Preview</>}
           </button>
         )}
       </div>

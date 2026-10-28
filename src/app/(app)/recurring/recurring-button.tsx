@@ -104,14 +104,14 @@ export function RecurringButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "Edit recurring" : "New recurring"}
+        title={editing ? "Edit Recurring" : "New Recurring"}
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}
             submit
             formId="recurring-form"
             saving={pending}
-            saveLabel="Save changes"
+            saveLabel="Save Changes"
             extra={
               editing ? (
                 <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">Delete</Button>
@@ -127,16 +127,16 @@ export function RecurringButton({
             <div>
               <Label htmlFor="r-kind">Type</Label>
               <Select id="r-kind" name="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
-                <option value="job">Recurring job</option>
-                {(invoiceKind || template?.kind === "invoice") && <option value="invoice">Recurring invoice</option>}
-                <option value="expense">Recurring expense</option>
+                <option value="job">Recurring Job</option>
+                {(invoiceKind || template?.kind === "invoice") && <option value="invoice">Recurring Invoice</option>}
+                <option value="expense">Recurring Expense</option>
               </Select>
             </div>
             <div>
               <Label htmlFor="r-freq">Repeats</Label>
               <Select id="r-freq" name="frequency" defaultValue={template?.frequency ?? "monthly"}>
                 <option value="weekly">Weekly</option>
-                <option value="biweekly">Every 2 weeks</option>
+                <option value="biweekly">Every 2 Weeks</option>
                 <option value="monthly">Monthly</option>
                 <option value="quarterly">Quarterly</option>
                 <option value="yearly">Yearly</option>
@@ -236,7 +236,7 @@ export function RecurringButton({
                   defaultValue={template?.kind === "expense" && template.category ? bucketOf(template.category) : ""}
                   required
                 >
-                  <option value="">Pick a Bucket</option>
+                  <option value="">Pick A Bucket</option>
                   {BUSINESS_COST_BUCKETS.map((b) => (
                     <option key={b} value={b}>{b}</option>
                   ))}

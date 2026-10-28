@@ -98,7 +98,7 @@ export function ClockStartPicker({
         className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand ${className}`}
       >
         <Clock className="h-3.5 w-3.5" />
-        {rounded ? `Rounded to ${lbl} · tap for now` : onBoundary ? "Starting now" : `Starting now · round back to ${lbl}`}
+        {rounded ? `Rounded to ${lbl} · tap for now` : onBoundary ? "Starting Now" : `Starting now · round back to ${lbl}`}
       </button>
     );
   }
@@ -120,7 +120,7 @@ export function ClockStartPicker({
         }}
         className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand ${className}`}
       >
-        <Clock className="h-3.5 w-3.5" /> Starting now · pick a different time
+        <Clock className="h-3.5 w-3.5" /> Starting Now · Pick A Different Time
       </button>
     );
   }

@@ -796,7 +796,7 @@ function useCardDoor(
         if (stale()) return;
         // No guide on this iOS (< 18) or this build: the written steps live in Settings, and the
         // person is told so once, under the card prompt — not a wall, the card is still next.
-        if (!guide?.ok) setTapNote("Apple's guide isn't available on this iPhone — the steps are in Settings › Getting Paid › How to Tap.");
+        if (!guide?.ok) setTapNote("Apple's guide isn't available on this iPhone — the steps are in Settings › Getting Paid › How To Tap.");
         // THE DOOR IS CHECKED AGAIN HERE, and this is the whole reason doorFor exists. Apple's
         // terms sheet and the connect behind it are allowed eight minutes; the how-to guide ten
         // more. The `pi` above was minted before any of that, at the balance of that moment, and
@@ -1531,7 +1531,7 @@ function useOtherWay(
             {qrPending ? (
               <><Loader2 className="animate-spin" /> Getting It Ready…</>
             ) : (
-              <><QrCode /> {props.source === "invoice" ? "Show Venmo QR" : "Send the Bill & Show Venmo QR"}</>
+              <><QrCode /> {props.source === "invoice" ? "Show Venmo QR" : "Send The Bill & Show Venmo QR"}</>
             )}
           </Button>
         )}

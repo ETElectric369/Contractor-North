@@ -92,7 +92,7 @@ export function BugList({ initial, readError = null }: { initial: BugReport[]; r
                   orgFilter === t ? "seaglass-active" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                <span className="relative z-10">{t || "All tenants"}</span>
+                <span className="relative z-10">{t || "All Tenants"}</span>
               </button>
             ))}
           </div>

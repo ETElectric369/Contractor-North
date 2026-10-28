@@ -398,9 +398,9 @@ export function BillsReceipts({
         <Kind>PO</Kind>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-slate-900">
-            {p.po_number} · {p.vendor || "No vendor"}
+            {p.po_number} · {p.vendor || "No Vendor"}
           </span>
-          <span className="block truncate text-xs text-slate-400">{p.jobs?.name ?? "No job"}</span>
+          <span className="block truncate text-xs text-slate-400">{p.jobs?.name ?? "No Job"}</span>
         </span>
         <span className="shrink-0 text-right">
           <span className="block font-medium tabular-nums text-slate-800">{formatCurrency(p.total)}</span>

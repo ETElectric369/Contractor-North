@@ -19,6 +19,6 @@ describe("Settings' inspection sheet", () => {
 
   it("the teal half says whose questions these are, and that a customer never sees them", () => {
     expect(src()).toContain("Your own inspection questions — what you ask yourself standing on the job. Never shown to a customer.");
-    expect(src()).toContain('"your inspection — only you see these"');
+    expect(src()).toContain('"Your inspection — only you see these."');
   });
 });

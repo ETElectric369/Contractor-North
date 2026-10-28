@@ -378,9 +378,9 @@ export function PlaceRail({
                           {i.urgent && <Badge tone="amber">overdue</Badge>}
                           {i.onHold && (
                             <Badge tone="slate">
-                              {/* THE REASON IS THE ACTION. "on hold" alone is a shrug; "on hold —
+                              {/* THE REASON IS THE ACTION. "On Hold" alone is a shrug; "On Hold —
                                   waiting on the permit" tells you what wakes it. */}
-                              on hold{i.holdReason ? ` — ${i.holdReason}` : ""}
+                              On Hold{i.holdReason ? ` — ${i.holdReason}` : ""}
                             </Badge>
                           )}
                           {/* THE DAY IT COMES BACK, ON THE CARD (text to visual, 0366): "Back Oct 3",
@@ -412,7 +412,7 @@ export function PlaceRail({
                             there isn't — and picking the card turns the dashes into inputs. */}
                         {miss === "place" && (
                           <span className={`mt-0.5 flex items-center gap-1 text-xs ${on ? "font-medium text-amber-700" : "text-slate-400"}`}>
-                            {on ? nextAction(miss) : "no address yet"}
+                            {on ? nextAction(miss) : "No Address Yet"}
                           </span>
                         )}
                       </span>

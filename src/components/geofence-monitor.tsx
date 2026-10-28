@@ -907,7 +907,7 @@ export function GeofenceMonitor({
               {phase === "picking" ? (
                 <>
                   <Button className="w-full" disabled={!pickedValid} onClick={clockOutPicked}>
-                    Clock Out at That Time
+                    Clock Out At That Time
                   </Button>
                   <div className="flex gap-2">
                     {/* Back leads to Clock Out Now, which a long shift does not offer. */}
@@ -933,7 +933,7 @@ export function GeofenceMonitor({
                 <>
                   {phase === "saving" ? (
                     <Button className="w-full" disabled>
-                      <Loader2 className="h-4 w-4 animate-spin" /> Clocking out…
+                      <Loader2 className="h-4 w-4 animate-spin" /> Clocking Out…
                     </Button>
                   ) : (
                     !longShift && (
@@ -953,7 +953,7 @@ export function GeofenceMonitor({
                         setPhase("picking");
                       }}
                     >
-                      Pick the Time…
+                      Pick The Time…
                     </Button>
                     <Button variant="ghost" className="flex-1" disabled={phase === "saving"} onClick={stillWorking}>
                       Still Working

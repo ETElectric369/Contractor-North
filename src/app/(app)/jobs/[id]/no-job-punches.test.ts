@@ -204,7 +204,7 @@ describe("the list on the Time tab", () => {
     const capped = render(props({ capped: true }));
     expect(capped).toContain("These are the newest 1. Older ones are under");
     expect(capped).toContain(`href="${NEAR_REST_HREF}"`);
-    expect(capped).toContain("Hours On No Job, on Timecards");
+    expect(capped).toContain("Hours On No Job, On Timecards");
     expect(render(props())).not.toContain("Older ones are under");
     const unlisted = render(props({ punches: [], capped: true }));
     expect(unlisted).toContain("Couldn’t list every punch with no job around this job’s days");

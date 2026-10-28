@@ -200,13 +200,13 @@ export function PostsManager({
       )}
 
       <Button type="button" variant="outline" size="sm" onClick={openNew}>
-        <Plus className="h-4 w-4" /> New article
+        <Plus className="h-4 w-4" /> New Article
       </Button>
 
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title={editing?.id ? "Edit article" : "New Article"}
+        title={editing?.id ? "Edit Article" : "New Article"}
         footer={
           <ModalActions
             onCancel={() => setEditing(null)}
@@ -314,7 +314,7 @@ export function PostsManager({
       <Modal
         open={!!deleting}
         onClose={() => setDeleting(null)}
-        title="Delete this article?"
+        title="Delete This Article?"
         size="sm"
         footer={<ModalActions onCancel={() => setDeleting(null)} onSave={confirmDelete} saveLabel="Delete" destructive />}
       >

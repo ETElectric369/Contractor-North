@@ -204,7 +204,7 @@ export function ImportDocsButton({ orgId, page }: { orgId: string; page: "Insura
       <Modal
         open={cslbOpen}
         onClose={() => setCslbOpen(false)}
-        title="Import from CSLB"
+        title="Import From CSLB"
         size="sm"
         footer={
           <ModalActions

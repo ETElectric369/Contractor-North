@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
-import { bornTasks, partsFromLines, tasksFromLines, type BornTask, type LineRow } from "./born-with-tasks";
+import { bornTasks, dismissalEntry, dismissalKey, dismissalTitle, partsFromLines, tasksFromLines, type BornTask, type LineRow } from "./born-with-tasks";
 
 /**
  * A JOB FOLLOWS ITS ESTIMATE (the first of the four deferred items, 2026-10-10).
@@ -100,14 +100,14 @@ export interface OtherTask {
 export const isHisTask = (t: Pick<LineTask, "notes" | "photo_path" | "has_steps">): boolean =>
   !!(t.notes && t.notes.trim()) || !!t.photo_path || !!t.has_steps;
 
-/**
- * A DISMISSAL, as the delete door writes it since cn-v1084: "<key>#<title>". The key bars that line;
- * the title bars the same task on a REBUILT line (the builder's autosave re-ids every line, so a key
- * alone forgot the task the moment the estimate was touched). Entries from before carry the key alone.
- */
-export const dismissalEntry = (key: string, title: string): string => `${key}#${title.trim()}`;
-const dismissalKey = (e: string): string => (e.includes("#") ? e.slice(0, e.indexOf("#")) : e);
-const dismissalTitle = (e: string): string | null => (e.includes("#") ? e.slice(e.indexOf("#") + 1).trim() || null : null);
+/** A DISMISSAL ("<key>#<title>", cn-v1084) is read and written by born-with-tasks now, so the birth
+ *  honors the list the sync does (cn-v1134); the delete door keeps importing the writer from here. */
+export { dismissalEntry };
+
+/** ONE TITLE, for a door that asks whether the job already carries a task by its words (Won · Pick The
+ *  Job, cn-v1134): trimmed and case folded, since an office types titles by hand. The plan's own claim
+ *  by title (planLineSync) compares the estimate's exact words, as it has since cn-v1084. */
+export const taskTitleKey = (title: string): string => title.trim().toLowerCase();
 
 /**
  * THE SHIELD (audit v1085, carried [17]): the task lines of the job's LINKED estimates that are not

@@ -46,7 +46,7 @@ export const FEATURES: readonly FeatureDef[] = [
   { key: "referrals", parent: "leads", label: "Track Referrals", line: "Ask who sent each lead and keep a tally." },
   { key: "estimates", label: "Estimates", line: "Estimates, change orders and work orders." },
   { key: "kits", parent: "estimates", label: "Kits & Sizing By Sq Ft", line: "Price whole assemblies and size jobs by the square or linear foot." },
-  { key: "contracts", label: "Contracts & Lien Rights", line: "E-sign contracts, payment schedules and lien deadlines." },
+  { key: "contracts", label: "Contracts & Lien Rights", line: "E-sign contracts, payment schedules and lien deadlines. California rules today; other states later." },
   { key: "purchase_orders", label: "Purchase Orders", line: "Write POs to suppliers before you buy. Open POs always count in job cost." },
   { key: "shop_stock", label: "Shop Stock", line: "Keep leftover rolls and boxes in stock and bill them to jobs." },
   { key: "crew_payroll", label: "Crew & Payroll", line: "Payroll, what you owe each person, mileage and the handbook." },

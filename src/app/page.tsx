@@ -98,7 +98,7 @@ export default async function Home() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link href={signedIn ? "/planner" : "/login?mode=signup"}>
               <Button size="lg" className="bg-white text-brand hover:bg-slate-100">
-                {signedIn ? "Open the App" : "Get Started Free"}
+                {signedIn ? "Open The App" : "Get Started Free"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -165,7 +165,7 @@ export default async function Home() {
           </div>
           <Link href={signedIn ? "/planner" : "/login?mode=signup"}>
             <Button size="lg">
-              {signedIn ? "Open the App" : "Create Your Account"}
+              {signedIn ? "Open The App" : "Create Your Account"}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>

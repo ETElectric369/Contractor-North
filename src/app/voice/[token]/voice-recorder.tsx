@@ -245,7 +245,7 @@ export function VoiceRecorder({
               <Button onClick={onAccept} disabled={pending}>
                 {pending ? "Saving…" : (
                   <>
-                    <Check className="h-4 w-4" /> Sounds good — save
+                    <Check className="h-4 w-4" /> Sounds Good — Save
                   </>
                 )}
               </Button>
@@ -341,7 +341,7 @@ export function VoiceRecorder({
               />
             </div>
             <Button onClick={agree} disabled={pending} className="w-full sm:w-auto">
-              {pending ? "Saving…" : "I agree and give my permission"} <Heart className="h-4 w-4" />
+              {pending ? "Saving…" : "I Agree And Give My Permission"} <Heart className="h-4 w-4" />
             </Button>
           </div>
         )}
@@ -380,7 +380,7 @@ export function VoiceRecorder({
 
             {phase === "idle" && prompt.kind === "natural" && (
               <button onClick={() => advance(false)} disabled={pending} className="text-sm text-slate-400 underline hover:text-slate-600">
-                Skip this one
+                Skip This One
               </button>
             )}
           </div>
@@ -422,7 +422,7 @@ export function VoiceRecorder({
                 <Button onClick={finish} disabled={pending}>
                   {pending ? "Finishing…" : (
                     <>
-                      <Check className="h-4 w-4" /> I&apos;m all done
+                      <Check className="h-4 w-4" /> I&apos;m All Done
                     </>
                   )}
                 </Button>

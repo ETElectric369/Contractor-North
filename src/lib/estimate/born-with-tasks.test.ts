@@ -274,7 +274,7 @@ describe("bornTasks — the write", () => {
   it("inserts the missing tasks with the company, the key, the order, each task's own minutes and who, and counts them", async () => {
     const db = fakeDb({ tasks: [], jobs: jobs(null) });
     const res = await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, birth);
-    expect(res).toEqual({ inserted: 2, plannedSet: true });
+    expect(res).toEqual({ inserted: 2, plannedSet: true, leftOff: 0 });
     expect(db.inserted.tasks).toEqual([
       { id: "tasks-1", org_id: ORG, job_id: "job-1", title: "Set panel", source_key: "line:a", sort_order: 0, category: null, planned_minutes: 120, created_by: "u-1" },
       { id: "tasks-2", org_id: ORG, job_id: "job-1", title: "Trim out", source_key: "line:b", sort_order: 2, category: null, planned_minutes: 75, created_by: "u-1" },
@@ -289,11 +289,24 @@ describe("bornTasks — the write", () => {
   it("a replay births nothing twice: the keys already on the job are skipped", async () => {
     const db = fakeDb({ tasks: [{ id: "t-old", job_id: "job-1", org_id: ORG, source_key: "line:a" }], jobs: jobs(195) }); // the company's row (the keys read is org-scoped)
     const res = await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, birth);
-    expect(res).toEqual({ inserted: 1, plannedSet: false });
+    expect(res).toEqual({ inserted: 1, plannedSet: false, leftOff: 0 });
     expect(db.inserted.tasks.map((r) => r.source_key)).toEqual(["line:b"]);
     const again = await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, birth);
-    expect(again).toEqual({ inserted: 0, plannedSet: false });
+    expect(again).toEqual({ inserted: 0, plannedSet: false, leftOff: 0 });
     expect(db.inserted.tasks).toHaveLength(1);
+  });
+
+  it("a key he deleted from the job stays gone (jobs.dismissed_task_keys, the sync's rule): not born again, counted as left off; the entry's title half is ignored", async () => {
+    const db = fakeDb({ tasks: [], jobs: [{ id: "job-1", org_id: ORG, planned_minutes: null, dismissed_task_keys: ["line:a#Set panel", 7] }] });
+    const res = await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { ...birth, plannedMinutes: null });
+    expect(res).toEqual({ inserted: 1, plannedSet: false, leftOff: 1 });
+    expect(db.inserted.tasks.map((r) => r.source_key)).toEqual(["line:b"]);
+    // A dismissed key that is ALSO on the job already (born before the delete door learned it): skipped as born, not counted twice.
+    const both = fakeDb({ tasks: [{ id: "t-old", job_id: "job-1", org_id: ORG, source_key: "line:a" }], jobs: [{ id: "job-1", org_id: ORG, planned_minutes: null, dismissed_task_keys: ["line:a"] }] });
+    expect(await bornTasks(both.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { ...birth, plannedMinutes: null })).toEqual({ inserted: 1, plannedSet: false, leftOff: 0 });
+    // The job's read is the company's: another company's row with that id is not this job's list.
+    const other = fakeDb({ tasks: [], jobs: [{ id: "job-1", org_id: "org-2", planned_minutes: null, dismissed_task_keys: ["line:a"] }] });
+    expect(await bornTasks(other.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { ...birth, plannedMinutes: null })).toEqual({ inserted: 2, plannedSet: false, leftOff: 0 });
   });
 
   it("his How Long wins: a job that already has a size keeps it", async () => {
@@ -305,10 +318,10 @@ describe("bornTasks — the write", () => {
 
   it("no hours → the size is not touched; no tasks → nothing is written at all", async () => {
     const db = fakeDb({ tasks: [], jobs: jobs(null) });
-    expect(await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { ...birth, plannedMinutes: null })).toEqual({ inserted: 2, plannedSet: false });
+    expect(await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { ...birth, plannedMinutes: null })).toEqual({ inserted: 2, plannedSet: false, leftOff: 0 });
     expect(db.tables.jobs[0].planned_minutes).toBeNull();
     const quiet = fakeDb({ tasks: [], jobs: jobs(null) });
-    expect(await bornTasks(quiet.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { tasks: [], plannedMinutes: null, parts: [] })).toEqual({ inserted: 0, plannedSet: false });
+    expect(await bornTasks(quiet.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, { tasks: [], plannedMinutes: null, parts: [] })).toEqual({ inserted: 0, plannedSet: false, leftOff: 0 });
     expect(quiet.inserted).toEqual({});
   });
 
@@ -325,7 +338,7 @@ describe("bornTasks — the write", () => {
       },
     );
     const res = await bornTasks(db.sb, { jobId: "job-1", orgId: ORG, createdBy: "u-1" }, birth);
-    expect(res).toEqual({ inserted: 0, plannedSet: true });
+    expect(res).toEqual({ inserted: 0, plannedSet: true, leftOff: 0 });
   });
 
   it("any other refusal is said in plain words, and the size is not written", async () => {

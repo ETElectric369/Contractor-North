@@ -93,7 +93,7 @@ export default async function MaterialsPage({
         <div className="-mt-3 mb-4 text-sm text-slate-500">
           Showing this job&rsquo;s lists only ·{" "}
           <Link href="/materials" className="font-medium text-brand hover:underline">
-            show all
+            Show All
           </Link>
         </div>
       )}
@@ -131,7 +131,7 @@ export default async function MaterialsPage({
                     {/* What's still OPEN, never the list's size (Erik, 2026-09-27: every count shows
                         only what's open). Plain words, not a badge. */}
                     <div className="mt-0.5 text-xs text-slate-400">
-                      {(l.material_list_items?.length ?? 0) === 0 ? "No items yet" : toBuyWords(openToBuyCount(l.material_list_items))} ·{" "}
+                      {(l.material_list_items?.length ?? 0) === 0 ? "No Items Yet" : toBuyWords(openToBuyCount(l.material_list_items))} ·{" "}
                       {formatDate(l.created_at)}
                     </div>
                     {l.jobs?.name && (

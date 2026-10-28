@@ -218,7 +218,7 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
             to a small secondary. On desktop the CSV door stays primary, as it should. */}
         {hasPicker && (
           <Button onClick={pickFromPhone} disabled={pending}>
-            <BookUser className="h-4 w-4" /> {pending ? "Adding…" : "Add from Contacts"}
+            <BookUser className="h-4 w-4" /> {pending ? "Adding…" : "Add From Contacts"}
           </Button>
         )}
         <Button
@@ -227,7 +227,7 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
           onClick={() => fileRef.current?.click()}
           title={!csv ? "iPhone: open a contact → Share Contact → Save to Files, then pick it here" : undefined}
         >
-          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import Customers" : "Import a Contact")}
+          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import Customers" : "Import A Contact")}
         </Button>
         {!csv && (
           <span className="text-[11px] text-slate-400">
@@ -248,7 +248,7 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={csv ? "Import customers" : "Import a contact"}
+        title={csv ? "Import Customers" : "Import A Contact"}
         footer={
           headers.length > 0 ? (
             <ModalActions

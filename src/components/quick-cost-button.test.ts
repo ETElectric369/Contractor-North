@@ -346,7 +346,7 @@ describe("the sheet as it is drawn", () => {
   it("the Now card's sheet is the snap sheet, as before (Add Cost, the receipt block)", () => {
     const now = renderToStaticMarkup(createElement(QuickCostButton, { jobId: "job-011", snapFirst: true }));
     expect(buttons(now)[0].words).toBe("Add Cost");
-    expect(now).toContain('data-sheet="Add a cost"');
+    expect(now).toContain('data-sheet="Add A Cost"');
     expect(now).not.toContain('data-sheet="Type It In"');
   });
 

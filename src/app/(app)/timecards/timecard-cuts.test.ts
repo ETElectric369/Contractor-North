@@ -144,8 +144,8 @@ describe("one door per row: the row opens the shift, and only a running clock ke
 
   it("an offline punch still says so on the row, and the words open the editor too", () => {
     const html = renderRow(row({ source: "offline" }));
-    expect(html).toMatch(/>offline</);
-    expect(html).toContain("time came from the phone");
+    expect(html).toMatch(/>Offline</);
+    expect(html).toContain("Time Came From The Phone");
     expect(html).toContain('title="Punched with no signal, so the time came from the phone"');
   });
 

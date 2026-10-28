@@ -591,7 +591,7 @@ export function PaperSheet({
           <div>
             <Label htmlFor="paper-replaces">Replaces</Label>
             <Select id="paper-replaces" value={replaces} onChange={(e) => setReplaces(e.target.value)}>
-              <option value="">Nothing, it&apos;s new</option>
+              <option value="">Nothing, It&apos;s New</option>
               {choices.map((s) => (
                 <option key={s.document_id} value={s.document_id}>
                   {s.title} ({kindLabel(s.kind)})

@@ -63,7 +63,7 @@ export function PasskeyManager({ passkeys }: { passkeys: Passkey[] }) {
       {error && <p className="text-sm text-red-600">{error}</p>}
       <Button variant="outline" onClick={enroll} disabled={pending}>
         {pending ? (
-          <><Loader2 className="h-4 w-4 animate-spin" /> Waiting for your tap…</>
+          <><Loader2 className="h-4 w-4 animate-spin" /> Waiting For Your Tap…</>
         ) : (
           <><Fingerprint className="h-4 w-4" /> {passkeys.length ? "Add Another Passkey" : "Set Up Face ID / Passkey"}</>
         )}

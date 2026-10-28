@@ -118,7 +118,7 @@ export function DeckGeneratorPanel({
       >
         {open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
         <Wand2 className="h-4 w-4 text-[color:rgb(var(--glass-ink))]" />
-        <span className="text-sm font-semibold text-slate-800">Deck generator</span>
+        <span className="text-sm font-semibold text-slate-800">Deck Generator</span>
         <span className="hidden text-xs text-slate-400 sm:inline">— type the dimensions, auto-fill the lines</span>
       </button>
       {open && (
@@ -127,9 +127,9 @@ export function DeckGeneratorPanel({
             <div>
               <Label>Project</Label>
               <Select value={f.projectType} onChange={(e) => set("projectType", e.target.value)}>
-                <option value="new_deck">New deck</option>
-                <option value="full_replacement">Full replacement</option>
-                <option value="resurface">Resurface (reuse frame)</option>
+                <option value="new_deck">New Deck</option>
+                <option value="full_replacement">Full Replacement</option>
+                <option value="resurface">Resurface (Reuse Frame)</option>
                 <option value="extension">Extension</option>
               </Select>
             </div>
@@ -221,7 +221,7 @@ export function DeckGeneratorPanel({
               <span className="font-semibold text-slate-900">{formatCurrency(est.total)}</span>
             </div>
             <Button type="button" onClick={drop} disabled={est.lines.length === 0}>
-              Drop into Estimate
+              Drop Into Estimate
             </Button>
           </div>
           {est.assumptions.length > 0 && (

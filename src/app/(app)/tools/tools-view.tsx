@@ -133,9 +133,9 @@ function WireSize() {
         <Field label="Amps (circuit)"><NumberInput value={amps} onValueChange={setAmps} /></Field>
         <Field label="Volts"><NumberInput value={volts} onValueChange={setVolts} /></Field>
         <Field label="One-way feet"><NumberInput value={feet} onValueChange={setFeet} /></Field>
-        <Field label="Wiring method"><Select value={method} onChange={(e) => setMethod(e.target.value as WiringMethod)}><option value="nm">NM-B (Romex)</option><option value="uf">UF (direct burial)</option><option value="raceway">Conduit (THHN)</option></Select></Field>
+        <Field label="Wiring method"><Select value={method} onChange={(e) => setMethod(e.target.value as WiringMethod)}><option value="nm">NM-B (Romex)</option><option value="uf">UF (Direct Burial)</option><option value="raceway">Conduit (THHN)</option></Select></Field>
         <Field label="Metal"><Select value={metal} onChange={(e) => setMetal(e.target.value as "cu" | "al")}><option value="cu">Copper</option><option value="al">Aluminum</option></Select></Field>
-        <Field label="Max drop %"><Select value={String(maxPct)} onChange={(e) => setMaxPct(Number(e.target.value))}><option value="3">3% (branch)</option><option value="5">5% (feeder)</option></Select></Field>
+        <Field label="Max drop %"><Select value={String(maxPct)} onChange={(e) => setMaxPct(Number(e.target.value))}><option value="3">3% (Branch)</option><option value="5">5% (Feeder)</option></Select></Field>
       </div>
       <Result tone={pick ? "green" : "red"}>
         {pick && detail ? (
@@ -405,7 +405,7 @@ function SalesTax() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Field label={mode === "add" ? "Pre-tax $" : "Total (with tax) $"}><NumberInput value={amt} onValueChange={setAmt} /></Field>
         <Field label="Tax rate %"><NumberInput value={rate} onValueChange={setRate} /></Field>
-        <Field label="Mode"><Select value={mode} onChange={(e) => setMode(e.target.value as "add" | "extract")}><option value="add">Add tax</option><option value="extract">Back out tax</option></Select></Field>
+        <Field label="Mode"><Select value={mode} onChange={(e) => setMode(e.target.value as "add" | "extract")}><option value="add">Add Tax</option><option value="extract">Back Out Tax</option></Select></Field>
       </div>
       <Result>
         Pre-tax <strong>${pre.toFixed(2)}</strong> · tax <strong>${taxAmt.toFixed(2)}</strong> · total <strong>${total.toFixed(2)}</strong>
@@ -610,7 +610,7 @@ function Derating() {
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Field label="Wire size"><Select value={size} onChange={(e) => setSize(e.target.value)}>{SIZES.map((s) => <option key={s} value={s}>{s}</option>)}</Select></Field>
-        <Field label="Wiring method"><Select value={method} onChange={(e) => setMethod(e.target.value as WiringMethod)}><option value="nm">NM-B (Romex)</option><option value="uf">UF (direct burial)</option><option value="raceway">Conduit (THHN)</option></Select></Field>
+        <Field label="Wiring method"><Select value={method} onChange={(e) => setMethod(e.target.value as WiringMethod)}><option value="nm">NM-B (Romex)</option><option value="uf">UF (Direct Burial)</option><option value="raceway">Conduit (THHN)</option></Select></Field>
         <Field label="Metal"><Select value={metal} onChange={(e) => setMetal(e.target.value as "cu" | "al")}><option value="cu">Copper</option><option value="al">Aluminum</option></Select></Field>
         <Field label="Ambient °F"><NumberInput value={ambF} onValueChange={setAmbF} /></Field>
         <Field label="# current-carrying"><NumberInput value={count} onValueChange={setCount} /></Field>
@@ -854,7 +854,7 @@ export function ToolsView({ trade = "" }: { trade?: string }) {
             onClick={() => { setShowAll((v) => !v); setPkg("All"); }}
             className="ml-auto rounded-full px-3 py-1.5 text-xs font-medium text-slate-500 underline-offset-2 hover:underline"
           >
-            {showAll ? "Show fewer" : `Show every tool (+${hiddenCount})`}
+            {showAll ? "Show Fewer" : `Show every tool (+${hiddenCount})`}
           </button>
         )}
       </div>

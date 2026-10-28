@@ -108,7 +108,7 @@ export default async function SubscribePage({
               </>
             ) : (
               <form action={startCheckout}>
-                <Button type="submit" size="lg" className="w-full">Subscribe now</Button>
+                <Button type="submit" size="lg" className="w-full">Subscribe Now</Button>
               </form>
             )
           ) : (
@@ -119,7 +119,7 @@ export default async function SubscribePage({
 
           <form action={signOut} className="mt-4">
             <button className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-700">
-              <LogOut className="h-4 w-4" /> Sign out
+              <LogOut className="h-4 w-4" /> Sign Out
             </button>
           </form>
         </div>

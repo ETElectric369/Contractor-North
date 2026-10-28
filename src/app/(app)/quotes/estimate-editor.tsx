@@ -901,12 +901,12 @@ export function EstimateEditor(props: EstimateEditorProps) {
             {/* Provenance backlinks — the lead, the visit. */}
             {savedPage?.lead && (
               <Link href={`/leads?focus=${savedPage.lead.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
-                ← from lead: {savedPage.lead.name}
+                ← From Lead: {savedPage.lead.name}
               </Link>
             )}
             {savedPage?.visitBehind && (
               <Link href={`/appointments/${savedPage.visitBehind.id}`} className="mt-1 block text-sm text-brand hover:underline">
-                ← from the visit{savedPage.visitBehind.starts_at ? ` on ${formatDate(savedPage.visitBehind.starts_at)}` : ""}
+                ← From The Visit{savedPage.visitBehind.starts_at ? ` on ${formatDate(savedPage.visitBehind.starts_at)}` : ""}
               </Link>
             )}
             {/* What the customer attached at intake: this estimate is the thing being priced FROM them. */}
@@ -1518,7 +1518,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                           commitField("taxRate");
                         }}
                       >
-                        <option value="">No tax</option>
+                        <option value="">No Tax</option>
                         {taxRates.map((t) => (
                           <option key={t.id} value={t.id}>
                             {t.name} ({Number(t.rate)}%)

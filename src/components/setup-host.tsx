@@ -115,13 +115,13 @@ export function SetupHost({
 
       {/* After the tour it opens on the draft (step 2), because the tour already asked the questions.
           With Nort off there was no tour, so it opens on the questions (step 1). */}
-      <Modal open={mode === "questions"} onClose={() => setMode(null)} title="Your questions, and your why lines" size="lg">
+      <Modal open={mode === "questions"} onClose={() => setMode(null)} title="Your Questions, And Your Why Lines" size="lg">
         <SetupInterview initial={initial} startAt={nortOn ? 2 : 1} onSaved={() => setMode(null)} nortOn={nortOn} />
       </Modal>
 
       {/* FINISH SETTING UP opens on the SETUP QUESTIONS (step 1), not the tour: this person has
           already been walked through, and what's left is a couple of boxes with their whys. */}
-      <Modal open={mode === "finish"} onClose={() => setMode(null)} title={nortOn ? "A couple of things I still don't know" : "A couple of things still missing"} size="lg">
+      <Modal open={mode === "finish"} onClose={() => setMode(null)} title={nortOn ? "A Couple Of Things I Still Don't Know" : "A Couple Of Things Still Missing"} size="lg">
         <SetupInterview initial={initial} startAt={1} onSaved={() => setMode(null)} nortOn={nortOn} />
       </Modal>
     </>

@@ -348,7 +348,7 @@ export function TourDriver({
             if (asksAnything) void dictation.start(); // same tap — iOS refuses a mic opened any later
           }}
         >
-          {asksAnything ? (<><Mic className="h-4 w-4" /> Start — press and talk</>) : (<>Start</>)}
+          {asksAnything ? (<><Mic className="h-4 w-4" /> Start — Press And Talk</>) : (<>Start</>)}
         </Button>
         {asksAnything && (
           <button
@@ -386,7 +386,7 @@ export function TourDriver({
                 onClick={() => { setTyping(true); setTyped(String(known ?? "")); }}
                 className="text-xs text-slate-400 underline-offset-2 hover:underline"
               >
-                not right?
+                Not Right?
               </button>
             </p>
           )}
@@ -407,13 +407,13 @@ export function TourDriver({
             }}
           >
             {dictation.transcribing ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Writing it down…</>
+              <><Loader2 className="h-4 w-4 animate-spin" /> Writing It Down…</>
             ) : dictation.recording ? (
               <><Square className="h-4 w-4" /> Stop</>
             ) : busy ? (
               <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
             ) : (
-              <><Mic className="h-4 w-4" /> {answered ? "Say it again" : "Talk"}</>
+              <><Mic className="h-4 w-4" /> {answered ? "Say It Again" : "Talk"}</>
             )}
           </Button>
           {dictation.recording && (
@@ -439,7 +439,7 @@ export function TourDriver({
               onClick={() => setTyping(true)}
               className="mt-2 w-full text-center text-xs text-slate-400 underline-offset-2 hover:underline"
             >
-              Type it instead
+              Type It Instead
             </button>
           )}
           {reply && (
@@ -472,7 +472,7 @@ export function TourDriver({
           onClick={() => void go(i + 1)}
           className="inline-flex items-center gap-1 text-sm text-slate-500 underline-offset-2 hover:underline disabled:opacity-40"
         >
-          {step.next ?? (need && !answered ? "Skip this one" : "Carry on")} <ArrowRight className="h-3.5 w-3.5" />
+          {step.next ?? (need && !answered ? "Skip This One" : "Carry On")} <ArrowRight className="h-3.5 w-3.5" />
         </button>
         {i > 0 && (
           <button type="button" onClick={() => void go(i - 1)} className="text-sm text-slate-500 underline-offset-2 hover:underline">

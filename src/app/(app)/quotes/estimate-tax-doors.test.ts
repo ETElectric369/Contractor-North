@@ -42,7 +42,7 @@ describe("a saved estimate", () => {
     const today = saved({}, [row], {}, { taxRates: RATES, salesTax: true });
     expect(text(today)).toContain("Tax $0.00");
     expect(today).toContain('id="tax"');
-    expect(today).toMatch(/<option value="" selected="">No tax/);
+    expect(today).toMatch(/<option value="" selected="">No Tax/);
   });
 
   it("off, untaxed: no Tax row and no tax field", () => {

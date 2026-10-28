@@ -3,10 +3,11 @@
 import { parseCSV } from "@/lib/csv";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Check, AlertCircle } from "lucide-react";
+import { Upload, Check, AlertCircle, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { importCrew, type CrewImportRow, type CrewImportResult } from "./actions";
+import { CREW_IMPORT_WORDS } from "./crew-setup-link";
 
 /**
  * THE ONE PARSER (cn-v700). This file carried a private `splitLine` doing `if (ch === '"') q = !q`
@@ -34,8 +35,91 @@ function parseCsv(text: string): CrewImportRow[] {
     .filter((r) => r.full_name && r.email.includes("@") && !/skip/i.test(r.role));
 }
 
-/** Bulk-add the crew from a roster CSV (Name, Email, Phone, Role). Each password is
- *  the employee's phone digits; the result list shows the login + password to hand out. */
+/** One created person's link, copied to the clipboard on a tap. The link is also printed so it can
+ *  be selected where the clipboard is not available (an older native shell, a locked-down browser)
+ *  — and the button SAYS when that is the case (no clipboard, or a refused write), never nothing. */
+function CopyLinkButton({ link }: { link: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const copy = () => {
+    const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+    if (!clipboard?.writeText) {
+      setState("failed");
+      return;
+    }
+    clipboard
+      .writeText(link)
+      .then(() => {
+        setState("copied");
+        setTimeout(() => setState("idle"), 2000);
+      })
+      .catch(() => setState("failed"));
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <Button type="button" variant="outline" size="sm" onClick={copy}>
+        <Link2 className="h-3.5 w-3.5" /> {state === "copied" ? "Copied" : "Copy Link"}
+      </Button>
+      {state === "failed" && (
+        <span role="status" className="text-xs text-rose-700">
+          Couldn&apos;t copy — select the link.
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * THE IMPORT'S ANSWER (cn-v1134): one row per person. A created person's row holds their one-time
+ * link and Copy Link; a created person with no link, or a failed row, says why in words. No row ever
+ * shows a password: the login was made with one nobody sees, and the link opens Set A Password.
+ */
+export function CrewImportResults({ results }: { results: CrewImportResult[] }) {
+  const created = results.filter((r) => r.status === "created");
+  const failed = results.filter((r) => r.status === "failed");
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-green-700">
+        <Check className="h-4 w-4" /> Added {created.length}{failed.length ? ` · ${failed.length} skipped` : ""}
+      </div>
+      {created.length > 0 && (
+        <>
+          <p className="text-sm text-slate-700">{CREW_IMPORT_WORDS.handOut}</p>
+          <p className="text-xs text-slate-500">{CREW_IMPORT_WORDS.onceAndSoon}</p>
+        </>
+      )}
+      <div className="rounded-lg border border-slate-200">
+        <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto text-sm">
+          {created.map((r, i) => (
+            <li key={i} className="px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-800">{r.name}</div>
+                  <div className="truncate text-xs text-slate-500">{r.email}</div>
+                </div>
+                {r.setupLink && <CopyLinkButton link={r.setupLink} />}
+              </div>
+              {r.setupLink ? (
+                <div className="mt-1 break-all font-mono text-[11px] text-slate-500" data-setup-link>
+                  {r.setupLink}
+                </div>
+              ) : (
+                <div className="mt-1 text-xs text-amber-700">{r.reason}</div>
+              )}
+            </li>
+          ))}
+          {failed.map((r, i) => (
+            <li key={"f" + i} className="flex items-start gap-1.5 px-3 py-2 text-xs text-amber-700">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {r.name} — {r.reason}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/** Bulk-add the crew from a roster CSV (Name, Email, Phone, Role). Each person gets a one-time
+ *  link that opens Set A Password; the import emails nobody and shows no password. */
 export function CrewImportButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -43,7 +127,6 @@ export function CrewImportButton() {
   const [results, setResults] = useState<CrewImportResult[] | null>(null);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [requireReset, setRequireReset] = useState(true);
 
   function reset() {
     setRows([]);
@@ -65,15 +148,12 @@ export function CrewImportButton() {
     if (!rows.length) return;
     setError(null);
     start(async () => {
-      const res = await importCrew(rows, requireReset);
+      const res = await importCrew(rows);
       if (!res.ok) return setError(res.error ?? "Import failed.");
       setResults(res.results ?? []);
       router.refresh();
     });
   }
-
-  const created = results?.filter((r) => r.status === "created") ?? [];
-  const failed = results?.filter((r) => r.status === "failed") ?? [];
 
   return (
     <>
@@ -83,7 +163,7 @@ export function CrewImportButton() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Import crew"
+        title="Import Crew"
         footer={
           results ? (
             <ModalActions onCancel={() => setOpen(false)} cancelLabel="Done" />
@@ -94,10 +174,7 @@ export function CrewImportButton() {
       >
         {!results ? (
           <div className="space-y-4">
-            <p className="text-sm text-slate-600">
-              Upload a CSV with <span className="font-medium">Name, Email, Phone, Role</span> columns. Each person&apos;s password is
-              set to their <span className="font-medium">phone digits</span> (no spaces/symbols) — the office hands those out.
-            </p>
+            <p className="text-sm text-slate-600">{CREW_IMPORT_WORDS.before}</p>
             <input type="file" accept=".csv,text/csv" onChange={onFile} className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" />
             {rows.length > 0 && (
               <div className="rounded-lg border border-slate-200">
@@ -106,40 +183,16 @@ export function CrewImportButton() {
                   {rows.map((r, i) => (
                     <li key={i} className="flex items-center justify-between px-3 py-1.5">
                       <span className="font-medium text-slate-800">{r.full_name}</span>
-                      <span className="text-xs text-slate-400">{r.email} · {r.role}{r.phone ? "" : " · no phone (temp pwd)"}</span>
+                      <span className="text-xs text-slate-400">{r.email} · {r.role}</span>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
-            <label className="flex items-start gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={requireReset} onChange={(e) => setRequireReset(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-              <span>Require a password reset on first login <span className="text-slate-400">— they sign in with the phone/temp password once, then set their own.</span></span>
-            </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
         ) : (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-green-700">
-              <Check className="h-4 w-4" /> Added {created.length}{failed.length ? ` · ${failed.length} skipped` : ""}
-            </div>
-            <p className="text-xs text-slate-500">Give each person their login + password (their phone number).{requireReset ? " They'll set their own password the first time they sign in." : " They install the app and clock in."}</p>
-            <div className="rounded-lg border border-slate-200">
-              <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto text-sm">
-                {created.map((r, i) => (
-                  <li key={i} className="px-3 py-2">
-                    <div className="font-medium text-slate-800">{r.name}</div>
-                    <div className="text-xs text-slate-500">{r.email} · password: <span className="font-mono font-semibold text-slate-700">{r.password}</span></div>
-                  </li>
-                ))}
-                {failed.map((r, i) => (
-                  <li key={"f" + i} className="flex items-start gap-1.5 px-3 py-2 text-xs text-amber-700">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {r.name} — {r.reason}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          <CrewImportResults results={results} />
         )}
       </Modal>
     </>

@@ -13,6 +13,7 @@ import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
 import { sendEmail } from "@/lib/email";
+import { CREW_IMPORT_WORDS, crewSetupLink } from "./crew-setup-link";
 
 export async function disconnectQuickbooks(): Promise<Result> {
   const supabase = await createClient();
@@ -402,13 +403,16 @@ export async function createEmployee(input: {
 }
 
 export type CrewImportRow = { full_name: string; email: string; phone?: string; role?: string; hourly_rate?: number | null };
-export type CrewImportResult = { name: string; email: string; password?: string; status: "created" | "failed"; reason?: string };
+/** One row of the import's answer. A created person carries their ONE-TIME LINK (setupLink); a
+ *  created person with no link, or a failed row, carries the reason in words. Never a password. */
+export type CrewImportResult = { name: string; email: string; setupLink?: string; status: "created" | "failed"; reason?: string };
 
-/** Bulk-create employees from a roster (the migration importer). Each password is the
- *  employee's PHONE DIGITS (>=8); a no-phone row gets a temp default to reset. Owner/
- *  admin only; needs SUPABASE_SERVICE_ROLE_KEY. Returns the login+password per row so
- *  the office can hand them out. Best-effort per row — one failure doesn't stop the rest. */
-export async function importCrew(rows: CrewImportRow[], requireReset = true): Promise<{ ok: boolean; error?: string; results?: CrewImportResult[] }> {
+/** Bulk-create employees from a roster (the migration importer). Owner/admin only; needs
+ *  SUPABASE_SERVICE_ROLE_KEY. Each login is made with a long random password NOBODY SEES (never
+ *  returned, never logged); the office hands each person a one-time link instead (crew-setup-link.ts
+ *  says how it works end to end: generateLink sends nothing, the link opens Set A Password). Nothing
+ *  is emailed by this door. Best-effort per row — one failure doesn't stop the rest. */
+export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; error?: string; results?: CrewImportResult[] }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -424,18 +428,19 @@ export async function importCrew(rows: CrewImportRow[], requireReset = true): Pr
   const admin = createAdminClient();
 
   const results: CrewImportResult[] = [];
-  for (const r of (rows ?? []).slice(0, 200)) {
+  // The sink is told the ROW (its 1-based place in the file), never the person's email.
+  for (const [i, r] of (rows ?? []).slice(0, 200).entries()) {
+    const row = i + 1;
     const name = (r.full_name || "").trim();
     const email = (r.email || "").trim().toLowerCase();
     if (!name || !email.includes("@")) {
       results.push({ name: name || email || "(blank)", email, status: "failed", reason: "Missing name or email." });
       continue;
     }
-    const digits = (r.phone || "").replace(/\D/g, "");
-    // Password = the phone digits (Erik's call — simplest for field crew the office texts).
-    // No-phone rows get a RANDOM temp (NOT derived from the email, which was guessable from
-    // a public address); it's shown once on the import screen for the office to hand out.
-    const password = digits.length >= 8 ? digits : "deck-" + crypto.randomUUID().slice(0, 8);
+    // A password nobody knows, never returned and never logged: the person sets their own through
+    // the one-time link. (The phone digits used to BE the password; a roster is not a secret.)
+    const password = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+    const phone = (r.phone || "").trim() || null;
     const role = ["admin", "office", "tech"].includes(r.role || "") ? (r.role as string) : "tech";
     await preApproveSignup(admin as any, email, `crew-import: ${name} (org ${me.org_id})`);
     const { data: created, error: authErr } = await admin.auth.admin.createUser({
@@ -448,22 +453,44 @@ export async function importCrew(rows: CrewImportRow[], requireReset = true): Pr
       results.push({ name, email, status: "failed", reason: /already/i.test(authErr?.message ?? "") ? "Already has a login." : authErr?.message ?? "Could not create login." });
       continue;
     }
-    const { error: profErr } = await admin
+    // must_reset_password stays true until they choose a password on Set A Password: the random one
+    // above is never theirs to keep, whichever way they first get in.
+    const { data: seat, error: profErr } = await admin
       .from("profiles")
-      .update({ org_id: me.org_id, full_name: name, role, hourly_rate: r.hourly_rate ?? null, active: true, must_reset_password: requireReset })
-      .eq("id", created.user.id);
+      .update({ org_id: me.org_id, full_name: name, role, phone, hourly_rate: r.hourly_rate ?? null, active: true, must_reset_password: true })
+      .eq("id", created.user.id)
+      .select("id");
     if (profErr) {
       // Roll back the just-created login so a failed profile attach can't leave an orphaned auth user
       // with no org. If the rollback ITSELF fails, don't swallow it — that's the exact invisible-orphan
       // state the rollback exists to prevent, so surface it for an operator to clean up.
       const rb = await admin.auth.admin.deleteUser(created.user.id).catch((e) => ({ error: e }));
       if ((rb as { error?: unknown })?.error) {
-        reportError("crewImport.rollbackDeleteUser", (rb as { error?: unknown }).error, { email, userId: created.user.id });
+        reportError("crewImport.rollbackDeleteUser", (rb as { error?: unknown }).error, { row, userId: created.user.id });
       }
       results.push({ name, email, status: "failed", reason: profErr.message });
       continue;
     }
-    results.push({ name, email, password, status: "created" });
+    // ZERO ROWS IS NOT A WRITE (the silent-write law): the login exists, but no roster row took the
+    // company and the role — said for that person, with the one door that finishes it; no link yet
+    // (without a seat the link would land them nowhere).
+    if (!seat?.length) {
+      reportError("crewImport.profileZeroRows", new Error("zero rows"), { row, userId: created.user.id });
+      results.push({ name, email, status: "created", reason: CREW_IMPORT_WORDS.noRoster });
+      continue;
+    }
+    // The one-time link. generateLink SENDS NOTHING: it answers the recovery token's hash, which the
+    // link carries to /auth/confirm (the app's token-hash door) and on to Set A Password. The
+    // action_link it also answers is not used (the implicit flow; crew-setup-link.ts says why).
+    const { data: link, error: linkErr } = await admin.auth.admin.generateLink({ type: "recovery", email });
+    const setupLink = linkErr ? null : crewSetupLink(process.env.NEXT_PUBLIC_SITE_URL, link?.properties?.hashed_token);
+    if (!setupLink) {
+      // The person exists and can get in by the login page's code; say so instead of a bare row.
+      if (linkErr) reportError("crewImport.generateLink", linkErr, { row });
+      results.push({ name, email, status: "created", reason: CREW_IMPORT_WORDS.noLink });
+      continue;
+    }
+    results.push({ name, email, setupLink, status: "created" });
   }
   revalidatePath("/team");
   revalidatePath("/settings");

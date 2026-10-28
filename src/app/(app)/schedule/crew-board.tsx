@@ -187,7 +187,7 @@ export function CrewBoard({
       {/* WHAT THE CHIPS MEAN. Three lines, with the real chips in them, readable at arm's length. */}
       <div className="mb-3 flex flex-col gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
         <span className="flex items-center gap-2">
-          <Badge tone="blue">On this job</Badge> You put them here.
+          <Badge tone="blue">On This Job</Badge> You put them here.
         </span>
         <span className="flex items-center gap-2">
           <Badge tone="slate">Scheduled</Badge> What the job calendar says.
@@ -267,7 +267,7 @@ export function CrewBoard({
                         >
                           <div className="flex items-start justify-between gap-1">
                             <span className="min-w-0 flex-1 truncate font-semibold text-slate-900">{decision?.label}</span>
-                            <Badge tone="blue">On this job</Badge>
+                            <Badge tone="blue">On This Job</Badge>
                           </div>
                         </button>
                       ) : (
@@ -277,7 +277,7 @@ export function CrewBoard({
                         >
                           <div className="flex items-start justify-between gap-1">
                             <span className="min-w-0 flex-1 truncate font-semibold text-slate-900">{decision?.label}</span>
-                            <Badge tone="blue">On this job</Badge>
+                            <Badge tone="blue">On This Job</Badge>
                           </div>
                         </Link>
                       ))}
@@ -397,7 +397,7 @@ export function CrewBoard({
             <div>
               <Label htmlFor="crew-day-job">Put on a job</Label>
               <Select id="crew-day-job" value={pickJobId} onChange={(e) => setPickJobId(e.target.value)}>
-                <option value="">Pick a job…</option>
+                <option value="">Pick A Job…</option>
                 <optgroup label="On this day's schedule">
                   {jobOptions.filter((j) => j.today).map((j) => (
                     <option key={j.id} value={j.id}>{j.label}</option>

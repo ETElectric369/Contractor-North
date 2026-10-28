@@ -413,9 +413,9 @@ export function StopClockSheet({
         <div>
           <Label htmlFor="s-job">Job</Label>
           <Select id="s-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
-            <option value="">No job</option>
+            <option value="">No Job</option>
             {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
-              <option value={entry.job_id}>{entry.job ? jobLabel(entry.job) : "Current job"}</option>
+              <option value={entry.job_id}>{entry.job ? jobLabel(entry.job) : "Current Job"}</option>
             )}
             {jobs.map((j) => (
               <option key={j.id} value={j.id}>
@@ -428,7 +428,7 @@ export function StopClockSheet({
           <div>
             <Label htmlFor="s-code">Job code</Label>
             <Select id="s-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
-              <option value="">No code</option>
+              <option value="">No Code</option>
               {jobCodes.map((c) => (
                 <option key={c.id} value={c.code}>
                   {c.code}: {c.description}

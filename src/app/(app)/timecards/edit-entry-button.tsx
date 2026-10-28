@@ -644,7 +644,7 @@ export function EditEntryButton({
       <Modal
         open={open}
         onClose={close}
-        title="Edit time entry"
+        title="Edit Time Entry"
         portal
         footer={
           /* SPLIT THIS SHIFT IS IN THE FOOTER TOO (cc484d6e): the tools box that holds it sits past
@@ -756,7 +756,7 @@ export function EditEntryButton({
                   the recent-jobs list, so saving never silently clears it. */}
               {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
                 <option value={entry.job_id}>
-                  {entry.job ? jobLabel(entry.job) : "Current job"}
+                  {entry.job ? jobLabel(entry.job) : "Current Job"}
                 </option>
               )}
               {jobs.map((j) => (

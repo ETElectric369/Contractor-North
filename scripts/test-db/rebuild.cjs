@@ -52,13 +52,15 @@ const { execFileSync } = require("node:child_process");
 const pg = require("pg");
 // The steps and their md5s: one list, shared with check-test-db.cjs (CI's is-the-test-database-behind check).
 const { stepsOnDisk, ledgerAhead } = require("./steps.cjs");
+// The marker and its decision: one rule, shared with scripts/run-migrations.mjs (db:push), which
+// refuses to run against any database without it (cn-v1134).
+const { MARKER_VALUE, markerDecision, readMarkerRows } = require("./guard.cjs");
 
 // ── The one database this script may write to. Constants on purpose. ────────────────────────────
 const TEST_HOST = "aws-0-us-east-2.pooler.supabase.com";
 const TEST_PORT = 5432;
 const TEST_USER = "postgres.olmehzbhtzegjxgswgyk";
 const TEST_DB = "postgres";
-const MARKER_VALUE = "contractor-north-test";
 // Production's project ref. If it ever shows up anywhere in the connection, refuse.
 const PROD_REF = "rbpokaozcxqownollqlx";
 
@@ -134,8 +136,8 @@ async function guard(client) {
     await client.query(`revoke all on public.cn_test_database_marker from public, anon, authenticated`);
     await client.query("commit");
   }
-  const { rows: mv } = await client.query(`select value from public.cn_test_database_marker`);
-  if (mv.length !== 1 || mv[0].value !== MARKER_VALUE) die(`cn_test_database_marker does not hold exactly one '${MARKER_VALUE}' row. Refusing.`);
+  const marker = markerDecision(await readMarkerRows(client));
+  if (!marker.ok) die(`${marker.why}: cn_test_database_marker does not hold exactly one '${MARKER_VALUE}' row. Refusing.`);
   console.log(`Guard passed: ${TEST_USER} @ ${TEST_HOST}, marker '${MARKER_VALUE}'.`);
 }
 

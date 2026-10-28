@@ -416,7 +416,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
           <div className="mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 p-6 text-center">
             <p className="text-sm font-medium text-red-700">{error}</p>
             <button type="button" onClick={load} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700">
-              <RefreshCw className="h-4 w-4" /> Try again
+              <RefreshCw className="h-4 w-4" /> Try Again
             </button>
           </div>
         )}

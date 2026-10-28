@@ -1586,7 +1586,7 @@ export async function showHowToTap(): Promise<{ ok: true } | { ok: false; error:
     };
   }
   if (preparing) {
-    return { ok: false, error: "Tap to Pay on iPhone is getting ready on this phone — give it a moment, then tap How to Tap again." };
+    return { ok: false, error: "Tap to Pay on iPhone is getting ready on this phone — give it a moment, then tap How To Tap again." };
   }
   try {
     await raced(10 * 60_000, () => show.call(edu));

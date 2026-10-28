@@ -433,7 +433,7 @@ export function PriceListManager({
                   variant="outline"
                   onClick={() => update({ chips: activeChips.has("shifted") ? prefs.chips.filter((c) => c !== "shifted") : [...prefs.chips, "shifted"] })}
                 >
-                  {activeChips.has("shifted") ? "Show the Whole List" : `Show Just These ${shifted.length}`}
+                  {activeChips.has("shifted") ? "Show The Whole List" : `Show Just These ${shifted.length}`}
                 </Button>
               </div>
             </div>
@@ -461,7 +461,7 @@ export function PriceListManager({
                   variant="outline"
                   onClick={() => update({ chips: activeChips.has("costiscode") ? prefs.chips.filter((c) => c !== "costiscode") : [...prefs.chips, "costiscode"] })}
                 >
-                  {activeChips.has("costiscode") ? "Show the Whole List" : `Show Just These ${costIsCode.length}`}
+                  {activeChips.has("costiscode") ? "Show The Whole List" : `Show Just These ${costIsCode.length}`}
                 </Button>
               </div>
             </div>
@@ -483,7 +483,7 @@ export function PriceListManager({
           <Package className="h-4 w-4 text-brand" />
           <span className="font-medium text-slate-800">{selected.size} selected</span>
           <Select aria-label="Kit" className="h-9 w-auto text-sm" value={kitTarget} onChange={(e) => setKitTarget(e.target.value)}>
-            <option value="">New kit…</option>
+            <option value="">New Kit…</option>
             {kits.map((k) => (
               <option key={k.id} value={k.id}>
                 {k.name}
@@ -501,7 +501,7 @@ export function PriceListManager({
             />
           )}
           <Button size="sm" onClick={() => void addSelectedToKit()} disabled={addingToKit || (!kitTarget && !newKitName.trim())}>
-            <Plus className="h-3.5 w-3.5" /> Add to Kit
+            <Plus className="h-3.5 w-3.5" /> Add To Kit
           </Button>
           <Button size="sm" variant="outline" onClick={() => setSelected(new Set())}>
             Clear

@@ -547,6 +547,14 @@ describe("Link To J-055 Instead", () => {
     expect(spies.createJob).not.toHaveBeenCalled();
   });
 
+  it("says the attach door's note when the visit's work joined the job (cn-v1134) — never 'Nothing new was made' over new tasks", async () => {
+    state.jobs = [{ ...j55, status: "complete" }];
+    spies.link.mockResolvedValueOnce({ ok: true, id: "appt-tom", note: "2 tasks and 1 part joined J-055 (12 Larkspur Ln)." });
+    const res = await linkVisitInstead("appt-tom", "job-55");
+    expect(res).toMatchObject({ ok: true, jobId: "job-55", message: "Linked this visit to J-055. 2 tasks and 1 part joined J-055 (12 Larkspur Ln)." });
+    expect(res.message).not.toContain("Nothing new was made");
+  });
+
   it("a visit that is over offers no clock on a finished job; any other pairing still does", () => {
     expect(clockOffered(true, "complete")).toBe(false);
     expect(clockOffered(true, "invoiced")).toBe(false);

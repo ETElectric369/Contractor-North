@@ -86,7 +86,7 @@ export function LienInsuranceCard({
               <div>
                 {prelimRequired
                   ? deadlineLine("Preliminary notice", s.prelimDeadline, s.prelimDaysLeft, s.prelimDone, s.prelimUrgent, `Prelim notice served ${fd(lien.prelim_sent_at)}`)
-                  : <span className="text-slate-400">No preliminary notice required (direct contractor, no construction lender).</span>}
+                  : <span className="text-slate-400">No California preliminary notice required (direct contractor, no construction lender).</span>}
               </div>
               <div>{deadlineLine("Record lien", s.lienDeadline, s.lienDaysLeft, s.lienDone, s.lienUrgent, `Lien recorded ${fd(lien.lien_recorded_at)}`)}</div>
               {!s.lienDone && (
@@ -103,7 +103,7 @@ export function LienInsuranceCard({
               </div>
             </div>
           ) : (
-            <p className="mt-1 text-xs text-slate-500">Track the 20-day Preliminary Notice and 90-day lien deadlines so you never lose lien rights.</p>
+            <p className="mt-1 text-xs text-slate-500">Track the California 20-day Preliminary Notice and 90-day lien deadlines so you never lose lien rights.</p>
           )}
         </div>
 
@@ -163,7 +163,7 @@ function LienEditor({ jobId, lien, defaults, onClose, onSaved }: { jobId: string
     });
   }
   return (
-    <Modal open onClose={() => !pending && onClose()} title="Lien rights tracking" footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save" />}>
+    <Modal open onClose={() => !pending && onClose()} title="Lien Rights Tracking" footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save" />}>
       <div className="space-y-3">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">CN tracks deadlines and generates the Preliminary Notice. Recording the lien itself is done at the county. Not legal advice.</p>
@@ -187,7 +187,7 @@ function LienEditor({ jobId, lien, defaults, onClose, onSaved }: { jobId: string
         </div>
         <label className="flex items-start gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={!!f.noc_recorded} onChange={(e) => set({ noc_recorded: e.target.checked })} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-          <span>Owner recorded a Notice of Completion / Cessation<span className="block text-xs text-slate-500">Shortens the lien deadline to 60 days (30 if you&apos;re a subcontractor).</span></span>
+          <span>Owner recorded a Notice of Completion / Cessation<span className="block text-xs text-slate-500">Shortens the California lien deadline to 60 days (30 if you&apos;re a subcontractor).</span></span>
         </label>
         <div className="grid grid-cols-2 gap-3">
           <div><Label htmlFor="l-ps">Prelim served on</Label><Input id="l-ps" type="date" value={f.prelim_sent_at ?? ""} onChange={(e) => set({ prelim_sent_at: e.target.value })} /></div>
@@ -220,7 +220,7 @@ function InsuranceEditor({ jobId, insurance, onClose, onSaved }: { jobId: string
     });
   }
   return (
-    <Modal open onClose={() => !pending && onClose()} title="Insurance claim" footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save" />}>
+    <Modal open onClose={() => !pending && onClose()} title="Insurance Claim" footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save" />}>
       <div className="space-y-3">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <div className="grid grid-cols-2 gap-3">

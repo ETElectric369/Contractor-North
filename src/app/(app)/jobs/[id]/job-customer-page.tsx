@@ -187,7 +187,7 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
           <p className="mt-2 text-sm text-red-700">
             {who} has no link yet, so there is nothing to open or copy.{" "}
             <Link href={`/crm/${link.customerId}`} className="font-semibold underline">
-              Make one on their contact page
+              Make One On Their Contact Page
             </Link>
             .
           </p>
@@ -195,7 +195,7 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
           <p className="mt-2 text-sm text-red-700">
             Their link is turned off, so it opens to &ldquo;This link was turned off.&rdquo;{" "}
             <Link href={`/crm/${link.customerId}`} className="font-semibold underline">
-              Turn it on from their contact page
+              Turn It On From Their Contact Page
             </Link>
             .
           </p>

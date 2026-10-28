@@ -231,8 +231,8 @@ function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
               title="Punched with no signal, so the time came from the phone"
               className="pointer-events-auto flex items-center gap-1"
             >
-              <Badge tone="blue">offline</Badge>
-              <span>time came from the phone</span>
+              <Badge tone="blue">Offline</Badge>
+              <span>Time Came From The Phone</span>
             </Link>
           )}
           {/* A running clock's "Clock Out <Name>" (the only row control left): a labelled 44px

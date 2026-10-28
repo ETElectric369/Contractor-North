@@ -258,7 +258,7 @@ export function JobTimeButton({
         />
       )}
       <Button type="button" variant="outline" size="sm" onClick={doLogHours} disabled={pending || hours <= 0}>
-        Log {hours > 0 ? `${hours}h` : "hours"} on This Job
+        Log {hours > 0 ? `${hours}h` : "Hours"} On This Job
       </Button>
     </div>
   );
@@ -287,12 +287,12 @@ export function JobTimeButton({
         {state === "in" && "Clock In"}
         {state === "switch" && (
           <>
-            Switch<span className="hidden sm:inline">&nbsp;here</span>
+            Switch<span className="hidden sm:inline">&nbsp;Here</span>
           </>
         )}
         {state === "here" && (
           <>
-            <span className="hidden sm:inline">On clock ·&nbsp;</span>
+            <span className="hidden sm:inline">On Clock ·&nbsp;</span>
             <span className="tabular-nums" suppressHydrationWarning>{fmtHm(elapsedMs)}</span>
           </>
         )}
@@ -307,7 +307,7 @@ export function JobTimeButton({
       <Modal
         open={open}
         onClose={() => !pending && setOpen(false)}
-        title={state === "in" ? "Clock in" : state === "switch" ? "Switch to this job" : "On the clock"}
+        title={state === "in" ? "Clock In" : state === "switch" ? "Switch To This Job" : "On The Clock"}
         size="md"
         portal
         footer={
@@ -334,10 +334,10 @@ export function JobTimeButton({
                     // refuses it anyway.
                     "Set When You Stopped"
                   : state === "switch"
-                    ? "Switch to This Job"
+                    ? "Switch To This Job"
                     : isStaff
                       ? "Clock Me Out"
-                      : "Clock Out on the Timeclock"
+                      : "Clock Out On The Timeclock"
             }
           />
         }

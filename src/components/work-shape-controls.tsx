@@ -82,7 +82,7 @@ export function WorkShapeControls({
         className="h-11 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
         aria-label="How long will it take"
       >
-        <option value="">How long?</option>
+        <option value="">How Long?</option>
         {/* A stored size that matches no bucket still shows — a select whose value matches no
             option falls back to the first, and the card would call itself unsized. */}
         {offList && <option value={String(plannedMinutes)}>{durationLabel(plannedMinutes)}</option>}

@@ -213,7 +213,7 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
                 {d.title ? ` · ${d.title}` : ""} · {formatDate(d.created_at)}
                 {isPinned && (
                   <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                    on a job
+                    On A Job
                   </span>
                 )}
               </Link>

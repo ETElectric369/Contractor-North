@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { HOW_MANY, takeOffFromQuote } from "./take-off-from-quote";
+import { HOW_MANY, isClaimableKey, takeOffFromQuote } from "./take-off-from-quote";
 
 /**
  * THE LAW UNDER TEST: a task line never becomes a material on the crew's list; its parts do, by
@@ -69,6 +69,20 @@ describe("takeOffFromQuote — the job's own list is the list (cn-v1084)", () =>
     expect(db.inserted.material_lists).toBeUndefined();
     expect(db.tables.material_lists[0].quote_id).toBe("q-1");
     expect(db.inserted.material_list_items ?? []).toEqual([]); // the romex is there already; the task's R1 is the sync's to add
+  });
+  it("a typed row under its 'capture:' key (cn-v1134, addCaptureItemsToJobList) is UNKEYED to the adoption: the plain line claims it, nothing is written twice", async () => {
+    const db = accepted(world(lines));
+    db.tables.material_lists.push({ id: "ml-visit", job_id: "job-1", quote_id: null, org_id: ORG, created_at: "2026-10-01" });
+    db.tables.material_list_items = [
+      { id: "typed", list_id: "ml-visit", org_id: ORG, source_key: "capture:c-romex", description: "14/2 romex", part_number: "W142", quantity: 2, sort_order: 0 },
+    ];
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res).toMatchObject({ ok: true, id: "ml-visit", adopted: true, follow: { added: 0, carried: 1, recounted: [], removed: [], kept: [], countsDiffer: [] } });
+    expect(db.inserted.material_list_items ?? []).toEqual([]);
+    expect(isClaimableKey("capture:c-romex")).toBe(true);
+    expect(isClaimableKey(null)).toBe(true);
+    expect(isClaimableKey("line:l1#W142")).toBe(false);
+    expect(isClaimableKey("task:t1#W142")).toBe(false);
   });
   it("seeds a plain line the adopted list does NOT carry, after the crew's last row", async () => {
     const db = accepted(world(lines));

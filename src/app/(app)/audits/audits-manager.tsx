@@ -157,7 +157,7 @@ export function AuditsManager({ items, canEdit, canAdd = canEdit }: { items: Com
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title="Edit audit"
+        title="Edit Audit"
         footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} disabled={!eName.trim()} />}
       >
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}

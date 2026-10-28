@@ -319,7 +319,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
                         onClick={() => set(n.key, (answers[n.key] as string[]).filter((p) => p !== path) as never)}
                         className="shrink-0 text-xs text-slate-400 underline-offset-2 hover:underline"
                       >
-                        remove
+                        Remove
                       </button>
                     </li>
                   ))}
@@ -382,7 +382,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
                               : "min-h-[40px] rounded-full border border-dashed border-slate-400 bg-white px-4 text-sm text-slate-600"
                           }
                         >
-                          Something else
+                          Something Else
                         </button>
                       )}
                     </div>
@@ -422,7 +422,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
                       {(n.slot as { options: string[] }).options.map((o) => (
                         <option key={o} value={o}>{o}</option>
                       ))}
-                      {other && <option value="__other">Something else…</option>}
+                      {other && <option value="__other">Something Else…</option>}
                     </Select>
                     {showOther && (
                       <Input
@@ -453,7 +453,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : "Send it"}
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : "Send It"}
         </Button>
         {err && <span className="text-sm text-rose-600">{err}</span>}
       </div>

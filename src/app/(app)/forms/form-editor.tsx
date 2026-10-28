@@ -140,7 +140,7 @@ export function FormEditor({
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? "Edit form" : "New form"}
+      title={isEdit ? "Edit Form" : "New Form"}
       footer={
         <ModalActions
           onCancel={onClose}
@@ -286,7 +286,7 @@ export function FormEditor({
                       value={f.showIfKey ?? ""}
                       onChange={(e) => updateField(i, { showIfKey: e.target.value })}
                     >
-                      <option value="">always show</option>
+                      <option value="">Always Show</option>
                       {fields.slice(0, i).filter((p) => p.label.trim()).map((p, pi) => (
                         <option key={pi} value={slugifyFieldKey(p.label)}>
                           {p.label}

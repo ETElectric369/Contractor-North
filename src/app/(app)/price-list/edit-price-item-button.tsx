@@ -205,9 +205,9 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
                       setPerLf(m === "lf" ? perLf || 1 : 0);
                     }}
                   >
-                    <option value="fixed">Fixed Quantity — typed on the estimate</option>
-                    <option value="sqft">Per Sq Ft of the Job</option>
-                    <option value="lf">Per Linear Ft of the Job</option>
+                    <option value="fixed">Fixed Quantity — Typed On The Estimate</option>
+                    <option value="sqft">Per Sq Ft Of The Job</option>
+                    <option value="lf">Per Linear Ft Of The Job</option>
                     {measurements.filter((m) => !m.builtIn).map((m) => (
                       <option key={m.key} value={`m:${m.key}`}>
                         Per {m.label}{m.unit ? ` (${m.unit})` : ""}
@@ -221,7 +221,7 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
                     {sizedBy && qtyPer > 0 && !measurements.some((m) => !m.builtIn && m.key === sizedBy) && (
                       <option value={`m:${sizedBy}`}>
                         Per {measurementLabel(sizedBy, measurements)}
-                        {measurements.some((m) => m.key === sizedBy) ? "" : " (no longer measured)"}
+                        {measurements.some((m) => m.key === sizedBy) ? "" : " (No Longer Measured)"}
                       </option>
                     )}
                   </Select>
@@ -241,9 +241,9 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
                     <div>
                       <Label htmlFor="epi-round">Round</Label>
                       <Select id="epi-round" value={rounding} onChange={(e) => setRounding(e.target.value)}>
-                        <option value="up">Round up (whole units)</option>
+                        <option value="up">Round Up (Whole Units)</option>
                         <option value="nearest">Nearest</option>
-                        <option value="none">Exact — no rounding</option>
+                        <option value="none">Exact — No Rounding</option>
                       </Select>
                     </div>
                   </>

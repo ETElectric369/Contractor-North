@@ -73,7 +73,7 @@ export function ContractSign({ token, brand }: { token: string; brand: string })
         className="mt-4 inline-flex items-center justify-center rounded-xl px-6 py-3 text-base font-semibold text-white shadow-sm disabled:opacity-60"
         style={{ backgroundColor: brand }}
       >
-        {busy ? "Signing…" : "Sign contract"}
+        {busy ? "Signing…" : "Sign Contract"}
       </button>
     </div>
   );

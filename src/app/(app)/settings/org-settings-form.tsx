@@ -127,8 +127,8 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
       <div>
         <Label htmlFor="weather_source">My Day weather location</Label>
         <Select id="weather_source" name="weather_source" defaultValue={s.weather_source}>
-          <option value="device">My location — each user&apos;s GPS</option>
-          <option value="business">Business address</option>
+          <option value="device">My Location — Each User&apos;s GPS</option>
+          <option value="business">Business Address</option>
         </Select>
         <p className="mt-1 text-xs text-slate-500">
           &ldquo;My location&rdquo; shows weather where each person actually is; if location is off it

@@ -97,7 +97,7 @@ export function PublicQuoteAccept({
         className="mt-3 inline-flex items-center gap-1.5 text-sm text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-60"
       >
         {busy === "decline" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        No thanks, decline this {lower}
+        No Thanks, Decline This {lower}
       </button>
     </div>
   );

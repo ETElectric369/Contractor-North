@@ -47,7 +47,7 @@ export default async function ResetPage({
               <PasswordInput id="password" name="password" placeholder="••••••••" required minLength={6} />
             </div>
             <Button type="submit" size="lg" className="w-full">
-              Update password
+              Update Password
             </Button>
           </form>
         </div>

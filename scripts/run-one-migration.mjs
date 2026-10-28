@@ -4,7 +4,13 @@
 //   node scripts/run-one-migration.mjs supabase/migrations/0048_x.sql
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import pg from "pg";
+
+// THE SAME GUARD db:push HAS (scripts/test-db/guard.cjs): this script takes the same SUPABASE_DB_URL,
+// and pointed at production it would apply the file there. It runs only where the test marker is.
+const require = createRequire(import.meta.url);
+const { checkMarker, DB_PUSH_REFUSAL } = require("./test-db/guard.cjs");
 
 const root = process.cwd();
 function loadEnvLocal() {
@@ -37,6 +43,12 @@ client.on("notice", (n) => {
 });
 try {
   await client.connect();
+  const guard = await checkMarker(client);
+  if (!guard.ok) {
+    console.error(`✗ ${DB_PUSH_REFUSAL} (${guard.why}).`);
+    await client.end();
+    process.exit(1);
+  }
   await client.query("begin");
   await client.query(sql);
   await client.query("commit");

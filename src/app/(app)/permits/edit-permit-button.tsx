@@ -97,7 +97,7 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Edit permit"
+        title="Edit Permit"
         footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} saveLabel="Save Changes" />}
       >
         <div className="space-y-3">

@@ -138,7 +138,7 @@ export function VisitEnding({
         <p className="text-slate-700">
           Written up as{" "}
           <Link href={`/quotes/${estimate.id}`} className="font-medium text-brand hover:underline">
-            {estimate.number ?? "the estimate"}
+            {estimate.number ?? "The Estimate"}
           </Link>
           {estimate.status ? ` · ${estimate.status}` : ""}
           {!estimate.live && <span className="text-slate-500"> — that estimate is over; a new one can be started below.</span>}

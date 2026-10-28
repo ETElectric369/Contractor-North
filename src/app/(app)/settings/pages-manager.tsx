@@ -117,7 +117,7 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
                 // session cookie lives here, and the org-host middleware strips /p/ URLs — on
                 // the custom domain the gate would see an anonymous visitor and 404.
                 <a href={`/site/${handle}/p/${p.slug}?preview=1`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md p-1.5 text-xs font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Preview the draft — only signed-in editors can see it">
-                  <Eye className="h-4 w-4" /> <span className="hidden sm:inline">Preview draft</span>
+                  <Eye className="h-4 w-4" /> <span className="hidden sm:inline">Preview Draft</span>
                 </a>
               )}
               <button type="button" onClick={() => openEdit(p)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
@@ -127,10 +127,10 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
         </ul>
       )}
 
-      <Button type="button" variant="outline" size="sm" onClick={openNew}><Plus className="h-4 w-4" /> New page</Button>
+      <Button type="button" variant="outline" size="sm" onClick={openNew}><Plus className="h-4 w-4" /> New Page</Button>
 
       {/* The save button promises only what the Published checkbox will deliver. */}
-      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit page" : "New Page"} size="xl"
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit Page" : "New Page"} size="xl"
         footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel={editing && !editing.published ? "Save Draft" : editing?.id ? "Save Page" : "Publish Page"} />}>
         {editing && (
           <div className="space-y-4">
@@ -178,7 +178,7 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
         )}
       </Modal>
 
-      <Modal open={!!deleting} onClose={() => setDeleting(null)} title="Delete this page?" size="sm"
+      <Modal open={!!deleting} onClose={() => setDeleting(null)} title="Delete This Page?" size="sm"
         footer={<ModalActions onCancel={() => setDeleting(null)} onSave={confirmDelete} saveLabel="Delete" destructive />}>
         <p className="text-sm text-slate-600">This permanently deletes <span className="font-medium text-slate-900">{deleting?.title}</span>.</p>
       </Modal>

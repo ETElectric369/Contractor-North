@@ -79,7 +79,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="New material list"
+        title="New Material List"
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}

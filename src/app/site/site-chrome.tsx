@@ -155,7 +155,7 @@ export function SiteHeader({
             Articles + the builder pages fold into one "More" dropdown once there are enough of
             them to crowd the name and the phone number — the two things that must never wrap. */}
         <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
-          {chrome.showWorkLink && <a href={sectionAnchor(anchorBase, "#work")} className="whitespace-nowrap hover:text-slate-900">Our work</a>}
+          {chrome.showWorkLink && <a href={sectionAnchor(anchorBase, "#work")} className="whitespace-nowrap hover:text-slate-900">Our Work</a>}
           {chrome.showServicesLink && <a href={sectionAnchor(anchorBase, "#services")} className="hover:text-slate-900">Services</a>}
           {chrome.showReviewsLink && <a href={sectionAnchor(anchorBase, "#reviews")} className="hover:text-slate-900">Reviews</a>}
           {(() => {
@@ -227,7 +227,7 @@ export function SiteHeader({
                 </a>
               )}
               {!onHomepage && <Link href={home} className="px-4 py-2 hover:bg-slate-50">Home</Link>}
-              {chrome.showWorkLink && <a href={sectionAnchor(anchorBase, "#work")} className="px-4 py-2 hover:bg-slate-50">Our work</a>}
+              {chrome.showWorkLink && <a href={sectionAnchor(anchorBase, "#work")} className="px-4 py-2 hover:bg-slate-50">Our Work</a>}
               {chrome.showServicesLink && <a href={sectionAnchor(anchorBase, "#services")} className="px-4 py-2 hover:bg-slate-50">Services</a>}
               {chrome.showReviewsLink && <a href={sectionAnchor(anchorBase, "#reviews")} className="px-4 py-2 hover:bg-slate-50">Reviews</a>}
               {articlesHref && (
@@ -299,7 +299,7 @@ export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome;
           {ig && <a href={`https://www.instagram.com/${ig}`} className="flex items-center gap-2 hover:text-white"><Instagram className="h-4 w-4" style={{ color: brand }} /> @{ig}</a>}
           {gbpUrl && (
             <a href={reviewUrl} {...ext} className="flex items-center gap-2 hover:text-white">
-              <Star className="h-4 w-4" style={{ color: brand }} /> Review us on Google
+              <Star className="h-4 w-4" style={{ color: brand }} /> Review Us On Google
             </a>
           )}
           <Link
@@ -318,7 +318,7 @@ export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome;
               in business". Computed at render — the pages are dynamic, so it stays current. */}
           <span>© {new Date().getFullYear()} {org.name}. All rights reserved.</span>
           <span className="flex items-center gap-4">
-            <Link href="/login" className="hover:text-slate-300">Team login</Link>
+            <Link href="/login" className="hover:text-slate-300">Team Login</Link>
             <span>Powered by Contractor North</span>
           </span>
         </div>

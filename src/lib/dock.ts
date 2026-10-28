@@ -241,7 +241,7 @@ export const DOCK: DockSection[] = [
       { id: "m-recon", label: "Reconcile", icon: ArrowLeftRight, href: "/reconcile", staffOnly: true },
       { id: "m-price", label: "Price List", icon: Tags, href: "/price-list" },
       // Money admin — promoted out of Office (Alexa's open "under billing?" call, now answered).
-      { id: "m-ma-h", label: "Money admin", icon: Calculator, header: true },
+      { id: "m-ma-h", label: "Money Admin", icon: Calculator, header: true },
       { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll", feature: "crew_payroll" },
       // No switch: the Tax Report carries the mileage deduction, which is not Sales Tax.
       { id: "ma-tax", label: "Tax Report", icon: Calculator, href: "/tax-report" },

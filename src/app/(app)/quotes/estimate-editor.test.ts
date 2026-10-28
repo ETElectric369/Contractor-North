@@ -140,8 +140,8 @@ describe("the saved page's doors, on the editor", () => {
       },
     );
     const t = text(html);
-    expect(t).toContain("← from lead: Thistlewood Builders");
-    expect(t).toContain("← from the visit on");
+    expect(t).toContain("← From Lead: Thistlewood Builders");
+    expect(t).toContain("← From The Visit on");
     expect(t).toContain("Revises E-000 — accepting this one supersedes it.");
     expect(t).toContain("plans.pdf");
     expect(t).toContain("Created");

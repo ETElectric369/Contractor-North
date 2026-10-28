@@ -331,7 +331,9 @@ export async function linkVisitInstead(appointmentId: string, jobId: string): Pr
     ok: true,
     jobId,
     jobNumber,
-    message: `Linked this visit to ${jobNumber}. Nothing new was made.${onIt}`,
+    // The attach door says what the visit's work did on the job (cn-v1134: "2 tasks and 1 part joined
+    // J-055 …", "J-055 already had …"); only a door with nothing to say leaves the old sentence.
+    message: `Linked this visit to ${jobNumber}. ${res.note ?? "Nothing new was made."}${onIt}`,
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
 }

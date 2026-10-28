@@ -79,7 +79,7 @@ export function CodeTemplatesManager({ templates, codes }: { templates: Template
       <Modal
         open={editing !== null}
         onClose={() => setEditing(null)}
-        title={editing && editing !== "new" ? "Edit template" : "New template"}
+        title={editing && editing !== "new" ? "Edit Template" : "New Template"}
         footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel="Save Template" disabled={!name.trim() || !selected.length} />}
       >
         <div className="space-y-4">

@@ -105,7 +105,7 @@ export function CustomerSelect({
           <Input id="qc-addr" autoComplete="street-address" value={newAddr} onChange={(e) => setNewAddr(e.target.value)} placeholder="Job address" />
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={createAndAttach} disabled={pending}>Create &amp; attach</Button>
+          <Button size="sm" onClick={createAndAttach} disabled={pending}>Create &amp; Attach</Button>
           <Button size="sm" variant="outline" onClick={() => { setCreating(false); setError(null); }} disabled={pending}>Cancel</Button>
         </div>
         <p className="text-xs text-slate-400">Phone, email and the rest can go in from the contact afterwards.</p>

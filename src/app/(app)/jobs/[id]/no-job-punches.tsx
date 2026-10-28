@@ -56,7 +56,7 @@ export function nearPunchLine(p: NearPunch, tz: string): string {
 function RestOnTimecards() {
   return (
     <Link href={NEAR_REST_HREF} className="inline-flex min-h-[44px] items-center font-medium text-amber-900 underline">
-      Hours On No Job, on Timecards
+      Hours On No Job, On Timecards
     </Link>
   );
 }

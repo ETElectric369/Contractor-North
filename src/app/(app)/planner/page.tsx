@@ -786,7 +786,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                     page carry — My Day drew an unconfirmed visit like a firm booking. */}
                 {i.status === "proposed" && (
                   <Badge tone="amber" className="shrink-0">
-                    pending pick
+                    Pending Pick
                   </Badge>
                 )}
               </>

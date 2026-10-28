@@ -55,7 +55,7 @@ export function NewChangeOrderButton({ jobs }: { jobs: JobOption[] }) {
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="New change order"
+          title="New Change Order"
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}

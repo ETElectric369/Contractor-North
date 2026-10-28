@@ -119,7 +119,7 @@ export function JobImportButton() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Import jobs"
+        title="Import Jobs"
         footer={
           results ? (
             <ModalActions onCancel={() => setOpen(false)} cancelLabel="Done" />

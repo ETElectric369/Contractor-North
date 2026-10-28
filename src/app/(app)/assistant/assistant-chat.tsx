@@ -145,7 +145,7 @@ function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; on
       </div>
       <div className="p-2">
         <Button onClick={onSave} disabled={saving || items.length === 0} className={`w-full ${ready ? "bg-green-600 hover:bg-green-500" : ""}`}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : ready ? "Save estimate →" : "Save draft →"}
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : ready ? "Save Estimate →" : "Save Draft →"}
         </Button>
       </div>
     </div>
@@ -1486,7 +1486,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                       size="sm"
                       className={`w-full ${draft.status === "ready" ? "bg-green-600 hover:bg-green-500" : ""}`}
                     >
-                      {savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : draft.status === "ready" ? "Save estimate →" : "Save draft →"}
+                      {savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : draft.status === "ready" ? "Save Estimate →" : "Save Draft →"}
                     </Button>
                   </div>
                 </>
@@ -1587,7 +1587,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         <>
           {messages.length > 0 && (
             <div className="flex shrink-0 justify-end px-3 pt-1">
-              <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New chat</button>
+              <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New Chat</button>
             </div>
           )}
           <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
@@ -1708,7 +1708,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           </ul>
           <div className="flex gap-2">
             <Button onClick={() => resolveConfirm(true)} className="flex-1 bg-green-600 hover:bg-green-500">
-              <Check className="h-4 w-4" /> Yes, do it
+              <Check className="h-4 w-4" /> Yes, Do It
             </Button>
             <Button variant="outline" onClick={() => resolveConfirm(false)} className="flex-1">
               Cancel
@@ -1739,7 +1739,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               onClick={stopVoice}
               className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-red-600"
             >
-              <Square className="h-3 w-3" fill="currentColor" /> End conversation
+              <Square className="h-3 w-3" fill="currentColor" /> End Conversation
             </button>
           </div>
       ) : (

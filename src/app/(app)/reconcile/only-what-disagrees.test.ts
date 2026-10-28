@@ -461,7 +461,7 @@ describe("it asks what the expense is, and only when that is unclear", () => {
       }),
     );
     expect(html).toContain('value="Larkspur Trade Counter"');
-    expect(textOf(html)).toContain("1 in All Bills matches");
+    expect(textOf(html)).toContain("1 In All Bills matches");
   });
 });
 

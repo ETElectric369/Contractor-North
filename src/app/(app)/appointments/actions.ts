@@ -6,9 +6,10 @@ import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { MAX_PHOTOS, PHOTOS_FULL, mergeCaptureSections, parseInspectorCapture, type CaptureItem, type CapturePatch } from "@/lib/inspection/capture";
-import { EMPTY_BIRTH, bornTasks, partsAsCaptureItems, tasksAnswered, tasksFromVisit, type Birth } from "@/lib/estimate/born-with-tasks";
-import { kitsReadWords, readTaskKits } from "@/lib/estimate/task-kits";
+import { MAX_PHOTOS, PHOTOS_FULL, mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
+import { bornTasks } from "@/lib/estimate/born-with-tasks";
+import { taskTitleKey } from "@/lib/estimate/sync-job-tasks";
+import { plainRowHalf } from "@/lib/estimate/take-off-from-quote";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
@@ -35,8 +36,10 @@ import { customerForInquiry } from "@/lib/actions/win-customer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
-import { addCaptureItemsToJobList } from "../materials/actions";
+import { addCaptureItemsToJobList, canonicalMaterialListId } from "../materials/actions";
 import { reportError } from "@/lib/observe";
+import { visitWork } from "@/lib/appointments/visit-work";
+import { jobShort } from "@/lib/appointments/visit-start";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
  *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
@@ -547,7 +550,7 @@ export async function linkAppointmentTo(
   id: string,
   kind: "lead" | "customer" | "job",
   targetId: string,
-): Promise<Result> {
+): Promise<Result & { /** What the visit's work did on the job it was linked to (kind "job"), in a sentence. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -557,11 +560,14 @@ export async function linkAppointmentTo(
     // type rides along (PROJECTION LAW): the new title follows the visit's kind, never a guess.
     // outcome + inquiry_id (cn-v1069): attaching an estimate visit to a job IS its answer (won), and
     // the lead it was booked from is won with it — both stamped only where nothing is stamped yet.
-    .select("id, title, location, type, outcome, inquiry_id")
+    // job_id (cn-v1134): a visit that already had a job moves its link only; the job it had keeps the work.
+    .select("id, title, location, type, outcome, inquiry_id, job_id")
     .eq("id", id)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
   const visitType = (appt as { type?: string | null }).type ?? null;
+  // The job the visit had BEFORE this write (read here, not after the update lands on the row).
+  const hadJob = (appt as { job_id?: string | null }).job_id ?? null;
 
   const patch: Record<string, unknown> = {};
   let name = "";
@@ -569,6 +575,8 @@ export async function linkAppointmentTo(
   // The structured parts of whatever we linked to — carried through so the visit inherits a
   // real address rather than a string somebody has to re-parse later (0177).
   let parts: { city: string | null; state: string | null; zip: string | null } | null = null;
+  // The job linked (kind "job"), for the carry below: its number and name for the sentence.
+  let jobRow: { id: string; job_number?: string | null; name?: string | null } | null = null;
 
   if (kind === "lead") {
     const { data: r } = await supabase
@@ -604,6 +612,7 @@ export async function linkAppointmentTo(
       .eq("id", targetId)
       .maybeSingle();
     if (!r) return { ok: false, error: "Job not found." };
+    jobRow = r;
     patch.job_id = r.id;
     if (r.customer_id) patch.customer_id = r.customer_id;
     // A VISIT WITH A JOB IS WON (cn-v1069). The attach door set no outcome, so a visit connected to
@@ -646,14 +655,147 @@ export async function linkAppointmentTo(
   // The lead behind a visit that took a job is won, and the job carries it (lib/appointments/lead-won;
   // it lived in Link To J-0xx Instead alone before cn-v1069, so this picker's attach never told it).
   const lead = kind === "job" ? await stampLeadWonByJob(supabase, { jobId: targetId, inquiryId: (appt as { inquiry_id?: string | null }).inquiry_id }) : {};
-  if (kind === "job" && targetId) revalidatePath(`/jobs/${targetId}`);
+  const warnings: string[] = lead.warning ? [lead.warning] : [];
+  let note: string | undefined;
+  /* THE VISIT'S WORK JOINS THE JOB IT WON (cn-v1134). Won · Pick The Job linked an existing job and
+     stamped the win (cn-v1069), and left the tasks he typed on the visit — each with its minutes and
+     parts — and the typed take-off on the visit, where nothing on the job read them. Start The Job
+     carried both onto the job it made; this door now carries them onto the job it links, through
+     the same read (lib/appointments/visit-work) and the same two keyed writers (bornTasks,
+     "task:<id>"; addCaptureItemsToJobList, "capture:<id>" and "task:<id>#<part>"), so a second press
+     births nothing twice. The job's own size is never touched: its tasks carry their minutes. A
+     RE-LINK moves the link only — the job it had keeps the work (one door opens, the last one
+     closes; never the same work on two jobs). What happened is `note`; what could not be is `warning`. */
+  if (kind === "job" && jobRow) {
+    if (hadJob && hadJob !== targetId) {
+      const { data: old } = await supabase.from("jobs").select("id, job_number, name").eq("id", hadJob).maybeSingle();
+      note = `${old ? jobShort(old as { job_number?: string | null; name?: string | null }) : "The job it had"} kept the tasks and parts from this visit.`;
+    } else {
+      const carried = await carryVisitWork(supabase, { appointmentId: id, job: jobRow, orgId: ctx.orgId, createdBy: ctx.userId });
+      note = carried.note;
+      warnings.push(...carried.warnings);
+    }
+    revalidatePath(`/jobs/${targetId}`);
+  }
 
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
   revalidatePath("/leads");
   revalidatePath(`/appointments/${id}`);
-  return { ok: true, id, ...(lead.warning ? { warning: lead.warning } : {}) };
+  return { ok: true, id, ...(note ? { note } : {}), ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
+}
+
+/** "3 tasks", "1 part". */
+const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** "1 task and 2 parts", "3 tasks", "1 part" — empty when both are zero. */
+const tasksAndParts = (tasks: number, parts: number) => [tasks ? counted(tasks, "task") : "", parts ? counted(parts, "part") : ""].filter(Boolean).join(" and ");
+
+/**
+ * Carry what the visit typed onto the job it was linked to (linkAppointmentTo, kind "job"): the
+ * tasks through bornTasks with NO size (plannedMinutes null — jobs.planned_minutes is the job's own;
+ * its tasks carry their minutes), the typed take-off and the tasks' parts through the one list
+ * writer. Says what happened in one sentence, and what could not happen as warnings; never throws.
+ *
+ * WHAT THE JOB ALREADY CARRIES IS NEVER DOUBLED (cn-v1134 fixer, skeptic #40). A job born from the
+ * estimate drafted from this visit has this visit's tasks under the LINE's keys ("line:<id>") with the
+ * same words, and their parts on its list — so a visit task whose title the job already has, under any
+ * key, is skipped (taskTitleKey: trimmed, case folded — the sync's claim by title, for a title typed by
+ * hand), and a part whose code — or, uncoded, whose words — is already on the job's list is skipped
+ * (plainRowHalf, the one reading the take-off and the sync match rows by). What he DELETED from the
+ * job stays gone: bornTasks honors jobs.dismissed_task_keys and the list writer the list's
+ * dismissed_keys, both counted as left off. The note counts only what is NEW. The visit's tasks sort
+ * after the job's last task (its own 0..n collided with the job's). A failed birth lists the typed
+ * rows alone — a task's parts with no task would be parts of nothing — and says so.
+ */
+async function carryVisitWork(
+  supabase: SupabaseClient,
+  w: { appointmentId: string; job: { id: string; job_number?: string | null; name?: string | null }; orgId: string | null; createdBy: string },
+): Promise<{ note?: string; warnings: string[] }> {
+  const short = jobShort(w.job);
+  const name = (w.job.name ?? "").trim();
+  const named = (w.job.job_number ?? "").trim() && name ? `${short} (${name})` : short;
+  const work = await visitWork(supabase, w.appointmentId, "link");
+  const warnings = [...work.notes];
+  const tasks = work.birth.tasks.length;
+  const parts = work.typedItems.length;
+  let tasksLanded = false;
+  let inserted = 0;
+  let tasksLeftOff = 0;
+  let sameTitle = 0;
+  if (tasks) {
+    // THE JOB'S OWN TASKS, once: the titles it carries (any key) and its last sort_order.
+    let tq = supabase.from("tasks").select("title, sort_order").eq("job_id", w.job.id);
+    if (w.orgId) tq = tq.eq("org_id", w.orgId);
+    const { data: onJob, error: tErr } = await tq;
+    if (tErr) warnings.push(`The visit is linked; its tasks and their parts could not be listed (${dbError(tErr)}). Add them on the job.`);
+    else {
+      const had = (onJob ?? []) as Array<{ title: string | null; sort_order: number | null }>;
+      const titles = new Set(had.map((t) => taskTitleKey(String(t.title ?? ""))));
+      const after = had.reduce((m, t) => Math.max(m, (t.sort_order ?? -1) + 1), 0);
+      const fresh = work.birth.tasks.filter((t) => !titles.has(taskTitleKey(t.title)));
+      sameTitle = tasks - fresh.length;
+      const born = await bornTasks(
+        supabase,
+        { jobId: w.job.id, orgId: w.orgId, createdBy: w.createdBy },
+        { ...work.birth, tasks: fresh.map((t) => ({ ...t, sort_order: after + t.sort_order })), plannedMinutes: null },
+      );
+      if (born.error) warnings.push(`The visit is linked; its tasks and their parts could not be listed (${born.error}). Add them on the job.`);
+      else {
+        tasksLanded = true;
+        inserted = born.inserted;
+        tasksLeftOff = born.leftOff;
+      }
+    }
+  }
+  let added = 0;
+  let kept = 0;
+  let partsLeftOff = 0;
+  let sameCode = 0;
+  // A birth that failed (or a read that did) lists the typed rows alone: a task's parts ride with it.
+  const items = tasks && !tasksLanded ? work.typedItems.filter((i) => !i.source_key) : work.typedItems;
+  if (items.length) {
+    try {
+      // THE JOB'S LIST, once: a part already on it by code, else by words, is not listed again.
+      const list = await canonicalMaterialListId(w.job.id);
+      if (list.error) throw new Error(list.error);
+      let halves = new Set<string>();
+      if (list.id) {
+        let rq = supabase.from("material_list_items").select("description, part_number").eq("list_id", list.id);
+        if (w.orgId) rq = rq.eq("org_id", w.orgId);
+        const { data: rows, error: rErr } = await rq;
+        if (rErr) throw rErr;
+        halves = new Set(((rows ?? []) as Array<{ description: string | null; part_number: string | null }>).map((r) => plainRowHalf(r)));
+      }
+      const fresh = items.filter((i) => !halves.has(plainRowHalf({ part_number: i.code ?? null, description: i.description })));
+      sameCode = items.length - fresh.length;
+      if (fresh.length) {
+        const listed = await addCaptureItemsToJobList(w.job.id, fresh);
+        added = listed.added;
+        kept = listed.kept;
+        partsLeftOff = listed.leftOff;
+        if (!listed.ok) warnings.push(`The visit is linked; its materials could not all be listed (${listed.error ?? "the list refused"}). Add them on the Materials tab.`);
+      }
+    } catch (e) {
+      reportError("linkAppointmentTo:materials", e, { jobId: w.job.id, appointmentId: w.appointmentId });
+      warnings.push("The visit is linked; the materials typed on the visit could not be listed. Add them on the Materials tab.");
+    }
+  }
+  if (!tasks && !parts) return warnings.length ? { warnings } : { warnings, note: `Nothing was typed on the visit, so ${short} is as it was.` };
+  const leftOff = tasksLeftOff + partsLeftOff;
+  const leftOffWords = leftOff ? ` ${tasksAndParts(tasksLeftOff, partsLeftOff)} left off — deleted from the job before.` : "";
+  const newTasks = tasksLanded ? inserted : 0;
+  if (newTasks + added > 0) return { warnings, note: `${tasksAndParts(newTasks, added)} joined ${named}.${leftOffWords}` };
+  // Nothing new: whatever landed was already there (a second press, or the estimate's job). What did
+  // not land is a warning.
+  const hadTasks = sameTitle > 0 || (tasksLanded && tasks - sameTitle - tasksLeftOff > 0);
+  const hadParts = sameCode > 0 || kept > 0;
+  if (hadTasks || hadParts) {
+    const what = hadTasks && hadParts ? "the tasks and parts" : hadTasks ? "the tasks" : "the parts";
+    return { warnings, note: `${short} already had ${what} from this visit.${leftOffWords}` };
+  }
+  if (leftOff) return { warnings, note: `${short} left off ${tasksAndParts(tasksLeftOff, partsLeftOff)} from this visit — deleted from the job before.` };
+  return { warnings };
 }
 
 /**
@@ -1400,8 +1542,8 @@ export async function createJobFromAppointment(
     // PROJECTION LAW: everything the job inherits has to be in the select list. planned_minutes,
     // ends_at and inquiry_id were all missing, which is why none of them survived the conversion.
     // `notes` too (209451e1): the lead's message rode the visit and never reached the job.
-    // `capture` (cn-v1069): the rows typed on site become the job's materials list.
-    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes, capture")
+    // The rows typed on site (`capture`, cn-v1069) and the sheet's tasks are read by visitWork below.
+    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -1475,46 +1617,13 @@ export async function createJobFromAppointment(
      job's length is decided in one place below (planned_minutes, the drawn end, the multi-day
      segments) and must agree with itself: the skeptic's case was an unsized visit with 20 h of
      tasks drawn as a two-hour block with no Tuesday. The visit's own size WINS; with none, the sum
-     of his task hours is the length — his figures, never a made-up number. The read is the estimate
-     seed's (tasksAnswered, through the 0366 views); a failed read is said in the result and the job
-     is made without its tasks. */
-  let visitBirth: Birth = EMPTY_BIRTH;
-  let tasksNote: string | undefined;
-  try {
-    const ans = await readViaView<{ inspection_answers: unknown; inspection_template_id: string | null }>(
-      supabase,
-      "answers",
-      (from) => from.select("inspection_answers, inspection_template_id").eq("id", appointmentId).maybeSingle(),
-    );
-    // Pre-0165 (no answers column on the table) is simply no tasks; any other failed read is said.
-    if (ans.error && !(ans.via === "table" && String((ans.error as { code?: string }).code ?? "") === "42703")) throw ans.error;
-    // The sheet through form_playbooks (0366), as every tech-facing read does; a failed read is said.
-    const sheetRead = ans.data?.inspection_template_id
-      ? await readViaView<{ schema?: unknown; playbook?: unknown }>(
-          supabase,
-          "sheets",
-          (from) => from.select("schema, playbook").eq("id", ans.data!.inspection_template_id!).maybeSingle(),
-        )
-      : null;
-    if (sheetRead?.error) throw sheetRead.error;
-    const sheet = sheetRead?.data ?? null;
-    if (ans.data && sheet) {
-      const answered = tasksAnswered(playbookForForm(sheet), (ans.data.inspection_answers ?? {}) as Record<string, unknown>);
-      // THE TASK KITS (0386, W4): a task that picked one takes its hours and parts from it, as the
-      // estimate seed does. A failed kits read is said, and the job is sized from what he typed.
-      const kitsRead = answered.some((t) => t.kit_id) ? await readTaskKits((sel) => supabase.from("kits").select(sel).order("name")) : null;
-      visitBirth = tasksFromVisit(answered, new Map((kitsRead?.kits ?? []).map((k) => [k.id, k])));
-      // The same words every page says for a read that was not whole (item 3); a thin read still
-      // names and counts the parts, so only a failed or pre-0386 read is a note on the job.
-      if (kitsRead && (kitsRead.state === "failed" || kitsRead.state === "pre-0386")) {
-        if (kitsRead.state === "failed") reportError("createJobFromAppointment:kits", kitsRead.error, { appointmentId });
-        tasksNote = `The job was made, sized from the hours typed. ${kitsReadWords(kitsRead.state)} Check the job's tasks.`;
-      }
-    }
-  } catch (e) {
-    reportError("createJobFromAppointment:tasks", e, { appointmentId });
-    tasksNote = "The job was made; the tasks typed on the visit could not be read. Add them on the job.";
-  }
+     of his task hours is the length — his figures, never a made-up number. The read is ONE helper
+     (lib/appointments/visit-work, cn-v1134) — the estimate seed's read of the sheet (tasksAnswered,
+     through the 0366 views), the task kits and the typed take-off — the same read Won · Pick The
+     Job carries an existing job with; a failed read is said in the result (work.notes) and the job
+     is made without that part. */
+  const work = await visitWork(supabase, appointmentId, "job");
+  const visitBirth = work.birth;
 
   // The visit's own size, else the sum of his task hours; neither → 0, unsized, as before.
   const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0) || (visitBirth.plannedMinutes ?? 0);
@@ -1638,13 +1747,14 @@ export async function createJobFromAppointment(
      nothing twice; its parts join the typed take-off below. The job's length was decided above (the
      visit's size, else the sum of his task hours), so bornTasks' own fill — only ever a blank — is a
      no-op here. Best-effort, never silent. */
-  const taskParts: CaptureItem[] = partsAsCaptureItems(visitBirth.parts);
+  let tasksNote: string | undefined;
   if (visitBirth.tasks.length) {
     const born = await bornTasks(supabase, { jobId: job.id, orgId: ctx.orgId, createdBy: ctx.userId }, visitBirth);
     if (born.error) tasksNote = `The job was made; its tasks could not all be listed (${born.error}). Add them on the job.`;
   }
   let materialsNote: string | undefined;
-  const typedItems = [...(parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? []), ...taskParts];
+  // The typed take-off and the tasks' parts, as visitWork read them (keyed, so a retry lists nothing twice).
+  const typedItems = work.typedItems;
   if (typedItems.length) {
     try {
       const listed = await addCaptureItemsToJobList(job.id, typedItems);
@@ -1664,7 +1774,7 @@ export async function createJobFromAppointment(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  const note = [absorbNote, tasksNote, materialsNote].filter(Boolean).join(" ");
+  const note = [absorbNote, ...work.notes, tasksNote, materialsNote].filter(Boolean).join(" ");
   return { ok: true, id: job.id, ...(note ? { note } : {}) };
 }
 

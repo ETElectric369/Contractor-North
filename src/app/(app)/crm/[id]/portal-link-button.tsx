@@ -197,7 +197,7 @@ export function PortalLinkButton({
           disabled={pending || !on}
           title={on ? "Copy their link" : "Turn the link on first"}
         >
-          <Copy className="h-4 w-4" /> Copy the Link
+          <Copy className="h-4 w-4" /> Copy The Link
         </Button>
         <Button
           variant="outline"
@@ -205,7 +205,7 @@ export function PortalLinkButton({
           disabled={pending || !hasEmail || !on}
           title={!hasEmail ? "Add an email to this customer first" : on ? "Email them the link to that page" : "Turn the link on first"}
         >
-          <Mail className="h-4 w-4" /> Email It to Them
+          <Mail className="h-4 w-4" /> Email It To Them
         </Button>
         <Button
           variant="outline"
@@ -259,7 +259,7 @@ export function PortalLinkButton({
             The link {customerName} has now stops working at once, and every device signed in to it is signed out.
             Anyone who opens it sees &ldquo;This link was turned off.&rdquo;
           </p>
-          <p>The new link works right away. Send it with Copy the Link or Email It to Them.</p>
+          <p>The new link works right away. Send it with Copy The Link or Email It To Them.</p>
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-red-700">{error}</div>}
         </div>
       </Modal>

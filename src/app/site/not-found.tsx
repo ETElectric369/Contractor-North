@@ -18,7 +18,7 @@ export default function SiteNotFound() {
           It may have moved or never existed. The homepage has everything current.
         </p>
         <Link href="/" style={{ display: "inline-block", background: "#0f172a", color: "#fff", padding: "10px 22px", borderRadius: 10, textDecoration: "none", fontWeight: 600, fontSize: 14 }}>
-          Go to the homepage
+          Go To The Homepage
         </Link>
       </div>
     </div>

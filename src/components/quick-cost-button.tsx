@@ -298,11 +298,11 @@ function SnapCostButton({
       try {
         if (sessionStorage.getItem(SNAP_KEY)?.startsWith(`${snapId.current}:`)) sessionStorage.removeItem(SNAP_KEY);
       } catch {}
-      setCameraHint("Camera didn't open? Tap Photo or PDF to pick from your photos, or allow the camera for North in your phone's Settings.");
+      setCameraHint("Camera didn't open? Tap Photo Or PDF to pick from your photos, or allow the camera for North in your phone's Settings.");
     }, 2500);
   }
 
-  /** The library door (Photo or PDF). Choosing it ends any camera hint. */
+  /** The library door (Photo Or PDF). Choosing it ends any camera hint. */
   function pickFromLibrary() {
     setCameraHint(null);
     if (fileRef.current) return fileRef.current.click();
@@ -327,7 +327,7 @@ function SnapCostButton({
     } catch {}
     if (at && Date.now() - at < SNAP_STALE_MS && !reloadAnnounced) {
       reloadAnnounced = true;
-      toast("The app reloaded while the camera was open, so that receipt photo didn't land. Open Add Cost again and try Photo or PDF.", "error");
+      toast("The app reloaded while the camera was open, so that receipt photo didn't land. Open Add Cost again and try Photo Or PDF.", "error");
     }
     const id = snapId.current;
     return () => {
@@ -540,7 +540,7 @@ function SnapCostButton({
     // away believing it was recorded. The reader is the door that gets the number off the paper
     // without typing, so the refusal names it — or, off a job (where Nort can't read), the field.
     if (receipt && !(amount > 0))
-      return setError(canRead ? "Type the amount, or switch to Read the Receipt." : `Type the amount — or pick a job and ${nortOn ? "Nort can read it" : "it can be read"} off the receipt.`);
+      return setError(canRead ? "Type the amount, or switch to Read The Receipt." : `Type the amount — or pick a job and ${nortOn ? "Nort can read it" : "it can be read"} off the receipt.`);
     // No job means a business cost, and a business cost goes in a bucket the person picked. A
     // preselected bucket would file every cost nobody looked at under the same word.
     if (!targetJob && !bucket) return setError("Pick the bucket this business cost goes in, or pick a job.");
@@ -628,19 +628,19 @@ function SnapCostButton({
             onClick={pickFromLibrary}
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
           >
-            <Check className="h-4 w-4 text-green-600" /> <span className="truncate">{receipt.name || "Receipt attached"}</span>
+            <Check className="h-4 w-4 text-green-600" /> <span className="truncate">{receipt.name || "Receipt Attached"}</span>
           </button>
         ) : snapTop ? (
           <div className="space-y-2">
             <Button type="button" size="lg" onClick={snap} className="w-full">
-              <Camera /> Snap the Bill
+              <Camera /> Snap The Bill
             </Button>
             <button
               type="button"
               onClick={pickFromLibrary}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
             >
-              <Paperclip className="h-4 w-4" /> Photo or PDF
+              <Paperclip className="h-4 w-4" /> Photo Or PDF
             </button>
           </div>
         ) : (
@@ -651,7 +651,7 @@ function SnapCostButton({
                 onClick={snap}
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
               >
-                <Camera className="h-4 w-4" /> Snap the Receipt
+                <Camera className="h-4 w-4" /> Snap The Receipt
               </button>
             )}
             <button
@@ -660,9 +660,9 @@ function SnapCostButton({
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
             >
               {phone ? (
-                <><Paperclip className="h-4 w-4" /> Photo or PDF</>
+                <><Paperclip className="h-4 w-4" /> Photo Or PDF</>
               ) : (
-                <><Camera className="h-4 w-4" /> Add Receipt: Photo or PDF</>
+                <><Camera className="h-4 w-4" /> Add Receipt: Photo Or PDF</>
               )}
             </button>
           </div>
@@ -679,7 +679,7 @@ function SnapCostButton({
             activeId={useReader ? "read" : "type"}
             onSelect={(id) => setReadMode(id === "read" ? "read" : "type")}
             items={[
-              { id: "read", label: "Read the Receipt" },
+              { id: "read", label: "Read The Receipt" },
               { id: "type", label: "Type It In" },
             ]}
           />
@@ -706,7 +706,7 @@ function SnapCostButton({
       <Modal
         open={open}
         onClose={closeModal}
-        title="Add a cost"
+        title="Add A Cost"
         portal
         footer={
           <ModalActions
@@ -714,7 +714,7 @@ function SnapCostButton({
             onSave={onSave}
             saving={pending}
             cancelLabel={sameAsDoc ? "Done" : undefined}
-            saveLabel={sameAsDoc ? "Different Purchase: Record It Anyway" : costSaved ? "Retry Receipt" : useReader ? "Read the Receipt" : "Save Cost"}
+            saveLabel={sameAsDoc ? "Different Purchase: Record It Anyway" : costSaved ? "Retry Receipt" : useReader ? "Read The Receipt" : "Save Cost"}
           />
         }
       >
@@ -780,7 +780,7 @@ function SnapCostButton({
             <div>
               <Label htmlFor="qc-bucket">Bucket</Label>
               <Select id="qc-bucket" className="h-11" value={bucket} onChange={(e) => setBucket(e.target.value)} disabled={costSaved}>
-                <option value="">Pick a Bucket</option>
+                <option value="">Pick A Bucket</option>
                 {BUSINESS_COST_BUCKETS.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}

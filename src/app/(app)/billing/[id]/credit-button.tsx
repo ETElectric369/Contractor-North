@@ -165,7 +165,7 @@ export function CreditButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Credit / refund"
+        title="Credit / Refund"
         portal
         footer={
           <ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!(amount > 0)} saveLabel="Post Credit" />

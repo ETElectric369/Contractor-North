@@ -55,7 +55,7 @@ export function AddPermitButton({ jobs }: { jobs: JobOpt[] }) {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Add a permit"
+        title="Add A Permit"
         footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} saveLabel="Add Permit" />}
       >
         <div className="space-y-3">

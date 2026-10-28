@@ -200,8 +200,8 @@ export function SchedulingSettings({
               <Label htmlFor="pay-sched">Pay period</Label>
               <Select id="pay-sched" value={paySchedule} onChange={(e) => setPaySchedule(e.target.value as any)}>
                 <option value="weekly">Weekly</option>
-                <option value="biweekly">Every 2 weeks (biweekly)</option>
-                <option value="semimonthly">Twice a month (1st &amp; 16th)</option>
+                <option value="biweekly">Every 2 Weeks (Biweekly)</option>
+                <option value="semimonthly">Twice A Month (1st &amp; 16th)</option>
                 <option value="monthly">Monthly</option>
               </Select>
             </div>

@@ -59,7 +59,7 @@ export function PayoutsLinkButton() {
       {error && <span className="text-xs text-red-600">{error}</span>}
       {fallback && (
         <a href={fallback} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-brand hover:underline">
-          Stripe didn&apos;t open — tap here
+          Stripe Didn&apos;t Open — Tap Here
         </a>
       )}
     </div>

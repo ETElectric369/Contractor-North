@@ -401,7 +401,7 @@ function BookingForm({
         <div>
           <Label htmlFor={`iw-${id}`}>Part Of The Day</Label>
           <Select id={`iw-${id}`} className="h-11" value={win} onChange={(e) => setWin(e.target.value)}>
-            <option value="">Not said</option>
+            <option value="">Not Said</option>
             {INSPECTION_WINDOWS.map(([v, l]) => (
               <option key={v} value={v}>
                 {l}

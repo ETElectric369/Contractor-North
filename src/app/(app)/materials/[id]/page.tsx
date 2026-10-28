@@ -212,7 +212,7 @@ export default async function MaterialListPage({
                 href={`/materials/${supersededBy}`}
                 className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
               >
-                <ListChecks className="h-4 w-4 shrink-0" /> Open the Job&rsquo;s List
+                <ListChecks className="h-4 w-4 shrink-0" /> Open The Job&rsquo;s List
               </Link>
             </div>
           ) : (

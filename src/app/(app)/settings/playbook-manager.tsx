@@ -420,7 +420,7 @@ export function PlaybookManager({
                 >
                   {f.name}
                   <span className={`block text-[11px] font-normal ${active ? "text-white/85" : "text-slate-400"}`}>
-                    {f.isWebsite ? "your website — customers see these" : "your inspection — only you see these"}
+                    {f.isWebsite ? "Your website — customers see these." : "Your inspection — only you see these."}
                   </span>
                 </button>
               );
@@ -474,11 +474,11 @@ export function PlaybookManager({
                         <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
                       )}
                       <span className="truncate text-sm font-medium text-slate-900">
-                        {n.ask?.trim() || <span className="text-amber-700">No question written yet</span>}
+                        {n.ask?.trim() || <span className="text-amber-700">No Question Written Yet</span>}
                       </span>
                       {n.hold && (
                         <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                          before pricing
+                          Before Pricing
                         </span>
                       )}
                     </div>
@@ -582,8 +582,8 @@ export function PlaybookManager({
                               });
                             }}
                           >
-                            <option value="free">Typed freely — a box</option>
-                            <option value="words">Picked from my words — and a box for the rest</option>
+                            <option value="free">Typed Freely — A Box</option>
+                            <option value="words">Picked From My Words — And A Box For The Rest</option>
                           </Select>
                         </div>
                       )}
@@ -714,7 +714,7 @@ export function PlaybookManager({
                             onClick={() => edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), options: [...(n.slot as { options: string[] }).options, ""] } })}
                             className="flex min-h-[40px] w-full items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 text-sm text-slate-500 hover:bg-white"
                           >
-                            <Plus className="h-4 w-4" /> Add a Choice
+                            <Plus className="h-4 w-4" /> Add A Choice
                           </button>
 
                           {/* Erik: "you prompt me with options then a 'other' box i use often."
@@ -777,9 +777,9 @@ export function PlaybookManager({
                                       );
                                     }}
                                   >
-                                    <option value="in" disabled={!opts.length}>is one of…</option>
-                                    <option value="known">has any answer</option>
-                                    <option value="unknown">has NO answer</option>
+                                    <option value="in" disabled={!opts.length}>Is One Of…</option>
+                                    <option value="known">Has Any Answer</option>
+                                    <option value="unknown">Has NO Answer</option>
                                   </Select>
                                   <button type="button"
                                           onClick={() => {
@@ -823,7 +823,7 @@ export function PlaybookManager({
                             onClick={() => edit(i, { when: [...(n.when ?? []), { key: earlier[earlier.length - 1].key, known: true }] })}
                             className="flex min-h-[40px] w-full items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 text-sm text-slate-500 hover:bg-white"
                           >
-                            <Plus className="h-4 w-4" /> Add a Condition
+                            <Plus className="h-4 w-4" /> Add A Condition
                           </button>
                           {(n.when?.length ?? 0) > 1 && (
                             <p className="text-xs text-slate-500">All of them have to be true.</p>
@@ -863,7 +863,7 @@ export function PlaybookManager({
         onClick={add}
         className="flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 text-sm text-slate-500 hover:bg-slate-50"
       >
-        <Plus className="h-4 w-4" /> Add a Question
+        <Plus className="h-4 w-4" /> Add A Question
       </button>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
@@ -886,7 +886,7 @@ export function PlaybookManager({
               run(() => installPlaybookStarter(form.id, s.key), "Starter loaded — now make it yours.", true);
             }}
           >
-            Start from: {s.label}
+            Start From: {s.label}
           </Button>
         ))}
 
@@ -914,7 +914,7 @@ export function PlaybookManager({
               run(() => clearPlaybook(form.id), "Back to the sheet.", true);
             }}
           >
-            <RotateCcw className="h-4 w-4" /> Back to the Plain Sheet
+            <RotateCcw className="h-4 w-4" /> Back To The Plain Sheet
           </Button>
         )}
 
@@ -964,7 +964,7 @@ export function PlaybookManager({
             }}
             className="shrink-0 font-medium underline underline-offset-2"
           >
-            Reload their version
+            Reload Their Version
           </button>
         </div>
       )}

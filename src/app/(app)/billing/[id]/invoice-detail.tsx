@@ -943,7 +943,7 @@ export function InvoiceDetail({
                 className="group flex min-h-11 w-full items-center gap-2 text-left"
                 title="Edit title"
               >
-                <span className={title ? "font-medium text-slate-800" : "text-slate-400"}>{title || "Add a title…"}</span>
+                <span className={title ? "font-medium text-slate-800" : "text-slate-400"}>{title || "Add A Title…"}</span>
                 <Pencil className="h-3.5 w-3.5 text-slate-400 group-hover:text-brand" />
               </button>
             )}
@@ -1554,7 +1554,7 @@ export function InvoiceDetail({
                       })
                     }
                   >
-                    <option value="">No tax</option>
+                    <option value="">No Tax</option>
                     {taxRates.map((t) => (
                       <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>
                     ))}
@@ -1701,7 +1701,7 @@ export function InvoiceDetail({
         )}
       </div>
 
-      <Modal open={linkOpen} onClose={() => setLinkOpen(false)} title="Edit customer / job">
+      <Modal open={linkOpen} onClose={() => setLinkOpen(false)} title="Edit Customer / Job">
         <div className="space-y-4">
           {linkError && <p className="text-sm text-red-600">{linkError}</p>}
           <div>
@@ -1717,10 +1717,10 @@ export function InvoiceDetail({
                 if (cust) setLinkCustomer(cust);
               }}
             >
-              <option value="">No job</option>
+              <option value="">No Job</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
-                  {j.job_number ? `${j.job_number} — ` : ""}{j.name || "Untitled job"}
+                  {j.job_number ? `${j.job_number} — ` : ""}{j.name || "Untitled Job"}
                 </option>
               ))}
             </Select>
@@ -1733,7 +1733,7 @@ export function InvoiceDetail({
               disabled={!!linkJobObj?.customer_id}
               onChange={(e) => setLinkCustomer(e.target.value)}
             >
-              <option value="">No customer</option>
+              <option value="">No Customer</option>
               {[...addedCustomers, ...customers].map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}

@@ -110,7 +110,7 @@ export function InquiryForm({
             className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white"
             style={{ backgroundColor: brandColor }}
           >
-            <CalendarClock className="h-4 w-4" /> Schedule your site visit <ExternalLink className="h-3.5 w-3.5" />
+            <CalendarClock className="h-4 w-4" /> Schedule Your Site Visit <ExternalLink className="h-3.5 w-3.5" />
           </a>
         ) : (
           <button
@@ -121,7 +121,7 @@ export function InquiryForm({
             style={{ backgroundColor: brandColor }}
           >
             {scheduling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-            {scheduling ? "One moment…" : "Request a site visit"}
+            {scheduling ? "One Moment…" : "Request A Site Visit"}
           </button>
         )}
         {schedError && <p className="mt-2 text-sm text-red-600">{schedError}</p>}
@@ -162,7 +162,7 @@ export function InquiryForm({
         style={{ backgroundColor: brandColor }}
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        {busy ? "Sending…" : "Send request"}
+        {busy ? "Sending…" : "Send Request"}
       </button>
       <p className="text-center text-[11px] text-slate-400">We'll never share your information.</p>
     </form>

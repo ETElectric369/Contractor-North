@@ -272,7 +272,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
                               <InvoiceAmountDetail total={inv.total} paid={inv.paid} overdue={inv.overdue} />
                             </div>
                             <span className="flex shrink-0 items-center gap-3">
-                              {inv.daysLate > 0 ? <LateChip days={inv.daysLate} /> : <span className="text-xs text-slate-400">Not late</span>}
+                              {inv.daysLate > 0 ? <LateChip days={inv.daysLate} /> : <span className="text-xs text-slate-400">Not Late</span>}
                               <InvoiceAmount total={inv.total} paid={inv.paid} overdue={inv.overdue} />
                             </span>
                           </Link>

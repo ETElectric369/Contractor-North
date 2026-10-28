@@ -1491,7 +1491,7 @@ export function Inspector({
                 setPicks([...picked, { code: row.code, qty: 1, price: row.price }]);
               }}
             >
-              <option value="">Add a line item…</option>
+              <option value="">Add A Line Item…</option>
               {menu.map((b) => (
                 <option key={b.code} value={b.code}>
                   {b.description || b.code}
@@ -2108,7 +2108,7 @@ export function Inspector({
                 queueAnswers();
               }}
             >
-              <option value="">Pick a sheet…</option>
+              <option value="">Pick A Sheet…</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}

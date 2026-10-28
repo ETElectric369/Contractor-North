@@ -161,7 +161,7 @@ export function InquiryFields({
         <div>
           <Label htmlFor="work_kind">What Kind Of Work</Label>
           <Select id="work_kind" name="work_kind" value={value.work_kind} onChange={(e) => onChange({ work_kind: e.target.value })}>
-            <option value="">Not sure yet</option>
+            <option value="">Not Sure Yet</option>
             {/* The five a person picks (W2-06), plus this lead's own old kind (Quote, Office) when it
                 carries one, so an edit never silently re-tags it. */}
             {kindOptions(value.work_kind).map((k) => (
@@ -172,15 +172,15 @@ export function InquiryFields({
         <div>
           <Label htmlFor="planned_minutes">How Long</Label>
           <Select id="planned_minutes" name="planned_minutes" value={value.planned_minutes} onChange={(e) => onChange({ planned_minutes: e.target.value })}>
-            <option value="">Not sure yet</option>
-            <option value="30">30 minutes</option>
-            <option value="60">1 hour</option>
-            <option value="120">2 hours</option>
-            <option value="240">Half day (4h)</option>
-            <option value="480">Full day</option>
-            <option value="960">2 days</option>
-            <option value="1440">3 days</option>
-            <option value="2400">A week (5 days)</option>
+            <option value="">Not Sure Yet</option>
+            <option value="30">30 Minutes</option>
+            <option value="60">1 Hour</option>
+            <option value="120">2 Hours</option>
+            <option value="240">Half Day (4h)</option>
+            <option value="480">Full Day</option>
+            <option value="960">2 Days</option>
+            <option value="1440">3 Days</option>
+            <option value="2400">A Week (5 Days)</option>
           </Select>
         </div>
       </div>

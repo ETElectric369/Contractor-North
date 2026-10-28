@@ -34,7 +34,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <span className="text-base font-bold text-slate-800">Contractor North · Content</span>
           <form action={signOut}>
             <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">
-              <LogOut className="h-4 w-4" /> Sign out
+              <LogOut className="h-4 w-4" /> Sign Out
             </button>
           </form>
         </div>
@@ -160,7 +160,7 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
     <Shell>
       {multi && (
         <Link href="/content" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-4 w-4" /> All client sites
+          <ArrowLeft className="h-4 w-4" /> All Client Sites
         </Link>
       )}
       <div className="mb-6 flex items-center gap-3">
@@ -176,7 +176,7 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
         </div>
         {siteUrl && (
           <a href={siteUrl} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800">
-            View site <ExternalLink className="h-3.5 w-3.5" />
+            View Site <ExternalLink className="h-3.5 w-3.5" />
           </a>
         )}
       </div>

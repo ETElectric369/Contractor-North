@@ -366,7 +366,7 @@ export function SiteStudio({
                       {r.status === "published" ? (
                         <Badge tone="green">live</Badge>
                       ) : r.status === "archived" ? (
-                        <span className="text-[10px] uppercase text-slate-400">was live</span>
+                        <span className="text-[10px] uppercase text-slate-400">Was Live</span>
                       ) : null}
                       <span className="shrink-0 text-[10px] text-slate-400">{formatDateTime(r.created_at)}</span>
                     </button>
@@ -435,7 +435,7 @@ export function SiteStudio({
               onClick={() => void flushLiveEdits().then(() => setPageEdit((v) => !v))}
               className={`text-sm font-medium underline-offset-2 hover:underline ${pageEdit ? "text-amber-600" : "text-brand"}`}
             >
-{pageEdit ? "✕ Close on-page editing" : "Edit on the page →"}
+{pageEdit ? "✕ Close On-Page Editing" : "Edit On The Page →"}
             </button>
           </div>
         )}
@@ -458,7 +458,7 @@ export function SiteStudio({
                 }
                 className="text-sm font-medium text-brand underline-offset-2 hover:underline"
               >
-                Arrange this version by hand →
+                Arrange This Version By Hand →
               </button>
             ) : (
               <Card key={selected.id}>

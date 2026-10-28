@@ -355,7 +355,7 @@ export function YourList({
               onClick={() => sheetAct(close, () => updateTask(t.id, { due_date: tomorrowStr }, opts), movedWords(t, tomorrowStr, todayStr))}
               className={SHEET_ROW}
             >
-              Move Due Date to Tomorrow
+              Move Due Date To Tomorrow
             </button>
             <MoveToDay
               label="Pick a Day"

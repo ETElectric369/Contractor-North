@@ -177,7 +177,7 @@ export function GcalCard({
               Sync Now
             </Button>
             <Button size="sm" variant="outline" onClick={sync} disabled={pending}>
-              Push Schedule to Google
+              Push Schedule To Google
             </Button>
             <Button size="sm" variant="outline" onClick={disconnect} disabled={pending}>
               Disconnect
@@ -193,9 +193,9 @@ export function GcalCard({
               className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               <span>
-                Calendars shown on your schedule
+                Calendars Shown On Your Schedule
                 <span className="ml-2 text-xs font-normal text-slate-400">
-                  {chosen.length ? `${chosen.length} selected` : "none"}
+                  {chosen.length ? `${chosen.length} selected` : "None"}
                 </span>
               </span>
               {pickerOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}

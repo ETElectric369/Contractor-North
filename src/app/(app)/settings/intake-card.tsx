@@ -59,7 +59,7 @@ export function IntakeCard({
               This link serves <strong className="font-medium">{live.name}</strong> &mdash;{" "}
               {live.count} question{live.count === 1 ? "" : "s"}.{" "}
               <Link href={`/settings?tab=playbook&form=${live.id}`} className="font-medium text-slate-900 underline underline-offset-2">
-                Edit these questions
+                Edit These Questions
               </Link>
             </p>
           ) : (

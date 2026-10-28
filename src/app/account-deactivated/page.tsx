@@ -64,7 +64,7 @@ export default async function AccountDeactivatedPage() {
             type="submit"
             className="inline-flex w-full items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-dark"
           >
-            Back to Sign In
+            Back To Sign In
           </button>
         </form>
       </div>

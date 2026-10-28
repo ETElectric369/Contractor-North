@@ -159,6 +159,24 @@ const isNewPerson = (id: string) => id === "__new__" || id === "__lead__";
 // leave this door shut for the rest of the session.
 const newParam = createParamClaim();
 
+/**
+ * THE WORDS ON THE FORM'S DOOR FOLLOW ITS KIND (cn-v1134). One form creates or edits an appointment
+ * OR an inspection, and its title and Save button said "appointment" for both. Now an inspection's
+ * form says Inspection — in Title Case, like every clickable. The propose mode keeps its own words.
+ */
+export function apptFormWords(o: { kind: string; editing: boolean; mode: "set" | "propose"; linkReady: boolean }): {
+  title: string;
+  saveLabel: string;
+  trigger: string;
+} {
+  const thing = o.kind === "inspection" ? "Inspection" : "Appointment";
+  return {
+    title: o.editing ? `Edit ${thing}` : o.linkReady ? "Text The Customer These Times" : `New ${thing}`,
+    saveLabel: o.mode === "propose" && !o.editing ? "Create Link" : `Save ${thing}`,
+    trigger: `New ${thing}`,
+  };
+}
+
 /** Create or edit an appointment / inspection. */
 export function AppointmentButton({
   jobs,
@@ -349,7 +367,7 @@ export function AppointmentButton({
   const claimant = useId();
   useEffect(() => () => newParam.release(claimant), [claimant]);
 
-  // Open straight from the quick-add menu's "New appointment"
+  // Open straight from the quick-add menu's "New Appointment"
   // (/schedule?view=appointments&new=1), then strip the param so a refresh or
   // back-button doesn't reopen the form. Edit instances never answer it.
   useEffect(() => {
@@ -534,6 +552,10 @@ export function AppointmentButton({
 
   // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
   const origin = useOrgPublicBase();
+  // The door's words: the live Type box decides (a New Inspection door seeds it; an edit shows the
+  // row's own kind); the closed trigger reads the caller's default kind.
+  const words = apptFormWords({ kind: form.type, editing, mode, linkReady: !!linkToken });
+  const triggerWords = apptFormWords({ kind: defaultType ?? "", editing, mode: "set", linkReady: false });
   const pickLink = linkToken && origin ? `${origin}/pick/${linkToken}` : null;
 
   async function copyLink() {
@@ -586,7 +608,7 @@ export function AppointmentButton({
         )
       ) : (
         <Button onClick={openModal} size={compact ? "sm" : undefined} className="shrink-0 whitespace-nowrap">
-          <Plus className="h-4 w-4" /> {buttonLabel ?? "New Appointment"}
+          <Plus className="h-4 w-4" /> {buttonLabel ?? triggerWords.trigger}
         </Button>
       )}
 
@@ -599,7 +621,7 @@ export function AppointmentButton({
         // (Erik, 2026-10-08; the cn-v463 job-hub class, lib memory modal-in-glass-menu-portal). The
         // form is INSIDE this modal and submits by formId, so portaling to <body> is safe here.
         portal={!!rowLabel}
-        title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
+        title={words.title}
         dirty={dirty}
         footer={
           linkToken ? (
@@ -610,7 +632,7 @@ export function AppointmentButton({
               submit
               formId="appt-form"
               saving={pending}
-              saveLabel={mode === "propose" ? "Create Link" : "Save Appointment"}
+              saveLabel={words.saveLabel}
               extra={
                 editing ? (
                   <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">
@@ -693,7 +715,7 @@ export function AppointmentButton({
               activeId={mode}
               onSelect={(id) => setMode(id as typeof mode)}
               items={[
-                { id: "set", label: "Set a Time" },
+                { id: "set", label: "Set A Time" },
                 { id: "propose", label: "Propose Times" },
               ]}
             />
@@ -854,7 +876,7 @@ export function AppointmentButton({
 
           {editing && appointment && !appointment.job_id && (
             <Button type="button" variant="outline" onClick={convertToJob} disabled={pending} className="w-full">
-              Convert to Job →
+              Convert To Job →
             </Button>
           )}
           </>

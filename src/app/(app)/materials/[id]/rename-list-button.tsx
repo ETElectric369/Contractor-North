@@ -66,7 +66,7 @@ export function RenameListButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Edit list"
+        title="Edit List"
         size="sm"
         footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!value.trim()} saveLabel="Save" />}
       >

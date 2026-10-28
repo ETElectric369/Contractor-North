@@ -98,7 +98,7 @@ function Hero({
   headlineColor?: string;
   taglineColor?: string;
   areaColor?: string;
-  /** The org's own accent, when one is set — washes the ghost "See our work" buttons at ~5%
+  /** The org's own accent, when one is set — washes the ghost "See Our Work" buttons at ~5%
    *  (Erik: "i love the almost transparent see our work button over the rocks, maybe apply
    *  the sea glass to that as well i bet its at 5% opacity or something"). Empty = the
    *  untouched white/slate ghost, byte-identical. */
@@ -154,7 +154,7 @@ function Hero({
                 <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
               </Link>
               {hasPhotos && (
-                <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold hover:bg-white/10${ghostCls}`}>See our work</a>
+                <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold hover:bg-white/10${ghostCls}`}>See Our Work</a>
               )}
             </div>
             {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/75">{creds.join("  ·  ")}</p>}
@@ -189,7 +189,7 @@ function Hero({
                 <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
               </Link>
               {hasPhotos && (
-                <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-full border border-slate-300 px-6 py-3.5 text-base font-semibold text-slate-700 hover:border-slate-400${ghostCls}`}>See our work</a>
+                <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-full border border-slate-300 px-6 py-3.5 text-base font-semibold text-slate-700 hover:border-slate-400${ghostCls}`}>See Our Work</a>
               )}
             </div>
             {creds.length > 0 && <p className="mt-6 text-sm font-medium text-slate-500">{creds.join("  ·  ")}</p>}
@@ -229,7 +229,7 @@ function Hero({
       <div className="mt-8 flex flex-wrap items-center gap-3">
         {cta}
         {hasPhotos && (
-          <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10${ghostCls}`}>See our work</a>
+          <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10${ghostCls}`}>See Our Work</a>
         )}
       </div>
       {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
@@ -291,7 +291,7 @@ function Hero({
               <div className="mt-6 flex flex-wrap items-center gap-3 sm:justify-end">
                 {cta}
                 {hasPhotos && (
-                  <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10${ghostCls}`}>See our work</a>
+                  <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10${ghostCls}`}>See Our Work</a>
                 )}
               </div>
               {creds.length > 0 && <p className="mt-5 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
@@ -528,7 +528,7 @@ function PortfolioBand({ portfolio, brand, orgName, moreHref }: { portfolio: { u
       {moreHref && (
         <div className="mx-auto -mt-8 max-w-5xl px-4 pb-14">
           <Link href={moreHref} className="inline-flex items-center gap-1.5 font-semibold hover:underline" style={{ color: brand }}>
-            See the full portfolio <ArrowRight className="h-4 w-4" />
+            See The Full Portfolio <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       )}
@@ -544,7 +544,7 @@ function ReviewsBand({ reviews, brand, gbpUrl, appHostExt = false }: { reviews: 
         <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
         {gbpUrl && (
           <a href={gbpUrl} {...(appHostExt ? {} : { target: "_blank", rel: "noopener" })} className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
-            <Star className="h-4 w-4" fill={brand} /> Review us on Google
+            <Star className="h-4 w-4" fill={brand} /> Review Us On Google
           </a>
         )}
       </div>
@@ -598,7 +598,7 @@ function ContactBand({ orgId, brand, hasEstimateDoor, pageHref }: { orgId: strin
       {pageHref && (
         <p className="mt-6 text-center">
           <Link href={pageHref} className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
-            Visit the contact page <ArrowRight className="h-4 w-4" />
+            Visit The Contact Page <ArrowRight className="h-4 w-4" />
           </Link>
         </p>
       )}

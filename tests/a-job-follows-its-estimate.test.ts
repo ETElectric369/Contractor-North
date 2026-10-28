@@ -192,7 +192,8 @@ describe("the buy list follows too (0390)", () => {
     const born = src("src/lib/estimate/born-with-tasks.ts");
     expect(born).toContain("source_key: keys.get(p) ?? materialKey(p.source_key, p.code, p.name)"); // keyParts' ordinals, the same as the take-off
     const mats = src("src/app/(app)/materials/actions.ts");
-    expect(mats).toContain("source_key: i.source_key ?? null");
+    // cn-v1134: a row typed on site (no key of its own) rides under its capture id, so a second press lists nothing twice.
+    expect(mats).toContain("source_key: i.source_key ?? (i.id ? `capture:${i.id}` : null),");
     expect(mats).toContain("...(item.source_key ? { source_key: item.source_key } : {})");
   });
   it("the take-off and the sync write one row shape, from one book lookup", () => {
@@ -261,7 +262,7 @@ describe("the deferred items (cn-v1084)", () => {
     expect(mats).toContain("p.taskId === t && partHalf(p.key) === partHalf(r.source_key)");
     expect(mats).toContain("tombstone: kept.map((r) => ({ id: r.id, source_key: `${GONE_KEY}${r.source_key}` }))");
     expect(mats).toContain("const hand: HandRow[] = all.filter((r) => {"); // unkeyed, not his, and not the estimate's own plain-line row (audit v1085)
-    expect(mats).toContain("if (r.source_key || isHisRow(r)) return false;");
+    expect(mats).toContain("if (!isClaimableKey(r.source_key) || isHisRow(r)) return false;"); // a typed row's "capture:" key is no claim (cn-v1134)
     expect(mats).toContain("const next = [...now.filter((k) => !consumed.has(k)), ...plan.redismiss.filter((k) => !now.includes(k))];");
   });
 });

@@ -201,7 +201,7 @@ export function TellNort({
           onClick={() => (recording ? stopMic() : startMic())}
         >
           {transcribing ? (
-            <><Loader2 className="h-4 w-4 animate-spin" /> Writing it down…</>
+            <><Loader2 className="h-4 w-4 animate-spin" /> Writing It Down…</>
           ) : recording ? (
             <><Square className="h-4 w-4" /> Stop</>
           ) : (

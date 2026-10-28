@@ -125,7 +125,7 @@ export function LinkPicker({
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[linked.kind]}`}>{linked.kind}</span>
           <span className="flex-1 truncate text-sm text-slate-700">{linked.name}</span>
           <button type="button" onClick={() => setOpen(true)} className="text-xs text-slate-500 underline-offset-2 hover:underline">
-            change
+            Change
           </button>
         </div>
       </div>
@@ -201,7 +201,7 @@ export function LinkPicker({
                 <UserPlus className="h-4 w-4 shrink-0 text-emerald-700" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-emerald-900">Add As A New Lead</span>
-                  <span className="block truncate text-xs text-emerald-800/80">{typed} — this visit's address goes on the lead</span>
+                  <span className="block truncate text-xs text-emerald-800/80">{typed} — this visit&rsquo;s address goes on the lead</span>
                 </span>
               </button>
             )}
@@ -224,6 +224,10 @@ export function LinkPicker({
                       return;
                     }
                     if (done.res.warning) toast(done.res.warning, "info", undefined, { sticky: true });
+                    // What the visit's work did on the job it won (cn-v1134: "3 tasks and 7 parts joined
+                    // J-055 (…)", "Nothing was typed on the visit, so J-055 is as it was."): the door's own
+                    // sentence, said as the ending card says Marked Lost. A failure rides the warning above.
+                    if (done.res.note) toast(done.res.note, "success");
                     setOpen(false);
                     router.refresh();
                   })

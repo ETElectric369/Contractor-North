@@ -72,14 +72,14 @@ export default async function ForgotPage({
             <p className="mt-4 text-center text-sm text-slate-500">
               Didn&apos;t get it, or the link won&apos;t open?{" "}
               <Link href="/login?mode=code" className="font-medium text-brand hover:underline">
-                Sign in with a code
+                Sign In With A Code
               </Link>
             </p>
           )}
 
           <p className="mt-6 text-center text-sm text-slate-500">
             <Link href="/login" className="font-medium text-brand hover:underline">
-              Back to sign in
+              Back To Sign In
             </Link>
           </p>
         </div>

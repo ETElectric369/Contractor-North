@@ -291,7 +291,7 @@ export function Configurator({
         ) : (
           <button type="button" onClick={submit} disabled={busy}
             className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60" style={{ backgroundColor: brand }}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{busy ? "Sending…" : "Get my estimate"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{busy ? "Sending…" : "Get My Estimate"}
           </button>
         )}
       </div>
@@ -391,7 +391,7 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: str
         className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white"
         style={{ backgroundColor: brand }}
       >
-        <CalendarClock className="h-4 w-4" /> Schedule your site visit <ExternalLink className="h-3.5 w-3.5" />
+        <CalendarClock className="h-4 w-4" /> Schedule Your Site Visit <ExternalLink className="h-3.5 w-3.5" />
       </a>
     );
   }
@@ -432,7 +432,7 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: str
         style={{ backgroundColor: brand }}
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-        {busy ? "One moment…" : "Request a site visit"}
+        {busy ? "One Moment…" : "Request A Site Visit"}
       </button>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </>

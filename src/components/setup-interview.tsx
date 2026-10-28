@@ -254,9 +254,9 @@ export function SetupInterview({
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button type="button" disabled={pending} onClick={toQuestions}>
               {pending ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Working on your questions…</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> Working On Your Questions…</>
               ) : (
-                <>Next: your questions <ArrowRight className="h-4 w-4" /></>
+                <>Next: Your Questions <ArrowRight className="h-4 w-4" /></>
               )}
             </Button>
             {err && <span className="text-sm text-rose-600">{err}</span>}
@@ -331,9 +331,9 @@ export function SetupInterview({
                       {pending ? (
                         <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
                       ) : i + 1 < needs.length ? (
-                        <>That one&rsquo;s right <ArrowRight className="h-4 w-4" /></>
+                        <>That One&rsquo;s Right <ArrowRight className="h-4 w-4" /></>
                       ) : (
-                        <>Save them all <ArrowRight className="h-4 w-4" /></>
+                        <>Save Them All <ArrowRight className="h-4 w-4" /></>
                       )}
                     </Button>
                     {i > 0 && (
@@ -348,11 +348,11 @@ export function SetupInterview({
                         the others on real jobs where they actually cost something. */}
                     {i > 0 ? (
                       <Button type="button" variant="secondary" disabled={pending} onClick={toWhere}>
-                        I&rsquo;ve got it — save the rest as drafted
+                        I&rsquo;ve Got It — Save The Rest As Drafted
                       </Button>
                     ) : (
                       <button type="button" disabled={pending} onClick={toWhere} className="text-sm text-slate-500 underline-offset-2 hover:underline">
-                        {nortOn ? <>Save Nort&rsquo;s drafts and read them later</> : "Save The Drafts And Read Them Later"}
+                        {nortOn ? <>Save Nort&rsquo;s Drafts And Read Them Later</> : "Save The Drafts And Read Them Later"}
                       </button>
                     )}
                   </div>
@@ -413,7 +413,7 @@ export function SetupInterview({
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <Button type="button" disabled={pending} onClick={done}>
-              {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> …</> : <><Check className="h-4 w-4" /> Got it</>}
+              {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> …</> : <><Check className="h-4 w-4" /> Got It</>}
             </Button>
             <button type="button" onClick={() => setStep(1)} className="text-sm text-slate-500 underline-offset-2 hover:underline">
               Start Over

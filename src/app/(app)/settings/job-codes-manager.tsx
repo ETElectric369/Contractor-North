@@ -133,7 +133,7 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
                 title={c.active ? "Active — click to deactivate" : "Inactive — click to activate"}
                 aria-label={c.active ? "Deactivate code" : "Activate code"}
               >
-                <Badge tone={c.active ? "green" : "slate"}>{c.active ? "active" : "inactive"}</Badge>
+                <Badge tone={c.active ? "green" : "slate"}>{c.active ? "Active" : "Inactive"}</Badge>
               </button>
               <button onClick={() => openEdit(c)} className="text-slate-400 hover:text-brand" title="Edit" aria-label="Edit job code">
                 <Pencil className="h-4 w-4" />
@@ -150,7 +150,7 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
       <Modal
         open={editing !== null}
         onClose={() => setEditing(null)}
-        title={editing && editing !== "new" ? "Edit job code" : "New job code"}
+        title={editing && editing !== "new" ? "Edit Job Code" : "New Job Code"}
         footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel="Save Code" disabled={!code.trim() || !description.trim()} />}
       >
         <div className="space-y-4">

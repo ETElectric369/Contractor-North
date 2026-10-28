@@ -357,7 +357,7 @@ export function SplitShiftSheet({
                   {shownJobs.map((j) => (
                     <option key={j.id} value={`job:${j.id}`}>
                       {jobLabel(j)}
-                      {j.id === entry.job_id ? " (same job)" : ""}
+                      {j.id === entry.job_id ? " (Same Job)" : ""}
                     </option>
                   ))}
                 </optgroup>

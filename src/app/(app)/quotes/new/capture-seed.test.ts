@@ -25,12 +25,19 @@ describe("Start The Estimate seeds the typed rows", () => {
 describe("Start The Job lists the typed rows on the job", () => {
   const src = read("src/app/(app)/appointments/actions.ts");
   it("selects the capture (projection law), writes through the one list writer, and says what could not be listed", () => {
-    expect(src).toContain("inquiry_id, notes, capture\")");
+    // The capture and the sheet's tasks are read by the ONE visit read (lib/appointments/visit-work,
+    // cn-v1134), which selects the capture by name; the door's own select no longer carries it.
+    expect(src).toContain("inquiry_id, notes\")");
+    expect(src).toContain('const work = await visitWork(supabase, appointmentId, "job");');
+    const rule = read("src/lib/appointments/visit-work.ts");
+    expect(rule).toContain('.select("capture")');
+    expect(rule).toContain("parseInspectorCapture(");
     // W3b: the visit's task parts join the typed rows on the same call.
-    expect(src).toContain("const typedItems = [...(parseInspectorCapture((appt as { capture?: unknown }).capture).items ?? []), ...taskParts];");
+    expect(rule).toContain("typedItems: [...items, ...partsAsCaptureItems(birth.parts)]");
+    expect(src).toContain("const typedItems = work.typedItems;");
     expect(src).toContain("await addCaptureItemsToJobList(job.id, typedItems)");
     expect(src).toContain("Add them on the Materials tab.");
-    expect(src).toContain("const note = [absorbNote, tasksNote, materialsNote].filter(Boolean).join(\" \");");
+    expect(src).toContain("const note = [absorbNote, ...work.notes, tasksNote, materialsNote].filter(Boolean).join(\" \");");
   });
   it("the list writer proves every row, prices nothing, and carries the book code as the part number", () => {
     const m = read("src/app/(app)/materials/actions.ts");
@@ -41,6 +48,8 @@ describe("Start The Job lists the typed rows on the job", () => {
     expect(fn).toContain("est_cost: null,");
     expect(fn).toContain("quantity: i.quantity ?? 1,");
     expect(fn).toContain("could not be listed");
-    expect(fn).toContain("if (!rows.length) return { ok: true, added: 0 };");
+    expect(fn).toContain("if (!rows.length) return { ok: true, added: 0, kept: 0, leftOff: 0 };"); // leftOff: a key he deleted from the list before (cn-v1134)
+    // KEYED (cn-v1134): a typed row rides under "capture:<its id>", so a second press lists nothing twice.
+    expect(fn).toContain("source_key: i.source_key ?? (i.id ? `capture:${i.id}` : null),");
   });
 });

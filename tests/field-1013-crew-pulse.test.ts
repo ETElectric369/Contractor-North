@@ -21,6 +21,7 @@ vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 vi.mock("@/app/(app)/timeclock/actions", () => ({ clockIn: vi.fn(), clockOut: vi.fn() }));
 vi.mock("@/app/(app)/timeclock/which-job-actions", () => ({ whichJobChoices: vi.fn(), putPunchOnJob: vi.fn() }));
 import { NowCard } from "@/app/(app)/planner/now-card";
+import { CREW_UNREAD, WhosOnTheClock, weeksBack } from "@/app/(app)/timeclock/whos-on-the-clock";
 
 const read = (p: string) => readFileSync(p, "utf8");
 const TZ = "America/Los_Angeles";
@@ -106,15 +107,72 @@ describe("the doors (source pins)", () => {
     expect(s).toContain("crew={crewForCard(crewR, user?.id ?? null, tz, todayStr)}");
     expect(s.indexOf("const crewP")).toBeLessThan(s.indexOf("const [crewR, curJobRes"));
   });
-  it("a returned read error is thrown by getCrewStatus, and Timecards says it", () => {
+  it("a returned read error is thrown by getCrewStatus, and the Time Clock says it — for staff only; Timecards no longer draws the block (cn-v1134)", () => {
     const s = read("src/lib/crew-status.ts");
     expect(s).toContain("if (membersError) throw membersError;");
     expect(s).toContain("if (openError) throw openError;");
     expect(s).toContain('"id, profile_id, clock_in, split_from, job:job_id(job_number, name)"');
-    const t = read("src/app/(app)/timecards/page.tsx");
-    expect(t).toContain('reportError("timecards-crew-status", e);');
-    expect(t).toContain("const onClock = (crew ?? []).filter((c) => c.clockedIn);");
-    expect(t).toContain("Couldn&rsquo;t read who&rsquo;s on the clock — reload to try again.");
-    expect(t).toContain('<span className="text-xs font-semibold uppercase tracking-wide text-slate-400">On the clock</span>');
+    // Erik, 2026-10-27: "keep the who's on the clock with Time Clock instead of Timecards".
+    const clock = read("src/app/(app)/timeclock/page.tsx");
+    expect(clock).toMatch(/const crewP[^=]*= isStaff\s*\?\s*getCrewStatus\(supabase\)/); // a tech's page reads nothing here
+    expect(clock).toContain(": Promise.resolve({ crew: undefined, starts: new Map<string, string>() });");
+    expect(clock).toContain('reportError("timeclock-crew-status", e);');
+    expect(clock).toContain('reportError("timeclock-crew-shift-chain", e);');
+    expect(clock).toContain("return { crew: null, starts: new Map<string, string>() };");
+    expect(clock).toContain("{crewR.crew !== undefined && (");
+    expect(clock).toContain("<WhosOnTheClock");
+    expect(clock).not.toContain("countTeammates"); // W2-01 stands: the block is not a door row
+    const cards = read("src/app/(app)/timecards/page.tsx");
+    for (const gone of ["getCrewStatus", "timecards-crew-status", "Couldn&rsquo;t read who&rsquo;s on the clock", "On the clock</span>", "const onClock"]) {
+      expect(cards, gone).not.toContain(gone);
+    }
+    // My Day is not touched: its Now card still gets the pulse.
+    expect(read("src/app/(app)/planner/page.tsx")).toContain("crew={crewForCard(crewR, user?.id ?? null, tz, todayStr)}");
+  });
+});
+
+describe("the Time Clock draws it (the block takes what the page read; staff only, by the page's gate)", () => {
+  const NOW = Date.parse("2026-10-13T16:00:00Z"); // 9:00 AM Pacific on the fixture's day
+  const block = (over: Partial<Parameters<typeof WhosOnTheClock>[0]> = {}) =>
+    renderToStaticMarkup(createElement(WhosOnTheClock, { crew, starts: new Map(), selfId: "me", tz: TZ, todayStr: TODAY, weekStart: "monday", nowMs: NOW, ...over }));
+  it("a failed read is said, never a silent nobody", () => {
+    const html = block({ crew: null });
+    expect(html).toContain(CREW_UNREAD);
+    expect(CREW_UNREAD).toBe("Couldn’t read who’s on the clock — reload to try again.");
+    expect(html).not.toContain("Nobody right now");
+  });
+  it("Title Case heading, the count of everyone, one 44px row per person on the clock — the job by name, since when, Clock Out <Name> into that entry's sheet on Timecards", () => {
+    const html = block();
+    expect(html).toContain("Who’s On The Clock");
+    expect(html).toContain("3 of 4");
+    expect(html).toContain('href="/timecards?week=0&amp;entry=e-b"');
+    // clockDoorWords: the first name for a teammate ("Clock Out Crew" for Crew B and Crew C), none for yourself.
+    expect(html.match(/Clock Out Crew</g)).toHaveLength(2);
+    expect(html).toContain("Clock Out<svg");
+    expect(html).toContain("Bayberry panel");
+    expect(html).toContain("since 8:05 AM");
+    expect(html).toMatch(/<a[^>]*min-h-\[44px\]/);
+    expect(html).not.toContain("Crew D"); // off the clock: counted, not listed
+    expect(html).not.toContain("bg-amber-50"); // nobody has been on twelve hours
+  });
+  it("a Switch Job's second piece reads since its SHIFT began, with its day when that was not today, and a long clock is tinted", () => {
+    const html = block({ starts: new Map([["e-b", "2026-10-13T02:00:00Z"]]) }); // 7:00 PM the night before: 14 h by NOW
+    expect(html).toContain("since Mon 7:00 PM");
+    expect(html).toContain("bg-amber-50");
+  });
+  it("the row's week is the entry's own clock-in week, by the company's week start (Timecards' ?week= counts weeks back)", () => {
+    expect(weeksBack("2026-10-13", "2026-10-13", "monday", TZ)).toBe(0);
+    expect(weeksBack("2026-10-12", "2026-10-13", "monday", TZ)).toBe(0); // the Monday this week began
+    expect(weeksBack("2026-10-11", "2026-10-13", "monday", TZ)).toBe(1); // Sunday: last week when weeks start Monday
+    expect(weeksBack("2026-10-11", "2026-10-13", "sunday", TZ)).toBe(0); // …this week when they start Sunday
+    expect(weeksBack("2026-09-30", "2026-10-13", "monday", TZ)).toBe(2);
+    expect(weeksBack("nope", "2026-10-13", "monday", TZ)).toBe(0);
+    const html = block({ crew: [m({ id: "b", name: "Crew B", clockedIn: true, entryId: "e-old", clockIn: "2026-10-06T15:05:00Z" })] });
+    expect(html).toContain('href="/timecards?week=1&amp;entry=e-old"');
+  });
+  it("nobody on the clock says so; an empty company draws nothing", () => {
+    expect(block({ crew: [crew[3]] })).toContain("Nobody right now");
+    expect(block({ crew: [crew[3]] })).toContain("0 of 1");
+    expect(block({ crew: [] })).toBe("");
   });
 });

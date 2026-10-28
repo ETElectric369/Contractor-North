@@ -51,7 +51,7 @@ export function EditCustomerButton({
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="Edit customer"
+          title="Edit Customer"
           footer={
             <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save Changes" />
           }

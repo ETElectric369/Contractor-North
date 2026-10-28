@@ -319,6 +319,13 @@ describe("syncQuoteMaterials — the writes", () => {
     expect(tables.material_list_items.find((r) => r.id === "hand")?.source_key).toBe("line:l1#R1");
     expect(inserted.material_list_items.map((r) => r.source_key)).toEqual(["line:l1#bayberry-clips"]);
   });
+  it("a row typed on site under its 'capture:' key (cn-v1134) is a hand row too: the line's part claims it — re-keyed to the line's key — instead of a second row", async () => {
+    const { sb, inserted, tables } = world({ rows: [{ id: "typed", list_id: "ml-1", org_id: ORG, source_key: "capture:c-switch", description: "A switch typed on site", part_number: "R1", quantity: 1, purchased: false, is_tool: false, sort_order: 0 }] });
+    const res = await syncQuoteMaterials(sb, WHO);
+    expect(res).toMatchObject({ inserted: 1, rekeyed: 1 });
+    expect(tables.material_list_items.find((r) => r.id === "typed")?.source_key).toBe("line:l1#R1");
+    expect(inserted.material_list_items.map((r) => r.source_key)).toEqual(["line:l1#bayberry-clips"]);
+  });
   it("no list for the estimate → nothing is made or written here", async () => {
     const { sb, inserted } = world({ noList: true });
     const res = await syncQuoteMaterials(sb, WHO);

@@ -381,7 +381,7 @@ export function ShelfCountRow({
               onChange={(e) => set({ itemId: e.target.value })}
               className="mt-1 h-11 w-full"
             >
-              <option value="">A new item</option>
+              <option value="">A New Item</option>
               {items.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name} ({i.unit})

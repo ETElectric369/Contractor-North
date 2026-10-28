@@ -151,7 +151,7 @@ function EditPettyCashButton({ tx }: { tx: PettyTx }) {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Edit entry"
+        title="Edit Entry"
         footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!amount} />}
       >
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}

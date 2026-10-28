@@ -286,7 +286,7 @@ export function WeatherWidget({
                           title={DENIED_HINT}
                           className="inline-flex items-center gap-0.5 font-medium text-amber-600 hover:text-amber-700"
                         >
-                          <MapPinOff className="h-3 w-3" /> Location blocked
+                          <MapPinOff className="h-3 w-3" /> Location Blocked
                         </button>
                       ) : (
                         <button

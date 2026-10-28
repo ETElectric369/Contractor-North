@@ -163,7 +163,7 @@ export function NewCustomerButton() {
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="New customer"
+          title="New Customer"
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}
@@ -190,11 +190,11 @@ export function NewCustomerButton() {
             <div className="flex flex-wrap items-center gap-2">
               {hasPicker && (
                 <Button type="button" size="sm" variant="outline" onClick={importContact}>
-                  <Contact className="h-4 w-4 shrink-0" /> Add from My Contacts
+                  <Contact className="h-4 w-4 shrink-0" /> Add From My Contacts
                 </Button>
               )}
               <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] text-slate-400 underline-offset-2 hover:text-brand hover:underline">
-                import a .vcf
+                Import A .vcf
               </button>
               {importMsg && <span className="text-[11px] font-medium text-emerald-600">{importMsg}</span>}
             </div>

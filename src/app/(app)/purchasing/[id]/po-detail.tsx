@@ -416,13 +416,13 @@ export function EditPoButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Edit purchase order"
+        title="Edit Purchase Order"
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}
             onSave={onSave}
             saving={pending}
-            saveLabel="Save changes"
+            saveLabel="Save Changes"
           />
         }
       >

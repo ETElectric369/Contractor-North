@@ -82,13 +82,13 @@ export default async function LoginPage({
                   <p className="mt-1 text-xs text-slate-400">Sent to {email} — enter the code, or just tap the sign-in link in the email. Check spam if it&apos;s not there.</p>
                 </div>
                 <FormSubmit className="w-full" size="lg" formAction={verifyLoginCode}>
-                  Verify &amp; sign in
+                  Verify &amp; Sign In
                 </FormSubmit>
                 <div className="flex items-center justify-between text-xs">
                   <button formAction={sendLoginCode} formNoValidate className="font-medium text-brand hover:underline">
-                    Resend code
+                    Resend Code
                   </button>
-                  <Link href="/login" className="text-slate-500 hover:underline">Use a password instead</Link>
+                  <Link href="/login" className="text-slate-500 hover:underline">Use A Password Instead</Link>
                 </div>
               </form>
             ) : (
@@ -99,10 +99,10 @@ export default async function LoginPage({
                   <Input id="email" name="email" type="email" autoComplete="username" placeholder="you@company.com" defaultValue={email ?? ""} required autoFocus />
                 </div>
                 <FormSubmit className="w-full" size="lg" formAction={sendLoginCode}>
-                  Email me a code
+                  Email Me A Code
                 </FormSubmit>
                 <p className="text-center text-xs">
-                  <Link href="/login" className="text-slate-500 hover:underline">Use a password instead</Link>
+                  <Link href="/login" className="text-slate-500 hover:underline">Use A Password Instead</Link>
                 </p>
               </form>
             )
@@ -135,7 +135,7 @@ export default async function LoginPage({
               {!isSignup && (
                 <p className="text-center text-xs">
                   <Link href="/login?mode=code" className="font-medium text-brand hover:underline">
-                    Sign in with a code instead — no password
+                    Sign In With A Code Instead — No Password
                   </Link>
                 </p>
               )}
@@ -152,7 +152,7 @@ export default async function LoginPage({
             ) : isSignup ? (
               <>Already have an account? <Link href={withNext("/login")} className="font-medium text-brand hover:underline">Sign In</Link></>
             ) : (
-              <>Need an account? <Link href={withNext("/login?mode=signup")} className="font-medium text-brand hover:underline">Sign up</Link></>
+              <>Need an account? <Link href={withNext("/login?mode=signup")} className="font-medium text-brand hover:underline">Sign Up</Link></>
             )}
           </p>
         </div>

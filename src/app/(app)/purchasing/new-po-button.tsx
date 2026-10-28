@@ -69,7 +69,7 @@ export function NewPoButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="New purchase order"
+        title="New Purchase Order"
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}
