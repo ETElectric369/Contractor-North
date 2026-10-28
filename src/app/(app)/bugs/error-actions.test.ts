@@ -25,7 +25,8 @@ const state = vi.hoisted(() => ({
 vi.mock("@/lib/platform-admin", () => ({ requirePlatformAdmin: vi.fn(async () => state.ctx) }));
 vi.mock("@/lib/observe", () => ({ reportError: state.reportError }));
 
-import { listErrorEvents, setErrorEventStatus, OPEN_ERRORS_LIMIT, REST_ERRORS_FILTER, UNKNOWN_COMPANY } from "./error-actions";
+import { listErrorEvents, setErrorEventStatus } from "./error-actions";
+import { OPEN_ERRORS_LIMIT, REST_ERRORS_FILTER, UNKNOWN_COMPANY } from "./error-limits";
 
 /** A pretend viewer's client: every chain is recorded with its filters; `.or` marks the rest read, `.in` the open one. */
 function client() {

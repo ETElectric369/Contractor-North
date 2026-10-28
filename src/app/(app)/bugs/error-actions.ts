@@ -2,6 +2,7 @@
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { requirePlatformAdmin } from "@/lib/platform-admin";
+import { OPEN_ERRORS_LIMIT, REST_ERRORS_LIMIT, REST_ERRORS_FILTER, UNKNOWN_COMPANY } from "./error-limits";
 
 /** One row of the error sink (error_events, 0399), as Bug Watch shows it: the FIRST sighting's
  *  payload is kept, a repeat only bumps the count and overwrites `last_payload`, and a fixed one that
@@ -23,16 +24,6 @@ export type ErrorEvent = {
 };
 
 const ERROR_COLUMNS = "id, title, culprit, level, status, event_count, first_seen, last_seen, org_id, payload, last_payload";
-
-/** PostgREST's row cap: the open read asks for exactly this many, and when exactly this many come
- *  back the page says the list may be cut. */
-export const OPEN_ERRORS_LIMIT = 1000;
-/** The closed-and-trace read: the newest 300 by last sighting, as the whole list used to be. */
-export const REST_ERRORS_LIMIT = 300;
-/** The rest, as PostgREST's `or` filter spells it: closed rows (fixed, ignored) or trace rows of any status. */
-export const REST_ERRORS_FILTER = "status.in.(fixed,ignored),level.eq.trace";
-/** The company's name when platform_org_label could not answer (N4): said, never a silent null. */
-export const UNKNOWN_COMPANY = "Unknown Company";
 
 /** Every company's caught failures, newest repeat first, for North's own team (cn-v1136: the sink
  *  triages itself on Bug Watch). Platform-admin gated in the app layer (belt) over the RLS read
