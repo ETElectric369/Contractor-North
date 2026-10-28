@@ -43,10 +43,15 @@ export function JobPermits({
   inspectionsUnread = false,
   todayStr = "",
   authorities = [],
+  defaultType = "Building",
 }: {
   jobId: string;
   permits: Permit[];
   canAdd?: boolean;
+  /** What a new permit's type opens on: the company's trade's permit (lib/trade-package
+   *  defaultPermitType), read by the job page. "Building" is the no-trade answer, so a test that
+   *  passes nothing draws a builder's form; it was "Electrical" for every trade before cn-v1135. */
+  defaultType?: string;
   /** Every inspection on this job's permits (0378) in one list; each card takes its own. */
   inspections?: PermitInspection[];
   /** The read failed: each card says so rather than reading as a permit with no inspections. */
@@ -62,7 +67,7 @@ export function JobPermits({
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [type, setType] = useState("Electrical");
+  const [type, setType] = useState(defaultType);
   const [num, setNum] = useState("");
   const [authority, setAuthority] = useState("");
   const [status, setStatus] = useState("applied");
@@ -165,7 +170,7 @@ export function JobPermits({
                     >
                       {permitStatusOptions(p.status).map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
                     </Select>
-                    <EditPermitButton permit={p as any} jobId={jobId} />
+                    <EditPermitButton permit={p as any} jobId={jobId} defaultType={defaultType} />
                     <Button
                       size="icon-sm"
                       variant="ghost"

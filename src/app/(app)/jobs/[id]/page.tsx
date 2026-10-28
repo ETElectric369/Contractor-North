@@ -104,6 +104,8 @@ import { AppointmentButton, type ApptValue } from "../../appointments/appointmen
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
+import { defaultPermitType } from "@/lib/trade-package";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { isOwnerShift } from "@/lib/build-time-cost";
 import { ownerRegister } from "@/lib/owner-draw";
@@ -1580,6 +1582,7 @@ export default async function JobDetailPage({
                 inspectionsUnread={inspectionsUnread}
                 todayStr={todayStrInTz(tz)}
                 authorities={inspectionAuthorities}
+                defaultType={defaultPermitType(orgTrade(getOrgSettings((org as any)?.settings)).key)}
               />
             ) : (
               <div>

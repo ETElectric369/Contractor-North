@@ -498,6 +498,10 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
           </span>
         )}
       </div>
+      {/* THE RULE, SAID ONCE (cn-v1135): the estimate picker in catalog mode reads kits.category
+          (quotes/new), not two kit names from one company's list. A scope is typed on each kit
+          below; this is the one scope word that means something to the estimate. */}
+      <p className="text-xs text-slate-500">Kits whose Scope is Estimate are the ones the estimate picker offers in catalog mode.</p>
 
       {addOpen && (
         <Card

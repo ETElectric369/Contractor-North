@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Phone, Mail, MapPin, ArrowRight, Instagram, Star, Menu, ChevronDown } from "lucide-react";
 import { siteAccentHex } from "@/lib/org-settings";
+import { deckConfiguratorOn } from "@/lib/org-trade";
 import { orgHasPublicIntake, type PublicOrg } from "@/lib/public-org";
 import { navPageLinks, pageSlugFromHref, sectionAnchor, type SiteNavLink } from "@/lib/site-nav";
 import { renderReadyBlocks, getNavPages } from "@/lib/public-pages";
@@ -83,12 +84,14 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   const showWorkLink = portfolio.length > 0 && (!hasBlocks || blockSections.has("portfolio"));
   const showServicesLink = services.length > 0 && (!hasBlocks || blockSections.has("services"));
   const showReviewsLink = reviews.length > 0 && (!hasBlocks || blockSections.has("reviews"));
-  // Primary CTA, three tiers: orgs that price from a catalog get the instant configurator; orgs
-  // with the public intake door switched ON get the estimator (/intake/<handle> — the full
-  // request-an-estimate form, which until now only external websites ever linked to); everyone
-  // else routes to the homepage contact form (or the footer when a block homepage carries no
-  // contact-form section — never a dead anchor). Off the homepage, anchors travel via anchorBase.
-  const hasConfigurator = s.estimating_mode === "catalog" && !!s.public_handle;
+  // Primary CTA, three tiers: a DECK company that prices from its catalog gets the instant deck
+  // configurator (deckConfiguratorOn — the one gate /estimate/<handle> itself reads, so the CTA
+  // never points at a 404); orgs with the public intake door switched ON get the estimator
+  // (/intake/<handle> — the full request-an-estimate form, which until now only external websites
+  // ever linked to); everyone else routes to the homepage contact form (or the footer when a block
+  // homepage carries no contact-form section — never a dead anchor). Off the homepage, anchors
+  // travel via anchorBase.
+  const hasConfigurator = deckConfiguratorOn(s) && !!s.public_handle;
   const hasIntake = !hasConfigurator && intakeOn && !!s.public_handle;
   const hasEstimateDoor = hasConfigurator || hasIntake;
   const contactAnchor: `#${string}` = !hasBlocks || blockSections.has("contact") ? "#contact-form" : "#contact";

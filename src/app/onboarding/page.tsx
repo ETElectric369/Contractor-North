@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createOrganization, acceptInvitation } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { TRADE_PRESETS, TRADE_ORDER } from "@/lib/trade-codes";
+import { TRADE_ORDER, TRADE_PACKAGES } from "@/lib/trade-package";
 
 export const dynamic = "force-dynamic";
 
@@ -126,18 +126,19 @@ export default async function OnboardingPage({
               <Label htmlFor="trade">Your trade</Label>
               {/* No default: a pre-picked "General contractor" handed everybody who didn't touch it
                   the builder's switches. The trade is kept now (0352) and sets which features
-                  start on, so it is asked for, with a real way out for a trade that isn't listed. */}
+                  start on, so it is asked for, with a real way out for a trade that isn't listed.
+                  The rows are the registry's (lib/trade-package), general first, never electrical. */}
               <Select id="trade" name="trade" defaultValue="" required>
                 <option value="" disabled>
                   Pick Your Trade
                 </option>
                 {TRADE_ORDER.map((t) => (
-                  <option key={t} value={t}>{TRADE_PRESETS[t].label}</option>
+                  <option key={t} value={t}>{TRADE_PACKAGES[t].menu}</option>
                 ))}
                 <option value="other">Other / Not Listed</option>
               </Select>
               <p className="mt-1 text-xs text-slate-500">
-                Sets your starter job codes and which features start on. You can change both anytime in Settings.
+                Sets your starter job codes and which features start on. You can change your trade, codes and features anytime in Settings.
               </p>
             </div>
             <Button type="submit" size="lg" className="w-full">

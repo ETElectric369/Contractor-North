@@ -1,6 +1,7 @@
 import type { Need, Playbook } from "../types";
 import { normalizeTradeKey } from "@/lib/features";
 import { tradeKeyFromWords } from "@/lib/org-trade";
+import { tradePackage } from "@/lib/trade-package";
 
 /**
  * THE CUSTOMER-FACING QUESTION SETS, ONE PER TRADE.
@@ -218,13 +219,17 @@ export const ELECTRICAL_INTAKE: Playbook = {
  * the trade-neutral five, which is the honest answer for "Construction", and is what a general
  * contractor should see anyway.
  *
+ * WHICH TRADE HAS A STARTER is the registry's call (lib/trade-package, each row's `intake`): the two
+ * written by somebody who does the work are named there, and a trade with none starts neutral.
+ *
  * A SEED IS A STARTING POINT, NEVER A REPLACEMENT. setPublicIntake only reaches this when there is
  * no "Customer intake" form at all; an org that already has one gets its own back, edits intact,
  * however many times the door is switched off and on.
  */
 export function intakeStarterForTrade(key: string | null | undefined, fallback: Playbook, words?: string | null): Playbook {
   const k = normalizeTradeKey(key) || tradeKeyFromWords(words);
-  if (k === "deck") return DECK_INTAKE;
-  if (k === "electrical") return ELECTRICAL_INTAKE;
+  const starter = tradePackage(k)?.intake ?? "neutral";
+  if (starter === "deck") return DECK_INTAKE;
+  if (starter === "electrical") return ELECTRICAL_INTAKE;
   return fallback;
 }

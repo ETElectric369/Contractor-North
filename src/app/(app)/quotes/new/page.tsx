@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { smsReadiness } from "@/lib/sms";
-import { scopeWord } from "@/lib/playbook/scope";
+import { sameScope, scopeWord } from "@/lib/playbook/scope";
 import type { Answers } from "@/lib/playbook/types";
 import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
 import { captureQuoteId } from "@/lib/inspections";
@@ -361,7 +361,8 @@ export default async function NewQuotePage({
       // picker until the migration landed.
       // … and the read SAYS how it went (readTaskKits, item 3): a failed or thin read is a banner
       // beside the price list's, never a quietly kit-less estimate.
-      readTaskKits((sel) => supabase.from("kits").select(sel).order("name")),
+      // `category` rides along: the catalog picker below offers the kits filed under Estimate.
+      readTaskKits((sel) => supabase.from("kits").select(sel).order("name"), "category"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
       // THE TEAM, for a labor row's Who select (cn-v1131): id, name and BILL rate off the staff-scoped
       // profile_pay view — the same view the job's labor billing reads its rates from, so a task row
@@ -425,21 +426,25 @@ export default async function NewQuotePage({
   if (opened && !leadOptions.some((l) => l.id === opened.id)) leadOptions.unshift(opened);
 
   const expiryDays = settings.quote_expiry_days;
-  // Catalog-mode orgs (Tahoe Deck) estimate from TWO scope kits — "Decks" and "Remodels".
-  // The granular material kits (Framing, Hardware, Decking…) are the POST-acceptance job
-  // breakdown, so they're hidden from the estimate picker here. Research orgs (ET Electric)
-  // still see every kit — nothing changes for them.
+  // In catalog mode the estimate picker offers the kits FILED UNDER Estimate (kits.category, the
+  // scope word the Kits page calls Scope; sameScope folds case, punctuation and a plural): those
+  // are the whole-job scope kits an estimate is priced from. The granular material kits (framing,
+  // hardware, decking…) are the POST-acceptance breakdown — seeded onto the job's buy list by the
+  // take-off (lib/estimate/take-off-from-quote), never offered here. Before cn-v1135 this read
+  // two kit NAMES from one company's price list; a rule, so any catalog company can file its own.
+  // Research orgs still see every parts kit — nothing changes for them.
   const catalogMode = settings.estimating_mode === "catalog";
   // KITS OFF (the switch board, 0352) hides the kit chips, a door. Never in catalog mode: there the
   // kits ARE how an estimate is priced (rule i), so nothing a catalog estimate prices from is gated.
   const kitDoors = featureOn(settings.features, "kits") || catalogMode;
+  // A TASK kit (0386) is a task's, not the plain picker's: dropped in there it would add one unit's
+  // parts and lose his hours without a word. It is offered on a task (the Inspector) — in EITHER
+  // mode, so a task kit a catalog company filed under Estimate is still never a plain pick.
   const estimateKits = !kitDoors
     ? []
     : catalogMode
-      ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
-      : // A TASK kit (0386) is a task's, not the plain picker's: dropped in there it would add one
-        // unit's parts and lose his hours without a word. It is offered on a task (the Inspector).
-        partsKitsOnly(kits ?? []);
+      ? partsKitsOnly(kits ?? []).filter((k: any) => sameScope(k.category, "Estimate"))
+      : partsKitsOnly(kits ?? []);
 
   return (
     <div>

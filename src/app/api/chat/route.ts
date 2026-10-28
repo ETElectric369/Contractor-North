@@ -13,7 +13,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { orgTrade } from "@/lib/org-trade";
 import { featureOn } from "@/lib/features";
 import { quoteDraftShown, quoteDraftToolFor } from "@/lib/nort/quote-draft-tax";
-import { NORT_EXAMPLES_RULE, engineeringLine, tradeRuleWords, voiceEstimateRule } from "@/lib/nort/trade-prompt";
+import { NORT_EXAMPLES_RULE, calcToolsFor, engineeringLine, tradeRuleWords, voiceEstimateRule } from "@/lib/nort/trade-prompt";
 import { recordAiUsage, aiSpendExceeded, modelFor, type TokenUsage } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import { reportError } from "@/lib/observe";
@@ -23,7 +23,7 @@ import { clockStateLine, type OpenClockRow } from "@/lib/nort/clock-state";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { holdingFor, readMyUpdates } from "@/lib/nort/updates";
 import { holdingPronoun, holdingWords } from "@/lib/nort/greeting";
-import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
+import { runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
 import { agentInputForSwitches, agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import { executeAction } from "@/lib/actions/execute";
@@ -403,10 +403,13 @@ export async function POST(req: Request) {
 
   // THE ESTIMATING METHOD — mode-aware. "catalog" companies (deck/carpentry & preset-price
   // shops) bid from their OWN price list + kits, quantities from the customer's measurements,
-  // NO web research. "research" (default, electrical) prices materials by LIVE market research
-  // (web_search) with a buffer + calculated quantities: the NEC and its calculators for electrical
-  // work only (lib/nort/trade-prompt engineeringLine), since a builder in research mode was being
-  // told to size its work by the electrical code. An electrical company's prompt is unchanged.
+  // NO web research. "research" (the default) prices materials by LIVE market research
+  // (web_search) with a buffer + calculated quantities: the ENGINEERING line is the trade's own
+  // from the trade's words (lib/nort/trade-prompt engineeringLine → lib/trade-nort), since a
+  // builder in research mode was being told to size its work by the electrical code. An
+  // electrical company's prompt is unchanged, and it is the one company handed the calc tools
+  // (calcToolsFor, at the tools array below): the neutral line names no calculator, because the
+  // other trades are not offered one.
   if (catalogMode) {
     systemPrompt += `\n\nESTIMATING METHOD — use this whenever you price work, draft a quote/proposal, or build the Estimator:
 - LABOR: ${orgS.default_labor_rate > 0 ? `bill labor at the company rate of $${orgS.default_labor_rate}/hr` : "the company labor rate isn't set yet — ask for it before pricing labor"}, unless labor is already baked into the company's catalog lines — then use those. Estimate the crew-hours the job realistically takes.
@@ -874,7 +877,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // input-is-data rule in the system prompt covers them).
               // The live quote preview is an Estimates door (its Save makes an estimate): off with it.
               // With Sales Tax off it carries no tax field (quoteDraftToolFor).
-              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax)] : []), SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, FILL_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+              // THE CALC TOOLS FOLLOW THE TRADE (cn-v1135): calc_wire_size and its three siblings are
+              // the Electrical calculator package, offered through calcToolsFor to a company whose
+              // trade package carries it and to nobody else — a deck builder's Nort was being handed
+              // four NEC calculators. The calc_* branch of the tool_use loop below stays as it is: a
+              // tool that was never offered is never called.
+              tools: [...dataTools, ...writeTools, ...calcToolsFor(trade.key), OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax)] : []), SHOW_CARD_TOOL, SHOW_SCREEN_TOOL, FILL_SCREEN_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             },
             // Strip the marker CHARACTER from MODEL text so a prompt-injection can't forge a confirm
             // card, a maps-open, a screen move or a fake quote preview — markers are only ever

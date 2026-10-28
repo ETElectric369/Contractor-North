@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { getPublicOrgByHandle, getPublicOrgByDomain, publicSite } from "@/lib/public-org";
 import { createServiceClient } from "@/lib/supabase/server";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
+import { deckConfiguratorOn } from "@/lib/org-trade";
 import { isReservedSlug } from "@/lib/site-reserved";
 import { lastmodDate, newestLastmod, urlEntry } from "./lastmod";
 
@@ -80,7 +81,9 @@ export async function GET() {
     const handle = org.settings.public_handle;
     // Estimate page content = org settings (headline/portfolio) + price list; org.updated_at is
     // the closest cheap proxy for "this page changed" (same caveat as the homepage lastmod above).
-    if (handle && org.settings.estimating_mode === "catalog")
+    // Listed only when the page answers: a deck company pricing from its catalog (deckConfiguratorOn,
+    // the one gate the page itself reads — a listed URL that 404s is worse than none).
+    if (handle && deckConfiguratorOn(org.settings))
       entries.push(urlEntry(`${base}/estimate/${handle}`, lastmodDate(org.updated_at)));
     // Articles — the index + every published post at its original path.
     if (posts.length) {

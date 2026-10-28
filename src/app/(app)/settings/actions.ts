@@ -1118,7 +1118,10 @@ export async function setCustomDomain(
 // through every other write unchanged. A patch that names one is REFUSED in words, never dropped
 // quietly: a dropped key would let the caller's screen say "Saved" for a switch that didn't move.
 const SWITCH_BOARD_KEYS = ["features", "trade", "timeclock_job_codes"];
-const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret", "office_sees_owner_money", ...SWITCH_BOARD_KEYS];
+// estimating_mode is the owner's own door (features-actions setEstimatingMode, cn-v1135: How You Price
+// on Settings › Features, written with the owner's client and the row asked back); a staff save must
+// not carry it past that door.
+const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret", "office_sees_owner_money", "estimating_mode", ...SWITCH_BOARD_KEYS];
 
 /** Merge a partial settings patch into organizations.settings (JSONB). STAFF get full access
  *  (protected keys stripped — they have dedicated guarded setters). An external site collaborator
@@ -1428,9 +1431,12 @@ export async function saveJobCode(input: {
   return { ok: true };
 }
 
-/** Import a whole trade's starter codes at once (Settings → Scheduling → "Import a trade's codes").
- *  Adds every code in the pack the org doesn't already have (case-insensitive on the code), so it's
- *  safe to re-run and won't duplicate. Staff only; org-scoped. */
+/** Import a whole trade's codes at once (Settings → Job codes → "Import A Trade's Codes"). `packId`
+ *  is a trade KEY: the rows are the registry's one list for that trade (lib/trade-package, the same
+ *  list sign-up seeds), so there is no second spelling anywhere. A code the company already holds is
+ *  skipped by its CANONICAL spelling for that trade (canonicalCode folds the pre-1135 packs' aliases:
+ *  a company holding TRBL importing electrical does not get TROUB beside it), so it's safe to re-run
+ *  and never twins a bucket the crew already clocks to. Staff only; org-scoped. */
 export async function importTradeCodePack(packId: string): Promise<Result & { added?: number; skipped?: number }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1438,15 +1444,16 @@ export async function importTradeCodePack(packId: string): Promise<Result & { ad
   const orgId = await myOrgId(supabase);
   if (!orgId) return { ok: false, error: "No organization." };
 
-  const { TRADE_CODE_PACKS } = await import("@/lib/trade-code-packs");
-  const pack = TRADE_CODE_PACKS.find((p) => p.id === packId);
-  if (!pack) return { ok: false, error: "Unknown trade pack." };
+  const { TRADE_PACKAGES, canonicalCode, isTradeKey } = await import("@/lib/trade-package");
+  if (!isTradeKey(packId)) return { ok: false, error: `There is no trade called "${packId}".` };
+  const pack = TRADE_PACKAGES[packId];
 
-  const { data: existing } = await supabase.from("job_codes").select("code").eq("org_id", orgId);
-  const have = new Set((existing ?? []).map((r) => String((r as { code: string }).code).trim().toUpperCase()));
+  const { data: existing, error: readErr } = await supabase.from("job_codes").select("code").eq("org_id", orgId);
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  const have = new Set((existing ?? []).map((r) => canonicalCode(packId, String((r as { code: string }).code))));
   const rows = pack.codes
-    .filter((c) => !have.has(c.code.toUpperCase()))
-    .map((c) => ({ org_id: orgId, code: c.code, description: c.description, billable: c.billable ?? true, active: true }));
+    .filter((c) => !have.has(c.code))
+    .map((c) => ({ org_id: orgId, code: c.code, description: c.description, billable: c.billable, active: true }));
 
   if (rows.length) {
     const { error } = await supabase.from("job_codes").insert(rows);

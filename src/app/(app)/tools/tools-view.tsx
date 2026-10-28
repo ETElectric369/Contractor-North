@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { wireSizeForLoad, ampacityAt, type WiringMethod } from "@/lib/electrical-calc";
+import { calculatorPackagesFor, type CalculatorPackage } from "@/lib/trade-package";
 
 /* ── NEC reference tables ─────────────────────────────────────────────── */
 /* Circular mils per AWG/kcmil size (NEC chapter 9 table 8). */
@@ -741,7 +742,8 @@ function Drywall() {
 }
 
 /* ── registry + packaged, searchable view ─────────────────────────────── */
-type Pkg = "Electrical" | "Estimating" | "Money" | "Field";
+/** The registry's package names (lib/trade-package): a row's `calculators` lists which open first. */
+type Pkg = CalculatorPackage;
 const PKG_TONE: Record<Pkg, string> = {
   Electrical: "bg-amber-100 text-amber-700",
   Estimating: "bg-blue-100 text-blue-700",
@@ -760,6 +762,8 @@ const TOOLS: Tool[] = [
   { id: "derating", name: "Ampacity derating", pkg: "Electrical", desc: "Temp + bundling adjusted ampacity", icon: Thermometer, render: () => <Derating /> },
   { id: "gfci-afci", name: "GFCI / AFCI lookup", pkg: "Electrical", desc: "Where protection is required (210.8 / 210.12)", icon: ShieldCheck, render: () => <GfciAfci /> },
   { id: "solar-busbar", name: "Solar 120% busbar", pkg: "Electrical", desc: "PV back-feed busbar check (705.12)", icon: Sun, render: () => <SolarBusbar /> },
+  // A conduit BENDING tool: it sat in Field, so a deck builder opened on it (cn-v1135).
+  { id: "conduit-offset", name: "Conduit offset", pkg: "Electrical", desc: "Bend multiplier, spacing, shrink", icon: Spline, render: () => <ConduitOffset /> },
   { id: "board-feet", name: "Board feet", pkg: "Estimating", desc: "Lumber board-foot volume", icon: Ruler, render: () => <BoardFeet /> },
   { id: "concrete-slab", name: "Concrete (slab)", pkg: "Estimating", desc: "Cubic yards + bag count for a slab", icon: Layers, render: () => <ConcreteSlab /> },
   { id: "paint", name: "Paint coverage", pkg: "Estimating", desc: "Gallons to paint a room", icon: PaintBucket, render: () => <Paint /> },
@@ -771,32 +775,27 @@ const TOOLS: Tool[] = [
   { id: "labor-burden", name: "Labor burden", pkg: "Money", desc: "True loaded labor cost per hour", icon: HardHat, render: () => <LaborBurden /> },
   { id: "sales-tax", name: "Sales tax", pkg: "Money", desc: "Add tax or back it out of a total", icon: Receipt, render: () => <SalesTax /> },
   { id: "right-triangle", name: "Right triangle", pkg: "Field", desc: "Solve sides + angles (3-4-5)", icon: Triangle, render: () => <RightTriangle /> },
-  { id: "conduit-offset", name: "Conduit offset", pkg: "Field", desc: "Bend multiplier, spacing, shrink", icon: Spline, render: () => <ConduitOffset /> },
   { id: "fraction", name: "Decimal ↔ fraction", pkg: "Field", desc: "Decimal inch to a tape-measure mark", icon: Ruler, render: () => <FractionConvert /> },
   { id: "unit-convert", name: "Unit converter", pkg: "Field", desc: "Length, area, volume, weight, temp", icon: ArrowRightLeft, render: () => <UnitConverter /> },
 ];
 
 /**
- * WHICH PACKAGES THIS TRADE STARTS ON.
+ * WHICH PACKAGES THIS TRADE STARTS ON: the registry's call (lib/trade-package, each row's
+ * `calculators`, read through calculatorPackagesFor). Eleven of the twenty-four tools are electrical.
+ * A deck builder opened this page and 40% of it was wire sizing, conduit fill and GFCI lookups — the
+ * same "your app is showing me the electrician's app" complaint as the inspection page — and this
+ * file used to decide for itself with `trade === "electrical"`, one more place that would have had
+ * to learn each new trade.
  *
- * Ten of the twenty-four tools are electrical. A deck builder opened this page and 40% of it was
- * wire sizing, conduit fill and GFCI lookups — the same "your app is showing me the electrician's
- * app" complaint as the inspection page.
- *
- * Trade-specific packages are HIDDEN, not removed: "Show every tool" brings them straight back,
+ * Trade-specific packages are HIDDEN, not removed: "Show Every Tool" brings them straight back,
  * because a deck builder genuinely might want a voltage-drop figure for a lighting run, and
  * silently deleting a capability is worse than showing one too many.
  *
  * `trade` is the company's trade KEY (lib/org-trade), so a company that picked Electrical at
- * sign-up and never typed its trade still opens on its own tools.
+ * sign-up and never typed its trade still opens on its own tools; no key opens on the universal three.
  */
-function packagesForTrade(trade: string): Pkg[] {
-  const universal: Pkg[] = ["Estimating", "Money", "Field"];
-  return trade === "electrical" ? ["Electrical", ...universal] : universal;
-}
-
 export function ToolsView({ trade = "" }: { trade?: string }) {
-  const mine = useMemo(() => new Set(packagesForTrade(trade)), [trade]);
+  const mine = useMemo(() => new Set<Pkg>(calculatorPackagesFor(trade)), [trade]);
   const [showAll, setShowAll] = useState(false);
   const [pkg, setPkg] = useState<"All" | Pkg>("All");
   const [q, setQ] = useState("");
@@ -854,7 +853,7 @@ export function ToolsView({ trade = "" }: { trade?: string }) {
             onClick={() => { setShowAll((v) => !v); setPkg("All"); }}
             className="ml-auto rounded-full px-3 py-1.5 text-xs font-medium text-slate-500 underline-offset-2 hover:underline"
           >
-            {showAll ? "Show Fewer" : `Show every tool (+${hiddenCount})`}
+            {showAll ? "Show Fewer" : `Show Every Tool (+${hiddenCount})`}
           </button>
         )}
       </div>

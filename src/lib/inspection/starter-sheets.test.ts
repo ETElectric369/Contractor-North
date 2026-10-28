@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseInspectionSchema, visibleFields } from "./schema";
 import { STARTER_FOR_TRADE, STARTER_TRADES, starterSchemaJson, starterSheet, starterTradeFor } from "./starter-sheets";
+import { TRADE_PACKAGES } from "@/lib/trade-package";
 import { TRADE_ORDER } from "@/lib/trade-codes";
 import { orgTrade } from "@/lib/org-trade";
 
@@ -105,6 +106,10 @@ describe("the trade KEY picks the starter, and never to nothing", () => {
       expect(STARTER_FOR_TRADE[k], k).toBeTruthy();
       expect(STARTER_TRADES).toContain(STARTER_FOR_TRADE[k]);
     }
+  });
+
+  it("the registry decides (cn-v1135): the row is the package's `inspection`, never a second map", () => {
+    for (const k of TRADE_ORDER) expect(STARTER_FOR_TRADE[k], k).toBe(TRADE_PACKAGES[k].inspection);
   });
 
   it("the key wins over the words", () => {

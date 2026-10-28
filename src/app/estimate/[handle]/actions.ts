@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
 import { getOrgSettings } from "@/lib/org-settings";
+import { deckConfiguratorOn } from "@/lib/org-trade";
 import { computeDeckEstimate, buildDeckRates, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import type { LeadIntake } from "@/lib/lead-triage";
@@ -84,6 +85,10 @@ export async function submitEstimateLead(handle: string, payload: EstimatePayloa
   }
 
   const settings = getOrgSettings((org as { settings?: unknown }).settings);
+  // THE SAME GATE AS THE PAGE (deckConfiguratorOn, cn-v1135): the page 404s for any company that
+  // is not a deck company pricing from its catalog, and a POST straight at this action must not
+  // file a deck lead for one either — the same words the page's absence would read as.
+  if (!deckConfiguratorOn(settings)) return { ok: false, error: "This estimator isn't available right now." };
 
   // Authoritative pricing: rates come from the org's live price list, keyed by code.
   // Same query + rate-building as the public page (markup applied, deduped newest-first) so the

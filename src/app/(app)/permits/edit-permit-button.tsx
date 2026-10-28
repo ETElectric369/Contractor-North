@@ -26,14 +26,16 @@ const d = (s?: string | null) => (s ? String(s).slice(0, 10) : "");
 
 /** Edit every field of an existing permit (the inline status select only covers status). Shared by
  *  the job Permits card and the standalone /permits list, so a typo in the number/authority/dates is
- *  fixable from either place. `jobId` is passed through so the action revalidates the right job page. */
-export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: string | null }) {
+ *  fixable from either place. `jobId` is passed through so the action revalidates the right job page.
+ *  `defaultType` (the company's trade's permit, lib/trade-package) stands in for a permit whose type
+ *  is empty: it was "Electrical" for every trade before cn-v1135. */
+export function EditPermitButton({ permit, jobId, defaultType }: { permit: Permit; jobId?: string | null; defaultType: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [type, setType] = useState(permit.type ?? "Electrical");
+  const [type, setType] = useState(permit.type ?? defaultType);
   const [num, setNum] = useState(permit.permit_number ?? "");
   const [authority, setAuthority] = useState(permit.authority ?? "");
   const [status, setStatus] = useState(permit.status ?? "applied");
@@ -48,7 +50,7 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
    *  a permit number) wrote the stale "issued" back — the permit counted open again with every
    *  visit passed. */
   function seed() {
-    setType(permit.type ?? "Electrical");
+    setType(permit.type ?? defaultType);
     setNum(permit.permit_number ?? "");
     setAuthority(permit.authority ?? "");
     setStatus(permit.status ?? "applied");

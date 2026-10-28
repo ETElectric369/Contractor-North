@@ -21,6 +21,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { WhyField } from "@/components/playbook/why-field";
 import type { Clause, Need, NeedSlot } from "@/lib/playbook/types";
+import type { StarterRow, StarterRows } from "@/lib/playbook/starters";
 import { clearPlaybook, installPlaybookStarter, savePlaybook } from "./playbook-actions";
 
 /**
@@ -163,7 +164,8 @@ export function PlaybookManager({
   starters,
 }: {
   forms: PlaybookForm[];
-  starters: { key: string; label: string; blurb: string }[];
+  /** The company's own trade's starter first, the other trades' after (starterRowsForTrade). */
+  starters: StarterRows;
 }) {
   const router = useRouter();
   // NOT forms[0] — that is alphabetical, and cn-v683 added the WEBSITE form to this picker.
@@ -371,6 +373,25 @@ export function PlaybookManager({
         setErr("That didn't reach the server — your questions are still on this screen. Check your connection and try again.");
       }
     });
+
+  /** One starter's door. A starter REPLACES everything. Say so plainly — the first version of this
+   *  destroyed a hand-authored sheet with no way back, and a soft "replace?" is not the same warning
+   *  as "this is gone". */
+  const starterButton = (s: StarterRow) => (
+    <Button
+      key={s.key}
+      type="button"
+      variant="secondary"
+      disabled={pending}
+      title={s.blurb}
+      onClick={() => {
+        if (!confirm(`Replace all ${needs.length} of your questions with the ${s.label} starter?\n\nYour current questions and why lines are overwritten.`)) return;
+        run(() => installPlaybookStarter(form.id, s.key), "Starter loaded — now make it yours.", true);
+      }}
+    >
+      Start From: {s.label}
+    </Button>
+  );
 
   // TWO DOORS, PAINTED DIFFERENT COLORS (Erik + Andrew: "we dont like the dropdown … two
   // seaglass buttons left and right on the top always visible … and a background color
@@ -871,25 +892,6 @@ export function PlaybookManager({
           {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
         </Button>
 
-        {starters.map((s) => (
-          <Button
-            key={s.key}
-            type="button"
-            variant="secondary"
-            disabled={pending}
-            title={s.blurb}
-            onClick={() => {
-              // A starter REPLACES everything. Say so plainly — the first version of this
-              // destroyed a hand-authored sheet with no way back, and a soft "replace?" is not
-              // the same warning as "this is gone".
-              if (!confirm(`Replace all ${needs.length} of your questions with the ${s.label} starter?\n\nYour current questions and why lines are overwritten.`)) return;
-              run(() => installPlaybookStarter(form.id, s.key), "Starter loaded — now make it yours.", true);
-            }}
-          >
-            Start From: {s.label}
-          </Button>
-        ))}
-
         {form.owned && (
           <Button
             type="button"
@@ -919,6 +921,30 @@ export function PlaybookManager({
         )}
 
         {msg && !err && <span className="text-sm font-medium text-emerald-700">{msg}</span>}
+      </div>
+
+      {/* THE STARTERS, THE COMPANY'S OWN TRADE FIRST (cn-v1135, starterRowsForTrade): one row for
+          the starter written for this trade, then the other trades'. A trade nobody has written
+          one for yet says so in one line and promises nothing — the data is what it is (no starter
+          is invented; lib/playbook/starters "one honest entry at a time"). A starter REPLACES
+          everything, so each button still confirms before it installs. */}
+      <div className="space-y-2">
+        {starters.own ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">Your Trade&rsquo;s Starter</span>
+            {starterButton(starters.own)}
+          </div>
+        ) : starters.tradeWords ? (
+          <p className="text-xs text-slate-500">
+            No starter is written for {starters.tradeWords} yet. Your inspection sheet is the honest start.
+          </p>
+        ) : null}
+        {starters.others.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">Other Trades&rsquo; Starters</span>
+            {starters.others.map((s) => starterButton(s))}
+          </div>
+        )}
       </div>
 
       {/* ── THE BAR THAT FOLLOWS YOU ──────────────────────────────────────────────────────────

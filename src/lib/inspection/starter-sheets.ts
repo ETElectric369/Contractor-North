@@ -1,6 +1,7 @@
 import { parseInspectionSchema, type InspectionField } from "./schema";
 import { normalizeTradeKey, type TradeKey } from "@/lib/features";
 import { tradeKeyFromWords } from "@/lib/org-trade";
+import { TRADE_ORDER, TRADE_PACKAGES } from "@/lib/trade-package";
 
 /**
  * THE SHEET A NEW COMPANY STARTS WITH.
@@ -149,24 +150,16 @@ const STARTERS: Record<StarterTrade, Starter> = {
 };
 
 /**
- * WHICH STARTER A TRADE GETS, BY ITS KEY (the sign-up dropdown, 0352). One row per trade, so a new
- * trade can't silently fall through (the Record type insists). A trade gets its own starter only
- * where one was written for it; everything else starts on the generic sheet and makes it its own.
- * HVAC is NOT plumbing (it used to get the water-heater sheet), and a general contractor or a
- * "Construction" company is NOT a deck builder (they used to get the deck sheet).
+ * WHICH STARTER A TRADE GETS, BY ITS KEY (the sign-up dropdown, 0352). THE REGISTRY DECIDES
+ * (lib/trade-package, each row's `inspection`); this is its view, one row per trade so a new trade
+ * can't silently fall through (the Record type insists). A trade gets its own starter only where one
+ * was written for it; everything else starts on the generic sheet and makes it its own. HVAC is NOT
+ * plumbing (it used to get the water-heater sheet), and a general contractor or a "Construction"
+ * company is NOT a deck builder (they used to get the deck sheet).
  */
-export const STARTER_FOR_TRADE: Record<TradeKey, StarterTrade> = {
-  electrical: "electrical",
-  deck: "deck",
-  plumbing: "plumbing",
-  hvac: "generic",
-  general: "generic",
-  roofing: "generic",
-  concrete: "generic",
-  tile: "generic",
-  painting: "generic",
-  landscaping: "generic",
-};
+export const STARTER_FOR_TRADE: Record<TradeKey, StarterTrade> = Object.fromEntries(
+  TRADE_ORDER.map((k) => [k, TRADE_PACKAGES[k].inspection]),
+) as Record<TradeKey, StarterTrade>;
 
 /**
  * The starter for a company: its trade KEY decides (pass lib/org-trade's key). Free text is the

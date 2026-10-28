@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { TRADE_PACK_OPTIONS } from "@/lib/trade-code-packs";
+import { TRADE_PACK_OPTIONS } from "@/lib/trade-package";
 import { saveJobCode, setJobCodeActive, deleteJobCode, importTradeCodePack } from "./actions";
 
 type JobCode = {
@@ -19,8 +19,11 @@ type JobCode = {
 };
 
 /** Manage the org's job codes (the cost/labor codes the timeclock uses).
- *  Add / edit inline (Pencil) / soft-toggle active / delete. */
-export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
+ *  Add / edit inline (Pencil) / soft-toggle active / delete.
+ *  `trade` is the company's trade KEY (lib/org-trade): the import picker opens on the company's own
+ *  trade's codes, the registry's rows in TRADE_ORDER behind it (general first, never electrical —
+ *  the picker used to open on Electrical for every company); "" (no trade known) opens on the first. */
+export function JobCodesManager({ jobCodes, trade }: { jobCodes: JobCode[]; trade: string }) {
   const router = useRouter();
   const [editing, setEditing] = useState<JobCode | "new" | null>(null);
   const [code, setCode] = useState("");
@@ -29,7 +32,7 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
   const [active, setActive] = useState(true);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [pack, setPack] = useState(TRADE_PACK_OPTIONS[0]?.id ?? "");
+  const [pack, setPack] = useState(TRADE_PACK_OPTIONS.some((o) => o.id === trade) ? trade : (TRADE_PACK_OPTIONS[0]?.id ?? ""));
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
   function runImport() {
@@ -101,9 +104,10 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
         but stay on past entries.
       </p>
 
-      {/* Quick-start: import a whole trade's common codes at once (skips any you already have). */}
+      {/* Quick-start: import a whole trade's codes at once (lib/trade-package, the one list sign-up
+          seeds; a code you already hold under an older spelling is skipped, never twinned). */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <div className="mb-2 text-sm font-medium text-slate-700">Import a trade&apos;s codes</div>
+        <div className="mb-2 text-sm font-medium text-slate-700">Import A Trade&apos;s Codes</div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={pack} onChange={(e) => { setPack(e.target.value); setImportMsg(null); }} className="max-w-[220px]">
             {TRADE_PACK_OPTIONS.map((o) => (

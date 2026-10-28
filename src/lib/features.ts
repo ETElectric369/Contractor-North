@@ -14,6 +14,7 @@
  * WRITTEN (sign-up, the backfill), so changing a preset later never flips an existing company.
  */
 import { TRADE_ORDER } from "@/lib/trade-codes";
+import { TRADE_PACKAGES, type TradeKey } from "@/lib/trade-package";
 
 /** MUST equal public.feature_keys() (0352). features.test.ts and the DB suite both check it. */
 export const FEATURE_KEYS = [
@@ -75,7 +76,8 @@ export const featureChildren = (k: FeatureKey): FeatureDef[] => FEATURES.filter(
 export const ALL_ON: FeatureMap = Object.fromEntries(FEATURE_KEYS.map((k) => [k, true])) as FeatureMap;
 
 // ── TRADE PRESETS: used ONLY when a map is written (sign-up, the backfill) ──────────────────────
-export type TradeKey = (typeof TRADE_ORDER)[number];
+/** The registry's key (lib/trade-package TRADE_ORDER), re-exported for the readers that learnt it here. */
+export type { TradeKey };
 /** A stored or picked trade, as one of TRADE_ORDER's keys; anything else ("other", blank) is "". */
 export function normalizeTradeKey(v: unknown): TradeKey | "" {
   return typeof v === "string" && (TRADE_ORDER as readonly string[]).includes(v) ? (v as TradeKey) : "";
@@ -89,20 +91,12 @@ export const BLANK_PRESET: FeatureMap = {
   licenses: true, safety_log: false, website: true, site_chat: false, nort: true, calculators: true,
   todo_extras: false,
 };
-const BUILDER: Partial<FeatureMap> = { kits: true, contracts: true };
-/** One entry per TRADE_ORDER key (features.test.ts enforces it, so a new trade can't silently get blank). */
-export const TRADE_FEATURES: Record<TradeKey, Partial<FeatureMap>> = {
-  general: BUILDER,
-  deck: BUILDER,
-  roofing: BUILDER,
-  concrete: BUILDER,
-  electrical: { shop_stock: true, panel_map: true },
-  plumbing: { shop_stock: true },
-  hvac: { shop_stock: true },
-  tile: { kits: true },
-  landscaping: { permits: false },
-  painting: { permits: false },
-};
+/** The switches each trade starts with beyond the blank preset: a VIEW of the registry's `features`
+ *  (lib/trade-package, one row per trade — the Record type and features.test.ts insist, so a new trade
+ *  can't silently get blank). Edit the registry's row, never this. */
+export const TRADE_FEATURES: Record<TradeKey, Partial<FeatureMap>> = Object.fromEntries(
+  TRADE_ORDER.map((k) => [k, TRADE_PACKAGES[k].features]),
+) as Record<TradeKey, Partial<FeatureMap>>;
 export function featurePreset(trade: unknown): FeatureMap {
   const t = normalizeTradeKey(trade);
   return { ...BLANK_PRESET, ...(t ? TRADE_FEATURES[t] : {}) };

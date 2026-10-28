@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 
 import { createOrganization } from "./actions";
 import { featurePreset, BLANK_PRESET } from "@/lib/features";
-import { TRADE_PRESETS } from "@/lib/trade-codes";
+import { TRADE_PACKAGES } from "@/lib/trade-package";
 
 const form = (fields: Record<string, string>) => {
   const f = new FormData();
@@ -39,17 +39,25 @@ beforeEach(() => {
 });
 
 describe("createOrganization", () => {
-  it("saves the picked trade and its starting switches", async () => {
+  it("saves the picked trade, the registry's whole code list and its starting switches", async () => {
     expect(await run({ name: "Sparky Co", trade: "electrical" })).toBe("REDIRECT /planner");
     expect(state.calls).toEqual([
       {
         fn: "create_organization",
         p_name: "Sparky Co",
-        p_codes: TRADE_PRESETS.electrical.codes,
+        p_codes: TRADE_PACKAGES.electrical.codes,
         p_trade: "electrical",
         p_features: featurePreset("electrical"),
       },
     ]);
+  });
+
+  it("seeds the registry's list whole: a plumber starts with TROUB and REPIPE, not a shorter sign-up list", async () => {
+    await run({ name: "Larkspur Plumbing", trade: "plumbing" });
+    const codes = (state.calls[0].p_codes as { code: string }[]).map((c) => c.code);
+    expect(codes).toEqual(TRADE_PACKAGES.plumbing.codes.map((c) => c.code));
+    expect(codes).toEqual(expect.arrayContaining(["TROUB", "REPIPE", "SHOP", "PTO"]));
+    expect(codes).not.toContain("TRBL"); // the old pack's spelling is an alias, never seeded
   });
 
   it("Other / Not Listed: neutral codes, no trade key, the light preset", async () => {
@@ -66,7 +74,7 @@ describe("createOrganization", () => {
     state.replies = [{ error: { code: "PGRST202", message: "Could not find the function" } }, { error: null }];
     expect(await run({ name: "Early Co", trade: "deck" })).toBe("REDIRECT /planner");
     expect(state.calls).toHaveLength(2);
-    expect(state.calls[1]).toEqual({ fn: "create_organization", p_name: "Early Co", p_codes: TRADE_PRESETS.deck.codes });
+    expect(state.calls[1]).toEqual({ fn: "create_organization", p_name: "Early Co", p_codes: TRADE_PACKAGES.deck.codes });
   });
 
   it("any other refusal is said, not retried", async () => {

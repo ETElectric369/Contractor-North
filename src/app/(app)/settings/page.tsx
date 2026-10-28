@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { parsePlaybook, playbookForForm } from "@/lib/playbook/parse";
-import { PLAYBOOK_STARTERS } from "@/lib/playbook/starters";
+import { starterRowsForTrade } from "@/lib/playbook/starters";
 import { PlaybookManager } from "./playbook-manager";
 import { LessonOffer } from "@/components/tour/lesson-offer";
 import { SettingsSubnav } from "./settings-subnav";
@@ -50,6 +50,7 @@ import { TextingCard } from "./texting-card";
 import { smsReadiness } from "@/lib/sms";
 import { TaxRatesManager } from "./tax-rates-manager";
 import { JobCodesManager } from "./job-codes-manager";
+import { orgTrade } from "@/lib/org-trade";
 import { HomepageCard } from "./homepage-card";
 import { WebsiteSettings } from "./website-settings";
 import { IntakeCard } from "./intake-card";
@@ -486,7 +487,7 @@ export default async function SettingsPage({
                     </p>
                     <PlaybookManager
                       forms={inspectionSheetForms}
-                      starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
+                      starters={starterRowsForTrade(orgTrade(settings).key)}
                     />
                   </Section>
                 </div>
@@ -756,6 +757,7 @@ export default async function SettingsPage({
                   <Section title="Job codes">
                     <JobCodesManager
                       jobCodes={(jobCodes ?? []) as { id: string; code: string; description: string; billable: boolean; active: boolean }[]}
+                      trade={orgTrade(settings).key}
                     />
                   </Section>
                   <Section title="Job-code templates">

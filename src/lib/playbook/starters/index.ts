@@ -1,4 +1,6 @@
 import type { Playbook } from "../types";
+import { tradePackage } from "@/lib/trade-package";
+import { withArticle } from "@/lib/org-trade";
 import { ET_ELECTRIC } from "./et-electric";
 import { TAHOE_DECK } from "./tahoe-deck";
 
@@ -49,3 +51,32 @@ export const PLAYBOOK_STARTERS: PlaybookStarter[] = [
 
 export const playbookStarter = (key: string): Playbook | null =>
   PLAYBOOK_STARTERS.find((s) => s.key === key)?.playbook ?? null;
+
+/**
+ * THE COMPANY'S OWN TRADE FIRST (cn-v1135). The trade package names the starter written for each
+ * trade (lib/trade-package playbookStarter — null for the trades nobody on North has written one
+ * for yet); the Settings card leads with that one and lists the rest under the other trades. The
+ * DATA above is unchanged: no starter is invented for a trade without one, and the card says so.
+ */
+export function startersForTrade(key: string): { own: PlaybookStarter | null; others: PlaybookStarter[] } {
+  const ownKey = tradePackage(key)?.playbookStarter ?? null;
+  const own = ownKey ? PLAYBOOK_STARTERS.find((s) => s.key === ownKey) ?? null : null;
+  return { own, others: PLAYBOOK_STARTERS.filter((s) => s !== own) };
+}
+
+/** What the Settings page hands the browser for the picker: the words, never the playbook itself. */
+export type StarterRow = Pick<PlaybookStarter, "key" | "label" | "blurb">;
+
+export type StarterRows = {
+  own: StarterRow | null;
+  others: StarterRow[];
+  /** "a plumber": the company's trade, with its article, for the line the card says when no starter
+   *  is written for it; "" when the trade isn't known (then the card says nothing of the kind). */
+  tradeWords: string;
+};
+
+export function starterRowsForTrade(key: string): StarterRows {
+  const row = ({ key, label, blurb }: PlaybookStarter): StarterRow => ({ key, label, blurb });
+  const { own, others } = startersForTrade(key);
+  return { own: own ? row(own) : null, others: others.map(row), tradeWords: withArticle(tradePackage(key)?.words ?? "") };
+}

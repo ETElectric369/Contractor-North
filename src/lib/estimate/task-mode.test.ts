@@ -37,6 +37,11 @@ describe("taskModePrompt", () => {
     expect(prompt).toContain("NEVER: a price, a catalog code, a labor rate, a part he did not name, a task he did not describe");
   });
 
+  it("shows the shape of a part, never an electrician's example (NORT_EXAMPLES_RULE, cn-v1135)", () => {
+    expect(prompt).toContain('in his words ("<the part he named>", "<its size or type as he said it>")');
+    expect(taskModePrompt({ trade: "contractor" })).not.toMatch(/50 amp|6\/3|breaker/);
+  });
+
   it("carries the description and questions rules of the priced-lines prompt, and the company notes last", () => {
     expect(prompt).toContain('"description" = HIS OWN SCOPE, rewritten as 2-5 sentences');
     expect(prompt).toContain('"questions" = AT MOST TWO, and usually ZERO');

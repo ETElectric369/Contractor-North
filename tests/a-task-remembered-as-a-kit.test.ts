@@ -124,7 +124,9 @@ describe("the plain kit pickers never offer a task kit", () => {
 describe("the seed", () => {
   it("hands the task kits to taskLines, so a task with a kit prices from it", () => {
     const page = src("src/app/(app)/quotes/new/page.tsx");
-    expect(page).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"))');
+    // `category` rides the read (cn-v1135): the catalog picker offers the kits filed under Estimate.
+    expect(page).toContain('readTaskKits((sel) => supabase.from("kits").select(sel).order("name"), "category")');
+    expect(page).toContain('sameScope(k.category, "Estimate")');
     expect(page).toContain("const taskKits = kitsRead.kits;");
     expect(page).toContain("kitDoors && kitsReadWords(kitsRead.state) && ("); // the banner beside the price list's
     expect(page).toContain('reportError("quotes/new:kits"');

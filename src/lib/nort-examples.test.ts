@@ -243,11 +243,12 @@ describe("Nort is told the same thing the guard enforces", () => {
     expect(NORT_EXAMPLES_RULE).not.toMatch(ANY_EXAMPLE_WORD);
   });
 
-  it("only electrical work is sized by the NEC and its calculators", () => {
+  it("only electrical work is sized by the NEC and its calculators; the neutral line names no calculator, because none is offered (cn-v1135)", () => {
     expect(engineeringLine("electrical")).toContain("per NEC");
     for (const k of ["deck", "general", "plumbing", "painting", ""] as const) {
       expect(engineeringLine(k), k).not.toContain("per NEC");
-      expect(engineeringLine(k), k).toContain("electrical work only");
+      expect(engineeringLine(k), k).not.toContain("calc_");
+      expect(engineeringLine(k), k).toContain("THIS trade's own rules and code");
     }
   });
 

@@ -28,7 +28,8 @@ import {
   type OptionedPriceItem,
 } from "@/lib/pricing/item-options";
 import { reviewAgainstBook, type BookReview } from "@/lib/pricing/book-review";
-import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
+import { runCalc } from "@/lib/electrical-calc";
+import { estimatorCalcTools, estimatorQuantitiesLine } from "@/lib/nort/trade-prompt";
 import { recordAiUsage, aiSpendExceeded, currentOrgId, fullEstimatesThisMonth, orgPlanTier, noteEstimateRun, modelFor } from "@/lib/ai-cost";
 import { estimateTierFor, overFullEstimateAllowance, planByTier } from "@/lib/plans";
 import { rateLimited } from "@/lib/rate-limit";
@@ -38,7 +39,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { jobNameFrom } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { isMissingColumn } from "@/lib/job-tasks";
-import { tradeWordsOr, withArticle } from "@/lib/org-trade";
+import { orgTrade, tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { closeVisitsBehindQuote, outcomeForQuoteStatus } from "@/lib/appointments/behind-quote";
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -2287,6 +2288,9 @@ async function runEstimator(
   // cn-v80. runEstimator never did.
   const catalogMode = orgS.estimating_mode === "catalog";
   const trade = tradeWordsOr(orgS);
+  // The KEY, for the trade package's sentences and tools (cn-v1135): the words above name the
+  // estimator, the key decides what it is told and handed.
+  const tradeKey = orgTrade(orgS).key;
 
   const client = getAnthropic();
   // TASK MODE for his typed scope (runEstimatorTasks, above): the model splits, code checks, his
@@ -2328,9 +2332,10 @@ async function runEstimator(
           "CONSUMABLES: never give small hardware its own line — fasteners, connectors, clips, tape, " +
           "adhesives, sealant and the like. Work them into the material line they belong to, or into a " +
           "single 'Misc materials' line if they belong to no one line. " +
-          (catalogMode
-            ? "QUANTITIES: compute from the measurements given — areas = length × width, linear feet, counts. Do NOT apply trade calculations that don't fit this work. "
-            : "QUANTITIES: calculate per the governing code for this trade — don't eyeball. For anything the CALCULATOR TOOLS cover (wire size, voltage drop, conduit fill, box fill) CALL THE TOOL instead of working the tables from memory; they return the exact NEC answer plus the code rule behind it. Reasoning a table in your head is where wrong numbers come from. ") +
+          // THE QUANTITIES SENTENCE IS THE TRADE'S (cn-v1135, lib/trade-package): catalog mode
+          // measures; research mode follows the trade's own rules, and only the electrician's
+          // sentence names the calculator tools, because only the electrician is handed them.
+          estimatorQuantitiesLine(tradeKey, catalogMode) +
           'If a needed material is NOT in the price book, still include it, estimate a typical retail price, and mark source "home_depot". ' +
           'Respond with ONLY a JSON OBJECT: {"description": string, "items": [ ... ], "questions": [ ... ]}. ' +
           // THE SCOPE, POLISHED. Erik: "and the description is the scope polished / by default and
@@ -2387,12 +2392,14 @@ async function runEstimator(
    * while four exact, tested calculators sat in the codebase unused. They're pure lookups: no
    * writes, no side effects, nothing to confirm, so the loop can run them without asking.
    *
-   * Bounded at 3 rounds. Research-mode estimates need a handful of calls (wire size, then drop on
-   * the long run); a bound means a model that gets stuck in a calculation loop still returns an
-   * estimate instead of burning the org's shared daily budget. Catalog orgs (deck, carpentry) get
-   * no calculators at all — an electrical tool array is noise on a deck bid and costs tokens.
+   * Bounded at 3 rounds. An electrical research-mode estimate needs a handful of calls (wire size,
+   * then drop on the long run); a bound means a model that gets stuck in a calculation loop still
+   * returns an estimate instead of burning the org's shared daily budget. ONLY an electrical
+   * company in research mode gets them (estimatorCalcTools, cn-v1135): a catalog company of any
+   * trade and a research company of any other trade get none — an electrical tool array is noise
+   * on a deck or a plumbing bid and costs tokens.
    */
-  const tools = catalogMode ? undefined : (CALC_TOOLS as unknown as Anthropic.Tool[]);
+  const tools = estimatorCalcTools(tradeKey, catalogMode) as unknown as Anthropic.Tool[] | undefined;
   const convo: Anthropic.MessageParam[] = [{ role: "user", content }];
   let msg!: Anthropic.Message;
   const LAST_ROUND = 2;

@@ -64,7 +64,9 @@ export function taskModePrompt({ trade, playbook }: TaskModePromptInput): string
     "A time he gave for the whole job is nobody's task's hours: null. Days are never converted to hours: null. No hours said: null. " +
     // PARTS HE NAMED, COUNTED AS HE COUNTED. Naming a part is one of it; a count he did not say
     // is null, never a typical quantity.
-    '"materials" = ONLY the parts he named in that fragment, in his words ("50 amp breaker", "6/3"). "qty" = the count he gave for it in that fragment ("a", "an" or "one" in front of it is 1); no count said: null; never a quantity you worked out. ' +
+    // THE EXAMPLES ARE SHAPES (NORT_EXAMPLES_RULE, cn-v1135): this prompt goes to every trade, so
+    // the part it shows is a slot, never an electrician's breaker and wire.
+    '"materials" = ONLY the parts he named in that fragment, in his words ("<the part he named>", "<its size or type as he said it>"). "qty" = the count he gave for it in that fragment ("a", "an" or "one" in front of it is 1); no count said: null; never a quantity you worked out. ' +
     "NEVER: a price, a catalog code, a labor rate, a part he did not name, a task he did not describe, a typical figure for anything. A hole in his words is a hole in the answer, not a guess. " +
     // THE SCOPE, POLISHED — the same rule the priced-lines prompt carries (quotes/actions.ts).
     '"description" = HIS OWN SCOPE, rewritten as 2-5 sentences a homeowner reads above the line items. Plain, calm, specific about rooms and what gets done. ' +

@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import { TRADE_ORDER } from "@/lib/trade-codes";
 import { getOrgSettings } from "@/lib/org-settings";
 import { TRADE_WORDS, orgTrade, tradeKeyFromWords, tradeWordsOr, withArticle } from "./org-trade";
+import { TRADE_PACKAGES } from "@/lib/trade-package";
 
 /** Every source file under src (tests and DB suites aside). */
 const walk = (d: string): string[] =>
@@ -52,6 +53,8 @@ describe("the key decides, the words describe", () => {
   it("every sign-up trade has words of its own", () => {
     for (const k of TRADE_ORDER) {
       expect(TRADE_WORDS[k]?.trim(), k).toBeTruthy();
+      // The registry's words (cn-v1135): this map is its view, never a second list.
+      expect(TRADE_WORDS[k], k).toBe(TRADE_PACKAGES[k].words);
       // A person's words, not the dropdown's menu row ("Deck / carpentry").
       expect(TRADE_WORDS[k], k).not.toContain("/");
       // And the words read back as the same trade.

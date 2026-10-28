@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { TRADE_ORDER, TRADE_PRESETS } from "@/lib/trade-codes";
+import { TRADE_PACKAGES } from "@/lib/trade-package";
 import {
   ALL_ON,
   BLANK_PRESET,
@@ -80,6 +81,14 @@ describe("trade presets", () => {
     expect(Object.keys(TRADE_FEATURES).sort()).toEqual([...TRADE_ORDER].sort());
     // …and every TRADE_ORDER key is still an onboarding option.
     for (const t of TRADE_ORDER) expect(TRADE_PRESETS[t], t).toBeDefined();
+  });
+
+  it("is a VIEW of the registry (cn-v1135): each trade's switches ARE its package row's, and so are its codes", () => {
+    for (const t of TRADE_ORDER) {
+      expect(TRADE_FEATURES[t], t).toBe(TRADE_PACKAGES[t].features);
+      expect(TRADE_PRESETS[t].codes, t).toBe(TRADE_PACKAGES[t].codes);
+      expect(TRADE_PRESETS[t].label, t).toBe(TRADE_PACKAGES[t].menu);
+    }
   });
 
   it("every preset is a whole map of booleans", () => {

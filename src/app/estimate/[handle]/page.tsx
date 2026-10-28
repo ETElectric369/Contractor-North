@@ -12,6 +12,7 @@ import { Configurator } from "./configurator";
 import { PortfolioGallery } from "./portfolio-gallery";
 import { AskNort } from "../../site/ask-nort";
 import { featureOn } from "@/lib/features";
+import { deckConfiguratorOn } from "@/lib/org-trade";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export async function generateMetadata({ params }: { params: Promise<{ handle: s
   const { handle } = await params;
   const org = await getPublicOrgByHandle(handle);
   if (!org) return {}; // the page itself 404s
-  if (org.settings.estimating_mode !== "catalog") return {}; // ditto — non-catalog orgs 404 below
+  if (!deckConfiguratorOn(org.settings)) return {}; // ditto — any other company 404s below
   if (!(await orgIsServable(org.settings))) return {}; // wrong host → the page 404s below
   const s = org.settings;
   // A deliberate two-line hero is still one line HERE — titles and descriptions have no \n.
@@ -56,13 +57,13 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
   const org = await getPublicOrgByHandle(handle);
   if (!org) notFound();
   // This route is the DECK configurator — it is deck-specific by construction (DECK_ESTIMATE_CODES
-  // above). It answered 200 for EVERY org, so etelectricity.com/estimate/et-electric was a live
-  // page asking a C-10 electrician's customers to choose "New deck / Resurface / Railing only",
-  // under the homepage's meta description byte-for-byte. Same gate the sitemap already uses
-  // (sitemap.xml/route.ts:71) and the header CTA already uses (site-chrome.tsx:68), so the three
-  // cannot drift. Nothing links here for a non-catalog org, so this removes a page rather than
-  // breaking one.
-  if (org.settings.estimating_mode !== "catalog") notFound();
+  // above), so the gate is the deck TRADE pricing from its catalog (deckConfiguratorOn, the ONE
+  // gate the header CTA, the sitemap, the site chat's deck tool and the submit action share, so
+  // the five cannot drift). It once answered 200 for EVERY org, so an electrician's domain had a
+  // live page asking its customers to choose "New deck / Resurface / Railing only"; then it read
+  // catalog mode alone, so a catalog-mode landscaper would have had a page titled "Deck Estimate".
+  // Nothing links here for any other company, so this removes a page rather than breaking one.
+  if (!deckConfiguratorOn(org.settings)) notFound();
   // WRONG-HOST LEAK: the handle comes from the URL and was never compared to the host, so this
   // page answered 200 on SEVEN hosts, including the other tenant's domain — one contractor's
   // configurator and pricing on the other's, fully crawlable. The canonical was correct, which

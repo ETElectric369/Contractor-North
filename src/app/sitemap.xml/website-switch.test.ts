@@ -23,7 +23,8 @@ const org = () => ({
   city: null,
   state: null,
   updated_at: "2026-09-01T12:00:00Z",
-  settings: getOrgSettings({ public_handle: "fixture", custom_domain: "etelectricity.com", estimating_mode: "catalog", ...stored }),
+  // A DECK company pricing from its catalog: the shape that lists /estimate/<handle> (deckConfiguratorOn, cn-v1135).
+  settings: getOrgSettings({ public_handle: "fixture", custom_domain: "etelectricity.com", trade: "deck", estimating_mode: "catalog", ...stored }),
 });
 vi.mock("@/lib/public-org", async (orig) => ({
   ...(await orig<typeof import("@/lib/public-org")>()),
@@ -101,6 +102,15 @@ describe("the sitemap", () => {
   it("Site Chat off changes nothing here", async () => {
     stored = { features: { site_chat: false } };
     expect(await (await sitemap()).text()).toBe(SITEMAP_TODAY);
+  });
+
+  it("a catalog-mode company of another trade lists no /estimate/ page (the page 404s for it — one gate, cn-v1135)", async () => {
+    stored = { trade: "landscaping" };
+    const xml = await (await sitemap()).text();
+    expect(xml).not.toContain("/estimate/fixture");
+    expect(xml).toContain("https://etelectricity.com/</loc>");
+    stored = { trade: "deck", estimating_mode: "research" };
+    expect(await (await sitemap()).text()).not.toContain("/estimate/fixture");
   });
 });
 

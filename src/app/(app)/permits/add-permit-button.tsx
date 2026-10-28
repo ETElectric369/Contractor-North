@@ -13,15 +13,17 @@ import { PERMIT_TYPES as TYPES, PERMIT_PICKABLE_STATUSES as STATUSES } from "@/l
 type JobOpt = { id: string; label: string };
 
 /** Standalone "Add permit" on the /permits page — the job is OPTIONAL (a permit can stand
- *  alone), so the page is no longer view-only. Mirrors the job-tab form, wraps createPermit. */
-export function AddPermitButton({ jobs }: { jobs: JobOpt[] }) {
+ *  alone), so the page is no longer view-only. Mirrors the job-tab form, wraps createPermit.
+ *  `defaultType` is the company's trade's permit (lib/trade-package defaultPermitType), read by the
+ *  server page that renders this: the form opened on Electrical for every trade before cn-v1135. */
+export function AddPermitButton({ jobs, defaultType }: { jobs: JobOpt[]; defaultType: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   const [jobId, setJobId] = useState("");
-  const [type, setType] = useState("Electrical");
+  const [type, setType] = useState(defaultType);
   const [num, setNum] = useState("");
   const [authority, setAuthority] = useState("");
   const [status, setStatus] = useState("applied");

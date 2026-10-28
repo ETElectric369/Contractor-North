@@ -132,13 +132,12 @@ describe("a supplier's terms are the supplier's own", () => {
 });
 
 describe("a deck company's customers are asked about a region only when the company priced one", () => {
-  it("the configurator, the office generator and the site chat gate the TRPA question on deckAsksTrpa", () => {
+  // The office deck generator (quotes/new/deck-generator-panel) is gone (cn-v1135): nothing had
+  // mounted it since the kit picker took over, so its gate is no longer a door to pin.
+  it("the configurator and the site chat gate the TRPA question on deckAsksTrpa", () => {
     const conf = src("src/app/estimate/[handle]/configurator.tsx");
     expect(conf.indexOf("deckAsksTrpa(rates) &&")).toBeGreaterThan(-1);
     expect(conf.indexOf("deckAsksTrpa(rates) &&")).toBeLessThan(conf.indexOf("Lake Tahoe basin"));
-    const gen = src("src/app/(app)/quotes/new/deck-generator-panel.tsx");
-    expect(gen.indexOf("deckAsksTrpa(rates) &&")).toBeGreaterThan(-1);
-    expect(gen.indexOf("deckAsksTrpa(rates) &&")).toBeLessThan(gen.indexOf("Tahoe basin"));
     const chat = src("src/app/api/site-chat/route.ts");
     expect(chat).toContain("deckTool(asksTrpa)");
     expect(chat).toContain('${asksTrpa ? ", and whether it\'s in the Tahoe/TRPA basin" : ""}');

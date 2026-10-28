@@ -27,12 +27,21 @@ function org(settings: Record<string, unknown>): PublicOrg {
 }
 
 describe("deriveSiteChrome estimate-CTA precedence", () => {
-  it("catalog configurator outranks a live intake door", () => {
-    const c = deriveSiteChrome(org({ public_handle: "demo", estimating_mode: "catalog" }), { onHomepage: true, intakeOn: true });
+  it("the deck configurator (a DECK company pricing from its catalog) outranks a live intake door", () => {
+    const c = deriveSiteChrome(org({ public_handle: "demo", trade: "deck", estimating_mode: "catalog" }), { onHomepage: true, intakeOn: true });
     expect(c.estimateHref).toBe("/estimate/demo");
     expect(c.hasConfigurator).toBe(true);
     expect(c.hasIntake).toBe(false);
     expect(c.hasEstimateDoor).toBe(true);
+  });
+
+  it("a catalog-mode company of another trade gets no configurator CTA (the page would 404 — one gate, cn-v1135): the intake door, then the form", () => {
+    const landscaper = deriveSiteChrome(org({ public_handle: "demo", trade: "landscaping", estimating_mode: "catalog" }), { onHomepage: true, intakeOn: true });
+    expect(landscaper.hasConfigurator).toBe(false);
+    expect(landscaper.estimateHref).toBe("/intake/demo");
+    const deckResearch = deriveSiteChrome(org({ public_handle: "demo", trade: "deck", estimating_mode: "research" }), { onHomepage: true, intakeOn: false });
+    expect(deckResearch.hasConfigurator).toBe(false);
+    expect(deckResearch.estimateHref).toBe("#contact-form");
   });
 
   it("a live intake door becomes the estimator CTA for non-catalog orgs", () => {

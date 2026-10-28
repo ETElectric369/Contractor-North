@@ -10,6 +10,8 @@ import type { LeadIntake } from "@/lib/lead-triage";
 import { computeDeckEstimate, buildDeckRates, deckAsksTrpa, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { deckConfiguratorOn, orgTrade } from "@/lib/org-trade";
+import { tradeNort } from "@/lib/trade-nort";
 
 export const runtime = "nodejs";
 
@@ -200,11 +202,19 @@ function systemPrompt(org: PublicOrg, area: string, threshold: number, isDeck: b
     org.email ? `- Email: ${org.email}` : "",
   ].filter(Boolean).join("\n");
   const playbook = (s.quote_playbook || "").trim();
+  // THE TRADE'S WORDS (cn-v1135, lib/trade-nort): the package example, what moves month to month,
+  // the small stuff that is bundled and what to read off a photo are the company's trade's own — an
+  // electrician's pricing words are what they were (its photo line no longer names a deck); every
+  // other trade, and a company whose trade isn't known, gets the neutral set, so a plumber's
+  // customers are no longer told about panel swaps, breakers and wire nuts.
+  // `trade` rides the server read of organizations.settings (getPublicOrgByHandle), never the
+  // browser's public_org projection.
+  const w = tradeNort(orgTrade(s).key);
   // Two pricing methods. Catalog orgs (e.g. a deck company) quote from their own stored price
   // list. Research orgs (e.g. an electrician) don't keep a list of a million tiny parts — they
   // quote set packages for known jobs and market-research the variable materials live.
   const pricingHow = canWebSearch
-    ? `- Give a PRELIMINARY ballpark like this: (a) if the pricing script above lists a SET PACKAGE price for the job (e.g. a like-for-like panel swap), quote THAT package directly — don't rebuild it from parts; (b) otherwise, use web_search to find CURRENT market prices for the materials from a few sources, average them, add ${org.name}'s ${buffer}% buffer, and add the labor. Copper, breakers, EV chargers and fixtures move month to month, so research them live rather than guessing. BUNDLE the small stuff (wire, nuts, staples, screws, straps) into ONE sensible materials line — never itemize every screw. If opening a wall is involved and the script calls for drywall repair, add it as its own chargeable line.`
+    ? `- Give a PRELIMINARY ballpark like this: (a) if the pricing script above lists a SET PACKAGE price for the job (e.g. ${w.siteChatPackage}), quote THAT package directly — don't rebuild it from parts; (b) otherwise, use web_search to find CURRENT market prices for the materials from a few sources, average them, add ${org.name}'s ${buffer}% buffer, and add the labor. ${w.siteChatMoving}, so research them live rather than guessing. BUNDLE the small stuff (${w.siteChatSmallStuff}) into ONE sensible materials line — never itemize every screw. If opening a wall is involved and the script calls for drywall repair, add it as its own chargeable line.`
     : `- Ask a couple of quick questions to understand the job, then give a PRELIMINARY ballpark using search_prices (the company's real prices) × the quantities they describe.`;
   return [
     `You are Nort, ${org.name}'s friendly estimate assistant on their public website. You're talking with a potential customer — a member of the public. Help them describe their project, give a quick PRELIMINARY ballpark, and answer questions about ${org.name}'s services.`,
@@ -212,7 +222,7 @@ function systemPrompt(org: PublicOrg, area: string, threshold: number, isDeck: b
     playbook ? `\nHOW ${org.name} SCOPES & PRICES A JOB (this is your script — use it to ask the right questions, quote set packages, and set expectations):\n${playbook}` : "",
     `\nWHAT TO DO:
 ${pricingHow}
-- If the customer attaches a PHOTO, look at it: identify what you can (e.g. panel brand & amperage, wiring/condition, access, deck size/shape) and use it to sharpen your questions and the estimate. Mention what you noticed so they know you saw it.
+- If the customer attaches a PHOTO, look at it: identify what you can (e.g. ${w.siteChatPhoto}) and use it to sharpen your questions and the estimate. Mention what you noticed so they know you saw it.
 - ALWAYS call it a preliminary estimate, subject to confirmation once ${org.name} reviews the details.${
       isDeck
         ? `\n- THIS IS A DECK COMPANY: for any deck job, gather the measurements (length, width, tallest-point height, wood or composite, railing feet, sets of stairs plus the total step count, whether the stairs get railing, doors onto the deck${asksTrpa ? ", and whether it's in the Tahoe/TRPA basin" : ""}), then call deck_estimate for an EXACT preliminary number — prefer it over doing the math yourself.`
@@ -437,7 +447,10 @@ export async function POST(req: Request) {
     .in("code", DECK_ESTIMATE_CODES as unknown as string[])
     .order("updated_at", { ascending: false });
   const deckRates = buildDeckRates((deckCat ?? []) as { code: string | null; buy_price: number | null; markup_pct: number | null }[]);
-  const isDeck = Object.keys(deckRates).length >= 3;
+  // THE ONE GATE (deckConfiguratorOn, cn-v1135): a DECK company pricing from its catalog, AND the
+  // deck codes priced. The rates alone decided before, so a catalog-mode landscaper who happened
+  // to price three of the deck codes was handed the deck tool and told it was a deck company.
+  const isDeck = deckConfiguratorOn(org.settings) && Object.keys(deckRates).length >= 3;
   const asksTrpa = isDeck && deckAsksTrpa(deckRates);
   // Research-mode orgs (electricians etc.) get live web-priced materials; catalog orgs (decks)
   // price from their own list + the deterministic deck engine, so they don't need it.

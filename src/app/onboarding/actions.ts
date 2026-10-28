@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { TRADE_PRESETS } from "@/lib/trade-codes";
+import { tradePackage } from "@/lib/trade-package";
 import { featurePreset, normalizeTradeKey } from "@/lib/features";
 
 export async function createOrganization(formData: FormData) {
@@ -18,16 +18,18 @@ export async function createOrganization(formData: FormData) {
     redirect(`/onboarding?error=${encodeURIComponent("Company name is required.")}`);
   }
 
-  // THE TRADE IS KEPT NOW (0352). It seeds the picked trade's job codes (deck, electrical, …), and
-  // it is saved as the company's trade key with its starting switches (lib/features featurePreset).
-  // "Other / Not Listed" is a real answer: trade-neutral codes and the light preset. No answer at
-  // all is not one: the select is required, and a form that arrives without it says so.
+  // THE TRADE IS KEPT NOW (0352). It seeds the picked trade's WHOLE job-code list from the registry
+  // (lib/trade-package — the one list "Import A Trade's Codes" offers too, so nothing is left to
+  // import later), and it is saved as the company's trade key with its starting switches
+  // (lib/features featurePreset). "Other / Not Listed" is a real answer: trade-neutral codes and the
+  // light preset. No answer at all is not one: the select is required, and a form that arrives
+  // without it says so.
   const picked = String(formData.get("trade") ?? "").trim();
   if (!picked) {
     redirect(`/onboarding?error=${encodeURIComponent("Pick your trade, or Other / Not Listed.")}`);
   }
   const trade = normalizeTradeKey(picked); // "other" and anything unknown → "" (blank)
-  const codes = trade ? (TRADE_PRESETS[trade]?.codes ?? null) : null;
+  const codes = tradePackage(trade)?.codes ?? null;
 
   // Atomic, RLS-safe: creates the org, makes the caller its owner, seeds the trade's job codes + a
   // safety form, and saves the trade and its switches. (See create_organization in 0352.)

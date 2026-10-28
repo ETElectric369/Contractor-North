@@ -9,12 +9,41 @@ import { renderToStaticMarkup } from "react-dom/server";
  * records, and the one-line confirm naming what stops.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
-vi.mock("./features-actions", () => ({ setFeature: vi.fn(async () => ({ ok: true })) }));
+vi.mock("./features-actions", () => ({
+  setFeature: vi.fn(async () => ({ ok: true })),
+  setOrgTrade: vi.fn(),
+  applyTradeCodes: vi.fn(),
+  applyTradeSwitches: vi.fn(),
+  startTradeSheet: vi.fn(),
+  setEstimatingMode: vi.fn(),
+}));
 
-import { FeatureBoard, stopsLine, type FeatureBoardProps } from "./feature-board";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  FeatureBoard,
+  MODE_LINES,
+  TRADE_FOLLOWS_LINE,
+  UNREACHABLE,
+  cardCall,
+  deckPageOffLine,
+  stopsLine,
+  tradeSavedWords,
+  type FeatureBoardProps,
+} from "./feature-board";
 import { ALL_ON, FEATURES, FEATURE_KEYS, featurePreset } from "@/lib/features";
+import { TRADE_PACK_OPTIONS } from "@/lib/trade-package";
 
-const base: FeatureBoardProps = { features: ALL_ON, isOwner: true, counts: {}, siteName: null, crewQuiet: false, ready: true };
+const base: FeatureBoardProps = {
+  features: ALL_ON,
+  isOwner: true,
+  counts: {},
+  siteName: null,
+  crewQuiet: false,
+  ready: true,
+  trade: { key: "plumbing", menu: "Plumbing" },
+  estimatingMode: "research",
+};
 const render = (p: Partial<FeatureBoardProps> = {}) => renderToStaticMarkup(createElement(FeatureBoard, { ...base, ...p }));
 const switches = (html: string) => [...html.matchAll(/<button[^>]*role="switch"[^>]*>/g)].map((m) => m[0]);
 const text = (html: string) => html.replace(/<[^>]+>/g, "\n").replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
@@ -129,5 +158,124 @@ describe("the one-line confirm naming what stops", () => {
   it("Customer Portal says its links stop opening, not just that buttons hide", () => {
     // lib/portal/access answers portal_off before any sign-in; /i and /api/pay never read the switch.
     expect(stopsLine("customer_portal", "x.com", 4)).toBe("Your customers' portal links stop opening. Invoice and pay links still work.");
+  });
+});
+
+describe("Your Trade & Pricing, the top card (cn-v1135)", () => {
+  it("sits above the switches: the trade's menu row, Change My Trade and Research / Catalog for the owner, one line each", () => {
+    const html = render();
+    const t = text(html);
+    expect(t).toContain("Your Trade: Plumbing");
+    expect(html.indexOf("Your Trade: Plumbing")).toBeLessThan(html.indexOf(">Leads &amp; Inspections<"));
+    expect(html).toContain(">Change My Trade<");
+    expect(html).toContain(">Research<");
+    expect(html).toContain(">Catalog<");
+    expect(t).toContain(MODE_LINES.research);
+    expect(t).toContain(MODE_LINES.catalog);
+    // The card tells the truth about the key: what follows it at once, and what is only offered.
+    expect(t).toContain(TRADE_FOLLOWS_LINE);
+    expect(t).not.toMatch(/nothing moves on its own|changes nothing else|Nothing else moved/i);
+    expect(t).not.toContain("Ask The Owner");
+  });
+
+  it("anyone but the owner reads the trade and the mode, with no button, and is told who can change them", () => {
+    const html = render({ isOwner: false, estimatingMode: "catalog" });
+    expect(html).not.toContain("<button");
+    const t = text(html);
+    expect(t).toContain("Your Trade: Plumbing");
+    expect(t).not.toContain("Change My Trade");
+    expect(t).toContain("Catalog · Ask The Owner");
+    expect(t).toContain(MODE_LINES.catalog);
+  });
+
+  it("before the switches are on the database the owner reads both rows too, and is not told to ask themselves", () => {
+    const html = render({ ready: false });
+    expect(html).not.toContain("Change My Trade");
+    expect(html).not.toContain("<button"); // no control: the mode is read as a word
+    const t = text(html);
+    expect(t).toContain("Your Trade: Plumbing");
+    expect(t).toMatch(/\nResearch\n/);
+    expect(t).not.toContain("Ask The Owner");
+  });
+
+  it("a company with no key reads Not Listed; the ten trades are the sign-up menu's rows in its order", () => {
+    expect(text(render({ trade: { key: "", menu: "Not Listed" } }))).toContain("Your Trade: Not Listed");
+    expect(TRADE_PACK_OPTIONS.map((o) => o.id)[0]).toBe("general");
+    expect(TRADE_PACK_OPTIONS).toHaveLength(10);
+  });
+
+  it("the card's words never name one trade as the rule", () => {
+    const t = text(render({ trade: { key: "deck", menu: "Deck / Carpentry" } }));
+    expect(t).not.toMatch(/electrician|NEC/);
+  });
+});
+
+describe("the trade door tells the truth (B1)", () => {
+  it("the one sentence names what follows the key at once and what only gets a button", () => {
+    expect(TRADE_FOLLOWS_LINE).toBe(
+      "Your trade sets Nort's words, the Tools page, the permit default and which inspection starter is offered. Your codes, switches, sheets and playbook stay as they are; below, each has its own button.",
+    );
+    // The same sentence stands in the Change My Trade sheet (the modal renders nothing while closed).
+    const file = readFileSync(join(process.cwd(), "src/app/(app)/settings/feature-board.tsx"), "utf8");
+    expect(file.match(/\{TRADE_FOLLOWS_LINE\}/g)).toHaveLength(2);
+  });
+
+  it("the result line names the words that were cleared, and says nothing of it when none were", () => {
+    expect(tradeSavedWords({ trade: "plumbing", clearedWords: "deck builder" }, "Plumbing")).toBe(
+      `Your trade is Plumbing. Nort's words, the Tools page and the permit default follow it now; the offers below are each your call. Your words "deck builder" were cleared.`,
+    );
+    expect(tradeSavedWords({ trade: "plumbing", clearedWords: null }, "Plumbing")).not.toContain("were cleared");
+    expect(tradeSavedWords({ trade: "", clearedWords: "deck builder" }, "Not Listed")).toBe(
+      'Your trade is not listed. The app stays neutral. Your words "deck builder" were cleared.',
+    );
+  });
+
+  it("a catalog-mode deck company moving to another trade is told its public instant-estimate page turns off, before Save", () => {
+    expect(deckPageOffLine("deck", "catalog", "plumbing")).toBe("Your public instant-estimate page turns off until a deck trade is set again.");
+    expect(deckPageOffLine("deck", "catalog", "other")).toBe("Your public instant-estimate page turns off until a deck trade is set again.");
+    // Not a deck company, not catalog mode, or the pick is still deck: nothing turns off, nothing is said.
+    expect(deckPageOffLine("deck", "research", "plumbing")).toBeNull();
+    expect(deckPageOffLine("plumbing", "catalog", "deck")).toBeNull();
+    expect(deckPageOffLine("deck", "catalog", "deck")).toBeNull();
+    expect(deckPageOffLine("", "catalog", "plumbing")).toBeNull();
+    const file = readFileSync(join(process.cwd(), "src/app/(app)/settings/feature-board.tsx"), "utf8");
+    expect(file).toContain("const deckOff = deckPageOffLine(key, mode, picked);");
+    expect(file).toContain("{deckOff && <p");
+  });
+});
+
+describe("the card cannot get stuck (S1)", () => {
+  it("a thrown action becomes a refusal in words and still runs done, so the buttons re-enable", async () => {
+    const done = vi.fn();
+    const res = await cardCall(async () => {
+      throw new Error("fetch failed");
+    }, done);
+    expect(res).toEqual({ ok: false, error: UNREACHABLE });
+    expect(UNREACHABLE).toBe("Couldn't reach the server — try again.");
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it("an answered action passes through untouched, refused or not, and done runs once each time", async () => {
+    const done = vi.fn();
+    expect(await cardCall(async () => ({ ok: true as const, mode: "catalog" }), done)).toEqual({ ok: true, mode: "catalog" });
+    expect(await cardCall(async () => ({ ok: false as const, error: "Only the owner can change the company's trade." }), done)).toEqual({
+      ok: false,
+      error: "Only the owner can change the company's trade.",
+    });
+    expect(done).toHaveBeenCalledTimes(2);
+  });
+
+  it("every server call the card makes goes through cardCall with setBusy(null) as done; none is awaited bare", () => {
+    const file = readFileSync(join(process.cwd(), "src/app/(app)/settings/feature-board.tsx"), "utf8");
+    const card = file.slice(file.indexOf("function TradeCard("));
+    expect(card).not.toMatch(/await (setOrgTrade|applyTradeCodes|applyTradeSwitches|startTradeSheet|setEstimatingMode)\(/);
+    for (const door of ["setOrgTrade(", "applyTradeSwitches(", "applyTradeCodes(", "startTradeSheet(", "setEstimatingMode("]) expect(card).toContain(door);
+    expect(card.match(/await cardCall\(/g)).toHaveLength(3);
+    expect(card.match(/\(\) => setBusy\(null\)/g)).toHaveLength(3);
+    // A refused or thrown mode pick goes back to the value the server last confirmed.
+    expect(card).toContain("setMode(previous);");
+    expect(card).toContain("setMode(res.mode);");
+    // Every door button is disabled while any call is out.
+    expect(card.match(/disabled=\{busy !== null\}/g)?.length).toBeGreaterThanOrEqual(2);
   });
 });

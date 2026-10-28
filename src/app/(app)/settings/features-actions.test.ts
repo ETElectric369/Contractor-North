@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *   - a stored value that isn't the asked-for one is a failure, never a quiet success;
  *   - a database without 0352 gets a plain line, not a developer error;
  *   - the RPC's own refusals come through in its words;
- *   - updateOrgSettings refuses a switch in words instead of dropping it.
+ *   - updateOrgSettings refuses a switch in words instead of dropping it, and strips estimating_mode
+ *     (the owner's own door, features-actions setEstimatingMode, writes it).
  */
 const state = vi.hoisted(() => ({ client: null as any, rpcCalls: [] as { fn: string; args: unknown }[], fromCalls: 0 }));
 vi.mock("@/lib/supabase/server", () => ({
@@ -15,6 +16,10 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/pdf-cache", () => ({ bustOrgPdfs: vi.fn(async () => {}) }));
+vi.mock("@/lib/site-editor-guard", () => ({
+  resolveSiteContext: async () => ({ supabase: state.client, userId: "me", orgId: "org-1", isCollaborator: false }),
+}));
 
 import { setFeature } from "./features-actions";
 import { updateOrgSettings } from "./actions";
@@ -83,4 +88,32 @@ describe("updateOrgSettings refuses the switch board's keys in words", () => {
       expect(state.rpcCalls).toHaveLength(0);
     },
   );
+});
+
+describe("updateOrgSettings strips estimating_mode: How You Price is the owner's door (S5)", () => {
+  it("a staff save carrying it writes everything else and never the mode", async () => {
+    const updates: Record<string, unknown>[] = [];
+    state.client = {
+      auth: { getUser: async () => ({ data: { user: { id: "me" } } }) },
+      rpc: async () => ({ data: null, error: null }),
+      from: (table: string) => {
+        const b: any = {
+          select: () => b,
+          eq: () => b,
+          single: async () => ({ data: table === "organizations" ? { settings: { estimating_mode: "catalog", service_area: "Larkspur" } } : null, error: null }),
+          update: (patch: Record<string, unknown>) => {
+            updates.push(patch);
+            const u: any = { eq: () => u, select: async () => ({ data: [{ id: "org-1" }], error: null }) };
+            return u;
+          },
+        };
+        return b;
+      },
+    };
+    const res = await updateOrgSettings({ estimating_mode: "research", service_area: "Snowbell" });
+    expect(res).toEqual({ ok: true });
+    expect(updates).toHaveLength(1);
+    // The stored mode stands; the rest of the patch landed.
+    expect(updates[0]).toEqual({ settings: { estimating_mode: "catalog", service_area: "Snowbell" } });
+  });
 });

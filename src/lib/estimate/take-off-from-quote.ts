@@ -5,6 +5,7 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
 import { firstThatWorks, kitLineView, linkedItemOf } from "@/lib/kit-line";
 import { partsKitsOnly, taskKitSelectRungs } from "./task-kits";
+import { sameScope } from "@/lib/playbook/scope";
 import { coerceTaskDetail, lineQty } from "./task-lines";
 import { keyParts, materialKey, partQtyFor } from "./born-with-tasks";
 import { readAllPages } from "@/lib/read-all-pages";
@@ -613,12 +614,15 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
   const plan = adopted ? planPlainRows(plainLines, unkeyed, originalHalves) : null;
   for (const r of plan?.insert ?? []) rows.push({ ...r, sort_order: so++ });
 
-  // Catalog orgs (Tahoe Deck): the granular MATERIAL kits (Framing, Hardware, Decking…) are
-  // the POST-ACCEPTANCE purchasing breakdown — deliberately kept OFF the estimate, seeded onto
-  // the job's materials list here so the crew has the buy-list grouped by scope. Prefixed with
-  // the kit name (material_list_items has no group column). Only on first creation (idempotent
-  // return above), so re-running never duplicates the groups. RLS scopes kits to this org on a
-  // user client; the company's id scopes them on the service client.
+  // Catalog orgs: the granular MATERIAL kits (framing, hardware, decking…) are the POST-ACCEPTANCE
+  // purchasing breakdown — deliberately kept OFF the estimate, seeded onto the job's materials
+  // list here so the crew has the buy-list grouped by scope. The kits FILED UNDER Estimate
+  // (kits.category, the same rule the estimate picker reads — quotes/new) are the whole-job scope
+  // kits the estimate was priced from and are never a buy-list group; before cn-v1135 this read
+  // two kit NAMES from one company's list. Prefixed with the kit name (material_list_items has no
+  // group column). Only on first creation (idempotent return above), so re-running never
+  // duplicates the groups. RLS scopes kits to this org on a user client; the company's id scopes
+  // them on the service client.
   // On a list adopted from the ORIGINAL estimate (0391) the groups are there already — the crew's bought
   // marks on them. The job's own list (a visit's, a hand add) never had them (audit v1085, carried): seeded
   // after the crew's rows. A TASK KIT (hours per unit) prices a task line and is never a buy-list group
@@ -629,13 +633,14 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
     // — the whole point — its BUY price as est_cost, not a sell price to back a markup out of.
     // A frozen line keeps today's behaviour (its unit_price as the estimate).
     const { data: matKits } = await firstThatWorks(
-      taskKitSelectRungs().map((sel) => () => {
-        let q = supabase.from("kits").select(sel).not("name", "in", '("Decks","Remodels")');
+      taskKitSelectRungs("category").map((sel) => () => {
+        let q = supabase.from("kits").select(sel);
         if (orgId) q = q.eq("org_id", orgId);
         return q.order("name");
       }),
     );
-    for (const k of partsKitsOnly((matKits ?? []) as any[])) {
+    const buyListKits = partsKitsOnly((matKits ?? []) as any[]).filter((k: { category?: string | null }) => !sameScope(k.category, "Estimate"));
+    for (const k of buyListKits) {
       const kitItems = [...(k.kit_items ?? [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       for (const it of kitItems) {
         const item = linkedItemOf(it);

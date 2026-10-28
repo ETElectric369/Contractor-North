@@ -15,7 +15,7 @@ export const permitActions: Record<string, ActionDef> = {
     // in order — they are rows in permit_inspections now, booked on the permit's own card, and
     // permits.inspection_date is superseded. `authority` is who ISSUED the permit, not who inspects it.
     description:
-      "Log a PERMIT — e.g. 'add a <type> permit for the <job> job, applied today'. Resolve the job first with list_jobs and pass job_id (optional — a permit can stand alone). type defaults to Electrical, status to applied; dates are YYYY-MM-DD. `authority` is who ISSUED it. The inspections it needs are separate: each authority that has to come is added on the permit itself, in the order they come.",
+      "Log a PERMIT — e.g. 'add a <type> permit for the <job> job, applied today'. Resolve the job first with list_jobs and pass job_id (optional — a permit can stand alone). type defaults to the company's trade's permit (Plumbing, Building, …), status to applied; dates are YYYY-MM-DD. `authority` is who ISSUED it. The inspections it needs are separate: each authority that has to come is added on the permit itself, in the order they come.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       permit_number: z.string().nullable().optional(),

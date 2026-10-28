@@ -47,10 +47,13 @@ export interface OrgSettings {
   /** Free-text "how we quote" playbook injected into AI quote drafts + assistant. */
   quote_playbook: string;
   /** How this company prices work, which base estimating method Nort uses:
-   *  "research" = live web-searched material prices + trade-calculated quantities (the
-   *  electrical/trade default); "catalog" = bid from the company's OWN price list + saved
-   *  kits at their own prices, quantities from the customer's measurements (deck/carpentry
-   *  & any preset-price shop). The quote_playbook holds the company's specific scoping script. */
+   *  "research" = the company's price book first, current prices researched for what it lacks,
+   *  quantities calculated per the trade's own rules (THE DEFAULT for every company, whatever its
+   *  trade); "catalog" = bid from the company's OWN price list + saved kits at their own prices,
+   *  never a web price, quantities from the customer's measurements (any preset-price shop; for a
+   *  deck builder it also opens the public configurator, lib/org-trade deckConfiguratorOn). The
+   *  owner sets it on Settings › Features › Your Trade & Pricing (setEstimatingMode, cn-v1135).
+   *  The quote_playbook holds the company's specific scoping script. */
   estimating_mode: "research" | "catalog";
   /** What this company DOES, in the words a person would use: "deck builder",
    *  "electrical contractor", "plumber". Drives the estimator's opening line and the

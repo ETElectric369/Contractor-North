@@ -107,6 +107,33 @@ describe("takeOffFromQuote — the job's own list is the list (cn-v1084)", () =>
     const takeOff = fs.readFileSync(path.join(process.cwd(), "src/lib/estimate/take-off-from-quote.ts"), "utf8");
     expect(takeOff).toContain('if (settings.estimating_mode === "catalog" && !adoptedFromOriginal) {'); // a job-own (visit) list never had them: seeded
   });
+  it("a catalog org's buy list takes the material kits by RULE: a kit filed under Estimate (the scope kit the estimate was priced from) is never a buy-list group; the rest are (cn-v1135)", async () => {
+    const db = world([{ id: "l1", quote_id: "q-1", org_id: ORG, description: "14/2 romex [W142]", quantity: 2, unit: "roll", unit_price: 125, sort_order: 0, detail: null }], {
+      settings: { default_markup_pct: 25, estimating_mode: "catalog" },
+    });
+    db.tables.kits = [
+      // Filed under Estimate in either spelling: the whole-job scope kits, never seeded.
+      { id: "k-scope", org_id: ORG, name: "Decks", category: "Estimate", labor_minutes: null, kit_items: [{ id: "i1", description: "Whole deck, per sq ft", quantity: 1, unit: "sqft", unit_price: 40, sort_order: 0 }] },
+      { id: "k-scope-2", org_id: ORG, name: "Remodels", category: "estimates", labor_minutes: null, kit_items: [{ id: "i2", description: "Remodel allowance", quantity: 1, unit: "ea", unit_price: 500, sort_order: 0 }] },
+      // A material kit under its own scope word: the crew's buy-list group.
+      { id: "k-frame", org_id: ORG, name: "Framing", category: "Deck", labor_minutes: null, kit_items: [{ id: "i3", description: "Joist hanger", quantity: 10, unit: "ea", unit_price: 2, sort_order: 0 }] },
+      // A TASK kit (hours per unit) prices a task line and is never a buy-list group (partsKitsOnly), as before.
+      { id: "k-task", org_id: ORG, name: "Set a post", category: "Deck", labor_minutes: 60, kit_items: [{ id: "i4", description: "Post base", quantity: 1, unit: "ea", unit_price: 15, sort_order: 0 }] },
+    ];
+    const res = await takeOffFromQuote(db.sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res.ok).toBe(true);
+    expect(db.inserted.material_list_items.map((r) => r.description)).toEqual(["14/2 romex", "Framing — Joist hanger"]);
+    const takeOff = fs.readFileSync(path.join(process.cwd(), "src/lib/estimate/take-off-from-quote.ts"), "utf8");
+    expect(takeOff).not.toContain("Decks"); // no company's kit NAMES in the rule
+    expect(takeOff).toContain('!sameScope(k.category, "Estimate")');
+    expect(takeOff).toContain('taskKitSelectRungs("category")');
+  });
+  it("the catalog picker on /quotes/new offers the Estimate-scope kits through partsKitsOnly first, so a task kit filed under Estimate never drops in and loses its hours (S6)", () => {
+    const page = fs.readFileSync(path.join(process.cwd(), "src/app/(app)/quotes/new/page.tsx"), "utf8");
+    expect(page).toContain('partsKitsOnly(kits ?? []).filter((k: any) => sameScope(k.category, "Estimate"))');
+    // Never the bare read at the ternary's branch: that was the picker that let a task kit in.
+    expect(page).not.toMatch(/\?\s*\(kits \?\? \[\]\)\.filter/);
+  });
   it("a DRAFT or sent estimate never adopts (nothing would add its parts): a fresh list, as before", async () => {
     const db = world(lines); // status undefined: not accepted
     db.tables.material_lists.push({ id: "ml-visit", job_id: "job-1", quote_id: null, org_id: ORG, created_at: "2026-10-01" });
