@@ -29,6 +29,14 @@ import { kitLineView, type KitLineRaw, type KitPricing } from "@/lib/kit-line";
  * longer carries) prices at $0 and asks "price?". Nothing here ever fills a hole with a typical
  * figure: the line is a zero that ASKS, never a number that looks right.
  *
+ * ── THE QTY BOX IS "THIS MANY OF THE TASK" (cn-v1133) ───────────────────────────────────────
+ *
+ * The breakdown is PER UNIT: lineFromDetail writes its total as the line's unit_price, and the Qty
+ * box multiplies it on the paper (line_total = qty × unit_price). So the breakdown explains the line
+ * while it equals the UNIT price (detailExplains), and the job reads the same multiplier: a task at
+ * qty 2 is twice the minutes and twice each part (taskMinutesFor, born-with-tasks). A kit's `units`
+ * is a DIFFERENT multiplier, already inside the breakdown (expandTaskKit): qty 2 of a ×7 kit is 14.
+ *
  * Pure. The page that calls it has already resolved the rate (laborRateFor) and the customer's
  * markup; the same function serves the inspection seed, the estimator's task mode and the builder.
  */
@@ -289,10 +297,18 @@ export function taskFlags(d: TaskDetail): string | undefined {
  * editor after it was built; the breakdown then describes a number the customer is not being
  * asked for. The document prints the breakdown only while it adds up to the line, so a stale one
  * disappears from the paper instead of contradicting it (nothing is deleted: the job still reads
- * the hours and parts from it).
+ * the hours and parts from it). PER UNIT (cn-v1133): the breakdown is compared to the UNIT price
+ * alone — the Qty box multiplies it on the paper, so a task at qty 2 still reads as explained.
  */
-export function detailExplains(d: TaskDetail, line: { quantity: number; unit_price: number }): boolean {
-  return Math.abs(taskMoney(d).total - round2((Number(line.quantity) || 0) * (Number(line.unit_price) || 0))) < 0.005;
+export function detailExplains(d: TaskDetail, line: { unit_price: number }): boolean {
+  return Math.abs(taskMoney(d).total - round2(Number(line.unit_price) || 0)) < 0.005;
+}
+
+/** THE LINE'S COUNT — "this many of the task" (cn-v1133). A blank, a 0 or junk is one of it, never
+ *  a zero that would empty the job's minutes and parts. The same reader for every job door. */
+export function lineQty(line: { quantity?: unknown }): number {
+  const n = Number(line.quantity);
+  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 /** A kit line's count for `units` of the kit, through the kit's own minimum and rounding (0166). */
@@ -525,8 +541,9 @@ export function taskFromLine(line: DraftLineItem, rule: { rate: number }): Draft
   return { ...line, detail, group: line.group ?? "Tasks", flag: taskFlags(detail) };
 }
 
-/** One task → one line. Quantity is always 1: the units of a per-unit task ride the breakdown and
- *  the name ("Footings ×7"), so labor + parts always equal the line to the cent. */
+/** One task → one line. Quantity starts at 1: the units of a per-unit task ride the breakdown and
+ *  the name ("Footings ×7"), so labor + parts always equal the UNIT price to the cent. The Qty box
+ *  is his to raise afterwards — "this many of the task" — and the job follows it (cn-v1133). */
 export function taskLine(task: TaskValue, ctx: TaskLineContext): DraftLineItem {
   const d = buildTaskDetail(task, ctx);
   const units = task.units !== null && task.units !== 1 ? ` ×${task.units}` : "";
@@ -547,10 +564,22 @@ export function taskLines(tasks: TaskValue[], ctx: TaskLineContext): DraftLineIt
   return tasks.map((t) => taskLine(t, ctx));
 }
 
-/** A task's labor in MINUTES — what the job's task carries (tasks.planned_minutes, 0395): Σ round(h × 60)
- *  over the rows he gave hours to; a row still asking adds nothing, and no hours at all is null (the
- *  task asks on the job as it did on the paper), never 0. */
-export function laborMinutes(labor: ReadonlyArray<Pick<TaskLabor, "hours">>): number | null {
+/** jobs.planned_minutes' own check (0229): null, or 0 < n ≤ 43200 (thirty working days). A task's own
+ *  minutes (0395) keep to the same bound, so a task can never carry what the job could not. */
+export const PLANNED_MINUTES_MAX = 43_200;
+
+/** A TASK'S MINUTES FOR THIS MANY OF IT (cn-v1133) — what the job's task carries (tasks.planned_minutes,
+ *  0395): Σ round(h × 60) over the rows he gave hours to, × the line's count, rounded. A row still asking
+ *  adds nothing, and no hours at all is null (the task asks on the job as it did on the paper), never 0.
+ *  A figure past the bound the column would refuse is null too, never clamped to a number he did not say. */
+export function taskMinutesFor(labor: ReadonlyArray<Pick<TaskLabor, "hours">>, qty: number): number | null {
+  const minutes = rawMinutes(labor, qty);
+  return minutes !== null && minutes > 0 && minutes <= PLANNED_MINUTES_MAX ? minutes : null;
+}
+
+/** The figure BEFORE the column's bound: Σ round(h × 60) over the rows he gave hours to, × the count,
+ *  rounded; null when no row has hours. */
+function rawMinutes(labor: ReadonlyArray<Pick<TaskLabor, "hours">>, qty: number): number | null {
   let sum = 0;
   let any = false;
   for (const r of labor) {
@@ -559,5 +588,20 @@ export function laborMinutes(labor: ReadonlyArray<Pick<TaskLabor, "hours">>): nu
       any = true;
     }
   }
-  return any && sum > 0 ? sum : null;
+  if (!any) return null;
+  return Math.round(sum * (Number.isFinite(qty) && qty > 0 ? qty : 1));
+}
+
+/** HE GAVE HOURS AND THE COLUMN CANNOT TAKE THEM: this many of the task is past the bound (more than
+ *  thirty working days), so taskMinutesFor read null for a figure that exists. The job's whole must read
+ *  null too (born-with-tasks tasksFromLines) — the sum of the OTHER tasks is not the job's length
+ *  (skeptic #39, N1). A task with no hours at all is not this: it adds nothing, truthfully. */
+export function minutesPastBound(labor: ReadonlyArray<Pick<TaskLabor, "hours">>, qty: number): boolean {
+  const minutes = rawMinutes(labor, qty);
+  return minutes !== null && minutes > PLANNED_MINUTES_MAX;
+}
+
+/** A task's labor in MINUTES for ONE of it: the visit's tasks and the kit rule read a task on its own. */
+export function laborMinutes(labor: ReadonlyArray<Pick<TaskLabor, "hours">>): number | null {
+  return taskMinutesFor(labor, 1);
 }

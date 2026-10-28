@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { fakeDb } from "@/test/fake-supabase";
-import { isHisRow, materialsWords, partHalf, partsFromLines, planPartSync, syncJobMaterials, syncQuoteMaterials, type KeyedPart, type ListPartRow } from "./sync-job-materials";
+import { isHisRow, isSlugHalf, materialsWords, partHalf, partsFromLines, planPartSync, syncJobMaterials, syncQuoteMaterials, type KeyedPart, type ListPartRow } from "./sync-job-materials";
 import { keyParts, materialKey } from "./born-with-tasks";
 
 /**
@@ -24,10 +24,116 @@ describe("materialKey / keyParts — a part's key is its task's key plus the par
   });
   it("partsFromLines keys a task line's named parts the way the take-off does — whatever the line's title", () => {
     const parts = partsFromLines([
-      { id: "l1", description: "", sort_order: 0, detail: { task_id: "t", hours: 1, rate: 1, units: null, kit_id: null, materials: [{ code: "R1", name: "Switch", qty: 2, cost: 4, sell: 5 }, { code: null, name: "  ", qty: 1, cost: null, sell: null }] } },
-      { id: "l2", description: "Plain", sort_order: 1, detail: null },
+      { id: "l1", description: "", sort_order: 0, quantity: 1, detail: { task_id: "t", hours: 1, rate: 1, units: null, kit_id: null, materials: [{ code: "R1", name: "Switch", qty: 2, cost: 4, sell: 5 }, { code: null, name: "  ", qty: 1, cost: null, sell: null }] } },
+      { id: "l2", description: "Plain", sort_order: 1, quantity: 1, detail: null },
     ]);
     expect(parts).toEqual([{ key: "line:l1#R1", code: "R1", name: "Switch", qty: 2, cost: 4, taskId: "t" }]);
+  });
+});
+
+describe("planPartSync — the count follows, like the minutes do (cn-v1133)", () => {
+  const wanted = [part({ key: "line:a#R1", code: "R1", name: "Switch", qty: 6 })];
+  it("a row still holding the count its line said BEFORE (partsBefore, by the key as read) moves to the line's count now", () => {
+    const plan = planPartSync(wanted, [row({ id: "r1", source_key: "line:a#R1", description: "Switch", quantity: 3 })], new Set(), [], new Map([["line:a#R1", 3]]));
+    expect(plan.move).toEqual([{ id: "r1", description: "Switch", from: 3, to: 6 }]);
+    expect(plan.countsDiffer).toEqual([]);
+  });
+  it("a count he typed (not the figure before), a bought or tool row, and a row with no figure before are said, never moved", () => {
+    const before = new Map([["line:a#R1", 3]]);
+    expect(planPartSync(wanted, [row({ id: "r1", source_key: "line:a#R1", description: "Switch", quantity: 4 })], new Set(), [], before)).toMatchObject({ move: [], countsDiffer: [{ description: "Switch", shows: 4, estimate: 6 }] });
+    expect(planPartSync(wanted, [row({ id: "r1", source_key: "line:a#R1", description: "Switch", quantity: 3, purchased: true })], new Set(), [], before)).toMatchObject({ move: [], countsDiffer: [{ description: "Switch", shows: 3, estimate: 6 }] });
+    expect(planPartSync(wanted, [row({ id: "r1", source_key: "line:a#R1", description: "Switch", quantity: 3, is_tool: true })], new Set(), [], before)).toMatchObject({ move: [], countsDiffer: [{ description: "Switch", shows: 3, estimate: 6 }] });
+    expect(planPartSync(wanted, [row({ id: "r1", source_key: "line:a#R1", description: "Switch", quantity: 3 })])).toMatchObject({ move: [], countsDiffer: [{ description: "Switch", shows: 3, estimate: 6 }] });
+  });
+  it("a re-keyed orphan (the builder's new ids) is compared under the key it HAD, the one the door read before", () => {
+    const plan = planPartSync(wanted, [row({ id: "r1", source_key: "line:OLD#R1", description: "Switch", quantity: 3 })], new Set(), [], new Map([["line:OLD#R1", 3]]));
+    expect(plan.rekey).toEqual([{ id: "r1", source_key: "line:a#R1" }]);
+    expect(plan.move).toEqual([{ id: "r1", description: "Switch", from: 3, to: 6 }]);
+  });
+  it("the 'how many?' placeholder still fills in first; a wanted part with no count moves nothing", () => {
+    const plan = planPartSync(
+      [part({ key: "line:a#R1", code: "R1", name: "Switch", qty: 6 }), part({ key: "line:a#clips", name: "Clips", qty: null })],
+      [row({ id: "r1", source_key: "line:a#R1", description: "Switch · how many?", quantity: 1 }), row({ id: "r2", source_key: "line:a#clips", description: "Clips", quantity: 9 })],
+      new Set(),
+      [],
+      new Map([["line:a#R1", 1]]),
+    );
+    expect(plan.fill).toEqual([{ id: "r1", description: "Switch", qty: 6 }]);
+    expect(plan.move).toEqual([]);
+    expect(plan.countsDiffer).toEqual([]);
+  });
+});
+
+describe("planPartSync — a rename is a rename (cn-v1133)", () => {
+  it("ONE line, one UNCODED key gone and one UNCODED key new at the same count: the row takes the new words and key — bought or not — instead of a tombstone + an insert", () => {
+    const plan = planPartSync(
+      [part({ key: "line:a#transfer-switch-200a", name: "Transfer switch, 200A", qty: 2 })],
+      [row({ id: "r1", source_key: "line:a#switch", description: "Switch", quantity: 2, purchased: true })],
+    );
+    expect(plan.rename).toEqual([{ id: "r1", source_key: "line:a#transfer-switch-200a", description: "Transfer switch, 200A" }]);
+    expect(plan.insert).toEqual([]);
+    expect(plan.kept).toEqual([]);
+    expect(plan.tombstone).toEqual([]);
+    expect(plan.remove).toEqual([]);
+    const open = planPartSync([part({ key: "line:a#clips-2-in", name: "Clips, 2 in.", qty: 1 })], [row({ id: "r1", source_key: "line:a#clips", description: "Clips", quantity: 1 })]);
+    expect(open.rename).toEqual([{ id: "r1", source_key: "line:a#clips-2-in", description: "Clips, 2 in." }]);
+    expect(open.remove).toEqual([]);
+    expect(open.insert).toEqual([]);
+  });
+  it("ONLY UNCODED TO UNCODED (skeptic #39, B2): a coded swap on one line at the same count — E1 gone, E2 new — is a different book item, never a rename: the bought row is kept under the tombstone with its own words, the new part inserted; uncoded → coded and coded → uncoded the same", () => {
+    const swap = planPartSync(
+      [part({ key: "line:a#E2", code: "E2", name: "3/4 in EMT", qty: 2 })],
+      [row({ id: "r1", source_key: "line:a#E1", description: "1/2 in EMT", part_number: "E1", quantity: 2, purchased: true })],
+    );
+    expect(swap.rename).toEqual([]);
+    expect(swap.kept.map((r) => r.id)).toEqual(["r1"]);
+    expect(swap.tombstone).toEqual([{ id: "r1", source_key: "gone:line:a#E1" }]);
+    expect(swap.insert.map((p) => p.key)).toEqual(["line:a#E2"]);
+    // Not bought: removed and inserted, as before.
+    const open = planPartSync([part({ key: "line:a#E2", code: "E2", name: "3/4 in EMT", qty: 2 })], [row({ id: "r1", source_key: "line:a#E1", description: "1/2 in EMT", part_number: "E1", quantity: 2 })]);
+    expect(open.rename).toEqual([]);
+    expect(open.remove.map((r) => r.id)).toEqual(["r1"]);
+    expect(open.insert.map((p) => p.key)).toEqual(["line:a#E2"]);
+    // The words gained a code (a book item now): not a rename.
+    const coded = planPartSync([part({ key: "line:a#E1", code: "E1", name: "1/2 in EMT", qty: 2 })], [row({ id: "r1", source_key: "line:a#emt", description: "EMT", quantity: 2, purchased: true })]);
+    expect(coded.rename).toEqual([]);
+    expect(coded.kept.map((r) => r.id)).toEqual(["r1"]);
+    expect(coded.insert.map((p) => p.key)).toEqual(["line:a#E1"]);
+    // The code was dropped for words: not a rename.
+    const uncoded = planPartSync([part({ key: "line:a#emt", name: "EMT", qty: 2 })], [row({ id: "r1", source_key: "line:a#E1", description: "1/2 in EMT", part_number: "E1", quantity: 2 })]);
+    expect(uncoded.rename).toEqual([]);
+    expect(uncoded.remove.map((r) => r.id)).toEqual(["r1"]);
+    expect(uncoded.insert.map((p) => p.key)).toEqual(["line:a#emt"]);
+    // What tells a slug from a code: materialKey lower-cases words and upper-cases a code.
+    expect(isSlugHalf("transfer-switch-200a")).toBe(true);
+    expect(isSlugHalf("E1")).toBe(false);
+    expect(isSlugHalf("RACO-936")).toBe(false);
+    expect(isSlugHalf("936")).toBe(false); // digits alone read as a code: the safe side
+  });
+  it("anything but the exact 1:1 at the same count is handled as before: a count that moved too, two gone, two new, a part with no count, a gone line", () => {
+    const moved = planPartSync([part({ key: "line:a#new", name: "New", qty: 3 })], [row({ id: "r1", source_key: "line:a#old", description: "Old", quantity: 2 })]);
+    expect(moved.rename).toEqual([]);
+    expect(moved.remove.map((r) => r.id)).toEqual(["r1"]);
+    expect(moved.insert.map((p) => p.key)).toEqual(["line:a#new"]);
+    const two = planPartSync([part({ key: "line:a#new", name: "New", qty: 2 })], [row({ id: "r1", source_key: "line:a#old", quantity: 2 }), row({ id: "r2", source_key: "line:a#older", quantity: 2 })]);
+    expect(two.rename).toEqual([]);
+    expect(two.remove.map((r) => r.id)).toEqual(["r1", "r2"]);
+    const uncounted = planPartSync([part({ key: "line:a#new", name: "New", qty: null })], [row({ id: "r1", source_key: "line:a#old", quantity: 1 })]);
+    expect(uncounted.rename).toEqual([]);
+    const goneLine = planPartSync([part({ key: "line:b#new", name: "New", qty: 2 })], [row({ id: "r1", source_key: "line:a#old", quantity: 2 })]);
+    expect(goneLine.rename).toEqual([]);
+    expect(goneLine.remove.map((r) => r.id)).toEqual(["r1"]);
+  });
+  it("a part the same half still wants claims first — a rebuilt line's unchanged part is never read as a rename of the other", () => {
+    const plan = planPartSync(
+      [part({ key: "line:a#R1", code: "R1", name: "Switch", qty: 2 }), part({ key: "line:a#clips-2-in", name: "Clips, 2 in.", qty: 1 })],
+      [row({ id: "sw", source_key: "line:OLD#R1", quantity: 2 }), row({ id: "cl", source_key: "line:OLD#clips", description: "Clips", quantity: 1 })],
+    );
+    expect(plan.rekey).toEqual([{ id: "sw", source_key: "line:a#R1" }]);
+    // The clips row is an orphan of a GONE line (OLD), not of line a: no rename — removed and inserted, as before.
+    expect(plan.rename).toEqual([]);
+    expect(plan.remove.map((r) => r.id)).toEqual(["cl"]);
+    expect(plan.insert.map((p) => p.key)).toEqual(["line:a#clips-2-in"]);
   });
 });
 
@@ -255,6 +361,64 @@ describe("syncQuoteMaterials — the writes", () => {
     const again = await syncQuoteMaterials(sb, WHO);
     expect(again).toEqual({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], leftOff: [], countsDiffer: [] });
     expect(tables.material_list_items).toHaveLength(2);
+  });
+  it("THE COUNT FOLLOWS (cn-v1133): a row still at the count its line said before moves to the line's count, compare-and-set; a bought row stands, said", async () => {
+    const { sb, tables } = world({ rows: [keyedRow("r1", "line:l1#R1", { quantity: 3, description: "Switch" })] });
+    const res = await syncQuoteMaterials(sb, { ...WHO, partsBefore: new Map([["line:l1#R1", 3]]) });
+    expect(res).toMatchObject({ moved: ["Switch"], countsDiffer: [], inserted: 1 });
+    expect(tables.material_list_items.find((r) => r.id === "r1")?.quantity).toBe(1);
+    expect(materialsWords(res)).toBe("The estimate's materials list follows too: 1 part added · 1 re-counted (Switch).");
+    const bought = world({ rows: [keyedRow("r1", "line:l1#R1", { quantity: 3, description: "Switch", purchased: true })] });
+    const stood = await syncQuoteMaterials(bought.sb, { ...WHO, partsBefore: new Map([["line:l1#R1", 3]]) });
+    expect(stood.moved).toBeUndefined();
+    expect(stood.countsDiffer).toEqual([{ description: "Switch", shows: 3, estimate: 1 }]);
+    expect(bought.tables.material_list_items.find((r) => r.id === "r1")?.quantity).toBe(3);
+  });
+  it("a count moved between the read and the write is his: zero rows, and the difference is said instead of written over", async () => {
+    const db = world({ rows: [keyedRow("r1", "line:l1#R1", { quantity: 3, description: "Switch" })] });
+    const raw = db.sb.from;
+    db.sb.from = (table: string) => {
+      const b = raw(table);
+      if (table === "material_list_items") {
+        const update = b.update;
+        b.update = (patch: Record<string, unknown>) => {
+          // Someone typed 5 on the row while the plan was being made: the compare-and-set must miss.
+          if ("quantity" in patch) db.tables.material_list_items.find((r) => r.id === "r1")!.quantity = 5;
+          return update(patch);
+        };
+      }
+      return b;
+    };
+    const res = await syncQuoteMaterials(db.sb, { ...WHO, partsBefore: new Map([["line:l1#R1", 3]]) });
+    expect(res.moved).toBeUndefined();
+    expect(res.countsDiffer).toEqual([{ description: "Switch", shows: 3, estimate: 1 }]);
+    expect(db.tables.material_list_items.find((r) => r.id === "r1")?.quantity).toBe(5);
+  });
+  it("A RENAME IS A RENAME (cn-v1133): the bought row takes the new words and key, keeps its mark, and no second row is made", async () => {
+    const { sb, tables, inserted } = world({
+      lines: [taskLine("l1", [{ code: null, name: "Bayberry clips", qty: 2, cost: null, sell: null }])],
+      rows: [keyedRow("r1", "line:l1#clips", { description: "Clips", quantity: 2, purchased: true })],
+    });
+    const res = await syncQuoteMaterials(sb, WHO);
+    expect(res).toMatchObject({ renamed: ["Bayberry clips"], inserted: 0, kept: 0, removed: 0 });
+    expect(materialsWords(res)).toBe("The estimate's materials list follows too: 1 renamed (Bayberry clips).");
+    const r1 = tables.material_list_items.find((r) => r.id === "r1")!;
+    expect(r1).toMatchObject({ source_key: "line:l1#bayberry-clips", description: "Bayberry clips", purchased: true, quantity: 2 });
+    expect(inserted).toEqual({});
+    expect(tables.material_list_items).toHaveLength(1);
+    // The next sync finds it by key: nothing to do.
+    expect(await syncQuoteMaterials(sb, WHO)).toEqual({ inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], leftOff: [], countsDiffer: [] });
+  });
+  it("a coded SWAP on one line (E1 → E2, same count) is not a rename (skeptic #39, B2): the bought row keeps its words, number, vendor and cost under the tombstone, and the new part is inserted priced from the line", async () => {
+    const { sb, tables, inserted } = world({
+      lines: [taskLine("l1", [{ code: "E2", name: "3/4 in EMT", qty: 2, cost: 9, sell: 12 }])],
+      rows: [keyedRow("r1", "line:l1#E1", { description: "1/2 in EMT", part_number: "E1", quantity: 2, purchased: true, vendor: "Northline Supply", est_cost: 6 })],
+    });
+    const res = await syncQuoteMaterials(sb, WHO);
+    expect(res).toMatchObject({ inserted: 1, kept: 1, keptNames: ["1/2 in EMT"], removed: 0 });
+    expect(res.renamed).toBeUndefined();
+    expect(tables.material_list_items.find((r) => r.id === "r1")).toMatchObject({ source_key: "gone:line:l1#E1", description: "1/2 in EMT", part_number: "E1", vendor: "Northline Supply", est_cost: 6, purchased: true });
+    expect(inserted.material_list_items).toEqual([expect.objectContaining({ source_key: "line:l1#E2", description: "3/4 in EMT", part_number: "E2", quantity: 2, est_cost: 9 })]);
   });
   it("syncJobMaterials walks the job's accepted estimates and adds the counts up; the words say what the list did", async () => {
     const { sb } = world();

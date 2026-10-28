@@ -421,11 +421,21 @@ export function EstimateEditor(props: EstimateEditorProps) {
   }, [session]);
 
   // THE PAGE READ THE ROW AGAIN (another door refreshed it: the customer card, the status select):
-  // what landed replaces the mirror; a refused row keeps its typed value and its Retry.
+  // what landed replaces the mirror; a refused row keeps its typed value and its Retry. NOT WHILE A
+  // WRITE IS ON THE WIRE OR SOMETHING TYPED IS UNCOMMITTED (S2): Next commits an action's props after
+  // the action resolved, by which time the next write of a chain (the reprice pass, a catch-up) may
+  // be out — those props are stale for it and would revert its figure and replace what he is typing.
+  // A STANDING REFUSAL DOES NOT HOLD IT (skeptic #39, S2): the store keeps a refused row's typed value
+  // and its Retry through a reseed, and gating on quiet meant a page re-read (the status, the customer
+  // card, another door) never reached the mirror until he resolved a refused line. The effect re-runs
+  // when busy or dirty flips and hands the seed over then; the store holds it the same way on its side.
   const reseedKey = props.mode === "saved" ? JSON.stringify([props.saved.quote, props.saved.items]) : "";
   const seededKey = useRef(reseedKey);
+  const quiet = isQuiet(state);
+  const dirty = session.isDirty();
   useEffect(() => {
     if (props.mode !== "saved" || seededKey.current === reseedKey) return;
+    if (busy || dirty) return;
     seededKey.current = reseedKey;
     session.reseed({
       header: headerFrom(props),
@@ -433,9 +443,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
       status: props.saved.quote.status,
       number: props.saved.quote.quote_number,
     });
-    // reseedKey stands for the row and its lines as the page read them.
+    // reseedKey stands for the row and its lines as the page read them; busy and dirty are the gates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reseedKey]);
+  }, [reseedKey, busy, dirty]);
 
   /* ── WHO'S THIS FOR ───────────────────────────────────────────────────────────────────────── */
   // Customers created inline, merged into the server-provided list.
@@ -590,23 +600,42 @@ export function EstimateEditor(props: EstimateEditorProps) {
   const [aiError, setAiError] = useState<string | null>(null);
   const [generating, startGenerate] = useTransition();
   const [uploading, startUpload] = useTransition();
+  // THE PRICE-BOOK REVIEW a supplier quote brought (what it knows that the book doesn't), open until
+  // he applies it or says Not Now. Declared here because the hand-off below waits on it.
+  const [bookReview, setBookReview] = useState<null | {
+    source: string;
+    updates: (BookUpdate & { keep: boolean })[];
+    additions: (BookAddition & { keep: boolean })[];
+    unchanged: number;
+  }>(null);
+  const [bookMsg, setBookMsg] = useState<string | null>(null);
+  const [applyingBook, startApplyBook] = useTransition();
 
   /* ── THE HAND-OFF (S6): born here → its own page, once, at the first quiet moment ─────────── */
   // The estimate is on the server (the first save landed, the ids came back, nothing is queued,
-  // refused or waiting) and the estimator is not mid-read: stash the UI text and navigate. A real
+  // refused or waiting), the estimator is not mid-read, nothing it said is still on the screen (an
+  // error he has not acted on), and no price-book review is open: stash the UI text and navigate.
+  // A supplier quote's lines birth the row only when he taps Add N To The Estimate, the same tap that
+  // used to fire the hand-off — and the review panel beside them went with the page, unread. A real
   // navigation, so the saved page's status and lock are the server's and Back skips the unsaved
   // editor. Once: the ref holds through the re-renders between the call and the unmount.
+  // WHEN THE STASH CANNOT BE KEPT (a full or blocked store) and there is text to carry — the scope,
+  // proposals, questions — the editor does NOT navigate: it keeps working here, in saved mode. The
+  // green line offers the saved page as a link (Open It) WHENEVER the editor is in saved mode on this
+  // route — a failed stash, a hand-off still waiting on a refusal, on an estimator error he has not
+  // dismissed, on an open review (skeptic #39, N3) — so the way to the row is never missing. Nothing
+  // he typed is lost for a page move.
   const handedOff = useRef(false);
-  const quiet = isQuiet(state);
   useEffect(() => {
     if (props.mode !== "unsaved" || mode.kind !== "saved" || !mode.bornHere || handedOff.current) return;
-    if (!quiet || generating || uploading) return;
+    if (!quiet || generating || uploading || bookReview !== null || aiError !== null) return;
     handedOff.current = true;
-    stashHandoff(browserStash(), mode.id, { scope, proposed, questions, number: mode.number });
+    const kept = stashHandoff(browserStash(), mode.id, { scope, proposed, questions, number: mode.number });
+    if (!kept && (scope.trim() || proposed.length || questions.length)) return; // stays here; the green line links the row
     router.replace(`/quotes/${mode.id}`);
     // The stash is read when the hand-off happens; the effect re-runs on the gates only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.mode, mode, quiet, generating, uploading]);
+  }, [props.mode, mode, quiet, generating, uploading, bookReview, aiError]);
   // The saved page takes the stash the new page left, once, on mount; the one green line says the
   // number the save came back with.
   const [born, setBorn] = useState<string | null>(null);
@@ -720,14 +749,6 @@ export function EstimateEditor(props: EstimateEditorProps) {
     });
   }
 
-  const [bookReview, setBookReview] = useState<null | {
-    source: string;
-    updates: (BookUpdate & { keep: boolean })[];
-    additions: (BookAddition & { keep: boolean })[];
-    unchanged: number;
-  }>(null);
-  const [bookMsg, setBookMsg] = useState<string | null>(null);
-  const [applyingBook, startApplyBook] = useTransition();
   function applyBook() {
     if (!bookReview) return;
     startApplyBook(async () => {
@@ -897,7 +918,19 @@ export function EstimateEditor(props: EstimateEditorProps) {
               </p>
             )}
             {(mode.bornHere || born) && (
-              <p className="mt-1 text-xs text-emerald-700">Saved as {number || born} — it&apos;s on the Estimates list even if you leave.</p>
+              <p className="mt-1 text-xs text-emerald-700">
+                Saved as {number || born}
+                {props.mode === "unsaved" ? (
+                  <>
+                    {" · "}
+                    <Link href={`/quotes/${savedId}`} className="font-semibold underline">
+                      Open It
+                    </Link>
+                  </>
+                ) : (
+                  <> — it&apos;s on the Estimates list even if you leave.</>
+                )}
+              </p>
             )}
           </div>
           {/* Impulse verbs first (Send / advance status / Duplicate); the ⋯ Actions menu rides LAST. */}
@@ -942,7 +975,16 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   value={scope}
                   onChange={(e) => setScope(e.target.value)}
                 />
-                {aiError && <p className="text-sm text-red-600">{aiError}</p>}
+                {/* The error has a way off the screen (skeptic #39, N3): the hand-off waits on it, so a
+                    stale one held a born-here estimate on this route for good. Title Case: a button. */}
+                {aiError && (
+                  <p className="text-sm text-red-600">
+                    {aiError}{" "}
+                    <button type="button" onClick={() => setAiError(null)} className="font-semibold underline">
+                      Dismiss
+                    </button>
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="primary" onClick={onGenerate} disabled={generating || uploading || busy}>
                     {generating ? (
@@ -1042,7 +1084,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                         </p>
                       </div>
                       <button type="button" onClick={() => setBookReview(null)} className="text-xs text-slate-400 hover:text-slate-900">
-                        Not now
+                        Not Now
                       </button>
                     </div>
                     <div className="space-y-1.5">
@@ -1097,7 +1139,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                     <div className="mt-3">
                       <Button type="button" size="sm" onClick={applyBook} disabled={applyingBook || !(bookReview.updates.some((u) => u.keep) || bookReview.additions.some((a) => a.keep))}>
                         {applyingBook ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                        Apply {bookReview.updates.filter((u) => u.keep).length + bookReview.additions.filter((a) => a.keep).length} to the price book
+                        Apply {bookReview.updates.filter((u) => u.keep).length + bookReview.additions.filter((a) => a.keep).length} To The Price Book
                       </Button>
                     </div>
                   </>
@@ -1126,7 +1168,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                       }}
                       className="text-xs font-medium text-slate-500 hover:text-slate-900"
                     >
-                      {proposed.every((p) => p.keep) ? "Untick all" : "Tick all"}
+                      {proposed.every((p) => p.keep) ? "Untick All" : "Tick All"}
                     </button>
                   ) : proposed.length === 0 && questions.length > 0 ? (
                     <button onClick={() => setQuestions([])} className="text-xs text-slate-400 hover:text-slate-900">
@@ -1166,10 +1208,10 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <Button variant="primary" onClick={acceptProposals} disabled={!proposed.some((p) => p.keep) || busy}>
                       <Check className="h-4 w-4" />
-                      Add {proposed.filter((p) => p.keep).length} to the estimate
+                      Add {proposed.filter((p) => p.keep).length} To The Estimate
                     </Button>
                     <button type="button" onClick={() => setProposed([])} className="text-sm text-slate-500 hover:text-slate-900">
-                      Drop them all
+                      Drop Them All
                     </button>
                     <span className="text-sm text-slate-500">{formatCurrency(proposed.filter((p) => p.keep).reduce((t, p) => t + p.quantity * p.unit_price, 0))}</span>
                   </div>

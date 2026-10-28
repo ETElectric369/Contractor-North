@@ -3,6 +3,7 @@ import type { TaskValue } from "@/lib/playbook/tasks";
 import type { TaskDetail, TaskLabor } from "./line-map";
 import {
   MAX_LABOR_ROWS,
+  PLANNED_MINUTES_MAX,
   buildTaskDetail,
   coerceDraftLine,
   coerceTaskDetail,
@@ -12,6 +13,9 @@ import {
   laborMinutes,
   laborMoney,
   lineNameWithUnits,
+  lineQty,
+  minutesPastBound,
+  taskMinutesFor,
   reexpandTaskDetail,
   stripUnits,
   lineFromDetail,
@@ -149,7 +153,7 @@ describe("labor rows: the line's labor is the rows' sum, each priced as printed"
     expect(laborMoney({ hours: null, rate: 145 })).toBe(0);
     // Rounded as printed: 1.33 × 145 = 192.85 and 0.33 × 65 = 21.45 → 214.30, the two bullets' sum.
     expect(taskMoney({ ...two, labor: [row({ hours: 1.33, rate: 145 }), row({ hours: 0.33, rate: 65 })] }).labor).toBe(214.3);
-    expect(detailExplains(two, { quantity: 1, unit_price: 840 })).toBe(true);
+    expect(detailExplains(two, { unit_price: 840 })).toBe(true);
     expect(taskFlags(two)).toBeUndefined();
   });
 
@@ -171,6 +175,37 @@ describe("labor rows: the line's labor is the rows' sum, each priced as printed"
     expect(laborMinutes([row({ hours: 1.25 }), row({ hours: null })])).toBe(75);
     expect(laborMinutes([row({ hours: null })])).toBeNull();
     expect(laborMinutes([])).toBeNull();
+  });
+
+  it("THIS MANY OF THE TASK (cn-v1133): taskMinutesFor × the line's count, rounded; none → null; past the column's bound → null, never clamped", () => {
+    expect(taskMinutesFor(two.labor, 2)).toBe(960);
+    expect(taskMinutesFor([row({ hours: 1.25 }), row({ hours: null })], 1.5)).toBe(113); // 75 × 1.5 = 112.5 → 113
+    expect(taskMinutesFor([row({ hours: 0.01 })], 0.4)).toBeNull(); // round(1 × 0.4) = 0 is no figure
+    expect(taskMinutesFor([row({ hours: null })], 2)).toBeNull();
+    expect(taskMinutesFor([], 2)).toBeNull();
+    expect(taskMinutesFor([row({ hours: PLANNED_MINUTES_MAX / 60 })], 1)).toBe(PLANNED_MINUTES_MAX);
+    expect(taskMinutesFor([row({ hours: PLANNED_MINUTES_MAX / 60 })], 2)).toBeNull();
+    expect(laborMinutes([row({ hours: PLANNED_MINUTES_MAX / 60 + 1 })])).toBeNull(); // the one rule: laborMinutes is one of it
+    // A junk count is one of it (never 0, which would empty the job's minutes).
+    expect(taskMinutesFor(two.labor, 0)).toBe(480);
+    expect(taskMinutesFor(two.labor, Number.NaN)).toBe(480);
+    // HE GAVE HOURS AND THE COLUMN CANNOT TAKE THEM (skeptic #39, N1): told apart from "no hours", so the
+    // job's whole can read null instead of the OTHER tasks' sum (born-with-tasks).
+    expect(minutesPastBound([row({ hours: PLANNED_MINUTES_MAX / 60 })], 2)).toBe(true);
+    expect(minutesPastBound([row({ hours: PLANNED_MINUTES_MAX / 60 })], 1)).toBe(false);
+    expect(minutesPastBound([row({ hours: null })], 1000)).toBe(false);
+    expect(minutesPastBound([], 1000)).toBe(false);
+    expect(minutesPastBound([row({ hours: 0.01 })], 0.4)).toBe(false); // rounds to nothing: not past the bound
+  });
+
+  it("lineQty: the Qty box, read as the job doors read it — blank, 0, junk and negative are one of it", () => {
+    expect(lineQty({ quantity: 2 })).toBe(2);
+    expect(lineQty({ quantity: "1.5" })).toBe(1.5);
+    expect(lineQty({ quantity: 0 })).toBe(1);
+    expect(lineQty({ quantity: -3 })).toBe(1);
+    expect(lineQty({ quantity: null })).toBe(1);
+    expect(lineQty({ quantity: "lots" })).toBe(1);
+    expect(lineQty({})).toBe(1);
   });
 
   it("repriceTaskLine: a rule row follows the new rule; a legacy row only while it still equals the old one; hand and stated stand", () => {
@@ -366,11 +401,13 @@ describe("the breakdown, read back and kept honest", () => {
     });
   });
 
-  it("adds up in cents, and explains the line only while the sums match", () => {
+  it("adds up in cents, and explains the line only while the sums match the UNIT price (the Qty box is this many of the task, cn-v1133)", () => {
     expect(taskMoney(stored)).toEqual({ labor: 435, parts: 480, total: 915 });
-    expect(detailExplains(stored, { quantity: 1, unit_price: 915 })).toBe(true);
-    expect(detailExplains(stored, { quantity: 1, unit_price: 900 })).toBe(false); // a hand edit
-    expect(detailExplains(stored, { quantity: 2, unit_price: 915 })).toBe(false);
+    expect(detailExplains(stored, { unit_price: 915 })).toBe(true);
+    expect(detailExplains(stored, { unit_price: 900 })).toBe(false); // a hand edit
+    // Two of the task at $915 each: the breakdown still explains the unit price — the count rides the line.
+    expect(detailExplains(stored, { quantity: 2, unit_price: 915 } as { unit_price: number })).toBe(true);
+    expect(detailExplains(stored, { quantity: 2, unit_price: 1830 } as { unit_price: number })).toBe(false); // the line total typed as the unit price is a hand price
     expect(taskFlags(stored)).toBeUndefined();
   });
 
@@ -539,8 +576,8 @@ describe("a part's money is the figure the paper prints (item 4): rounded per pa
     expect(money.parts).toBe(Math.round(printed * 100) / 100);
     expect(money.total).toBe(210.38);
     expect(money.labor + money.parts).toBeCloseTo(money.total, 10);
-    expect(detailExplains(d, { quantity: 1, unit_price: 210.38 })).toBe(true);
-    expect(detailExplains(d, { quantity: 1, unit_price: 210.37 })).toBe(false); // the old once-rounded sum no longer explains
+    expect(detailExplains(d, { unit_price: 210.38 })).toBe(true);
+    expect(detailExplains(d, { unit_price: 210.37 })).toBe(false); // the old once-rounded sum no longer explains
   });
 });
 

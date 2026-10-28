@@ -187,7 +187,8 @@ describe("estimateLines — the accepted estimates' task lines, in order", () =>
         taskLine("b", "q2", "Phase two", 1.5, 0),
         plain("p", "q1", 1),
         taskLine("a", "q1", "Trench", 2, 0),
-        taskLine("a2", "q1", "Set the panel", null, 2),
+        // qty 2 of the task (cn-v1133): its parts count twice; a part he never counted stays uncounted.
+        taskLine("a2", "q1", "Set the panel", null, 2, { quantity: 2, detail: { task_id: "t-a2", hours: null, rate: 100, units: null, kit_id: null, materials: [{ code: "R1", name: "Switch", qty: 3, cost: 4, sell: 5 }, { code: null, name: "Bayberry clips", qty: null, cost: null, sell: null }] } }),
         taskLine("x", "q3", "Declined work", 8, 0),
         taskLine("y", "q9", "Another job", 8, 0),
       ],
@@ -198,6 +199,8 @@ describe("estimateLines — the accepted estimates' task lines, in order", () =>
     expect(est.minutes).toBe(210); // 2 h + 1.5 h; the hole asks, the plain line is not a task
     // Each task line's own figure, by key — what a door hands back as `tasksBefore` (0395).
     expect([...est.taskMinutes]).toEqual([["line:a", 120], ["line:a2", null], ["line:b", 90]]);
+    // Each counted part's count, by row key, × the line's quantity — what a door hands back as `partsBefore` (cn-v1133).
+    expect([...est.partCounts]).toEqual([["line:a2#R1", 6]]);
   });
 
   it("`except` leaves one estimate out — the figure before THIS acceptance", async () => {
@@ -215,7 +218,7 @@ describe("estimateLines — the accepted estimates' task lines, in order", () =>
 
   it("no accepted estimate → no lines, no figure, no second read", async () => {
     const est = await estimateLines(fakeDb({ quotes: [{ id: "q1", job_id: "j1", status: "sent" }] }).sb, { jobId: "j1", orgId: null });
-    expect(est).toEqual({ lines: [], minutes: null, taskMinutes: new Map() });
+    expect(est).toEqual({ lines: [], minutes: null, taskMinutes: new Map(), partCounts: new Map() });
   });
 });
 

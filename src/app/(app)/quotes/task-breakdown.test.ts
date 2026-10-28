@@ -75,6 +75,13 @@ describe("a task line on the editor", () => {
     expect(text(html)).not.toContain("Price set by hand");
   });
 
+  it("THIS MANY OF THE TASK (cn-v1133): at qty 2 the breakdown's sum says what the paper will charge — $480.00 × 2 = $960.00; at qty 1 no such row", () => {
+    const t = text(builder({ seededLines: [{ ...taskLine, quantity: 2 }] }));
+    expect(t).toContain("$480.00 × 2 = $960.00");
+    expect(t).not.toContain("Price set by hand"); // the breakdown explains the UNIT price; the count rides the line
+    expect(text(builder({ seededLines: [taskLine] }))).not.toContain(" × 1 = ");
+  });
+
   it("THE SAME BREAKDOWN ON THE SAVED PAGE (Erik's morning): a stored task line reads with its rows, never as a plain row", () => {
     const row = { id: "li-1", description: taskLine.description, quantity: 1, unit: "ea", unit_price: 480, category: "Tasks", detail: taskLine.detail, sort_order: 0 };
     const html = saved({}, [row]);

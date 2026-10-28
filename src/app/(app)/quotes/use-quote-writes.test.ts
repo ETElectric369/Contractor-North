@@ -49,8 +49,13 @@ const trench: DraftLineItem = { description: "Trench", quantity: 1, unit: "ea", 
 const task: DraftLineItem = { description: "Install transfer switch", quantity: 1, unit: "ea", unit_price: 290, group: "Tasks", detail: detail() };
 const blank: DraftLineItem = { description: "", quantity: 1, unit: "ea", unit_price: 0 };
 
-/** Fake actions that LAND, each recorded; a test overrides the one it wants to refuse or throw. */
+/** Fake actions that LAND, each recorded; a test overrides the one it wants to refuse or throw. The
+ *  read-back answers with the lines the first save was asked to write — ids li-1…, each at its index,
+ *  saying what the line says — as the real read does (readQuoteLineIds returns the description). */
 function fakes(over: Partial<SessionActions> = {}) {
+  // Off the mock's own record, so a test that hands in its own saveQuote (a gate, a refusal first) is
+  // read back the same way.
+  const wrote = (): DraftLineItem[] => (calls(a.saveQuote).at(-1)?.[0] as { items?: DraftLineItem[] } | undefined)?.items ?? [];
   const a: SessionActions = {
     saveQuote: vi.fn(async (input) => ({ ok: true as const, id: input.id, quote_number: "E-012" })),
     appendQuoteLines: vi.fn(async (_q: string, lines: (DraftLineItem & { id: string })[]) => ({ ok: true as const, ids: lines.map((l) => l.id) })),
@@ -59,7 +64,7 @@ function fakes(over: Partial<SessionActions> = {}) {
     updateQuoteMeta: vi.fn(async () => ({ ok: true })),
     setQuoteCustomer: vi.fn(async () => ({ ok: true })),
     setQuoteType: vi.fn(async () => ({ ok: true })),
-    readQuoteLineIds: vi.fn(async () => ({ ok: true as const, items: [{ id: "li-1", sort_order: 0 }, { id: "li-2", sort_order: 1 }] })),
+    readQuoteLineIds: vi.fn(async () => ({ ok: true as const, items: wrote().map((l, i) => ({ id: `li-${i + 1}`, sort_order: i, description: l.description })) })),
     ...over,
   };
   return { a };
@@ -68,9 +73,9 @@ let n = 0;
 const keys = () => `k${++n}`;
 let idN = 0;
 const ids = () => `id-${++idN}`;
-const unsaved = (items: DraftLineItem[], over: Partial<SessionActions> = {}, clientId = CLIENT) => {
+const unsaved = (items: DraftLineItem[], over: Partial<SessionActions> = {}, clientId = CLIENT, seed: EstimateHeader = header) => {
   const f = fakes(over);
-  const s = createQuoteSession({ mode: { kind: "unsaved", clientId }, header, items, actions: f.a, newKey: keys, newId: ids });
+  const s = createQuoteSession({ mode: { kind: "unsaved", clientId }, header: seed, items, actions: f.a, newKey: keys, newId: ids });
   return { s, ...f };
 };
 const saved = (items: (DraftLineItem & { id: string })[], over: Partial<SessionActions> = {}, status = "draft") => {
@@ -494,7 +499,7 @@ describe("birth without litter", () => {
   });
 
   it("when the ids cannot be read back, the row is saved and says so; a line edit waits on Retry rather than appending a twin, and goes once the read-back lands", async () => {
-    const { s, a } = unsaved([trench], { readQuoteLineIds: vi.fn().mockResolvedValueOnce({ ok: false, error: "no" }).mockResolvedValue({ ok: true, items: [{ id: "li-1", sort_order: 0 }] }) });
+    const { s, a } = unsaved([trench], { readQuoteLineIds: vi.fn().mockResolvedValueOnce({ ok: false, error: "no" }).mockResolvedValue({ ok: true, items: [{ id: "li-1", sort_order: 0, description: "Trench" }] }) });
     await s.mount();
     expect(s.get().mode.kind).toBe("saved");
     expect(s.get().refusals["read-back"]).toBe(READ_BACK_FAILED);
@@ -528,7 +533,298 @@ describe("birth without litter", () => {
       { ...task, key: "c", id: "own-9", saved: true },
       { ...task, key: "b", id: null, saved: true },
     ];
-    expect(idsBySortOrder(items, [{ id: "two", sort_order: 1 }, { id: "own-9", sort_order: 2 }, { id: "one", sort_order: 0 }]).map((l) => l.id)).toEqual(["one", "own-9", "two"]);
+    expect(
+      idsBySortOrder(items, [
+        { id: "two", sort_order: 1, description: task.description },
+        { id: "own-9", sort_order: 2, description: task.description },
+        { id: "one", sort_order: 0, description: "Trench" },
+      ]).map((l) => l.id),
+    ).toEqual(["one", "own-9", "two"]);
+  });
+});
+
+describe("the read-back's rows are matched by what they say (S6)", () => {
+  const two = [
+    { ...trench, key: "a", id: null, saved: true },
+    { ...task, key: "b", id: null, saved: true },
+  ];
+  it("an extra row ahead of the lines does not shift the ids onto the wrong rows; the row that says what the line says is its", () => {
+    const read = [
+      { id: "x", sort_order: 0, description: "Something else" },
+      { id: "one", sort_order: 1, description: "Trench" },
+      { id: "two", sort_order: 2, description: "Install transfer switch" },
+    ];
+    expect(idsBySortOrder(two, read).map((l) => l.id)).toEqual(["one", "two"]);
+  });
+  it("two rows tied at one place: each line takes the one that says its words", () => {
+    const read = [
+      { id: "b-row", sort_order: 0, description: "Install transfer switch" },
+      { id: "a-row", sort_order: 0, description: "Trench" },
+    ];
+    expect(idsBySortOrder(two, read).map((l) => l.id)).toEqual(["a-row", "b-row"]);
+  });
+  it("two lines with the same words keep their order: the row at the line's place first, else the earliest unused", () => {
+    const same = [
+      { ...trench, key: "a", id: null, saved: true },
+      { ...trench, key: "b", id: null, saved: true },
+    ];
+    expect(idsBySortOrder(same, [{ id: "second", sort_order: 1, description: "Trench" }, { id: "first", sort_order: 0, description: "Trench" }]).map((l) => l.id)).toEqual(["first", "second"]);
+    expect(idsBySortOrder(same, [{ id: "p", sort_order: 5, description: "  Trench " }, { id: "q", sort_order: 7, description: "Trench" }]).map((l) => l.id)).toEqual(["p", "q"]);
+  });
+  it("a row at a line's place that says something else is NOT its id (the next edit would overwrite a stranger); fewer rows than lines leaves the rest without one", () => {
+    expect(idsBySortOrder(two, [{ id: "x", sort_order: 0, description: "Backfill" }, { id: "y", sort_order: 1, description: "Backfill" }]).map((l) => l.id)).toEqual([null, null]);
+    expect(idsBySortOrder(two, [{ id: "one", sort_order: 0, description: "Trench" }]).map((l) => l.id)).toEqual(["one", null]);
+    // A row with no words vouches for nothing.
+    expect(idsBySortOrder(two, [{ id: "one", sort_order: 0 }, { id: "two", sort_order: 1 }]).map((l) => l.id)).toEqual([null, null]);
+  });
+  it("driven: a read-back that lands short says READ_BACK_FAILED with a Retry that reads again; the lines it did vouch for are editable at once", async () => {
+    const { s, a } = unsaved([trench, task], {
+      readQuoteLineIds: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, items: [{ id: "li-1", sort_order: 0, description: "Trench" }] })
+        .mockResolvedValue({ ok: true, items: [{ id: "li-1", sort_order: 0, description: "Trench" }, { id: "li-2", sort_order: 1, description: "Install transfer switch" }] }),
+    });
+    await s.mount();
+    expect(s.get().mode.kind).toBe("saved");
+    expect(s.get().items.map((l) => l.id)).toEqual(["li-1", null]);
+    expect(s.get().refusals["read-back"]).toBe(READ_BACK_FAILED);
+    const [k1, k2] = s.get().items.map((l) => l.key);
+    // The vouched-for line writes on its own; the other waits with its words, and nothing is appended as a twin.
+    s.typeLine(k1, { quantity: 2 });
+    expect(await s.commitLine(k1)).toBe(true);
+    expect(a.updateQuoteItem).toHaveBeenCalledWith("li-1", CLIENT, expect.objectContaining({ quantity: 2 }));
+    s.typeLine(k2, { quantity: 3 });
+    expect(await s.commitLine(k2)).toBe(false);
+    expect(s.get().waiting[`line:${k2}`]).toBe(WAITING_READ_BACK);
+    expect(a.appendQuoteLines).not.toHaveBeenCalled();
+    // Retry reads again: the second row vouches now, the id lands, and the edit he made goes.
+    expect(await s.retry("read-back")).toBe(true);
+    expect(a.readQuoteLineIds).toHaveBeenCalledTimes(2);
+    expect(s.get().items.map((l) => l.id)).toEqual(["li-1", "li-2"]);
+    expect(a.updateQuoteItem).toHaveBeenCalledWith("li-2", CLIENT, expect.objectContaining({ quantity: 3 }));
+    expect(s.get().refusals).toEqual({});
+    expect(s.get().waiting).toEqual({});
+    expect(isQuiet(s.get())).toBe(true);
+  });
+});
+
+describe("a line the server may hold is deleted there, never dropped (S1)", () => {
+  it("after an append whose answer was lost, Remove calls deleteQuoteItem under the line's own id; the append's words go with its last line", async () => {
+    const { s, a } = saved([{ ...trench, id: "li-1" }], { appendQuoteLines: vi.fn().mockRejectedValueOnce(new Error("lost")) });
+    expect(await s.addLines([task])).toBe(false);
+    const added = s.get().items[1];
+    expect(added.saved).toBe(false);
+    expect(added.id).toMatch(/^id-/);
+    const slot = Object.keys(s.get().refusals)[0];
+    expect(s.get().refusals[slot]).toBe(COULD_NOT_REACH);
+    expect(await s.removeLine(added.key)).toBe(true);
+    expect(a.deleteQuoteItem).toHaveBeenCalledWith(added.id, "q1");
+    expect(s.get().items.map((l) => l.id)).toEqual(["li-1"]);
+    // Nothing of that append is left to send again: its words and its Retry went with the line.
+    expect(s.get().refusals).toEqual({});
+    expect(await s.retry(slot)).toBe(true);
+    expect(a.appendQuoteLines).toHaveBeenCalledTimes(1);
+    expect(isQuiet(s.get())).toBe(true);
+  });
+  it("after the clock, the same — the rows may have landed, so the server is asked; 'isn't on this estimate' lands as gone", async () => {
+    vi.useFakeTimers();
+    const { s, a } = saved([{ ...trench, id: "li-1" }], {
+      appendQuoteLines: vi.fn().mockReturnValueOnce(new Promise(() => {})),
+      deleteQuoteItem: vi.fn(async () => ({ ok: false, error: LINE_GONE })),
+    });
+    const hung = s.addLines([task]);
+    await vi.advanceTimersByTimeAsync(WRITE_TIMEOUT_MS);
+    expect(await hung).toBe(false);
+    const added = s.get().items[1];
+    expect(s.get().refusals[`append:${added.key}`]).toBe(COULD_NOT_REACH);
+    expect(await s.removeLine(added.key)).toBe(true);
+    expect(a.deleteQuoteItem).toHaveBeenCalledWith(added.id, "q1");
+    expect(s.get().items.length).toBe(1);
+    expect(s.get().said).toBe(LINE_WAS_GONE);
+    expect(s.get().refusals).toEqual({});
+  });
+  it("removed while another write is on the wire: queued behind it, then deleted on the server — the queued path drops nothing with an id", async () => {
+    const g = gate<{ ok: boolean }>();
+    const { s, a } = saved([{ ...trench, id: "li-1" }], {
+      appendQuoteLines: vi.fn().mockRejectedValueOnce(new Error("lost")),
+      updateQuoteItem: vi.fn().mockReturnValueOnce(g.promise),
+    });
+    await s.addLines([task]);
+    const [k1, k2] = s.get().items.map((l) => l.key);
+    const own = s.get().items[1].id;
+    s.typeLine(k1, { unit_price: 300 });
+    const first = s.commitLine(k1);
+    expect(await s.removeLine(k2)).toBe(false);
+    expect(s.get().waiting[`line:${k2}`]).toBe(STILL_SAVING);
+    expect(s.get().items.length).toBe(2);
+    g.release({ ok: true });
+    expect(await first).toBe(true);
+    expect(a.deleteQuoteItem).toHaveBeenCalledWith(own, "q1");
+    expect(s.get().items.map((l) => l.id)).toEqual(["li-1"]);
+    expect(s.get().refusals).toEqual({});
+    expect(s.get().waiting).toEqual({});
+  });
+  it("a line the server was never asked for (no id) still just goes; one of a refused append that stays keeps the append's Retry, which sends only what is still unsaved", async () => {
+    const { s, a } = saved([{ ...trench, id: "li-1" }], { appendQuoteLines: vi.fn().mockResolvedValueOnce({ ok: false, error: "locked" }).mockImplementation(async (_q: string, lines: { id: string }[]) => ({ ok: true, ids: lines.map((l) => l.id) })) });
+    const never = s.addLine({ ...trench, description: "Backfill" });
+    expect(await s.removeLine(never)).toBe(true);
+    expect(a.deleteQuoteItem).not.toHaveBeenCalled();
+    await s.addLines([task, { ...trench, description: "Conduit" }]);
+    const [, kTask, kConduit] = s.get().items.map((l) => l.key);
+    const slot = Object.keys(s.get().refusals)[0];
+    expect(await s.removeLine(kTask)).toBe(true);
+    expect(a.deleteQuoteItem).toHaveBeenCalledTimes(1);
+    expect(s.get().refusals[slot]).toBe("locked"); // Conduit is still unsaved: the Retry stands
+    expect(await s.retry(slot)).toBe(true);
+    expect((calls(a.appendQuoteLines)[1][1] as { description: string }[]).map((l) => l.description)).toEqual(["Conduit"]);
+    expect(s.get().items.map((l) => [l.key, l.saved])).toEqual([[s.get().items[0].key, true], [kConduit, true]]);
+  });
+});
+
+describe("the page read the row again while the store was busy or dirty (S2)", () => {
+  const fromServer = (title: string, price = 290) => ({ header: { title }, status: "draft", number: "E-001", items: [{ ...trench, id: "li-1", unit_price: price }] });
+  it("held while a write is on the wire — the in-flight figure is not reverted — and applied once the write lands, once; the line that landed meanwhile keeps its figure", async () => {
+    const g = gate<{ ok: boolean }>();
+    const { s, a } = saved([{ ...trench, id: "li-1" }], { updateQuoteItem: vi.fn().mockReturnValueOnce(g.promise).mockResolvedValue({ ok: true }) });
+    const key = s.get().items[0].key;
+    s.typeLine(key, { unit_price: 310 });
+    const write = s.commitLine(key);
+    expect(s.get().pending).toBe(`line:${key}`);
+    expect(s.isDirty()).toBe(false); // the record was taken at send
+    // Stale props (the server's row from before this write) arrive mid-flight: held.
+    s.reseed(fromServer("From the server", 290));
+    expect(s.get().header.title).toBe("");
+    expect(s.get().items[0].unit_price).toBe(310);
+    g.release({ ok: true });
+    expect(await write).toBe(true);
+    // Applied at the landing: the title the server has; the figure this write landed stands (the
+    // seed predates it — the write's own refresh follows and agrees).
+    expect(s.get().header.title).toBe("From the server");
+    expect(s.get().items[0].unit_price).toBe(310);
+    // Once: a later landing does not bring the seed back over what he types next.
+    s.typeHeader({ title: "Mine" });
+    expect(await s.commitHeader("title")).toBe(true);
+    expect(s.get().header.title).toBe("Mine");
+    expect(a.updateQuoteMeta).toHaveBeenCalledTimes(1);
+    // The next seed, taken when quiet: the write's own refresh.
+    s.reseed({ ...fromServer("Mine", 310) });
+    expect(s.get().header.title).toBe("Mine");
+    expect(s.get().items[0].unit_price).toBe(310);
+  });
+  it("held while something typed is not yet committed (isDirty), and applied once the commit lands; the newest seed is the one applied", async () => {
+    const { s } = saved([{ ...trench, id: "li-1" }, { ...task, id: "li-2" }]);
+    const [k1] = s.get().items.map((l) => l.key);
+    expect(s.isDirty()).toBe(false);
+    s.typeLine(k1, { unit_price: 999 });
+    expect(s.isDirty()).toBe(true);
+    s.reseed(fromServer("First", 290));
+    s.reseed(fromServer("Second", 290));
+    expect(s.get().header.title).toBe(""); // held: what he is typing is not replaced
+    expect(s.get().items[0].unit_price).toBe(999);
+    expect(await s.commitLine(k1)).toBe(true);
+    expect(s.isDirty()).toBe(false);
+    // The latest seed, once: the title; the line he just wrote keeps 999; li-2 (not in the seed) is
+    // the server's to drop.
+    expect(s.get().header.title).toBe("Second");
+    expect(s.get().items.map((l) => [l.id, l.unit_price])).toEqual([["li-1", 999]]);
+    // Header text typed and not committed is dirty too; a named line not yet on the server as well.
+    s.typeHeader({ notes: "Net 30" });
+    expect(s.isDirty()).toBe(true);
+    await s.commitHeader("notes");
+    expect(s.isDirty()).toBe(false);
+    const added = s.addLine(blank);
+    expect(s.isDirty()).toBe(false); // a blank starter row is scratch
+    s.typeLine(added, { description: "Backfill" });
+    expect(s.isDirty()).toBe(true);
+  });
+  it("a seed that predates an append or a delete neither drops the new line nor brings the removed one back", async () => {
+    const { s } = saved([{ ...trench, id: "li-1" }, { ...task, id: "li-2" }]);
+    const [, k2] = s.get().items.map((l) => l.key);
+    await s.addLines([{ ...trench, description: "Conduit" }]);
+    await s.removeLine(k2);
+    const own = s.get().items[1].id as string;
+    // The row as it was before both: li-1 and li-2, no Conduit.
+    s.reseed({ header: {}, status: "draft", number: "E-001", items: [{ ...trench, id: "li-1" }, { ...task, id: "li-2" }] });
+    expect(s.get().items.map((l) => l.id)).toEqual(["li-1", own]);
+    // The next seed (the server caught up) is taken whole.
+    s.reseed({ header: {}, status: "sent", number: "E-001", items: [{ ...trench, id: "li-1", unit_price: 300 }, { ...trench, id: own, description: "Conduit" }] });
+    expect(s.get().items.map((l) => [l.id, l.unit_price])).toEqual([["li-1", 300], [own, 290]]);
+    expect(s.get().mode).toMatchObject({ status: "sent" });
+  });
+});
+
+describe("the rule pass on a saved draft whose ids are not back yet (S3)", () => {
+  const now = { levelRate: null, orgDefault: 135, people: [] };
+  it("queues the id-less lines with their words instead of skipping them; the read-back's Retry drains them", async () => {
+    const { s, a } = unsaved([task, trench], { readQuoteLineIds: vi.fn().mockResolvedValueOnce({ ok: false, error: "no" }).mockResolvedValue({ ok: true, items: [{ id: "li-1", sort_order: 0, description: task.description }, { id: "li-2", sort_order: 1, description: "Trench" }] }) });
+    await s.mount();
+    expect(s.get().refusals["read-back"]).toBe(READ_BACK_FAILED);
+    const [kTask] = s.get().items.map((l) => l.key);
+    expect(await s.reprice(now, 145)).toBe(false);
+    expect(s.get().items[0].unit_price).toBe(270); // the mirror moved
+    expect(a.updateQuoteItem).not.toHaveBeenCalled();
+    expect(s.get().waiting[`line:${kTask}`]).toBe(WAITING_READ_BACK);
+    expect(s.get().refusals.reprice).toBeUndefined();
+    expect(isQuiet(s.get())).toBe(false);
+    expect(await s.retry("read-back")).toBe(true);
+    expect(a.updateQuoteItem).toHaveBeenCalledTimes(1);
+    expect(a.updateQuoteItem).toHaveBeenCalledWith("li-1", CLIENT, expect.objectContaining({ unit_price: 270, detail: expect.objectContaining({ labor: [expect.objectContaining({ rate: 135 })] }) }));
+    expect(s.get().waiting).toEqual({});
+    expect(isQuiet(s.get())).toBe(true);
+  });
+});
+
+describe("what the job's list did with an append (said / note)", () => {
+  it("a kit added to an accepted, job-linked estimate: the said sits under the list, the note rides each line it was about", async () => {
+    const { s } = saved([{ ...trench, id: "li-1" }], {
+      appendQuoteLines: vi
+        .fn()
+        .mockImplementationOnce(async (_q: string, lines: { id: string }[]) => ({ ok: true, ids: lines.map((l) => l.id), said: "The job's list has them too.", note: "One part was already on the job's list." }))
+        .mockImplementation(async (_q: string, lines: { id: string }[]) => ({ ok: true, ids: lines.map((l) => l.id) })),
+    });
+    expect(await s.addLines([task, { ...trench, description: "Conduit" }])).toBe(true);
+    const [, k2, k3] = s.get().items.map((l) => l.key);
+    expect(s.get().said).toBe("The job's list has them too.");
+    expect(s.get().follow[k2]).toEqual({ note: "One part was already on the job's list." });
+    expect(s.get().follow[k3]).toEqual({ note: "One part was already on the job's list." });
+    // An append that followed nothing says nothing, and clears the last deed's words under the list.
+    expect(await s.addLines([{ ...trench, description: "Backfill" }])).toBe(true);
+    expect(s.get().said).toBeNull();
+    expect(s.get().follow[s.get().items[3].key]).toBeUndefined();
+  });
+});
+
+describe("only what he did HERE is substance", () => {
+  const preset: EstimateHeader = { ...header, customerId: "c1", leadId: "l1" };
+  it("a toggle of the document kind on a cold estimate opened with a preselected customer and lead births nothing; a customer picked here does", async () => {
+    const { s, a } = unsaved([blank], {}, CLIENT, preset);
+    s.typeHeader({ docType: "quote" });
+    expect(await s.commitHeader("docType")).toBe(true);
+    s.typeHeader({ estimateFormat: "detailed" });
+    expect(await s.commitHeader("estimateFormat")).toBe(true);
+    expect(a.saveQuote).not.toHaveBeenCalled();
+    expect(s.get().mode.kind).toBe("unsaved");
+    // He picks somebody: that is his, and the seed's lead and the held toggles ride the save.
+    s.typeHeader({ customerId: "c2" });
+    expect(await s.commitHeader("customerId")).toBe(true);
+    expect(a.saveQuote).toHaveBeenCalledTimes(1);
+    expect(calls(a.saveQuote)[0][0]).toMatchObject({ customer_id: "c2", inquiry_id: "l1", doc_type: "quote", estimate_format: "detailed", items: [] });
+  });
+  it("the seed with real lines still births at mount, preselected or not; the pure rule compares to the seed", async () => {
+    const { s, a } = unsaved([task], {}, CLIENT, preset);
+    await s.mount();
+    expect(a.saveQuote).toHaveBeenCalledTimes(1);
+    expect(calls(a.saveQuote)[0][0]).toMatchObject({ customer_id: "c1", inquiry_id: "l1" });
+    expect(s.get().mode.kind).toBe("saved");
+    expect(substantive(preset, [blank], preset)).toBe(false);
+    expect(substantive({ ...preset, docType: "quote", taxRate: 0.1, validUntil: "2027-01-01" }, [blank], preset)).toBe(false);
+    expect(substantive({ ...preset, customerId: "c2" }, [blank], preset)).toBe(true);
+    expect(substantive({ ...preset, customerId: "" }, [blank], preset)).toBe(false); // un-picking is not a pick
+    expect(substantive({ ...preset, title: "Larkspur panel" }, [blank], preset)).toBe(true);
+    expect(substantive({ ...preset, title: "Larkspur panel" }, [blank], { ...preset, title: "Larkspur panel" })).toBe(false);
+    expect(substantive(preset, [task], preset)).toBe(true);
+    // Without a seed, anything on the header is his (the pure rule as the older tests use it).
+    expect(substantive(preset, [blank])).toBe(true);
   });
 });
 
@@ -750,5 +1046,98 @@ describe("the page read the row again", () => {
     expect(items[3]).toMatchObject({ key: blankKey, saved: false });
     expect(s.get().header.title).toBe("From the server");
     expect(s.get().mode).toMatchObject({ status: "sent" });
+  });
+});
+
+describe("the read-back matches by the words that WENT (skeptic #39, B3)", () => {
+  it("a line renamed and committed while the first save was out: the row that says the sent words is its, the rename goes as its own update, and the store is quiet", async () => {
+    const g = gate<{ ok: true; id: string; quote_number: string }>();
+    const { s, a } = unsaved([{ ...trench, description: "Outlet", unit_price: 5 }]);
+    (a.saveQuote as ReturnType<typeof vi.fn>).mockImplementation(async () => g.promise);
+    const [key] = s.get().items.map((l) => l.key);
+    const first = s.commitLine(key); // the first save, carrying "Outlet", on the wire
+    s.typeLine(key, { description: "Outlets" }); // a typo fixed in flight
+    const second = s.commitLine(key); // queued behind the wire
+    expect(s.get().waiting[`line:${key}`]).toBe(STILL_SAVING);
+    g.release({ ok: true, id: CLIENT, quote_number: "E-012" });
+    await first;
+    await second;
+    // The read-back answered "Outlet" (what went) — matched onto the line now saying "Outlets".
+    expect(calls(a.readQuoteLineIds)).toHaveLength(1);
+    expect(s.get().items[0]).toMatchObject({ id: "li-1", saved: true, description: "Outlets" });
+    expect(s.get().refusals).toEqual({});
+    expect(s.get().waiting).toEqual({});
+    // Then the queued rename went as a normal update under the id, once.
+    expect(calls(a.updateQuoteItem)).toEqual([["li-1", CLIENT, expect.objectContaining({ description: "Outlets" })]]);
+    expect(isQuiet(s.get())).toBe(true);
+    expect(s.isDirty()).toBe(false);
+  });
+
+  it("the pure rule: `sent` wins over the current words; a line with no record is matched by its current words", () => {
+    const items = [
+      { key: "a", id: null, saved: true, description: "Outlets", quantity: 1, unit: "ea", unit_price: 5 },
+      { key: "b", id: null, saved: true, description: "Trench", quantity: 1, unit: "ea", unit_price: 290 },
+    ];
+    const read = [{ id: "r1", sort_order: 0, description: "Outlet" }, { id: "r2", sort_order: 1, description: "Trench" }];
+    expect(idsBySortOrder(items, read).map((l) => l.id)).toEqual([null, "r2"]);
+    expect(idsBySortOrder(items, read, (key) => (key === "a" ? "Outlet" : undefined)).map((l) => l.id)).toEqual(["r1", "r2"]);
+  });
+});
+
+describe("a line of a refused append goes with its set (skeptic #39, B4)", () => {
+  it("a refused append of [A, B]; A is edited and committed alone: the same slot re-sends BOTH (under the same ids), both land, no refusal or waiting is left, and the store is clean", async () => {
+    let fail = true;
+    const sent: [string, string, number][][] = [];
+    const { s } = saved([{ ...trench, id: "e1", description: "Existing" }], {
+      appendQuoteLines: vi.fn(async (_q: string, lines: (DraftLineItem & { id: string })[]) => {
+        sent.push(lines.map((l) => [l.description, l.id, l.unit_price]));
+        if (fail) throw new Error("lost");
+        return { ok: true as const, ids: lines.map((l) => l.id) };
+      }),
+    });
+    await s.addLines([{ ...trench, description: "A", unit_price: 10 }, { ...trench, description: "B", unit_price: 10 }]);
+    const slot = Object.keys(s.get().refusals).find((k) => k.startsWith("append:"))!;
+    expect(s.get().refusals[slot]).toBe(COULD_NOT_REACH);
+    const [, kA] = s.get().items.map((l) => l.key);
+    const [idA, idB] = s.get().items.slice(1).map((l) => l.id);
+    s.typeLine(kA, { unit_price: 99 });
+    fail = false;
+    expect(await s.commitLine(kA)).toBe(true);
+    expect(s.get().items.map((l) => [l.description, l.saved, l.id, l.unit_price])).toEqual([["Existing", true, "e1", 290], ["A", true, idA, 99], ["B", true, idB, 10]]);
+    expect(s.get().refusals).toEqual({});
+    expect(s.get().waiting).toEqual({});
+    expect(sent).toEqual([[["A", idA, 10], ["B", idB, 10]], [["A", idA, 99], ["B", idB, 10]]]);
+    expect(s.isDirty()).toBe(false);
+    expect(isQuiet(s.get())).toBe(true);
+    // Nothing left to retry on the slot.
+    expect(await s.retry(slot)).toBe(true);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("B committed alone while another write is on the wire (the catch-up path) widens to the set the same way", async () => {
+    let fail = true;
+    const sent: string[][] = [];
+    const g = gate<{ ok: boolean }>();
+    const { s, a } = saved([{ ...trench, id: "e1", description: "Existing" }], {
+      appendQuoteLines: vi.fn(async (_q: string, lines: (DraftLineItem & { id: string })[]) => {
+        sent.push(lines.map((l) => l.description));
+        if (fail) return { ok: false as const, error: "no room" };
+        return { ok: true as const, ids: lines.map((l) => l.id) };
+      }),
+      updateQuoteItem: vi.fn().mockReturnValueOnce(g.promise).mockResolvedValue({ ok: true }),
+    });
+    await s.addLines([{ ...trench, description: "A" }, { ...trench, description: "B" }]);
+    const [kE, , kB] = s.get().items.map((l) => l.key);
+    s.typeLine(kE, { unit_price: 300 });
+    const busyWrite = s.commitLine(kE); // the wire is busy with Existing
+    s.typeLine(kB, { unit_price: 77 });
+    expect(await s.commitLine(kB)).toBe(false); // queued
+    fail = false;
+    g.release({ ok: true });
+    await busyWrite;
+    expect(sent).toEqual([["A", "B"], ["A", "B"]]); // the catch-up sent the whole set, not B alone
+    expect(s.get().items.slice(1).map((l) => [l.description, l.saved, l.unit_price])).toEqual([["A", true, 290], ["B", true, 77]]);
+    expect(s.get().refusals).toEqual({});
+    expect(calls(a.appendQuoteLines)).toHaveLength(2);
   });
 });

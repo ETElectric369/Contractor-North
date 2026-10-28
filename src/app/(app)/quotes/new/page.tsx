@@ -48,7 +48,7 @@ export default async function NewQuotePage({
   // edit that one row, never mint a numbered twin. The estimate is edited where it lives; nothing is
   // adopted into the browser. RLS-scoped; newest draft wins.
   if (inquiry) {
-    const { data: existing } = await supabase
+    const { data: existing, error: existingErr } = await supabase
       .from("quotes")
       .select("id")
       .eq("inquiry_id", inquiry)
@@ -56,6 +56,9 @@ export default async function NewQuotePage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    // A failed read is an error, exactly as the ?capture= read below: a draft this door couldn't see
+    // is not "no draft", and opening a fresh editor over it would mint the twin this check exists to prevent.
+    if (existingErr) throw existingErr;
     if (existing?.id) redirect(`/quotes/${existing.id}`);
   }
 

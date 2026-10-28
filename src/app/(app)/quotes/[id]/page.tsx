@@ -71,8 +71,11 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   };
 
   // EVERY COLUMN THE EDITOR SHOWS (projection law): the words, the count, the price, the group
-  // (category), the task behind the line (detail) and its place (sort_order).
-  const { data: items } = await supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order");
+  // (category), the task behind the line (detail) and its place (sort_order). A FAILED READ IS AN
+  // ERROR, like the row's: rendered as an empty estimate it read as "no lines", and the editor's next
+  // reseed then dropped every saved line from its mirror.
+  const { data: items, error: itemsErr } = await supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order");
+  if (itemsErr) throw itemsErr;
   const lineItems = (items ?? []) as SavedLineRow[];
 
   // Has this quote already been turned into these records? (Drives idempotent UI: the map shows

@@ -1,9 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
-import { keyParts, materialKey, type LineRow } from "./born-with-tasks";
-import { coerceTaskDetail } from "./task-lines";
+import { partsFromLines, type KeyedPart, type LineRow } from "./born-with-tasks";
 import { GONE_KEY, LINE_KEY, VISIT_KEY } from "./sync-job-tasks";
 import { HOW_MANY, few, insertKeyedRows, plainLineOf, plainRowHalf, plural, readPriceBook, taskPartRow } from "./take-off-from-quote";
+
+/** The parts reader and its row type live with the birth (born-with-tasks, cn-v1133) so the figure a
+ *  door reads before its write (estimateLines' partCounts) is the sync's own reading; found here still. */
+export { partsFromLines, type KeyedPart } from "./born-with-tasks";
 
 /**
  * THE MATERIALS LIST FOLLOWS THE ESTIMATE (0390, 2026-10-10).
@@ -19,7 +22,20 @@ import { HOW_MANY, few, insertKeyedRows, plainLineOf, plainRowHalf, plural, read
  *
  *  - A row whose key is still wanted stays exactly as it is (his count, vendor, cost edits stand).
  *    When its count differs from the estimate's, that is SAID by name — the row is not rewritten,
- *    because a count he typed and a count the take-off wrote look the same.
+ *    because a count he typed and a count the take-off wrote look the same — UNLESS the row still
+ *    holds the count its line said BEFORE this change (`partsBefore`, read by the door before its
+ *    write, the twin of the tasks' `tasksBefore`, cn-v1133): then the count is still the estimate's
+ *    and FOLLOWS, compare-and-set on the count just read, never a bought or tool row. A count that
+ *    moved meanwhile is his, and the difference is said.
+ *  - A RENAME IS A RENAME (cn-v1133). An uncoded part's key is a slug of its words, so renaming it
+ *    changed its key: the old row went under the tombstone (bought) or away, and a new row was
+ *    inserted — two rows for one part. When ONE line has exactly one key gone and one key new, at
+ *    the same count, AND BOTH ARE UNCODED, the existing row takes the new words and the new key
+ *    (bought or not; a bought row keeps its mark). A coded part's key IS its book code, so a changed
+ *    key on either side is a different book item — another part number, vendor and cost — and takes
+ *    the old path (kept or removed; the new one inserted, priced from the book): writing "3/4 in EMT"
+ *    onto a bought row of 1/2 in EMT would misname what he bought (skeptic #39, B2). Anything but
+ *    that exact 1:1 is handled as before.
  *  - An ORPHAN (its key is on no task line) is matched by its "#part" half to a wanted part nobody
  *    has yet — the builder rewrites lines with NEW ids — and re-keyed: rows that are not his first,
  *    preferring an equal count; a bought or tool row only onto an equal count (a bought R1 must never
@@ -70,35 +86,14 @@ export interface ListPartRow {
 /** A row with no key that is not his (not bought, not a tool): typed by hand, or taken off before 0390. */
 export type HandRow = Pick<ListPartRow, "id" | "description" | "part_number" | "quantity">;
 
-/** A wanted part with its row key. */
-export interface KeyedPart {
-  key: string;
-  code: string | null;
-  name: string;
-  qty: number | null;
-  cost: number | null;
-  /** The Inspector task the line was built from (detail.task_id): how a visit's row finds its line. */
-  taskId?: string | null;
-}
-
-/** The parts of a quote's TASK lines, keyed as the take-off keys them (ordinals for repeats). The
- *  take-off's own predicate: a line with a breakdown, whatever its title — a nameless task line's parts
- *  are still rows on the sheet. */
-export function partsFromLines(rows: ReadonlyArray<LineRow>): KeyedPart[] {
-  const out: KeyedPart[] = [];
-  for (const r of rows) {
-    const d = coerceTaskDetail(r.detail);
-    if (!d) continue;
-    const named = d.materials.filter((m) => m.name.trim());
-    for (const m of keyParts(`line:${r.id}`, named)) out.push({ key: m.key, code: m.code, name: m.name.trim(), qty: m.qty, cost: m.cost, taskId: d.task_id || null });
-  }
-  return out;
-}
-
 /** The "#part" half of a key, without its ordinal — what survives the builder giving the line a new id. */
 export const partHalf = (key: string): string => key.slice(key.indexOf("#") + 1).replace(/~\d+$/, "");
 /** The "line:<id>" half. */
 const lineHalf = (key: string): string => key.slice(0, key.indexOf("#"));
+/** An UNCODED part's half: materialKey slugs words to lowercase and upper-cases a code, so a half with a
+ *  lowercase letter in it is words, never a book code. (A slug of digits alone reads as a code — the
+ *  safe side: the old path, never a rename onto a row that may be another part.) */
+export const isSlugHalf = (half: string): boolean => /[a-z]/.test(half);
 /** The Inspector task id inside a visit's row key ("task:<id>#part"), else null. */
 const visitTaskOf = (key: string): string | null => (key.startsWith(VISIT_KEY) && key.includes("#") ? key.slice(VISIT_KEY.length, key.indexOf("#")) : null);
 
@@ -133,30 +128,49 @@ export interface PartSyncPlan {
   countsDiffer: CountDiffers[];
   /** A placeholder row ("… · how many?", riding as one, not his) whose part now has a count: filled in. */
   fill: Array<{ id: string; description: string; qty: number }>;
+  /** A row still holding the count its line said BEFORE this change (partsBefore), not his: moved to the
+   *  line's count now — compare-and-set on `from` (cn-v1133). */
+  move: Array<{ id: string; description: string; from: number; to: number }>;
+  /** ONE line's one gone UNCODED key and one new UNCODED key at the same count: the row takes the new
+   *  words and key (a rename, not a tombstone + an insert), bought or not (cn-v1133). */
+  rename: Array<{ id: string; source_key: string; description: string }>;
 }
 
-/** A row as the plan compares it: the keyed rows carry purchased/is_tool, a hand row is not his by definition. */
-type RowLike = Pick<ListPartRow, "id" | "description" | "quantity"> & Partial<Pick<ListPartRow, "purchased" | "is_tool">>;
+/** A row as the plan compares it: the keyed rows carry purchased/is_tool and their key as read (what
+ *  `partsBefore` is keyed by), a hand row is not his by definition and has no key. */
+type RowLike = Pick<ListPartRow, "id" | "description" | "quantity"> & Partial<Pick<ListPartRow, "purchased" | "is_tool" | "source_key">>;
 
-/** THE PLAN, pure. `hand` = unkeyed rows that are not his: they may be a wanted part's row. */
+/** THE PLAN, pure. `hand` = unkeyed rows that are not his: they may be a wanted part's row. `partsBefore`
+ *  = each part's count as its line said it BEFORE the change (by the row key as read), from the door. */
 export function planPartSync(
   wanted: ReadonlyArray<KeyedPart>,
   have: ReadonlyArray<ListPartRow>,
   dismissed: ReadonlySet<string> = new Set(),
   hand: ReadonlyArray<HandRow> = [],
+  partsBefore?: ReadonlyMap<string, number>,
 ): PartSyncPlan {
   const wantedByKey = new Map(wanted.map((p) => [p.key, p]));
   const haveKeys = new Set(have.map((r) => r.source_key)); // live and tombstoned alike: neither is inserted again
   const currentLines = new Set(wanted.map((p) => lineHalf(p.key)));
   const countsDiffer: CountDiffers[] = [];
   const fill: PartSyncPlan["fill"] = [];
+  const move: PartSyncPlan["move"] = [];
   const differs = (r: RowLike, p: KeyedPart) => {
     if (p.qty === null || Number(r.quantity) === p.qty) return;
+    const his = isHisRow({ purchased: r.purchased ?? null, is_tool: r.is_tool ?? null });
     // THE ANSWER REACHES THE ROW (audit v1085, carried): a part the visit listed without a count ("how
     // many?", riding as one) takes the count the estimate gives it — only that untouched placeholder, never
     // a count someone typed (he keeps the words but not the 1) and never a bought or tool row.
-    if (!isHisRow({ purchased: r.purchased ?? null, is_tool: r.is_tool ?? null }) && r.description.endsWith(HOW_MANY) && Number(r.quantity) === 1 && p.qty !== 1) {
+    if (!his && r.description.endsWith(HOW_MANY) && Number(r.quantity) === 1 && p.qty !== 1) {
       fill.push({ id: r.id, description: r.description.slice(0, -HOW_MANY.length), qty: p.qty });
+      return;
+    }
+    // THE COUNT FOLLOWS, LIKE THE MINUTES DO (cn-v1133): the row still says what its line said before
+    // this change (under the key the row had when the door read it), so the count is the estimate's,
+    // not his — it moves. A count he typed, and a bought or tool row, stay: said.
+    const before = r.source_key ? partsBefore?.get(r.source_key) : undefined;
+    if (!his && before !== undefined && Number(r.quantity) === before) {
+      move.push({ id: r.id, description: r.description, from: before, to: p.qty });
       return;
     }
     countsDiffer.push({ description: r.description, shows: r.quantity, estimate: p.qty });
@@ -219,6 +233,35 @@ export function planPartSync(
   for (const r of hand) claimHalf(r, unkeyedHalf(r), true);
   for (const r of hand) claimHalf(r, unkeyedHalf(r), false);
 
+  // A RENAME IS A RENAME (cn-v1133): an uncoded part's key is a slug of its words, so his rename made
+  // one key gone and one key new on the SAME line. When that is all that changed on the line — exactly
+  // one of each, at the same count — the row is renamed and re-keyed in place, bought or not, instead
+  // of going under the tombstone (or away) beside a second row for the same part. ONLY UNCODED TO
+  // UNCODED (skeptic #39, B2): a coded part's key is its book code, so a changed key there is a swap to
+  // a DIFFERENT book item (E1 → E2: another part number, vendor and cost), and renaming the row would
+  // put the new words on a bought row of the old part — that pair takes the old path. Anything else on
+  // a line (two gone, two new, a count that moved too) is read as before. After the claims, so a part
+  // the same key or half still wants is never mistaken for a rename.
+  const rename: PartSyncPlan["rename"] = [];
+  const goneByLine = new Map<string, ListPartRow[]>();
+  for (const r of orphans) {
+    if (claimed.has(r.id) || !r.source_key.startsWith(LINE_KEY)) continue;
+    const line = lineHalf(r.source_key);
+    if (!currentLines.has(line)) continue;
+    goneByLine.set(line, [...(goneByLine.get(line) ?? []), r]);
+  }
+  for (const [line, gone] of goneByLine) {
+    const added = unmatched.filter((p) => lineHalf(p.key) === line);
+    if (gone.length !== 1 || added.length !== 1) continue;
+    const [r] = gone;
+    const [p] = added;
+    if (p.qty === null || Number(r.quantity) !== p.qty) continue;
+    if (p.code !== null || !isSlugHalf(partHalf(r.source_key))) continue;
+    rename.push({ id: r.id, source_key: p.key, description: p.name });
+    claimed.add(r.id);
+    unmatched.splice(unmatched.indexOf(p), 1);
+  }
+
   // A dismissal under a line that is gone bars the same part on a line nobody has (one part per
   // dismissal) — AFTER the claims, so a row that is there always wins — and MOVES to the new key.
   const leftOff: string[] = [];
@@ -253,6 +296,8 @@ export function planPartSync(
     redismiss,
     countsDiffer,
     fill,
+    move,
+    rename,
   };
 }
 
@@ -260,6 +305,10 @@ export interface MaterialsSyncWho {
   jobId: string;
   orgId: string | null;
   userId: string | null;
+  /** Each part's count as its line said it BEFORE the change (estimateLines().partCounts, by row key), read
+   *  by the door before its write: a row still holding it follows its line (cn-v1133). undefined = only a
+   *  "how many?" placeholder follows; every other difference is said. */
+  partsBefore?: ReadonlyMap<string, number>;
 }
 
 export interface MaterialsSyncResult {
@@ -274,10 +323,16 @@ export interface MaterialsSyncResult {
   countsDiffer: CountDiffers[];
   /** Placeholder rows ("how many?") that took the estimate's count, by name. */
   filled?: string[];
+  /** Rows still at the count their line said before that moved to the line's count now (cn-v1133), by name. */
+  moved?: string[];
+  /** Rows that took a renamed part's new words and key in place of a tombstone + an insert (cn-v1133), by their new name. */
+  renamed?: string[];
   error?: string;
 }
 
 const NONE: MaterialsSyncResult = { inserted: 0, rekeyed: 0, removed: 0, removedNames: [], kept: 0, keptNames: [], leftOff: [], countsDiffer: [] };
+const names = (key: "filled" | "moved" | "renamed", a: MaterialsSyncResult, b: MaterialsSyncResult) =>
+  a[key]?.length || b[key]?.length ? { [key]: [...(a[key] ?? []), ...(b[key] ?? [])] } : {};
 const add = (a: MaterialsSyncResult, b: MaterialsSyncResult): MaterialsSyncResult => ({
   inserted: a.inserted + b.inserted,
   rekeyed: a.rekeyed + b.rekeyed,
@@ -287,7 +342,9 @@ const add = (a: MaterialsSyncResult, b: MaterialsSyncResult): MaterialsSyncResul
   keptNames: [...a.keptNames, ...b.keptNames],
   leftOff: [...a.leftOff, ...b.leftOff],
   countsDiffer: [...a.countsDiffer, ...b.countsDiffer],
-  ...(a.filled?.length || b.filled?.length ? { filled: [...(a.filled ?? []), ...(b.filled ?? [])] } : {}),
+  ...names("filled", a, b),
+  ...names("moved", a, b),
+  ...names("renamed", a, b),
   ...(a.error || b.error ? { error: [a.error, b.error].filter(Boolean).join(" ") } : {}),
 });
 
@@ -305,7 +362,8 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
   );
   const dismissed = new Set<string>(dismissedList);
 
-  const { data: lines, error: qErr } = await org(sb.from("quote_line_items").select("id, description, sort_order, detail, unit").eq("quote_id", who.quoteId), who.orgId).order("sort_order");
+  // `quantity` rides with the breakdown (cn-v1133): "this many of the task" multiplies each part's count.
+  const { data: lines, error: qErr } = await org(sb.from("quote_line_items").select("id, description, sort_order, quantity, detail, unit").eq("quote_id", who.quoteId), who.orgId).order("sort_order");
   if (qErr) return { ...NONE, error: dbError(qErr) };
   const wanted = partsFromLines((lines ?? []) as LineRow[]);
 
@@ -348,7 +406,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     return false; // the estimate's own plain row: left exactly as it is
   });
 
-  const plan = planPartSync(wanted, have, dismissed, hand);
+  const plan = planPartSync(wanted, have, dismissed, hand, who.partsBefore);
 
   // THE BOOK, once, when anything needs pricing: a claimed visit or hand row with no vendor or cost
   // takes the book's (audit v1085: a PO seeded from such a row read $0), never a value someone set.
@@ -376,6 +434,18 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     rekeyed++;
   }
 
+  // A RENAME IS A RENAME (cn-v1133): the row takes the part's new words and key in place — a bought row
+  // keeps its mark, its part number, vendor and cost (only the words and the key are written — right
+  // ONLY because the plan renames uncoded → uncoded; a coded swap never reaches here). Zero rows is a
+  // refusal, said.
+  const renamed: string[] = [];
+  for (const r of plan.rename) {
+    const { data, error } = await org(sb.from("material_list_items").update({ source_key: r.source_key, description: r.description }).eq("id", r.id).eq("list_id", listId), who.orgId).select("id");
+    if (error) return { ...NONE, rekeyed, error: dbError(error) };
+    if (!data?.length) return { ...NONE, rekeyed, error: "A renamed part could not be matched to its line." };
+    renamed.push(r.description);
+  }
+
   // THE ANSWER REACHES THE ROW: conditional on the placeholder being untouched still (count 1, not bought,
   // not a tool) — a count typed or a buy made meanwhile is his, and the difference is said instead.
   const filled: string[] = [];
@@ -387,6 +457,20 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
     if (data?.length) filled.push(f.description);
     else plan.countsDiffer.push({ description: f.description, shows: 1, estimate: f.qty });
+  }
+
+  // THE COUNT FOLLOWS, LIKE THE MINUTES DO (cn-v1133): compare-and-set on the count the plan read (still
+  // the line's figure before), never a bought or tool row. Zero rows = someone moved it meanwhile: his
+  // now, and the difference is said instead of written over.
+  const moved: string[] = [];
+  for (const m of plan.move) {
+    const { data, error } = await org(
+      sb.from("material_list_items").update({ quantity: m.to }).eq("id", m.id).eq("list_id", listId).eq("purchased", false).eq("is_tool", false).eq("quantity", m.from),
+      who.orgId,
+    ).select("id");
+    if (error) return { ...NONE, rekeyed, error: dbError(error) };
+    if (data?.length) moved.push(m.description);
+    else plan.countsDiffer.push({ description: m.description, shows: m.from, estimate: m.to });
   }
 
   for (const t of plan.tombstone) {
@@ -443,7 +527,19 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     if (k.error) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, inserted, error: dbError(k.error) };
   }
 
-  return { inserted, rekeyed, removed, removedNames, kept, keptNames, leftOff: plan.leftOff, countsDiffer: plan.countsDiffer, ...(filled.length ? { filled } : {}) };
+  return {
+    inserted,
+    rekeyed,
+    removed,
+    removedNames,
+    kept,
+    keptNames,
+    leftOff: plan.leftOff,
+    countsDiffer: plan.countsDiffer,
+    ...(filled.length ? { filled } : {}),
+    ...(moved.length ? { moved } : {}),
+    ...(renamed.length ? { renamed } : {}),
+  };
 }
 
 /** EVERY ACCEPTED ESTIMATE OF THE JOB that has a list, each brought in step. */
@@ -464,6 +560,8 @@ export function materialsWords(r: MaterialsSyncResult, lead = "The estimate's ma
   if (r.kept) bits.push(`${r.kept} kept${few(r.keptNames)} — bought, or a tool`);
   if (r.leftOff.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the list before`);
   if (r.filled?.length) bits.push(`${plural(r.filled.length, "count", "counts")} filled in${few(r.filled)}`);
+  if (r.moved?.length) bits.push(`${r.moved.length} re-counted${few(r.moved)}`);
+  if (r.renamed?.length) bits.push(`${r.renamed.length} renamed${few(r.renamed)}`);
   for (const c of r.countsDiffer.slice(0, 3)) bits.push(`${c.description} shows ${c.shows ?? "no count"}, the estimate says ${c.estimate}`);
   if (r.countsDiffer.length > 3) bits.push(`${r.countsDiffer.length - 3} more counts differ`);
   return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;

@@ -34,6 +34,11 @@ export interface Handoff {
 
 export const handoffKey = (quoteId: string): string => `handoff:quote:${quoteId}`;
 
+/** How long a stash is good for. A hand-off that never landed (the tab closed between the stash and
+ *  the navigation, the navigation refused) would otherwise leave its proposals and a "Saved as" line
+ *  for whoever opens that estimate in the same tab a week later. Ten minutes covers a slow network. */
+export const HANDOFF_TTL_MS = 10 * 60_000;
+
 /** The browser's sessionStorage, or null where there is none (a server render, a private window that
  *  refuses it). Every caller treats null as "nothing to carry": the estimate itself is on the server. */
 export function browserStash(): StorageLike | null {
@@ -46,12 +51,13 @@ export function browserStash(): StorageLike | null {
   }
 }
 
-/** Put the unsaved UI text under the estimate's key. False when it could not be kept (no store, a
- *  full store): the navigation still happens, and the scope text is the one thing lost. */
-export function stashHandoff(store: StorageLike | null, quoteId: string, h: Handoff): boolean {
+/** Put the unsaved UI text under the estimate's key, stamped with when. False when it could not be
+ *  kept (no store, a full store): the editor then decides whether to navigate — with text to carry it
+ *  stays where it is and offers the saved page as a link, so nothing he typed is lost. */
+export function stashHandoff(store: StorageLike | null, quoteId: string, h: Handoff, now: number = Date.now()): boolean {
   if (!store) return false;
   try {
-    store.setItem(handoffKey(quoteId), JSON.stringify(h));
+    store.setItem(handoffKey(quoteId), JSON.stringify({ ...h, at: now }));
     return true;
   } catch {
     return false;
@@ -59,8 +65,9 @@ export function stashHandoff(store: StorageLike | null, quoteId: string, h: Hand
 }
 
 /** Take the stash for this estimate, once: what was kept, shaped (a proposal is a draft line with
- *  its pid and keep; anything else is dropped), and the key cleared. null when there is none. */
-export function takeHandoff(store: StorageLike | null, quoteId: string): Handoff | null {
+ *  its pid and keep; anything else is dropped), and the key cleared. null when there is none, or when
+ *  it is older than HANDOFF_TTL_MS (a stash with no stamp counts as old: nothing to carry). */
+export function takeHandoff(store: StorageLike | null, quoteId: string, now: number = Date.now()): Handoff | null {
   if (!store) return null;
   const key = handoffKey(quoteId);
   let raw: string | null;
@@ -79,6 +86,7 @@ export function takeHandoff(store: StorageLike | null, quoteId: string): Handoff
   }
   if (!parsed || typeof parsed !== "object") return null;
   const p = parsed as Record<string, unknown>;
+  if (typeof p.at !== "number" || !Number.isFinite(p.at) || now - p.at > HANDOFF_TTL_MS) return null;
   const proposed: HandoffProposal[] = (Array.isArray(p.proposed) ? p.proposed : [])
     .filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && typeof (x as { description?: unknown }).description === "string")
     .map((x, i) => ({

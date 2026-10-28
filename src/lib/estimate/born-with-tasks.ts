@@ -4,7 +4,10 @@ import type { Answers, Playbook } from "@/lib/playbook/types";
 import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { dbError } from "@/lib/db-error";
-import { coerceTaskDetail, expandTaskKit, laborMinutes, type TaskKit } from "./task-lines";
+import { PLANNED_MINUTES_MAX, coerceTaskDetail, expandTaskKit, laborMinutes, lineQty, minutesPastBound, taskMinutesFor, type TaskKit } from "./task-lines";
+
+/** The bound lives with the minutes rule (task-lines); callers that knew it here still find it. */
+export { PLANNED_MINUTES_MAX } from "./task-lines";
 
 /**
  * A JOB IS BORN WITH ITS TASKS (W3, cn-v1075).
@@ -32,6 +35,11 @@ import { coerceTaskDetail, expandTaskKit, laborMinutes, type TaskKit } from "./t
  *    ([[no-speculation]]). No hours at all → null, and the job's How Long box asks as it does today.
  *    A How Long the job already has WINS (the write lands only on a null); 0229's bound
  *    (0 < n ≤ 43200) is honoured by leaving an out-of-range sum null rather than clamping it.
+ *  - THE QTY BOX IS "THIS MANY OF THE TASK" (cn-v1133). The breakdown is per unit and the paper
+ *    multiplies it by the line's quantity, so the job does too: a task at qty 2 is born with twice
+ *    the minutes and twice each counted part (taskMinutesFor, partQtyFor). A part he never counted
+ *    stays null — "I haven't counted it" — at any quantity. Every door that reads lines for the
+ *    birth selects `quantity` (LineRow): a reader that leaves it out is the bug class this closed.
  *  - IDEMPOTENT BY KEY. tasks.source_key ("line:<line id>", "task:<task id>") with
  *    tasks_job_source_key_uq means a door run twice births nothing twice. PostgREST's upsert cannot
  *    name a partial index's predicate, so the keys the job already has are read first and only the
@@ -96,23 +104,69 @@ export function keyParts<T extends { code: string | null; name: string }>(source
   });
 }
 
-/** jobs.planned_minutes' own check (0229): null, or 0 < n ≤ 43200 (thirty working days). */
-export const PLANNED_MINUTES_MAX = 43_200;
+/** A sum the job's column would take (0229): 0 < n ≤ PLANNED_MINUTES_MAX, else null — never clamped. */
+const bounded = (sum: number): number | null => (sum > 0 && sum <= PLANNED_MINUTES_MAX ? sum : null);
 
 /** Σ round(h × 60) over the hours he gave. None given → null; a sum the column would refuse → null. */
 export function minutesOf(hours: ReadonlyArray<number | null>): number | null {
   const given = hours.filter((h): h is number => typeof h === "number" && Number.isFinite(h) && h > 0);
   if (!given.length) return null;
-  const sum = given.reduce((t, h) => t + Math.round(h * 60), 0);
-  return sum > 0 && sum <= PLANNED_MINUTES_MAX ? sum : null;
+  return bounded(given.reduce((t, h) => t + Math.round(h * 60), 0));
 }
 
-/** The columns a door reads off quote_line_items for the birth. */
+/** THE JOB'S WHOLE from its tasks' own minutes: Σ over the tasks that have a figure. None → null; a sum
+ *  the column would refuse → null (the same bound as minutesOf, over minutes already counted). A null
+ *  here cannot tell "no hours" from "past the bound" — tasksFromLines reads that first (minutesPastBound)
+ *  and leaves the whole null when any task with hours was. */
+export function sumMinutes(minutes: ReadonlyArray<number | null | undefined>): number | null {
+  const given = minutes.filter((m): m is number => typeof m === "number" && Number.isFinite(m) && m > 0);
+  if (!given.length) return null;
+  return bounded(given.reduce((t, m) => t + m, 0));
+}
+
+/** The columns a door reads off quote_line_items for the birth. `quantity` is the Qty box — "this
+ *  many of the task" (cn-v1133) — and EVERY select that feeds a LineRow names it. */
 export interface LineRow {
   id: string;
   description: string | null;
   sort_order: number | null;
+  quantity: number | string | null;
   detail: unknown;
+}
+
+/** A PART'S COUNT FOR THIS MANY OF ITS TASK (cn-v1133): the part's count × the line's quantity, to the
+ *  cent of a count (two decimals, as the breakdown stores counts). A part he never counted stays null
+ *  — "I haven't counted it" — whatever the quantity; the list asks "how many?" as it did. */
+export function partQtyFor(qty: number | null, lineQuantity: number): number | null {
+  if (qty === null) return null;
+  return Math.round(qty * lineQuantity * 100) / 100;
+}
+
+/** A wanted part with its row key (the materials sync's unit; keyed as the take-off keys rows). */
+export interface KeyedPart {
+  key: string;
+  code: string | null;
+  name: string;
+  qty: number | null;
+  cost: number | null;
+  /** The Inspector task the line was built from (detail.task_id): how a visit's row finds its line. */
+  taskId?: string | null;
+}
+
+/** The parts of a quote's TASK lines, keyed as the take-off keys them (ordinals for repeats), each
+ *  count × the line's quantity. The take-off's own predicate: a line with a breakdown, whatever its
+ *  title — a nameless task line's parts are still rows on the sheet. ONE reader for the materials
+ *  sync and for the figure a door reads before its write (estimateLines' partCounts). */
+export function partsFromLines(rows: ReadonlyArray<LineRow>): KeyedPart[] {
+  const out: KeyedPart[] = [];
+  for (const r of rows) {
+    const d = coerceTaskDetail(r.detail);
+    if (!d) continue;
+    const qty = lineQty(r);
+    const named = d.materials.filter((m) => m.name.trim());
+    for (const m of keyParts(`line:${r.id}`, named)) out.push({ key: m.key, code: m.code, name: m.name.trim(), qty: partQtyFor(m.qty, qty), cost: m.cost, taskId: d.task_id || null });
+  }
+  return out;
 }
 
 /** " ×7" after a per-unit task's name, exactly as taskLine (task-lines.ts) writes the line. */
@@ -120,26 +174,31 @@ const unitsSuffix = (units: number | null): string => (units !== null && units !
 
 /**
  * WHAT AN ACCEPTED ESTIMATE'S LINES GIVE BIRTH TO. Rows arrive in sort order; a row that is not a
- * task (no detail) is skipped and keeps its sort_order gap, so the tasks sit in estimate order.
+ * task (no detail) is skipped and keeps its sort_order gap, so the tasks sit in estimate order. Each
+ * task's minutes and parts are for the line's quantity (cn-v1133); the job's whole is their sum.
  */
 export function tasksFromLines(rows: ReadonlyArray<LineRow>): Birth {
   const tasks: BornTask[] = [];
   const parts: BornPart[] = [];
-  const hours: Array<number | null> = [];
+  // THE WHOLE IS NULL WHEN A TASK WITH HOURS COULD NOT BE COUNTED (skeptic #39, N1): a task past the
+  // column's bound (its hours × its count) reads null, and summing the rest would hand the job a length
+  // that is the OTHER tasks' — a job with one giant task showed as two hours. The How Long box asks.
+  let pastBound = false;
   rows.forEach((r, i) => {
     const d = coerceTaskDetail(r.detail);
     if (!d) return;
     const title = String(r.description ?? "").trim();
     if (!title) return;
     const source_key = `line:${r.id}`;
-    tasks.push({ source_key, title, sort_order: typeof r.sort_order === "number" ? r.sort_order : i, task_id: d.task_id || null, planned_minutes: laborMinutes(d.labor) });
-    for (const l of d.labor) hours.push(l.hours);
+    const qty = lineQty(r);
+    if (minutesPastBound(d.labor, qty)) pastBound = true;
+    tasks.push({ source_key, title, sort_order: typeof r.sort_order === "number" ? r.sort_order : i, task_id: d.task_id || null, planned_minutes: taskMinutesFor(d.labor, qty) });
     for (const m of d.materials) {
       if (!m.name.trim()) continue;
-      parts.push({ source_key, code: m.code, name: m.name.trim(), qty: m.qty, cost: m.cost });
+      parts.push({ source_key, code: m.code, name: m.name.trim(), qty: partQtyFor(m.qty, qty), cost: m.cost });
     }
   });
-  return { tasks, plannedMinutes: minutesOf(hours), parts };
+  return { tasks, plannedMinutes: pastBound ? null : sumMinutes(tasks.map((t) => t.planned_minutes)), parts };
 }
 
 /**
@@ -294,7 +353,8 @@ export async function bornWithTasks(
   sb: SupabaseClient,
   who: BornWho & { quoteId: string },
 ): Promise<BornResult & { birth: Birth }> {
-  let q = sb.from("quote_line_items").select("id, description, sort_order, detail").eq("quote_id", who.quoteId);
+  // `quantity` rides with the breakdown (cn-v1133): "this many of the task" multiplies its minutes and parts.
+  let q = sb.from("quote_line_items").select("id, description, sort_order, quantity, detail").eq("quote_id", who.quoteId);
   if (who.orgId) q = q.eq("org_id", who.orgId);
   const { data, error } = await q.order("sort_order");
   if (error) return { inserted: 0, plannedSet: false, error: dbError(error), birth: EMPTY_BIRTH };

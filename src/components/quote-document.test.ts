@@ -80,6 +80,30 @@ describe("QuoteDocument prints the breakdown the format asks for", () => {
     expect(html).not.toContain("Helper");
   });
 
+  it("THIS MANY OF THE TASK (cn-v1133; S1): at qty 2 the breakdown still explains the UNIT price, ONE sub-heading above the bullets says 'For each one:' and no bullet says 'each' (a part's money is its count × its price per task, never per part); at qty 1 nothing says it", () => {
+    const two = render([{ ...line(880, twoRows), quantity: 2, line_total: 1760 }], "detailed");
+    expect(two).toContain("For each one:");
+    expect(two.indexOf("For each one:")).toBeLessThan(two.indexOf("Labor · 4 h"));
+    expect(two).toContain("Labor · 4 h × $125.00 = $500.00");
+    expect(two).toContain("Helper · 4 h × $85.00 = $340.00");
+    expect(two).toContain("Tandem breaker, 20A × 2 · $40.00");
+    expect(two).not.toMatch(/\$[\d,.]+ each/); // "$40.00 each" read as $40 per breaker: it is $20 × 2 per task
+    expect(two).toContain("$1,760.00");
+    const one = render([line(880, twoRows)], "detailed");
+    expect(one).not.toContain("For each one:");
+    expect(one).not.toContain(" each");
+    // A part with no count prints as before under the one heading: no figure, no word.
+    const uncounted = render([{ ...line(840, { ...twoRows, materials: [{ ...breaker, qty: null }] }), quantity: 3, line_total: 2520 }], "detailed");
+    expect(uncounted).toContain("For each one:");
+    expect(uncounted).toContain("Labor · 4 h × $125.00 = $500.00");
+    expect(uncounted).toContain("Tandem breaker, 20A ");
+    expect(uncounted).not.toContain("Tandem breaker, 20A each");
+    // The heading rides only with a breakdown: a hand-priced line at qty 2 prints neither.
+    const hand = render([{ ...line(999, twoRows), quantity: 2, line_total: 1998 }], "detailed");
+    expect(hand).not.toContain("For each one:");
+    expect(hand).not.toContain(" h × ");
+  });
+
   it("tasks: the line alone, no bullets", () => {
     const html = render([line(880, twoRows)], "tasks");
     expect(html).not.toContain(" h × ");

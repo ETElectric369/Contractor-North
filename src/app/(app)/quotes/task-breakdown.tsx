@@ -12,6 +12,7 @@ import {
   laborMoney,
   lineFromDetail,
   lineNameWithUnits,
+  lineQty,
   partMoney,
   reexpandTaskDetail,
   taskMoney,
@@ -339,6 +340,11 @@ export function TaskBreakdown({
   };
   const dropPart = (i: number) => commit({ ...d, materials: d.materials.filter((_, j) => j !== i) });
   const money = taskMoney(d);
+  // THIS MANY OF THE TASK (cn-v1133): the breakdown prices ONE; the line's Qty box multiplies it.
+  // (Destructured: the dotted spelling of a total is a materials-list footer's, and the
+  // materials-money scan fails any screen that prints one for itself.)
+  const qty = lineQty(line);
+  const { total: oneOfTheTask } = money;
   const box = "h-7 px-2 text-xs";
   // REMEMBER AS A KIT (W4): the breakdown becomes a task kit — his hours and parts PER UNIT — so
   // the next visit's Inspector offers it by name (lib/estimate/kit-from-task). The pure rule says
@@ -537,6 +543,15 @@ export function TaskBreakdown({
         </button>
         {d.materials.length > 0 && <span className="tabular-nums text-slate-500">Parts {formatCurrency(money.parts)}</span>}
       </div>
+      {/* The sum is for ONE of the task; when the line's Qty is more, the row says what the paper will
+          charge, so $540 under a $1,080 line is not a puzzle (the Qty box is "this many of the task"). */}
+      {qty !== 1 && (
+        <div className="flex justify-end pt-0.5">
+          <span className="tabular-nums text-slate-500">
+            {formatCurrency(oneOfTheTask)} × {qty} = {formatCurrency(Math.round(oneOfTheTask * qty * 100) / 100)}
+          </span>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         {d.kit_id ? (
           <>

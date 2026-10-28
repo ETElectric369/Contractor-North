@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { browserStash, handoffKey, stashHandoff, takeHandoff, type Handoff, type StorageLike } from "./handoff";
+import { HANDOFF_TTL_MS, browserStash, handoffKey, stashHandoff, takeHandoff, type Handoff, type StorageLike } from "./handoff";
 
 /**
  * THE HAND-OFF STASH (cn-v1132, S6), driven over a Map-backed store: what the new page puts under the
@@ -52,7 +52,7 @@ describe("stash and take", () => {
     const s = store();
     s.setItem(handoffKey("q1"), "{not json");
     expect(takeHandoff(s, "q1")).toBeNull();
-    s.setItem(handoffKey("q1"), JSON.stringify({ proposed: [{ quantity: 2 }, { description: "Trench", quantity: "3", unit_price: "290", kind: "labor" }, "x"], questions: ["a", 4], number: "" }));
+    s.setItem(handoffKey("q1"), JSON.stringify({ proposed: [{ quantity: 2 }, { description: "Trench", quantity: "3", unit_price: "290", kind: "labor" }, "x"], questions: ["a", 4], number: "", at: Date.now() }));
     expect(takeHandoff(s, "q1")).toEqual({
       scope: "",
       // A proposal with no pid takes its place in the kept list.
@@ -62,6 +62,26 @@ describe("stash and take", () => {
     });
     s.setItem(handoffKey("q1"), JSON.stringify(null));
     expect(takeHandoff(s, "q1")).toBeNull();
+  });
+
+  it("a stash is good for ten minutes: older than that it is nothing (and the key still goes); one with no stamp is nothing", () => {
+    expect(HANDOFF_TTL_MS).toBe(600_000);
+    const s = store();
+    const t0 = 1_700_000_000_000;
+    expect(stashHandoff(s, "q1", h, t0)).toBe(true);
+    expect(JSON.parse(s.map.get(handoffKey("q1"))!).at).toBe(t0);
+    expect(takeHandoff(s, "q1", t0 + HANDOFF_TTL_MS)?.number).toBe("E-012"); // ten minutes on the dot still carries
+    stashHandoff(s, "q1", h, t0);
+    expect(takeHandoff(s, "q1", t0 + HANDOFF_TTL_MS + 1)).toBeNull();
+    expect(s.map.size).toBe(0); // read once either way: a stale stash does not wait for the next visit
+    // Written before the stamp existed, or with a stamp that is not a time: nothing to carry.
+    s.setItem(handoffKey("q1"), JSON.stringify({ scope: "x", proposed: [], questions: [], number: "E-012" }));
+    expect(takeHandoff(s, "q1", t0)).toBeNull();
+    s.setItem(handoffKey("q1"), JSON.stringify({ scope: "x", proposed: [], questions: [], number: "E-012", at: "soon" }));
+    expect(takeHandoff(s, "q1", t0)).toBeNull();
+    // The stamp is not part of what comes back.
+    stashHandoff(s, "q1", h, t0);
+    expect(takeHandoff(s, "q1", t0 + 1)).toEqual(h);
   });
 
   it("no store, or a store that refuses: nothing is carried and nothing throws", () => {

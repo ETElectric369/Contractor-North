@@ -22,14 +22,18 @@ import { JOB_NAME_CASES } from "@/lib/job-name.cases";
  *                  street, "<the customer> · <the title's words>"; never "Job from Q-00012".
  *
  * Everything happens inside ONE transaction that is always rolled back, on a throwaway company. 0369
- * is applied inside that transaction (the file on this branch, so what is asserted is what ships).
+ * is applied inside that transaction, then 0396 over it (the files on this branch, so what is asserted
+ * is what ships: 0396 redefines the door from 0392's live body with the customer's address as the
+ * site's third fallback and the job link guarded — the names it makes are 0369's, unchanged).
  *
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npx vitest run <this file>
  */
 const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 const migrations = join(process.cwd(), "supabase/migrations");
-const M0369 = readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith("0369_"))!), "utf8");
+const migration = (prefix: string) => readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith(prefix))!), "utf8");
+const M0369 = migration("0369_");
+const M0396 = migration("0396_");
 
 d("a job's name is never where it came from (0369)", () => {
   let c: pg.Client;
@@ -55,6 +59,7 @@ d("a job's name is never where it came from (0369)", () => {
     orgId = org.orgId;
     ownerId = org.owner.id;
     await c.query(M0369);
+    await c.query(M0396); // the door as it ships: 0392's body + the customer's address + the guarded link
     ready = true;
   });
 
@@ -145,6 +150,31 @@ d("a job's name is never where it came from (0369)", () => {
 
   it("a PO box on the card is no street: who and the work", async () => {
     expect(await acceptAndName("Panel Upgrade", { custAddress: "PO Box 123" })).toBe("Rita TestMoss · Panel Upgrade");
+  });
+
+  it("0396: no street on the estimate and no lead — the job is born at the CUSTOMER'S address, all five parts, and named for it, as the office door makes it; a second tap meets the same job", async () => {
+    const cust = (
+      await c.query(
+        "insert into public.customers (org_id, name, type, status, address, unit, city, state, zip, created_by) values ($1, 'Rita TestMoss', 'residential', 'active', '77 Test Pine Ct', '2', 'Thistlewood', 'CA', '96100', $2) returning id::text as id",
+        [orgId, ownerId],
+      )
+    ).rows[0].id as string;
+    const token = `test-0396-${randomUUID()}`;
+    const q = (
+      await c.query("insert into public.quotes (org_id, customer_id, title, status, public_token, created_by) values ($1, $2, 'Panel swap', 'sent', $3, $4) returning id::text as id", [
+        orgId,
+        cust,
+        token,
+        ownerId,
+      ])
+    ).rows[0].id as string;
+    expect((await c.query("select public.accept_public_quote($1) as r", [token])).rows[0].r).toMatchObject({ ok: true });
+    const job = (
+      await c.query("select j.name, j.address, j.unit, j.city, j.state, j.zip, j.org_id::text as org_id from public.jobs j join public.quotes q on q.job_id = j.id where q.id = $1", [q])
+    ).rows[0];
+    expect(job).toEqual({ name: "77 Test Pine Ct #2", address: "77 Test Pine Ct", unit: "2", city: "Thistlewood", state: "CA", zip: "96100", org_id: orgId });
+    expect((await c.query("select public.accept_public_quote($1) as r", [token])).rows[0].r).toMatchObject({ ok: true });
+    expect((await c.query("select count(*)::int as n from public.jobs where org_id = $1 and customer_id = $2", [orgId, cust])).rows[0].n).toBe(1);
   });
 
   it("the twin is not callable from outside the database, and there is only the one", async () => {

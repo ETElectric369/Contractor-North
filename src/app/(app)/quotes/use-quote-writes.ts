@@ -48,6 +48,17 @@ import type { QuoteDocType } from "@/lib/doc-label";
  *   · NOTHING MOVES SILENTLY ON A SENT ESTIMATE: the rule pass re-prices "rule" labor rows only
  *     while the estimate is a draft; a sent estimate's chip says what the rule says now and the
  *     figure stands until he taps Use ….
+ *   · A LINE WITH AN ID IS THE SERVER'S TO DELETE (cn-v1133, S1): an id means an append was attempted
+ *     under it, and a lost answer or the clock cannot tell a row that landed from one that did not —
+ *     so Remove asks the server, and "isn't on this estimate" lands as gone. Only a line never asked
+ *     for (no id, not in the first save on the wire) is dropped here.
+ *   · THE READ-BACK IS PROVED BY THE WORDS (S6): a row is a line's only when it says what the line
+ *     says — the words that WENT (committedLines, taken when the first save was sent), so a line
+ *     renamed while that save was out still finds its row and the rename then goes as its own write
+ *     (skeptic #39, B3); a line no row vouches for keeps its words and a Retry that reads again.
+ *   · THE PAGE'S FRESH PROPS WAIT (S2): a reseed is held while a write is on the wire or anything
+ *     typed is uncommitted (isDirty), the latest one applied once the store is quiet — and never over
+ *     what this store wrote since the last seed it took, which that seed may predate.
  */
 
 export const COULD_NOT_REACH = "Couldn't reach the server — press Retry";
@@ -170,8 +181,10 @@ export const isQuiet = (s: SessionState): boolean => s.pending === null && Objec
 /** Everything the session writes through. The editor hands in the server actions; a test hands in fakes. */
 export interface SessionActions {
   saveQuote: (input: FirstSaveInput) => Promise<{ ok: true; id: string; quote_number?: string | null } | { ok: false; error?: string; code?: string }>;
-  /** Each line under the id the client chose; idempotent on the server (B2). */
-  appendQuoteLines: (quoteId: string, lines: (DraftLineItem & { id: string })[]) => Promise<{ ok: true; ids: string[] } | { ok: false; error: string }>;
+  /** Each line under the id the client chose; idempotent on the server (B2). `said` / `note` are the
+   *  job-followed words (what the job's list did with a kit added to an accepted, job-linked estimate),
+   *  the same two updateQuoteItem answers with; both optional, so an append that followed nothing says nothing. */
+  appendQuoteLines: (quoteId: string, lines: (DraftLineItem & { id: string })[]) => Promise<{ ok: true; ids: string[]; said?: string; note?: string } | { ok: false; error: string }>;
   updateQuoteItem: (itemId: string, quoteId: string, patch: LinePatch) => Promise<{ ok: boolean; error?: string; said?: string; note?: string }>;
   deleteQuoteItem: (itemId: string, quoteId: string) => Promise<{ ok: boolean; error?: string; said?: string; note?: string }>;
   updateQuoteMeta: (quoteId: string, meta: MetaPatch) => Promise<{ ok: boolean; error?: string }>;
@@ -217,10 +230,12 @@ export interface MetaPatch {
   estimate_format?: EstimateFormat | null;
 }
 
-/** What readQuoteLineIds hands back per line: the id, and where it sits. */
+/** What readQuoteLineIds hands back per line: the id, where it sits, and what it says — the words are
+ *  the proof a row is a line's (idsBySortOrder); a row with none matches nothing. */
 export interface ReadBackLine {
   id: string;
   sort_order?: number | null;
+  description?: string | null;
 }
 
 /* ── PURE RULES ────────────────────────────────────────────────────────────────────────────── */
@@ -237,15 +252,23 @@ export function hasSubstance(l: DraftLineItem): boolean {
   return d.labor.some((r) => r.hours !== null) || d.materials.some((m) => m.name.trim().length > 0);
 }
 
+/** The header fields that count as substance when HE put them there (substantive). */
+export type SubstanceField = "customerId" | "leadId" | "title" | "description" | "notes";
+const NOTHING_PRESET: Pick<EstimateHeader, SubstanceField> = { customerId: "", leadId: "", title: "", description: "", notes: "" };
+
 /**
- * WHAT MAKES A ROW WORTH HAVING (S2): a named line, header text he typed, or somebody picked. The
+ * WHAT MAKES A ROW WORTH HAVING (S2): a named line, header text he typed, or somebody HE picked. The
  * document kind, the paper format, a tax rate or a date on an otherwise empty estimate are
  * settings, not an estimate — held in the mirror until there is something to save them with.
+ * ONLY WHAT HE DID HERE COUNTS: a customer or lead the door preselected (?customer=, ?inquiry=) is
+ * the seed's, not his — without this a toggle of the document kind on a cold estimate opened from a
+ * lead birthed a zero-line row and handed it off. The seed's own values ride the first save he earns.
  */
-export function substantive(h: EstimateHeader, items: readonly DraftLineItem[]): boolean {
+export function substantive(h: EstimateHeader, items: readonly DraftLineItem[], seed: Pick<EstimateHeader, SubstanceField> = NOTHING_PRESET): boolean {
   if (items.some(named)) return true;
-  if (h.title.trim() || h.description.trim() || h.notes.trim()) return true;
-  return !!h.customerId || !!h.leadId;
+  const typed = (f: "title" | "description" | "notes") => h[f].trim().length > 0 && h[f].trim() !== seed[f].trim();
+  if (typed("title") || typed("description") || typed("notes")) return true;
+  return (!!h.customerId && h.customerId !== seed.customerId) || (!!h.leadId && h.leadId !== seed.leadId);
 }
 
 /** The part of a line the server stores, in the shape saveQuote and appendQuoteLines take. */
@@ -344,20 +367,32 @@ export function changedLines<T extends DraftLineItem>(prev: readonly T[], next: 
 }
 
 /** The lines read back after the first save, matched onto the lines THAT SAVE WROTE (saved, no id
- *  yet) by sort order — saveQuote writes sort_order = the named line's index. A row whose id the
- *  mirror already knows (a line appended under its own id meanwhile) is not matched onto anything.
- *  Unmatched lines keep no id. */
-export function idsBySortOrder(items: readonly EditorLine[], read: readonly ReadBackLine[]): EditorLine[] {
+ *  yet). A row is a line's only when it SAYS what the line says (description, trimmed): the words are
+ *  the proof. Among the rows that say it, the one at the line's place wins — saveQuote writes
+ *  sort_order = the named line's index — else the earliest still unused, so two lines with the same
+ *  words keep their order. Position alone used to pair them, and an extra row ahead of a line, or one
+ *  tied with it, handed the line another row's id: its next edit then overwrote a row that said
+ *  something else. A row whose id the mirror already knows (a line appended under its own id
+ *  meanwhile) is not matched onto anything. A line no row vouches for keeps no id — readBack says so.
+ *  THE WORDS COMPARED ARE THE WORDS THAT WENT (`sent`, skeptic #39, B3): the server holds what the
+ *  first save carried, and a line renamed or cleared while that save was out would otherwise never
+ *  match — READ_BACK_FAILED for good, its queued edit never written, no hand-off. The current words
+ *  stand in only for a line with no record of what went. */
+export function idsBySortOrder(items: readonly EditorLine[], read: readonly ReadBackLine[], sent?: (key: string) => string | undefined): EditorLine[] {
   const known = new Set(items.map((l) => l.id).filter((id): id is string => !!id));
-  const ordered = read
+  const pool = read
     .filter((r) => !known.has(r.id))
-    .map((r, i) => ({ id: r.id, at: typeof r.sort_order === "number" ? r.sort_order : i }))
+    .map((r, i) => ({ id: r.id, at: typeof r.sort_order === "number" ? r.sort_order : i, says: (r.description ?? "").trim(), used: false }))
     .sort((a, b) => a.at - b.at);
-  let n = 0;
+  let place = 0;
   return items.map((l) => {
     if (!l.saved || l.id) return l;
-    const got = ordered[n++];
-    return got ? { ...l, id: got.id } : l;
+    const at = place++;
+    const says = (sent?.(l.key) ?? l.description).trim();
+    const row = pool.find((r) => !r.used && r.says === says && r.at === at) ?? pool.find((r) => !r.used && r.says === says);
+    if (!row) return l;
+    row.used = true;
+    return { ...l, id: row.id };
   });
 }
 
@@ -410,8 +445,12 @@ export interface QuoteSession {
   /** Run the refused write of a slot again. */
   retry: (slot: string) => Promise<boolean>;
   /** The saved page read the row again (another door refreshed it): take what landed, keep what
-   *  is refused or still unsaved here. */
+   *  is refused or still unsaved here. HELD while a write is on the wire or anything typed is not yet
+   *  committed (isDirty) — the latest seed is remembered and applied once the store goes quiet. */
   reseed: (saved: SavedReseed) => void;
+  /** Something typed here is not what the server was last asked to hold: a line or a header field
+   *  whose typed value differs from its committed one, or a named line not yet on the server. */
+  isDirty: () => boolean;
   /** Clear the "what the job's list did" words. */
   clearSaid: () => void;
 }
@@ -440,11 +479,26 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
   let committedHeader: EstimateHeader = headerOf(init.header);
   const committedLines = new Map<string, DraftLineItem>();
   for (const l of state.items) if (l.saved) committedLines.set(l.key, lineForServer(l));
-  // THE LINES THE FIRST SAVE (or an append) CARRIED, by key, read while it is on the wire: a line among
-  // them that is removed before the landing is on the server by then, so its delete is queued for after
-  // (and the read-back matches ids by order, which a dropped row would shift).
+  // THE HEADER AS THE DOOR SEEDED IT: what substantive measures his own typing and picks against, so
+  // a preselected customer or lead never earns a row on its own.
+  const seedHeader: EstimateHeader = headerOf(init.header);
+  // THE LINES THE FIRST SAVE CARRIED, by key, read while it is on the wire: a line among them that is
+  // removed before the landing is on the server by then, so its delete is queued for after (and the
+  // read-back matches ids by place and words, which a dropped row would shift). A line an append
+  // carried needs no such set: it carries its own id from the first attempt, and an id IS the mark
+  // that the server may hold it.
   let firstSaveSent: Set<string> | null = null;
-  let appendSent: Set<string> | null = null;
+  // EACH APPEND'S LINES, by slot: a refused append whose lines have all since been removed (each
+  // through its own delete) has nothing left to retry, so its words and its Retry go with the last.
+  const appendSlots = new Map<string, string[]>();
+  // THE SEED THAT ARRIVED WHILE THE STORE WAS BUSY OR DIRTY (reseed): remembered, applied once quiet.
+  let latestSeed: SavedReseed | null = null;
+  // WHAT THIS STORE WROTE SINCE THE LAST SEED IT TOOK — each line and header field that landed, each
+  // line deleted (by id). Next commits an action's props after the action resolved, by which time the
+  // next write may already have landed, so the seed in hand can predate what is on the screen: it does
+  // not overwrite those (the write's own refresh follows and agrees), does not drop a line appended
+  // since, and does not bring back a line removed since.
+  const written = { lines: new Set<string>(), header: new Set<HeaderField>(), gone: new Set<string>() };
   // THE QUEUE: what was committed while the wire was busy, in the order it was asked for. Drained
   // after every landing or refusal. A line waiting for its id stays until the read-back lands.
   const queued = { header: new Set<HeaderField>(), lines: new Set<string>(), deletes: new Set<string>() };
@@ -476,6 +530,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     if (!r.landed) {
       set({ pending: null, refusals: withRefusal(state.refusals, slot, r.words) });
       await drain();
+      settleSeed();
       return false;
     }
     // Landed: the wire is free BEFORE the follow-up runs (the first save's read-back is a write's
@@ -484,6 +539,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     set({ pending: null, refusals: withRefusal(state.refusals, slot, null) });
     await onOk(r.value);
     await drain();
+    settleSeed();
     return true;
   }
 
@@ -494,7 +550,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
   async function firstSave(): Promise<boolean> {
     if (state.mode.kind !== "unsaved") return true;
     if (busy()) return false;
-    if (!substantive(state.header, state.items)) return true;
+    if (!substantive(state.header, state.items, seedHeader)) return true;
     const clientId = state.mode.clientId;
     return run(
       "first-save",
@@ -523,17 +579,23 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
   async function readBack(id: string): Promise<boolean> {
     if (!state.items.some((l) => l.saved && !l.id)) return true;
     // The read's own refusal is a detail; what he needs to know is that the row IS saved and what to
-    // press before editing a line. A throw still reads as the one unreachable line.
+    // press before editing a line. A throw still reads as the one unreachable line. A read that
+    // LANDED but vouched for fewer lines than the save wrote (a row short, a row that says something
+    // else at a line's place) is the same answer: the lines it did vouch for take their ids now, and
+    // the rest keep their words — with the Retry, which reads again. Without that a line left id-less
+    // after a landed read said "press Retry above" over a slot that had no Retry.
     const read = async () => {
       const r = await init.actions.readQuoteLineIds(id);
-      return r.ok ? r : { ok: false as const, error: READ_BACK_FAILED };
-    };
-    return run("read-back", read, READ_BACK_FAILED, (res) => {
-      const items = idsBySortOrder(state.items, res.items);
-      const waiting = Object.fromEntries(Object.entries(state.waiting).filter(([, w]) => w !== WAITING_READ_BACK));
+      if (!r.ok) return { ok: false as const, error: READ_BACK_FAILED };
+      // Matched by the words the first save SENT (the record taken at send), never the words typed since.
+      const items = idsBySortOrder(state.items, r.items, (key) => committedLines.get(key)?.description);
+      const idless = new Set(items.filter((l) => l.saved && !l.id).map((l) => `line:${l.key}`));
+      const waiting = Object.fromEntries(Object.entries(state.waiting).filter(([slot, w]) => w !== WAITING_READ_BACK || idless.has(slot)));
       set({ items, waiting });
       // A line edited or removed while its id was on the way is queued; the drain writes it now.
-    });
+      return idless.size ? { ok: false as const, error: READ_BACK_FAILED } : { ok: true as const };
+    };
+    return run("read-back", read, READ_BACK_FAILED, () => {});
   }
 
   /** ONE deed, one pending: each named line in turn; the first refusal stops the pass and names the
@@ -553,6 +615,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
           if (!res.ok) return { ok: false, error: `${l.description || "A line"}: ${res.error ?? "couldn't be saved."}` };
           // Recorded per line as it lands, so Retry carries on from the line that was refused.
           committedLines.set(key, lineForServer(l));
+          written.lines.add(key);
         }
         return { ok: true };
       },
@@ -570,6 +633,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     const id = savedId();
     if (!id) return Promise.resolve(true);
     const slot = `append:${keys[0]}`;
+    appendSlots.set(slot, keys);
     const still = () => state.items.filter((l) => keys.includes(l.key) && !l.saved && named(l));
     return run(
       slot,
@@ -577,15 +641,49 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         if (still().some((l) => !l.id)) set({ items: state.items.map((l) => (keys.includes(l.key) && !l.saved && !l.id ? { ...l, id: newId() } : l)) });
         const lines = still();
         for (const l of lines) committedLines.set(l.key, lineForServer(l));
-        appendSent = new Set(lines.map((l) => l.key));
         return init.actions.appendQuoteLines(id, lines.map((l) => ({ ...lineForServer(l), id: l.id as string })));
       },
       "Couldn't add those lines.",
-      () => {
+      (res) => {
         const landed = new Set(still().map((l) => l.key));
-        set({ items: state.items.map((l) => (landed.has(l.key) ? { ...l, saved: true } : l)) });
+        // What the job's list did with the lines (a kit added to an accepted, job-linked estimate):
+        // the note rides each line it was about, the said sits under the list — as a line's own write
+        // and a delete land theirs.
+        const follow = { ...state.follow };
+        if (res.note) for (const key of landed) follow[key] = { ...follow[key], note: res.note };
+        for (const key of landed) written.lines.add(key);
+        set({ items: state.items.map((l) => (landed.has(l.key) ? { ...l, saved: true } : l)), follow, said: res.said ?? null });
+        appendSlots.delete(slot);
+        sweepAppends(); // a widened set may have landed another slot's last line too
       },
     );
+  }
+
+  /** A LINE OF A REFUSED APPEND GOES WITH ITS SET (skeptic #39, B4). A slot is named by its first key,
+   *  so one line of a refused [A, B] committed alone re-ran the same slot with A only: the refusal
+   *  cleared, A landed, and B sat unsaved with its id, no words and no Retry — on the screen, nowhere
+   *  on the server. Every key is widened to its slot's keys, in the slot's order (so the slot name is
+   *  the same and its refusal is the one replaced); appendKeys sends what is still unsaved of them. */
+  function appendSet(keys: string[]): string[] {
+    const out: string[] = [];
+    for (const k of keys) {
+      const slot = [...appendSlots.values()].find((ks) => ks.includes(k));
+      for (const x of slot ?? [k]) if (!out.includes(x)) out.push(x);
+    }
+    return out;
+  }
+
+  /** A refused append whose lines have all gone (each through its own delete, or a never-attempted
+   *  one dropped) or have all since landed has nothing to send again: its words and its Retry go. */
+  function sweepAppends() {
+    let refusals = state.refusals;
+    for (const [slot, keys] of appendSlots) {
+      if (state.items.some((l) => keys.includes(l.key) && !l.saved)) continue;
+      appendSlots.delete(slot);
+      retries.delete(slot);
+      refusals = withRefusal(refusals, slot, null);
+    }
+    if (refusals !== state.refusals) set({ refusals });
   }
 
   /** The delete of one saved line. "Isn't on this estimate" is a delete that landed (the screen and
@@ -604,12 +702,14 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       "Couldn't remove the line.",
       (res) => {
         committedLines.delete(key);
+        written.gone.add(itemId);
         set({
           items: state.items.filter((x) => x.key !== key),
           refusals: withRefusal(state.refusals, `line:${key}`, null),
           said: res.said ?? (res.note ?? null),
         });
         wait(`line:${key}`, null);
+        sweepAppends();
       },
     );
   }
@@ -619,7 +719,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     const id = savedId() as string;
     const slot = `line:${l.key}`;
     wait(slot, null);
-    if (!l.saved) return appendKeys([l.key]);
+    if (!l.saved) return appendKeys(appendSet([l.key]));
     if (!l.id) {
       // Saved by the first save, its id still on the way back: the typed figure waits on the row
       // (not marked sent) and goes once the read-back lands.
@@ -637,6 +737,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       "Couldn't save the line.",
       (res) => {
         const words = { ...(res.said ? { said: res.said } : {}), ...(res.note ? { note: res.note } : {}) };
+        written.lines.add(l.key);
         set({ follow: { ...state.follow, [l.key]: words } });
       },
     );
@@ -657,19 +758,23 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
           return call();
         },
         fallback,
-        () => {},
+        () => {
+          written.header.add(field);
+        },
       );
     if (w.kind === "meta") return send(() => init.actions.updateQuoteMeta(id, w.meta), "Couldn't save that.");
     if (w.kind === "customer") return send(() => init.actions.setQuoteCustomer(id, w.customerId), "Couldn't change the customer.");
     return send(() => init.actions.setQuoteType(id, w.docType), "Couldn't change the type.");
   }
 
+  /** A line the server was never asked for (no id: no append attempted, not in the first save) just goes. */
   const dropLocal = (key: string) => {
     committedLines.delete(key);
     queued.lines.delete(key);
     queued.deletes.delete(key);
     set({ items: state.items.filter((x) => x.key !== key), refusals: withRefusal(withRefusal(state.refusals, `line:${key}`, null), `delete:${key}`, null) });
     wait(`line:${key}`, null);
+    sweepAppends();
   };
 
   /**
@@ -726,7 +831,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         queued.lines.delete(k);
         wait(`line:${k}`, null);
       }
-      return () => appendKeys(fresh);
+      return () => appendKeys(appendSet(fresh));
     }
     for (const k of queued.lines) {
       const l = line(k) as EditorLine;
@@ -756,7 +861,10 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         queued.deletes.delete(k);
         continue;
       }
-      if (!l.saved) {
+      // Never attempted (no id, not marked saved): a local drop. A line WITH an id had an append
+      // attempted under it — its answer may have been lost — so it is deleted on the server like any
+      // saved line (S1): "isn't on this estimate" lands, a ghost row never does.
+      if (!l.saved && !l.id) {
         dropLocal(k);
         continue;
       }
@@ -768,6 +876,75 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       return () => deleteKey(k);
     }
     return null;
+  }
+
+  /** Something typed here is not what the server was last asked to hold. A refused write is NOT
+   *  dirty (its record was taken at send; only Retry or a later edit sends it again); a header field
+   *  with no door once the row exists (the lead) is not either. */
+  function isDirty(): boolean {
+    for (const f of Object.keys(state.header) as HeaderField[]) {
+      if (state.header[f] === committedHeader[f]) continue;
+      if (state.mode.kind === "saved" && !headerWrite(f, state.header)) continue;
+      return true;
+    }
+    for (const l of state.items) {
+      const was = committedLines.get(l.key);
+      if (was ? !sameLine(was, l) : named(l)) return true;
+    }
+    return false;
+  }
+
+  /** The remembered seed, applied the moment the store is quiet — the tail of every write, after its
+   *  catch-up; inside a drain it waits for the drain's end. */
+  function settleSeed() {
+    if (!latestSeed || draining || busy() || isDirty()) return;
+    const s = latestSeed;
+    latestSeed = null;
+    applyReseed(s);
+  }
+
+  /** The seed taken: a server line replaces the mirror's by id unless the mirror's is refused (his
+   *  typed figure stands with its Retry) or was written here since the last seed (the seed may predate
+   *  that write); a line the server has that the mirror lacks joins, unless it was removed here since;
+   *  a line still unsaved here stays at the end. The record of what was written since is then cleared. */
+  function applyReseed(saved: SavedReseed) {
+    const byId = new Map(saved.items.map((l) => [l.id, l]));
+    const seen = new Set<string>();
+    const matched: EditorLine[] = [];
+    const local: EditorLine[] = [];
+    for (const l of state.items) {
+      if (l.saved && written.lines.has(l.key)) {
+        if (l.id) seen.add(l.id);
+        matched.push(l);
+      } else if (l.saved && l.id && byId.has(l.id)) {
+        seen.add(l.id);
+        const refused = `line:${l.key}` in state.refusals || `delete:${l.key}` in state.refusals || queued.lines.has(l.key) || queued.deletes.has(l.key);
+        const fresh = byId.get(l.id)!;
+        if (!refused) committedLines.set(l.key, lineForServer(fresh));
+        matched.push(refused ? l : { ...fresh, key: l.key, saved: true });
+      } else if (!l.saved) local.push(l);
+    }
+    const extra: EditorLine[] = [];
+    for (const fresh of saved.items) {
+      if (seen.has(fresh.id) || written.gone.has(fresh.id)) continue;
+      const key = newKey();
+      committedLines.set(key, lineForServer(fresh));
+      extra.push({ ...fresh, key, saved: true });
+    }
+    const kept = [...matched, ...extra, ...local];
+    const header: EstimateHeader = { ...state.header };
+    for (const k of Object.keys(saved.header) as HeaderField[]) {
+      if (`header:${k}` in state.refusals || queued.header.has(k) || written.header.has(k)) continue;
+      const v = saved.header[k];
+      if (v === undefined) continue;
+      (header as unknown as Record<string, unknown>)[k] = v;
+      (committedHeader as unknown as Record<string, unknown>)[k] = v;
+    }
+    written.lines.clear();
+    written.header.clear();
+    written.gone.clear();
+    const mode: Mode = state.mode.kind === "saved" ? { ...state.mode, status: saved.status, number: saved.number } : state.mode;
+    set({ items: kept, header, mode });
   }
 
   return {
@@ -844,12 +1021,19 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     async removeLine(key) {
       const l = line(key);
       if (!l) return true;
-      const onServer = l.saved || (state.pending === "first-save" && !!firstSaveSent?.has(key)) || (!!state.pending?.startsWith("append:") && !!appendSent?.has(key));
+      // THE SERVER MAY HOLD IT when it is marked saved, when it carries an id (an append was attempted
+      // under that id — on the wire now, refused, or answered nothing inside the clock: the rows may
+      // have landed with the answer lost), or when the first save on the wire carried it. Only a line
+      // the server was never asked for is dropped here (S1): dropping one with an id left a ghost row
+      // that came back at the next read.
+      const onServer = l.saved || !!l.id || (state.pending === "first-save" && !!firstSaveSent?.has(key));
       if (!onServer) {
         dropLocal(key);
         return true;
       }
       if (busy()) {
+        // A delete supersedes an edit of the same line queued behind the wire.
+        queued.lines.delete(key);
         queued.deletes.add(key);
         wait(`line:${key}`, STILL_SAVING);
         return false;
@@ -875,7 +1059,25 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         }
         return false;
       }
-      return writeKeys("reprice", changed.map((l) => l.key));
+      // A saved line whose id is not back yet (the read-back refused) cannot be written now: queued
+      // with its words, like a typed edit (writeSavedLine), so the read-back's Retry drains it. It
+      // used to be skipped without a word — the mirror re-priced, nothing sent, nothing queued, and
+      // Retry on the read-back sent nothing (S3). A line not on the server at all rides its own
+      // commit or its append's Retry, which read the mirror as it stands.
+      const ready: string[] = [];
+      let held = false;
+      for (const l of changed) {
+        if (!l.saved) continue;
+        if (l.id) ready.push(l.key);
+        else {
+          queued.lines.add(l.key);
+          wait(`line:${l.key}`, WAITING_READ_BACK);
+          held = true;
+        }
+      }
+      if (!ready.length) return !held;
+      const ok = await writeKeys("reprice", ready);
+      return ok && !held;
     },
     mount() {
       if (state.mode.kind !== "unsaved" || !savesAtMount(state.items)) return Promise.resolve(true);
@@ -888,45 +1090,23 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       return again ? again() : Promise.resolve(true);
     },
     reseed(saved) {
-      // Lines: a server line replaces the mirror's by id unless the mirror's is refused (his typed
-      // figure stands with its Retry); a line the server has that the mirror lacks joins; a line
-      // still unsaved here stays at the end.
-      const byId = new Map(saved.items.map((l) => [l.id, l]));
-      const seen = new Set<string>();
-      const matched: EditorLine[] = [];
-      const local: EditorLine[] = [];
-      for (const l of state.items) {
-        if (l.saved && l.id && byId.has(l.id)) {
-          seen.add(l.id);
-          const refused = `line:${l.key}` in state.refusals || `delete:${l.key}` in state.refusals || queued.lines.has(l.key) || queued.deletes.has(l.key);
-          const fresh = byId.get(l.id)!;
-          if (!refused) committedLines.set(l.key, lineForServer(fresh));
-          matched.push(refused ? l : { ...fresh, key: l.key, saved: true });
-        } else if (!l.saved) local.push(l);
+      // HELD WHILE A WRITE IS ON THE WIRE OR SOMETHING TYPED IS NOT YET COMMITTED (S2): Next's action
+      // queue can run the next write before the previous action's props commit, so a chained write
+      // (the reprice loop, a drain) met stale props that reverted the in-flight figure and replaced
+      // what he was typing. The latest seed is remembered and applied once, when the store is quiet.
+      if (busy() || isDirty()) {
+        latestSeed = saved;
+        return;
       }
-      const extra: EditorLine[] = [];
-      for (const fresh of saved.items) {
-        if (seen.has(fresh.id)) continue;
-        const key = newKey();
-        committedLines.set(key, lineForServer(fresh));
-        extra.push({ ...fresh, key, saved: true });
-      }
-      const kept = [...matched, ...extra, ...local];
-      const header: EstimateHeader = { ...state.header };
-      for (const k of Object.keys(saved.header) as HeaderField[]) {
-        if (`header:${k}` in state.refusals || queued.header.has(k)) continue;
-        const v = saved.header[k];
-        if (v === undefined) continue;
-        (header as unknown as Record<string, unknown>)[k] = v;
-        (committedHeader as unknown as Record<string, unknown>)[k] = v;
-      }
-      const mode: Mode = state.mode.kind === "saved" ? { ...state.mode, status: saved.status, number: saved.number } : state.mode;
-      set({ items: kept, header, mode });
+      latestSeed = null;
+      applyReseed(saved);
     },
+    isDirty,
     clearSaid() {
       if (state.said !== null) set({ said: null });
     },
   };
+
 }
 
 /** The React side: one session per mount, read through useSyncExternalStore (server render included). */

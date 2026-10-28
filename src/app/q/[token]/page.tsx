@@ -14,6 +14,11 @@ import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+// THE CUSTOMER'S ACCEPT RUNS UNDER THIS ROUTE'S LIMIT: a server action (acceptPublicQuote) takes its
+// route's maxDuration, and since cn-v1133 that one tap does the office door's whole work before it
+// answers — the tasks, the work order, the take-off, the sync, the visit, the bell — seconds, not the
+// default's ten (skeptic #39, S3).
+export const maxDuration = 60;
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
   const { token } = await params;

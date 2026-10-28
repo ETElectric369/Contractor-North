@@ -51,6 +51,7 @@ function fake(rows: any[], fail: { read?: boolean; write?: boolean } = {}) {
         or: (f: string) => ((c.or = f), chain),
         in: (col: string, v: unknown) => (c.filters.push(["in", col, v]), chain),
         is: (col: string, v: unknown) => (c.filters.push(["is", col, v]), chain),
+        eq: (col: string, v: unknown) => (c.filters.push(["eq", col, v]), chain),
         limit: () => chain,
         then: (res: (v: unknown) => unknown) => {
           if (c.op === "select") return Promise.resolve(fail.read ? { data: null, error: { message: "read failed" } } : { data: rows, error: null }).then(res);
@@ -82,6 +83,17 @@ describe("closeVisitsBehindQuote", () => {
     expect(stamp.patch).toMatchObject({ outcome: "won" });
     expect(stamp.patch.outcome_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(stamp.filters).toEqual([["in", "id", ["a", "b"]], ["is", "outcome", null]]);
+  });
+
+  it("with the company's id (the service client, which RLS does not fence) the read and both writes name it; without it none does (skeptic #39, S6)", async () => {
+    const { client, calls } = fake([{ id: "a", job_id: null, outcome: null }]);
+    expect(await closeVisitsBehindQuote(client, { id: "q1" }, { jobId: "j1", outcome: "won", orgId: "org-1" })).toEqual({ attached: 1, stamped: 1 });
+    expect(calls[0].filters).toEqual([["eq", "org_id", "org-1"]]);
+    expect(calls[1].filters).toEqual([["in", "id", ["a"]], ["is", "job_id", null], ["eq", "org_id", "org-1"]]);
+    expect(calls[2].filters).toEqual([["in", "id", ["a"]], ["is", "outcome", null], ["eq", "org_id", "org-1"]]);
+    const bare = fake([{ id: "a", job_id: null, outcome: null }]);
+    await closeVisitsBehindQuote(bare.client, { id: "q1" }, { jobId: "j1", outcome: "won" });
+    expect(bare.calls.flatMap((c) => c.filters).some(([op, col]) => op === "eq" && col === "org_id")).toBe(false);
   });
 
   it("nothing to decide means no read at all; nothing left open means no write", async () => {

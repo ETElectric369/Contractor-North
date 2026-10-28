@@ -7,7 +7,9 @@ import {
   bornTasks,
   bornWithTasks,
   minutesOf,
+  partQtyFor,
   partsAsCaptureItems,
+  partsFromLines,
   tasksAnswered,
   tasksFromLines,
   tasksFromVisit,
@@ -20,7 +22,7 @@ import {
  * task is left alone.
  */
 
-const line = (id: string, description: string, sort_order: number, detail: unknown): LineRow => ({ id, description, sort_order, detail });
+const line = (id: string, description: string, sort_order: number, detail: unknown, quantity: LineRow["quantity"] = 1): LineRow => ({ id, description, sort_order, quantity, detail });
 
 /** A task line's breakdown with ONE labor row (the shape every line saved since cn-v1131 carries). */
 const detail = (hours: number | null, materials: unknown[] = []) => ({
@@ -104,6 +106,45 @@ describe("tasksFromLines — what an accepted estimate gives birth to", () => {
       // a code with no name is named by its code (coerceTaskDetail), so it stays a part
       { source_key: "line:b", code: "X9", name: "X9", qty: 2, cost: 1 },
     ]);
+  });
+
+  it("THE QTY BOX IS THIS MANY OF THE TASK (cn-v1133): qty 2 is twice the minutes and twice each counted part; a part he never counted stays null; the whole follows", () => {
+    const parts = [
+      { code: "R1", name: "Transfer switch, 200A", qty: 1, cost: 400, sell: 460 },
+      { code: null, name: "Bayberry clips", qty: null, cost: null, sell: null },
+      { code: "W142", name: "14/2 romex", qty: 2.5, cost: 90, sell: 110 },
+    ];
+    const b = tasksFromLines([line("a", "Install transfer switch", 0, detail(3, parts), 2), line("b", "Trim out", 1, detail(1.25), "1.5")]);
+    expect(b.tasks.map((t) => [t.title, t.planned_minutes])).toEqual([["Install transfer switch", 360], ["Trim out", 113]]); // 180 × 2; 75 × 1.5 = 112.5 → 113
+    expect(b.plannedMinutes).toBe(473);
+    expect(b.parts).toEqual([
+      { source_key: "line:a", code: "R1", name: "Transfer switch, 200A", qty: 2, cost: 400 },
+      { source_key: "line:a", code: null, name: "Bayberry clips", qty: null, cost: null }, // "I haven't counted it" — at any quantity
+      { source_key: "line:a", code: "W142", name: "14/2 romex", qty: 5, cost: 90 },
+    ]);
+    // A blank, 0 or junk count is one of it, as the line reads on the paper.
+    expect(tasksFromLines([line("a", "Set panel", 0, detail(2), null)]).tasks[0].planned_minutes).toBe(120);
+    expect(tasksFromLines([line("a", "Set panel", 0, detail(2), 0)]).tasks[0].planned_minutes).toBe(120);
+    expect(tasksFromLines([line("a", "Set panel", 0, detail(2), "lots")]).tasks[0].planned_minutes).toBe(120);
+    // A quantity that carries the task past the column's bound leaves it null, never clamped.
+    expect(tasksFromLines([line("a", "Set panel", 0, detail(PLANNED_MINUTES_MAX / 60), 2)]).tasks[0].planned_minutes).toBeNull();
+    // THE WHOLE IS NULL WHEN A TASK WITH HOURS COULD NOT BE COUNTED (skeptic #39, N1): the other tasks'
+    // sum is not the job's length — a 2 h task beside a 2 h × 1000 task is not a 2 h job; the box asks.
+    const giant = tasksFromLines([line("a", "Set panel", 0, detail(2)), line("b", "Pull wire", 1, detail(2), 1000)]);
+    expect(giant.tasks.map((t) => t.planned_minutes)).toEqual([120, null]);
+    expect(giant.plannedMinutes).toBeNull();
+    // A task with NO hours beside one with hours still sums: the asking task adds nothing, truthfully.
+    expect(tasksFromLines([line("a", "Set panel", 0, detail(2)), line("b", "Pull permit", 1, detail(null), 1000)]).plannedMinutes).toBe(120);
+  });
+
+  it("partsFromLines (the materials sync's reader) keys each part to its line and counts it × the line's quantity", () => {
+    const parts = partsFromLines([line("a", "Install", 0, detail(1, [{ code: "R1", name: "Switch", qty: 2, cost: 4, sell: 5 }, { code: null, name: "Clips", qty: null, cost: null, sell: null }]), 3)]);
+    expect(parts).toEqual([
+      { key: "line:a#R1", code: "R1", name: "Switch", qty: 6, cost: 4, taskId: "t-1" },
+      { key: "line:a#clips", code: null, name: "Clips", qty: null, cost: null, taskId: "t-1" },
+    ]);
+    expect(partQtyFor(2.5, 1.5)).toBe(3.75);
+    expect(partQtyFor(null, 7)).toBeNull();
   });
 
   it("a hand-edited row that is not a breakdown (an array, a string) is not a task", () => {

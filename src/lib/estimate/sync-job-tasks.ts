@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
-import { bornTasks, tasksFromLines, type BornTask, type LineRow } from "./born-with-tasks";
+import { bornTasks, partsFromLines, tasksFromLines, type BornTask, type LineRow } from "./born-with-tasks";
 
 /**
  * A JOB FOLLOWS ITS ESTIMATE (the first of the four deferred items, 2026-10-10).
@@ -250,10 +250,15 @@ export interface EstimateLines {
   /** Each task line's own minutes by its key ("line:<id>" → Σ its rows' hours × 60, null = none): the
    *  per-task twin of `minutes`, handed back to the sync as `tasksBefore` by a door that read it first. */
   taskMinutes: ReadonlyMap<string, number | null>;
+  /** Each counted part's count by its row key ("line:<id>#R1" → the count the line said, × its quantity;
+   *  an uncounted part is left out): the materials twin of `taskMinutes`, handed back to the materials
+   *  sync as `partsBefore` (cn-v1133) so a row still holding the line's count follows the line. */
+  partCounts: ReadonlyMap<string, number>;
   error?: string;
 }
 
 const NO_TASK_MINUTES: ReadonlyMap<string, number | null> = new Map();
+const NO_PART_COUNTS: ReadonlyMap<string, number> = new Map();
 
 /**
  * THE JOB'S ACCEPTED ESTIMATES' LINES. A later-ACCEPTED estimate's lines sit AFTER the earlier one's
@@ -269,17 +274,18 @@ export async function estimateLines(
   let qq = sb.from("quotes").select("id, created_at, accepted_at").eq("job_id", who.jobId).eq("status", "accepted");
   if (who.orgId) qq = qq.eq("org_id", who.orgId);
   const { data: quotes, error: qErr } = await qq.order("accepted_at");
-  if (qErr) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES, error: dbError(qErr) };
+  if (qErr) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES, partCounts: NO_PART_COUNTS, error: dbError(qErr) };
   const when = (q: { created_at: string | null; accepted_at?: string | null }) => String(q.accepted_at ?? q.created_at ?? "");
   const ordered = ((quotes ?? []) as Array<{ id: string; created_at: string | null; accepted_at?: string | null }>)
     .filter((q) => !who.except || q.id !== who.except)
     .sort((a, b) => when(a).localeCompare(when(b)) || String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
-  if (!ordered.length) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES };
+  if (!ordered.length) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES, partCounts: NO_PART_COUNTS };
   const rank = new Map(ordered.map((q, i) => [q.id, i]));
-  let lq = sb.from("quote_line_items").select("id, description, sort_order, detail, quote_id").in("quote_id", ordered.map((q) => q.id));
+  // `quantity` rides with the breakdown (cn-v1133): "this many of the task" multiplies its minutes and parts.
+  let lq = sb.from("quote_line_items").select("id, description, sort_order, quantity, detail, quote_id").in("quote_id", ordered.map((q) => q.id));
   if (who.orgId) lq = lq.eq("org_id", who.orgId);
   const { data, error } = await lq.order("sort_order");
-  if (error) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES, error: dbError(error) };
+  if (error) return { lines: [], minutes: null, taskMinutes: NO_TASK_MINUTES, partCounts: NO_PART_COUNTS, error: dbError(error) };
   const rows = ((data ?? []) as Array<LineRow & { quote_id: string }>)
     .slice()
     .sort((a, b) => (rank.get(a.quote_id) ?? 0) - (rank.get(b.quote_id) ?? 0) || (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -296,10 +302,14 @@ export async function estimateLines(
     }
     const own = typeof r.sort_order === "number" ? r.sort_order : 0;
     highest = Math.max(highest, own);
-    lines.push({ id: r.id, description: r.description, sort_order: own + offset, detail: r.detail });
+    lines.push({ id: r.id, description: r.description, sort_order: own + offset, quantity: r.quantity, detail: r.detail });
   }
   const birth = tasksFromLines(lines);
-  return { lines, minutes: birth.plannedMinutes, taskMinutes: new Map(birth.tasks.map((t) => [t.source_key, t.planned_minutes ?? null])) };
+  // The parts' counts by key, through THE one reader the materials sync uses (partsFromLines), so the
+  // figure a door reads before its write is exactly the figure the sync compares a row to.
+  const partCounts = new Map<string, number>();
+  for (const p of partsFromLines(lines)) if (p.qty !== null) partCounts.set(p.key, p.qty);
+  return { lines, minutes: birth.plannedMinutes, taskMinutes: new Map(birth.tasks.map((t) => [t.source_key, t.planned_minutes ?? null])), partCounts };
 }
 
 /**
@@ -314,7 +324,7 @@ export async function pendingShield(sb: SupabaseClient, who: { jobId: string; or
   if (qErr) return { ...NO_SHIELD, error: dbError(qErr) };
   const ids = ((quotes ?? []) as Array<{ id: string }>).map((q) => q.id);
   if (!ids.length) return NO_SHIELD;
-  let lq = sb.from("quote_line_items").select("id, description, sort_order, detail").in("quote_id", ids);
+  let lq = sb.from("quote_line_items").select("id, description, sort_order, quantity, detail").in("quote_id", ids);
   if (who.orgId) lq = lq.eq("org_id", who.orgId);
   const { data, error } = await lq;
   if (error) return { ...NO_SHIELD, error: dbError(error) };

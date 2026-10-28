@@ -3,7 +3,7 @@ import type { ResolvedSite } from "@/lib/site-address";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { CSSProperties } from "react";
 import { normalizeDocStyle, sheetStyleVars, type DocStyle, type EstimateFormat } from "@/lib/doc-style";
-import { coerceTaskDetail, detailExplains, partMoney, taskMoney } from "@/lib/estimate/task-lines";
+import { coerceTaskDetail, detailExplains, lineQty, partMoney, taskMoney } from "@/lib/estimate/task-lines";
 
 // The quote table's rhythm is a step tighter than the invoice's at every density.
 const QUOTE_DENSITY_ROW: Record<DocStyle["density"], string> = {
@@ -186,6 +186,12 @@ export function QuoteDocument({
             const d = estimateFormat === "detailed" ? coerceTaskDetail(it.detail) : null;
             const laborRows = d ? d.labor.filter((row) => row.hours !== null) : [];
             const breakdown = d && (laborRows.length > 0 || d.materials.length > 0) && detailExplains(d, it) ? d : null;
+            // THE BREAKDOWN IS PER UNIT (cn-v1133): the Qty box multiplies it on the line, so when the
+            // customer is buying more than one of the task ONE sub-heading above the bullets says so —
+            // "For each one:" — and no bullet carries a word of its own. " each" after a part's money
+            // misread it: "Tandem breaker, 20A × 2 · $40.00 each" says $40 per breaker, when it is $20
+            // × 2 per task (skeptic #39, S1). The customer's words, never the crew's.
+            const perUnit = lineQty(it) !== 1;
             return (
               <tr key={it.id ?? i} className="border-b border-slate-100 align-top [break-inside:avoid]">
                 <td className={`${rowPad} pr-2 text-slate-800`}>
@@ -197,6 +203,7 @@ export function QuoteDocument({
                       ))}
                     </ul>
                   )}
+                  {breakdown && perUnit && <div className="mt-0.5 text-[11px] text-slate-500">For each one:</div>}
                   {breakdown && (
                     <ul className="ml-3 mt-0.5 list-disc text-[11px] text-slate-500 marker:text-slate-300">
                       {/* ONE BULLET PER LABOR ROW. A row that names a person reaches the public wire

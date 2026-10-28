@@ -45,6 +45,10 @@ export interface Closing {
   jobId?: string | null;
   /** The estimate's decision: stamped on every visit still undecided. */
   outcome?: VisitOutcome | null;
+  /** The company, when the caller's client is not scoped to one (the customer's Accept runs with the
+   *  service client, which RLS does not fence): every read and write here then names it (skeptic #39,
+   *  S6; house law — SQL that bypasses RLS always filters org_id). A user client may pass it too. */
+  orgId?: string | null;
 }
 
 /** The estimate's new status, as the visit's outcome: accepted is won, declined or expired is lost,
@@ -84,7 +88,8 @@ export interface ClosedBehind {
 
 /**
  * Find the org's visits behind `quote` and close what is still open. The client is the caller's
- * (RLS scopes the read and both writes to its org). A zero-row write here is not a failure: the
+ * (RLS scopes the read and both writes to its org — and when the client is the service one, which
+ * RLS does not fence, `orgId` scopes them instead). A zero-row write here is not a failure: the
  * guard (`job_id is null` / `outcome is null`) simply found nothing left to close.
  */
 export async function closeVisitsBehindQuote(
@@ -93,11 +98,9 @@ export async function closeVisitsBehindQuote(
   w: Closing,
 ): Promise<ClosedBehind> {
   if (!w.jobId && !w.outcome) return { attached: 0, stamped: 0 };
-  const { data, error } = await supabase
-    .from("appointments")
-    .select("id, job_id, outcome, type")
-    .or(visitsBehindQuoteFilter(quote))
-    .limit(50);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scoped = (q: any): any => (w.orgId ? q.eq("org_id", w.orgId) : q);
+  const { data, error } = await scoped(supabase.from("appointments").select("id, job_id, outcome, type").or(visitsBehindQuoteFilter(quote))).limit(50);
   if (error) return { attached: 0, stamped: 0, error: error.message };
   const { attach, stamp } = closingsFor((data ?? []) as VisitBehind[], w);
   const nowIso = new Date().toISOString();
@@ -105,22 +108,12 @@ export async function closeVisitsBehindQuote(
   let stamped = 0;
   const errors: string[] = [];
   if (attach.length) {
-    const { data: rows, error: e } = await supabase
-      .from("appointments")
-      .update({ job_id: w.jobId, updated_at: nowIso })
-      .in("id", attach)
-      .is("job_id", null)
-      .select("id");
+    const { data: rows, error: e } = await scoped(supabase.from("appointments").update({ job_id: w.jobId, updated_at: nowIso }).in("id", attach).is("job_id", null)).select("id");
     if (e) errors.push(e.message);
     else attached = rows?.length ?? 0;
   }
   if (stamp.length) {
-    const { data: rows, error: e } = await supabase
-      .from("appointments")
-      .update({ outcome: w.outcome, outcome_at: nowIso, updated_at: nowIso })
-      .in("id", stamp)
-      .is("outcome", null)
-      .select("id");
+    const { data: rows, error: e } = await scoped(supabase.from("appointments").update({ outcome: w.outcome, outcome_at: nowIso, updated_at: nowIso }).in("id", stamp).is("outcome", null)).select("id");
     if (e) errors.push(e.message);
     else stamped = rows?.length ?? 0;
   }

@@ -92,7 +92,7 @@ describe("the doors", () => {
     expect(create).toContain("Accept it again to retry.");
     expect(create.indexOf("Accept it again to retry.")).toBeLessThan(follow); // the linked branch returns before the follow
     expect(create).toContain('.update({ job_id: origJob }).eq("id", quoteId).is("job_id", null).select("id")'); // the original's job, read back
-    expect(create).toContain("revises_quote_id: revises }, { jobId: job.id, outcome: \"won\" }"); // the visit behind the original closes too
+    expect(create).toContain("revises_quote_id: revises }, { jobId: job.id, outcome: \"won\", orgId: ctx.orgId }"); // the visit behind the original closes too, the company named (S6)
     const status = body(actions, "export async function updateQuoteStatus(");
     expect(status).toContain('if (status === "superseded") return { ok: false as const, error: "Superseded is set by accepting a revision — Revise this estimate instead." };');
     expect(status).toContain("replaced this estimate — change that one instead."); // leaving superseded by hand while the revision stands
@@ -113,7 +113,7 @@ describe("the doors", () => {
     expect(page).toContain('quoteBehind?.status === "superseded" ? (await revisionOf(supabase, { quoteId: quoteBehind.id, orgId: null })) ?? null : null');
   });
   it("the customer's own Accept supersedes after the figure before is read and before the sync; a failed supersede skips both syncs", () => {
-    const finish = body(src("src/app/q/[token]/actions.ts"), "export async function finishPublicAcceptance(");
+    const finish = body(src("src/app/q/[token]/actions.ts"), "async function finishPublicAcceptance("); // internal since cn-v1133: acceptPublicQuote awaits it
     const before = finish.indexOf("estimateLines(sb, { jobId, orgId: who.orgId, except: q.id })");
     const sup = finish.indexOf("supersedeRevised(sb, { revisionId: q.id, orgId: who.orgId })");
     const sync = finish.indexOf("syncJobTasks(sb,");

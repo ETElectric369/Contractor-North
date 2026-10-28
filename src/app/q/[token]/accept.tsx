@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { finishPublicAcceptance } from "./actions";
+import { acceptPublicQuote } from "./actions";
 
 type Outcome = "open" | "accepted" | "declined";
 
@@ -29,20 +29,23 @@ export function PublicQuoteAccept({
   async function accept() {
     setBusy("accept");
     setErr(null);
-    const supabase = createClient();
-    const { data, error } = await supabase.rpc("accept_public_quote", { p_token: token });
-    if (error || !data?.ok) {
-      setErr(error?.message ?? data?.error ?? "Could not accept. Please try again.");
+    // ONE server call (cn-v1133): the RPC accepts, the job's tasks, work order and materials list are
+    // born (the same rules as the office's accept) and THEN the office is pinged — all awaited on the
+    // server, so closing this tab the moment the button is pressed loses none of it. The button says
+    // "Accepting…" while the call is out; a refusal keeps its own words.
+    let res: Awaited<ReturnType<typeof acceptPublicQuote>>;
+    try {
+      res = await acceptPublicQuote(token);
+    } catch {
+      res = { ok: false, error: "Could not accept. Please try again." };
+    }
+    if (!res.ok) {
+      setErr(res.error);
       setBusy(null);
       return;
     }
     setOutcome("accepted");
     setBusy(null);
-    // ONE call, fire-and-forget: the job's tasks, work order and materials list are born (the same
-    // rules as the office's accept) and THEN the office is pinged, all on the server — so the push's
-    // link opens a job that already has its list, and closing this tab loses neither. The
-    // acceptance itself is already saved by the RPC above.
-    void finishPublicAcceptance(token);
   }
 
   async function decline() {
@@ -85,7 +88,7 @@ export function PublicQuoteAccept({
         style={{ backgroundColor: brand }}
       >
         {busy === "accept" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
-        Accept this {lower}
+        {busy === "accept" ? "Accepting…" : `Accept this ${lower}`}
       </button>
       <p className="mt-1.5 text-xs text-slate-400">Accepting lets us schedule your work.</p>
       <button

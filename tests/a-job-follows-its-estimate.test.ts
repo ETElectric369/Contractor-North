@@ -38,8 +38,8 @@ describe("deleting a line on an accepted estimate", () => {
 
 describe("renaming a line on an accepted estimate", () => {
   const fn = body(actions, "export async function updateQuoteItem(");
-  it("reads the line's old words and breakdown BEFORE the write, and renames the job's task only through the guarded rule", () => {
-    const was = fn.indexOf('select("description, detail")');
+  it("reads the line's old words, figure and breakdown BEFORE the write, and renames the job's task only through the guarded rule", () => {
+    const was = fn.indexOf('select("description, quantity, unit_price, detail")'); // the figure too (cn-v1133): the syncs run only when it differs
     const write = fn.indexOf(".update(clean)");
     const retitle = fn.indexOf("retitleLineTask(");
     expect(was).toBeGreaterThan(-1);
@@ -60,7 +60,7 @@ describe("accepting an estimate that already has its job", () => {
     const write = status.indexOf(".update(patch)");
     expect(read).toBeGreaterThan(-1);
     expect(write).toBeGreaterThan(read);
-    expect(status).toContain("createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore } : undefined)");
+    expect(status).toContain("createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore, partsBefore: linked.partsBefore } : undefined)");
   });
   it("the news is said under the status, apart from a warning", () => {
     expect(status).toContain("if (jobRes?.said) said = jobRes.said;");
@@ -73,7 +73,7 @@ describe("accepting an estimate that already has its job", () => {
     const branch = create.slice(linked, birth);
     expect(branch).toContain('status !== "accepted") return { ok: true, id: q.job_id }'); // a sent/draft linked estimate: the old answer, no sync
     expect(create).toContain('.select("id, job_id, status,');
-    expect(branch).toContain("jobFollows(supabase, { jobId: q.job_id, sizeBefore, tasksBefore }, ctx)"); // the figure before: the caller's, or read before a revision's pin
+    expect(branch).toContain("jobFollows(supabase, { jobId: q.job_id, sizeBefore, tasksBefore, partsBefore }, ctx)"); // the figure before: the caller's, or read before a revision's pin
     expect(branch).toContain("createWorkOrderFromQuote(quoteId)");
     expect(branch).toContain("createMaterialListFromQuote(quoteId)");
     // The paperwork FIRST (cn-v1084): the take-off may adopt a visit-born job's list and leave its task
@@ -168,7 +168,7 @@ describe("the buy list follows too (0390)", () => {
     expect(fn).toContain('revalidatePath("/materials")');
   });
   it("the customer's own Accept link syncs the buy list after the take-off", () => {
-    const finish = body(src("src/app/q/[token]/actions.ts"), "export async function finishPublicAcceptance(");
+    const finish = body(src("src/app/q/[token]/actions.ts"), "async function finishPublicAcceptance("); // internal since cn-v1133: acceptPublicQuote awaits it
     const takeOff = finish.indexOf("takeOffFromQuote(");
     const mats = finish.indexOf("syncJobMaterials(");
     expect(mats).toBeGreaterThan(takeOff);
@@ -281,7 +281,8 @@ const ORG = "org-1";
 const detail = (hours: number) => ({ task_id: "t-trench", labor: [{ label: null, person_id: null, hours, rate: 145, rate_from: "rule" }], units: null, kit_id: null, materials: [] });
 const db = vi.hoisted(() => ({ current: null as any }));
 const revisionAccepted = (over: { revisionStatus: "sent" | "accepted"; acceptedAt?: string | null }) =>
-  fakeDb({
+  fakeDb(
+    {
     quotes: [
       { id: "q1", org_id: ORG, job_id: "j1", status: "accepted", quote_number: "E-001", revises_quote_id: null, created_at: "2026-10-01T10:00:00Z", accepted_at: "2026-10-01T12:00:00Z", customer_id: "c1", inquiry_id: null, public_token: "tok-1", created_by: "u1" },
       { id: "q2", org_id: ORG, job_id: "j1", status: over.revisionStatus, quote_number: "E-002", revises_quote_id: "q1", created_at: "2026-10-05T10:00:00Z", accepted_at: over.acceptedAt ?? null, customer_id: "c1", inquiry_id: null, public_token: "tok-2", created_by: "u1" },
@@ -294,7 +295,10 @@ const revisionAccepted = (over: { revisionStatus: "sent" | "accepted"; acceptedA
     tasks: [{ id: "t1", org_id: ORG, job_id: "j1", source_key: "line:l1", title: "Trench", status: "open", notes: null, photo_path: null, parent_id: null, planned_minutes: 120 }],
     jobs: [{ id: "j1", org_id: ORG, planned_minutes: 120, dismissed_task_keys: [] }],
     appointments: [],
-  });
+    },
+    // The customer's door runs the RPC first (cn-v1133): the revision here is ALREADY accepted, so the SQL answers ok and the finish does the work.
+    { rpc: (fn) => (fn === "accept_public_quote" ? { data: { ok: true }, error: null } : { data: null, error: { message: `no such function: ${fn}` } }) },
+  );
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => db.current.sb), createServiceClient: vi.fn(() => db.current.sb) }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => ({ supabase: db.current.sb, userId: "u-office", orgId: ORG })) }));
@@ -313,7 +317,7 @@ vi.mock("@/lib/estimate/take-off-from-quote", async (importOriginal) => ({ ...(a
 
 const { fakeDb } = await import("@/test/fake-supabase");
 const { updateQuoteStatus } = await import("@/app/(app)/quotes/actions");
-const { finishPublicAcceptance } = await import("@/app/q/[token]/actions");
+const { acceptPublicQuote } = await import("@/app/q/[token]/actions");
 
 describe("a task's minutes follow its line through the real doors (0395)", () => {
   it("the office accepts a revision: the task still holding the original's 2 h follows to the revision's 3 h, said as updated — never 'kept its hours'", async () => {
@@ -334,7 +338,7 @@ describe("a task's minutes follow its line through the real doors (0395)", () =>
 
   it("the customer accepts the revision through the link: the same rule, the same figure before (the job's OTHER accepted estimates), the task follows", async () => {
     db.current = revisionAccepted({ revisionStatus: "accepted", acceptedAt: new Date().toISOString() });
-    await finishPublicAcceptance("tok-2");
+    expect(await acceptPublicQuote("tok-2")).toEqual({ ok: true }); // the one server call: the RPC, then the finish AWAITED, then the bell
     const t = db.current.tables.tasks.find((r: any) => r.id === "t1");
     expect(t.planned_minutes).toBe(180);
     expect(t.source_key).toBe("line:l2");
@@ -344,15 +348,29 @@ describe("a task's minutes follow its line through the real doors (0395)", () =>
 
   it("every door hands the per-task figure through: jobBehindQuote, setQuoteJob (both jobs), createJobFromQuote, updateQuoteStatus, the link", () => {
     expect(actions).toContain("const figureBefore = (est: Awaited<ReturnType<typeof estimateLines>>): FigureBefore =>");
-    expect(actions).toContain("est.error ? { sizeBefore: undefined, tasksBefore: undefined } : { sizeBefore: est.minutes, tasksBefore: est.taskMinutes }");
+    expect(actions).toContain("est.error ? { sizeBefore: undefined, tasksBefore: undefined, partsBefore: undefined } : { sizeBefore: est.minutes, tasksBefore: est.taskMinutes, partsBefore: est.partCounts }");
     expect(actions).toContain("return { jobId, ...figureBefore(est) };"); // jobBehindQuote
-    expect(actions).toContain("sizeBefore: who.sizeBefore, tasksBefore: who.tasksBefore"); // jobFollows → the sync
+    expect(actions).toContain("sizeBefore: who.sizeBefore, tasksBefore: who.tasksBefore"); // jobFollows → the tasks sync
+    expect(actions).toContain("userId: ctx.userId, partsBefore: who.partsBefore"); // jobFollows → the materials sync (cn-v1133)
     expect(actions).toContain("pinned = figureBefore(est);");
     expect(actions).toContain("left = { jobId: from, ...figureBefore(est), label:");
     expect(actions).toContain("jobFollows(supabase, { jobId, ...pinned }, ctx)");
-    expect(actions).toContain("jobFollows(supabase, { jobId: left.jobId, sizeBefore: left.sizeBefore, tasksBefore: left.tasksBefore }, ctx, {");
-    expect(actions).toContain("({ sizeBefore, tasksBefore } = figureBefore(est));"); // a revision's pin inside createJobFromQuote
+    expect(actions).toContain("jobFollows(supabase, { jobId: left.jobId, sizeBefore: left.sizeBefore, tasksBefore: left.tasksBefore, partsBefore: left.partsBefore }, ctx, {");
+    expect(actions).toContain("({ sizeBefore, tasksBefore, partsBefore } = figureBefore(est));"); // a revision's pin inside createJobFromQuote
     expect(actions).toContain("linked = { jobId, ...figureBefore(est) };"); // updateQuoteStatus
-    expect(src("src/app/q/[token]/actions.ts")).toContain("tasksBefore: before.error ? undefined : before.taskMinutes,");
+    const link = src("src/app/q/[token]/actions.ts");
+    expect(link).toContain("tasksBefore: before.error ? undefined : before.taskMinutes,");
+    expect(link).toContain("partsBefore: before.error ? undefined : before.partCounts");
+  });
+
+  it("appending lines runs the same pair as a line edit (cn-v1133): the figure before the insert, the two rules after it", () => {
+    const fn = body(actions, "export async function appendQuoteLines(");
+    const before = fn.indexOf("jobBehindQuote(");
+    const insert = fn.indexOf('.insert(rows).select("id")');
+    const after = fn.indexOf("jobFollows(");
+    expect(before).toBeGreaterThan(-1);
+    expect(insert).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(insert);
+    expect(fn).toContain("return { ok: true, ids, ...follow };");
   });
 });

@@ -5,8 +5,8 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
 import { firstThatWorks, kitLineView, linkedItemOf } from "@/lib/kit-line";
 import { partsKitsOnly, taskKitSelectRungs } from "./task-kits";
-import { coerceTaskDetail } from "./task-lines";
-import { keyParts, materialKey } from "./born-with-tasks";
+import { coerceTaskDetail, lineQty } from "./task-lines";
+import { keyParts, materialKey, partQtyFor } from "./born-with-tasks";
 import { readAllPages } from "@/lib/read-all-pages";
 import { reportError } from "@/lib/observe";
 import type { CountDiffers } from "./sync-job-materials";
@@ -571,9 +571,12 @@ export async function takeOffFromQuote(supabase: SupabaseClient, who: TakeOffWho
       // to its line and part (0390) so a later change to the estimate can find it. On an ADOPTED list
       // they are the sync's to add (it knows the visit's rows); here they would double them.
       if (adopted) continue;
+      // THIS MANY OF THE TASK (cn-v1133): each part's count × the line's quantity, the birth's own rule
+      // (partQtyFor); a part he never counted stays the "how many?" placeholder at any quantity.
+      const qty = lineQty(it);
       for (const m of keyParts(`line:${it.id}`, task.materials.filter((x) => x.name.trim()))) {
         const name = m.name.trim();
-        rows.push({ ...taskPartRow(list.id, orgId, { code: m.code, name, qty: m.qty, cost: m.cost, source_key: m.key }, findPl(m.code, name)), sort_order: so++ });
+        rows.push({ ...taskPartRow(list.id, orgId, { code: m.code, name, qty: partQtyFor(m.qty, qty), cost: m.cost, source_key: m.key }, findPl(m.code, name)), sort_order: so++ });
       }
       continue;
     }

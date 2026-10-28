@@ -147,6 +147,20 @@ describe("takeOffFromQuote — a task line puts its PARTS on the sheet, never it
     expect(rows[0].source_key).toBeUndefined();
   });
 
+  it("THIS MANY OF THE TASK (cn-v1133): a task line at qty 2 puts twice each counted part on the sheet; an uncounted part stays the 'how many?' placeholder at 1", async () => {
+    const { sb, inserted } = world([{ ...lines[1], quantity: 2 }]);
+    const res = await takeOffFromQuote(sb, { quoteId: "q-1", userId: "u-1", orgId: null });
+    expect(res.ok).toBe(true);
+    const rows = inserted.material_list_items;
+    expect(rows.map((r) => [r.description, r.quantity, r.source_key])).toEqual([
+      ["Transfer switch, 200A", 2, "line:l2#R1"],
+      [`Bayberry clips${HOW_MANY}`, 1, "line:l2#bayberry-clips"],
+      ["50A breaker", 4, "line:l2#BRK50"],
+    ]);
+    // The cost is the part's unit buy, never multiplied: the sheet counts, the price is each.
+    expect(rows[0].est_cost).toBe(400);
+  });
+
   it("plain lines are treated exactly as before: the [CODE] matched to the book, labor dropped", async () => {
     const { sb, inserted } = world(lines);
     await takeOffFromQuote(sb, { quoteId: "q-1", userId: "u-1", orgId: null });

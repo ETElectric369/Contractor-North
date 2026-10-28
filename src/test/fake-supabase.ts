@@ -9,7 +9,9 @@
  * to the rows the filters hit, returning their ids. `onInsert` lets a test refuse one insert the way
  * Postgres would (a unique violation), optionally planting the winner's rows first. `in` filters by
  * a list, `ilike` by a literal (the pattern's escapes undone, case folded — the rules here only ever
- * pass a literal), and a delete takes the rows it hits out of the table and returns their ids.
+ * pass a literal), and a delete takes the rows it hits out of the table and returns their ids. An
+ * `or` filter is ignored like order/limit (the visit closer's three-link read, lib/appointments/
+ * behind-quote): a test that cares which visits it finds plants only those rows.
  */
 export type Row = Record<string, any>;
 
@@ -37,6 +39,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: FakeDbOptions = {}) 
       order: () => b,
       limit: () => b,
       not: () => b,
+      or: () => b,
       eq(col: string, v: unknown) {
         if (!col.includes(".")) filters.push((r) => r[col] === v);
         return b;

@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1133", date: "2026-10-27", line: "A task line's Qty now reaches the job (hours and parts × the count); the customer's Accept makes the whole job before it answers; part counts follow an edit; the editor cannot lose or double a line." },
   { version: "cn-v1132", date: "2026-10-27", line: "One editor for every estimate, new or saved: the task layout, Add A Task and labor rows on all of them; no estimate is made until you give it substance; a lost connection cannot double a line." },
   { version: "cn-v1131", date: "2026-10-27", line: "A task's labor is one or more rows, each at its own rate with its source named; Add A Task on any estimate; labor and parts can print under each task per estimate; Settings says what each rate drives." },
   { version: "cn-v1130", date: "2026-10-27", line: "The timeclock texts go out at the company's own hour, a failed read texts nobody instead of everyone, and the daily run, the nightly review, Bug Watch and Nort's hold all say a failed read out loud." },

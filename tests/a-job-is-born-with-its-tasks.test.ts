@@ -41,7 +41,7 @@ describe("the office's accept", () => {
 
 describe("the customer's own Accept link", () => {
   const actions = src("src/app/q/[token]/actions.ts");
-  const finish = body(actions, "export async function finishPublicAcceptance(");
+  const finish = body(actions, "async function finishPublicAcceptance("); // internal since cn-v1133: acceptPublicQuote awaits it
   it("finishes the birth only on an accepted quote that already has its job, by token, soon after the tap", () => {
     expect(finish).toContain('.eq("public_token", token)');
     expect(finish).toContain('q.status !== "accepted"');
@@ -59,14 +59,24 @@ describe("the customer's own Accept link", () => {
     expect(finish).toMatch(/workOrderFromQuote\(sb, \{ quoteId: q\.id, orgId: who\.orgId, userId: who\.userId \}\)/);
     expect(finish).toMatch(/takeOffFromQuote\(sb, \{ quoteId: q\.id, orgId: who\.orgId, userId: who\.userId \}\)/);
   });
-  it("rings the office LAST and ALWAYS, on the server, so a closed tab loses neither", () => {
-    expect(finish).toMatch(/\} finally \{[\s\S]*await notifyQuoteAccepted\(token, listSaid\);/);
-    const page = src("src/app/q/[token]/accept.tsx");
-    const accept = page.slice(page.indexOf("async function accept()"), page.indexOf("async function decline()"));
-    const rpc = accept.indexOf('rpc("accept_public_quote"');
-    const finishAt = accept.indexOf("finishPublicAcceptance(token)");
+  it("ONE server call (cn-v1133): the RPC, then the finish AWAITED, then the office rung LAST and ALWAYS — so a closed tab loses none of it", () => {
+    const door = body(actions, "export async function acceptPublicQuote(");
+    const rpc = door.indexOf('rpc("accept_public_quote", { p_token: token })');
+    const finishAt = door.indexOf("await finishPublicAcceptance(token)");
+    const bell = door.indexOf("await notifyQuoteAccepted(token, listSaid);");
     expect(rpc).toBeGreaterThan(-1);
     expect(finishAt).toBeGreaterThan(rpc);
+    expect(bell).toBeGreaterThan(finishAt);
+    expect(door).toContain("const supabase = await createClient();"); // the token page's own client (cookie-bound anon): the RPC is keyed by the token
+    expect(finish).toContain("return listSaid;"); // the finish never rings: the door does, after it
+    expect(finish).toContain("closeVisitsBehindQuote(sb, { id: q.id, inquiry_id:"); // parity with the office door: the visit behind the estimate is won
+    expect(finish).toContain("revises_quote_id: (q.revises_quote_id as string | null) ?? null }, { jobId, outcome: \"won\", orgId: who.orgId })"); // the service client: the company's id scopes it (S6)
+    const page = src("src/app/q/[token]/accept.tsx");
+    const accept = page.slice(page.indexOf("async function accept()"), page.indexOf("async function decline()"));
+    expect(accept).toContain("await acceptPublicQuote(token)");
+    expect(accept).not.toContain('rpc("accept_public_quote"'); // the RPC runs on the server now
+    expect(page).toContain('{busy === "accept" ? "Accepting…" : `Accept this ${lower}`}');
+    expect(page).not.toContain("finishPublicAcceptance");
     expect(page).not.toContain("notifyQuoteAccepted"); // one call from the page, the chain is server-side
   });
 });

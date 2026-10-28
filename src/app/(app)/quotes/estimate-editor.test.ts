@@ -53,13 +53,57 @@ describe("birth without litter", () => {
     expect(editorSrc).not.toContain("replaceUrl");
     expect(editorSrc).toContain("const quiet = isQuiet(state);");
     expect(editorSrc).toContain('if (props.mode !== "unsaved" || mode.kind !== "saved" || !mode.bornHere || handedOff.current) return;');
-    expect(editorSrc).toContain("if (!quiet || generating || uploading) return;");
+    expect(editorSrc).toContain("if (!quiet || generating || uploading || bookReview !== null || aiError !== null) return;");
     expect(editorSrc).toContain("handedOff.current = true;");
     expect(editorSrc).toContain("stashHandoff(browserStash(), mode.id, { scope, proposed, questions, number: mode.number });");
     expect(editorSrc).toContain("router.replace(`/quotes/${mode.id}`);");
     expect(editorSrc).toContain("const h = takeHandoff(browserStash(), props.saved.quote.id);");
     expect(editorSrc).toContain("setBorn(h.number ?? props.saved.quote.quote_number);");
     expect(editorSrc).toContain("{(mode.bornHere || born) && (");
+  });
+
+  it("the hand-off waits for an open price-book review and for an estimator error he has not acted on — which has a Dismiss (N3) — and a stash that could not be kept with text to carry holds the editor here; the green line offers Open It WHENEVER the editor is in saved mode on this route (pinned; the stash's own answer is driven in handoff.test.ts)", () => {
+    const effect = editorSrc.slice(editorSrc.indexOf("const handedOff = useRef(false);"), editorSrc.indexOf("}, [props.mode, mode, quiet, generating, uploading, bookReview, aiError]);"));
+    // The review panel and the error are declared before the effect that reads them (a hook reads
+    // state declared above it, or it is a render-time error).
+    expect(editorSrc.indexOf("const [bookReview, setBookReview] = useState")).toBeLessThan(editorSrc.indexOf("const handedOff = useRef(false);"));
+    expect(editorSrc.indexOf("const [aiError, setAiError] = useState")).toBeLessThan(editorSrc.indexOf("const handedOff = useRef(false);"));
+    expect(effect).toContain("const kept = stashHandoff(browserStash(), mode.id, { scope, proposed, questions, number: mode.number });");
+    expect(effect).toContain("if (!kept && (scope.trim() || proposed.length || questions.length)) return;");
+    // Born here and still on this route — a failed stash, a refusal, an error, a review: ANY reason — the
+    // green line links the row; on its own page it says the estimate is on the list (skeptic #39, N3).
+    expect(editorSrc).not.toContain("stayedHere");
+    expect(editorSrc).toMatch(/\{props\.mode === "unsaved" \? \(\s*<>\s*\{" · "\}\s*<Link href=\{`\/quotes\/\$\{savedId\}`\} className="font-semibold underline">\s*Open It\s*<\/Link>/);
+    expect(editorSrc).toContain("<> — it&apos;s on the Estimates list even if you leave.</>");
+    // The estimator's error can be dismissed (Title Case: a button), so a stale one never holds the hand-off for good.
+    expect(editorSrc).toMatch(/\{aiError\}\{" "\}\s*<button type="button" onClick=\{\(\) => setAiError\(null\)\}[^>]*>\s*Dismiss\s*<\/button>/);
+  });
+
+  it("the page's fresh props are taken when nothing is on the wire and nothing typed is uncommitted (S2) — a standing refusal does not hold them (skeptic #39: the store keeps a refused row's value and Retry through a reseed) — and the effect re-runs when either flips (the hold itself is driven in use-quote-writes.test.ts)", () => {
+    const effect = editorSrc.slice(editorSrc.indexOf("const seededKey = useRef(reseedKey);"), editorSrc.indexOf("}, [reseedKey, busy, dirty]);"));
+    expect(effect).toContain("const dirty = session.isDirty();");
+    expect(effect).toContain('if (props.mode !== "saved" || seededKey.current === reseedKey) return;');
+    expect(effect).toContain("if (busy || dirty) return;");
+    expect(effect).not.toContain("if (!quiet || dirty) return;");
+    expect(effect).toContain("seededKey.current = reseedKey;");
+    expect(effect).toContain("session.reseed({");
+  });
+
+  it("the pages say a failed read: the saved page throws on the lines' read like the row's, the new page on the lead-draft read like the ?capture= read (a failed read minted a twin)", () => {
+    const saved = read("src/app/(app)/quotes/[id]/page.tsx");
+    expect(saved).toContain("if (quoteErr) throw quoteErr;");
+    expect(saved).toContain('const { data: items, error: itemsErr } = await supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order");');
+    expect(saved).toContain("if (itemsErr) throw itemsErr;");
+    const fresh = read("src/app/(app)/quotes/new/page.tsx");
+    expect(fresh).toContain("const { data: existing, error: existingErr } = await supabase");
+    expect(fresh).toContain("if (existingErr) throw existingErr;");
+    expect(fresh).toContain("if (existing?.id) redirect(`/quotes/${existing.id}`);");
+    expect(fresh.indexOf("if (existingErr) throw existingErr;")).toBeLessThan(fresh.indexOf("if (existing?.id) redirect(`/quotes/${existing.id}`);"));
+  });
+
+  it("the estimator's buttons read Title Case", () => {
+    for (const label of ["Not Now", "Drop Them All", "To The Estimate", "To The Price Book", "Tick All", "Untick All"]) expect(editorSrc).toContain(label);
+    for (const label of ["Not now", "Drop them all", "to the estimate\n", "to the price book", '"Tick all"', '"Untick all"']) expect(editorSrc).not.toContain(label);
   });
 
   it("no session draft anywhere: the sessionStorage slot and its key are gone, and nothing imports them (the one-shot hand-off lives in handoff.ts, read once and cleared)", () => {
