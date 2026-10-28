@@ -9,7 +9,8 @@ Size: XS (<1h) · S (≈half day) · M (≈1–2 days) · L (multi-day).
 > - ✅ §3 Multi-job end-of-day timecards (migration 0010)
 > - ✅ §4 Twilio SMS helper + no-clock-in & end-of-day reminders — **code complete,
 >   activates when `TWILIO_*` env vars are added** (logs instead of texting until then)
-> - ✅ §5 Spanish interface for employees + Claude-in-Spanish (migration 0011)
+> - 🟡 §5 Spanish: `profiles.language` (migration 0011) and the Time Clock's words today; cn-v1138
+>   widens it to the tech's whole side (see §5)
 >
 > Remaining to *activate* (not build): add a **Twilio account** for live texts,
 > and the **`ANTHROPIC_API_KEY`** for Claude-in-Spanish + other AI. Possible
@@ -50,12 +51,10 @@ Size: XS (<1h) · S (≈half day) · M (≈1–2 days) · L (multi-day).
   form, text the tech (and/or office) on a schedule until done.
 
 ## 5. Spanish for employees
-- ⬜ **L — Spanish interface (i18n)** for employee-facing screens (timeclock,
-  end-of-day form, login). Add an i18n layer + a language toggle on the profile;
-  translate the tech-facing strings first.
-- ⬜ **S — Claude in Spanish**: the assistant can guide employees in Spanish
-  (language-aware system prompt + the tech's preferred language). *(Needs the
-  `ANTHROPIC_API_KEY` switched on.)*
+- 🟡 **L — Spanish interface (i18n)**: today Spanish = the Time Clock's keys (`src/lib/i18n.ts` over the
+  catalogs in `src/lib/words/`, the toggle on the profile); cn-v1138 widens it to the tech's side —
+  My Day, jobs, tasks, materials, sign-in, the texts and pushes they get. Office screens stay English.
+- 🟡 **S — Nort in Spanish**: cn-v1138 — Nort reads `profiles.language` and answers in it.
 
 ## Dependencies / decisions needed
 - **Twilio account** (for items in §4).

@@ -16,6 +16,7 @@ vi.mock("./stock-actions", () => ({ loadShelf: vi.fn(), takeFromStockAction: vi.
 
 import { TakeSheetView, TakesListView, TookFromStock, padPress } from "./took-from-stock";
 import type { JobTake, ShelfRow } from "@/lib/stock-take";
+import { LangProvider } from "@/components/lang-provider";
 
 // A row as it might arrive if a cost ever leaked into the payload: the view must not draw it.
 const LEAKY = { cost: 180.17, value: 136.93, unit_cost: 0.72 };
@@ -227,5 +228,84 @@ describe("the job's takes", () => {
     const office = list([{ ...settled, canUndo: true }], true);
     expect(buttons(office).map((b) => b.text)).toContain("Undo");
     expect(textOf(office)).not.toContain("ask the office");
+  });
+});
+
+/**
+ * THE SAME DOOR IN SPANISH (cn-v1138). profiles.language reaches the sheet, the takes and the button
+ * through the (app) layout's LangProvider; the words come from lib/words/materials (mt_). A take's own
+ * line, a short and the toast after Take It are lib/stock-take's words and stay as that file says them.
+ */
+describe("in Spanish (cn-v1138)", () => {
+  const base: JobTake = {
+    drawGroup: "g1",
+    takenAt: "2026-09-24T17:00:00Z",
+    itemId: "i1",
+    item: "12/2 NM-B",
+    unit: "ft",
+    qty: 60,
+    short: 0,
+    back: 0,
+    who: "Brian",
+    mine: true,
+    billedOn: null,
+    partBilled: false,
+    billedInvoiceId: null,
+    canUndo: true,
+    settledByOffice: false,
+  };
+  const sheetIn = (lang: "en" | "es", over: Partial<Parameters<typeof TakeSheetView>[0]> = {}) =>
+    renderToStaticMarkup(
+      createElement(LangProvider, {
+        lang,
+        children: createElement(TakeSheetView, {
+          step: { kind: "pick" },
+          rows: SHELF,
+          loading: false,
+          error: null,
+          search: "",
+          entry: "",
+          busy: false,
+          onSearch: noop,
+          onPick: noop,
+          onKey: noop,
+          onBack: noop,
+          onTake: noop,
+          ...over,
+        }),
+      }),
+    );
+  const doorIn = (lang: "en" | "es") => renderToStaticMarkup(createElement(LangProvider, { lang, children: createElement(TookFromStock, { jobId: "j1", takes: [base], viewerIsStaff: false }) }));
+
+  it("the sheet: the search, the shelf's count, an empty shelf, and the pad's doors in Title Case", () => {
+    const pick = sheetIn("es");
+    expect(pick).toContain('placeholder="Buscar en inventario"');
+    expect(textOf(pick)).toContain("250 ft en inventario");
+    expect(textOf(pick)).not.toContain("in stock");
+    expect(textOf(sheetIn("es", { rows: [] }))).toContain("Aún no hay nada en inventario.");
+    expect(textOf(sheetIn("es", { loading: true }))).toContain("Leyendo inventario…");
+    const count = sheetIn("es", { step: { kind: "count", row: SHELF[0] }, entry: "6" });
+    const texts = buttons(count).map((b) => b.text);
+    expect(texts).toEqual(expect.arrayContaining(["Elegir Otro Artículo", "Tomarlo", "1", "0", "."]));
+    expect(texts).not.toContain("Take It");
+    for (const b of buttons(count)) expect(titleCase(b.text), b.text).toBe(true);
+  });
+
+  it("the button, the takes' heading and Undo", () => {
+    const door = doorIn("es");
+    const texts = buttons(door).map((b) => b.text);
+    expect(texts).toContain("Tomado Del Inventario");
+    expect(texts).toContain("Deshacer");
+    expect(texts).not.toContain("Took From Stock");
+    expect(texts).not.toContain("Undo");
+    expect(textOf(door)).toContain("Lo Tomado Del Inventario");
+  });
+
+  it("English is unchanged: the same render inside an English provider is the render with no provider", () => {
+    expect(sheetIn("en")).toBe(sheet());
+    expect(sheetIn("en", { step: { kind: "count", row: SHELF[0] }, entry: "6" })).toBe(sheet({ step: { kind: "count", row: SHELF[0] }, entry: "6" }));
+    expect(doorIn("en")).toBe(renderToStaticMarkup(createElement(TookFromStock, { jobId: "j1", takes: [base], viewerIsStaff: false })));
+    expect(buttons(doorIn("en")).map((b) => b.text)).toEqual(expect.arrayContaining(["Took From Stock", "Undo"]));
+    expect(textOf(doorIn("en"))).toContain("Taken From Stock");
   });
 });

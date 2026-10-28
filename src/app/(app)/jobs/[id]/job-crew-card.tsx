@@ -6,6 +6,8 @@ import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { initials } from "@/lib/utils";
 import { applyCrewChange, type CrewChange } from "@/lib/crew-change";
 import { chipDot } from "@/lib/schedule/block-info";
@@ -33,6 +35,7 @@ function Avatar({ name }: { name: string | null }) {
 export function useJobCrew(jobId: string, initialCrew: CrewMember[], team: CrewMember[]) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   const [crew, setCrew] = useState<string[]>(initialCrew.map((c) => c.id));
   // SERVER TRUTH COMES BACK IN. A refresh never remounts this card (any save on the Overview re-renders
@@ -48,11 +51,12 @@ export function useJobCrew(jobId: string, initialCrew: CrewMember[], team: CrewM
   const [asking, setAsking] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const known = new Map<string, CrewMember>([...team, ...initialCrew].map((m) => [m.id, m]));
-  const nameOf = (id: string) => known.get(id)?.full_name ?? "Unnamed";
+  const nameOf = (id: string) => known.get(id)?.full_name ?? t("jb_unnamed");
 
   // The optimistic move must be BACKED OUT when the write fails, or the card lies: a refresh never
   // remounts it, and useState ignores its initializer on re-render. The try/catch is not optional:
   // an async transition's rejection (offline, 5xx) otherwise reaches no handler at all.
+  // `said` is the deed in the viewer's words ("take Brian off this job"), so the refusal reads whole.
   function write(change: CrewChange, said: string) {
     const prev = crew;
     setCrew(applyCrewChange(crew, change));
@@ -63,7 +67,7 @@ export function useJobCrew(jobId: string, initialCrew: CrewMember[], team: CrewM
         const res = await changeJobCrew(jobId, change);
         if (!res.ok) {
           setCrew(prev);
-          toast(res.error ?? `Couldn't ${said}. Try again.`, "error");
+          toast(res.error ?? fillText(t("jb_couldntTryAgain"), { what: said }), "error");
           return;
         }
         // The refresh brings the crew as written (which may hold someone this page hadn't seen yet),
@@ -71,28 +75,28 @@ export function useJobCrew(jobId: string, initialCrew: CrewMember[], team: CrewM
         router.refresh();
       } catch {
         setCrew(prev);
-        toast(`Couldn't ${said}. You may be offline.`, "error");
+        toast(fillText(t("jb_couldntOffline"), { what: said }), "error");
       }
     });
   }
 
   const addable = team.filter((m) => !crew.includes(m.id));
-  return { crew, pending, asking, setAsking, adding, setAdding, write, nameOf, addable };
+  return { crew, pending, asking, setAsking, adding, setAdding, write, nameOf, addable, t };
 }
 
 /** The two panels a crew chip opens: "Take Brian Off This Job?" and the team list for + Add. */
 function CrewPanels({ c }: { c: ReturnType<typeof useJobCrew> }) {
-  const { asking, setAsking, adding, addable, write, nameOf } = c;
+  const { asking, setAsking, adding, addable, write, nameOf, t } = c;
   return (
     <>
       {asking && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-          <span className="mr-auto">Take {nameOf(asking)} Off This Job?</span>
-          <Button variant="outline" className="text-red-600" onClick={() => write({ remove: asking }, `take ${nameOf(asking)} off this job`)}>
-            <X className="h-4 w-4" /> Take Off
+          <span className="mr-auto">{fillText(t("jb_takeOffQ"), { name: nameOf(asking) })}</span>
+          <Button variant="outline" className="text-red-600" onClick={() => write({ remove: asking }, fillText(t("jb_takeOffThisJob"), { name: nameOf(asking) }))}>
+            <X className="h-4 w-4" /> {t("jb_takeOff")}
           </Button>
           <Button variant="ghost" onClick={() => setAsking(null)}>
-            Keep
+            {t("jb_keep")}
           </Button>
         </div>
       )}
@@ -100,18 +104,18 @@ function CrewPanels({ c }: { c: ReturnType<typeof useJobCrew> }) {
       {adding && (
         <div className="mt-3 rounded-lg border border-slate-200">
           {addable.length === 0 ? (
-            <p className="px-3 py-3 text-sm text-slate-500">Everyone on the team is on this job.</p>
+            <p className="px-3 py-3 text-sm text-slate-500">{t("jb_everyoneOnJob")}</p>
           ) : (
             <ul className="divide-y divide-slate-100">
               {addable.map((m) => (
                 <li key={m.id}>
                   <button
                     type="button"
-                    onClick={() => write({ add: m.id }, `put ${m.full_name ?? "them"} on this job`)}
+                    onClick={() => write({ add: m.id }, fillText(t("jb_putOnThisJob"), { name: m.full_name ?? t("jb_them") }))}
                     className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50"
                   >
                     <Avatar name={m.full_name} />
-                    {m.full_name ?? "Unnamed"}
+                    {m.full_name ?? t("jb_unnamed")}
                   </button>
                 </li>
               ))}
@@ -136,7 +140,7 @@ function AddChip({ c }: { c: ReturnType<typeof useJobCrew> }) {
       }}
       className="inline-flex min-h-11 items-center gap-1 rounded-full border border-dashed border-slate-300 px-3 text-sm font-medium text-brand hover:bg-slate-50 disabled:opacity-60"
     >
-      <Plus className="h-4 w-4" /> Add
+      <Plus className="h-4 w-4" /> {c.t("jb_add")}
     </button>
   );
 }
@@ -161,19 +165,19 @@ export function JobCrewCard({
   viewerIsStaff: boolean;
 }) {
   const c = useJobCrew(jobId, initialCrew, team);
-  const { crew, pending, asking, setAsking, nameOf } = c;
+  const { crew, pending, asking, setAsking, nameOf, t } = c;
 
   if (!viewerIsStaff) {
     return (
       <Card>
         <CardContent className="py-5">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Crew</div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_crew")}</div>
           <div className="flex flex-wrap gap-2">
-            {initialCrew.length === 0 && <span className="text-sm text-slate-400">No one is on this job yet.</span>}
+            {initialCrew.length === 0 && <span className="text-sm text-slate-400">{t("jb_noOneOnJob")}</span>}
             {initialCrew.map((s) => (
               <span key={s.id} className={CHIP}>
                 <Avatar name={s.full_name} />
-                {s.full_name ?? "Unnamed"}
+                {s.full_name ?? t("jb_unnamed")}
               </span>
             ))}
           </div>
@@ -185,9 +189,9 @@ export function JobCrewCard({
   return (
     <Card>
       <CardContent className="py-5">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Crew</div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_crew")}</div>
         <div className="flex flex-wrap items-center gap-2">
-          {crew.length === 0 && <span className="text-sm text-slate-400">No one is on this job yet.</span>}
+          {crew.length === 0 && <span className="text-sm text-slate-400">{t("jb_noOneOnJob")}</span>}
           {crew.map((id) => (
             <button
               key={id}
@@ -227,13 +231,13 @@ export function JobCrewChips({
   canEdit?: boolean;
 }) {
   const c = useJobCrew(jobId, initialCrew, team);
-  const { crew, pending, asking, setAsking, nameOf } = c;
+  const { crew, pending, asking, setAsking, nameOf, t } = c;
   // ONE PERSON IS ONE COLOR: each circle wears the person's own color, the same as their chip on the
   // tile and their bar on a worked day (lib/schedule/block-info chipDot). The job page's card keeps its look.
   const dot = (id: string) => `flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${chipDot({ id })} text-xs font-semibold text-white`;
   const nobody = (
     <span className="inline-flex h-11 items-center rounded-full border border-dashed border-slate-300 px-3 text-sm text-slate-400">
-      Nobody
+      {t("jb_nobody")}
     </span>
   );
 
@@ -242,7 +246,7 @@ export function JobCrewChips({
       <div className="flex flex-wrap items-center gap-2">
         {initialCrew.length === 0 && nobody}
         {initialCrew.map((s) => (
-          <span key={s.id} className={dot(s.id)} title={s.full_name ?? "Unnamed"} aria-label={s.full_name ?? "Unnamed"}>
+          <span key={s.id} className={dot(s.id)} title={s.full_name ?? t("jb_unnamed")} aria-label={s.full_name ?? t("jb_unnamed")}>
             {initials(s.full_name ?? "")}
           </span>
         ))}

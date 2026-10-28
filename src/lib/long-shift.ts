@@ -20,8 +20,26 @@
  */
 import { DEFAULT_TIMEZONE } from "./utils";
 import { tzMinutesOfDay, todayStrInTz } from "./tz";
+import { fillText, localeOf, translator, type Lang } from "./i18n";
 
 const H = 3_600_000;
+
+/**
+ * THE WORDS, IN THE PERSON'S LANGUAGE (cn-v1138). Every sentence below is a function of the language
+ * (lib/words/clockserver, cs_); the exported CONSTANTS are the English, read from the same catalog, so
+ * a door that has not learned to pass a language yet reads exactly what it always did and the two can
+ * never drift. A clock is rendered in the language's locale and its narrow spaces made plain.
+ */
+const en = translator("en");
+
+/** ICU puts a narrow no-break space (U+202F) before AM/PM, and es-US a no-break space (U+00A0) inside
+ *  "p. m."; plain text reads and compares better in either language. The Spanish meridiem loses its
+ *  dots too ("5:00 p.m." → "5:00 pm", the way the long-shift route already wrote it): a clock that
+ *  ends in a stop swallowed the period of every Spanish sentence that ended on a time, and "pm" is
+ *  how an es-US crew writes it anyway. */
+export function plainSpaces(s: string): string {
+  return s.replace(/[\u202F\u00A0]/g, " ").replace(/\b([ap])\.\s?m\.(?!\w)/gi, "$1m");
+}
 
 /**
  * A shift running this long has probably been forgotten. Not a ceiling: a real 13-hour day saves.
@@ -49,7 +67,10 @@ export const MAX_SHIFT_HOURS = 18;
  * the toast says so. The fence, a picked stop time and an unattended close never undo anything.
  */
 export const UNDO_PUNCH_MS = 2 * 60_000;
-export const UNDO_PUNCH_SENTENCE = "That punch is gone — it was under two minutes old, so nothing was recorded and nothing is paid.";
+export const UNDO_PUNCH_SENTENCE = en("cs_undoPunchSentence");
+export function undoPunchSentence(lang?: Lang | null): string {
+  return translator(lang)("cs_undoPunchSentence");
+}
 
 /**
  * "18 hours": the ceiling as every sentence says it, read from the constant above.
@@ -60,25 +81,36 @@ export const UNDO_PUNCH_SENTENCE = "That punch is gone — it was under two minu
  * "more than 18 hours". Every sentence now reads the one number, and shift-ceiling.test.ts holds it
  * to the number the database refuses at.
  */
-export const MAX_SHIFT_PHRASE = `${MAX_SHIFT_HOURS} hours`;
+export function maxShiftPhrase(lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_hoursPhrase"), { n: String(MAX_SHIFT_HOURS) });
+}
+export const MAX_SHIFT_PHRASE = maxShiftPhrase("en");
 
 /**
  * THE ONE REFUSAL FOR A STOP PAST THE CEILING, in the two voices the app speaks in: the crew
  * member reads "you", the office reads "the shift". A typed Record, so a third voice cannot be
  * added without a sentence for it.
  */
+export function ceilingRefusal(who: "you" | "he", lang?: Lang | null): string {
+  return fillText(translator(lang)(who === "you" ? "cs_ceilingRefusalYou" : "cs_ceilingRefusalHe"), { max: maxShiftPhrase(lang) });
+}
 export const CEILING_REFUSAL: Record<"you" | "he", string> = {
-  you: `That's more than ${MAX_SHIFT_PHRASE} after you clocked in. Pick when you really stopped.`,
-  he: `That's more than ${MAX_SHIFT_PHRASE} after the clock-in. Pick when the shift really stopped.`,
+  you: ceilingRefusal("you", "en"),
+  he: ceilingRefusal("he", "en"),
 };
 
 /** The clock-out door's refusal: the same sentence, plus who CAN enter a shift that really ran
  *  that long. Nothing is left silent — the person is told where the hours can still go. */
-export const CEILING_REFUSAL_ASK_OFFICE =
-  `${CEILING_REFUSAL.you} If the shift truly ran that long, the office has to enter it.`;
+export function ceilingRefusalAskOffice(lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_ceilingAskOffice"), { refusal: ceilingRefusal("you", lang) });
+}
+export const CEILING_REFUSAL_ASK_OFFICE = ceilingRefusalAskOffice("en");
 
 /** What the clock-out sheet's picker says a good time looks like. */
-export const PICK_WITHIN_CEILING = `Pick a time between clock-in and now, within ${MAX_SHIFT_PHRASE}.`;
+export function pickWithinCeiling(lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_pickWithinCeiling"), { max: maxShiftPhrase(lang) });
+}
+export const PICK_WITHIN_CEILING = pickWithinCeiling("en");
 
 /**
  * True when the clock has been running at least LONG_SHIFT_HOURS.
@@ -93,7 +125,10 @@ export function isLongOpenShift(clockInMs: number, nowMs: number): boolean {
 }
 
 /** "more than 12 hours": the line as every refusal and prompt says it, read from the constant. */
-export const LONG_SHIFT_PHRASE = `more than ${LONG_SHIFT_HOURS} hours`;
+export function longShiftPhrase(lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_moreThanHours"), { n: String(LONG_SHIFT_HOURS) });
+}
+export const LONG_SHIFT_PHRASE = longShiftPhrase("en");
 
 /**
  * WHAT THE OFFICE'S DOOR ON SOMEBODY ELSE'S RUNNING CLOCK SAYS (Erik, 2026-09-24: "an option to
@@ -106,16 +141,18 @@ export const LONG_SHIFT_PHRASE = `more than ${LONG_SHIFT_HOURS} hours`;
  *             starts empty), not by its name.
  *
  * `self`: the viewer's own running clock, which he clocks out of himself ("Clock Out"); a door
- * never names its own reader in the third person.
+ * never names its own reader in the third person. `lang`: the reader's language (cn-v1138; the
+ * words are cs_door…, English when omitted, so every door that has not passed one reads as before).
  */
-export function clockDoorWords(fullName: string | null | undefined, opts: { self?: boolean } = {}): {
+export function clockDoorWords(fullName: string | null | undefined, opts: { self?: boolean; lang?: Lang | null } = {}): {
   clockOut: string;
 } {
-  if (opts.self) return { clockOut: "Clock Out" };
+  const t = translator(opts.lang);
+  if (opts.self) return { clockOut: t("cs_doorClockOut") };
   const first = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
   // A placeholder a list printed for a missing name ("—") is not a name.
-  if (!/\p{L}/u.test(first)) return { clockOut: "Clock Them Out" };
-  return { clockOut: `Clock Out ${first}` };
+  if (!/\p{L}/u.test(first)) return { clockOut: t("cs_doorClockThemOut") };
+  return { clockOut: fillText(t("cs_doorClockOutName"), { first }) };
 }
 
 /**
@@ -125,36 +162,53 @@ export function clockDoorWords(fullName: string | null | undefined, opts: { self
  *   headline:      "Brian is Clocked Out", "They're Clocked Out" with no name, "You're Clocked Out"
  *   told:          "Brian has been told." (empty for your own clock: nobody is told about himself)
  *   subject / was: "Brian was already clocked out", "They were...", "You were..."
+ *   is:            "Brian is still on the clock", "They are...", "You are..."
  *   clockOutVerb:  "Clock Brian out", "Clock them out", "Clock out"
  *   clockOutFirst: the same, "first": "Clock Brian out first, then move the shift to someone else."
+ *
+ * In Spanish (cn-v1138) `was` and `is` are the conjugated verbs the cs_ sentences slot in ("ya
+ * {was} salida marcada": tenías / tenía; "{is} en el reloj": sigues / sigue), so "You" and "Brian"
+ * each read in their own person instead of a third-person line with "Tú" in front of it.
  *
  * A name is read the way clockDoorWords reads it: a placeholder with no letter in it is no name.
  */
 export function clockedOutWords(
   fullName: string | null | undefined,
   self = false,
-): { headline: string; told: string; subject: string; was: string; clockOutVerb: string; clockOutFirst: string } {
+  lang?: Lang | null,
+): { headline: string; told: string; subject: string; was: string; is: string; clockOutVerb: string; clockOutFirst: string } {
+  const t = translator(lang);
   if (self) {
-    return { headline: "You're Clocked Out", told: "", subject: "You", was: "were", clockOutVerb: "Clock out", clockOutFirst: "Clock out first" };
+    return {
+      headline: t("cs_youreClockedOutTitle"),
+      told: "",
+      subject: t("cs_subjectYou"),
+      was: t("cs_wasYou"),
+      is: t("cs_isYou"),
+      clockOutVerb: t("cs_verbClockOut"),
+      clockOutFirst: t("cs_firstClockOut"),
+    };
   }
   const first = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
   if (!/\p{L}/u.test(first)) {
     return {
-      headline: "They're Clocked Out",
-      told: "They have been told.",
-      subject: "They",
-      was: "were",
-      clockOutVerb: "Clock them out",
-      clockOutFirst: "Clock them out first",
+      headline: t("cs_theyreClockedOut"),
+      told: t("cs_toldThey"),
+      subject: t("cs_subjectThey"),
+      was: t("cs_wasThey"),
+      is: t("cs_isThey"),
+      clockOutVerb: t("cs_verbClockThemOut"),
+      clockOutFirst: t("cs_firstClockThemOut"),
     };
   }
   return {
-    headline: `${first} is Clocked Out`,
-    told: `${first} has been told.`,
+    headline: fillText(t("cs_nameIsClockedOut"), { first }),
+    told: fillText(t("cs_toldName"), { first }),
     subject: first,
-    was: "was",
-    clockOutVerb: `Clock ${first} out`,
-    clockOutFirst: `Clock ${first} out first`,
+    was: t("cs_wasName"),
+    is: t("cs_isName"),
+    clockOutVerb: fillText(t("cs_verbClockNameOut"), { first }),
+    clockOutFirst: fillText(t("cs_firstClockNameOut"), { first }),
   };
 }
 
@@ -188,11 +242,11 @@ export function stopWindow(clockInMs: number, nowMs: number): { minMs: number; m
   return { minMs: clockInMs + 60_000, maxMs: Math.min(nowMs + 60_000, clockInMs + MAX_SHIFT_HOURS * H) };
 }
 
-function clock(ms: number, tz?: string): string {
-  // ICU puts a narrow no-break space before AM/PM; plain text reads and compares better.
-  return new Date(ms)
-    .toLocaleTimeString("en-US", { timeZone: tz || DEFAULT_TIMEZONE, hour: "numeric", minute: "2-digit" })
-    .replace(/ /g, " ");
+function clock(ms: number, tz?: string, lang?: Lang | null): string {
+  // The person's locale, with the narrow spaces made plain (plainSpaces).
+  return plainSpaces(
+    new Date(ms).toLocaleTimeString(localeOf(lang), { timeZone: tz || DEFAULT_TIMEZONE, hour: "numeric", minute: "2-digit" }),
+  );
 }
 
 /**
@@ -200,7 +254,7 @@ function clock(ms: number, tz?: string): string {
  *
  * `who` only changes the ceiling sentence: the crew member reads "you", the office reads "the
  * shift". `tz` names the clock the start is shown in (the org's; the browser's when omitted on a
- * device that is already in it).
+ * device that is already in it). `lang`: the reader's language (English when omitted).
  */
 export function stopProblem(input: {
   startMs: number;
@@ -209,14 +263,16 @@ export function stopProblem(input: {
   lunchMin: number;
   who: "you" | "he";
   tz?: string;
+  lang?: Lang | null;
 }): string | null {
   const { startMs, stopMs, nowMs } = input;
-  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return "Pick a stop time.";
-  if (stopMs < startMs + 60_000) return `Pick a stop time after ${clock(startMs, input.tz)}.`;
-  if (stopMs > nowMs + 60_000) return "That time hasn't happened yet.";
-  if (stopMs - startMs > MAX_SHIFT_HOURS * H) return CEILING_REFUSAL[input.who];
+  const t = translator(input.lang);
+  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return t("cs_pickAStopTime");
+  if (stopMs < startMs + 60_000) return fillText(t("cs_pickStopAfter"), { clock: clock(startMs, input.tz, input.lang) });
+  if (stopMs > nowMs + 60_000) return t("cs_timeHasntHappened");
+  if (stopMs - startMs > MAX_SHIFT_HOURS * H) return ceilingRefusal(input.who, input.lang);
   const lunch = Math.max(0, Number(input.lunchMin) || 0);
-  if (lunch * 60_000 >= stopMs - startMs) return "The lunch is longer than the shift.";
+  if (lunch * 60_000 >= stopMs - startMs) return t("cs_lunchLongerThanShift");
   return null;
 }
 

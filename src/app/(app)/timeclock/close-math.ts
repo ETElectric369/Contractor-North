@@ -11,8 +11,9 @@
  * Neither function touches payroll arithmetic: hours paid come from clock_in/clock_out/lunch as
  * they always have (see payroll-math).
  */
-import { isLongOpenShift } from "@/lib/long-shift";
+import { isLongOpenShift, plainSpaces } from "@/lib/long-shift";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc } from "@/lib/tz";
+import { fillText, localeOf, translator, type Lang } from "@/lib/i18n";
 
 /**
  * The clock-out instant to persist for an explicitly supplied `at` (the geofence "time they left",
@@ -83,18 +84,19 @@ export function needsStatedStop(input: {
   return isLongOpenShift(input.clockInMs, input.closeMs);
 }
 
-function clockLabel(iso: string, tz: string): string {
+/** A clock in the language's locale, plain spaces (lib/long-shift plainSpaces): "11:56 PM", "11:56 p. m.". */
+function clockLabel(iso: string, tz: string, lang?: Lang | null): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+  return plainSpaces(d.toLocaleTimeString(localeOf(lang), { timeZone: tz, hour: "numeric", minute: "2-digit" }));
 }
 
 /** "Sep 23, 11:56 PM" in the org's clock, plain spaces. */
-function whenLabel(iso: string, tz: string): string {
+function whenLabel(iso: string, tz: string, lang?: Lang | null): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  const day = d.toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" });
-  return `${day}, ${clockLabel(iso, tz)}`;
+  const day = d.toLocaleDateString(localeOf(lang), { timeZone: tz, month: "short", day: "numeric" });
+  return `${day}, ${clockLabel(iso, tz, lang)}`;
 }
 
 /**
@@ -102,6 +104,11 @@ function whenLabel(iso: string, tz: string): string {
  * who set the stop time and when. The notes are the only history a time entry has (a full edit
  * trail is a bigger change), and a stop time a person typed a day later has to be told apart from
  * a live punch.
+ *
+ * A STORED RECORD, SO ENGLISH (cn-v1138): the office reads the card's notes, and a crumb written in
+ * the crew member's language would hand the office a Spanish line on an English screen. The clock
+ * labels inside it stay en-US for the same reason; the sentences a person reads live take `lang`
+ * (durationSpan, placeLunch, lunchOnPriorAllowed).
  *
  *   office: "[clocked out by Erik Taylor on Sep 23, 11:56 PM; it had been running since Sep 22, 1:37 PM]"
  *           plus "; start moved from 1:37 PM to 12:00 PM" inside the brackets when the start moved
@@ -156,17 +163,20 @@ export function durationSpan(input: {
   lunchMin: number;
   tz: string;
   nowMs: number;
+  /** The reader's language (English when omitted). */
+  lang?: Lang | null;
 }): { ok: true; clockIn: string; clockOut: string; warning?: string } | { ok: false; error: string } {
+  const t = translator(input.lang);
   const spanMin = Math.round(input.hours * 60) + Math.max(0, input.lunchMin);
   const startMin = Math.max(0, 12 * 60 - Math.round(spanMin / 2));
   const hh = String(Math.floor(startMin / 60)).padStart(2, "0");
   const mm = String(startMin % 60).padStart(2, "0");
   const startIso = tzDateTimeUtc(input.workDate, `${hh}:${mm}`, input.tz);
-  if (!startIso) return { ok: false, error: "I couldn't read that date." };
+  if (!startIso) return { ok: false, error: t("cs_couldntReadDate") };
   const endMs = Date.parse(startIso) + spanMin * 60_000;
   const today = todayStrInTz(input.tz, new Date(input.nowMs));
   if (input.workDate > today) {
-    return { ok: false, error: "That day hasn't happened yet. Log the hours once they're worked." };
+    return { ok: false, error: t("cs_dayHasntHappened") };
   }
   if (endMs <= input.nowMs) {
     return { ok: true, clockIn: startIso, clockOut: new Date(endMs).toISOString() };
@@ -179,18 +189,17 @@ export function durationSpan(input: {
     const h = Number.isInteger(input.hours) ? String(input.hours) : input.hours.toFixed(2);
     return {
       ok: false,
-      error: `Today isn't over yet, and ${h} hours${input.lunchMin > 0 ? " plus the lunch" : ""} don't fit between midnight and now. Give the hours after the work is done, or give the start and stop times.`,
+      error: fillText(t("cs_todayNotOverDontFit"), { h, plusLunch: input.lunchMin > 0 ? t("cs_plusTheLunch") : "" }),
     };
   }
   const clockIn = new Date(start).toISOString();
   const clockOut = new Date(nowMin).toISOString();
-  const clock = (ms: number) =>
-    new Date(ms).toLocaleTimeString("en-US", { timeZone: input.tz, hour: "numeric", minute: "2-digit" }).replace(/\u202f/g, " ");
+  const clock = (ms: number) => clockLabel(new Date(ms).toISOString(), input.tz, input.lang);
   return {
     ok: true,
     clockIn,
     clockOut,
-    warning: `Today isn't over yet, so the hours are logged ending now: ${clock(start)} to ${clock(nowMin)}. Change the times on Timecards if that's not right.`,
+    warning: fillText(t("cs_todayNotOverEndingNow"), { from: clock(start), to: clock(nowMin) }),
   };
 }
 
@@ -231,14 +240,14 @@ export type LunchPlacement =
  * IS the day's lunch: putting the stated one on the part before as well docks the one lunch twice, and
  * the crew guard can't lower this part's. It stays here, and the answer says so.
  */
-export function lunchOnPriorAllowed(input: { lunchOnPrior: boolean; lunch: number; existingHere: number }): {
+export function lunchOnPriorAllowed(input: { lunchOnPrior: boolean; lunch: number; existingHere: number; lang?: Lang | null }): {
   onPrior: boolean;
   warning?: string;
 } {
   const lunch = Math.max(0, Math.round(Number(input.lunch) || 0));
   const existing = Math.max(0, Math.round(Number(input.existingHere) || 0));
   if (!input.lunchOnPrior || lunch === 0) return { onPrior: false };
-  if (existing > 0) return { onPrior: false, warning: `This part already has a ${existing}-minute lunch on it, so it stays here.` };
+  if (existing > 0) return { onPrior: false, warning: fillText(translator(input.lang)("cs_partAlreadyHasLunch"), { min: String(existing) }) };
   return { onPrior: true };
 }
 
@@ -268,7 +277,10 @@ export function placeLunch(input: {
   here: { clock_in: string; clock_out: string };
   prior: LunchPart | null;
   refuse: boolean;
+  /** The reader's language (English when omitted). */
+  lang?: Lang | null;
 }): LunchPlacement {
+  const t = translator(input.lang);
   let here = Math.max(0, Math.round(Number(input.hereLunch) || 0));
   const asked = Math.max(0, Math.round(Number(input.priorLunch) || 0));
   const p = input.prior;
@@ -282,27 +294,27 @@ export function placeLunch(input: {
       prior = { id: p.id, lunch: Math.max(Number(p.lunch_minutes) || 0, asked) };
     } else {
       here = Math.max(here, asked);
-      warning =
-        p && paid && (!input.priorId || input.priorId === p.id)
-          ? "The part before the switch is already paid, so the lunch went on this part of your shift."
-          : "The lunch didn't fit on the part before the switch, so it went on this part of your shift.";
+      warning = p && paid && (!input.priorId || input.priorId === p.id) ? t("cs_priorPaidLunchHere") : t("cs_lunchDidntFitPrior");
     }
   }
 
   if (here > 0 && !lunchFits(input.here.clock_in, input.here.clock_out, here)) {
     if (!prior && p && room(here)) {
       prior = { id: p.id, lunch: Math.max(Number(p.lunch_minutes) || 0, here) };
-      warning = `The ${here}-minute lunch is longer than this part of your shift, so it went on the part before the switch.`;
+      warning = fillText(t("cs_lunchLongerWentPrior"), { min: String(here) });
       here = 0;
     } else if (input.refuse) {
       const spanMs = Date.parse(input.here.clock_out) - Date.parse(input.here.clock_in);
       const workedMin = Math.max(0, Math.floor((Number.isFinite(spanMs) ? spanMs : 0) / 60_000));
       return {
         ok: false,
-        error:
-          `A ${here}-minute lunch is longer than the ${workedMin} ${workedMin === 1 ? "minute" : "minutes"} on ${p ? "this part of your shift" : "this shift"}.` +
-          (paid ? " The part before the switch is already paid, so it can't go there." : "") +
-          " Untick the lunch, or ask the office to fix it on Timecards.",
+        error: fillText(t("cs_lunchLongerRefusal"), {
+          min: String(here),
+          worked: String(workedMin),
+          unit: workedMin === 1 ? t("cs_minute") : t("cs_minutes"),
+          part: p ? t("cs_thisPartOfYourShift") : t("cs_thisShift"),
+          paid: paid ? t("cs_priorPaidCantGo") : "",
+        }),
       };
     }
   }

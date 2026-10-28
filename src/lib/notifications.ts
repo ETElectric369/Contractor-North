@@ -3,6 +3,8 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
 import { isStaffRole } from "@/lib/actions/perms";
 import { pushKindIsOptIn, sendPushToProfiles, type PushKind } from "@/lib/push";
+import { langOf } from "@/lib/lang-of";
+import type { Lang } from "@/lib/locale";
 
 export type NotificationInput = {
   type?: string;
@@ -10,6 +12,33 @@ export type NotificationInput = {
   body?: string | null;
   url?: string | null;
 };
+
+/**
+ * WORDS PER PERSON (cn-v1138). A sender that has one line for everyone passes the payload as before;
+ * a sender whose line a Spanish-speaking tech should read in Spanish passes a FUNCTION of the
+ * language — `(lang) => ({ title: t(lang)("nb_…"), … })` — and the recipients are read once
+ * (lang-of), grouped by language, and each group gets its own words. A failed language read is
+ * English for everyone and filed, never a lost line.
+ */
+export type ByLang<T> = T | ((lang: Lang) => T);
+
+type LangGroup<T> = { lang: Lang; ids: string[]; words: T };
+
+/** The recipients in groups that share one set of words: one group with no read for a plain payload.
+ *  The language read names the company (the service client reads across companies without it). */
+async function groupsByLang<T>(sb: { from: (t: string) => any }, orgId: string, ids: string[], n: ByLang<T>): Promise<LangGroup<T>[]> {
+  if (typeof n !== "function") return [{ lang: "en", ids, words: n }];
+  const make = n as (lang: Lang) => T;
+  const langs = await langOf(sb, ids, orgId);
+  const byLang = new Map<Lang, string[]>();
+  for (const id of ids) {
+    const lang = langs.get(id) ?? "en";
+    const list = byLang.get(lang) ?? [];
+    list.push(id);
+    byLang.set(lang, list);
+  }
+  return Array.from(byLang.entries()).map(([lang, list]) => ({ lang, ids: list, words: make(lang) }));
+}
 
 /**
  * Persist an in-app notification (the bell) for each recipient. This is the always-works
@@ -25,27 +54,35 @@ export type NotificationInput = {
 export async function createNotifications(
   orgId: string | null | undefined,
   userIds: (string | null | undefined)[],
-  n: NotificationInput,
+  n: ByLang<NotificationInput>,
 ): Promise<boolean> {
+  const typeOf = typeof n === "function" ? "by-language" : (n.type ?? "general");
   try {
     const ids = Array.from(new Set(userIds.filter((x): x is string => !!x)));
-    if (!orgId || ids.length === 0 || !n.title) return true;
-    const rows = ids.map((user_id) => ({
-      org_id: orgId,
-      user_id,
-      type: n.type ?? "general",
-      title: n.title,
-      body: n.body ?? null,
-      url: n.url ?? null,
-    }));
+    if (!orgId || ids.length === 0 || (typeof n !== "function" && !n.title)) return true;
     const sb = createServiceClient();
+    const rows: { org_id: string; user_id: string; type: string; title: string; body: string | null; url: string | null }[] = [];
+    for (const g of await groupsByLang(sb, orgId, ids, n)) {
+      if (!g.words.title) continue;
+      for (const user_id of g.ids) {
+        rows.push({
+          org_id: orgId,
+          user_id,
+          type: g.words.type ?? "general",
+          title: g.words.title,
+          body: g.words.body ?? null,
+          url: g.words.url ?? null,
+        });
+      }
+    }
+    if (!rows.length) return true;
     // Supabase RETURNS a failed insert; it does not throw it.
     const { error } = await sb.from("notifications").insert(rows);
     if (error) throw error;
     return true;
   } catch (e) {
     // Best-effort: a notification must never break the caller. But not silent.
-    reportError("createNotifications", e, { orgId, type: n.type ?? "general" });
+    reportError("createNotifications", e, { orgId, type: typeOf });
     return false;
   }
 }
@@ -75,20 +112,28 @@ export async function notifyPeople(
   orgId: string | null | undefined,
   profileIds: (string | null | undefined)[],
   kind: PushKind,
-  n: { title: string; body?: string | null; url?: string | null },
+  n: ByLang<{ title: string; body?: string | null; url?: string | null }>,
 ): Promise<{ bell: boolean; pushed: string[] }> {
   try {
     const ids = Array.from(new Set(profileIds.filter((x): x is string => !!x)));
-    if (!orgId || !ids.length || !n.title) return { bell: true, pushed: [] };
-    const line = { type: kind, title: n.title, body: n.body ?? null, url: n.url ?? null };
-    const payload = { title: n.title, body: n.body ?? "", ...(n.url ? { url: n.url } : {}) };
-    if (pushKindIsOptIn(kind)) {
-      const pushed = ((await sendPushToProfiles(ids, kind, payload).catch(() => [])) ?? []) as string[];
-      const bell = pushed.length ? await createNotifications(orgId, pushed, line) : true;
-      return { bell, pushed };
+    if (!orgId || !ids.length || (typeof n !== "function" && !n.title)) return { bell: true, pushed: [] };
+    // One group per language (one, with no read, for a plain payload): each gets its own line and push.
+    const groups = await groupsByLang(createServiceClient(), orgId, ids, n);
+    let bell = true;
+    const pushed: string[] = [];
+    for (const g of groups) {
+      if (!g.words.title) continue;
+      const line = { type: kind, title: g.words.title, body: g.words.body ?? null, url: g.words.url ?? null };
+      const payload = { title: g.words.title, body: g.words.body ?? "", ...(g.words.url ? { url: g.words.url } : {}) };
+      if (pushKindIsOptIn(kind)) {
+        const went = ((await sendPushToProfiles(g.ids, kind, payload).catch(() => [])) ?? []) as string[];
+        if (went.length && !(await createNotifications(orgId, went, line))) bell = false;
+        pushed.push(...went);
+        continue;
+      }
+      if (!(await createNotifications(orgId, g.ids, line))) bell = false;
+      pushed.push(...(((await sendPushToProfiles(g.ids, kind, payload).catch(() => [])) ?? []) as string[]));
     }
-    const bell = await createNotifications(orgId, ids, line);
-    const pushed = ((await sendPushToProfiles(ids, kind, payload).catch(() => [])) ?? []) as string[];
     return { bell, pushed };
   } catch (e) {
     reportError("notifyPeople", e, { orgId, kind });

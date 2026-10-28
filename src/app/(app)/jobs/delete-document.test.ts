@@ -181,6 +181,23 @@ describe("a tech deleting a receipt or photo they added", () => {
     expect(removed).toEqual([]);
   });
 
+  it("a Spanish-speaking tech is refused in Spanish (cn-v1138: profiles.language picks the words), and nothing is deleted", async () => {
+    state.adminRows = [{ byFile: { data: [{ id: "tie-1", created_by: "user-office", bill_id: "bill-1" }], error: null }, byDoc: none }];
+    techWith({ "profiles.select": [{ data: { role: "tech", active: true, language: "es" }, error: null }] });
+    const res = await deleteDocument(DOC, null, JOB);
+    expect(res).toEqual({ ok: false, error: expect.stringMatching(/^La oficina registró este recibo como costo/) });
+    expect(calls.some((c) => c.verb === "delete" || c.verb === "update")).toBe(false);
+    expect(removed).toEqual([]);
+    // Somebody else's paper, same tech: the office-only refusal, in Spanish too.
+    state.adminRows = [];
+    officeWith({
+      "documents.select": [{ data: { id: DOC, org_id: ORG, file_url: PATH, uploaded_by: "user-office" }, error: null }],
+      "profiles.select": [{ data: { role: "tech", active: true, language: "es" }, error: null }],
+    });
+    const other = await deleteDocument(DOC, null, JOB);
+    expect(other).toEqual({ ok: false, error: "Solo la oficina puede eliminar este. Tú puedes eliminar las fotos y recibos que agregaste." });
+  });
+
   it("a link by the document alone counts too (a receipt tied to a supplier invoice)", async () => {
     state.adminRows = [{ byFile: none, byDoc: { data: [{ id: "tie-2", created_by: "user-office", tied_supplier_invoice_id: "si-1" }], error: null } }];
     techWith({});

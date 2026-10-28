@@ -15,6 +15,8 @@ import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut, joinTimeEntries } from "./actions";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { useToast } from "@/components/toast";
+import { fillText, translator } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 
 type JobOpt = {
   id: string;
@@ -75,6 +77,7 @@ export function AutoClockoutPrompt({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const optionLabel = (j: JobOpt) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
   // Save may only RAISE lunch on a closed shift (the 0143 guard), so a pre-existing 45-minute lunch
   // is the floor, never lowered here.
@@ -91,19 +94,20 @@ export function AutoClockoutPrompt({
   const lunchFitsHere = lunchFits(entry.clock_in, entry.clock_out, onPrior ? 0 : lunchMin);
   const lunchFitsPrior = !!previousPiece && lunchFits(previousPiece.clock_in, previousPiece.clock_out, priorNext);
   // Said before Save, in the same words the server uses: a lunch that fits neither part is refused.
+  const min = String(lunchMin);
   const lunchNote = !tookLunch
     ? null
     : onPrior
       ? lunchFitsPrior
         ? null
         : lunchFitsHere
-          ? "The lunch doesn't fit the part before the switch, so it will go on this part."
-          : `A ${lunchMin}-minute lunch doesn't fit either part of this shift. Untick it, or ask the office to fix it on Timecards.`
+          ? t("tc_acLunchNotFitPrior")
+          : fillText(t("tc_acLunchFitsNeither"), { min })
       : lunchFitsHere
         ? null
         : lunchFitsPrior
-          ? `The ${lunchMin}-minute lunch is longer than this part of your shift, so it will go on the part before the switch.`
-          : `A ${lunchMin}-minute lunch is longer than this ${previousPiece ? "part of your shift" : "shift"}. Untick it, or ask the office to fix it on Timecards.`;
+          ? fillText(t("tc_acLunchLongerThisPart"), { min })
+          : fillText(t(previousPiece ? "tc_acLunchLongerPart" : "tc_acLunchLongerWhole"), { min });
 
   const [switched, setSwitched] = useState(false);
   const firstAt = defaultSplitAt({ clock_in: entry.clock_in, clock_out: entry.clock_out }, tz);
@@ -121,7 +125,7 @@ export function AutoClockoutPrompt({
   const shown = fitsOther?.ok ? fitsOther : preview;
   const [kind, val] = pick.split(":");
   const pickedLabel =
-    kind === "job" ? (jobs.find((j) => j.id === val) ? optionLabel(jobs.find((j) => j.id === val)!) : "that job") : kind === "code" ? val : null;
+    kind === "job" ? (jobs.find((j) => j.id === val) ? optionLabel(jobs.find((j) => j.id === val)!) : t("tc_thatJob")) : kind === "code" ? val : null;
   const canSave = !switched || (!!at && shown.ok && !!pick);
 
   function save() {
@@ -139,27 +143,27 @@ export function AutoClockoutPrompt({
               : null,
         });
       } catch {
-        return setError("No connection — nothing was saved. Try again when you have a bar or two.");
+        return setError(t("tc_offlineNothingSaved"));
       }
-      if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (!res.ok) return setError(res.error ?? t("tc_couldNotSave"));
       // The card leaves once it is answered, so what it has to say rides the toast, not the card: the
       // split with its Undo (the same join the Timecards sheet offers), and any money sentence kept on
       // screen until it has been read.
       const left = res.split?.left_id;
       const right = res.split?.right_id;
       toast(
-        switched ? "Saved. The shift is split into 2 entries." : "Saved your hours.",
+        switched ? t("tc_savedSplit") : t("tc_savedHours"),
         "success",
         switched && left && right
           ? {
-              label: "Undo",
+              label: t("tc_undo"),
               onClick: () => {
                 void joinTimeEntries({ left_id: left, right_id: right })
                   .then((j) => {
-                    toast(j.ok ? "Joined back into one shift. Your lunch stays saved." : (j.error ?? "Couldn't join them back."), j.ok ? "success" : "error");
+                    toast(j.ok ? t("tc_joinedBack") : (j.error ?? t("tc_couldNotJoin")), j.ok ? "success" : "error");
                     router.refresh();
                   })
-                  .catch(() => toast("No connection — the split is still there. Join it back on Timecards.", "error"));
+                  .catch(() => toast(t("tc_offlineSplitStays"), "error"));
               },
             }
           : undefined,
@@ -176,10 +180,10 @@ export function AutoClockoutPrompt({
           <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div>
             <div className="text-sm font-semibold text-amber-800">
-              Finish your timecard — you clocked out at {splitClock(entry.clock_out, tz)}.
+              {fillText(t("tc_finishTimecard"), { time: splitClock(entry.clock_out, tz) })}
             </div>
             <div className="text-xs text-amber-700">
-              {splitClock(entry.clock_in, tz)}–{splitClock(entry.clock_out, tz)} on {entry.jobLabel}. Nobody was asked about lunch when it closed.
+              {fillText(t("tc_acRange"), { from: splitClock(entry.clock_in, tz), to: splitClock(entry.clock_out, tz), job: entry.jobLabel })}
             </div>
           </div>
         </div>
@@ -187,24 +191,24 @@ export function AutoClockoutPrompt({
         {storedLunch > LUNCH_MIN ? (
           <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-white/60 px-3 py-2 text-sm text-slate-600">
             <Coffee className="h-4 w-4 shrink-0 text-slate-400" />
-            {`A ${storedLunch}-minute unpaid lunch is already on this shift.`}
+            {fillText(t("tc_acLunchAlready"), { min: String(storedLunch) })}
           </p>
         ) : (
           <LunchCheckbox id="ac-lunch" checked={tookLunch} onChange={setTookLunch} className="border-amber-200 bg-white/60" />
         )}
 
         {previousPiece && storedLunch > 0 && storedLunch <= LUNCH_MIN && (
-          <p className="text-xs text-slate-600">{`This part already has a ${storedLunch}-minute lunch on it, so it stays here.`}</p>
+          <p className="text-xs text-slate-600">{fillText(t("tc_acPartHasLunch"), { min: String(storedLunch) })}</p>
         )}
         {canMoveLunch && tookLunch && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white/60 px-3 py-1 text-xs text-slate-600">
             <span>
               {onPrior
-                ? `The lunch goes on ${previousPiece.jobLabel} (${splitClock(previousPiece.clock_in, tz)}–${splitClock(previousPiece.clock_out, tz)}), before the switch.`
-                : `The lunch goes on ${entry.jobLabel}, this part of your shift.`}
+                ? fillText(t("tc_acLunchOnPrior"), { job: previousPiece.jobLabel, from: splitClock(previousPiece.clock_in, tz), to: splitClock(previousPiece.clock_out, tz) })
+                : fillText(t("tc_acLunchOnThisPart"), { job: entry.jobLabel })}
             </span>
             <button type="button" onClick={() => setLunchOnPrior((v) => !v)} className="min-h-[44px] font-semibold text-brand hover:underline">
-              {onPrior ? "Put It On This Part" : `Put It On ${previousPiece.jobLabel}`}
+              {onPrior ? t("tc_putOnThis") : fillText(t("tc_putOnJob"), { job: previousPiece.jobLabel })}
             </button>
           </div>
         )}
@@ -221,19 +225,19 @@ export function AutoClockoutPrompt({
                 className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand"
               />
               <ArrowLeftRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-              <span>I Switched Jobs During This Shift</span>
+              <span>{t("tc_iSwitchedJobs")}</span>
             </label>
             {switched && (
               <div className="space-y-2">
                 <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                   <Label htmlFor="ac-at" className="mb-0">
-                    At
+                    {t("tc_at")}
                   </Label>
                   <Input id="ac-at" type="time" value={hm} onChange={(e) => setHm(e.target.value)} className="h-11" />
                 </div>
-                <Select value={pick} onChange={(e) => setPick(e.target.value)} className="h-11 w-full" aria-label="The job you switched to">
-                  <option value="">Pick A Job</option>
-                  <optgroup label="Jobs">
+                <Select value={pick} onChange={(e) => setPick(e.target.value)} className="h-11 w-full" aria-label={t("tc_jobSwitchedToAria")}>
+                  <option value="">{t("tc_pickAJob")}</option>
+                  <optgroup label={t("tc_jobsGroup")}>
                     {jobs.map((j) => (
                       <option key={j.id} value={`job:${j.id}`}>
                         {optionLabel(j)}
@@ -241,7 +245,7 @@ export function AutoClockoutPrompt({
                     ))}
                   </optgroup>
                   {jobCodesEnabled && jobCodes.length > 0 && (
-                    <optgroup label="Time Codes — Paid, Not Billed">
+                    <optgroup label={t("tc_timeCodesGroup")}>
                       {jobCodes.map((c) => (
                         <option key={c.id} value={`code:${c.code}`}>
                           {c.code}
@@ -252,13 +256,13 @@ export function AutoClockoutPrompt({
                 </Select>
                 {at && shown.ok ? (
                   <p className="text-xs text-slate-600">
-                    {`${splitClock(entry.clock_in, tz)}–${splitClock(at, tz)} on ${entry.jobLabel} (${formatDuration(shown.left.hours)})`}
-                    {shown.left.lunchMinutes > 0 ? " with the lunch" : ""}
-                    {`, then ${splitClock(at, tz)}–${splitClock(entry.clock_out, tz)} on ${pickedLabel ?? "the job you pick"} (${formatDuration(shown.right.hours)})`}
-                    {shown.right.lunchMinutes > 0 ? " with the lunch" : ""}.
+                    {fillText(t("tc_acPreviewLeft"), { from: splitClock(entry.clock_in, tz), to: splitClock(at, tz), job: entry.jobLabel, hours: formatDuration(shown.left.hours) })}
+                    {shown.left.lunchMinutes > 0 ? ` ${t("tc_withTheLunch")}` : ""}
+                    {fillText(t("tc_acPreviewRight"), { from: splitClock(at, tz), to: splitClock(entry.clock_out, tz), job: pickedLabel ?? t("tc_theJobYouPick"), hours: formatDuration(shown.right.hours) })}
+                    {shown.right.lunchMinutes > 0 ? ` ${t("tc_withTheLunch")}` : ""}.
                   </p>
                 ) : (
-                  <p className="text-xs text-amber-800">{shown.problem ?? "Pick the time you switched."}</p>
+                  <p className="text-xs text-amber-800">{shown.problem ?? t("tc_pickSwitchTime")}</p>
                 )}
               </div>
             )}
@@ -269,10 +273,10 @@ export function AutoClockoutPrompt({
         <Button onClick={save} disabled={pending || !canSave} className="h-11 w-full">
           {pending ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Saving
+              <Loader2 className="h-4 w-4 animate-spin" /> {t("tc_saving")}
             </>
           ) : (
-            "Save My Hours"
+            t("tc_saveMyHours")
           )}
         </Button>
       </CardContent>

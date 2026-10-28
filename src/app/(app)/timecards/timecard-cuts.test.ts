@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
+import { dict } from "@/lib/i18n";
 
 /**
  * TIMECARDS, CUT DOWN (Wave 2, W2-02). No approver nobody asks, no approval settings nothing reads,
@@ -285,8 +286,11 @@ describe("Copy To Someone Else… lives in the editor, beside Split", () => {
 describe("no sentence sends anyone to a door that left", () => {
   it("a crew lead's filed report says the office reads it on My Day, not on the gone 'Crew Hours' card", () => {
     const debrief = src("../timeclock/daily-report-debrief.tsx");
-    expect(debrief).toContain("The office reads it on their My Day.");
+    expect(debrief).toContain('{t("tc_officeReadsMyDay")}');
+    expect(dict("en").tc_officeReadsMyDay).toBe("The office reads it on their My Day.");
+    expect(dict("es").tc_officeReadsMyDay).toBe("La oficina lo lee en su Mi Día.");
     expect(debrief).not.toMatch(/on Crew Hours\./);
+    expect(dict("en").tc_officeReadsMyDay).not.toMatch(/Crew Hours/);
     // My Day is where the reports are (with Mark Reviewed).
     expect(src("../planner/page.tsx")).toContain('.from("daily_reports")');
   });

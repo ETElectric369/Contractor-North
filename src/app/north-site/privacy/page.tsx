@@ -175,7 +175,10 @@ export default function NorthPrivacy() {
         <ul>
           <li>Turn location, camera, microphone, photos or notifications off in iPhone Settings. The features that need them stop working; the rest of North keeps going.</li>
           <li>Leave Google Calendar unconnected, or disconnect it.</li>
-          <li>Ask us for a copy of your data, a correction, or deletion at <a href={mailto("Privacy request")}>{SUPPORT_EMAIL}</a>.</li>
+          <li>
+            Owners download everything from Settings › Getting Paid › Your Data. Anyone else can ask us for a copy of their own
+            data, a correction, or deletion at <a href={mailto("Privacy request")}>{SUPPORT_EMAIL}</a>.
+          </li>
         </ul>
       </Section>
 

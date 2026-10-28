@@ -261,6 +261,33 @@ describe("the morning nudge: no clock-in yet", () => {
     expect(reportError).toHaveBeenCalledWith("cron-nudge", { message: "boom" }, { orgId: "org-1" });
   });
 
+  /**
+   * IN EACH TECH'S LANGUAGE (cn-v1138): `language` rides the one people read, and a Spanish-speaking
+   * tech and an English one in the SAME run each get their own words; a null language is English.
+   */
+  it("an es tech and an en tech in the same run each get their own text, from the one people read", async () => {
+    textingReady();
+    const peopleReads: string[] = [];
+    state.client = fakeSupabase((q) => {
+      if (q.table !== "profiles") return routes(q);
+      peopleReads.push(q.cols);
+      return {
+        data: [
+          { id: "larkspur-1", full_name: "Larkspur Catbird", phone: "(530) 555-0101", language: "es" },
+          { id: "brian-1", full_name: "Brian Taylor", phone: "(530) 555-0100", language: null },
+        ],
+      };
+    });
+    const body = await (await nudge(req())).json();
+    expect(body).toMatchObject({ texted: 2, checked: 2, failed: 0 });
+    expect(sentTexts()).toEqual([
+      { to: "+15305550101", body: "¡Buenos días, Larkspur Catbird! Aún no marcas entrada. Abre Contractor North para marcar entrada." },
+      { to: "+15305550100", body: "Good morning Brian Taylor! You haven't clocked in yet. Open Contractor North to clock in." },
+    ]);
+    // ONE people read, carrying the language beside the phone: no second read per person.
+    expect(peopleReads).toEqual(["id, full_name, phone, language"]);
+  });
+
   it("a company whose plan has ended is not texted for and is counted; a comped one still is (cn-v1137)", async () => {
     textingReady();
     state.client = fakeSupabase((q) => (q.table === "organizations" ? orgPage(q, [LAPSED_ORG, COMPED_ORG]) : routes(q)));
@@ -352,6 +379,38 @@ describe("the evening reminder: still clocked in", () => {
     expect(body).toMatchObject({ due: 1, checked: 0, reminded: 0, failed: 1 });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1" });
+  });
+
+  /** IN EACH TECH'S LANGUAGE (cn-v1138): one people read carries the language; each tech's own words, in one run. */
+  it("an es tech still clocked in and an en tech with no form, in the same run, each get their own text", async () => {
+    textingReady();
+    const peopleReads: string[] = [];
+    state.client = fakeSupabase((q) => {
+      if (q.table === "profiles") {
+        peopleReads.push(q.cols);
+        return {
+          data: [
+            { id: "larkspur-1", full_name: "Larkspur Catbird", phone: "(530) 555-0101", language: "es" },
+            { id: "brian-1", full_name: "Brian Taylor", phone: "5305550100", language: "en" },
+          ],
+        };
+      }
+      if (q.table === "time_entries")
+        return {
+          data: [
+            { profile_id: "larkspur-1", status: "open", notes: null },
+            { profile_id: "brian-1", status: "closed", notes: null },
+          ],
+        };
+      return routes(q);
+    });
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ reminded: 2, checked: 2, failed: 0 });
+    expect(sentTexts()).toEqual([
+      { to: "+15305550101", body: "Hola, Larkspur Catbird: sigues con entrada marcada. Marca salida y llena tu reporte del día en Contractor North." },
+      { to: "+15305550100", body: "Hi Brian Taylor — please fill out your end-of-day form (what you worked on today) in Contractor North." },
+    ]);
+    expect(peopleReads).toEqual(["id, full_name, phone, language"]);
   });
 
   it("a company whose plan has ended gets neither the reminder nor the debrief and is counted; a comped one gets both (cn-v1137)", async () => {
@@ -489,6 +548,55 @@ describe("the 12-hour question, as a text too", () => {
     expect(reportError).not.toHaveBeenCalled();
     expect(reportErrorAwaited).not.toHaveBeenCalled(); // a blocker, never a plain row (cn-v1136)
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * IN EACH PERSON'S LANGUAGE (cn-v1138): `language` rides the people join on the entries read, so an
+   * es crew member and an en one in the SAME run are each asked in their own words — push, bell line
+   * and text, with the shift's start in their own clock ("lun 11:00 p.m." / "Mon 11:00 PM") — while
+   * the office's buzz about each stays English.
+   */
+  it("an es crew member and an en one in the same run: each is asked in their own words by push, bell and text; the office hears English", async () => {
+    textingReady();
+    const larkspur = { ...row("(530) 555-0101"), id: "entry-2", profile_id: "larkspur-1", profiles: { full_name: "Larkspur Catbird", role: "tech", active: true, phone: "(530) 555-0101", language: "es" } };
+    let entriesRead = "";
+    state.client = fakeSupabase((q) => {
+      if (q.table === "time_entries" && q.verb === "select") {
+        entriesRead = q.cols;
+        return { data: [row("(530) 555-0100"), larkspur] };
+      }
+      return routes("(530) 555-0100")(q);
+    });
+    const body = await (await longShift(req())).json();
+    expect(body).toMatchObject({ asked: 2, texted: 2, office_buzzes: 2, failed: 0 });
+    expect(entriesRead).toContain("profiles:profile_id(full_name, role, active, phone, language)");
+    expect(sentTexts()).toEqual([
+      { to: "+15305550100", body: "ET Electric: You've been clocked in at Honeysuckle since Mon 11:00 PM, more than 12 hours. Open Timeclock to set when you stopped." },
+      { to: "+15305550101", body: "ET Electric: Tienes entrada marcada en Honeysuckle desde lun 11:00 pm, más de 12 horas. Abre el Reloj para poner a qué hora paraste." },
+    ]);
+    // The pushes: each person's question in their own words, the office's buzz in English about both.
+    expect(spies.push.map((p) => [p[0], p[1], p[2].title, p[2].body])).toEqual([
+      [["brian-1"], "clock_out", "Still On The Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
+      [["office-1"], "long_shift", "Brian Is Still On The Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Brian has been asked when the shift ended. Clock Out Brian on Timecards if you know."],
+      [["larkspur-1"], "clock_out", "¿Sigues En El Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
+      [["office-1"], "long_shift", "Larkspur Is Still On The Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Larkspur has been asked when the shift ended. Clock Out Larkspur on Timecards if you know."],
+    ]);
+    // The bell line says what the push said, to the same person.
+    expect(spies.notify.map((n) => [n[1], n[2].title, n[2].body])).toEqual([
+      [["brian-1"], "Still On The Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
+      [["larkspur-1"], "¿Sigues En El Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
+    ]);
+  });
+
+  it("a failed entries read (the people ride it) asks and texts NOBODY: counted as failed and filed with the company", async () => {
+    textingReady();
+    state.client = fakeSupabase((q) => (q.table === "time_entries" && q.verb === "select" ? { error: { message: "boom" } } : routes("(530) 555-0100")(q)));
+    const body = await (await longShift(req())).json();
+    expect(body).toMatchObject({ orgs: 1, asked: 0, texted: 0, office_buzzes: 0, failed: 1 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.push).toEqual([]);
+    expect(spies.notify).toEqual([]);
+    expect(reportError).toHaveBeenCalledWith("cron-long-shift", { message: "boom" }, { orgId: "org-1" });
   });
 
   it("a text the service refuses is counted as failed and never costs the office its buzz", async () => {

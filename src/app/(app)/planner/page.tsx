@@ -14,6 +14,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { formatTime, formatCityStateZip, formatFullAddress, formatDate, formatDuration } from "@/lib/utils";
+import { asLang, fillText, localeOf, translator } from "@/lib/i18n";
 import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
@@ -49,6 +50,10 @@ import type { DayHours } from "@/lib/schedule-math";
 import { CrewInitials } from "@/components/crew-initials";
 
 export const dynamic = "force-dynamic";
+
+/** How many quotes of the day the catalog holds (md_quote_01 … md_quote_34); the rotation below counts them.
+ *  Not exported: a page file exports only its page and segment config (the route-file law). */
+const QUOTE_COUNT = 34;
 
 /** A job as an agenda row reads it: its block (start, end, size), its crew, where it is. */
 const AGENDA_JOB_COLS = "id, job_number, name, status, address, city, scheduled_start, scheduled_end, planned_minutes, assigned_to";
@@ -114,7 +119,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     supabase.from("jobs").select("id, job_number, name, address, status").order("created_at", { ascending: false }).limit(200),
     // full_name rides along for the setup card — it's the first thing it asks and the first thing
     // that would otherwise be asked again after it was already answered at signup.
-    supabase.from("profiles").select("role, full_name").eq("id", user?.id ?? "").maybeSingle(),
+    // language too (cn-v1138): the page's words are the person's own, read once with the role.
+    supabase.from("profiles").select("role, full_name, language").eq("id", user?.id ?? "").maybeSingle(),
     // (No leads read: the Open Leads card is gone. A new request reaches Needs You below through
     // its own feeder, and the Sales tile's badge counts the new, uncontacted ones.)
     // Everyone's Day's rows for today (both kinds): the day row wins on the rows' crew chips (someone
@@ -130,6 +136,22 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
   const isStaff = isStaffRole((me as any)?.role ?? "");
+  // THE PERSON'S LANGUAGE (cn-v1138): every word on this page comes through t() and lib/words/myday;
+  // the dates read in the same language (localeOf). English for anyone whose profile says nothing.
+  const lang = asLang((me as any)?.language);
+  const t = translator(lang);
+  /** A day as the header and the week's day rows say it ("Tuesday, October 28"): lib/tz prettyDay's
+   *  words in English, the same Intl options in the person's own locale otherwise. */
+  const dayWords = (ymd: string) =>
+    lang === "es"
+      ? new Date(`${ymd}T12:00:00Z`).toLocaleDateString(localeOf(lang), { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })
+      : prettyDay(ymd);
+  /** A folded weekend day's short words ("Sat 31"): lib/schedule/week-columns shortDayWords in
+   *  English, the same shape in the person's own locale otherwise. */
+  const dayShort = (ymd: string) =>
+    lang === "es" && /^\d{4}-\d{2}-\d{2}$/.test(ymd)
+      ? `${new Date(`${ymd}T12:00:00Z`).toLocaleDateString(localeOf(lang), { weekday: "short", timeZone: "UTC" })} ${Number(ymd.slice(8, 10))}`
+      : shortDayWords(ymd);
   // WHO ELSE IS ON THE CLOCK (lib/crew-pulse), for the office's Now card. Staff only: it reads the
   // whole org's open shifts and names the crew. Started here, the moment the role is known, so it
   // overlaps the reads below instead of adding a round trip to the page. A failed read is said on
@@ -277,7 +299,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     materials_tomorrow: (r.materials_tomorrow ?? null) as string | null,
     gps: (r.gps_summary ?? null) as DailyReportSummary | null,
     status: (r.status ?? "filed") as string,
-    name: (r.profiles?.full_name ?? "Crew member") as string,
+    name: (r.profiles?.full_name ?? t("md_crewMember")) as string,
   }));
   const reportsToReview = dailyReports.filter((r) => r.status !== "reviewed").length;
   const reportsOn = featureOn(features, "daily_reports");
@@ -391,43 +413,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const orgLocation = formatCityStateZip((org as any)?.city, (org as any)?.state, (org as any)?.zip) || null;
   // Simple, deep, spiritual — timeless wisdom (public-domain sources + universal proverbs),
   // grounding for a crew starting the day. Rotated by day-of-YEAR so it advances every day
-  // instead of repeating on the same date each month.
-  const QUOTES = [
-    "Be still, and know.",
-    "This too shall pass.",
-    "Wherever you are, be all there.",
-    "The quieter you become, the more you can hear.",
-    "What you seek is seeking you. —Rumi",
-    "Nature does not hurry, yet everything is accomplished. —Lao Tzu",
-    "The wound is the place where the light enters you. —Rumi",
-    "Peace comes from within; do not seek it without. —Buddha",
-    "Fall seven times, stand up eight.",
-    "A journey of a thousand miles begins with a single step. —Lao Tzu",
-    "Silence is a source of great strength. —Lao Tzu",
-    "Do your work, then step back. —Tao Te Ching",
-    "Water is soft, yet it wears away stone.",
-    "Let go, or be dragged.",
-    "Empty your cup, and it can be filled.",
-    "Gratitude turns what we have into enough.",
-    "When the student is ready, the teacher appears.",
-    "Still waters run deep.",
-    "As you think, so you become.",
-    "The mountain is climbed one step at a time.",
-    "Where there is love, there is life. —Gandhi",
-    "Tend your own garden.",
-    "Kindness is a language the blind can see and the deaf can hear.",
-    "Rest is part of the work, not a break from it.",
-    "Trust the timing of your life.",
-    "The light you are looking for is within you.",
-    "Do everything with a mind that lets go. —Ajahn Chah",
-    "What we give, we grow.",
-    "The obstacle is the way. —Marcus Aurelius",
-    "Be like water: patient, yielding, unstoppable.",
-    "Slow is smooth, and smooth is fast.",
-    "Every morning we are born again; what we do today matters most.",
-    "Presence is the greatest gift you bring to your work.",
-    "Do good, and good comes back around.",
-  ];
+  // instead of repeating on the same date each month. The 34 quotes live in lib/words/myday
+  // (md_quote_01 … md_quote_34, cn-v1138), each in both languages with its author's name as written.
+  const QUOTES = Array.from({ length: QUOTE_COUNT }, (_, i) => t(`md_quote_${String(i + 1).padStart(2, "0")}`));
   const _qNow = Date.parse(`${todayStr}T12:00:00Z`);
   const _qYearStart = Date.parse(`${todayStr.slice(0, 4)}-01-01T12:00:00Z`);
   const dayOfYear = Math.max(0, Math.round((_qNow - _qYearStart) / 86_400_000));
@@ -460,7 +448,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     return {
       place: placeLine({ name: j.name, street: j.address, customer: j.customers?.name })?.text ?? null,
       town: (j.city as string | null) ?? null,
-      span: b.allDay ? "All day" : `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(b.endMin))}`,
+      span: b.allDay ? t("md_allDay") : `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(b.endMin))}`,
       crew: crewChips(j.assigned_to, people, { rows: crewRowsByDay[day], jobId: j.id, jobNames, people: everPeople }),
     };
   };
@@ -485,7 +473,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     };
   };
 
-  const niceDay = prettyDay(todayStr);
+  const niceDay = dayWords(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
   // NEEDS YOU, WHOLE (Wave 1, NY-list): no five-row cut and no Show All. The same-kind piles keep it
@@ -740,7 +728,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           ...jobRowInfo(j, dayStr, own),
         });
       }
-      weekDayGroups.push({ dayStr, label: prettyDay(dayStr), items });
+      weekDayGroups.push({ dayStr, label: dayWords(dayStr), items });
     }
     /* THE WEEKEND EARNS ITS ROW, OR IT ISN'T DRAWN — the SAME rule as the schedule's week columns
        (lib/schedule/week-columns), from the same function. Hiding empty weekends on one week view and
@@ -757,7 +745,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     }
   }
   const weekOfLabel = weekFirstDay
-    ? new Date(`${weekFirstDay}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+    ? new Date(`${weekFirstDay}T12:00:00Z`).toLocaleDateString(localeOf(lang), { month: "short", day: "numeric", timeZone: "UTC" })
     : "";
 
   const navBtnCls =
@@ -780,19 +768,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             {i.kind === "appt" ? (
               <>
                 <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"} className="shrink-0">
-                  {appointmentTypeLabel(i.apptType)}
+                  {appointmentTypeLabel(i.apptType, lang, t)}
                 </Badge>
                 {/* audit v921: the same "pending pick" marker the calendar and the appointment
                     page carry — My Day drew an unconfirmed visit like a firm booking. */}
                 {i.status === "proposed" && (
                   <Badge tone="amber" className="shrink-0">
-                    Pending Pick
+                    {t("md_pendingPick")}
                   </Badge>
                 )}
               </>
             ) : i.status ? (
               <Badge tone={statusTone(i.status)} className="shrink-0">
-                {jobStatusLabel(i.status)}
+                {jobStatusLabel(i.status, lang, t)}
               </Badge>
             ) : null}
             {/* WHERE: the street number and name (never the city or the zip), or who when the name
@@ -818,16 +806,17 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
           {i.key === lateNudge && i.phone && (
             <a
-              href={`sms:${i.phone}&body=${encodeURIComponent("On my way — running a few minutes behind. See you soon.")}`}
+              // The text goes to the CUSTOMER, so its body is English whatever the tech reads (cn-v1138).
+              href={`sms:${i.phone}&body=${encodeURIComponent(translator("en")("md_onMyWay"))}`}
               className={navBtnCls}
-              title="Running late? Opens a heads-up text from this phone"
+              title={t("md_runningLateTitle")}
             >
-              <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Running Late?</span>
+              <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">{t("md_runningLate")}</span>
             </a>
           )}
           {i.address && (
             <NavLink address={i.address} className={navBtnCls}>
-              <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Navigate</span>
+              <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">{t("md_navigate")}</span>
             </NavLink>
           )}
           {/* THE OFFICE'S VERBS, behind one 44px ⋯ (the app's one row sheet): a visit's Mark Done,
@@ -862,7 +851,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           truncates or crowds anything. */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Day</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t("md_title")}</h1>
           <p className="mt-1 text-sm text-slate-500">{niceDay}</p>
         </div>
         <WeatherWidget
@@ -923,14 +912,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   address={currentNavTarget}
                   className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
                 >
-                  <Navigation className="h-4 w-4 shrink-0" /> Navigate
+                  <Navigation className="h-4 w-4 shrink-0" /> {t("md_navigate")}
                 </NavLink>
               )}
               <Link
                 href={currentMaterialsHref}
                 className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
               >
-                Materials
+                {t("md_materials")}
               </Link>
               {/* snapFirst: on the clock, a cost is a bill in his hand, so the sheet opens on
                   Snap the Bill instead of a focused Supplier field. */}
@@ -986,12 +975,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="flex items-center gap-2">
               <ClipboardList className="h-4 w-4 text-slate-400" />
-              <span className="text-sm font-semibold text-slate-800">Daily reports</span>
+              <span className="text-sm font-semibold text-slate-800">{t("md_dailyReports")}</span>
             </div>
             {/* NOTHING SILENT: the right-hand line says what is left to do AND what window
                 this list covers, so "only three" is never mistaken for "only three exist". */}
             <span className="shrink-0 text-xs font-medium text-slate-500">
-              {reportsToReview > 0 ? `${reportsToReview} to review · ` : ""}last 14 days
+              {reportsToReview > 0 ? fillText(t("md_toReview"), { n: String(reportsToReview) }) : ""}
+              {t("md_last14Days")}
             </span>
           </div>
           <FeatureOffLine feature="daily_reports" features={features} isOwner={isOwner} className="mx-5 mt-3" />
@@ -1006,15 +996,15 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   )}
                   {r.materials_tomorrow && (
                     <p className="mt-1 whitespace-pre-line text-sm text-amber-700">
-                      <span className="font-medium">Materials for tomorrow:</span> {r.materials_tomorrow}
+                      <span className="font-medium">{t("md_materialsTomorrow")}</span> {r.materials_tomorrow}
                     </p>
                   )}
                   {r.gps && (
                     <div className="mt-1.5 text-xs text-slate-500">
                       <span className="font-medium text-slate-600">{formatDuration(Number(r.gps.total_hours) || 0)}</span>
                       {Number(r.gps.miles) > 0 && <span> · {Number(r.gps.miles).toFixed(1)} mi</span>}
-                      {r.gps.first_in && <span> · first in {formatTime(r.gps.first_in, tz)}</span>}
-                      {r.gps.last_out && <span> · last out {formatTime(r.gps.last_out, tz)}</span>}
+                      {r.gps.first_in && <span>{fillText(t("md_firstIn"), { time: formatTime(r.gps.first_in, tz) })}</span>}
+                      {r.gps.last_out && <span>{fillText(t("md_lastOut"), { time: formatTime(r.gps.last_out, tz) })}</span>}
                       {(r.gps.jobs ?? []).length > 0 && (
                         <span>
                           {" · "}
@@ -1046,9 +1036,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open:rotate-90" />
                         <div className="min-w-0 flex-1 truncate text-sm">
                           <span className="font-semibold text-slate-900">{r.name}</span>
-                          <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz)}</span>
+                          <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz, lang)}</span>
                         </div>
-                        <Badge tone="green" className="shrink-0">reviewed</Badge>
+                        <Badge tone="green" className="shrink-0">{t("md_reviewed")}</Badge>
                       </summary>
                       <div className="px-5 pb-3">{body}</div>
                     </details>
@@ -1060,7 +1050,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 text-sm">
                       <span className="font-semibold text-slate-900">{r.name}</span>
-                      <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz)}</span>
+                      <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz, lang)}</span>
                     </div>
                     <MarkReportReviewedButton id={r.id} />
                   </div>
@@ -1082,13 +1072,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             <div className="min-w-0 text-sm font-semibold text-slate-900">
               <div className="flex min-w-0 items-center gap-2">
                 <CalendarCheck className="h-4 w-4 shrink-0 text-brand" />
-                <span className="truncate">{weekOffset === 0 ? "This week" : `Week of ${weekOfLabel}`}</span>
+                <span className="truncate">{weekOffset === 0 ? t("md_thisWeekHeader") : fillText(t("md_weekOf"), { date: weekOfLabel })}</span>
               </div>
               {/* NOTHING SILENT: the week is short two rows and says which, so a week that grows a
                   Saturday next time it is drawn was announced before it did. */}
               {weekHiddenDays.length > 0 && (
                 <span className="mt-0.5 block text-[11px] font-normal text-slate-400">
-                  {weekHiddenDays.map(shortDayWords).join(" and ")} clear
+                  {fillText(t("md_daysClear"), { days: weekHiddenDays.map(dayShort).join(` ${t("md_and")} `) })}
                 </span>
               )}
             </div>
@@ -1096,19 +1086,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             <div className="-my-3 flex shrink-0 items-center gap-0.5">
               <Link
                 href={`/planner?view=week&week=${weekOffset - 1}`}
-                aria-label="Previous week"
+                aria-label={t("md_prevWeek")}
                 className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <ChevronLeft className="h-4 w-4" />
               </Link>
               {weekOffset !== 0 && (
                 <Link href="/planner?view=week" className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-brand hover:underline">
-                  This Week
+                  {t("md_thisWeekDoor")}
                 </Link>
               )}
               <Link
                 href={`/planner?view=week&week=${weekOffset + 1}`}
-                aria-label="Next week"
+                aria-label={t("md_nextWeek")}
                 className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <ChevronRight className="h-4 w-4" />
@@ -1116,7 +1106,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             </div>
           </div>
           {weekDayGroups.every((d) => d.items.length === 0) ? (
-            empty("Nothing scheduled this week.")
+            empty(t("md_nothingThisWeek"))
           ) : (
             weekDayGroups.map((d) => (
               <div key={d.dayStr}>
@@ -1125,12 +1115,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                     d.dayStr === todayStr ? "bg-brand-light/40 text-brand" : "bg-slate-50/70 text-slate-400"
                   }`}
                 >
-                  {d.label}{d.dayStr === todayStr ? " · Today" : ""}
+                  {d.label}{d.dayStr === todayStr ? t("md_todayTag") : ""}
                 </div>
                 {d.items.length > 0 ? (
                   <ul className="divide-y divide-slate-100">{agendaRows(d.items, d.dayStr)}</ul>
                 ) : (
-                  <p className="px-5 py-2 text-xs text-slate-300">Open</p>
+                  <p className="px-5 py-2 text-xs text-slate-300">{t("md_openDay")}</p>
                 )}
               </div>
             ))
@@ -1142,7 +1132,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         <Card className="mb-4 overflow-hidden" data-tour="agenda">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <CalendarCheck className="h-4 w-4 text-brand" /> Today
+              <CalendarCheck className="h-4 w-4 text-brand" /> {t("md_today")}
             </div>
             {/* A tech pages his own week here. The office has no doors in this header: a new
                 appointment is + › New Appointment, and THE week is the Schedule tile (a staff
@@ -1152,31 +1142,31 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 href="/planner?view=week"
                 className="-my-3 inline-flex min-h-11 shrink-0 items-center whitespace-nowrap px-2 text-xs font-medium text-brand hover:underline"
               >
-                Week →
+                {t("md_weekArrow")}
               </Link>
             )}
           </div>
 
 
           {nextAgenda.length === 0 && laterAgenda.length === 0 && earlierAgenda.length === 0 ? (
-            empty(currentJob ? "Nothing else on the schedule today." : "Nothing left on the schedule today.")
+            empty(currentJob ? t("md_nothingElseToday") : t("md_nothingLeftToday"))
           ) : (
             <>
               {earlierAgenda.length > 0 && (
                 <>
-                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Earlier today</div>
+                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t("md_earlierToday")}</div>
                   <ul className="divide-y divide-slate-100">{agendaRows(earlierAgenda, todayStr)}</ul>
                 </>
               )}
               {nextAgenda.length > 0 && (
                 <>
-                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">Next</div>
+                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">{t("md_next")}</div>
                   <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda, todayStr)}</ul>
                 </>
               )}
               {laterAgenda.length > 0 && (
                 <>
-                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Later</div>
+                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t("md_later")}</div>
                   <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda, todayStr)}</ul>
                 </>
               )}
@@ -1214,7 +1204,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       {(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (
         <Card className="mb-4 overflow-hidden" data-tour="needs-you">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
+            <h2 className="text-sm font-semibold text-slate-900">{t("md_needsYou")}</h2>
             {/* The open count (a pile counts one), the same number as the dock's badge. Nothing to
                 act on now: no pill (zero shows no badge). */}
             {needsYou.now.length > 0 && (
@@ -1230,7 +1220,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               leadsOn={leadsOn}
               isStaff={isStaff}
               textReady={textReady}
-              emptyLabel="Nothing needs you right now."
+              emptyLabel={t("md_nothingNeedsYou")}
             />
           </div>
           {/* WAITING (N): each thing waiting, why, and the day it comes back. Grey, never a badge. */}

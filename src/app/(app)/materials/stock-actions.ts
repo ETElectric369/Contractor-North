@@ -4,6 +4,9 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireMember, requireStaff } from "@/lib/staff-guard";
+import { createClient } from "@/lib/supabase/server";
+import { translator } from "@/lib/i18n";
+import { callerLang } from "@/lib/lang-of";
 import { dbError } from "@/lib/db-error";
 import { isMissingShelfRpc, shelfForCrew, takeFromStock, undoTake } from "@/lib/stock-ledger";
 import { createNotifications, officeRecipients } from "@/lib/notifications";
@@ -37,8 +40,22 @@ const TAKE = z
   })
   .strict();
 
-const NO_MONEY = "Took From Stock takes a count, never a price. Nothing was taken.";
 const UUID = z.string().uuid();
+
+/**
+ * THE CALLER'S WORDS (cn-v1138): a refusal or an answer a person reads comes back in the language on
+ * their profile. Read only where it is said, never on the hot path of a take: the member's own client
+ * when the door has one, a fresh one before sign-in (a refusal before sign-in reads English when no
+ * request is there to read from); English on any failure. The toast after Take It and the office's
+ * bell keep lib/stock-take's words.
+ */
+async function wordsOf(sb?: Parameters<typeof callerLang>[0]): Promise<(key: string) => string> {
+  try {
+    return translator(await callerLang(sb ?? (await createClient())));
+  } catch {
+    return translator("en");
+  }
+}
 
 export type TakeActionResult =
   | { ok: true; drawGroup: string; item: string; unit: string; qty: number; short: number; onHand: number; message: string }
@@ -49,7 +66,7 @@ export type ShelfLoad = { ok: true; rows: ShelfRow[] } | { ok: false; error: str
 /** The shelf for the sheet: names, units and counts. The same read for the crew and the office. */
 export async function loadShelf(): Promise<ShelfLoad> {
   const m = await requireMember();
-  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from stock." };
+  if ("error" in m) return { ok: false, error: m.error ?? (await wordsOf())("mt_signInAgainStock") };
   return shelfForCrew(m.supabase);
 }
 
@@ -57,23 +74,24 @@ export async function loadShelf(): Promise<ShelfLoad> {
 export async function takeFromStockAction(raw: unknown): Promise<TakeActionResult> {
   const parsed = TAKE.safeParse(raw);
   if (!parsed.success) {
-    if (parsed.error.issues.some((i) => i.code === "unrecognized_keys")) return { ok: false, error: NO_MONEY };
+    const t = await wordsOf();
+    if (parsed.error.issues.some((i) => i.code === "unrecognized_keys")) return { ok: false, error: t("mt_noMoney") };
     const path = parsed.error.issues[0]?.path[0];
-    if (path === "qty") return { ok: false, error: "Say how many you took." };
-    if (path === "itemId") return { ok: false, error: "Pick what you took out of stock." };
-    if (path === "jobId") return { ok: false, error: "Pick the job these pieces went on." };
-    return { ok: false, error: "That take didn't read right. Nothing was taken." };
+    if (path === "qty") return { ok: false, error: t("mt_sayHowMany") };
+    if (path === "itemId") return { ok: false, error: t("mt_pickWhatYouTook") };
+    if (path === "jobId") return { ok: false, error: t("mt_pickTheJob") };
+    return { ok: false, error: t("mt_takeDidntRead") };
   }
   const input = parsed.data;
   const m = await requireMember();
-  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from stock." };
+  if ("error" in m) return { ok: false, error: m.error ?? (await wordsOf())("mt_signInAgainStock") };
   const { supabase, orgId, staff } = m;
 
   // The job is this company's, said here as well as in stock_draw (0173: a rule at one door is a
   // convention). Its label is the bell's and the toast's.
   const { data: job, error: jobErr } = await supabase.from("jobs").select("id, job_number, name").eq("id", input.jobId).eq("org_id", orgId).maybeSingle();
   if (jobErr) return { ok: false, error: dbError(jobErr) };
-  if (!job) return { ok: false, error: "That job isn't in this company (or isn't one you can see)." };
+  if (!job) return { ok: false, error: (await wordsOf(supabase))("mt_jobNotInCompany") };
   const label = jobLabel(job as { job_number?: string | null; name?: string | null });
 
   const res = await takeFromStock({
@@ -84,8 +102,8 @@ export async function takeFromStockAction(raw: unknown): Promise<TakeActionResul
     // The database records a tech's take as 'crew' whatever is sent; this only names the office's.
     source: staff ? (input.via === "nort" ? "nort" : "office") : "crew",
   });
-  if (!res.ok) return { ok: false, error: isMissingShelfRpc({ message: res.error }) ? "Took From Stock needs a database update that hasn't been applied yet. Nothing was taken." : res.error };
-  if (!res.drawGroup) return { ok: false, error: "The stock record didn't say what it took. Reload the job to see where it stands." };
+  if (!res.ok) return { ok: false, error: isMissingShelfRpc({ message: res.error }) ? (await wordsOf(supabase))("mt_needsDbUpdate") : res.error };
+  if (!res.drawGroup) return { ok: false, error: (await wordsOf(supabase))("mt_recordDidntSay") };
 
   revalidatePath("/materials/[id]", "page");
 
@@ -136,15 +154,16 @@ async function tellOfficeAboutTake(
 /** UNDO, until an invoice bills it. stock_undo refuses a billed take and names the invoice, and a
  *  tech may undo only his own; both refusals come back in the database's own words. */
 export async function undoTakeAction(drawGroup: string, jobId?: string | null): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  if (!UUID.safeParse(drawGroup).success) return { ok: false, error: "That take isn't one this job knows. Reload to see where it stands." };
+  if (!UUID.safeParse(drawGroup).success) return { ok: false, error: (await wordsOf())("mt_takeNotKnown") };
   const m = await requireMember();
-  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from stock." };
+  if ("error" in m) return { ok: false, error: m.error ?? (await wordsOf())("mt_signInAgainStock") };
   const res = await undoTake(drawGroup);
   if (!res.ok) return { ok: false, error: res.error };
-  if (!res.undone) return { ok: false, error: "That take was already undone. Reload to see where it stands." };
+  const t = await wordsOf(m.supabase);
+  if (!res.undone) return { ok: false, error: t("mt_alreadyUndone") };
   if (jobId && UUID.safeParse(jobId).success) revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/materials/[id]", "page");
-  return { ok: true, message: "Undone: the pieces are back in stock." };
+  return { ok: true, message: t("mt_undone") };
 }
 
 /**
@@ -153,15 +172,16 @@ export async function undoTakeAction(drawGroup: string, jobId?: string | null): 
  * and bills nothing.
  */
 export async function settleShortAction(shortId: string): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  if (!UUID.safeParse(shortId).success) return { ok: false, error: "That take isn't on the stock record. Reload to see where it stands." };
+  if (!UUID.safeParse(shortId).success) return { ok: false, error: (await wordsOf())("mt_takeNotOnRecord") };
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is office-only." };
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? (await wordsOf())("mt_officeOnly") };
   const { supabase, orgId } = ctx;
-  if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company." };
+  const t = await wordsOf(supabase);
+  if (!orgId) return { ok: false, error: t("mt_noCompany") };
   const { data, error } = await supabase.rpc("settle_short", { p_short: shortId });
   if (error) return { ok: false, error: settleRefusalWords(dbError(error)) };
-  if (!(data as { draw_group?: unknown } | null)?.draw_group) return { ok: false, error: "The stock record didn't settle it. Reload to see where it stands." };
+  if (!(data as { draw_group?: unknown } | null)?.draw_group) return { ok: false, error: t("mt_recordDidntSettle") };
   revalidatePath("/inventory");
   revalidatePath("/jobs/[id]", "page");
-  return { ok: true, message: "Settled: those pieces now cost the job what the roll cost." };
+  return { ok: true, message: t("mt_settled") };
 }

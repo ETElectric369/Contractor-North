@@ -13,8 +13,8 @@ import { autoClockoutPromptState } from "./close-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
-import { hoursBetween, formatCurrency, formatDate, formatDuration, formatTime } from "@/lib/utils";
-import { translator } from "@/lib/i18n";
+import { hoursBetween, formatCurrency, formatDate, formatDuration } from "@/lib/utils";
+import { fillText, localeOf, translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { loadShiftChains } from "@/lib/shift-chain";
@@ -49,6 +49,9 @@ export default async function TimeclockPage() {
   ]);
   const lang = prof?.language ?? "en";
   const t = translator(lang);
+  // The clock words in the person's language ("10:31 AM" / "10:31 a. m."), in the org's zone.
+  const clockWords = (iso: string, tz: string) =>
+    new Date(iso).toLocaleTimeString(localeOf(lang), { timeZone: tz, hour: "numeric", minute: "2-digit" });
   const isStaff = !!prof && isStaffRole(prof.role);
 
   // WHO'S ON THE CLOCK (cn-v1134; Erik, 2026-10-27: "keep the who's on the clock with Time Clock
@@ -179,7 +182,7 @@ export default async function TimeclockPage() {
           ? jobCodesOn
             ? jobLabel(p.job)
             : jobSiteLabel({ ...p.job, customer_name: p.job.customers?.name ?? null })
-          : (p.job_code ?? "the part before"),
+          : (p.job_code ?? t("tc_thePartBefore")),
       };
     }
   }
@@ -246,7 +249,7 @@ export default async function TimeclockPage() {
             ? jobCodesOn
               ? jobLabel(j)
               : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null })
-            : "the jobsite",
+            : t("tc_theJobsite"),
         };
         // THE PART BEFORE THE SWITCH (audit v994 SW3): the caller's own unpaid closed entry that ended
         // when the auto-closed one began. The prompt offers the lunch there, by default, the way the
@@ -270,7 +273,7 @@ export default async function TimeclockPage() {
               ? jobCodesOn
                 ? jobLabel(p.job)
                 : jobSiteLabel({ ...p.job, customer_name: p.job.customers?.name ?? null })
-              : (p.job_code ?? "the part before"),
+              : (p.job_code ?? t("tc_thePartBefore")),
           };
         }
       }
@@ -315,7 +318,7 @@ export default async function TimeclockPage() {
       const day = todayStrInTz(tz, new Date(e.clock_in));
       if (!byDay.has(day)) {
         byDay.set(day, {
-          label: new Date(e.clock_in).toLocaleDateString("en-US", {
+          label: new Date(e.clock_in).toLocaleDateString(localeOf(lang), {
             timeZone: tz,
             weekday: "short",
             month: "short",
@@ -331,8 +334,8 @@ export default async function TimeclockPage() {
       // The query is newest-first; unshift so each day's punches read in clock order.
       g.rows.unshift({
         id: e.id,
-        in: formatTime(e.clock_in, tz),
-        out: e.clock_out ? formatTime(e.clock_out, tz) : null,
+        in: clockWords(e.clock_in, tz),
+        out: e.clock_out ? clockWords(e.clock_out, tz) : null,
         lunch: Math.max(0, Number(e.lunch_minutes) || 0),
         hours: h,
         jobTag: weekJobTag(e),
@@ -385,7 +388,7 @@ export default async function TimeclockPage() {
         .slice(0, 10);
       const openInMs = openEntry ? new Date(openEntry.clock_in).getTime() : null;
       myPeriod = {
-        label: `${formatDate(period.start)} – ${formatDate(endIncl)}`,
+        label: `${formatDate(period.start, undefined, lang)} – ${formatDate(endIncl, undefined, lang)}`,
         hours: row.paidHours + row.unpaidHours,
         gross: Math.round((row.paidGross + row.unpaidGross) * 100) / 100,
         state: row.unpaidHours === 0 ? "paid" : row.paidHours > 0 ? "partly" : "unpaid",
@@ -444,13 +447,13 @@ export default async function TimeclockPage() {
             fallback={
               <Card>
                 <CardContent className="py-4">
-                  <h3 className="mb-1 text-sm font-semibold text-slate-900">Next up</h3>
-                  <p className="py-2 text-sm text-slate-400">Checking the schedule…</p>
+                  <h3 className="mb-1 text-sm font-semibold text-slate-900">{t("tc_nextUp")}</h3>
+                  <p className="py-2 text-sm text-slate-400">{t("tc_checkingSchedule")}</p>
                 </CardContent>
               </Card>
             }
           >
-            <NextUp userId={user.id} tz={orgSettings.timezone} />
+            <NextUp userId={user.id} tz={orgSettings.timezone} lang={lang} />
           </Suspense>
         )}
 
@@ -478,8 +481,8 @@ export default async function TimeclockPage() {
           <Card>
             <CardContent className="py-5">
               <div className="mb-1 flex items-baseline justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">My timecard</h3>
-                <span className="text-xs text-slate-400">Last 7 days</span>
+                <h3 className="text-sm font-semibold text-slate-900">{t("tc_myTimecard")}</h3>
+                <span className="text-xs text-slate-400">{t("tc_last7Days")}</span>
               </div>
               <div className="divide-y divide-slate-100">
                 {myTimecard.map((d) => (
@@ -491,12 +494,12 @@ export default async function TimeclockPage() {
                     {d.rows.map((r) => (
                       <div key={r.id} className="mt-1 flex items-center justify-between gap-3 text-sm">
                         <span className="min-w-0 truncate text-slate-700">
-                          {r.in}–{r.out ?? "now"}
-                          {r.lunch > 0 ? ` · ${r.lunch}m lunch` : ""}
+                          {r.in}–{r.out ?? t("tc_now")}
+                          {r.lunch > 0 ? ` · ${fillText(t("tc_lunchShort"), { min: String(r.lunch) })}` : ""}
                           {r.jobTag ? ` · ${r.jobTag}` : ""}
                         </span>
                         <span className="shrink-0 text-slate-600">
-                          {r.hours != null ? formatDuration(r.hours) : "on the clock"}
+                          {r.hours != null ? formatDuration(r.hours) : t("tc_onTheClock")}
                         </span>
                       </div>
                     ))}
@@ -504,7 +507,7 @@ export default async function TimeclockPage() {
                 ))}
               </div>
               <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
-                <span className="font-semibold text-slate-900">Week total</span>
+                <span className="font-semibold text-slate-900">{t("tc_weekTotal")}</span>
                 <span className="font-bold text-slate-900">{formatDuration(weekTotal)}</span>
               </div>
             </CardContent>
@@ -518,31 +521,26 @@ export default async function TimeclockPage() {
           <Card>
             <CardContent className="py-4">
               <div className="mb-1 flex items-baseline justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">My pay period</h3>
+                <h3 className="text-sm font-semibold text-slate-900">{t("tc_myPayPeriod")}</h3>
                 <span className="text-xs text-slate-400">{myPeriod.label}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600">{formatDuration(myPeriod.hours)}</span>
                 <span className="flex items-center gap-2">
-                  <span className="font-bold text-slate-900">{formatCurrency(myPeriod.gross)}</span>
+                  <span className="font-bold text-slate-900">{formatCurrency(myPeriod.gross, lang)}</span>
                   {myPeriod.state === "paid" ? (
-                    <Badge tone="green">paid</Badge>
+                    <Badge tone="green">{t("tc_paid")}</Badge>
                   ) : myPeriod.state === "partly" ? (
-                    <Badge tone="amber">partly paid</Badge>
+                    <Badge tone="amber">{t("tc_partlyPaid")}</Badge>
                   ) : (
-                    <Badge tone="slate">unpaid</Badge>
+                    <Badge tone="slate">{t("tc_unpaid")}</Badge>
                   )}
                 </span>
               </div>
               {myPeriod.openNotCounted && (
-                <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  Your current shift is still on the clock and not counted yet — these totals update
-                  when you clock out.
-                </p>
+                <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">{t("tc_openNotCounted")}</p>
               )}
-              <p className="mt-1.5 text-xs text-slate-400">
-                Base pay only — mileage is tracked in miles and settled separately by the office.
-              </p>
+              <p className="mt-1.5 text-xs text-slate-400">{t("tc_basePayOnly")}</p>
             </CardContent>
           </Card>
         )}

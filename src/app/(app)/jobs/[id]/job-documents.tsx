@@ -13,6 +13,8 @@ import { formatDate } from "@/lib/utils";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
 import { isCostableCategory } from "@/lib/job-photos";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { deleteDocument, linkReceiptToBill, updateDocument } from "../actions";
 
 /** A Receipt or a Bill: what Record As Cost reads into a job cost (lib/job-photos, the same rule
@@ -129,6 +131,8 @@ export function JobDocuments({
   bills?: BillChoice[] | null;
 }) {
   const router = useRouter();
+  const lang = useLang();
+  const t = translator(lang);
   const onPhotoTab = new Set(photoTabIds ?? []);
   const papers = docs.filter((d) => !onPhotoTab.has(d.id));
   const tabPictures = docs.filter((d) => onPhotoTab.has(d.id));
@@ -190,11 +194,11 @@ export function JobDocuments({
     try {
       const res = await linkReceiptToBill(billId, d.id);
       if (!res.ok) {
-        note(d.id, { text: res.error ?? "The tie didn't save. Try again.", done: false, tone: "fail" });
+        note(d.id, { text: res.error ?? t("jb_tieDidntSave"), done: false, tone: "fail" });
         return;
       }
       const label = billChoices.find((b) => b.id === billId)?.label;
-      note(d.id, { text: `On ${label ?? "that bill"}.`, done: true, tone: "ok" });
+      note(d.id, { text: fillText(t("jb_onBill"), { bill: label ?? t("jb_thatBill") }), done: true, tone: "ok" });
       router.refresh();
     } finally {
       setBilling(null);
@@ -207,7 +211,7 @@ export function JobDocuments({
   }
 
   function remove(d: Doc) {
-    if (!confirm(`Delete "${d.name}"?`)) return;
+    if (!confirm(fillText(t("jb_deleteNamedConfirm"), { name: d.name }))) return;
     start(async () => {
       await deleteDocument(d.id, d.file_url, jobId);
       router.refresh();
@@ -224,7 +228,7 @@ export function JobDocuments({
   async function saveEdit() {
     if (!editing) return;
     if (!editName.trim()) {
-      setEditErr("Name is required.");
+      setEditErr(t("jb_nameRequired"));
       return;
     }
     setSavingEdit(true);
@@ -236,7 +240,7 @@ export function JobDocuments({
     );
     setSavingEdit(false);
     if (!res.ok) {
-      setEditErr(res.error ?? "Couldn't save changes.");
+      setEditErr(res.error ?? t("jb_couldntSaveChanges"));
       return;
     }
     setEditing(null);
@@ -264,32 +268,32 @@ export function JobDocuments({
           <button onClick={() => open(d)} className="min-w-0 flex-1 text-left">
             <div className="truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</div>
             <div className="text-xs text-slate-400">
-              {formatDate(d.created_at)}
+              {formatDate(d.created_at, undefined, lang)}
               {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
             </div>
-            {billOf?.[d.id] && <div className="text-xs text-slate-500">On {billOf[d.id]}.</div>}
-            {loose?.has(d.id) && !n?.done && <div className="text-xs font-medium text-amber-700">Not on a bill yet.</div>}
+            {billOf?.[d.id] && <div className="text-xs text-slate-500">{fillText(t("jb_onBill"), { bill: billOf[d.id] })}</div>}
+            {loose?.has(d.id) && !n?.done && <div className="text-xs font-medium text-amber-700">{t("jb_notOnBillYet")}</div>}
           </button>
           {recordable && (
             <button
               onClick={() => recordCost(d)}
               disabled={billing === d.id}
               className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
-              title={`${nortOn ? "Nort reads" : "Reads"} the receipt and adds it to this job's costs`}
+              title={nortOn ? t("jb_nortReadsReceiptTitle") : t("jb_readsReceiptTitle")}
             >
               {billing === d.id ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
               ) : (
                 <DollarSign className="h-4 w-4 shrink-0" />
               )}
-              Record As Cost
+              {t("jb_recordAsCost")}
             </button>
           )}
           {d.category && <Badge tone="blue">{d.category}</Badge>}
           <button
             onClick={() => openEdit(d)}
             className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-            title="Rename or re-categorize"
+            title={t("jb_renameRecategorize")}
           >
             <Pencil className="h-4 w-4" />
           </button>
@@ -297,7 +301,7 @@ export function JobDocuments({
             onClick={() => remove(d)}
             disabled={pending}
             className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-            title="Delete"
+            title={t("jb_delete")}
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -312,10 +316,10 @@ export function JobDocuments({
             >
               <Globe className="h-4 w-4" />
               {portalPapers[d.id] === "shown"
-                ? "On The Portal"
+                ? t("jb_onThePortal")
                 : portalPapers[d.id] === "replaced"
-                  ? "Replaced By A Newer One On The Portal"
-                  : "Show On Portal"}
+                  ? t("jb_replacedOnPortal")
+                  : t("jb_showOnPortal")}
             </Link>
           </div>
         )}
@@ -324,7 +328,7 @@ export function JobDocuments({
         {loose?.has(d.id) && !n?.done && billChoices.length > 0 && (
           <div className="pl-15 flex flex-wrap items-center gap-2">
             <label htmlFor={`tie-${d.id}`} className="text-xs font-medium text-slate-600">
-              Already On A Bill:
+              {t("jb_alreadyOnABill")}
             </label>
             <Select
               id={`tie-${d.id}`}
@@ -346,7 +350,7 @@ export function JobDocuments({
               className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Tie It
+              {t("jb_tieIt")}
             </button>
           </div>
         )}
@@ -367,7 +371,7 @@ export function JobDocuments({
                 className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-3 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
               >
                 {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Same Purchase: It&apos;s That Bill
+                {t("jb_samePurchase")}
               </button>
             )}
             <button
@@ -377,7 +381,7 @@ export function JobDocuments({
               className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Different Purchase: Record It Anyway
+              {t("jb_differentPurchase")}
             </button>
           </div>
         )}
@@ -393,11 +397,11 @@ export function JobDocuments({
         summary={
           <span className="flex flex-wrap items-center gap-x-2 text-sm">
             <span className="inline-flex items-center gap-2 font-semibold text-slate-900">
-              <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; Papers
+              <Receipt className="h-4 w-4 text-slate-400" /> {t("jb_receiptsPapers")}
             </span>
             {looseCount > 0 && (
               <span className="font-medium text-amber-700">
-                · {looseCount} Not On A Bill Yet
+                · {fillText(t("jb_nNotOnBillYet"), { n: String(looseCount) })}
               </span>
             )}
           </span>
@@ -411,7 +415,7 @@ export function JobDocuments({
                 href={`/jobs/${jobId}?tab=customer&plans=add`}
                 className="inline-flex min-h-11 items-center font-semibold text-brand underline-offset-2 hover:underline"
               >
-                Plan Or Drawing? Add It On The Customer Page
+                {t("jb_planOrDrawing")}
               </Link>
             </p>
           )}
@@ -420,8 +424,8 @@ export function JobDocuments({
 
           {papers.length === 0 ? (
             <p className="text-sm text-slate-400">
-              No receipts yet. Use Snap The Bill above.
-              {!plansDoor && " A plan, permit or other paper? Tap ⋯ and File A Paper (Not A Cost)."}
+              {t("jb_noReceiptsYet")}
+              {!plansDoor && ` ${t("jb_planPaperHint")}`}
             </p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{papers.map(row)}</ul>
@@ -432,15 +436,15 @@ export function JobDocuments({
           {tabPictures.length > 0 && (
             <Fold
               className="mt-4"
-              summary={<span className="text-sm font-medium text-slate-700">Photos And Plans On The Photos Tab</span>}
+              summary={<span className="text-sm font-medium text-slate-700">{t("jb_photosPlansOnTab")}</span>}
             >
               <p className="mb-2 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
-                They show on the Photos tab. One that is really a receipt: tap its pencil and file it as a Receipt.
+                {t("jb_theyShowOnPhotos")}
                 <Link
                   href={`/jobs/${jobId}?tab=photos`}
                   className="inline-flex min-h-11 items-center text-sm font-medium text-brand underline-offset-2 hover:underline"
                 >
-                  Open Photos
+                  {t("jb_openPhotos")}
                 </Link>
               </p>
               <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{tabPictures.map(row)}</ul>
@@ -456,7 +460,7 @@ export function JobDocuments({
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title="Edit Document"
+        title={t("jb_editDocument")}
         size="sm"
         footer={
           <ModalActions
@@ -468,16 +472,16 @@ export function JobDocuments({
       >
         <div className="space-y-4">
           <div>
-            <Label htmlFor="doc-name">Name</Label>
+            <Label htmlFor="doc-name">{t("jb_name")}</Label>
             <Input
               id="doc-name"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              placeholder="Document name"
+              placeholder={t("jb_documentName")}
             />
           </div>
           <div>
-            <Label htmlFor="doc-category">Category</Label>
+            <Label htmlFor="doc-category">{t("jb_category")}</Label>
             <Select
               id="doc-category"
               value={editCategory}

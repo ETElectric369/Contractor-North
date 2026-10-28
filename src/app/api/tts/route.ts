@@ -1,5 +1,6 @@
 import { voiceGate } from "@/lib/voice-gate";
 import { reportError } from "@/lib/observe";
+import { asLang, type Lang } from "@/lib/locale";
 // Neural text-to-speech so Claude speaks with a real, intelligence-grade voice instead of
 // the OS robot. ElevenLabs is preferred (best quality + supports a cloned voice — Erik's
 // "hero's voice"); OpenAI is the simpler fallback. Returns mp3 audio. 503 if neither key
@@ -66,8 +67,11 @@ export async function POST(req: Request) {
   const gate = await voiceGate("tts", 120);
   if (gate) return gate;
   let text = "";
+  let lang: Lang = "en";
   try {
-    text = String((await req.json())?.text ?? "");
+    const body = await req.json();
+    text = String(body?.text ?? "");
+    lang = asLang(body?.lang); // the page's language (lib/tts voiceLang); anything but "es" is English
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -94,6 +98,9 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         text,
         model_id: process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5",
+        // SPANISH IS SAID, NOT GUESSED (cn-v1138): Flash v2.5 is multilingual and takes language_code
+        // to enforce the language; the voice stays George. English keeps today's request exactly.
+        ...(lang === "es" ? { language_code: "es" } : {}),
         voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.15, use_speaker_boost: true, speed: Number(process.env.ELEVENLABS_SPEED) || 1.12 },
       }),
     });
@@ -123,7 +130,10 @@ export async function POST(req: Request) {
         voice: process.env.OPENAI_TTS_VOICE || "fable",
         input: text,
         // Steers tone — only honored by gpt-4o-mini-tts (ignored by tts-1).
-        instructions: "Speak as a calm, refined British English male — a warm, confident, natural conversational tone, like a helpful colleague. Relaxed pacing, clear enunciation; never robotic or rushed.",
+        instructions:
+          lang === "es"
+            ? "Habla en español natural y claro, con un tono cálido, seguro y conversacional, como un colega que ayuda. Ritmo relajado, buena dicción; nunca robótico ni apresurado."
+            : "Speak as a calm, refined British English male — a warm, confident, natural conversational tone, like a helpful colleague. Relaxed pacing, clear enunciation; never robotic or rushed.",
         response_format: "mp3",
       }),
     });

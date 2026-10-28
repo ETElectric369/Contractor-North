@@ -44,15 +44,32 @@ import {
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
-import { UNREAD_JOB_LABEL, punchJobLabel, type AppPickSource, type PunchJob } from "./clock-told";
+import { punchJobLabel, unreadJobLabel, type AppPickSource, type PunchJob } from "./clock-told";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
-import { CEILING_REFUSAL_ASK_OFFICE, LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, UNDO_PUNCH_MS, UNDO_PUNCH_SENTENCE, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
+import { MAX_SHIFT_HOURS, UNDO_PUNCH_MS, ceilingRefusalAskOffice, clockDoorWords, clockedOutWords, isLongOpenShift, longShiftPhrase, plainSpaces, stopProblem, undoPunchSentence } from "@/lib/long-shift";
+import { asLang, fillText, localeOf, translator, type Lang } from "@/lib/i18n";
+import { callerLang, langOf } from "@/lib/lang-of";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
+
+/**
+ * THE PERSON'S LANGUAGE (cn-v1138). Every word a tech reads from this file is a cs_ key
+ * (lib/words/clockserver), filled through fillText; a server action reads the caller's language once
+ * (callerLang, or `language` on a profile select it already makes) and a line sent to somebody else
+ * is written in THAT person's language (createNotifications' and notifyPeople's function forms; a
+ * bare push resolves it with langOf). What is STORED stays English: the switch breadcrumb, the stop
+ * crumb, auto_closed_reason, gps_summary's labels and the "Daily report from …" title, which other
+ * code reads back by its English words. "Not signed in." is English too: there is nobody to read a
+ * language for.
+ */
+const en = translator("en");
 
 export type ClockResult = {
   ok: boolean;
   error?: string;
   warning?: string;
+  /** The shift this call was about is OVER (closed elsewhere, or never open): a terminal refusal
+   *  the geofence sheet syncs on, in any language, instead of matching the English sentence. */
+  ended?: boolean;
   /** The clock has been running LONG_SHIFT_HOURS or more and nobody said when it stopped: the
    *  caller should ask for a stop time instead of closing at now (the Timeclock long-shift block). */
   needsTime?: boolean;
@@ -224,7 +241,8 @@ async function noteHeldBefore(supabase: Pick<SupabaseClient, "from">, userId: st
  * ON THE SERVICE CLIENT (jobs_write is the office's), scoped by hand: this job, this company, only
  * while it is still in progress, rows read back. A write that fails is said, never swallowed.
  */
-async function putHeldJobBack(notes: string | null | undefined, entryId: string, orgId: string | null | undefined): Promise<string | null> {
+async function putHeldJobBack(notes: string | null | undefined, entryId: string, orgId: string | null | undefined, lang?: Lang | null): Promise<string | null> {
+  const t = translator(lang);
   const was = orgId ? heldBefore(notes, entryId) : null;
   if (!was || !orgId) return null;
   try {
@@ -253,10 +271,10 @@ async function putHeldJobBack(notes: string | null | undefined, entryId: string,
     revalidatePath("/jobs");
     revalidatePath("/schedule"); // the held card is back on the rail
     const why = (was.r ?? "").trim().replace(/[.\s]+$/, "");
-    return `${jobLabel(job)} is back on hold${why ? ` (${why})` : ""}.`;
+    return fillText(t("cs_backOnHold"), { job: jobLabel(job), why: why ? ` (${why})` : "" });
   } catch (e) {
     reportError("timeclock.clockOut.undoHold", e, { entryId, jobId: was.j });
-    return "That job was on hold before this punch and I couldn't put it back. Set it on hold again from the job.";
+    return t("cs_couldntPutBackOnHold");
   }
 }
 
@@ -275,7 +293,7 @@ export async function clockIn(input: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
 
   /**
    * EXACTLY-ONCE (0167). The DB's one_open_entry index already stops a second OPEN shift, but it
@@ -283,19 +301,22 @@ export async function clockIn(input: {
    * punch actually landed, and it tells the queue the op was rejected. runOnce makes the replay a
    * genuine no-op that returns the original result.
    */
-  const { data: profRow } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+  // The language rides on the read the punch already makes: no extra round trip on the clock's hot path.
+  const { data: profRow } = await supabase.from("profiles").select("org_id, language").eq("id", user.id).maybeSingle();
+  const prof = profRow as { org_id?: string; language?: string | null } | null;
+  const lang = asLang(prof?.language);
   const res = await runOnce(
     {
       clientOpId: input.clientOpId,
       action: "time.clockIn",
-      orgId: (profRow as { org_id?: string } | null)?.org_id,
+      orgId: prof?.org_id,
       profileId: user.id,
     },
-    () => clockInInner(supabase, user.id, input),
+    () => clockInInner(supabase, user.id, input, lang),
   );
   // A PUNCH THAT ALREADY FILED ONCE still owes the person the sentence: runOnce's duplicate answer
   // carries only ok and the id, so the job it landed on is rebuilt here rather than lost.
-  return answerForAlreadyFiled(supabase, user.id, input, res);
+  return answerForAlreadyFiled(supabase, user.id, input, res, lang);
 }
 
 async function clockInInner(
@@ -309,6 +330,7 @@ async function clockInInner(
     offline_pressed_at?: string | null;
     clientOpId?: string;
   },
+  lang: Lang = "en",
 ): Promise<ClockResult> {
   const user = { id: userId };
 
@@ -488,7 +510,7 @@ async function clockInInner(
   // the job and offer the move — and say nothing at all when the person picked it themselves. The
   // label is read only on the app's pick: a person-picked punch needs no sentence, so it pays for no
   // extra read and the clock answers as fast as it always did.
-  return { ok: true, id, ...said, jobPick: await punchPickOf(supabase, jobId, appPick) };
+  return { ok: true, id, ...said, jobPick: await punchPickOf(supabase, jobId, appPick, lang) };
 }
 
 /**
@@ -497,7 +519,7 @@ async function clockInInner(
  * punch into a refusal, so the pick still reports WHO chose it and the sentence falls back to the
  * job's number or name — never silence, and never a bare id.
  */
-async function punchPickOf(supabase: SupabaseClient, jobId: string, appPick: AppPickSource | null): Promise<PunchJob> {
+async function punchPickOf(supabase: SupabaseClient, jobId: string, appPick: AppPickSource | null, lang?: Lang | null): Promise<PunchJob> {
   if (!appPick) return { chosenBy: "person", id: jobId };
   try {
     const [{ data: jobRow }, { data: orgRow }] = await Promise.all([
@@ -506,9 +528,9 @@ async function punchPickOf(supabase: SupabaseClient, jobId: string, appPick: App
     ]);
     const codesOn = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timeclock_job_codes;
     const job = jobRow as ChoiceJob | null;
-    return { chosenBy: "app", id: jobId, from: appPick, label: job ? punchJobLabel(job, codesOn) : UNREAD_JOB_LABEL };
+    return { chosenBy: "app", id: jobId, from: appPick, label: job ? punchJobLabel(job, codesOn) : unreadJobLabel(lang) };
   } catch {
-    return { chosenBy: "app", id: jobId, from: appPick, label: UNREAD_JOB_LABEL };
+    return { chosenBy: "app", id: jobId, from: appPick, label: unreadJobLabel(lang) };
   }
 }
 
@@ -535,6 +557,7 @@ async function answerForAlreadyFiled(
   userId: string,
   input: { job_id: string | null; job_code: string | null; clientOpId?: string },
   res: ClockResult,
+  lang?: Lang | null,
 ): Promise<ClockResult> {
   // Online (no idempotency key) the inner answer IS the answer: never pay for a read it doesn't need.
   if (!input.clientOpId) return res;
@@ -552,7 +575,7 @@ async function answerForAlreadyFiled(
     if (!entry) return res;
     if ((entry.job_code ?? "").trim()) return res; // filed under a time code: named on purpose
     if (!entry.job_id) return { ...res, noJob: true };
-    return { ...res, jobPick: await punchPickOf(supabase, entry.job_id, "unknown") };
+    return { ...res, jobPick: await punchPickOf(supabase, entry.job_id, "unknown", lang) };
   } catch {
     return res; // a failed read must never turn a saved punch into a refusal
   }
@@ -606,7 +629,9 @@ export async function switchJob(input: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const lang = await callerLang(supabase, user.id);
+  const t = translator(lang);
 
   const { data: entry } = await supabase
     .from("time_entries")
@@ -614,7 +639,7 @@ export async function switchJob(input: {
     .eq("id", input.entry_id)
     .eq("status", "open")
     .maybeSingle();
-  if (!entry) return { ok: false, error: "No open entry to switch." };
+  if (!entry) return { ok: false, error: t("cs_noOpenEntryToSwitch") };
 
   /**
    * A SWITCH ON A FORGOTTEN CLOCK IS A CLOSE AT NOW (review of 0291, 2026-09-24). In cut mode
@@ -644,17 +669,17 @@ export async function switchJob(input: {
       entry as { id: string; profile_id: string; clock_in: string; split_from?: string | null },
     );
     if (shiftUnread) {
-      return { ok: false, error: "I couldn't check how long this clock has been running. Nothing was switched; try again." };
+      return { ok: false, error: t("cs_couldntCheckClockSwitch") };
     }
     const ciMs = shiftSw ? shiftSw.startMs : entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
     if (isLongOpenShift(ciMs, Date.now())) {
       const tz = await orgTz(supabase);
-      const since = dayClock(shiftSw ? shiftSw.startIso : String(entry.clock_in), tz);
+      const since = dayClock(shiftSw ? shiftSw.startIso : String(entry.clock_in), tz, lang);
       if (entry.profile_id === user.id) {
         return {
           ok: false,
           needsTime: true,
-          error: `You've been on the clock since ${since}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock, then clock in on this job.`,
+          error: fillText(t("cs_onClockSinceSwitch"), { since, phrase: longShiftPhrase(lang) }),
         };
       }
       // The office's own door names whose clock it is: "Clock Out Brian" on Timecards.
@@ -662,15 +687,20 @@ export async function switchJob(input: {
       const ownerName = (Array.isArray(owner) ? owner[0] : owner)?.full_name ?? null;
       return {
         ok: false,
-        error: `That clock has been running since ${since}, ${LONG_SHIFT_PHRASE}. ${clockedOutWords(ownerName, false).clockOutVerb} at the time the shift really ended (Timecards, ${clockDoorWords(ownerName).clockOut}), then clock in on this job.`,
+        error: fillText(t("cs_thatClockRunningSince"), {
+          since,
+          phrase: longShiftPhrase(lang),
+          verb: clockedOutWords(ownerName, false, lang).clockOutVerb,
+          door: clockDoorWords(ownerName, { lang }).clockOut,
+        }),
       };
     }
   }
 
   // The new job must be visible to the caller (RLS-scoped): never point an entry at a foreign job.
   const jobId = await visibleJobIdOrNull(supabase, input.job_id);
-  if (!jobId) return { ok: false, error: "That job isn't available." };
-  if (jobId === entry.job_id) return { ok: false, error: "You're already clocked into that job." };
+  if (!jobId) return { ok: false, error: t("cs_thatJobIsntAvailable") };
+  if (jobId === entry.job_id) return { ok: false, error: t("cs_alreadyClockedIntoThatJob") };
 
   // The note typed so far belongs to the part being closed. Saved first, own open row, so the
   // close below never strands unsaved typing on a finished entry nobody reopens. A WHOLE MOVE closes
@@ -727,7 +757,7 @@ export async function switchJob(input: {
     const { data: moved, error: moveErr } = await (entry.job_id ? move.eq("job_id", entry.job_id) : move.is("job_id", null)).select("id");
     if (moveErr) return { ok: false, error: dbError(moveErr) };
     if (!moved?.length) {
-      return { ok: false, error: "Nothing moved: that shift closed or changed job in the meantime. Reload and try again." };
+      return { ok: false, error: t("cs_nothingMovedShiftChanged") };
     }
     r = { mode: "repointed", entry_id: entry.id, closed_id: null, closed_hours: 0, rate_left_behind: false };
   } else {
@@ -740,10 +770,13 @@ export async function switchJob(input: {
     if (error) return { ok: false, error: dbError(error) };
     r = (res ?? {}) as SwitchOutcome;
   }
-  if (!r.entry_id) return { ok: false, error: "The switch did not save. Try again." };
+  if (!r.entry_id) return { ok: false, error: t("cs_switchDidNotSave") };
 
   const { data: j } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
-  const label = j ? jobLabel(j as any) : "another job";
+  // The breadcrumb below is a stored record, so its fallback word is English; the office's bell line
+  // names the job in each reader's language (labelFor).
+  const labelFor = (l: Lang) => (j ? jobLabel(j as any) : translator(l)("cs_anotherJob"));
+  const label = labelFor("en");
   let notes = "";
   if (r.mode === "repointed") {
     // The whole entry moved. THE ANCHOR IS THIS SWITCH'S FIX OR NOTHING: a re-point with no usable fix
@@ -767,19 +800,23 @@ ${switchBreadcrumb(label, nowIso)}` : switchBreadcrumb(label, nowIso);
   const warnings: string[] = [];
   const lunchMoved = Math.max(0, Number(r.lunch_moved) || 0);
   if (lunchMoved > 0) {
-    warnings.push(`The ${lunchMoved}-minute lunch on this shift didn't fit the part before the switch, so it moved to this part.`);
+    warnings.push(fillText(t("cs_lunchMovedToThisPart"), { min: String(lunchMoved) }));
   }
   if (r.rate_left_behind) {
-    warnings.push("Your special pay rate stays on the part before the switch. The office will set it on this part.");
+    warnings.push(t("cs_rateStaysOnPartBefore"));
     try {
       const staff = (await orgStaffIds(String(entry.org_id))).filter((id) => id !== user.id);
       const { data: who } = await supabase.from("profiles").select("full_name").eq("id", entry.profile_id).maybeSingle();
-      const name = (who as { full_name?: string | null } | null)?.full_name ?? "A crew member";
-      await createNotifications(String(entry.org_id), staff, {
-        type: "general",
-        title: `${name} switched jobs mid-shift`,
-        body: `The pay rate on the first part did not carry to the part on ${label}. Set it on Timecards if it applies.`,
-        url: "/timecards",
+      const fullName = (who as { full_name?: string | null } | null)?.full_name ?? null;
+      // One line per reader's language (the function form groups the staff by it).
+      await createNotifications(String(entry.org_id), staff, (l) => {
+        const tl = translator(l);
+        return {
+          type: "general",
+          title: fillText(tl("cs_switchedMidShiftTitle"), { name: fullName ?? tl("cs_aCrewMember") }),
+          body: fillText(tl("cs_switchedMidShiftBody"), { label: labelFor(l) }),
+          url: "/timecards",
+        };
       });
     } catch {
       /* the warning to the tech above still stands */
@@ -888,12 +925,17 @@ export async function clockOut(input: {
   /** The person STATED `at` (the Timeclock long-shift picker, the geofence prompt's picker). A clock
    *  that has run LONG_SHIFT_HOURS closes only at a stated time; see needsStatedStop. */
   picked?: boolean;
+  /** The caller's language when the door already read it (clockOutCurrent, geoClockOut), so the
+   *  close does not read it twice. Omitted: read here. */
+  lang?: Lang | null;
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const lang = input.lang ?? (await callerLang(supabase, user.id));
+  const t = translator(lang);
 
   // A clock-out is ONE tap for everyone (Erik's two-button rework): the job was resolved at
   // clock-in, and a day on two jobs is two entries (Switch Job, or a split on Timecards), never a
@@ -974,9 +1016,9 @@ export async function clockOut(input: {
         revalidatePath("/timecards");
         revalidatePath("/planner");
         // A hold this punch took off a job goes back on it (the punch's own sealed line), said beside the sentence.
-        const heldBack = await putHeldJobBack(ent?.notes, input.entry_id, ent?.org_id);
-        if (heldBack) return { ok: true, id: input.entry_id, undone: true, warning: `${UNDO_PUNCH_SENTENCE} ${heldBack}` };
-        return { ok: true, id: input.entry_id, undone: true, warning: UNDO_PUNCH_SENTENCE };
+        const heldBack = await putHeldJobBack(ent?.notes, input.entry_id, ent?.org_id, lang);
+        if (heldBack) return { ok: true, id: input.entry_id, undone: true, warning: `${undoPunchSentence(lang)} ${heldBack}` };
+        return { ok: true, id: input.entry_id, undone: true, warning: undoPunchSentence(lang) };
       }
     }
   }
@@ -994,7 +1036,7 @@ export async function clockOut(input: {
     // enforces it.
     const { shift, failed: shiftUnread } = await shiftOf(supabase, ent);
     if (shiftUnread && !picked && !unattended) {
-      return { ok: false, error: "I couldn't check how long you've been on the clock. You're still clocked in; try again." };
+      return { ok: false, error: t("cs_couldntCheckClockOut") };
     }
     const shiftStartMs = shift ? shift.startMs : ciMsForStop;
     const shiftStartIso = shift ? shift.startIso : (entClockIn as string);
@@ -1003,11 +1045,11 @@ export async function clockOut(input: {
       return {
         ok: false,
         needsTime: true,
-        error: `You've been on the clock since ${dayClock(shiftStartIso, tz)}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock.`,
+        error: fillText(t("cs_onClockSinceOut"), { since: dayClock(shiftStartIso, tz, lang), phrase: longShiftPhrase(lang) }),
       };
     }
     if (!unattended && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
-      return { ok: false, error: CEILING_REFUSAL_ASK_OFFICE };
+      return { ok: false, error: ceilingRefusalAskOffice(lang) };
     }
     // A stop time stated after a long run says so on the card, and the office hears about it. Not
     // only a `picked` one: needsStatedStop lets an `at` well before now through as a real time, and
@@ -1056,8 +1098,9 @@ export async function clockOut(input: {
       here: { clock_in: entClockIn, clock_out: clockOutIso },
       prior,
       refuse: !input.auto,
+      lang,
     });
-    if (!placed.ok) return { ok: false, error: `${placed.error} You're still clocked in.` };
+    if (!placed.ok) return { ok: false, error: fillText(t("cs_stillClockedInTail"), { error: placed.error }) };
     lunchMinutes = placed.here;
     lunchOnPrior = placed.prior;
     lunchWarning = placed.warning;
@@ -1142,11 +1185,7 @@ export async function clockOut(input: {
     // actually clear the way, instead of handing a man in a truck a database's words.
     const raw = String((error as { message?: unknown } | null)?.message ?? "");
     if (/overlap a shift already recorded/i.test(raw)) {
-      return {
-        ok: false,
-        error:
-          "These hours overlap a shift already recorded for you, so this one can't close on top of it. Your shift is still running and nothing was lost. The office has to fix that other entry on Timecards first.",
-      };
+      return { ok: false, error: t("cs_overlapCantClose") };
     }
     return { ok: false, error: dbError(error) };
   }
@@ -1156,9 +1195,7 @@ export async function clockOut(input: {
     revalidatePath("/planner");
     return {
       ok: false,
-      error: ent
-        ? "That shift is already closed — pull down to refresh."
-        : "That entry is gone — the office may have removed it. Ask them to add the shift.",
+      error: ent ? t("cs_shiftAlreadyClosedRefresh") : t("cs_entryGoneOfficeRemoved"),
     };
   }
 
@@ -1173,22 +1210,33 @@ export async function clockOut(input: {
       .is("paid_at", null)
       .select("id");
     if (lErr || !upd?.length) {
-      lunchWarning = "You're clocked out, but the lunch didn't save on the part before the switch. Ask the office to add it on Timecards.";
+      lunchWarning = t("cs_lunchDidntSavePrior");
     }
   }
 
   // The office hears that a stop time was set after the fact: on the bell only, with the shift a tap
   // away. Never fails the clock-out that already landed (createNotifications never throws).
   if (lateStop && entClockIn && ent?.org_id) {
-    const name = lateStop.name || "A crew member";
-    const first = firstName(name);
     const hours = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
     const staff = (await orgStaffIds(ent.org_id)).filter((id) => id !== user.id);
-    await createNotifications(ent.org_id, staff, {
-      type: "clock_stopped_late",
-      title: `${first} Set His Stop Time Late`,
-      body: `${first} was still on the clock from ${shortDayClock(entClockIn, lateStop.tz)} and picked ${clockOnly(clockOutIso, lateStop.tz)} as his stop, ${hours.toFixed(2)} h.`,
-      url: `/timecards?entry=${input.entry_id}`,
+    const tzLate = lateStop.tz;
+    const stopName = lateStop.name;
+    // One line per reader's language (the function form groups the staff by it).
+    await createNotifications(ent.org_id, staff, (l) => {
+      const tl = translator(l);
+      // A member with no name is "A crew member" whole, never the first word of that phrase.
+      const first = stopName ? firstName(stopName, l) : tl("cs_aCrewMember");
+      return {
+        type: "clock_stopped_late",
+        title: fillText(tl("cs_setStopTimeLateTitle"), { first }),
+        body: fillText(tl("cs_setStopTimeLateBody"), {
+          first,
+          from: shortDayClock(entClockIn, tzLate, l),
+          stop: clockOnly(clockOutIso, tzLate, l),
+          hours: hours.toFixed(2),
+        }),
+        url: `/timecards?entry=${input.entry_id}`,
+      };
     });
   }
 
@@ -1226,14 +1274,15 @@ export async function clockOutCurrent(input: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const lang = await callerLang(supabase, user.id);
   const { data: open } = await supabase
     .from("time_entries")
     .select("id")
     .eq("profile_id", user.id)
     .eq("status", "open")
     .maybeSingle();
-  if (!open) return { ok: false, error: "You're not clocked in." };
+  if (!open) return { ok: false, error: translator(lang)("cs_youreNotClockedIn") };
   return clockOut({
     entry_id: (open as any).id,
     // null when the caller didn't mention lunch → the entry keeps whatever lunch it
@@ -1242,6 +1291,7 @@ export async function clockOutCurrent(input: {
     notes: input.notes ?? "",
     gps: null,
     miles: input.miles,
+    lang,
   });
 }
 
@@ -1264,15 +1314,16 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const t = translator(await callerLang(supabase, user.id));
   if (
     typeof gps?.lat !== "number" || typeof gps?.lng !== "number" ||
     !Number.isFinite(gps.lat) || !Number.isFinite(gps.lng)
   ) {
-    return { ok: false, error: "Bad coordinates." };
+    return { ok: false, error: t("cs_badCoordinates") };
   }
   // A fix fuzzier than this proves nothing about where the job is — refuse it.
-  if (gps.accuracy != null && gps.accuracy > 200) return { ok: false, error: "Fix too fuzzy to anchor on." };
+  if (gps.accuracy != null && gps.accuracy > 200) return { ok: false, error: t("cs_fixTooFuzzy") };
 
   const { data: open } = await supabase
     .from("time_entries")
@@ -1281,8 +1332,8 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
     .eq("profile_id", user.id)
     .eq("status", "open")
     .maybeSingle();
-  if (!open) return { ok: false, error: "Not clocked in." };
-  if ((open as { gps_in: GeoPoint | null }).gps_in) return { ok: false, error: "Anchor already set." };
+  if (!open) return { ok: false, error: t("cs_notClockedIn") };
+  if ((open as { gps_in: GeoPoint | null }).gps_in) return { ok: false, error: t("cs_anchorAlreadySet") };
   // The adoption window opens at clock-in AND re-opens at each mid-shift switch: a
   // switch with no fix to hand deliberately NULLS the anchor (never leave the old
   // site's centre armed), so the fence has to be allowed to re-arm at the new site
@@ -1301,7 +1352,7 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
   const windowMs =
     livePiece || (swMs != null && swMs >= (isNaN(ciMs) ? 0 : ciMs)) ? ADOPT_AFTER_SWITCH_MS : ADOPT_AFTER_CLOCK_IN_MS;
   if (!openedAt || Date.now() - openedAt > windowMs) {
-    return { ok: false, error: "Too long since clock-in to backfill a location." };
+    return { ok: false, error: t("cs_tooLongToBackfill") };
   }
 
   const { data: anchored, error } = await supabase
@@ -1323,7 +1374,7 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
   if (error) return { ok: false, error: dbError(error) };
   // A zero-row update is a 204, not an anchor (the silent-write law): the shift closed or switched
   // meanwhile, or another tab anchored it first.
-  if (!anchored?.length) return { ok: false, error: "That shift changed before the location saved." };
+  if (!anchored?.length) return { ok: false, error: t("cs_shiftChangedBeforeLocation") };
   return { ok: true };
 }
 
@@ -1367,18 +1418,21 @@ export async function geoClockOut(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const lang = await callerLang(supabase, user.id);
+  const t = translator(lang);
   const { data: open } = await supabase
     .from("time_entries")
     .select("id, notes, lunch_minutes")
     .eq("profile_id", user.id)
     .eq("status", "open")
     .maybeSingle();
-  if (!open) return { ok: false, error: "Not clocked in." };
+  // `ended`: the sheet syncs on this, not on the English words (it reads them in any language now).
+  if (!open) return { ok: false, error: t("cs_notClockedIn"), ended: true };
   if (watchedEntryId && (open as { id: string }).id !== watchedEntryId) {
     // The shift the monitor fenced has already ended (a switch, or a close on another screen).
     // Closing whatever happens to be open now would end a shift nobody left.
-    return { ok: false, error: "That shift already ended; nothing was closed." };
+    return { ok: false, error: t("cs_shiftAlreadyEnded"), ended: true };
   }
 
   return clockOut({
@@ -1391,10 +1445,12 @@ export async function geoClockOut(
     gps,
     auto: true,
     at: atIso,
+    // A stored record (0193's column, read by the office's needs-attention list): English.
     autoClosedReason: unattended
       ? "closed automatically from the last GPS fix at the job site — nobody answered the prompt"
       : null,
     picked,
+    lang,
   });
 }
 
@@ -1432,7 +1488,9 @@ export async function completeAutoClockOut(input: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const lang = await callerLang(supabase, user.id);
+  const t = translator(lang);
 
   const { data: entry } = await supabase
     .from("time_entries")
@@ -1443,7 +1501,7 @@ export async function completeAutoClockOut(input: {
     .eq("profile_id", user.id)
     .eq("status", "closed")
     .maybeSingle();
-  if (!entry) return { ok: false, error: "Entry not found." };
+  if (!entry) return { ok: false, error: t("cs_entryNotFound") };
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
   const existingHere = Math.max(0, Number(entry.lunch_minutes) || 0);
 
@@ -1453,7 +1511,7 @@ export async function completeAutoClockOut(input: {
   let priorBefore: LunchPart | null = null;
   let lunchWarning: string | undefined;
   // A lunch already on THIS part is the day's lunch: it is never ALSO put on the part before (SW3).
-  const priorRule = lunchOnPriorAllowed({ lunchOnPrior: !!input.lunch_on_prior, lunch, existingHere });
+  const priorRule = lunchOnPriorAllowed({ lunchOnPrior: !!input.lunch_on_prior, lunch, existingHere, lang });
   const onPrior = priorRule.onPrior;
   lunchWarning = priorRule.warning;
   // Only a lunch being STATED here is placed: a lunch the part already carried (a Switch Job moved it
@@ -1467,25 +1525,26 @@ export async function completeAutoClockOut(input: {
       here: { clock_in: entry.clock_in, clock_out: entry.clock_out },
       prior: priorBefore,
       refuse: true,
+      lang,
     });
-    if (!placed.ok) return { ok: false, error: `${placed.error} Nothing was changed.` };
+    if (!placed.ok) return { ok: false, error: fillText(t("cs_nothingWasChangedTail"), { error: placed.error }) };
     priorWrite = placed.prior;
     lunchWarning = placed.warning ?? lunchWarning;
     // The lunch went on the part before: this part keeps what it already carries.
     hereLunch = placed.here > 0 ? placed.here : existingHere;
   }
 
-  const claims = await claimsOnSources(supabase, priorWrite ? [input.entry_id, priorWrite.id] : [input.entry_id]);
+  const claims = await claimsOnSources(supabase, priorWrite ? [input.entry_id, priorWrite.id] : [input.entry_id], lang);
   if ("error" in claims) return { ok: false, error: claims.error };
 
   // A split is decided BEFORE anything is written, so a refusal leaves the shift as it was.
   let splitPlan: { at: string; lunchOn: "left" | "right"; jobId: string | null; jobCode: string | null } | null = null;
   if (input.switched) {
     const ctx = await requireStaff();
-    if ("error" in ctx) return { ok: false, error: "The office splits a shift after it ends. Tell them when you switched." };
+    if ("error" in ctx) return { ok: false, error: t("cs_officeSplitsAfter") };
     const jobId = input.switched.job_id ? await visibleJobIdOrNull(supabase, input.switched.job_id) : null;
     const jobCode = (input.switched.job_code ?? "").trim() || null;
-    if (!jobId && !jobCode) return { ok: false, error: "Pick the job you switched to." };
+    if (!jobId && !jobCode) return { ok: false, error: t("cs_pickJobSwitchedTo") };
     const preview = splitPreview(
       { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: hereLunch },
       input.switched.at,
@@ -1501,9 +1560,9 @@ export async function completeAutoClockOut(input: {
         preview.lunchOn === "left" ? "right" : "left",
       );
       if (other.ok) lunchOn = other.lunchOn;
-      else return { ok: false, error: preview.problem ?? other.problem ?? "That split time doesn't fit this shift." };
+      else return { ok: false, error: preview.problem ?? other.problem ?? t("cs_splitTimeDoesntFit") };
     } else if (!preview.ok) {
-      return { ok: false, error: preview.problem ?? "That split time doesn't fit this shift." };
+      return { ok: false, error: preview.problem ?? t("cs_splitTimeDoesntFit") };
     }
     splitPlan = { at: preview.at, lunchOn, jobId, jobCode };
   }
@@ -1524,7 +1583,7 @@ export async function completeAutoClockOut(input: {
         ok: false,
         error: priorErr
           ? dbError(priorErr)
-          : "The part before the switch didn't take the lunch (it may have just been paid). Nothing was changed; reload and try again.",
+          : t("cs_priorDidntTakeLunch"),
       };
     }
   }
@@ -1540,10 +1599,10 @@ export async function completeAutoClockOut(input: {
     return {
       ok: false,
       error: priorWrite
-        ? `The lunch is saved on the part before the switch, but this shift didn't take the answer. ${lunchErr ? dbError(lunchErr) : "Reload and try again."}`
+        ? fillText(t("cs_lunchSavedPriorNotHere"), { rest: lunchErr ? dbError(lunchErr) : t("cs_reloadAndTryAgain") })
         : lunchErr
           ? dbError(lunchErr)
-          : "That shift didn't take the lunch — reload and try again.",
+          : t("cs_shiftDidntTakeLunch"),
     };
   }
 
@@ -1555,10 +1614,11 @@ export async function completeAutoClockOut(input: {
       job_id: splitPlan.jobId,
       job_code: splitPlan.jobCode,
       lunch_on: splitPlan.lunchOn,
+      lang,
     });
     if (!res.ok) {
       // The lunch is saved and stands; only the split did not happen, and the sentence says so.
-      return { ok: false, error: `Saved the lunch, but the shift was not split. ${res.error ?? ""}`.trim() };
+      return { ok: false, error: fillText(t("cs_savedLunchNotSplit"), { rest: res.error ?? "" }).trim() };
     }
     split = res;
     // The new part holds the clock-out, so it is the row the prompt would find next: it carries
@@ -1583,14 +1643,14 @@ export async function completeAutoClockOut(input: {
   const warnings: string[] = [];
   if (lunchWarning) warnings.push(lunchWarning);
   if (holder && hoursWere != null && hoursNow != null && Math.abs(hoursWere - hoursNow) >= 0.01) {
-    warnings.push(billedPartMoved(holder, hoursWere, hoursNow));
+    warnings.push(billedPartMoved(holder, hoursWere, hoursNow, lang));
   }
   // The part before the switch can be billed too: its trim is said the same way.
   const priorHolder = priorWrite ? claims.get(priorWrite.id) : null;
   if (priorWrite && priorHolder && priorBefore?.clock_out) {
     const was = hoursBetween(priorBefore.clock_in, priorBefore.clock_out, Number(priorBefore.lunch_minutes) || 0);
     const now = hoursBetween(priorBefore.clock_in, priorBefore.clock_out, priorWrite.lunch);
-    if (Math.abs(was - now) >= 0.01) warnings.push(billedPartMoved(priorHolder, was, now));
+    if (Math.abs(was - now) >= 0.01) warnings.push(billedPartMoved(priorHolder, was, now, lang));
   }
   if (priorWrite) revalidatePath("/timecards");
   if (split?.warning) warnings.push(split.warning);
@@ -1627,6 +1687,8 @@ export async function createManualEntry(input: {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const lang = await callerLang(supabase, ctx.userId);
+  const t = translator(lang);
   const profileId = input.profile_id || ctx.userId;
 
   let clockIn = input.clock_in;
@@ -1636,12 +1698,12 @@ export async function createManualEntry(input: {
   // Lunch: whatever was stated, otherwise none. Nothing here infers a meal from the span.
   const lunchMin = Math.max(0, Number(input.lunch_minutes) || 0);
   if ((!clockIn || !clockOut) && input.work_date && input.hours != null) {
-    if (!(input.hours > 0 && input.hours <= 24)) return { ok: false, error: "Hours must be between 0 and 24." };
+    if (!(input.hours > 0 && input.hours <= 24)) return { ok: false, error: t("cs_hoursBetween0And24") };
     // Center the span on midday in the ORG tz; add the unpaid lunch to the span so the
     // net paid hours come out exactly as stated (payroll deducts lunch from the span).
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
-    const plan = durationSpan({ workDate: input.work_date, hours: input.hours, lunchMin, tz, nowMs: Date.now() });
+    const plan = durationSpan({ workDate: input.work_date, hours: input.hours, lunchMin, tz, nowMs: Date.now(), lang });
     if (!plan.ok) return { ok: false, error: plan.error };
     clockIn = plan.clockIn;
     clockOut = plan.clockOut;
@@ -1649,14 +1711,14 @@ export async function createManualEntry(input: {
     // Flag it so a reviewer knows the times are a placeholder span, not observed times.
     notes = [notes?.trim(), `[duration-entered: ${input.hours}h]`].filter(Boolean).join(" ");
   }
-  if (!clockIn || !clockOut) return { ok: false, error: "Need clock in & out times, or a work date + hours." };
+  if (!clockIn || !clockOut) return { ok: false, error: t("cs_needTimesOrDate") };
 
   const ci = new Date(clockIn);
   const co = new Date(clockOut);
   if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
-    return { ok: false, error: "Invalid date/time." };
+    return { ok: false, error: t("cs_invalidDateTime") };
   }
-  if (co <= ci) return { ok: false, error: "End must be after start." };
+  if (co <= ci) return { ok: false, error: t("cs_endAfterStart") };
 
   // THE EASIEST WAY IN THE APP TO PAY FOR ONE AFTERNOON TWICE was this button: Add Entry wrote a
   // second row for a person who already had those hours and said nothing, because nothing here
@@ -1705,7 +1767,7 @@ export async function createManualEntry(input: {
   }
   // The silent-write law: an insert that comes back with no row wrote nothing, and this door was
   // reporting that as a saved shift. Hours that never landed are hours nobody gets paid for.
-  if (!made?.length) return { ok: false, error: "Those hours didn't save. Reload and try again." };
+  if (!made?.length) return { ok: false, error: t("cs_hoursDidntSave") };
 
   revalidatePath("/timeclock");
   revalidatePath("/timecards");
@@ -1757,10 +1819,14 @@ export async function stopShift(input: {
   notes?: string;
   miles?: number;
   rate_override?: number | null;
+  /** The caller's language when the door already read it (updateTimeEntry); omitted: read here. */
+  lang?: Lang | null;
 }): Promise<ClockResult & { hours?: number; sentence?: string; still_open_entry_id?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const lang = input.lang ?? (await callerLang(supabase, ctx.userId));
+  const t = translator(lang);
 
   /**
    * SWITCHED, NOT CLOCKED OUT (audit v994 SW4). Since 0288 a Switch Job closes the running entry and
@@ -1788,13 +1854,18 @@ export async function stopShift(input: {
     const n = next as { id?: string; clock_in?: string; job_code?: string | null; job?: unknown } | null;
     if (!n?.id || !n.clock_in) return null;
     const j = (Array.isArray(n.job) ? n.job[0] : n.job) as { job_number?: string | null; name?: string | null } | null;
-    const where = j ? jobLabel(j) : n.job_code || "another job";
-    const w = clockedOutWords(fullName, isSelf);
-    const is = isSelf ? "are" : "is";
+    const where = j ? jobLabel(j) : n.job_code || t("cs_anotherJob");
+    const w = clockedOutWords(fullName, isSelf, lang);
     return {
       ok: false as const,
       still_open_entry_id: n.id,
-      error: `${w.subject} switched to ${where} at ${dayClock(n.clock_in, tz)} and ${is} still on the clock. Nothing was changed. Open that shift to ${clockDoorWords(fullName, { self: isSelf }).clockOut}.`,
+      error: fillText(t("cs_switchedStillOnClock"), {
+        subject: w.subject,
+        where,
+        when: dayClock(n.clock_in, tz, lang),
+        is: w.is,
+        door: clockDoorWords(fullName, { self: isSelf, lang }).clockOut,
+      }),
     };
   };
 
@@ -1818,12 +1889,12 @@ export async function stopShift(input: {
     profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
     job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
   } | null;
-  if (!stored) return { ok: false, error: "Entry not found." };
+  if (!stored) return { ok: false, error: t("cs_entryNotFound") };
   const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
   const ownerFull = (one(stored.profiles)?.full_name ?? "").trim();
-  const ownerName = ownerFull || "That person";
+  const ownerName = ownerFull || t("cs_thatPerson");
   const self = stored.profile_id === ctx.userId;
-  const said = clockedOutWords(ownerFull, self);
+  const said = clockedOutWords(ownerFull, self, lang);
   const tz = await orgTz(supabase);
   if (stored.status !== "open") {
     const moved = await stillOpen(stored.split_from ?? stored.id, stored.profile_id, stored.org_id, ownerFull, self, tz);
@@ -1831,17 +1902,17 @@ export async function stopShift(input: {
     return {
       ok: false,
       error: stored.clock_out
-        ? `${said.subject} ${said.was} already clocked out at ${dayClock(stored.clock_out, tz)}. Reload to see the times.`
-        : `${said.subject} ${said.was} already clocked out. Reload to see the times.`,
+        ? fillText(t("cs_alreadyClockedOutAt"), { subject: said.subject, was: said.was, when: dayClock(stored.clock_out, tz, lang) })
+        : fillText(t("cs_alreadyClockedOut"), { subject: said.subject, was: said.was }),
     };
   }
 
   const startIso = input.clock_in ?? stored.clock_in;
   const startMs = Date.parse(startIso);
   const stopMs = Date.parse(input.clock_out);
-  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return { ok: false, error: "Pick the time the shift stopped." };
+  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return { ok: false, error: t("cs_pickTimeShiftStopped") };
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
-  const problem = stopProblem({ startMs, stopMs, nowMs: Date.now(), lunchMin: lunch, who: "he", tz });
+  const problem = stopProblem({ startMs, stopMs, nowMs: Date.now(), lunchMin: lunch, who: "he", tz, lang });
   if (problem) return { ok: false, error: problem };
 
   const overlaps = await overlapRefusal(supabase, stored.profile_id, startMs, stopMs, { excludeId: stored.id, name: ownerName, tz });
@@ -1851,7 +1922,7 @@ export async function stopShift(input: {
   let jobId: string | null | undefined = undefined;
   if (input.job_id !== undefined) {
     jobId = input.job_id ? await visibleJobIdOrNull(supabase, input.job_id) : null;
-    if (input.job_id && !jobId) return { ok: false, error: "That job isn't available." };
+    if (input.job_id && !jobId) return { ok: false, error: t("cs_thatJobIsntAvailable") };
   }
 
   const { data: actor } = await supabase.from("profiles").select("full_name").eq("id", ctx.userId).maybeSingle();
@@ -1905,7 +1976,7 @@ export async function stopShift(input: {
     revalidateTime([stored.job_id]);
     const moved = await stillOpen(stored.split_from ?? stored.id, stored.profile_id, stored.org_id, ownerFull, self, tz);
     if (moved) return moved;
-    return { ok: false, error: `${said.subject} ${said.was} clocked out a moment ago somewhere else. Reload to see it.` };
+    return { ok: false, error: fillText(t("cs_clockedOutElsewhere"), { subject: said.subject, was: said.was }) };
   }
 
   const hours = hoursBetween(startOut, stopOut, lunch);
@@ -1921,23 +1992,42 @@ export async function stopShift(input: {
       : job
         ? jobLabel(job)
         : null;
-  const when = `${dayOnly(startOut, tz)}, ${clockOnly(startOut, tz)} to ${clockOnly(stopOut, tz)}`;
-  // "5.00 h on Honeysuckle, Mon Jan 1, 12:00 PM to 5:00 PM": the facts every line below names.
-  const facts = `${hours.toFixed(2)} h${newJobLabel ? ` on ${newJobLabel}` : ""}, ${when}`;
+  // "5.00 h on Honeysuckle, Mon Jan 1, 12:00 PM to 5:00 PM": the facts every line below names — in
+  // the reader's language, because the office reads its sentence and the crew member reads the push.
+  const factsIn = (l: Lang) => {
+    const tl = translator(l);
+    const when = fillText(tl("cs_whenRange"), { day: dayOnly(startOut, tz, l), from: clockOnly(startOut, tz, l), to: clockOnly(stopOut, tz, l) });
+    return newJobLabel
+      ? fillText(tl("cs_factsOn"), { hours: hours.toFixed(2), label: newJobLabel, when })
+      : fillText(tl("cs_facts"), { hours: hours.toFixed(2), when });
+  };
 
   if (!self) {
-    // The actor's own name when the office has one; a profile with no name reads "The office".
-    const actorFirst = actorFull ? firstName(actorFull) : "The office";
-    const tellWho = actorFull ? actorFirst : "the office";
-    const title = "You're Clocked Out";
-    const body =
-      `${actorFirst} clocked you out at ${clockOnly(stopOut, tz)}: ${facts}, ${lunch > 0 ? `${lunch} min lunch` : "no lunch"}. ` +
-      `If that is wrong, tell ${tellWho}.`;
+    // THE PERSON WHOSE CLOCK IT WAS IS TOLD IN THEIR OWN LANGUAGE (cn-v1138): the bell line through the
+    // function form, the push with the language resolved once (langOf). The actor's own name when the
+    // office has one; a profile with no name reads "The office".
+    const words = (l: Lang) => {
+      const tl = translator(l);
+      const actorFirst = actorFull ? firstName(actorFull, l) : tl("cs_TheOffice");
+      const tellWho = actorFull ? actorFirst : tl("cs_theOffice");
+      return {
+        title: tl("cs_youreClockedOutTitle"),
+        body: fillText(tl("cs_clockedYouOutBody"), {
+          actor: actorFirst,
+          clock: clockOnly(stopOut, tz, l),
+          facts: factsIn(l),
+          lunch: lunch > 0 ? fillText(tl("cs_minLunch"), { n: String(lunch) }) : tl("cs_noLunch"),
+          who: tellWho,
+        }),
+        url: "/timeclock",
+      };
+    };
+    const memberLang = (await langOf(supabase, [stored.profile_id], stored.org_id)).get(stored.profile_id) ?? "en";
     // Both are best-effort by construction (they never throw); allSettled keeps it that way even if
     // that changes, so a push outage can never make a stopped clock look unstopped.
     await Promise.allSettled([
-      createNotifications(stored.org_id, [stored.profile_id], { type: "clock_stopped", title, body, url: "/timeclock" }),
-      sendPushToProfiles([stored.profile_id], "clock_out", { title, body, url: "/timeclock" }),
+      createNotifications(stored.org_id, [stored.profile_id], (l) => ({ type: "clock_stopped", ...words(l) })),
+      sendPushToProfiles([stored.profile_id], "clock_out", words(memberLang)),
     ]);
   }
 
@@ -1945,7 +2035,10 @@ export async function stopShift(input: {
   revalidatePath("/payroll");
 
   // Erik, 2026-09-24: "Brian is Clocked Out". The deed first, in his words, then the facts.
-  const sentence = self ? `${said.headline}: ${facts}.` : `${said.headline}: ${facts}. ${said.told}`;
+  const facts = factsIn(lang);
+  const sentence = self
+    ? fillText(t("cs_headlineFacts"), { headline: said.headline, facts })
+    : fillText(t("cs_headlineFactsTold"), { headline: said.headline, facts, told: said.told });
   return { ok: true, hours, sentence };
 }
 
@@ -1964,19 +2057,20 @@ export async function updateOpenEntry(input: {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
+  const t = translator(await callerLang(supabase, ctx.userId));
   const { data: prev } = await supabase.from("time_entries").select("job_id, status").eq("id", input.id).maybeSingle();
   const before = prev as { job_id: string | null; status: string } | null;
-  if (!before) return { ok: false, error: "Entry not found." };
+  if (!before) return { ok: false, error: t("cs_entryNotFound") };
 
   const patch: Record<string, unknown> = {};
   if (input.job_id !== undefined) {
     const jobId = input.job_id ? await visibleJobIdOrNull(supabase, input.job_id) : null;
-    if (input.job_id && !jobId) return { ok: false, error: "That job isn't available." };
+    if (input.job_id && !jobId) return { ok: false, error: t("cs_thatJobIsntAvailable") };
     patch.job_id = jobId;
   }
   if (input.job_code !== undefined) patch.job_code = input.job_code;
   if (input.notes !== undefined) patch.notes = input.notes.trim() ? input.notes : null;
-  if (!Object.keys(patch).length) return { ok: false, error: "Nothing changed to save." };
+  if (!Object.keys(patch).length) return { ok: false, error: t("cs_nothingChangedToSave") };
 
   const { data: upd, error } = await supabase
     .from("time_entries")
@@ -1987,7 +2081,7 @@ export async function updateOpenEntry(input: {
   if (error) return { ok: false, error: dbError(error) };
   if (!upd?.length) {
     revalidateTime([before.job_id]);
-    return { ok: false, error: "That clock isn't running any more. Reload." };
+    return { ok: false, error: t("cs_clockNotRunningReload") };
   }
   revalidateTime([before.job_id, typeof patch.job_id === "string" ? patch.job_id : null]);
   revalidatePath("/payroll");
@@ -2051,12 +2145,14 @@ export async function updateTimeEntry(input: {
     auto_closed_reason: string | null;
     status: string | null;
   } | null;
-  if (!stored) return { ok: false, error: "Entry not found." };
+  const lang = await callerLang(supabase, ctx.userId);
+  const t = translator(lang);
+  if (!stored) return { ok: false, error: t("cs_entryNotFound") };
 
   if (stored.status === "open") {
     if (input.profile_id && input.profile_id !== stored.profile_id) {
       const owner = Array.isArray(stored.profiles) ? stored.profiles[0] : stored.profiles;
-      return { ok: false, error: `${clockedOutWords(owner?.full_name, stored.profile_id === ctx.userId).clockOutFirst}, then move the shift to someone else.` };
+      return { ok: false, error: fillText(t("cs_clockOutFirstThenMove"), { first: clockedOutWords(owner?.full_name, stored.profile_id === ctx.userId, lang).clockOutFirst }) };
     }
     return stopShift({
       entry_id: input.id,
@@ -2068,6 +2164,7 @@ export async function updateTimeEntry(input: {
       notes: input.notes,
       miles: input.miles,
       rate_override: input.rate_override,
+      lang,
     });
   }
 
@@ -2084,16 +2181,16 @@ export async function updateTimeEntry(input: {
       splitShift = !!kids?.length;
     }
     if (splitShift) {
-      return { ok: false, error: "This shift was split into parts. Join the split back first, then move the shift to someone else." };
+      return { ok: false, error: t("cs_splitJoinBackFirst") };
     }
   }
 
   const ci = new Date(input.clock_in);
   const co = new Date(input.clock_out);
   if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
-    return { ok: false, error: "Invalid date/time." };
+    return { ok: false, error: t("cs_invalidDateTime") };
   }
-  if (co <= ci) return { ok: false, error: "End must be after start." };
+  if (co <= ci) return { ok: false, error: t("cs_endAfterStart") };
 
   const patch: Record<string, unknown> = {
     // The office just LOOKED at this entry — the "system closed this by itself" flag has done
@@ -2142,10 +2239,10 @@ export async function updateTimeEntry(input: {
       (input.lunch_minutes || 0) !== (stored.lunch_minutes ?? 0) ||
       rateMoved ||
       (!!input.profile_id && input.profile_id !== stored.profile_id);
-    if (payMoved) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
+    if (payMoved) return { ok: false, error: t("cs_paidPeriodUndo") };
   }
   if (stored.mileage_paid_at && input.miles !== undefined && Math.abs((input.miles ?? 0) - Number(stored.miles ?? 0)) > 0.001) {
-    return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
+    return { ok: false, error: t("cs_mileageSettledUndo") };
   }
 
   // AND A SHIFT MUST NOT BE MOVED ON TOP OF ANOTHER ONE. This door can change both ends of the
@@ -2176,18 +2273,18 @@ export async function updateTimeEntry(input: {
   //     Erik's line would claim Brian's hours (0361's time_entries_billed_person_stays, underneath).
   //     An owner's shift is never in a paid period (0286), so the payroll lock above never stops it;
   //   • its hours MAY change (a typo is a typo), and the answer names the invoice and both figures.
-  const claims = await claimsOnSources(supabase, [input.id]);
+  const claims = await claimsOnSources(supabase, [input.id], lang);
   if ("error" in claims) return { ok: false, error: claims.error };
   const billedBy = claims.get(input.id) ?? null;
   const hoursBefore = stored.clock_out ? hoursBetween(stored.clock_in, stored.clock_out, stored.lunch_minutes ?? 0) : null;
   const hoursAfter = hoursBetween(input.clock_in, input.clock_out, input.lunch_minutes || 0);
   const billedHoursMoved = !!billedBy && hoursBefore != null && Math.abs(hoursBefore - hoursAfter) >= 0.01;
   if (input.job_id !== undefined && (input.job_id ?? null) !== (oldJobId ?? null) && billedBy) {
-    return { ok: false, error: claimedMoveRefusal(billedBy) };
+    return { ok: false, error: claimedMoveRefusal(billedBy, lang) };
   }
   if (billedBy && targetProfileId !== stored.profile_id) {
     const owner = Array.isArray(stored.profiles) ? stored.profiles[0] : stored.profiles;
-    return { ok: false, error: claimedPersonRefusal(billedBy, owner?.full_name) };
+    return { ok: false, error: claimedPersonRefusal(billedBy, owner?.full_name, lang) };
   }
 
   const { data: entryUpd, error } = await supabase
@@ -2197,7 +2294,7 @@ export async function updateTimeEntry(input: {
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   // The silent-write law: a zero-row update is a 204, not a saved edit.
-  if (!entryUpd?.length) return { ok: false, error: "That entry didn't take the edit — reload and try again." };
+  if (!entryUpd?.length) return { ok: false, error: t("cs_entryDidntTakeEdit") };
 
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
@@ -2213,7 +2310,7 @@ export async function updateTimeEntry(input: {
   if (billedHoursMoved && billedBy) {
     const fmt = (h: number) => `${(Math.round(h * 100) / 100).toString()} h`;
     warnings.push(
-      `${billedBy.invoice_number ?? "An invoice"} billed this shift at ${fmt(hoursBefore ?? 0)} — it now reads ${fmt(hoursAfter)}. The invoice keeps its figure; adjust it by hand if the customer should pay for the difference.`,
+      fillText(t("cs_billedShiftNowReads"), { invoice: billedBy.invoice_number ?? t("cs_AnInvoice"), before: fmt(hoursBefore ?? 0), after: fmt(hoursAfter) }),
     );
   }
   return warnings.length ? { ok: true, warning: warnings.join(" ") } : { ok: true };
@@ -2275,21 +2372,24 @@ export async function splitTimeEntry(input: {
   job_code?: string | null;
   lunch_on?: "left" | "right" | null;
   miles_on?: "left" | "right" | null;
+  /** The caller's language when the door already read it (completeAutoClockOut); omitted: read here. */
+  lang?: Lang | null;
 }): Promise<SplitResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const t = translator(input.lang ?? (await callerLang(supabase, ctx.userId)));
   const atMs = Date.parse(input.at);
-  if (!Number.isFinite(atMs)) return { ok: false, error: "Pick a split time inside the shift." };
+  if (!Number.isFinite(atMs)) return { ok: false, error: t("cs_pickSplitTimeInside") };
   // A job the caller cannot see is refused, never quietly dropped to "no job": the hours would
   // land nowhere.
   let jobId: string | null = null;
   if (input.job_id) {
     jobId = await visibleJobIdOrNull(supabase, input.job_id);
-    if (!jobId) return { ok: false, error: "That job isn't available." };
+    if (!jobId) return { ok: false, error: t("cs_thatJobIsntAvailable") };
   }
   const jobCode = (input.job_code ?? "").trim() || null;
-  if (!jobId && !jobCode) return { ok: false, error: "Pick a job or a time code for the new part." };
+  if (!jobId && !jobCode) return { ok: false, error: t("cs_pickJobOrCodeForPart") };
 
   const { data, error } = await supabase.rpc("split_time_entry", {
     p_entry: input.entry_id,
@@ -2310,7 +2410,7 @@ export async function splitTimeEntry(input: {
     right_hours?: number;
     carried?: { invoice_id: string; invoice_number: string | null; status: string }[];
   };
-  if (!r.right_id) return { ok: false, error: "That split didn't save. Reload and try again." };
+  if (!r.right_id) return { ok: false, error: t("cs_splitDidntSave") };
   revalidateTime([...(await jobIdsOf(supabase, [input.entry_id])), jobId]);
   // NOTHING SILENT: a billed shift split on its own job hands its claim to the new part (it carries
   // hours that invoice already bills), and the office is told which invoice.
@@ -2319,7 +2419,7 @@ export async function splitTimeEntry(input: {
   const carried = r.carried ?? [];
   const billing = carried.filter((c) => c.status !== "void");
   const warning = billing.length
-    ? `${billing.map((c) => c.invoice_number ?? "An invoice").join(", ")} already ${billing.length === 1 ? "bills" : "bill"} this shift, so the new part carries that claim and will not be billed again.`
+    ? fillText(t(billing.length === 1 ? "cs_splitCarriesClaim1" : "cs_splitCarriesClaimN"), { list: billing.map((c) => c.invoice_number ?? t("cs_AnInvoice")).join(", ") })
     : undefined;
   return {
     ok: true,
@@ -2339,8 +2439,8 @@ export async function splitTimeEntry(input: {
  */
 export async function shiftClaim(entryId: string): Promise<{ ok: true; holder: ClaimHolder | null } | { ok: false; error: string }> {
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: String(ctx.error ?? "This action is staff-only.") };
-  const claims = await claimsOnSources(ctx.supabase, [entryId]);
+  if ("error" in ctx) return { ok: false, error: String(ctx.error ?? en("cs_staffOnly")) };
+  const claims = await claimsOnSources(ctx.supabase, [entryId], await callerLang(ctx.supabase, ctx.userId));
   if ("error" in claims) return { ok: false, error: claims.error };
   const h = claims.get(entryId);
   return { ok: true, holder: h ? { id: h.id, invoice_number: h.invoice_number } : null };
@@ -2359,7 +2459,7 @@ export async function joinTimeEntries(input: { left_id: string; right_id: string
   const { data, error } = await supabase.rpc("join_time_entries", { p_left: input.left_id, p_right: input.right_id });
   if (error) return { ok: false, error: dbError(error) };
   const r = (data ?? {}) as { kept_id?: string; hours?: number };
-  if (!r.kept_id) return { ok: false, error: "Those parts didn't join. Reload and try again." };
+  if (!r.kept_id) return { ok: false, error: translator(await callerLang(supabase, ctx.userId))("cs_partsDidntJoin") };
   revalidateTime(jobs);
   return { ok: true, kept_id: r.kept_id, hours: Number(r.hours) || 0 };
 }
@@ -2379,8 +2479,9 @@ export async function moveTimeEntryCut(input: {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const lang = await callerLang(supabase, ctx.userId);
   const atMs = Date.parse(input.at);
-  if (!Number.isFinite(atMs)) return { ok: false, error: "Pick a time for the split." };
+  if (!Number.isFinite(atMs)) return { ok: false, error: translator(lang)("cs_pickTimeForSplit") };
   const { data, error } = await supabase.rpc("move_time_entry_cut", {
     p_left: input.left_id,
     p_right: input.right_id,
@@ -2398,7 +2499,7 @@ export async function moveTimeEntryCut(input: {
   };
   revalidateTime(await jobIdsOf(supabase, [input.left_id, input.right_id]));
   const warnings = (r.billed ?? []).map((b) =>
-    billedPartMoved({ id: b.invoice_id, invoice_number: b.invoice_number }, Number(b.hours_before) || 0, Number(b.hours_after) || 0),
+    billedPartMoved({ id: b.invoice_id, invoice_number: b.invoice_number }, Number(b.hours_before) || 0, Number(b.hours_after) || 0, lang),
   );
   return {
     ok: true,
@@ -2415,7 +2516,7 @@ export async function moveTimeEntryCut(input: {
  * source_ids column there are no labor claims to protect, so the answer is "none" — while any
  * OTHER failure refuses, because editing blind is how a claim gets lost.
  */
-async function claimsOnSources(supabase: SupabaseClient, ids: string[]): Promise<ClaimIndex | { error: string }> {
+async function claimsOnSources(supabase: SupabaseClient, ids: string[], lang?: Lang | null): Promise<ClaimIndex | { error: string }> {
   if (!ids.length) return new Map();
   const { data, error } = await supabase
     .from("invoice_items")
@@ -2427,7 +2528,7 @@ async function claimsOnSources(supabase: SupabaseClient, ids: string[]): Promise
     const msg = String((error as { message?: string })?.message ?? "");
     if (code === "42703" || /source_ids/i.test(msg) || /does not exist/i.test(msg)) return new Map();
     reportError("claimsOnSources", error, { ids });
-    return { error: "Couldn't check which invoice bills this shift — nothing was changed. Try again in a moment." };
+    return { error: translator(lang)("cs_couldntCheckInvoice") };
   }
   const wanted = new Set(ids);
   const out = new Map<string, ClaimHolder & { created_at: string }>();
@@ -2446,6 +2547,8 @@ async function claimsOnSources(supabase: SupabaseClient, ids: string[]): Promise
 
 export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   const supabase = await createClient();
+  const lang = await callerLang(supabase);
+  const t = translator(lang);
   /**
    * Payroll locks: a base-paid or mileage-settled entry backs a payroll_runs snapshot the accountant
    * exports — deleting it would silently diverge the books. No bypass for any caller: Undo the period
@@ -2467,9 +2570,9 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
     .maybeSingle();
   if (lockErr) {
     reportError("deleteTimeEntry.read", lockErr, { entryId: id });
-    return { ok: false, error: "Couldn't check this entry — nothing was changed. Try again in a moment." };
+    return { ok: false, error: t("cs_couldntCheckEntry") };
   }
-  if (!locked) return { ok: false, error: "That entry is no longer there — reload and try again." };
+  if (!locked) return { ok: false, error: t("cs_entryNoLongerThere") };
   // NOT nullable: the two refusals above are what makes that true, and the type is what keeps the
   // guards below from going quiet again if either one is ever moved.
   const lock = locked as {
@@ -2479,22 +2582,22 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
     profile_id: string | null;
     split_from: string | null;
   };
-  if (lock.paid_at) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
-  if (lock.mileage_paid_at) return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
+  if (lock.paid_at) return { ok: false, error: t("cs_paidPeriodUndo") };
+  if (lock.mileage_paid_at) return { ok: false, error: t("cs_mileageSettledUndo") };
 
   // AN INVOICE THAT BILLED THIS SHIFT HOLDS IT (0255). A labor line's claim (invoice_items.source_ids)
   // names the entry: with the row gone the invoice would bill hours that no longer exist on the
   // timecard, and payroll and billing would disagree with no record of why. 0261 refuses it under
   // this; here the office reads which invoice to void or adjust first.
-  const claims = await claimsOnSources(supabase, [id]);
+  const claims = await claimsOnSources(supabase, [id], lang);
   if ("error" in claims) return { ok: false, error: claims.error };
   const holders = [...new Map([...claims.values()].map((h) => [h.id, h] as const)).values()];
   if (holders.length) {
-    const numbers = holders.map((h) => h.invoice_number ?? "an invoice");
-    const list = numbers.length === 1 ? numbers[0] : `${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
+    const numbers = holders.map((h) => h.invoice_number ?? t("cs_anInvoice"));
+    const list = numbers.length === 1 ? numbers[0] : `${numbers.slice(0, -1).join(", ")} ${t("cs_and")} ${numbers[numbers.length - 1]}`;
     return {
       ok: false,
-      error: `${list} ${holders.length === 1 ? "bills" : "bill"} this shift — void or adjust ${holders.length === 1 ? "it" : "them"} first. Nothing was changed.`,
+      error: fillText(t(holders.length === 1 ? "cs_invoicesHoldShift1" : "cs_invoicesHoldShiftN"), { list }),
     };
   }
 
@@ -2531,7 +2634,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
       .order("clock_in", { ascending: true });
     if (kinErr) {
       reportError("deleteTimeEntry.family", kinErr, { entryId: id });
-      return { ok: false, error: "Couldn't check whether this shift was split into parts — nothing was changed. Try again in a moment." };
+      return { ok: false, error: t("cs_couldntCheckSplitParts") };
     }
     // Sorted here as well as in the read: WHICH piece becomes the new first entry is the whole rule,
     // so it is decided by the clock in front of us and not by the order a query happened to answer in.
@@ -2543,7 +2646,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   // not a deleted entry.
   const { data: gone, error } = await supabase.from("time_entries").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!gone?.length) return { ok: false, error: "That entry didn't delete — reload and try again." };
+  if (!gone?.length) return { ok: false, error: t("cs_entryDidntDelete") };
 
   // THE RE-ROOT. Only the pieces this delete just orphaned (`split_from is null` on the write, so a
   // piece somebody re-pointed in the meantime is left where it is), and checked: if it did not land,
@@ -2562,8 +2665,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
       .select("id");
     if (rerootErr || (rerooted ?? []).length !== rest.length) {
       if (rerootErr) reportError("deleteTimeEntry.reroot", rerootErr, { entryId: id, root: first.id });
-      said =
-        "That entry is deleted, but the other parts of that shift are no longer held together as one split shift, so Join Back isn't offered on them. Each part is still its own entry on Timecards.";
+      said = t("cs_deletedPartsNotHeld");
     }
   }
 
@@ -2580,33 +2682,36 @@ async function orgTz(supabase: SupabaseClient): Promise<string> {
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   return getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
 }
-/** "1:37 PM" */
-function clockOnly(iso: string, tz: string): string {
+/** "1:37 PM" / "1:37 p.m." on the company's clock, in the reader's language; the narrow and the
+ *  no-break spaces Intl puts before the meridiem become plain ones (plainSpaces), so a sentence
+ *  wraps and a test matches the way a person types it. */
+function clockOnly(iso: string, tz: string, lang?: Lang | null): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+  return plainSpaces(d.toLocaleTimeString(localeOf(lang), { timeZone: tz, hour: "numeric", minute: "2-digit" }));
 }
-/** "Tue Sep 22" */
-function dayOnly(iso: string, tz: string): string {
+/** "Tue Sep 22" / "mar 22 sep" */
+function dayOnly(iso: string, tz: string, lang?: Lang | null): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  const wd = d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" });
-  const md = d.toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" });
-  return `${wd} ${md}`;
+  const wd = d.toLocaleDateString(localeOf(lang), { timeZone: tz, weekday: "short" });
+  const md = d.toLocaleDateString(localeOf(lang), { timeZone: tz, month: "short", day: "numeric" });
+  return plainSpaces(`${wd} ${md}`);
 }
 /** "Tue Sep 22, 1:37 PM" */
-function dayClock(iso: string, tz: string): string {
-  return `${dayOnly(iso, tz)}, ${clockOnly(iso, tz)}`;
+function dayClock(iso: string, tz: string, lang?: Lang | null): string {
+  return `${dayOnly(iso, tz, lang)}, ${clockOnly(iso, tz, lang)}`;
 }
 /** "Tue 1:37 PM" */
-function shortDayClock(iso: string, tz: string): string {
+function shortDayClock(iso: string, tz: string, lang?: Lang | null): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  return `${d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${clockOnly(iso, tz)}`;
+  return plainSpaces(`${d.toLocaleDateString(localeOf(lang), { timeZone: tz, weekday: "short" })} ${clockOnly(iso, tz, lang)}`);
 }
-function firstName(full: string | null | undefined): string {
+/** The first name, or "They" in the reader's language for a profile with none. */
+function firstName(full: string | null | undefined, lang?: Lang | null): string {
   const f = (full ?? "").trim().split(/\s+/)[0];
-  return f || "They";
+  return f || translator(lang)("cs_they");
 }
 
 /**
@@ -2641,16 +2746,18 @@ export async function duplicateTimeEntry(
     .select("profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, notes, status, rate_override")
     .eq("id", id)
     .single();
-  if (readErr || !e) return { ok: false, error: readErr?.message ?? "Entry not found." };
+  const lang = await callerLang(supabase, ctx.userId);
+  const t = translator(lang);
+  if (readErr || !e) return { ok: false, error: readErr?.message ?? t("cs_entryNotFound") };
   if (e.status !== "closed" || !e.clock_out) {
-    return { ok: false, error: "Clock out the entry before duplicating it." };
+    return { ok: false, error: t("cs_clockOutBeforeDuplicating") };
   }
   const clockIn = String(e.clock_in);
   const clockOut = String(e.clock_out);
   const startMs = new Date(clockIn).getTime();
   const endMs = new Date(clockOut).getTime();
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
-    return { ok: false, error: "That entry's times can't be read, so there's nothing to copy." };
+    return { ok: false, error: t("cs_timesCantBeRead") };
   }
 
   // Whoever was named, else the same person.
@@ -2667,10 +2774,10 @@ export async function duplicateTimeEntry(
     .eq("id", targetId)
     .maybeSingle();
   const target = targetRow as { id: string; full_name: string | null; active: boolean | null } | null;
-  if (!target) return { ok: false, error: "That person isn't on this crew." };
-  const name = target.full_name ?? "That person";
+  if (!target) return { ok: false, error: t("cs_personNotOnCrew") };
+  const name = target.full_name ?? t("cs_thatPerson");
   if (target.active === false) {
-    return { ok: false, error: `${name} isn't active anymore, so hours can't be added for them.` };
+    return { ok: false, error: fillText(t("cs_personNotActive"), { name }) };
   }
 
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
@@ -2708,7 +2815,7 @@ export async function duplicateTimeEntry(
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   // The silent-write law: an insert that comes back with no row wrote nothing.
-  if (!made?.length) return { ok: false, error: "That copy didn't save. Reload and try again." };
+  if (!made?.length) return { ok: false, error: t("cs_copyDidntSave") };
 
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
@@ -2719,13 +2826,13 @@ export async function duplicateTimeEntry(
   // What stayed behind is said out loud, once, and only when there was something to leave.
   const dropped = samePerson
     ? []
-    : [e.rate_override != null ? "rate override" : null, Number(e.miles) > 0 ? "miles" : null].filter(
+    : [e.rate_override != null ? t("cs_rateOverride") : null, Number(e.miles) > 0 ? t("cs_miles") : null].filter(
         (x): x is string => !!x,
       );
   const warning = dropped.length
-    ? `The ${dropped.join(" and ")} stayed on the original. Add ${dropped.length > 1 ? "them" : "it"} to ${name}'s entry if ${dropped.length > 1 ? "they apply" : "it applies"}.`
+    ? fillText(t(dropped.length > 1 ? "cs_droppedStayedN" : "cs_droppedStayed1"), { dropped: dropped.join(` ${t("cs_and")} `), name })
     : undefined;
-  return { ok: true, message: `Copied to ${name}, ${when}.`, ...(warning ? { warning } : {}) };
+  return { ok: true, message: fillText(t("cs_copiedTo"), { name, when }), ...(warning ? { warning } : {}) };
 }
 
 // ── A PUNCH ALREADY THERE IS PUT ON THE JOB, NOT TYPED AGAIN (the duplicate punches) ──────────
@@ -2781,10 +2888,12 @@ export type DayShifts =
  */
 export async function shiftsOnDay(input: { profile_id?: string | null; date: string; for_job_id?: string | null }): Promise<DayShifts> {
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? en("cs_staffOnly") };
   const supabase = ctx.supabase;
+  const lang = await callerLang(supabase, ctx.userId);
+  const t = translator(lang);
   const profileId = input.profile_id || ctx.userId;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date ?? "")) return { ok: false, error: "Pick a day." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date ?? "")) return { ok: false, error: t("cs_pickADay") };
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
   const tz = orgSettings.timezone;
@@ -2815,7 +2924,7 @@ export async function shiftsOnDay(input: { profile_id?: string | null; date: str
     const e = r.clock_out ? Date.parse(r.clock_out) : now;
     return s < dayEnd && e > dayStart;
   });
-  const claims = await claimsOnSources(supabase, rows.map((r) => r.id));
+  const claims = await claimsOnSources(supabase, rows.map((r) => r.id), lang);
   if ("error" in claims) return { ok: false, error: claims.error };
   const shifts: DayShift[] = rows.map((r) => {
     const j = (Array.isArray(r.job) ? r.job[0] : r.job) as { job_number?: string | null; name?: string | null } | null | undefined;
@@ -2829,7 +2938,7 @@ export async function shiftsOnDay(input: { profile_id?: string | null; date: str
       jobLabel: r.job_id && j ? jobLabel(j) : null,
       jobCode: code,
       noJob: !r.job_id && !code,
-      billedBy: claims.get(r.id)?.invoice_number ?? (claims.has(r.id) ? "an invoice" : null),
+      billedBy: claims.get(r.id)?.invoice_number ?? (claims.has(r.id) ? t("cs_anInvoice") : null),
     };
   });
   const job = jobR.data as { id: string; job_number?: string | null; name?: string | null } | null;
@@ -2850,7 +2959,7 @@ export async function shiftsOnDay(input: { profile_id?: string | null; date: str
   }
   return {
     ok: true,
-    name: ((whoR.data as { full_name?: string | null } | null)?.full_name ?? "").trim() || "This person",
+    name: ((whoR.data as { full_name?: string | null } | null)?.full_name ?? "").trim() || t("cs_thisPerson"),
     tz,
     shifts,
     forJob: job ? { id: job.id, label: jobLabel(job) } : null,
@@ -2884,21 +2993,23 @@ export async function putShiftOnJob(input: { entry_id: string; job_id: string })
     profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
     job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
   } | null;
-  if (!e) return { ok: false, error: "That shift is gone. Reload to see the day." };
+  const lang = await callerLang(supabase, ctx.userId);
+  const t = translator(lang);
+  if (!e) return { ok: false, error: t("cs_shiftGoneReloadDay") };
   if (e.job_id) {
     const j = Array.isArray(e.job) ? e.job[0] : e.job;
     return {
       ok: false,
       error:
         e.job_id === input.job_id
-          ? `That shift is already on ${j ? jobLabel(j) : "this job"}.`
-          : `That shift is already on ${j ? jobLabel(j) : "another job"}. Move it from Timecards if it belongs here.`,
+          ? fillText(t("cs_shiftAlreadyOnThis"), { label: j ? jobLabel(j) : t("cs_thisJob") })
+          : fillText(t("cs_shiftAlreadyOnOther"), { label: j ? jobLabel(j) : t("cs_anotherJob") }),
     };
   }
   const jobId = await visibleJobIdOrNull(supabase, input.job_id);
-  if (!jobId) return { ok: false, error: "That job isn't available." };
+  if (!jobId) return { ok: false, error: t("cs_thatJobIsntAvailable") };
   const { data: jobRow } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
-  const label = jobRow ? jobLabel(jobRow as { job_number?: string | null; name?: string | null }) : "the job";
+  const label = jobRow ? jobLabel(jobRow as { job_number?: string | null; name?: string | null }) : t("cs_theJob");
 
   const { data: upd, error } = await supabase
     .from("time_entries")
@@ -2907,15 +3018,22 @@ export async function putShiftOnJob(input: { entry_id: string; job_id: string })
     .is("job_id", null)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!upd?.length) return { ok: false, error: "That shift got a job a moment ago. Reload to see where it went." };
+  if (!upd?.length) return { ok: false, error: t("cs_shiftGotJobReload") };
 
   revalidateTime([jobId]);
   revalidatePath("/payroll");
   const tz = await orgTz(supabase);
-  const who = firstName((Array.isArray(e.profiles) ? e.profiles[0] : e.profiles)?.full_name);
+  const who = firstName((Array.isArray(e.profiles) ? e.profiles[0] : e.profiles)?.full_name, lang);
   const sentence = e.clock_out
-    ? `${who}'s ${dayOnly(e.clock_in, tz)} shift, ${clockOnly(e.clock_in, tz)} to ${clockOnly(e.clock_out, tz)} (${hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes ?? 0).toFixed(2)} h), is on ${label} now.`
-    : `${who}'s shift running since ${dayClock(e.clock_in, tz)} is on ${label} now.`;
+    ? fillText(t("cs_closedShiftOnJobNow"), {
+        who,
+        day: dayOnly(e.clock_in, tz, lang),
+        from: clockOnly(e.clock_in, tz, lang),
+        to: clockOnly(e.clock_out, tz, lang),
+        hours: hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes ?? 0).toFixed(2),
+        label,
+      })
+    : fillText(t("cs_runningShiftOnJobNow"), { who, since: dayClock(e.clock_in, tz, lang), label });
   return { ok: true, sentence };
 }
 
@@ -2931,7 +3049,7 @@ export async function takeShiftOffJob(input: { entry_id: string; job_id: string 
     .eq("job_id", input.job_id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!upd?.length) return { ok: false, error: "That shift moved again since. Reload to see it." };
+  if (!upd?.length) return { ok: false, error: translator(await callerLang(ctx.supabase, ctx.userId))("cs_shiftMovedAgainReload") };
   revalidateTime([input.job_id]);
   revalidatePath("/payroll");
   return { ok: true };
@@ -2951,6 +3069,8 @@ export async function fileShiftAsCompanyTime(input: {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const lang = await callerLang(supabase, ctx.userId);
+  const t = translator(lang);
 
   if (input.undo) {
     const { data: back, error: backErr } = await supabase
@@ -2961,7 +3081,7 @@ export async function fileShiftAsCompanyTime(input: {
       .is("job_id", null)
       .select("id");
     if (backErr) return { ok: false, error: dbError(backErr) };
-    if (!back?.length) return { ok: false, error: "That shift changed again since. Reload to see it." };
+    if (!back?.length) return { ok: false, error: t("cs_shiftChangedAgainReload") };
     revalidateTime([]);
     return { ok: true };
   }
@@ -2977,7 +3097,7 @@ export async function fileShiftAsCompanyTime(input: {
   if (codesR.error) return { ok: false, error: dbError(codesR.error) };
   const code = companyTimeCode((codesR.data ?? []) as { code?: string | null; billable?: boolean | null; active?: boolean | null }[]);
   if (!code) {
-    return { ok: false, error: "Your company has no time code for its own time (like Shop). Add one under Settings, or put the shift on a job." };
+    return { ok: false, error: t("cs_noCompanyTimeCode") };
   }
   const e = rowR.data as {
     id: string;
@@ -2989,9 +3109,9 @@ export async function fileShiftAsCompanyTime(input: {
     status: string;
     profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
   } | null;
-  if (!e) return { ok: false, error: "That shift is gone. Reload to see the day." };
-  if (e.job_id) return { ok: false, error: "That shift is on a job. Take it off the job on Timecards first." };
-  if (e.status !== "closed" || !e.clock_out) return { ok: false, error: "That clock is still running. Stop it first." };
+  if (!e) return { ok: false, error: t("cs_shiftGoneReloadDay") };
+  if (e.job_id) return { ok: false, error: t("cs_shiftOnJobTakeOffFirst") };
+  if (e.status !== "closed" || !e.clock_out) return { ok: false, error: t("cs_clockStillRunningStopFirst") };
 
   const { data: upd, error } = await supabase
     .from("time_entries")
@@ -3000,16 +3120,21 @@ export async function fileShiftAsCompanyTime(input: {
     .is("job_id", null)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!upd?.length) return { ok: false, error: "That shift changed a moment ago. Reload to see it." };
+  if (!upd?.length) return { ok: false, error: t("cs_shiftChangedMomentAgo") };
 
   revalidateTime([]);
   const tz = await orgTz(supabase);
-  const who = firstName((Array.isArray(e.profiles) ? e.profiles[0] : e.profiles)?.full_name);
+  const who = firstName((Array.isArray(e.profiles) ? e.profiles[0] : e.profiles)?.full_name, lang);
   return {
     ok: true,
     code,
     previous: e.job_code ?? null,
-    sentence: `${who}'s ${dayOnly(e.clock_in, tz)} shift (${hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes ?? 0).toFixed(2)} h) is filed as ${code}, the company's own time.`,
+    sentence: fillText(t("cs_filedAsCompanyTime"), {
+      who,
+      day: dayOnly(e.clock_in, tz, lang),
+      hours: hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes ?? 0).toFixed(2),
+      code,
+    }),
   };
 }
 
@@ -3042,8 +3167,9 @@ export async function assignMemberToJob(memberId: string, jobId: string | null):
   const supabase = ctx.supabase;
 
   // The member must be visible to the caller (RLS keeps this org-scoped).
+  const t = translator(await callerLang(supabase, ctx.userId));
   const { data: member } = await supabase.from("profiles").select("id").eq("id", memberId).maybeSingle();
-  if (!member) return { ok: false, error: "Member not found." };
+  if (!member) return { ok: false, error: t("cs_memberNotFound") };
 
   // Every ACTIVE job currently carrying this member (the set to clear).
   const { data: mine } = await supabase
@@ -3056,7 +3182,7 @@ export async function assignMemberToJob(memberId: string, jobId: string | null):
   // ADD to the chosen job first — a mid-way failure must never leave them unassigned.
   if (jobId) {
     const { data: target } = await supabase.from("jobs").select("id, assigned_to").eq("id", jobId).maybeSingle();
-    if (!target) return { ok: false, error: "Job not found." };
+    if (!target) return { ok: false, error: t("cs_jobNotFound") };
     const ids = ((target as { assigned_to?: string[] | null }).assigned_to ?? []) as string[];
     if (!ids.includes(memberId)) {
       const res = await setJobCrew(jobId, [...ids, memberId]);
@@ -3100,19 +3226,21 @@ export async function fileDailyReport(input: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+
+  // The language rides on the profile read the report makes anyway, so it is read first.
+  const { data: meRow } = await supabase
+    .from("profiles")
+    .select("org_id, full_name, language")
+    .eq("id", user.id)
+    .maybeSingle();
+  const me = meRow as { org_id: string | null; full_name: string | null; language?: string | null } | null;
+  const t = translator(asLang(me?.language));
 
   const did = (input.did_today ?? "").trim();
   const mats = (input.materials_tomorrow ?? "").trim();
-  if (!did && !mats) return { ok: false, error: "Say what you did today (or dictate it) before filing." };
-
-  const { data: meRow } = await supabase
-    .from("profiles")
-    .select("org_id, full_name")
-    .eq("id", user.id)
-    .maybeSingle();
-  const me = meRow as { org_id: string | null; full_name: string | null } | null;
-  if (!me?.org_id) return { ok: false, error: "No organization on your profile." };
+  if (!did && !mats) return { ok: false, error: t("cs_sayWhatYouDidToday") };
+  if (!me?.org_id) return { ok: false, error: t("cs_noOrganizationOnProfile") };
 
   // "Today" is the ORG's local day — the same boundary the clock pages use.
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
@@ -3212,6 +3340,8 @@ export async function fileDailyReport(input: {
   // The deep link is "/planner": NO DEAD ENDS — the Daily Reports card (with the
   // filed→reviewed check-off and the GPS day story) lives on My Day since cn-v958,
   // so a tap on this bell has to land there and not on the payroll page it left.
+  // THE OFFICE'S LINE STAYS ENGLISH: markDailyReportReviewed and nort/updates read it back by these
+  // words ("Daily report from …"), so it is a record, not a sentence (cn-v1138).
   const staff = (await orgStaffIds(me.org_id)).filter((id) => id !== user.id);
   const name = me.full_name ?? "the crew";
   const payload = {
@@ -3255,7 +3385,7 @@ export async function markDailyReportReviewed(id: string): Promise<ClockResult> 
     .select("id, profile_id")
     .maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
-  if (!hit) return { ok: false, error: "That report isn't there any more — My Day is catching up." };
+  if (!hit) return { ok: false, error: translator(await callerLang(ctx.supabase, ctx.userId))("cs_reportNotThere") };
   // Reviewed here is heard: the reviewer's own unread bell rows for THIS report are read too, so Nort
   // stops holding them (0394). Best-effort — the Bell row is a courtesy, the review is the deed, but a
   // write that fails is reported, not swallowed.
@@ -3309,7 +3439,7 @@ export async function notifyGeofenceExit(jobLabel?: string): Promise<ClockResult
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
   const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
   if (isStaffRole((me as { role?: string } | null)?.role ?? "")) return { ok: true }; // techs only
   const { data: open } = await supabase
@@ -3323,12 +3453,11 @@ export async function notifyGeofenceExit(jobLabel?: string): Promise<ClockResult
   // is what actually stops the spam — no-op if we already prompted this shift within the window.
   const lastAt = (open as { last_geofence_push_at?: string | null }).last_geofence_push_at;
   if (lastAt && Date.now() - Date.parse(lastAt) < GEOFENCE_PUSH_DEBOUNCE_MS) return { ok: true };
-  const label = (jobLabel ?? "").trim().slice(0, 80) || "the job site";
-  // On his own bell too (notifyPeople): the same words, to the one person the push was for.
-  await notifyPeople((me as { org_id?: string | null } | null)?.org_id ?? null, [user.id], "clock_out", {
-    title: "Clock out?",
-    body: `Looks like you left ${label} — you're still on the clock.`,
-    url: "/timeclock",
+  const given = (jobLabel ?? "").trim().slice(0, 80);
+  // In the reader's language (the function form): a job with no label is "the job site" in it too.
+  await notifyPeople((me as { org_id?: string | null } | null)?.org_id ?? null, [user.id], "clock_out", (l) => {
+    const tl = translator(l);
+    return { title: tl("gf_clockOutQ"), body: fillText(tl("gf_looksLikeYouLeftStillOn"), { label: given || tl("gf_theJobSite") }), url: "/timeclock" };
   });
   // Stamp AFTER sending so a failed push doesn't silence the next legit prompt. Own open row
   // + a non-pay column → passes both the RLS owner policy and the 0143 write guard.

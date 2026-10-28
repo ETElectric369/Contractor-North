@@ -49,8 +49,8 @@ describe("GlobalAssistant", () => {
     expect(listener).not.toMatch(/setTimeout|requestAnimationFrame|await|\.then\(|queueMicrotask/);
     // launch() itself starts the mic before anything asynchronous happens to it.
     const launch = src.slice(src.indexOf("function launch()"), src.indexOf("// W5 — the end-of-day debrief"));
-    expect(launch).toContain("speech.startListening();");
-    expect(launch.indexOf("speech.startListening();")).toBeLessThan(launch.indexOf("setOpen(true)"));
+    expect(launch).toContain("speech.startListening(localeOf(lang));"); // the person's language rides the start (cn-v1138)
+    expect(launch.indexOf("speech.startListening(localeOf(lang));")).toBeLessThan(launch.indexOf("setOpen(true)"));
     expect(launch).not.toMatch(/await|setTimeout/);
   });
 

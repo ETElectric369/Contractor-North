@@ -49,6 +49,38 @@ describe("pushTriggersFor", () => {
     const tech = rows("tech");
     for (const k of Object.keys(ALL_ON) as (keyof FeatureMap)[]) for (const r of rows("tech", off(k))) expect(tech, r).toContain(r);
   });
+
+  /** A SPANISH-SPEAKING TECH (cn-v1138): the same switches, the same keys, his words. */
+  it("Spanish: the same keys in the same order, every label in Spanish but Apple's, the hours filled in", () => {
+    const en = pushTriggersFor("tech", ALL_ON, false, "en");
+    const es = pushTriggersFor("tech", ALL_ON, false, "es");
+    expect(es.map((t) => t.key)).toEqual(en.map((t) => t.key));
+    expect(es.map((t) => t.audience)).toEqual(en.map((t) => t.audience));
+    expect(pushTriggersFor("tech", ALL_ON).map((t) => t.label)).toEqual(en.map((t) => t.label));
+    const by = (list: typeof en, key: string) => list.find((t) => t.key === key)!;
+    expect(by(es, "assigned").label).toBe("Trabajos y citas asignados a mí");
+    expect(by(es, "clock_out").label).toBe("Recordatorios para marcar salida");
+    expect(by(en, "clock_out").help).toContain("has run 12 hours");
+    expect(by(es, "clock_out").help).toContain("12 horas");
+    expect(by(es, "clock_out").help).not.toContain("{hours}");
+    for (const t of es) if (t.key !== "tap_to_pay") expect(t.label, t.key).not.toBe(by(en, t.key).label);
+    // Apple's words, the same in both (a staff row: the owner's list has it).
+    expect(by(pushTriggersFor("owner", ALL_ON, false, "es"), "tap_to_pay").label).toBe("Tap to Pay on iPhone");
+  });
+
+  it("Spanish, the office and the owner: Leads off swaps the inquiry words; the long-shift row carries the hours; the Title Case rows stay Title Case", () => {
+    const es = (role: string, f?: FeatureMap, platform = false) => pushTriggersFor(role, f, platform, "es");
+    expect(es("owner", off("leads")).find((t) => t.key === "inquiry")!.label).toBe("Nuevas solicitudes de clientes");
+    expect(es("owner").find((t) => t.key === "inquiry")!.label).toBe("Nuevas consultas / prospectos");
+    expect(es("owner").find((t) => t.key === "long_shift")!.label).toBe("Un reloj de la cuadrilla con 12 horas");
+    const titleCase = (s: string) => s.split(/[\s:]+/).filter(Boolean).every((w) => /^[\p{Lu}\p{N}]/u.test(w));
+    for (const key of ["booked", "billing", "bug_watch"]) {
+      const row = es("owner", ALL_ON, true).find((t) => t.key === key)!;
+      expect(titleCase(row.label), row.label).toBe(true);
+      expect(titleCase(pushTriggersFor("owner", ALL_ON, true).find((t) => t.key === key)!.label)).toBe(true);
+    }
+    expect(es("owner", ALL_ON, true).find((t) => t.key === "bug_watch")!.label).toBe("Bug Watch: Bloqueos Y El Resumen Del Lunes");
+  });
 });
 
 /**

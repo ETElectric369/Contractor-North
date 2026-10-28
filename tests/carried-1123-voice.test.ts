@@ -41,6 +41,8 @@ vi.mock("react", async () => {
       return s;
     },
     useCallback: (f: unknown) => f,
+    // The bell reads useLang() (cn-v1138), a context read; there is no provider here, so it is English.
+    useContext: () => "en",
     useEffect: (f: () => unknown) => void rt.effects.push(f),
   };
 });

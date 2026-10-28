@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Loader2 } from "lucide-react";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { PhotoTaskSheet } from "./photo-task-sheet";
 
@@ -31,6 +33,7 @@ export function JobPhotoQuick({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [sheet, setSheet] = useState<{ path: string; preview: string | null } | null>(null);
@@ -45,16 +48,16 @@ export function JobPhotoQuick({
       if (taskDoor && files.length === 1 && paths[0]) {
         const path = paths[0];
         const file = files[0];
-        toast("Photo added to the job", "success", {
-          label: "Make It A Task",
+        toast(t("jb_photoAddedToJob"), "success", {
+          label: t("jb_makeItATask"),
           onClick: () => setSheet({ path, preview: URL.createObjectURL(file) }),
         });
       } else {
-        toast(files.length > 1 ? "Photos added to the job" : "Photo added to the job", "success");
+        toast(files.length > 1 ? t("jb_photosAddedToJob") : t("jb_photoAddedToJob"), "success");
       }
       router.refresh();
     } catch (err: any) {
-      toast(err?.message ?? "Photo upload failed — try again.", "error");
+      toast(err?.message ?? t("jb_photoUploadFailed"), "error");
     } finally {
       setBusy(false);
     }
@@ -72,13 +75,13 @@ export function JobPhotoQuick({
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={busy}
-        title="Add photo"
+        title={t("jb_addPhotoTitle")}
         className={className}
       >
         {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Camera className="h-4 w-4 shrink-0" />}
         {/* Always visible — the dock's ICON_BTN renders it as a tiny caption under
             the icon on a phone (60mph glanceability), inline at sm+. */}
-        <span>Photo</span>
+        <span>{t("jb_photo")}</span>
       </button>
       {sheet && (
         <PhotoTaskSheet

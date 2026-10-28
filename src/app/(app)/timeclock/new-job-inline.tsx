@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createJob } from "../schedule/actions";
 import { isOnlyASourceTag } from "@/lib/job-name";
+import { fillText, translator } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 
 /** What the caller gets back — enough to drop the job straight into a picker without
  *  waiting for the page's server-rendered job list to catch up. */
@@ -34,16 +36,17 @@ export interface CreatedJob {
  */
 export function NewJobInline({
   onCreated,
-  label = "New Job",
+  label,
   className = "",
 }: {
   onCreated: (job: CreatedJob) => void;
-  /** The trigger's words. "New Job" everywhere today — a prop so a surface can say what the
-   *  new job is about to be used for. */
+  /** The trigger's words. "New Job" (in the person's language) everywhere today — a prop so a
+   *  surface can say what the new job is about to be used for. */
   label?: string;
   className?: string;
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -54,14 +57,14 @@ export function NewJobInline({
     if (!trimmed) {
       // createJob would happily mint "New job — Sep 9" from a blank box; a stub nobody can
       // recognize on a timecard is worse than being asked for four words.
-      setError("Give it a name first — the street address works fine.");
+      setError(t("tc_giveItAName"));
       return;
     }
     if (isOnlyASourceTag(trimmed)) {
       // "Service call" or "Inspection" says what kind of visit, not which job: createJob would save
       // it as "New Job · Sep 27", the same stub the blank box is refused for (Erik 2026-09-27: a job
       // never carries the tag).
-      setError(`"${trimmed}" says what kind of visit, not which job. Give it the street or the customer.`);
+      setError(fillText(t("tc_tagOnlyName"), { name: trimmed }));
       return;
     }
     setError(null);
@@ -77,7 +80,7 @@ export function NewJobInline({
         // .select("id"), so a missing one means nothing landed. Say that, rather than handing
         // the picker an id-less job and letting the punch resolve to nothing.
         if (!res.ok || !res.id) {
-          setError(res.error ?? "Could not create the job.");
+          setError(res.error ?? t("tc_couldNotCreateJob"));
           return;
         }
         // The name it was SAVED under: the picker and the "Created …" toast say what the timecard,
@@ -92,7 +95,7 @@ export function NewJobInline({
       } catch {
         // Dead spot: the punch flow's own rule — keep what they typed, and say why nothing
         // happened instead of throwing the whole clock to the error boundary.
-        setError("No connection — what you typed is kept, try again when you have bars.");
+        setError(t("tc_offlineTypedKept"));
       }
     });
   }
@@ -107,7 +110,7 @@ export function NewJobInline({
         }}
         className={`inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline ${className}`}
       >
-        <Plus className="h-3.5 w-3.5 shrink-0" /> {label}
+        <Plus className="h-3.5 w-3.5 shrink-0" /> {label ?? t("tc_newJob")}
       </button>
     );
   }
@@ -129,18 +132,16 @@ export function NewJobInline({
             submit();
           }
         }}
-        placeholder="Job name or address"
-        aria-label="New job name"
+        placeholder={t("tc_jobNamePlaceholder")}
+        aria-label={t("tc_newJobNameAria")}
         disabled={pending}
         className="h-11"
       />
-      <p className="text-xs text-slate-500">
-        That&apos;s all the clock needs — the office fills in the customer, address and the rest later.
-      </p>
+      <p className="text-xs text-slate-500">{t("tc_allClockNeeds")}</p>
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex gap-2">
         <Button size="sm" className="flex-1" onClick={submit} disabled={pending}>
-          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create Job
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} {t("tc_createJob")}
         </Button>
         <Button
           size="sm"
@@ -151,7 +152,7 @@ export function NewJobInline({
           }}
           disabled={pending}
         >
-          Cancel
+          {t("tc_cancel")}
         </Button>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { NO_INDEX } from "@/lib/no-index";
+import { OfflineWords } from "./offline-words";
 
 /**
  * The PWA offline fallback. It is deliberately unauthenticated (the service worker has to be able
@@ -13,6 +14,9 @@ import { NO_INDEX } from "@/lib/no-index";
  *
  * noindex rather than a canonical, because there is no "primary" copy worth indexing: this page
  * says "you're offline" under the SOFTWARE VENDOR's name, on the contractor's own domain.
+ *
+ * THE WORDS (cn-v1138) are OfflineWords: with no session to read a language from, they follow the
+ * phone's own language. The document title is the vendor's name and stays as it is.
  */
 export const metadata = { title: "Offline · Contractor North", robots: NO_INDEX };
 
@@ -21,17 +25,7 @@ export default function OfflinePage() {
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-slate-50 p-8 text-center">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/icon-192.png" alt="Contractor North" className="h-16 w-16 rounded-2xl" />
-      <h1 className="text-xl font-bold text-slate-900">You&apos;re offline</h1>
-      <p className="max-w-xs text-sm text-slate-500">
-        No internet connection right now. Reconnect and tap below — pages you&apos;ve already opened
-        may still work.
-      </p>
-      <a
-        href="/planner"
-        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-      >
-        Try Again
-      </a>
+      <OfflineWords />
     </div>
   );
 }

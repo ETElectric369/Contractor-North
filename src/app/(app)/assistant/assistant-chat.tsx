@@ -7,7 +7,6 @@ import { APP_VERSION } from "@/lib/version";
 import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
-import { NO_VOICE_LINE, TRY_AGAIN_LINE } from "@/lib/voice-failure";
 import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
 import { consumeGreeted, setNortHolding } from "@/lib/nort-holding";
 import type { NortHolding } from "@/lib/nort/greeting";
@@ -28,6 +27,9 @@ import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversat
 import { ContactPicker } from "./contact-picker";
 import { DriverCard } from "@/components/driver-card";
 import { estimatorStore } from "@/lib/estimator-store";
+import { useLang } from "@/components/lang-provider";
+import { dict, fillText, localeOf, translator, type Lang } from "@/lib/i18n";
+import { isStaffRole } from "@/lib/actions/perms";
 
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 
@@ -93,7 +95,8 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null; ca
 }
 
 /** The Estimator — the live estimate building in front of you (the assistant's preview box). */
-function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; onSave: () => void; onDismiss: () => void; saving: boolean }) {
+function LiveQuote({ draft, onSave, onDismiss, saving, lang }: { draft: AgentDraft; onSave: () => void; onDismiss: () => void; saving: boolean; lang: Lang }) {
+  const t = translator(lang);
   // Defensive: a streaming/partial draft can briefly arrive with items as a non-array or with
   // a null entry — never let that crash the Estimator render (it would blank the whole page).
   const items = (Array.isArray(draft.items) ? draft.items : []).filter((i) => i && typeof i === "object");
@@ -108,16 +111,16 @@ function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; on
     <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-white/40 bg-white/70 shadow-sm backdrop-blur">
       <div className="flex items-center gap-2 border-b border-slate-200/70 px-3 py-2 text-xs font-semibold text-slate-700">
         <FileText className="h-3.5 w-3.5 text-brand" />
-        <span className="text-[10px] font-bold uppercase tracking-wide text-brand">Estimator</span>
-        <span className="min-w-0 truncate font-normal text-slate-500">· {draft.title || "New estimate"}</span>
+        <span className="text-[10px] font-bold uppercase tracking-wide text-brand">{t("nt_estimator")}</span>
+        <span className="min-w-0 truncate font-normal text-slate-500">· {draft.title || t("nt_newEstimate")}</span>
         {draft.customer_name ? <span className="truncate font-normal text-slate-400">· {draft.customer_name}</span> : null}
         {/* Always give the user a way to clear the preview off the screen — an
             already-saved or abandoned estimate should never be stuck here. */}
         <button
           type="button"
           onClick={onDismiss}
-          aria-label="Clear the estimate preview"
-          title="Clear this estimate off the screen"
+          aria-label={t("nt_clearPreviewAria")}
+          title={t("nt_clearPreviewTitle")}
           className="ml-auto shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700"
         >
           <X className="h-3.5 w-3.5" />
@@ -125,7 +128,7 @@ function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; on
       </div>
       <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto px-3 text-xs">
         {items.length === 0 ? (
-          <li className="py-2 text-slate-400">Building…</li>
+          <li className="py-2 text-slate-400">{t("nt_building")}</li>
         ) : (
           items.map((it, i) => (
             <li key={i} className="flex items-baseline justify-between gap-2 py-1.5">
@@ -139,13 +142,13 @@ function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; on
         )}
       </ul>
       <div className="space-y-0.5 border-t border-slate-200/70 px-3 py-2 text-xs">
-        <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(subtotal)}</span></div>
-        {draft.tax_rate ? <div className="flex justify-between text-slate-500"><span>Tax</span><span>{money(tax)}</span></div> : null}
-        <div className="flex justify-between text-sm font-semibold text-slate-900"><span>Total</span><span>{money(total)}</span></div>
+        <div className="flex justify-between text-slate-500"><span>{t("nt_subtotal")}</span><span>{money(subtotal)}</span></div>
+        {draft.tax_rate ? <div className="flex justify-between text-slate-500"><span>{t("nt_tax")}</span><span>{money(tax)}</span></div> : null}
+        <div className="flex justify-between text-sm font-semibold text-slate-900"><span>{t("nt_total")}</span><span>{money(total)}</span></div>
       </div>
       <div className="p-2">
         <Button onClick={onSave} disabled={saving || items.length === 0} className={`w-full ${ready ? "bg-green-600 hover:bg-green-500" : ""}`}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : ready ? "Save Estimate →" : "Save Draft →"}
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : ready ? t("nt_saveEstimate") : t("nt_saveDraft")}
         </Button>
       </div>
     </div>
@@ -258,19 +261,21 @@ const TURN_MAX_MS = 150_000;
 /** No bytes for this long mid-reply = the socket is dead but WebKit hasn't said so. Well past the
  *  longest silent tool round (a web search) so a slow answer is never mistaken for a lost one. */
 const STREAM_STALL_MS = 90_000;
-const DROPPED_SENTENCE = "The connection dropped before Nort's answer arrived — Reload to check for it, or ask again.";
+// (cn-v1138) Each line is a catalog KEY (lib/words/nort) and is read through t() the moment it is
+// shown, so a tech sees it in Spanish; the English stands in the catalog, byte for byte as it was.
+const DROPPED_KEY = "nt_dropped";
 /** Offline is a different fact from "dropped": nothing can be checked right now, and saying so at
  *  once beats a probe that cannot succeed. Reload is still the door — the server keeps the turn. */
-const OFFLINE_SENTENCE = "You're offline — Nort may still have answered. Reload when you have bars to check, or ask again.";
+const OFFLINE_KEY = "nt_offline";
 /** The reload-time versions. The question text is deliberately not echoed by any of them: the
  *  marker is per-device, the reply lookup is per-user — only a found reply proves the question was
  *  this user's. Offline, the lookup never ran, so "didn't get an answer" would be a guess. */
-const RELOAD_OFFLINE_SENTENCE = "You're offline — couldn't check whether your last question got an answer. Reload when you have bars, or ask it again.";
+const RELOAD_OFFLINE_KEY = "nt_reloadOffline";
 /** Young marker, nothing on the server yet: the route's turn may still be running (a web search
  *  round is silent for a while), so Reload stays a live door. */
-const RELOAD_PENDING_SENTENCE = "No answer to your last question yet — Nort may still be working on it. Reload in a moment to check, or ask it again.";
+const RELOAD_PENDING_KEY = "nt_reloadPending";
 /** The server's turn is over and there is nothing: the only honest door left is asking again. */
-const RELOAD_UNANSWERED_SENTENCE = "Your last question didn't get an answer before the app reloaded — ask it again.";
+const RELOAD_UNANSWERED_KEY = "nt_reloadUnanswered";
 /** HOW LONG A RECOVERED MONEY PROPOSAL MAY STILL BE ANSWERED. The confirm marker is the last
  *  thing in the stream, so a drop in that half-second used to lose the Yes/No card for good: the
  *  recovery path reads the persisted reply, and that text is marker-stripped. The route now
@@ -281,13 +286,13 @@ const RELOAD_UNANSWERED_SENTENCE = "Your last question didn't get an answer befo
  *  marker above, so a proposal can never outlive the turn that carries it. Past the window the
  *  proposal is NOT re-offered — the turn is shown and the user is told to ask again. */
 const RECOVERED_CONFIRM_MAX_AGE_MS = 10 * 60_000;
-const EXPIRED_CONFIRM_SENTENCE = "That one needed a yes or no while the connection was down, and it's too old to answer now. Ask again if you still want it.";
+const EXPIRED_CONFIRM_KEY = "nt_expiredConfirm";
 /** A RECOVERED REPLY IS THE WORDS ONLY. The typing and pointing Nort did rode the stream as screen
  *  blocks (show_screen / fill_screen) and the route persists none of them, so after a drop the saved
  *  sentence ("Put that in the visit notes") can describe a box that was never typed into. Whether
  *  a block was lost is not knowable from here, so it is said as what it is — it may not have run —
  *  with the one thing to do about it. Written for the eyes and the ears alike (it is read out too). */
-const SCREEN_STEPS_LOST_SENTENCE = "The connection dropped mid-answer, so anything typed or pointed at on your screen may not have happened — if a box is empty, say it again.";
+const SCREEN_STEPS_LOST_KEY = "nt_screenStepsLost";
 
 /** COULD THIS TURN HAVE CARRIED SCREEN STEPS? Only then is the sentence above true to say: a plain
  *  question on a page Nort has no screen entry for (his own chat) typed nothing and pointed at
@@ -316,12 +321,15 @@ export function refuseStaleFill(step: AgentScreen, pathNow: string, pathAtSend: 
 
 /** A box Nort named that is not on the screen: said under the chat in plain words. The door's NAME
  *  is never shown — it carries record ids (task-hours-<uuid>, need-q_xxx) — and one action is named. */
-export const MISSING_BOX_NOTE = "That box isn't on this screen — say that again.";
+export const MISSING_BOX_KEY = "nt_missingBox";
+/** The English line (what the tests pin); the screen reads the key through t(), in the person's language. */
+export const MISSING_BOX_NOTE = dict("en")[MISSING_BOX_KEY];
 
 /** A spot Nort pointed at that never showed. The anchor name is for the page, not the person: with
  *  no label from the model it is "that spot", never the raw name. */
-export function spotMissNote(label?: string | null): string {
-  return `Couldn't find ${label?.trim() || "that spot"} on this screen.`;
+export function spotMissNote(label?: string | null, lang: Lang = "en"): string {
+  const t = translator(lang);
+  return fillText(t("nt_spotMiss"), { spot: label?.trim() || t("nt_thatSpot") });
 }
 
 /** A recovered turn arrives as the persisted reply, which may END with the confirm envelope the
@@ -352,21 +360,25 @@ function splitRecovered(reply: string): { text: string; confirm: AgentConfirm | 
 /** The assistant line(s) a recovered turn becomes. A turn that only PROPOSED has no sentence of
  *  its own, so the read-back is the line — exactly what the live path shows when the reply is the
  *  proposal. An expired proposal says so on its own line: nothing silent. */
-export function recoveredLines(r: { text: string; confirm: AgentConfirm | null; stale: boolean }, screen = true): Msg[] {
+export function recoveredLines(r: { text: string; confirm: AgentConfirm | null; stale: boolean }, screen = true, lang: Lang = "en"): Msg[] {
+  const t = translator(lang);
+  const expired = t(EXPIRED_CONFIRM_KEY);
   const body = r.text.trim();
-  const head = body || r.confirm?.prompt || EXPIRED_CONFIRM_SENTENCE;
+  const head = body || r.confirm?.prompt || expired;
   const lines: Msg[] = [{ role: "assistant", content: head }];
-  if (r.stale && head !== EXPIRED_CONFIRM_SENTENCE) lines.push({ role: "assistant", content: EXPIRED_CONFIRM_SENTENCE });
+  if (r.stale && head !== expired) lines.push({ role: "assistant", content: expired });
   // A recovered reply is a stream that did not finish: the screen steps in it, if it could have carried
   // any (`screen`: screenStepsPossible, asked when the turn left), are not known to have run.
-  if (screen) lines.push({ role: "assistant", content: SCREEN_STEPS_LOST_SENTENCE });
+  if (screen) lines.push({ role: "assistant", content: t(SCREEN_STEPS_LOST_KEY) });
   return lines;
 }
 
 /** Every residual line the recovery paths can leave. A restored transcript loses the `hint`
  *  (saveConversation keeps role + content only), so content is how a residual line is recognised
  *  again after a reload — it is REPLACED by the next attempt's line, never stacked under it. */
-const RESIDUAL_SENTENCES = new Set([DROPPED_SENTENCE, OFFLINE_SENTENCE, RELOAD_OFFLINE_SENTENCE, RELOAD_PENDING_SENTENCE, RELOAD_UNANSWERED_SENTENCE]);
+const RESIDUAL_KEYS = [DROPPED_KEY, OFFLINE_KEY, RELOAD_OFFLINE_KEY, RELOAD_PENDING_KEY, RELOAD_UNANSWERED_KEY];
+// In both languages: a restored transcript may hold a line written under the other one.
+const RESIDUAL_SENTENCES = new Set(RESIDUAL_KEYS.flatMap((k) => [dict("en")[k], dict("es")[k]]));
 function dropResidualTail(list: Msg[]): Msg[] {
   const last = list[list.length - 1];
   return last?.role === "assistant" && RESIDUAL_SENTENCES.has(last.content.trim()) ? list.slice(0, -1) : list;
@@ -377,23 +389,28 @@ function withResidual(list: Msg[], line: Msg): Msg[] {
   return [...dropResidualTail(list), line];
 }
 
-const SUGGESTIONS = [
-  "Start an estimate — I'll tell you what's on it.",
-  "What's on the schedule this week?",
-  "Which invoices are still unpaid?",
-  "Show me my open estimates and their totals.",
-];
+/** THE FIRST QUESTIONS OFFERED on an empty chat (cn-v1138): a tech's are a tech's — clock in, the
+ *  day's list, the materials list — and the office keeps its money ones; both in the person's
+ *  language. An unknown role is shown the tech's: nothing about invoices to someone the page
+ *  could not place. */
+export function suggestionsFor(role: string | null | undefined, lang: Lang): string[] {
+  const t = translator(lang);
+  return isStaffRole(role)
+    ? [t("nt_sugOffice1"), t("nt_sugOffice2"), t("nt_sugOffice3"), t("nt_sugOffice4")]
+    : [t("nt_sugTech1"), t("nt_sugTech2"), t("nt_sugTech3"), t("nt_sugTech4")];
+}
 
 /** The door a dropped-connection line names: the shell has no address bar and no pull-to-refresh,
  *  so "Reload" has to be a thing you can tap. */
-function ReloadDoor() {
+function ReloadDoor({ lang }: { lang: Lang }) {
+  const t = translator(lang);
   return (
     <button
       type="button"
       onClick={() => window.location.reload()}
       className="ml-1.5 inline-flex items-center rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-brand hover:bg-brand-light/40"
     >
-      Reload
+      {t("nt_reload")}
     </button>
   );
 }
@@ -417,7 +434,22 @@ function VoiceWave({ active }: { active?: boolean }) {
   );
 }
 
-export function AssistantChat({ autoStart = false, glass = false, initialQuery }: { autoStart?: boolean; glass?: boolean; initialQuery?: string } = {}) {
+export function AssistantChat({
+  autoStart = false,
+  glass = false,
+  initialQuery,
+  role = null,
+}: {
+  autoStart?: boolean;
+  glass?: boolean;
+  initialQuery?: string;
+  /** profiles.role, from the shell (topbar → GlobalAssistant): the first suggestions are a tech's or the office's by it (cn-v1138). */
+  role?: string | null;
+} = {}) {
+  // THE PERSON'S LANGUAGE (cn-v1138): every word this panel shows or says comes through t() and the
+  // nt_ catalog; the mic is started with it (voice-stream's hint; the profile wins server-side).
+  const lang = useLang();
+  const t = translator(lang);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -612,10 +644,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           items.map((i) => (Number(i.quantity) || 0) * (Number(i.unit_price) || 0)),
           Number(draft.tax_rate) || 0,
         );
-        setSaved((sv) => [...sv, { id: res.id!, title: draft.title || "Estimate", total, customer: draft.customer_name ?? undefined }]);
+        setSaved((sv) => [...sv, { id: res.id!, title: draft.title || t("nt_estimate"), total, customer: draft.customer_name ?? undefined }]);
         setDraft(null);
       } else {
-        setMessages((m) => [...m, { role: "assistant", content: res.error ? `Couldn't save: ${res.error}` : "Couldn't save the quote." }]);
+        setMessages((m) => [...m, { role: "assistant", content: res.error ? fillText(t("nt_couldntSaveWhy"), { why: res.error }) : t("nt_couldntSaveQuote") }]);
       }
     } finally {
       setSavingDraft(false);
@@ -763,7 +795,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     // "Tap the mic to answer" on screen in a panel that has no mic button. Only the fallback
     // backend, which says nothing, gets a line from here.
     if (speech.isListening()) setListening(true);
-    else if (!speech.usingStreamBackend()) setStatus(speech.speechSupported() ? TRY_AGAIN_LINE : NO_VOICE_LINE);
+    else if (!speech.usingStreamBackend()) setStatus(speech.speechSupported() ? t("nt_tryAgainLine") : t("nt_noVoiceLine"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
 
@@ -804,7 +836,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     // Past the route's maxDuration the server's turn is over: one look is the whole truth, and the
     // phone is not held on "catching up" for a reply that cannot still be on its way.
     const turnOver = Date.now() - Date.parse(p.at) > TURN_MAX_MS;
-    setStatus("Catching up with Nort…");
+    setStatus(t("nt_catchingUp"));
     const reply = await fetchRecoveredReply(p.content, p.at, turnOver ? 1 : 3, ctrl.signal);
     if (ctrl.signal.aborted) return; // STOP / Close / a new question owns the screen now — say nothing
     catchUpAbortRef.current = null;
@@ -818,7 +850,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       // back, still gated — nothing runs until the user says yes, and the yes still goes through
       // the server-side gate.
       const rec = splitRecovered(reply);
-      const lines = recoveredLines(rec, p.screen !== false);
+      const lines = recoveredLines(rec, p.screen !== false, lang);
       setMessages((cur) => {
         // While the marker stood, whatever the stored transcript holds after this question is at
         // best a half-streamed reply or a residual "didn't get an answer" line — never the answer
@@ -863,10 +895,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       // with the turn possibly still running, it stays — Reload is a live door in both.
       if (!offline && turnOver) clearPendingTurn(p.at);
       const line: Msg = offline
-        ? { role: "assistant", content: RELOAD_OFFLINE_SENTENCE, hint: "reload" }
+        ? { role: "assistant", content: t(RELOAD_OFFLINE_KEY), hint: "reload" }
         : turnOver
-          ? { role: "assistant", content: RELOAD_UNANSWERED_SENTENCE }
-          : { role: "assistant", content: RELOAD_PENDING_SENTENCE, hint: "reload" };
+          ? { role: "assistant", content: t(RELOAD_UNANSWERED_KEY) }
+          : { role: "assistant", content: t(RELOAD_PENDING_KEY), hint: "reload" };
       setMessages((cur) => withResidual(cur, line));
     }
     scrollToBottom();
@@ -1030,7 +1062,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       if (res.ok) seenRef.current = seenRef.current.slice(seenNow.length);
       if (!res.ok || !res.body) {
         turnSettled = true; // the route refused the turn — there is no reply to come back for
-        const errText = await res.text().catch(() => "Request failed.");
+        const errText = await res.text().catch(() => t("nt_requestFailed"));
         setMessages((m) => [...m, { role: "assistant", content: errText }]);
         setStreaming(false);
         return;
@@ -1101,8 +1133,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           const stale = refuseStaleFill(step, window.location.pathname, turnPathRef.current, movedThisTurn);
           if (stale) {
             seenRef.current.push(stale);
-            noteUnder("The screen changed — say that again.");
-            if (viaVoice) say("The screen changed. Say that again.");
+            noteUnder(t("nt_screenChanged"));
+            if (viaVoice) say(t("nt_screenChangedSay"));
             continue;
           }
           try {
@@ -1112,7 +1144,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               window,
               {
                 onMiss: (s) => {
-                  setMissNote(spotMissNote(s.label));
+                  setMissNote(spotMissNote(s.label, lang));
                   if (missTimerRef.current) clearTimeout(missTimerRef.current);
                   missTimerRef.current = setTimeout(() => setMissNote(null), 8000);
                   openBox();
@@ -1124,9 +1156,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   if (o.result.ok) seenRef.current.push(`${o.door}: landed — ${o.result.landed}`);
                   else {
                     seenRef.current.push(`${o.door}: NOT filled — ${o.result.why}`);
-                    const words = "missing" in o.result ? MISSING_BOX_NOTE : `Couldn't put that in: ${o.result.why}`;
+                    const words = "missing" in o.result ? t(MISSING_BOX_KEY) : fillText(t("nt_couldntPutIn"), { why: o.result.why });
                     noteUnder(words);
-                    if (viaVoice) say("missing" in o.result ? "That box isn't on this screen." : `That didn't go in. ${o.result.why}`);
+                    if (viaVoice) say("missing" in o.result ? t("nt_missingBoxSay") : fillText(t("nt_didntGoIn"), { why: o.result.why }));
                   }
                 },
               },
@@ -1196,10 +1228,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // The assistant asked the user to pick a contact on screen — pop the picker; their choice
         // comes back as the next message (handled by onPickContact below).
         setPendingPick(pickDir);
-        if (viaVoice) say("Go ahead and pick the contact on screen.");
+        if (viaVoice) say(t("nt_pickContactSay"));
       } else if (openDir?.url) {
         // Hands-free navigation: say it, then open Maps (keep the app if the browser lets us).
-        if (viaVoice) say(`Opening maps for ${openDir.label}.`, () => { if (voiceModeRef.current) startMic(); });
+        if (viaVoice) say(fillText(t("nt_openingMaps"), { label: openDir.label }), () => { if (voiceModeRef.current) startMic(); });
         try {
           const w = window.open(openDir.url, "_blank");
           if (!w) window.location.href = openDir.url;
@@ -1253,7 +1285,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         const tries = full.length ? RECOVERY_TRIES_FULL : RECOVERY_TRIES_NO_BYTE;
         recoverAbort = new AbortController();
         abortRef.current = recoverAbort; // what Stop Nort aborts from here on
-        if (!recoveredEarly && !isOffline()) setStatus("The connection dropped. Catching up with Nort…");
+        if (!recoveredEarly && !isOffline()) setStatus(t("nt_droppedCatchingUp"));
         const reply = recoveredEarly ?? (await fetchRecoveredReply(content, sentAt, tries, recoverAbort.signal));
         if (recoverAbort.signal.aborted) {
           // STOP mid-catch-up: no line lands after the user said stop. Same as a stop mid-stream —
@@ -1268,7 +1300,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
             // reply and the Yes/No card goes back on screen instead of a money read-back nobody
             // can answer. Re-armed, never re-run: the yes still runs the server-side gate.
             const rec = splitRecovered(reply);
-            const lines = recoveredLines(rec, screenTurn);
+            const lines = recoveredLines(rec, screenTurn, lang);
             const head = lines[0].content;
             setAssistantTail(head);
             if (lines.length > 1) setMessages((m) => [...m, ...lines.slice(1)]);
@@ -1295,14 +1327,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
             // true state (offline vs dropped) and both doors. The marker stays (turnSettled is
             // still false): the Reload it names only checks while the marker exists.
             const offline = isOffline();
-            const sentence = offline ? OFFLINE_SENTENCE : DROPPED_SENTENCE;
+            const sentence = t(offline ? OFFLINE_KEY : DROPPED_KEY);
             if (partial.trim()) setMessages((m) => [...m, { role: "assistant", content: sentence, hint: "reload" }]);
             else setAssistantTail(sentence, "reload");
             if (viaVoice) {
-              say(
-                offline ? "You're offline — ask me again when you have bars." : "The connection dropped before I could answer — ask me again.",
-                () => { if (voiceModeRef.current) startMic(); },
-              );
+              say(t(offline ? "nt_offlineSay" : "nt_droppedSay"), () => { if (voiceModeRef.current) startMic(); });
             }
           }
         }
@@ -1336,7 +1365,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // silently.
   function startMic() {
     speech.setResultHandler((t) => sendRef.current?.(t, true)); // normal mode (confirmListen may have changed it)
-    if (!speech.startListening()) setStatus(speech.speechSupported() ? TRY_AGAIN_LINE : NO_VOICE_LINE);
+    if (!speech.startListening(localeOf(lang))) setStatus(speech.speechSupported() ? t("nt_tryAgainLine") : t("nt_noVoiceLine"));
   }
 
   // Enter voice mode from the text composer's Talk button. (Leaving is the Stop button →
@@ -1359,8 +1388,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // Listen for a spoken reply to a pending confirm proposal (the service routes the transcript here).
   // Handles corrections, not just yes/no — see classifyConfirmReply.
   function confirmListen() {
-    speech.setResultHandler((t) => {
-      const intent = classifyConfirmReply(t);
+    speech.setResultHandler((heard) => {
+      const intent = classifyConfirmReply(heard);
       if (intent === "yes") resolveConfirm(true);
       else if (intent === "no") resolveConfirm(false);
       else if (intent === "correction") {
@@ -1373,13 +1402,13 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // mutes the live session and re-arms it at the end of the turn, exactly like a normal voice turn.
         confirmRef.current = null;
         setPendingConfirm(null);
-        void send(t, true);
+        void send(heard, true);
       } else {
         // Unclear — re-prompt, then listen again (only while a proposal is still pending).
-        say("Say yes or no.", confirmAfterSaid);
+        say(t("nt_sayYesOrNo"), confirmAfterSaid);
       }
     });
-    if (!speech.startListening()) setStatus(speech.speechSupported() ? TRY_AGAIN_LINE : NO_VOICE_LINE);
+    if (!speech.startListening(localeOf(lang))) setStatus(speech.speechSupported() ? t("nt_tryAgainLine") : t("nt_noVoiceLine"));
   }
 
   // Resolve a pending confirm: run it (yes) or drop it (no). Nothing wrote until here.
@@ -1395,8 +1424,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     setListening(false);
     if (!c) return;
     if (!yes) {
-      setMessages((m) => [...m, { role: "assistant", content: "Okay — skipped that." }]);
-      if (voiceModeRef.current) say("Okay, skipped that.", () => { if (voiceModeRef.current) startMic(); });
+      setMessages((m) => [...m, { role: "assistant", content: t("nt_skippedThat") }]);
+      if (voiceModeRef.current) say(t("nt_skippedThatSay"), () => { if (voiceModeRef.current) startMic(); });
       return;
     }
     setStreaming(true);
@@ -1404,11 +1433,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       const res = await confirmAgentAction(c.name, c.input);
       // A confirmed action is always a write: the page re-reads (a closed punch stands the fence down).
       if (res.ok) followWrite();
-      const msg = res.message || (res.ok ? "Done." : "That didn't work.");
+      const msg = res.message || (res.ok ? t("nt_done") : t("nt_didntWork"));
       setMessages((m) => [...m, { role: "assistant", content: (res.ok ? "✓ " : "") + msg }]);
       if (voiceModeRef.current) say(msg, () => { if (voiceModeRef.current) startMic(); });
     } catch {
-      setMessages((m) => [...m, { role: "assistant", content: "That didn't work." }]);
+      setMessages((m) => [...m, { role: "assistant", content: t("nt_didntWork") }]);
     } finally {
       setStreaming(false);
       scrollToBottom();
@@ -1439,7 +1468,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
 
   const elapsedStr = (() => { const s = Math.floor(elapsedMs / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; })();
   // A spot Nort could not find reads here (item 6), under a live tool status, over the idle words.
-  const statusText = status ?? missNote ?? (streaming ? (tokens > 2 ? "responding…" : "thinking…") : listening ? "listening…" : speaking ? "talking…" : null);
+  const statusText = status ?? missNote ?? (streaming ? (tokens > 2 ? t("nt_responding") : t("nt_thinking")) : listening ? t("nt_listening") : speaking ? t("nt_talking") : null);
   return (
     <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
       {/* THE WINDSHIELD — pinned at the TOP so the driver card is the hero: the chat log
@@ -1461,7 +1490,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               <div className="flex items-center gap-2 px-3 pb-1 pt-2.5">
                 <FileText className="h-4 w-4 shrink-0 text-brand" />
                 <span className="truncate text-sm">
-                  <span className="font-semibold text-brand">ESTIMATOR</span>
+                  <span className="font-semibold text-brand">{t("nt_estimatorCaps")}</span>
                   {draft.title ? <span className="text-slate-700"> · {draft.title}</span> : null}
                   {draft.customer_name ? <span className="text-slate-400"> · {draft.customer_name}</span> : null}
                 </span>
@@ -1471,7 +1500,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   <div className="max-h-[22vh] space-y-0.5 overflow-y-auto px-3 pb-1.5">
                     {(draft.items ?? []).map((it, i) => (
                       <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-                        <span className="truncate text-slate-500">{it.description || "item"}</span>
+                        <span className="truncate text-slate-500">{it.description || t("nt_item")}</span>
                         <span className="shrink-0 tabular-nums text-slate-400">
                           {Number(it.quantity) || 1}×${Math.round(Number(it.unit_price) || 0)}
                         </span>
@@ -1486,7 +1515,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                       size="sm"
                       className={`w-full ${draft.status === "ready" ? "bg-green-600 hover:bg-green-500" : ""}`}
                     >
-                      {savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : draft.status === "ready" ? "Save Estimate →" : "Save Draft →"}
+                      {savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : draft.status === "ready" ? t("nt_saveEstimate") : t("nt_saveDraft")}
                     </Button>
                   </div>
                 </>
@@ -1504,11 +1533,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   button up top…", now "Tap Talk To Nort to try again, or type below.") off every
                   mic failure line. The streaming readout stays one line. */}
               <span className={`text-sm text-slate-500 ${streaming ? "truncate" : "line-clamp-3 break-words"}`}>
-                {streaming ? `${elapsedStr} · ${tokens} tokens · ${statusText}` : statusText}
+                {streaming ? fillText(t("nt_streamLine"), { elapsed: elapsedStr, tokens: String(tokens), status: statusText }) : statusText}
               </span>
             </div>
           ) : !draft && messages.length === 0 && !voiceMode ? (
-            <div className="px-3 py-2.5 text-sm text-slate-400">What can I help you with?</div>
+            <div className="px-3 py-2.5 text-sm text-slate-400">{t("nt_whatCanIHelp")}</div>
           ) : null}
           {voiceMode && (
             // Live mic-input meter — if this bar stays flat while you talk, the mic isn't reaching
@@ -1550,14 +1579,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   if (voiceModeRef.current) stopVoice();
                   setInput(e.target.value);
                 }}
-                placeholder="Type a question"
-                aria-label="Type a question for Nort"
+                placeholder={t("nt_typeQuestion")}
+                aria-label={t("nt_typeQuestionAria")}
                 enterKeyHint="send"
                 autoComplete="off"
                 className="h-11 min-w-0 flex-1 bg-white/80"
               />
               <Button type="submit" disabled={streaming || !input.trim()} className="shrink-0">
-                Send
+                {t("nt_send")}
               </Button>
             </form>
           )}
@@ -1572,7 +1601,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   </span>
                   <span className="whitespace-pre-wrap break-words text-slate-600">
                     {m.content || "…"}
-                    {m.hint === "reload" ? <ReloadDoor /> : null}
+                    {m.hint === "reload" ? <ReloadDoor lang={lang} /> : null}
                   </span>
                 </div>
               ))}
@@ -1587,7 +1616,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         <>
           {messages.length > 0 && (
             <div className="flex shrink-0 justify-end px-3 pt-1">
-              <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New Chat</button>
+              <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">{t("nt_newChat")}</button>
             </div>
           )}
           <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
@@ -1597,14 +1626,13 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-light">
                     <Sparkles className="h-6 w-6 text-brand" />
                   </div>
-                  <h3 className="text-sm font-semibold text-slate-900">How can I help?</h3>
+                  <h3 className="text-sm font-semibold text-slate-900">{t("nt_howCanIHelp")}</h3>
                   <p className="mt-1 max-w-sm text-sm text-slate-500">
-                    I can pull up your jobs, quotes, invoices, schedule, and who&apos;s
-                    clocked in, draft quotes &amp; take-offs, and help with scopes and code.
-                    {voiceOn && " Tap the mic and just talk — I'll read replies back."}
+                    {t(isStaffRole(role) ? "nt_introOffice" : "nt_introTech")}
+                    {voiceOn && t("nt_introVoice")}
                   </p>
                   <div className="mt-5 grid w-full max-w-lg gap-2 sm:grid-cols-2">
-                    {SUGGESTIONS.map((s) => (
+                    {suggestionsFor(role, lang).map((s) => (
                       <button
                         key={s}
                         onClick={() => send(s)}
@@ -1627,7 +1655,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                     }
                   >
                     {m.content || <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
-                    {m.hint === "reload" ? <ReloadDoor /> : null}
+                    {m.hint === "reload" ? <ReloadDoor lang={lang} /> : null}
                   </div>
                 </div>
               ))
@@ -1641,7 +1669,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           thing worse than losing it is losing it quietly. */}
       {saveFailed ? (
         <div className="mx-2 mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-          Not saving — this conversation isn&apos;t being kept. Reconnect or sign in again, then keep going.
+          {t("nt_notSaving")}
         </div>
       ) : null}
 
@@ -1655,7 +1683,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       ) : null}
 
       {/* The full estimate card — non-glass only; the glass drawer shows the ESTIMATOR line + items. */}
-      {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} onDismiss={() => setDraft(null)} saving={savingDraft} /> : null}
+      {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} onDismiss={() => setDraft(null)} saving={savingDraft} lang={lang} /> : null}
 
       {/* Saved-this-session estimates: the live numbers collapse to ONE clickable line each, linking to
           the quote in /quotes (the permanent log). Newest first. */}
@@ -1673,7 +1701,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                 {s.customer ? <span className="font-normal text-slate-400"> · {s.customer}</span> : null}
               </span>
               <span className="shrink-0 font-semibold text-slate-900">{money(s.total)}</span>
-              <span className="shrink-0 text-xs font-medium text-brand">View →</span>
+              <span className="shrink-0 text-xs font-medium text-brand">{t("nt_view")}</span>
             </a>
           ))}
         </div>
@@ -1708,10 +1736,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           </ul>
           <div className="flex gap-2">
             <Button onClick={() => resolveConfirm(true)} className="flex-1 bg-green-600 hover:bg-green-500">
-              <Check className="h-4 w-4" /> Yes, Do It
+              <Check className="h-4 w-4" /> {t("nt_yesDoIt")}
             </Button>
             <Button variant="outline" onClick={() => resolveConfirm(false)} className="flex-1">
-              Cancel
+              {t("nt_cancel")}
             </Button>
           </div>
         </div>
@@ -1722,12 +1750,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
             <VoiceWave active={listening || speaking} />
             <div className="text-sm font-medium text-slate-600">
-              {streaming ? "Thinking…" : listening ? "Listening…" : speaking ? "Talking…" : "Your turn — tap the mic"}
+              {streaming ? t("nt_thinkingCap") : listening ? t("nt_listeningCap") : speaking ? t("nt_talkingCap") : t("nt_yourTurn")}
             </div>
             <button
               type="button"
               onClick={voiceTap}
-              aria-label={listening ? "Stop listening" : "Talk"}
+              aria-label={listening ? t("nt_stopListeningAria") : t("nt_talkAria")}
               className={`mt-1 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95 ${
                 listening ? "animate-pulse bg-red-600" : "bg-brand hover:bg-brand-dark"
               }`}
@@ -1739,7 +1767,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               onClick={stopVoice}
               className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-red-600"
             >
-              <Square className="h-3 w-3" fill="currentColor" /> End Conversation
+              <Square className="h-3 w-3" fill="currentColor" /> {t("nt_endConversation")}
             </button>
           </div>
       ) : (
@@ -1761,7 +1789,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                 }
               }}
               rows={1}
-              placeholder="Ask, or tap Talk to speak…"
+              placeholder={t("nt_askPlaceholder")}
               className="max-h-40 min-h-[44px] flex-1 resize-none"
             />
             {voiceOn && (
@@ -1771,8 +1799,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                 variant="ghost"
                 onClick={startVoice}
                 disabled={streaming}
-                aria-label="Talk to the assistant"
-                title="Tap and talk"
+                aria-label={t("nt_talkToAssistantAria")}
+                title={t("nt_tapAndTalk")}
                 className="text-brand"
               >
                 <Mic className="h-4 w-4" />

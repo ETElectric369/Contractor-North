@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { reportClientError } from "@/app/report-client-error";
 import { recoverFromChunkError, isTransportError } from "@/lib/chunk-reload";
 import { useTryAgain } from "@/lib/try-again";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /** Segment error boundary for the whole (app) shell. A render crash in any (app) PAGE now
  *  shows this recoverable card in the content area while the dock, topbar, and back nav stay
@@ -35,24 +37,22 @@ export default function AppError({
     });
   }, [error]);
   const transport = isTransportError(error);
+  // This boundary renders INSIDE the (app) layout, so the LangProvider is above it (cn-v1138).
+  const t = translator(useLang());
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
         <AlertTriangle className="h-6 w-6 text-red-600" />
       </div>
-      <h1 className="text-lg font-semibold text-slate-900">{transport ? "The connection dropped" : "This page hit a snag"}</h1>
-      <p className="mt-1 max-w-md text-sm text-slate-500">
-        {transport
-          ? "Check your signal and try again — nothing was lost."
-          : "Something went wrong loading this screen. Your data is safe — try again, or head back to your day."}
-      </p>
+      <h1 className="text-lg font-semibold text-slate-900">{transport ? t("sh_connectionDropped") : t("sh_pageSnag")}</h1>
+      <p className="mt-1 max-w-md text-sm text-slate-500">{transport ? t("sh_checkSignal") : t("sh_pageSnagBody")}</p>
       <div className="mt-5 flex gap-2">
         <Button onClick={tryAgain} disabled={trying}>
-          {trying ? "Trying Again…" : "Try Again"}
+          {trying ? t("sh_tryingAgain") : t("sh_tryAgain")}
         </Button>
         <Link href="/planner">
-          <Button variant="outline">My Day</Button>
+          <Button variant="outline">{t("sh_myDay")}</Button>
         </Link>
       </div>
     </div>

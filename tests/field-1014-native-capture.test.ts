@@ -154,7 +154,7 @@ describe("the reply's voice (tts.ts ↔ native-audio.ts)", () => {
     expect(door).toContain('armDeadman(PLAY_UNKNOWN_MS + PLAY_SLACK_MS); // the bridge\'s own reply may be the thing that is lost');
     expect(door).toContain('armDeadman((seconds > 0 ? seconds * 1000 : PLAY_UNKNOWN_MS) + PLAY_SLACK_MS);');
     expect(door).toContain('started.catch(() => finish("refused"));'); // refused (fall back) is not failed (never twice)
-    expect(tts).toContain('if (o === "refused") { resolvePlaying(); browserSpeak(speakable(fallbackText), () => fire("ended")); return; }');
+    expect(tts).toContain('if (o === "refused") { resolvePlaying(); browserSpeak(speakable(fallbackText, voiceLang()), () => fire("ended")); return; }'); // in the page's language (cn-v1138)
     expect(tts).toContain("else if (o !== \"stopped\") fire(o === \"ended\");"); // speakSmart: never onEnd on a cut (the element's contract); a clip that broke is not heard
     expect(swift).toContain('stopPlayer("stopped") // the player is invalid after a reset');
     expect(door).not.toMatch(/console\.log\([^\n]*(d\?\.audio|b64|base64)/); // the bytes are never echoed

@@ -16,8 +16,10 @@ vi.mock("./actions", () => ({
   takeShiftOffJob: vi.fn(async () => ({ ok: true })),
 }));
 
-import { SameDayShiftsList, notCarriedWords } from "./same-day-shifts";
+import { SameDayShiftsList, notCarriedWords, shiftLine } from "./same-day-shifts";
 import type { DayShift } from "./actions";
+import { dict } from "@/lib/i18n";
+import { LangProvider } from "@/components/lang-provider";
 
 const TZ = "America/Los_Angeles";
 const punch: DayShift = {
@@ -120,6 +122,57 @@ describe("Put This On moves the punch only, and the form says what it typed that
   });
 });
 
+describe("the day's shifts in Spanish (cn-v1138): the list reads the person's language, the pure words take it", () => {
+  const renderEs = (shifts: DayShift[], forJob: { id: string; label: string } | null, offThatDay = false) =>
+    renderToStaticMarkup(
+      createElement(LangProvider, {
+        lang: "es",
+        children: createElement(SameDayShiftsList, {
+          data: { ok: true, name: "Brian Taylor", tz: TZ, shifts, forJob, scheduledJob: null, offThatDay },
+          date: "2026-09-11",
+        }),
+      }),
+    );
+
+  it("a punch on no job: the headline, the day and clock words, the door and the sentence under it are Spanish", () => {
+    const html = renderEs([punch], { id: "j28", label: "41 Larkspur" });
+    expect(html).toContain("Brian ya tiene un turno el vie, 11");
+    expect(html).toMatch(/10:31 a\.\s?m\. a 6:57 p\.\s?m\. · 8\.43 h/);
+    expect(html).toContain("Sin trabajo");
+    expect(html).toContain(">Poner Esto En 41 Larkspur</button>");
+    expect(html).toContain("Ponlo en 41 Larkspur en vez de agregar las horas otra vez.");
+    expect(html).not.toContain("already has");
+    expect(html).not.toContain("Put This On");
+  });
+
+  it("two shifts, one billed: Spanish count, 'on INV' and the Open That Shift door; a day marked off says so in Spanish", () => {
+    const html = renderEs([punch, billed], null, true);
+    expect(html).toContain("Brian ya tiene 2 turnos el vie, 11");
+    expect(html).toContain("41 Larkspur · en INV-081");
+    expect(html).toContain(">Abrir Ese Turno</a>");
+    expect(html).toContain("Marcado libre ese día en el calendario.");
+    expect(html).toContain("Elige el trabajo arriba para ponerlo ahí en vez de agregar las horas otra vez.");
+  });
+
+  it("shiftLine and notCarriedWords take the language; with none they are English, byte for byte as before", () => {
+    expect(shiftLine(punch, TZ, "es").when).toMatch(/^10:31 a\.\s?m\. a 6:57 p\.\s?m\. · 8\.43 h$/);
+    expect(shiftLine(punch, TZ, "es").where).toBe("Sin trabajo");
+    expect(shiftLine({ ...punch, clockOut: null }, TZ, "es").when).toMatch(/^desde 10:31 a\.\s?m\., todavía en el reloj$/);
+    expect(shiftLine(billed, TZ, "es").where).toBe("41 Larkspur · en INV-081");
+    expect(shiftLine(punch, TZ)).toEqual({ when: "10:31 AM to 6:57 PM · 8.43 h", where: "No job" });
+    expect(shiftLine(punch, TZ)).toEqual(shiftLine(punch, TZ, "en"));
+    expect(notCarriedWords({ miles: 12, lunch: true, code: "ROUGH", rate: 30, notes: "panel" }, "es")).toBe(
+      "No se agregó a ese turno: 12 millas, el almuerzo, código ROUGH, la tarifa y las notas escrito en el formulario. Ábrelo para agregar eso.",
+    );
+    expect(notCarriedWords({ miles: 12 }, "es")).toBe("No se agregó a ese turno: 12 millas escrito en el formulario. Ábrelo para agregar eso.");
+    expect(notCarriedWords({ miles: 12 })).toBe(notCarriedWords({ miles: 12 }, "en"));
+    // The English the office reads is what it was.
+    expect(dict("en").tc_offThatDay).toBe("Marked off that day on the schedule.");
+    expect(dict("en").tc_putThisOn).toBe("Put This On {job}");
+    expect(dict("en").tc_alreadyHasOne).toBe("{name} already has a shift on {day}");
+  });
+});
+
 describe("one tap, one entry", () => {
   const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
   it("Add Time Entry (Timecards and the job's Time tab): a second tap before the first save answers is dropped, and the day's shifts are shown", () => {
@@ -143,8 +196,13 @@ describe("one tap, one entry", () => {
   });
   it("a dropped connection on Put This On, Company Time or either Undo is a sentence (the 60mph law)", () => {
     const put = src("./same-day-shifts.tsx");
-    expect(put).toMatch(/try \{\s*r = await putShiftOnJob\([^)]*\);\s*\} catch \{\s*toast\("No connection/);
-    expect(put).toMatch(/takeShiftOffJob\([^)]*\)\.then\(\s*\(u\) => \{[\s\S]*?\},\s*\(\) => toast\("No connection/);
+    // The sentences come through the catalog since cn-v1138: the door reads the key, the key says "No connection".
+    expect(put).toMatch(/try \{\s*r = await putShiftOnJob\([^)]*\);\s*\} catch \{\s*toast\(t\("tc_offlineShiftMayNotMove"\)/);
+    expect(put).toMatch(/takeShiftOffJob\([^)]*\)\.then\(\s*\(u\) => \{[\s\S]*?\},\s*\(\) => toast\(t\("tc_offlineUndoFailed"\)/);
+    expect(dict("en").tc_offlineShiftMayNotMove).toMatch(/^No connection/);
+    expect(dict("en").tc_offlineUndoFailed).toMatch(/^No connection/);
+    expect(dict("es").tc_offlineShiftMayNotMove).toMatch(/^Sin conexión/);
+    expect(dict("es").tc_offlineUndoFailed).toMatch(/^Sin conexión/);
     const company = src("../timecards/company-time-button.tsx");
     expect(company).toMatch(/try \{\s*r = await fileShiftAsCompanyTime\([^)]*\);\s*\} catch \{\s*toast\("No connection/);
     expect(company).toMatch(/\.then\(\s*\(u\) => \{[\s\S]*?\},\s*\(\) =>\s*toast\(\s*`No connection/);

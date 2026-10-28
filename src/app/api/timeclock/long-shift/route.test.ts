@@ -179,6 +179,34 @@ describe("GET /api/timeclock/long-shift", () => {
     expect(res).toMatchObject({ office_bells: 0, asked: 1, office_buzzes: 1 });
   });
 
+  /**
+   * IN EACH PERSON'S LANGUAGE (cn-v1138): the entries read joins profiles.language beside the phone,
+   * so a Spanish-speaking crew member and an English one in the SAME run are each asked in their own
+   * words (push and bell line, the shift's start in their own clock), and the office is buzzed in
+   * English about both.
+   */
+  it("at 12 hours, an es crew member and an en one in the same run are each asked in their own words; the office hears English about both", async () => {
+    const now = pacific("20:00");
+    vi.setSystemTime(now);
+    const warned = { long_shift_warned_at: new Date(now - 2 * H).toISOString() };
+    const brianRow = brian(12, now, warned);
+    const larkspur = brian(12, now, { ...warned, id: "entry-l", profile_id: "larkspur-1", profiles: { full_name: "Larkspur Catbird", role: "tech", active: true, language: "es" } });
+    state.client = fakeSupabase([brianRow, larkspur], { "entry-b": ["long_shift_nudged_at"], "entry-l": ["long_shift_nudged_at"] }, calls);
+    const res = await (await GET(req())).json();
+    expect(calls.find((c) => c.table === "time_entries")!.cols).toContain("profiles:profile_id(full_name, role, active, phone, language)");
+    expect(spies.push.map(([to, kind, p]) => [to, kind, p.title, p.body])).toEqual([
+      [["brian-1"], "clock_out", "Still On The Clock?", "You've been clocked in at Honeysuckle since Thu 8:00 AM. Tap to set when you stopped."],
+      [["erik-1", "alexa-1"], "long_shift", "Brian Is Still On The Clock", "Clocked in Thu 8:00 AM at Honeysuckle, 12 hours ago. Brian has been asked when the shift ended. Clock Out Brian on Timecards if you know."],
+      [["larkspur-1"], "clock_out", "¿Sigues En El Reloj?", "Tienes entrada marcada en Honeysuckle desde jue 8:00 am. Toca para poner a qué hora paraste."],
+      [["erik-1", "alexa-1"], "long_shift", "Larkspur Is Still On The Clock", "Clocked in Thu 8:00 AM at Honeysuckle, 12 hours ago. Larkspur has been asked when the shift ended. Clock Out Larkspur on Timecards if you know."],
+    ]);
+    expect(spies.notify.map(([, to, n]) => [to, n.type, n.title, n.body, n.url])).toEqual([
+      [["brian-1"], "long_shift", "Still On The Clock?", "You've been clocked in at Honeysuckle since Thu 8:00 AM. Tap to set when you stopped.", "/timeclock"],
+      [["larkspur-1"], "long_shift", "¿Sigues En El Reloj?", "Tienes entrada marcada en Honeysuckle desde jue 8:00 am. Toca para poner a qué hora paraste.", "/timeclock"],
+    ]);
+    expect(res).toMatchObject({ asked: 2, office_buzzes: 2, failed: 0 });
+  });
+
   it("the night holds the pushes, never the bell line", async () => {
     // 11 PM, a 10:30 AM clock-in the job never reached (it was down): both steps are owed. The bell
     // line goes out now; the question and the buzz wait for the 6 AM run, unclaimed.

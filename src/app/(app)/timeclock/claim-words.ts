@@ -15,13 +15,15 @@
  * only the words are left.
  */
 
+import { fillText, translator, type Lang } from "@/lib/i18n";
+
 /** The invoice that holds a claim on a source row. */
 export type ClaimHolder = { id: string; invoice_number: string | null };
 
 /** source row id (a time_entry id) → the non-void invoice that bills it. */
 export type ClaimIndex = ReadonlyMap<string, ClaimHolder>;
 
-const invoiceLabel = (h: ClaimHolder | undefined): string => h?.invoice_number ?? "an invoice";
+const invoiceLabel = (h: ClaimHolder | undefined, lang?: Lang | null): string => h?.invoice_number ?? translator(lang)("cs_anInvoice");
 const fmtHours = (h: number | null | undefined): string => `${(Math.round((Number(h) || 0) * 100) / 100).toFixed(2)} h`;
 
 /**
@@ -30,14 +32,16 @@ const fmtHours = (h: number | null | undefined): string => `${(Math.round((Numbe
  * A claim says "these rows are billed", not "at this many hours", so correcting a billed shift is
  * allowed (a typo is a typo, and refusing would block every honest correction). What is not allowed
  * is saying nothing: the invoice goes on billing the old figure, and the office has to be told.
+ *
+ * Every sentence takes the reader's `lang` (cn-v1138, lib/words/clockserver); omitted, it is English.
  */
-export function billedPartMoved(holder: ClaimHolder | undefined, before: number, after: number): string {
-  return `${invoiceLabel(holder)} bills ${fmtHours(before)} of this shift and that part now reads ${fmtHours(after)}. The invoice keeps its figure; adjust it by hand if the customer should pay for the difference.`;
+export function billedPartMoved(holder: ClaimHolder | undefined, before: number, after: number, lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_billedPartMoved"), { invoice: invoiceLabel(holder, lang), before: fmtHours(before), after: fmtHours(after) });
 }
 
 /** The sentence for a job move on a claimed shift: one place, so every door says the same thing. */
-export function claimedMoveRefusal(holder: ClaimHolder): string {
-  return `${invoiceLabel(holder)} already bills this shift — void or adjust that invoice before moving its hours to another job. Nothing was changed.`;
+export function claimedMoveRefusal(holder: ClaimHolder, lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_claimedMoveRefusal"), { invoice: invoiceLabel(holder, lang) });
 }
 
 /**
@@ -45,7 +49,8 @@ export function claimedMoveRefusal(holder: ClaimHolder): string {
  * refuses the same thing underneath). The invoice billed these hours as `name`'s, on that person's
  * labor line; moved, that line would claim another person's hours.
  */
-export function claimedPersonRefusal(holder: ClaimHolder, name?: string | null): string {
-  const whose = name?.trim() ? ` as ${name.trim()}'s hours` : "";
-  return `${invoiceLabel(holder)} already bills this shift${whose} — void or adjust that invoice before handing the shift to someone else. Nothing was changed.`;
+export function claimedPersonRefusal(holder: ClaimHolder, name?: string | null, lang?: Lang | null): string {
+  const t = translator(lang);
+  const whose = name?.trim() ? fillText(t("cs_asPersonsHours"), { name: name.trim() }) : "";
+  return fillText(t("cs_claimedPersonRefusal"), { invoice: invoiceLabel(holder, lang), whose });
 }

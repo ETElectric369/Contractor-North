@@ -97,11 +97,33 @@ export const JOB_STATUS_PRIORITY: Record<string, number> = {
   invoiced: 4,
 };
 
+/** The catalog key a status reads its word from in another language (lib/words/jobs, jb_status…). */
+const JOB_STATUS_KEY: Record<JobStatus, string> = {
+  to_be_scheduled: "jb_statusToBeScheduled",
+  scheduled: "jb_statusScheduled",
+  in_progress: "jb_statusInProgress",
+  on_hold: "jb_statusOnHold",
+  complete: "jb_statusComplete",
+  cancelled: "jb_statusCancelled",
+};
+
 /** Human label for a status (the UI's "in_progress" → "in progress"). Null-tolerant:
  *  a stray null status renders as "" instead of crashing the whole page render —
  *  the prod error_events sink caught exactly that crash class (null.replace) on a
- *  job page 2026-07-13; one bad row must never take down an RSC tree. */
-export const jobStatusLabel = (s: string | null | undefined): string => String(s ?? "").replace(/_/g, " ");
+ *  job page 2026-07-13; one bad row must never take down an RSC tree.
+ *
+ *  `lang` + `words` (cn-v1138): a Spanish reader gets the catalog's word for a status on the spine
+ *  ("Por Programar", "En Curso") through the caller's translator (lib/i18n translator(lang)); this
+ *  file rides customer bundles (lib/portal, lib/job-financials), so it imports no dictionary of its
+ *  own (lib/catalog-free-libs.test.ts holds that). English — the default, so every caller that
+ *  passes nothing reads byte for byte what it always did — stays the underscore-to-space form, and a
+ *  retired or unknown value reads that way in both languages rather than crashing or lying. */
+export const jobStatusLabel = (s: string | null | undefined, lang?: string | null, words?: (key: string) => string): string => {
+  const plain = String(s ?? "").replace(/_/g, " ");
+  if (lang !== "es" || !words) return plain;
+  const key = JOB_STATUS_KEY[String(s ?? "") as JobStatus];
+  return key ? words(key) : plain;
+};
 
 /** The row shape the "which job is this person on today" picks need. */
 export interface TodayJobPick {

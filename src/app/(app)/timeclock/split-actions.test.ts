@@ -309,7 +309,9 @@ describe("switchJob goes through switch_job", () => {
     expect(r.warning).toMatch(/special pay rate stays on the part before the switch/);
     expect(spies.notify).toHaveLength(1);
     expect(spies.notify[0][1]).toEqual(["office-1"]); // never the person who switched
-    expect(spies.notify[0][2].title).toBe("Brian Taylor switched jobs mid-shift");
+    // cn-v1138: the bell line is written per reader's language (the function form); English reads as before.
+    expect(spies.notify[0][2]("en").title).toBe("Brian Taylor switched jobs mid-shift");
+    expect(spies.notify[0][2]("es").title).toBe("Brian Taylor cambió de trabajo a mitad del turno");
   });
 
   it("a lunch that moved to the new part is said", async () => {
@@ -414,7 +416,8 @@ describe("clock-out without the breakdown", () => {
   it("the geofence never closes a shift the monitor was not watching", async () => {
     state.client = fakeSupabase((q) => (q.table === "time_entries" ? { data: { id: RIGHT, notes: null, lunch_minutes: 0 } } : undefined), calls);
     const r = await geoClockOut(null, "2001-07-14T22:00:00.000Z", true, ENTRY);
-    expect(r).toEqual({ ok: false, error: "That shift already ended; nothing was closed." });
+    // `ended`: the sheet's terminal signal in any language (cn-v1138).
+    expect(r).toEqual({ ok: false, error: "That shift already ended; nothing was closed.", ended: true });
     expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 });

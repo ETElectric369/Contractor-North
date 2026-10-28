@@ -87,6 +87,8 @@ export type MemberEditRead = {
   commute_baseline_miles?: number | null;
   role?: string | null;
   crew_lead?: boolean | null;
+  /** profiles.language (cn-v1138): "en" | "es"; null or absent reads as English. */
+  language?: string | null;
 };
 
 /** What is in the editor's fields now. */
@@ -97,6 +99,8 @@ export type MemberEditTyped = {
   commute_baseline_miles: number;
   role: string;
   crew_lead: boolean;
+  /** Left out by an editor that has no Language select (the older tests' shape): never sent. */
+  language?: "en" | "es";
 };
 
 /** The patch `updateMember` is called with. A field left out is "leave that column alone". */
@@ -107,6 +111,7 @@ export type MemberEditSave = {
   commute_baseline_miles?: number;
   role?: string;
   crew_lead?: boolean;
+  language?: "en" | "es";
 };
 
 const sameText = (was: string | null | undefined, now: string): boolean =>
@@ -135,5 +140,8 @@ export function memberEditToSave(
   }
   if (!opts.isSelf && !sameText(read.role, typed.role)) save.role = typed.role;
   if (!!read.crew_lead !== !!typed.crew_lead) save.crew_lead = typed.crew_lead;
+  // The language (cn-v1138): a blank or missing read is English, so a select left on English says
+  // nothing; it is sent only when the office changed it.
+  if (typed.language !== undefined && (read.language === "es" ? "es" : "en") !== typed.language) save.language = typed.language;
   return Object.keys(save).length ? save : null;
 }

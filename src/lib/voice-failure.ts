@@ -10,13 +10,24 @@
  * Pure (no browser, no server) so the copy and the payload shape are tested, not assumed.
  */
 
+import { translator, type Lang } from "./i18n";
+
 /** The glass panel's controls: Talk To Nort (the first row under Search Or Ask; the panel has no
  *  mic of its own) and the text box under the status line. Every "what to do now" line names
- *  those two and nothing else. It fits the status line on a 375px phone (48 characters) whole. */
-export const TRY_AGAIN_LINE = "Tap Talk To Nort to try again, or type below.";
+ *  those two and nothing else. It fits the status line on a 375px phone (48 characters) whole.
+ *  The words live in the catalog (nt_tryAgainLine, cn-v1138): the panel reads them in the person's
+ *  language through tryAgainLine(lang); the constant is the English for the stream's own status
+ *  lines, which are still English. */
+export function tryAgainLine(lang?: Lang | null): string {
+  return translator(lang)("nt_tryAgainLine");
+}
+export const TRY_AGAIN_LINE = tryAgainLine("en");
 
 /** Shown when the browser has no way to record at all, so trying again cannot help. */
-export const NO_VOICE_LINE = "Voice isn't available here. Type below.";
+export function noVoiceLine(lang?: Lang | null): string {
+  return translator(lang)("nt_noVoiceLine");
+}
+export const NO_VOICE_LINE = noVoiceLine("en");
 
 /** Mic permission denied. Inside the iOS shell the app grants WebKit's own capture prompt
  *  (Capacitor's WKUIDelegate), so a denial comes from the OS switch for the North app, not from

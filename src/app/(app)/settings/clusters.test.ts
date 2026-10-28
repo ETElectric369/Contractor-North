@@ -25,8 +25,8 @@ const dir = join(process.cwd(), "src/app/(app)/settings");
 const page = readFileSync(join(dir, "page.tsx"), "utf8");
 const subnav = readFileSync(join(dir, "settings-subnav.tsx"), "utf8");
 
-/** Each cluster literal is `id: "x",` followed by `label:` then `icon:` — nothing else matches. */
-const clusters = [...page.matchAll(/id: "([a-z]+)",\n\s+label: "[^"]+",\n\s+icon: /g)].map((m) => m[1]);
+/** Each cluster literal is `id: "x",` followed by `label:` (a literal, or the You tab's t("sh_you") since cn-v1138) then `icon:` — nothing else matches. */
+const clusters = [...page.matchAll(/id: "([a-z]+)",\n\s+label: (?:"[^"]+"|t\("[a-z_]+"\)),\n\s+icon: /g)].map((m) => m[1]);
 
 describe("settings clusters", () => {
   it("declares the eleven-way split, not the old seven", () => {

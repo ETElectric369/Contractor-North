@@ -6,6 +6,9 @@ import { TasksView } from "./tasks-view";
 import { getTasksPageData } from "./query";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
+import { createClient } from "@/lib/supabase/server";
+import { callerLang } from "@/lib/lang-of";
+import { translator } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +25,13 @@ export default async function TasksPage({
 }) {
   const sp = await searchParams;
   const showAllDone = sp?.done === "all";
-  const [{ todayStr, weekStart, viewerId, tasks, doneTotal, people, categories }, sw] = await Promise.all([
+  // The person's language rides beside the page's reads (cn-v1138): the header's words are theirs.
+  const [{ todayStr, weekStart, viewerId, tasks, doneTotal, people, categories }, sw, lang] = await Promise.all([
     getTasksPageData(showAllDone),
     viewerSwitches(),
+    createClient().then((sb) => callerLang(sb)),
   ]);
+  const t = translator(lang);
 
   // The standard header action (every list page's idiom) — it deep-links to the one-line add box
   // via ?new=1 (focus), keeping the grouping.
@@ -35,10 +41,10 @@ export default async function TasksPage({
 
   return (
     <div>
-      <PageHeader title="Reminders" description="Yours alone: the ones you made and the ones made for you. A job's tasks are on the job.">
+      <PageHeader title={t("tk_title")} description={t("tk_desc")}>
         <Link href={`/tasks?${addParams.toString()}`}>
           <Button>
-            <Plus className="h-4 w-4" /> Add Reminder
+            <Plus className="h-4 w-4" /> {t("tk_addReminder")}
           </Button>
         </Link>
       </PageHeader>

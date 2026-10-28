@@ -1,12 +1,25 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import { endSessionIfDeactivated, DEACTIVATED_MESSAGE } from "@/lib/deactivation-gate";
+import { cookies, headers } from "next/headers";
+import { endSessionIfDeactivated } from "@/lib/deactivation-gate";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { safeNextPath } from "@/lib/safe-next";
 import { reportError } from "@/lib/observe";
+import { translator } from "@/lib/i18n";
+import { langFromAcceptLanguage } from "@/lib/request-lang";
+
+/**
+ * THE WORDS AN ERROR COMES BACK IN (cn-v1138). Nobody is signed in when these doors refuse, so the
+ * language is the phone's: the Accept-Language header's first tag, the same read login/page.tsx
+ * makes, so the page and the error it shows agree. au_deactivated is lib/deactivation-gate's one
+ * sentence, in the catalog (login-words.test.tsx pins them equal). GoTrue's own sentences ("Invalid
+ * login credentials") still pass through as they are.
+ */
+async function words() {
+  return translator(langFromAcceptLanguage((await headers()).get("accept-language")));
+}
 
 /**
  * Where does a freshly-signed-in user with NO org belong? An external site collaborator
@@ -36,8 +49,8 @@ async function collaboratorHome(
  *  rejection happens before any app code runs and the deactivation gate never gets to speak.
  *  Translate it back to the one sentence the office tells people (audit v921). Anything else is
  *  passed through untouched — a real typo must still read like a typo. */
-function bannedMessage(raw: string): string {
-  return /banned|user is banned/i.test(raw) ? DEACTIVATED_MESSAGE : raw;
+function bannedMessage(raw: string, t: (key: string) => string): string {
+  return /banned|user is banned/i.test(raw) ? t("au_deactivated") : raw;
 }
 
 /** The deactivation rule lives in ONE place now (lib/deactivation-gate) so the magic-link
@@ -48,6 +61,7 @@ async function isDeactivated(supabase: Awaited<ReturnType<typeof createClient>>)
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
+  const t = await words();
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
 
@@ -56,7 +70,7 @@ export async function login(formData: FormData) {
     // setMemberActive now BANS the seat at GoTrue, which rejects the sign-in before any app code
     // runs — so the deactivation gate below can never speak (audit v921 review blocker). Say the
     // sentence the office expects instead of GoTrue's raw "Invalid login credentials".
-    redirect(`/login?error=${encodeURIComponent(bannedMessage(error.message))}`);
+    redirect(`/login?error=${encodeURIComponent(bannedMessage(error.message, t))}`);
   }
 
   // A deactivated account must not get a session at all. Migration 0158 already denies it
@@ -64,7 +78,7 @@ export async function login(formData: FormData) {
   // token — and the credential itself is what an ex-employee still holds. Sign the new
   // session straight back out and say so plainly.
   if (await isDeactivated(supabase)) {
-    redirect(`/login?error=${encodeURIComponent(DEACTIVATED_MESSAGE)}`);
+    redirect(`/login?error=${encodeURIComponent(t("au_deactivated"))}`);
   }
 
   // A RETURNING org-less collaborator belongs on /content (their grants may still be pending
@@ -79,6 +93,7 @@ export async function login(formData: FormData) {
 
 export async function signup(formData: FormData) {
   const supabase = await createClient();
+  const t = await words();
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const full_name = String(formData.get("full_name") ?? "");
@@ -91,11 +106,7 @@ export async function signup(formData: FormData) {
   // turns the refusal into a clean message instead of a raw database error.
   const { data: allowed } = await supabase.rpc("signup_allowed", { p_email: email });
   if (allowed === false) {
-    redirect(
-      `/login?mode=signup&error=${encodeURIComponent(
-        "Contractor North is invite-only right now. Ask for an invite and we'll open the door.",
-      )}`,
-    );
+    redirect(`/login?mode=signup&error=${encodeURIComponent(t("au_inviteOnly"))}`);
   }
 
   const { error } = await supabase.auth.signUp({
@@ -126,32 +137,26 @@ export async function signup(formData: FormData) {
     redirect(collab ? (next ?? collab) : "/planner");
   }
 
-  redirect(
-    `/login?message=${encodeURIComponent(
-      "Check your email to confirm your account, then sign in.",
-    )}`,
-  );
+  redirect(`/login?message=${encodeURIComponent(t("au_checkEmailConfirm"))}`);
 }
 
 export async function requestPasswordReset(formData: FormData) {
   const supabase = await createClient();
+  const t = await words();
   const email = String(formData.get("email") ?? "").trim();
-  if (!email) redirect(`/forgot?error=${encodeURIComponent("Enter your email.")}`);
+  if (!email) redirect(`/forgot?error=${encodeURIComponent(t("au_enterEmail"))}`);
 
   await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback?next=/reset`,
   });
 
   // Always show success (don't reveal whether an email exists).
-  redirect(
-    `/forgot?message=${encodeURIComponent(
-      "If that email has an account, a reset link is on its way.",
-    )}`,
-  );
+  redirect(`/forgot?message=${encodeURIComponent(t("au_resetOnItsWay"))}`);
 }
 
 export async function updatePassword(formData: FormData) {
   const supabase = await createClient();
+  const t = await words();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -159,7 +164,7 @@ export async function updatePassword(formData: FormData) {
 
   const password = String(formData.get("password") ?? "");
   if (password.length < 6) {
-    redirect(`/reset?error=${encodeURIComponent("Password must be at least 6 characters.")}`);
+    redirect(`/reset?error=${encodeURIComponent(t("au_password6"))}`);
   }
 
   const { error } = await supabase.auth.updateUser({ password });
@@ -178,8 +183,9 @@ const enc = encodeURIComponent;
  *  "Magic Link" template includes {{ .Token }}; the magic link in the same email also works. */
 export async function sendLoginCode(formData: FormData) {
   const supabase = await createClient();
+  const t = await words();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  if (!email) redirect(`/login?mode=code&error=${enc("Enter your email.")}`);
+  if (!email) redirect(`/login?mode=code&error=${enc(t("au_enterEmail"))}`);
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: { shouldCreateUser: false, emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback` },
@@ -191,16 +197,17 @@ export async function sendLoginCode(formData: FormData) {
 /** Verify the 6-digit code the user typed → establishes a session. */
 export async function verifyLoginCode(formData: FormData) {
   const supabase = await createClient();
+  const t = await words();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const token = String(formData.get("code") ?? "").replace(/\D/g, "").slice(0, 6);
   const back = `/login?mode=code&email=${enc(email)}&sent=1`;
-  if (!email || token.length < 6) redirect(`${back}&error=${enc("Enter the 6-digit code from your email.")}`);
+  if (!email || token.length < 6) redirect(`${back}&error=${enc(t("au_enterCode"))}`);
   const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
   if (error) redirect(`${back}&error=${enc(error.message)}`);
   // Same deactivation gate as the password path — otherwise the 6-digit code is a way
   // straight around it.
   if (await isDeactivated(supabase)) {
-    redirect(`/login?error=${enc(DEACTIVATED_MESSAGE)}`);
+    redirect(`/login?error=${enc(t("au_deactivated"))}`);
   }
   // Same routing as password login: an org-less site collaborator belongs on /content, and a
   // deep link the middleware stashed in ?next= is honoured.

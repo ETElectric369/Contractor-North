@@ -1,15 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { translator } from "@/lib/i18n";
 import { sep } from "node:path";
 import { eachAppSource } from "@/lib/migration-body.test-util";
-import {
-  JOB_STATUSES,
-  JOB_STATUS_DOOR,
-  SETTABLE_JOB_STATUSES,
-  finishedJobFields,
-  finishesTheJob,
-  pickJobScheduledToday,
-  pickMemberCurrentJob,
-} from "@/lib/job-status";
+import { JOB_STATUSES, JOB_STATUS_DOOR, SETTABLE_JOB_STATUSES, finishedJobFields, finishesTheJob, pickJobScheduledToday, pickMemberCurrentJob, jobStatusLabel } from "@/lib/job-status";
 
 /**
  * WHICH DOOR A STATUS IS WRITTEN THROUGH (M2). Finishing a job BILLS THE UNBILLED WORK FIRST, so the
@@ -264,5 +257,24 @@ describe("an explicit day OFF beats every guess", () => {
     // The regression that would matter most: making every cell empty.
     expect(pickMemberCurrentJob([inProgress, scheduledToday], new Set(), dayStart, dayEnd, null, false)?.id).toBe("sched");
     expect(pickMemberCurrentJob([inProgress, scheduledToday], new Set(), dayStart, dayEnd)?.id).toBe("sched");
+  });
+});
+
+describe("jobStatusLabel in the reader's language (cn-v1138)", () => {
+  const es = translator("es");
+  it("English, the default, is the underscore-to-space form as always; Spanish is the catalog's word through the caller's translator; an unknown or null value never crashes", () => {
+    expect(jobStatusLabel("in_progress")).toBe("in progress");
+    expect(jobStatusLabel("to_be_scheduled", "en", translator("en"))).toBe("to be scheduled");
+    expect(jobStatusLabel("in_progress", "es", es)).toBe("En Curso");
+    expect(jobStatusLabel("to_be_scheduled", "es", es)).toBe("Por Programar");
+    expect(jobStatusLabel("on_hold", "es", es)).toBe("En Pausa");
+    expect(jobStatusLabel("complete", "es", es)).toBe("Terminado");
+    expect(jobStatusLabel("cancelled", "es", es)).toBe("Cancelado");
+    // No translator handed in: the plain form, whatever the language (this file carries no dictionary).
+    expect(jobStatusLabel("in_progress", "es")).toBe("in progress");
+    // A retired enum value or a stray null reads the plain form in both languages.
+    expect(jobStatusLabel("invoiced", "es", es)).toBe("invoiced");
+    expect(jobStatusLabel(null, "es", es)).toBe("");
+    expect(jobStatusLabel(undefined)).toBe("");
   });
 });

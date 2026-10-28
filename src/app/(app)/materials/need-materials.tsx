@@ -6,6 +6,8 @@ import { Check, Loader2, PackagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { requestMaterials } from "./actions";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * THE ASK-THE-OFFICE DOOR UNDER A TECH'S MATERIALS LIST.
@@ -33,19 +35,20 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const t = translator(useLang());
 
   if (sent)
     return (
       <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">
         <Check className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
-          On the list above, and on the office&rsquo;s phone with this job attached.{" "}
+          {t("mt_askSent")}{" "}
           <button
             type="button"
             className="inline-flex min-h-[44px] items-center underline underline-offset-2"
             onClick={() => { setSent(false); setText(""); }}
           >
-            Something Else?
+            {t("mt_somethingElse")}
           </button>
         </span>
       </div>
@@ -54,16 +57,15 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
   return (
     <div className="rounded-lg border border-slate-200 p-3">
       <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-900">
-        <PackagePlus className="h-4 w-4 text-brand" /> Need it fast? Tell the office.
+        <PackagePlus className="h-4 w-4 text-brand" /> {t("mt_needItFast")}
       </div>
       <p className="mb-2 text-xs text-slate-500">
-        Say the item: it goes on the list above as a line to buy, and straight to the office&rsquo;s
-        phone with this job attached. You don&rsquo;t have to chase anybody.
+        {t("mt_askExplainer")}
       </p>
       <Textarea
         rows={2}
         value={text}
-        placeholder="Two more boxes of screws — need them tomorrow"
+        placeholder={t("mt_askPlaceholder")}
         onChange={(e) => { setText(e.target.value); setErr(null); }}
       />
       <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -73,13 +75,13 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
           onClick={() =>
             start(async () => {
               const r = await requestMaterials(jobId, text);
-              if (!r.ok) return setErr(r.error ?? "Couldn't send that.");
+              if (!r.ok) return setErr(r.error ?? t("mt_couldNotSend"));
               setSent(true);
               router.refresh();
             })
           }
         >
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : "Tell The Office"}
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> {t("mt_sending")}</> : t("mt_tellTheOffice")}
         </Button>
         {err && <span className="text-sm text-rose-600">{err}</span>}
       </div>

@@ -32,6 +32,9 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
   const [role, setRole] = useState("tech");
   const [rate, setRate] = useState(0);
   const [requireReset, setRequireReset] = useState(true);
+  // The person's language (cn-v1138): set here, so a Spanish-speaking tech opens the app in Spanish
+  // without ever finding the toggle.
+  const [language, setLanguage] = useState<"en" | "es">("en");
 
   function save() {
     setError(null);
@@ -43,6 +46,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
         role,
         hourly_rate: rate || null,
         requireReset,
+        language,
       });
       if (!res.ok) return setError(res.error ?? "Could not create the employee.");
       setDone(`${name} can now log in with ${email} and the password below — send it to them${requireReset ? "; they'll set their own password on first login." : ", they can change it later."}`);
@@ -58,6 +62,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
     setRole("tech");
     setRate(0);
     setRequireReset(true);
+    setLanguage("en");
     router.refresh();
   }
 
@@ -136,6 +141,13 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
                     is billed - the Team page's Bill box is that. It was labelled "Billable rate". */}
                 <Label htmlFor="emp-rate">Pay rate ($/hr)</Label>
                 <NumberInput id="emp-rate" value={rate} onValueChange={setRate} />
+              </div>
+              <div className="col-span-2">
+                <Label htmlFor="emp-lang">Language</Label>
+                <Select id="emp-lang" value={language} onChange={(e) => setLanguage(e.target.value === "es" ? "es" : "en")}>
+                  <option value="en">English</option>
+                  <option value="es">Español</option>
+                </Select>
               </div>
               {!(rate > 0) && (
                 // NOTHING SILENT (audit v994 MR3): with no pay rate their hours cost nothing, so

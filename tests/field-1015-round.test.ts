@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { UNDO_PUNCH_MS, UNDO_PUNCH_SENTENCE } from "@/lib/long-shift";
+import { dict } from "@/lib/i18n";
 
 /** THE 2026-10-15 ROUND (field-feedback-1015-round): the pins that keep each fix where it is. */
 const ROOT = path.resolve(__dirname, "..");
@@ -32,11 +33,16 @@ describe("a punch taken back", () => {
     // still under two minutes by the database's clock, rows read back; an error falls through to the close.
     expect(door).toMatch(/await createServiceClient\(\)\s*\.from\("time_entries"\)\s*\.delete\(\)\s*\.eq\("id", input\.entry_id\)\s*\.eq\("profile_id", user\.id\)\s*\.eq\("status", "open"\)\s*\.gt\("clock_in", new Date\(Date\.now\(\) - UNDO_PUNCH_MS\)\.toISOString\(\)\)\s*\.select\("id"\)/);
     expect(door).toContain('reportError("timeclock.clockOut.undo", undoErr, { entryId: input.entry_id });');
-    expect(door).toContain("return { ok: true, id: input.entry_id, undone: true, warning: UNDO_PUNCH_SENTENCE };");
+    // cn-v1138: the sentence in the caller's language (undoPunchSentence("en") is UNDO_PUNCH_SENTENCE).
+    expect(door).toContain("return { ok: true, id: input.entry_id, undone: true, warning: undoPunchSentence(lang) };");
     // The three screens and Nort's door.
-    expect(read("src/app/(app)/timeclock/timeclock-panel.tsx")).toMatch(/if \(res\.undone\) \{\s*toast\(res\.warning \?\? "That punch is gone\.", "success"\);\s*return;/);
-    expect(read("src/app/(app)/planner/now-card.tsx")).toContain('else if (res.undone) {\n          toast(res.warning ?? "That punch is gone.", "success");');
-    expect(read("src/app/(app)/jobs/[id]/job-time-button.tsx")).toContain('if (res.undone) toast(res.warning ?? "That punch is gone.", "success");');
+    // The panel's words come through the catalog (cn-v1138): the key says the sentence.
+    expect(read("src/app/(app)/timeclock/timeclock-panel.tsx")).toMatch(/if \(res\.undone\) \{\s*toast\(res\.warning \?\? t\("tc_punchGone"\), "success"\);\s*return;/);
+    expect(dict("en").tc_punchGone).toBe("That punch is gone.");
+    // My Day's card says the sentence in the person's language since cn-v1138 (md_punchGone is "That punch is gone." in English).
+    expect(read("src/app/(app)/planner/now-card.tsx")).toContain('else if (res.undone) {\n          toast(res.warning ?? t("md_punchGone"), "success");');
+    expect(read("src/app/(app)/jobs/[id]/job-time-button.tsx")).toContain('if (res.undone) toast(res.warning ?? t("jb_punchGone"), "success");');
+    expect(dict("en").jb_punchGone).toBe("That punch is gone.");
     expect(read("src/lib/actions/entities/time.ts")).toContain("if ((res as { undone?: boolean }).undone) return { ...res, recorded:");
   });
 });

@@ -179,9 +179,11 @@ describe("stopShift", () => {
     expect(upd.payload).not.toHaveProperty("rate_override");
 
     expect(spies.notify).toHaveLength(1);
-    const [org, to, n] = spies.notify[0];
+    const [org, to, byLang] = spies.notify[0];
     expect(org).toBe("org-1");
     expect(to).toEqual(["brian-1"]);
+    // cn-v1138: the line is written per reader's language (the function form); English reads as before.
+    const n = byLang("en");
     expect(n).toMatchObject({ type: "clock_stopped", title: "You're Clocked Out", url: "/timeclock" });
     expect(n.body).toBe(
       "Erik clocked you out at 5:00 PM: 5.00 h on Honeysuckle, Mon Jan 1, 12:00 PM to 5:00 PM, no lunch. If that is wrong, tell Erik.",
@@ -207,7 +209,7 @@ describe("stopShift", () => {
     }, calls);
     const r = await stop("2001-01-02T01:00:00.000Z");
     expect(r.sentence).toBe("They're Clocked Out: 3.38 h on Honeysuckle, Mon Jan 1, 1:37 PM to 5:00 PM. They have been told.");
-    expect(spies.notify[0][2].body).toBe(
+    expect(spies.notify[0][2]("en").body).toBe(
       "The office clocked you out at 5:00 PM: 3.38 h on Honeysuckle, Mon Jan 1, 1:37 PM to 5:00 PM, no lunch. If that is wrong, tell the office.",
     );
   });
@@ -216,7 +218,8 @@ describe("stopShift", () => {
     state.client = fakeSupabase(stopRoutes(openRow()), calls);
     const r = await stop("2001-01-02T01:00:00.000Z");
     expect(r.sentence).not.toMatch(/—/);
-    expect(spies.notify[0][2].body).not.toMatch(/—/);
+    expect(spies.notify[0][2]("en").body).not.toMatch(/—/);
+    expect(spies.notify[0][2]("es").body).not.toMatch(/—/);
   });
 });
 
@@ -286,8 +289,9 @@ describe("clockOut past twelve hours", () => {
     expect(upd.payload.clock_out).toBe(at);
     expect(upd.payload.notes).toMatch(/^trimmed out\n\[stop time picked by Brian Taylor on .+, after the shift\]$/);
     expect(spies.notify).toHaveLength(1);
-    const [, to, n] = spies.notify[0];
+    const [, to, byLang] = spies.notify[0];
     expect(to).toEqual(["office-1"]); // the caller is never told about himself
+    const n = byLang("en"); // cn-v1138: one line per reader's language
     expect(n).toMatchObject({ type: "clock_stopped_late", title: "Brian Set His Stop Time Late", url: `/timecards?entry=${ENTRY}` });
     expect(n.body).toMatch(/and picked .+ as his stop, 4\.00 h\.$/);
     expect(spies.push).toEqual([]); // bell only

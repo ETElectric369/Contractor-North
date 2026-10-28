@@ -7,6 +7,8 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayBoundsInTz } from "@/lib/tz";
 import { promoteJobToInProgress } from "@/lib/job-promote";
+import { asLang, fillText, translator } from "@/lib/i18n";
+import { callerLang } from "@/lib/lang-of";
 import {
   LAST_JOB_LOOKBACK_MS,
   WHICH_JOB_COLUMNS,
@@ -27,29 +29,36 @@ import {
  *
  * Every read runs on the caller's RLS client, and the job read selects labels and schedule only:
  * a tech sees the same rows as the office, with no price anywhere on them.
+ *
+ * THE WORDS ARE THE CALLER'S (cn-v1138): the profile read this action already makes carries the
+ * language, and every sentence and each row's why come through the cs_ catalog in it. "Not signed
+ * in." has nobody to read a language for, so it is English.
  */
 export async function whichJobChoices(entryId: string, fromJobId?: string | null): Promise<WhichJobChoices> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, isStaff: false, error: "Not signed in." };
+  if (!user) return { ok: false, isStaff: false, error: translator("en")("cs_notSignedIn") };
 
   const [meR, orgR, entryR] = await Promise.all([
-    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("role, language").eq("id", user.id).maybeSingle(),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     supabase.from("time_entries").select("id, job_id, status").eq("id", entryId).eq("profile_id", user.id).maybeSingle(),
   ]);
-  const isStaff = isStaffRole((meR.data as { role?: string } | null)?.role ?? "");
+  const me = meR.data as { role?: string; language?: string | null } | null;
+  const isStaff = isStaffRole(me?.role ?? "");
+  const lang = asLang(me?.language);
+  const t = translator(lang);
   const entry = entryR.data as { id: string; job_id: string | null } | null;
-  if (!entry) return { ok: false, isStaff, error: "That punch isn't there any more. The office can see it on Timecards." };
+  if (!entry) return { ok: false, isStaff, error: t("cs_punchGoneOfficeTimecards") };
   // A MOVE OFF THE APP'S PICK IS THE SAME QUESTION (Erik, 2026-10-01). The clock's sentence names the
   // job the app chose and its Change door opens this sheet with that job as `fromJobId`, so a punch
   // that carries exactly that job is offered the list. Any OTHER job on it means the screen is behind
   // (the office moved it, a Switch Job landed): the old refusal stands, because the list the sheet
   // would show would be answering about a punch that no longer exists as shown.
   const moving = !!fromJobId && entry.job_id === fromJobId;
-  if (entry.job_id && !moving) return { ok: false, isStaff, error: "This punch is already on a job." };
+  if (entry.job_id && !moving) return { ok: false, isStaff, error: t("cs_punchAlreadyOnJob") };
 
   const settings = getOrgSettings((orgR.data as { settings?: unknown } | null)?.settings);
   const tz = settings.timezone || "America/Los_Angeles";
@@ -89,7 +98,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
   ]);
   // A MOVE'S PUNCH ALREADY HAS A JOB, so it is not in Hours On No Job and the office is never
   // prompted about it: the line must not promise that they will pick it (which-job-choices).
-  if (goingR.error) return { ok: false, isStaff, error: choicesUnavailable(moving) };
+  if (goingR.error) return { ok: false, isStaff, error: choicesUnavailable(moving, lang) };
 
   const lastJobId = ((lastR.data as { job_id?: string | null } | null)?.job_id ?? null) || null;
   const segToday = new Set(((segR.data ?? []) as { job_id: string }[]).map((s) => s.job_id));
@@ -122,6 +131,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
     codesOn,
     // On a move, the job the punch is on is never offered back to itself.
     excludeJobId: moving ? entry.job_id : null,
+    lang,
   });
   return { ok: true, isStaff, jobs };
 }
@@ -176,7 +186,9 @@ export async function putPunchOnJob(entryId: string, jobId: string, fromJobId?: 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: translator("en")("cs_notSignedIn") };
+  // The caller's language (cn-v1138): this action reads no profile row of its own, so one small read.
+  const t = translator(await callerLang(supabase, user.id));
 
   const { data: entryRow } = await supabase
     .from("time_entries")
@@ -187,20 +199,20 @@ export async function putPunchOnJob(entryId: string, jobId: string, fromJobId?: 
   const entry = entryRow as { id: string; job_id: string | null; job_code: string | null; status: string; clock_out: string | null } | null;
   // `stale` refusals: the punch is not what the screen shows. The shell has no pull-to-refresh,
   // so the sentence never asks for one — the door re-renders from the server itself.
-  if (!entry) return { ok: false, stale: true, error: "That punch isn't there any more. The screen is catching up." };
+  if (!entry) return { ok: false, stale: true, error: t("cs_punchGoneCatchingUp") };
   // Moving off the app's pick: only off the very job the screen named. A punch on some OTHER job got
   // there another way (the office, a Switch Job) and that is Timecards' business, as it always was.
   const moving = !!fromJobId && entry.job_id === fromJobId;
   if (entry.job_id && !moving) {
-    return { ok: false, stale: true, error: "This punch already carries a job. The screen is catching up; the office moves it from Timecards." };
+    return { ok: false, stale: true, error: t("cs_punchCarriesJobCatchingUp") };
   }
-  if (moving && jobId === entry.job_id) return { ok: false, error: "That's the job it's already on." };
+  if (moving && jobId === entry.job_id) return { ok: false, error: t("cs_jobAlreadyOn") };
   const open = entry.status === "open";
   if (!open) {
     const code = (entry.job_code ?? "").trim();
-    if (code) return { ok: false, stale: true, error: `That shift is filed under ${code}. The office moves it from Timecards.` };
+    if (code) return { ok: false, stale: true, error: fillText(t("cs_shiftFiledUnderCode"), { code }) };
     if (!closedPickable(entry.clock_out)) {
-      return { ok: false, stale: true, error: "That shift closed a while ago, so the office puts it on its job from Timecards." };
+      return { ok: false, stale: true, error: t("cs_shiftClosedAWhileAgo") };
     }
   }
 
@@ -210,9 +222,9 @@ export async function putPunchOnJob(entryId: string, jobId: string, fromJobId?: 
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
   const job = jobRow as (ChoiceJob & { id: string }) | null;
-  if (!job) return { ok: false, error: "That job isn't available." };
+  if (!job) return { ok: false, error: t("cs_thatJobIsntAvailable") };
   if (!ACTIVE_JOB_STATUSES.includes(String(job.status ?? "") as (typeof ACTIVE_JOB_STATUSES)[number])) {
-    return { ok: false, error: "That job is finished. Pick one that's still going, or skip and the office will pick." };
+    return { ok: false, error: t("cs_jobFinishedPickAnother") };
   }
 
   // The predicates repeat the checks above ON the write itself, so a punch that closed, reopened or
@@ -227,8 +239,8 @@ export async function putPunchOnJob(entryId: string, jobId: string, fromJobId?: 
   if (error) return { ok: false, error: dbError(error) };
   if (!hit) {
     return moving
-      ? { ok: false, stale: true, error: "Nothing changed: the punch closed or moved to another job in the meantime. The screen is catching up." }
-      : { ok: false, stale: true, error: "Nothing changed: the punch closed or got a job in the meantime. The screen is catching up." };
+      ? { ok: false, stale: true, error: t("cs_nothingChangedMoved") }
+      : { ok: false, stale: true, error: t("cs_nothingChangedGotJob") };
   }
 
   // A held job comes off hold with the pick, and the sheet says so in its own words (NY-hold, 0366):

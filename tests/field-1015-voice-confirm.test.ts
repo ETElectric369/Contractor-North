@@ -21,7 +21,7 @@ describe("the say path and the reply queue (lib/tts)", () => {
   const tts = src("src/lib/tts.ts");
   it("asks for a clip twice, traces each stage, and never uses the browser voice in the dark", () => {
     expect(tts).toContain("export const CLIP_RETRY_MS = 1500;");
-    expect(tts).toContain("async function clipTwice(t: string, alive: () => boolean = () => true): Promise<{ blob: Blob } | { why: string }>");
+    expect(tts).toContain("async function clipTwice(t: string, alive: () => boolean = () => true, lang: Lang = voiceLang()): Promise<{ blob: Blob } | { why: string }>"); // the language rides the clip (cn-v1138)
     // One request may not hang the turn; a cut phrase makes no second try and never plays late; a refusal is not retried.
     expect(tts).toContain("export const CLIP_WAIT_MS = 8000;");
     expect(tts).toContain("AbortSignal.timeout(CLIP_WAIT_MS)");
@@ -30,16 +30,16 @@ describe("the say path and the reply queue (lib/tts)", () => {
     expect(tts).toContain("if ([400, 401, 403, 404].includes(r.status)) return { why };");
     expect(tts).toContain('if (buf.byteLength >= 1024) return { blob: new Blob([buf], { type: "audio/mpeg" }) };');
     // The caller is told whether anything was heard.
-    expect(tts).toContain("export function speakSmart(text: string, onEnd?: (heard: boolean) => void, onStart?: () => void) {");
-    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin); }');
+    expect(tts).toContain("export function speakSmart(text: string, onEnd?: (heard: boolean) => void, onStart?: () => void, lang: Lang = voiceLang()) {"); // the language rides the say (cn-v1138)
+    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin, lang); }'); // the browser voice in the same language (cn-v1138)
     expect(tts).toContain("for (let attempt = 0; attempt < 2; attempt++) {");
     expect(tts).toContain('if (!attempt) trace("clip retry", why);');
     for (const line of ['trace("say sent", `${t.length} chars`);', 'trace("say failed", got.why);', 'trace("say clip", `${blob.size}b native`);', 'trace("say done", o);']) expect(tts).toContain(line);
     expect(tts).toContain("if (dark()) { fire(false); return; }");
     expect(tts).toContain('return typeof document !== "undefined" && document.visibilityState === "hidden";');
     // The reply queue: the same two tries, and a lost sentence is skipped in the dark, never read silently.
-    expect(tts).toContain("return clipTwice(speakableText, alive).then((got) => {");
-    expect(tts).toContain("clip: synthClip(t, () => !this.stopped)");
+    expect(tts).toContain("return clipTwice(speakableText, alive, lang).then((got) => {"); // the language rides the clip (cn-v1138)
+    expect(tts).toContain("clip: synthClip(t, () => !this.stopped, this.lang)");
     expect(tts).toContain('trace("clip failed", got.why);');
     expect(tts).toContain('} else if (nativePlaybackOn() && pageHidden()) {\n        trace("clip skipped", "dark");');
     // Only audio is a clip.
@@ -47,7 +47,7 @@ describe("the say path and the reply queue (lib/tts)", () => {
     expect(tts).toContain('why = r.ok ? "tts not audio" : `tts ${r.status}`;');
   });
   it("keeps the player's contract: onEnd at the end or a failure (a failure is unheard), never on a cut", () => {
-    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin); }\n        else if (o !== "stopped") fire(o === "ended");');
+    expect(tts).toContain('if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin, lang); }\n        else if (o !== "stopped") fire(o === "ended");'); // the browser voice in the same language (cn-v1138)
   });
 });
 
@@ -59,7 +59,7 @@ describe("the chat: a confirm question nobody heard gates nothing", () => {
     expect(chat).toContain('trace("confirm unheard");');
     expect(chat).toContain('document.addEventListener("visibilitychange", again);');
     expect(chat).toContain("if (viaVoice) say(proposal.prompt, confirmAfterSaid);");
-    expect(chat).toContain('say("Say yes or no.", confirmAfterSaid);');
+    expect(chat).toContain('say(t("nt_sayYesOrNo"), confirmAfterSaid);'); // "Say yes or no." — the catalog's words since cn-v1138
     // No confirm prompt listens straight after say() any more.
     expect(chat).not.toContain("() => { if (voiceModeRef.current) confirmListen(); }");
   });

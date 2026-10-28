@@ -5,6 +5,7 @@ import { costOf } from "@/lib/ai-cost";
 import { estimateTierFor, overFullEstimateAllowance } from "@/lib/plans";
 import { SCREEN_ROOTS } from "@/lib/assistant-protocol";
 import { SCREENS } from "@/lib/nort/screens";
+import { dict } from "@/lib/i18n";
 
 const src = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf8");
 
@@ -73,13 +74,16 @@ describe("cn-v1128 — the estimate allowance is enforced", () => {
 describe("cn-v1128 — Reminders have a standing door and Nort can drive there", () => {
   it("My Day's card header carries All Reminders unconditionally, before the add line", () => {
     const y = src("src/app/(app)/planner/your-list.tsx");
-    const header = y.indexOf('<h2 className="text-sm font-semibold text-slate-900">Tasks &amp; Reminders</h2>');
+    // Since cn-v1138 the heading and the door read their words through t() (lib/words/myday; English unchanged).
+    const header = y.indexOf('<h2 className="text-sm font-semibold text-slate-900">{t("md_tasksAndReminders")}</h2>');
     const link = y.indexOf('<Link href="/tasks" className="ml-auto');
     const add = y.indexOf("<AddReminderLine");
     expect(header).toBeGreaterThan(0);
     expect(link).toBeGreaterThan(header);
     expect(add).toBeGreaterThan(link);
-    expect(y.slice(link, add)).toContain("All Reminders");
+    expect(y.slice(link, add)).toContain('t("md_allReminders")');
+    expect(dict("en").md_tasksAndReminders).toBe("Tasks & Reminders");
+    expect(dict("en").md_allReminders).toBe("All Reminders");
     expect(y.slice(header, link)).not.toContain("restCount");
   });
   it("tasks is a drivable root, a screen, and the product map names the full list", () => {

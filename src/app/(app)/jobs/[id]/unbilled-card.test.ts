@@ -114,7 +114,7 @@ describe("UnbilledCard - Open: $X and the door that bills it", () => {
     // True in code: the dock's button reads Switch whenever his open entry is not on this job.
     const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-time-button.tsx"), "utf8");
     expect(button).toContain('openEntry.job_id === jobId ? "here" : "switch"');
-    expect(button).toMatch(/Switch<span/);
+    expect(button).toMatch(/\{t\("jb_switch"\)\}<span/);
   });
 
   it("the page tells the card when his open shift is on this job (source)", () => {

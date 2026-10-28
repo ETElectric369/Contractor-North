@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { reportClientError } from "@/app/report-client-error";
 import { recoverFromChunkError, isTransportError } from "@/lib/chunk-reload";
 import { useTryAgain } from "@/lib/try-again";
+import { useLang } from "@/components/lang-provider";
+import { rootErrorWords } from "./error-words";
 
 export default function Error({
   error,
@@ -30,24 +32,25 @@ export default function Error({
     });
   }, [error]);
   const transport = isTransportError(error);
+  // Outside the (app) shell there is no LangProvider, so this reads English — a customer's pages
+  // (/estimate, /portal, /i…) do not change (cn-v1138); a signed-in person who lands here reads the
+  // same words the shell's boundary says. The words are a LOCAL map (error-words.ts), never
+  // lib/i18n: this file rides every customer page's bundle and must not carry the catalogs.
+  const w = rootErrorWords(useLang());
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
         <AlertTriangle className="h-6 w-6 text-red-600" />
       </div>
-      <h1 className="text-lg font-semibold text-slate-900">{transport ? "The connection dropped" : "Something went wrong"}</h1>
-      <p className="mt-1 max-w-md text-sm text-slate-500">
-        {transport
-          ? "Check your signal and try again — nothing was lost."
-          : "An unexpected error occurred. You can try again, or head back to the dashboard."}
-      </p>
+      <h1 className="text-lg font-semibold text-slate-900">{transport ? w.connectionDropped : w.somethingWrong}</h1>
+      <p className="mt-1 max-w-md text-sm text-slate-500">{transport ? w.checkSignal : w.unexpectedError}</p>
       <div className="mt-5 flex gap-2">
         <Button onClick={tryAgain} disabled={trying}>
-          {trying ? "Trying Again…" : "Try Again"}
+          {trying ? w.tryingAgain : w.tryAgain}
         </Button>
         <Link href="/planner">
-          <Button variant="outline">Dashboard</Button>
+          <Button variant="outline">{w.dashboard}</Button>
         </Link>
       </div>
     </div>

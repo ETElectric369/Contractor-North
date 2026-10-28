@@ -105,7 +105,7 @@ describe("where each edit goes (source)", () => {
 
   it("a day edit keeps the job's start and length, and a refused save is said in words", () => {
     expect(src).toContain("await setJobScheduleRanges(id, filled);");
-    expect(src).toContain('setError(res.error ?? "The days didn\'t save. Try again.")');
+    expect(src).toContain('setError(res.error ?? t("jb_daysDidntSave"))');
   });
 
   it("the page hands it the block on the company's clock", () => {
@@ -126,7 +126,7 @@ describe("where each edit goes (source)", () => {
     const from = page.indexOf("const scheduleText");
     const line = page.slice(from, page.indexOf("})();", from));
     expect(line).not.toContain("`starts ${hmWords(block.startHm)}`");
-    expect(line).toContain('`${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? " each day" : ""}`');
+    expect(line).toContain('`${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? ` ${t("jb_eachDay")}` : ""}`');
   });
 
   it("the job page's Add Time Entry hands the clock-out sheet the work day's end (End Of Work Day on a forgotten punch)", () => {

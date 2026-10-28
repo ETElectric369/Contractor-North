@@ -10,6 +10,8 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
 import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 import { carriedDay, carriedPin, isPinned } from "@/lib/six-rank";
 import { weekDayStrs, type WeekStart } from "@/lib/tz";
@@ -53,10 +55,11 @@ interface Person {
 // list. The legacy three keep their pretty labels + chip colors; anything
 // else gets a capitalized label and the neutral chip.
 const LEGACY_LABELS: Record<string, string> = {
-  sales: "Sales",
-  operations: "Operations",
-  office: "Office",
+  sales: "tk_catSales",
+  operations: "tk_catOperations",
+  office: "tk_catOffice",
 };
+type Words = (key: string) => string;
 
 // Category is a glance-chip on the row (default view), not the organizing
 // principle — the sections answer "what's next", the chip answers "what kind".
@@ -65,8 +68,10 @@ const CATEGORY_CHIP: Record<string, string> = {
   operations: "bg-green-50 text-green-700",
   office: "bg-amber-50 text-amber-700",
 };
-const categoryLabel = (id: string) =>
-  LEGACY_LABELS[id.toLowerCase()] ?? id.charAt(0).toUpperCase() + id.slice(1);
+const categoryLabel = (id: string, t: Words) => {
+  const key = LEGACY_LABELS[id.toLowerCase()];
+  return key ? t(key) : id.charAt(0).toUpperCase() + id.slice(1);
+};
 
 /** Datalist-backed free-text category input — autocompletes the org's OWN
  *  existing values (no invented taxonomy), still accepts anything new. */
@@ -84,6 +89,7 @@ function CategoryInput({
   className?: string;
 }) {
   const listId = useId();
+  const t = translator(useLang());
   return (
     <>
       <Input
@@ -91,8 +97,8 @@ function CategoryInput({
         list={categories.length ? listId : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Category (optional)"
-        aria-label="Category"
+        placeholder={t("tk_categoryOptional")}
+        aria-label={t("tk_category")}
         className={className}
       />
       {categories.length > 0 && (
@@ -106,12 +112,12 @@ function CategoryInput({
   );
 }
 
-const PRIORITIES: { value: number; label: string }[] = [
-  { value: 0, label: "Normal" },
-  { value: 1, label: "High" },
-  { value: 2, label: "Urgent" },
+const PRIORITIES: { value: number; key: string }[] = [
+  { value: 0, key: "tk_priNormal" },
+  { value: 1, key: "tk_priHigh" },
+  { value: 2, key: "tk_priUrgent" },
 ];
-const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.label ?? "High";
+const priorityLabel = (p: number, t: Words) => t(PRIORITIES.find((x) => x.value === p)?.key ?? "tk_priHigh");
 
 /**
  * THE ONE-LINE ADD (0358: the 6-field box — category, job, person, due, priority — became this).
@@ -123,6 +129,8 @@ const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.labe
 export function NewReminderBox() {
   const router = useRouter();
   const toast = useToast();
+  // THE PERSON'S LANGUAGE (cn-v1138): the line's words come through t() and lib/words/tasks.
+  const t = translator(useLang());
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const [pending, start] = useTransition();
@@ -146,10 +154,10 @@ export function NewReminderBox() {
     start(async () => {
       const res = await createTask({ title });
       if (!res.ok) {
-        toast(res.error ?? "Couldn't add the reminder. Try again.", "error");
+        toast(res.error ?? t("tk_couldNotAddReminder"), "error");
         return;
       }
-      toast(res.duplicate ? (res.speak ?? "Already on the list.") : "Reminder added", res.duplicate ? "info" : "success");
+      toast(res.duplicate ? (res.speak ?? t("tk_alreadyOnList")) : t("tk_reminderAdded"), res.duplicate ? "info" : "success");
       setTitle("");
       router.refresh();
     });
@@ -163,12 +171,12 @@ export function NewReminderBox() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
-          placeholder="Add A Reminder…"
-          aria-label="Add A Reminder"
+          placeholder={t("tk_addPlaceholder")}
+          aria-label={t("tk_addAria")}
           className="h-11 min-w-0 flex-1"
         />
         <Button onClick={add} disabled={pending || !title.trim()} className="shrink-0 px-3">
-          <Plus className="h-4 w-4" /> Add
+          <Plus className="h-4 w-4" /> {t("tk_add")}
         </Button>
       </div>
     </Card>
@@ -178,7 +186,7 @@ export function NewReminderBox() {
 /** Full edit modal: title, category, due date, priority, who it's for, tags, notes. No job: a
  *  Reminder is not a job's task (0358); a job's list is worked on the job. */
 export function TaskEditModal({
-  t,
+  t: task,
   people,
   category,
   categories,
@@ -200,23 +208,26 @@ export function TaskEditModal({
   viewerId?: string | null;
 }) {
   const router = useRouter();
-  const canHandOff = !!viewerId && t.created_by === viewerId;
+  // THE PERSON'S LANGUAGE (cn-v1138): the sheet's words come through t() and lib/words/tasks.
+  const lang = useLang();
+  const t = translator(lang);
+  const canHandOff = !!viewerId && task.created_by === viewerId;
   const [pending, start] = useTransition();
-  const [title, setTitle] = useState(t.title);
-  const [cat, setCat] = useState(t.category ?? "");
-  const [dueDate, setDueDate] = useState(t.due_date ?? "");
-  const [priority, setPriority] = useState(t.priority);
-  const [assignedTo, setAssignedTo] = useState(t.assigned_to ?? "");
-  const [tags, setTags] = useState((t.tags ?? []).join(", "));
-  const [notes, setNotes] = useState(t.notes ?? "");
+  const [title, setTitle] = useState(task.title);
+  const [cat, setCat] = useState(task.category ?? "");
+  const [dueDate, setDueDate] = useState(task.due_date ?? "");
+  const [priority, setPriority] = useState(task.priority);
+  const [assignedTo, setAssignedTo] = useState(task.assigned_to ?? "");
+  const [tags, setTags] = useState((task.tags ?? []).join(", "));
+  const [notes, setNotes] = useState(task.notes ?? "");
   const [error, setError] = useState<string | null>(null);
 
   function save() {
-    if (!title.trim()) return setError("Title is required.");
+    if (!title.trim()) return setError(t("tk_titleRequired"));
     setError(null);
     start(async () => {
       const res = await updateTask(
-        t.id,
+        task.id,
         {
           title,
           category: cat.trim() || null,
@@ -228,9 +239,9 @@ export function TaskEditModal({
           ...(extras ? { tags: tags.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
           notes: notes || null,
         },
-        { category, jobId: t.job_id },
+        { category, jobId: task.job_id },
       );
-      if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (!res.ok) return setError(res.error ?? t("tk_couldNotSave"));
       onClose();
       router.refresh();
     });
@@ -240,43 +251,43 @@ export function TaskEditModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Edit Reminder"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save Changes" />}
+      title={t("tk_editReminder")}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel={t("tk_saveChanges")} />}
     >
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <div>
-          <Label htmlFor="te-title">Title</Label>
+          <Label htmlFor="te-title">{t("tk_titleLabel")}</Label>
           <Input id="te-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
         </div>
         <div>
-          <Label htmlFor="te-cat">Category</Label>
+          <Label htmlFor="te-cat">{t("tk_category")}</Label>
           <CategoryInput id="te-cat" value={cat} onChange={setCat} categories={categories} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label>Due date</Label>
+            <Label>{t("tk_dueDateLabel")}</Label>
             {/* The one move-to-day sheet, app-wide idiom — picks into local form
                 state here; nothing saves until "Save changes". */}
             <MoveToDay
-              label="Due date"
+              label={t("tk_dueDateLabel")}
               clearable
               onPick={(iso) => setDueDate(iso ?? "")}
               triggerClassName="flex h-10 w-full items-center rounded-lg border border-slate-300 bg-white px-3 text-left text-sm hover:border-brand"
             >
               {dueDate ? (
-                <span className="text-slate-900">{formatDate(dueDate)}</span>
+                <span className="text-slate-900">{formatDate(dueDate, undefined, lang)}</span>
               ) : (
-                <span className="text-slate-400">No due date</span>
+                <span className="text-slate-400">{t("tk_noDueDate")}</span>
               )}
             </MoveToDay>
           </div>
           {extras && (
             <div>
-              <Label htmlFor="te-pri">Priority</Label>
+              <Label htmlFor="te-pri">{t("tk_priority")}</Label>
               <Select id="te-pri" value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
                 {PRIORITIES.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
+                  <option key={p.value} value={p.value}>{t(p.key)}</option>
                 ))}
               </Select>
             </div>
@@ -287,33 +298,33 @@ export function TaskEditModal({
               only the maker hands it to someone else, so nobody else is offered a door 0358 refuses. */}
           {canHandOff ? (
             <>
-              <Label htmlFor="te-person">Who It&rsquo;s For</Label>
+              <Label htmlFor="te-person">{t("tk_whoFor")}</Label>
               <Select id="te-person" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-                <option value="">Whoever Made It</option>
+                <option value="">{t("tk_whoeverMadeIt")}</option>
                 {people.map((p) => (
-                  <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+                  <option key={p.id} value={p.id}>{p.full_name ?? t("tk_unnamed")}</option>
                 ))}
               </Select>
             </>
           ) : (
             <>
-              <Label>Who It&rsquo;s For</Label>
+              <Label>{t("tk_whoFor")}</Label>
               <p className="text-sm text-slate-700">
-                {t.assigned_to ? (t.assigned_to === viewerId ? "You" : (t.assignee?.full_name ?? "Someone on the team")) : "Whoever Made It"}
+                {task.assigned_to ? (task.assigned_to === viewerId ? t("tk_you") : (task.assignee?.full_name ?? t("tk_someoneOnTeam"))) : t("tk_whoeverMadeIt")}
               </p>
-              <p className="mt-1 text-xs text-slate-500">Only the person who made it can hand it to someone else.</p>
+              <p className="mt-1 text-xs text-slate-500">{t("tk_onlyMakerHandsOff")}</p>
             </>
           )}
         </div>
         {extras && (
           <div>
-            <Label htmlFor="te-tags">Tags</Label>
-            <Input id="te-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="comma, separated, tags" />
+            <Label htmlFor="te-tags">{t("tk_tags")}</Label>
+            <Input id="te-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t("tk_tagsPlaceholder")} />
           </div>
         )}
         <div>
-          <Label htmlFor="te-notes">Notes</Label>
-          <Textarea id="te-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} placeholder="Add any details or context…" />
+          <Label htmlFor="te-notes">{t("tk_notes")}</Label>
+          <Textarea id="te-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} placeholder={t("tk_notesPlaceholder")} />
         </div>
       </div>
     </Modal>
@@ -321,7 +332,7 @@ export function TaskEditModal({
 }
 
 export function TaskRow({
-  t,
+  t: task,
   people,
   category,
   categories,
@@ -349,6 +360,9 @@ export function TaskRow({
 }) {
   const router = useRouter();
   const toast = useToast();
+  // THE PERSON'S LANGUAGE (cn-v1138): the row's words come through t() and lib/words/tasks.
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -356,18 +370,18 @@ export function TaskRow({
   // THE PIN RULE HAS ONE HOME (lib/six-rank isPinned): any focus_date on or before today is a pin
   // that still stands. This used to read `=== todayStr`, the third hand-written copy of the rule, and
   // it is why yesterday's pin still drew a filled glyph here while My Day had already lost the row.
-  const pinned = isPinned(t.focus_date, todayStr ?? "");
+  const pinned = isPinned(task.focus_date, todayStr ?? "");
   // A DONE ROW SAYS NOTHING ABOUT A PIN (lib/six-rank carriedPin owns that gate): checking a
   // Reminder off leaves its focus_date alone, so the Done fold used to wear "Carried From <Day>"
   // under a struck-through title — a false sentence about finished work.
-  const carried = carriedPin(t, todayStr);
+  const carried = carriedPin(task, todayStr);
 
   function addSub() {
     if (!subTitle.trim()) return;
     start(async () => {
-      const res = await createTask({ title: subTitle, category, parent_id: t.id });
-      if (!res?.ok) { toast(res?.error ?? "Couldn't add subtask — try again.", "error"); return; }
-      if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
+      const res = await createTask({ title: subTitle, category, parent_id: task.id });
+      if (!res?.ok) { toast(res?.error ?? t("tk_couldNotAddSubtask"), "error"); return; }
+      if (res.duplicate) toast(res.speak ?? t("tk_alreadyOnList"), "info");
       setSubTitle("");
       setAdding(false);
       router.refresh();
@@ -378,13 +392,14 @@ export function TaskRow({
   // never silently stranded under a done parent — confirm, then cascade.
   function toggleParent(done: boolean) {
     start(async () => {
-      let res: ToggleTaskResult = await toggleTask(t.id, done, { category });
+      let res: ToggleTaskResult = await toggleTask(task.id, done, { category });
       if (!res?.ok && res?.needsCascade && done) {
         const n = res.openChildren ?? subtasks.filter((s) => s.status !== "done").length;
-        if (!confirm(`"${t.title}" has ${n} open subtask${n === 1 ? "" : "s"} — mark ${n === 1 ? "it" : "them"} done too?`)) return;
-        res = await toggleTask(t.id, done, { category, cascade: true });
+        const ask = n === 1 ? fillText(t("tk_openSubtaskAskOne"), { title: task.title }) : fillText(t("tk_openSubtasksAskMany"), { title: task.title, n: String(n) });
+        if (!confirm(ask)) return;
+        res = await toggleTask(task.id, done, { category, cascade: true });
       }
-      if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; }
+      if (!res?.ok) { toast(res?.error ?? t("tk_couldNotUpdate"), "error"); return; }
       router.refresh();
     });
   }
@@ -393,9 +408,9 @@ export function TaskRow({
     if (!todayStr) return;
     start(async () => {
       // focus_date = the pin. It no longer expires at midnight: a pin carries until it is unpinned.
-      const res = await updateTask(t.id, { focus_date: pinned ? null : todayStr }, { category, jobId: t.job_id });
-      if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; }
-      toast(pinned ? "Unpinned" : "Pinned to the top of Tasks & Reminders. It carries until you unpin it.", "success");
+      const res = await updateTask(task.id, { focus_date: pinned ? null : todayStr }, { category, jobId: task.job_id });
+      if (!res?.ok) { toast(res?.error ?? t("tk_couldNotUpdate"), "error"); return; }
+      toast(pinned ? t("tk_unpinned") : t("tk_pinnedToTop"), "success");
       router.refresh();
     });
   }
@@ -405,7 +420,7 @@ export function TaskRow({
       <div className="flex items-start gap-3">
         <input
           type="checkbox"
-          checked={t.status === "done"}
+          checked={task.status === "done"}
           onChange={(e) => toggleParent(e.target.checked)}
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
         />
@@ -415,70 +430,70 @@ export function TaskRow({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className={`flex min-h-[44px] w-full items-center text-left ${t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}
+            className={`flex min-h-[44px] w-full items-center text-left ${task.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}
           >
-            {t.priority > 0 && t.status !== "done" && (
-              <Flag className={`mr-1 inline h-3.5 w-3.5 shrink-0 ${t.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
+            {task.priority > 0 && task.status !== "done" && (
+              <Flag className={`mr-1 inline h-3.5 w-3.5 shrink-0 ${task.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
             )}
-            {t.title}
+            {task.title}
           </button>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-            {t.due_date && (
-              <span className={overdue && t.status !== "done" ? "font-medium text-red-600" : undefined}>
-                Due {formatDate(t.due_date)}
+            {task.due_date && (
+              <span className={overdue && task.status !== "done" ? "font-medium text-red-600" : undefined}>
+                {fillText(t("tk_due"), { date: formatDate(task.due_date, undefined, lang) })}
               </span>
             )}
-            {t.priority > 0 && <span className={t.priority >= 2 ? "text-red-600" : "text-amber-600"}>{priorityLabel(t.priority)}</span>}
-            {t.assignee?.full_name && (
-              <span className="flex items-center gap-1"><User className="h-3 w-3" /> {t.assignee.full_name}</span>
+            {task.priority > 0 && <span className={task.priority >= 2 ? "text-red-600" : "text-amber-600"}>{priorityLabel(task.priority, t)}</span>}
+            {task.assignee?.full_name && (
+              <span className="flex items-center gap-1"><User className="h-3 w-3" /> {task.assignee.full_name}</span>
             )}
-            {showCategory && t.category && (
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${CATEGORY_CHIP[t.category.toLowerCase()] ?? "bg-slate-100 text-slate-500"}`}>
-                {categoryLabel(t.category)}
+            {showCategory && task.category && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${CATEGORY_CHIP[task.category.toLowerCase()] ?? "bg-slate-100 text-slate-500"}`}>
+                {categoryLabel(task.category, t)}
               </span>
             )}
             {/* A pin he set on an earlier day says so here as well as on My Day — the same two words
                 in both places, so the row never looks like it arrived today. */}
             {carried && (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                Carried From {carriedDay(carried, todayStr as string)}
+                {fillText(t("tk_carriedFrom"), { day: carriedDay(carried, todayStr as string, lang) })}
               </span>
             )}
             {/* Tags follow To-Do Extras (0358): off, the chips aren't drawn; the tags stay stored. */}
             {extras &&
-              (t.tags ?? []).map((tag) => (
+              (task.tags ?? []).map((tag) => (
                 <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">#{tag}</span>
               ))}
           </div>
         </div>
         {/* The pin — it puts this Reminder at the top of My Day's Tasks & Reminders and KEEPS it
             there until it is unpinned or checked off. Top-level open tasks only; subtasks never rank. */}
-        {todayStr && t.status !== "done" && !t.parent_id && (
+        {todayStr && task.status !== "done" && !task.parent_id && (
           <button
             onClick={togglePin}
             disabled={pending}
             className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-slate-100 ${pinned ? "text-brand" : "text-slate-300 hover:text-brand"}`}
-            title={pinned ? "Unpin" : "Pin To Top (Carries Until You Unpin It)"}
+            title={pinned ? t("tk_unpin") : t("tk_pinToTop")}
           >
             <Pin className="h-4 w-4" fill={pinned ? "currentColor" : "none"} />
           </button>
         )}
         {extras && (
-          <button onClick={() => setAdding((v) => !v)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-brand" title="Add subtask">
+          <button onClick={() => setAdding((v) => !v)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-brand" title={t("tk_addSubtask")}>
             <Plus className="h-4 w-4" />
           </button>
         )}
-        <button onClick={() => setEditing(true)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="Edit">
+        <button onClick={() => setEditing(true)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-slate-600" title={t("tk_edit")}>
           <Pencil className="h-4 w-4" />
         </button>
         <button
           onClick={() => {
-            if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
-            start(async () => { const res = await deleteTask(t.id, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't delete the reminder. Try again.", "error"); return; } toast("Reminder deleted", "success"); router.refresh(); });
+            if (!confirm(fillText(t("tk_deleteAsk"), { title: task.title }))) return;
+            start(async () => { const res = await deleteTask(task.id, { category }); if (!res?.ok) { toast(res?.error ?? t("tk_couldNotDeleteReminder"), "error"); return; } toast(t("tk_reminderDeleted"), "success"); router.refresh(); });
           }}
           disabled={pending}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-red-50 hover:text-red-600"
-          title="Delete"
+          title={t("tk_delete")}
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -494,14 +509,14 @@ export function TaskRow({
               <input
                 type="checkbox"
                 checked={st.status === "done"}
-                onChange={(e) => start(async () => { const res = await toggleTask(st.id, e.target.checked, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't update subtask — try again.", "error"); return; } router.refresh(); })}
+                onChange={(e) => start(async () => { const res = await toggleTask(st.id, e.target.checked, { category }); if (!res?.ok) { toast(res?.error ?? t("tk_couldNotUpdateSubtask"), "error"); return; } router.refresh(); })}
                 className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
               />
               <span className={`flex-1 ${st.status === "done" ? "text-slate-400 line-through" : "text-slate-700"}`}>{st.title}</span>
               <button
                 onClick={() => {
-                  if (!confirm(`Delete subtask "${st.title}"? This can't be undone.`)) return;
-                  start(async () => { const res = await deleteTask(st.id, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't delete subtask — try again.", "error"); return; } toast("Subtask deleted", "success"); router.refresh(); });
+                  if (!confirm(fillText(t("tk_deleteSubtaskAsk"), { title: st.title }))) return;
+                  start(async () => { const res = await deleteTask(st.id, { category }); if (!res?.ok) { toast(res?.error ?? t("tk_couldNotDeleteSubtask"), "error"); return; } toast(t("tk_subtaskDeleted"), "success"); router.refresh(); });
                 }}
                 className="text-slate-300 hover:text-red-600"
               >
@@ -511,8 +526,8 @@ export function TaskRow({
           ))}
           {adding && (
             <li className="flex items-center gap-2">
-              <Input value={subTitle} onChange={(e) => setSubTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSub()} placeholder="Subtask…" autoFocus className="h-7 text-xs" />
-              <Button size="sm" onClick={addSub} disabled={pending || !subTitle.trim()} className="h-7 px-2.5 text-xs">Add</Button>
+              <Input value={subTitle} onChange={(e) => setSubTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSub()} placeholder={t("tk_subtaskPlaceholder")} autoFocus className="h-7 text-xs" />
+              <Button size="sm" onClick={addSub} disabled={pending || !subTitle.trim()} className="h-7 px-2.5 text-xs">{t("tk_add")}</Button>
             </li>
           )}
         </ul>
@@ -520,7 +535,7 @@ export function TaskRow({
 
       {editing && (
         <TaskEditModal
-          t={t}
+          t={task}
           people={people}
           category={category}
           categories={categories}
@@ -628,6 +643,8 @@ export function TasksView({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const byCategory = searchParams.get("by") === "category";
+  // THE PERSON'S LANGUAGE (cn-v1138): the page's words come through t() and lib/words/tasks.
+  const t = translator(useLang());
 
   // Preserve every live filter (?by, ?done) when building links —
   // only the transient ?new focus flag is dropped.
@@ -678,11 +695,11 @@ export function TasksView({
   );
 
   const timeSections: { key: string; label: string; tone: string; countClass?: string; tasks: ViewTask[] }[] = [
-    { key: "overdue", label: "Overdue", tone: "border-red-200 bg-red-50/60", countClass: "font-semibold text-red-600", tasks: openTop.filter((t) => !!t.due_date && t.due_date! < todayStr) },
-    { key: "today", label: "Today", tone: "border-sky-200 bg-sky-50/60", tasks: openTop.filter((t) => t.due_date === todayStr) },
-    { key: "week", label: "This week", tone: "border-slate-200 bg-slate-50/60", tasks: openTop.filter((t) => !!t.due_date && t.due_date! > todayStr && t.due_date! <= weekEnd) },
-    { key: "later", label: "Later", tone: "border-slate-200 bg-slate-50/40", tasks: openTop.filter((t) => !!t.due_date && t.due_date! > weekEnd) },
-    { key: "someday", label: "Someday", tone: "border-slate-200 bg-white", tasks: openTop.filter((t) => !t.due_date) },
+    { key: "overdue", label: t("tk_overdue"), tone: "border-red-200 bg-red-50/60", countClass: "font-semibold text-red-600", tasks: openTop.filter((x) => !!x.due_date && x.due_date! < todayStr) },
+    { key: "today", label: t("tk_today"), tone: "border-sky-200 bg-sky-50/60", tasks: openTop.filter((x) => x.due_date === todayStr) },
+    { key: "week", label: t("tk_thisWeek"), tone: "border-slate-200 bg-slate-50/60", tasks: openTop.filter((x) => !!x.due_date && x.due_date! > todayStr && x.due_date! <= weekEnd) },
+    { key: "later", label: t("tk_later"), tone: "border-slate-200 bg-slate-50/40", tasks: openTop.filter((x) => !!x.due_date && x.due_date! > weekEnd) },
+    { key: "someday", label: t("tk_someday"), tone: "border-slate-200 bg-white", tasks: openTop.filter((x) => !x.due_date) },
   ].filter((s) => s.tasks.length > 0);
 
   // Same open tasks regrouped by category — grouped case-insensitively (the
@@ -691,19 +708,19 @@ export function TasksView({
   const catMap = new Map<string, { label: string; tasks: ViewTask[] }>();
   const uncategorized: ViewTask[] = [];
   if (byCategory) {
-    for (const t of openTop) {
-      const raw = (t.category ?? "").trim();
-      if (!raw) { uncategorized.push(t); continue; }
+    for (const x of openTop) {
+      const raw = (x.category ?? "").trim();
+      if (!raw) { uncategorized.push(x); continue; }
       const g = catMap.get(raw.toLowerCase());
-      if (g) g.tasks.push(t);
-      else catMap.set(raw.toLowerCase(), { label: categoryLabel(raw), tasks: [t] });
+      if (g) g.tasks.push(x);
+      else catMap.set(raw.toLowerCase(), { label: categoryLabel(raw, t), tasks: [x] });
     }
   }
   const categorySections = [...catMap.values()]
     .sort((a, b) => a.label.localeCompare(b.label))
     .map((g) => ({ key: `cat-${g.label}`, label: g.label, tone: "border-slate-200 bg-slate-50/60", countClass: undefined as string | undefined, tasks: g.tasks }));
   if (uncategorized.length > 0) {
-    categorySections.push({ key: "cat-none", label: "No category", tone: "border-slate-200 bg-white", countClass: undefined, tasks: uncategorized });
+    categorySections.push({ key: "cat-none", label: t("tk_noCategory"), tone: "border-slate-200 bg-white", countClass: undefined, tasks: uncategorized });
   }
 
   const sections = byCategory ? categorySections : timeSections;
@@ -715,8 +732,8 @@ export function TasksView({
           grouping survives reloads and deep links. */}
       <div className="mb-4 flex items-center gap-1.5">
         {([
-          { on: false, label: "By When" },
-          { on: true, label: "By Category" },
+          { on: false, label: t("tk_byWhen") },
+          { on: true, label: t("tk_byCategory") },
         ] as const).map((p) => (
           <Link
             key={p.label}
@@ -735,7 +752,7 @@ export function TasksView({
       <div className="space-y-4">
         {sections.length === 0 && (
           <Card>
-            <div className="px-4 py-8 text-center text-sm text-slate-400">Nothing open. Add a reminder above.</div>
+            <div className="px-4 py-8 text-center text-sm text-slate-400">{t("tk_nothingOpen")}</div>
           </Card>
         )}
         {sections.map((s) => (
@@ -745,7 +762,7 @@ export function TasksView({
         ))}
         {doneTop.length > 0 && (
           <TimeSection
-            label="Completed"
+            label={t("tk_completed")}
             collapsible
             defaultExpanded={showingAllDone}
             tone="border-slate-200 bg-slate-50/40"
@@ -755,7 +772,7 @@ export function TasksView({
               !showingAllDone && doneTotal > doneFetched ? (
                 <div className="border-t border-slate-200/70 bg-white px-4 py-2.5 text-center">
                   <Link href={hrefWith((q) => q.set("done", "all"))} className="text-xs font-medium text-brand hover:underline">
-                    Show All Completed ({doneTotal})
+                    {fillText(t("tk_showAllCompleted"), { n: String(doneTotal) })}
                   </Link>
                 </div>
               ) : undefined

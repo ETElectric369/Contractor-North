@@ -71,7 +71,7 @@ describe("the Off line on every record page", () => {
 
   it("the job page's switch-owned tabs get theirs from arrangeJobTabs (job-tabs.test.ts)", () => {
     const src = readFileSync(join(ROOT, "jobs/[id]/page.tsx"), "utf8");
-    expect(src).toContain("arrangeJobTabs(tabs, viewerIsStaff, switches)");
+    expect(src).toContain("arrangeJobTabs(tabs, viewerIsStaff, switches, lang)");
   });
 
   it("Job Codes off: Edit Job draws no job-code template picker (no code picker is left to limit)", () => {

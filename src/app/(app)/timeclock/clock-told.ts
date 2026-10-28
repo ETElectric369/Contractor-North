@@ -26,6 +26,15 @@
  * A plain module, never "use server": it is imported by the server actions AND by every client door.
  */
 import { askAfterPunch, whichJobLabel, type ChoiceJob, type WhichJobAsk } from "./which-job-choices";
+import { fillText, translator, type Lang } from "@/lib/i18n";
+
+/**
+ * THE WORDS, IN THE PERSON'S LANGUAGE (cn-v1138). Every sentence here is a function of `lang`
+ * (lib/words/clockserver, cs_); omitted, it is English, so every door and test that has not learned
+ * to pass one reads exactly what it always did. The exported CONSTANTS are the English, read from
+ * the same catalog, so they cannot drift from the words a Spanish door shows.
+ */
+const en = translator("en");
 
 /** Who put the job on a punch. "app": nobody picked it — the clock resolved it itself. */
 export type JobChosenBy = "person" | "app";
@@ -70,20 +79,24 @@ export function punchJobLabel(j: ChoiceJob, codesOn: boolean): string {
 /** When the job's own row could not be read, the sentence still goes out — it just can't name the
  *  job. Silence would be the one unacceptable answer; the Change door beside it still opens the sheet,
  *  which reads the job list itself. */
-export const UNREAD_JOB_LABEL = "a job it couldn't name just now";
+export const UNREAD_JOB_LABEL = en("cs_unreadJobLabel");
+export function unreadJobLabel(lang?: Lang | null): string {
+  return translator(lang)("cs_unreadJobLabel");
+}
 
 /** WHY the app picked it, in the sentence's own words — and nothing at all when the source isn't
  *  known, because naming one the resolver didn't use is the same class of lie as saying nothing. */
-function pickedBecause(from: AppPickSource): string {
-  if (from === "schedule") return " from today's schedule";
-  if (from === "only-job") return " because it's the only job going";
+function pickedBecause(from: AppPickSource, lang?: Lang | null): string {
+  const t = translator(lang);
+  if (from === "schedule") return t("cs_fromTodaysSchedule");
+  if (from === "only-job") return t("cs_becauseOnlyJob");
   return "";
 }
 
 /** THE ONE SENTENCE a door says when the app chose the job. Plain words, the job named, the source
  *  it actually came from, and it ends in the door out, so it is never a dead end. */
-export function appChoseSentence(label: string, from: AppPickSource): string {
-  return `Your punch is on ${label}. The app picked that${pickedBecause(from)} — change it if you're somewhere else.`;
+export function appChoseSentence(label: string, from: AppPickSource, lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_appChoseSentence"), { label, because: pickedBecause(from, lang) });
 }
 
 /**
@@ -105,16 +118,15 @@ export function appChoseSentence(label: string, from: AppPickSource): string {
  *
  * Both sentences are built HERE, from the same label and the same source, so they cannot drift.
  */
-export function appChoseSentenceToSay(label: string, from: AppPickSource): string {
-  return (
-    `Your punch is on ${label}. The app picked that${pickedBecause(from)}. If you were somewhere else, ` +
-    `tell me the right job and I'll move this whole punch while it's this fresh — or move it yourself on ` +
-    `My Day's Now card or on Timeclock (tap ${CHANGE_JOB_LABEL}), or the office moves it on Timecards.`
-  );
+export function appChoseSentenceToSay(label: string, from: AppPickSource, lang?: Lang | null): string {
+  return fillText(translator(lang)("cs_appChoseSay"), { label, because: pickedBecause(from, lang), change: changeJobLabel(lang) });
 }
 
 /** The Change door's words, Title Case, one copy (buttons on three surfaces read the same). */
-export const CHANGE_JOB_LABEL = "Change The Job";
+export function changeJobLabel(lang?: Lang | null): string {
+  return translator(lang)("cs_changeTheJob");
+}
+export const CHANGE_JOB_LABEL = changeJobLabel("en");
 
 /** What a door puts on screen: the sentence, and the job the Change door moves the punch OFF. */
 export type AppChoseNotice = {
@@ -135,15 +147,15 @@ export type ToldResult = { ok: boolean; id?: string; noJob?: boolean; jobPick?: 
  * id) whose job the APP chose. A refusal, a person-picked job, a punch that landed on no job (that
  * one ASKS instead), or an answer without the entry id tells nothing.
  */
-export function tellAppChose(res: ToldResult | null | undefined): AppChoseNotice | null {
+export function tellAppChose(res: ToldResult | null | undefined, lang?: Lang | null): AppChoseNotice | null {
   if (!res?.ok || !res.id) return null;
   const pick = res.jobPick;
   if (!pick || pick.chosenBy !== "app") return null;
   return {
     entryId: res.id,
     job: { id: pick.id, label: pick.label },
-    sentence: appChoseSentence(pick.label, pick.from),
-    say: appChoseSentenceToSay(pick.label, pick.from),
+    sentence: appChoseSentence(pick.label, pick.from, lang),
+    say: appChoseSentenceToSay(pick.label, pick.from, lang),
   };
 }
 
@@ -216,11 +228,11 @@ export type ReplayTold = {
  * hours after the tap, and the person must still be told where it went. Same two rules as the live
  * doors (askAfterPunch, tellAppChose), so the queue's door can never drift from the clock's.
  */
-export function replayTold(res: ToldResult | null | undefined): ReplayTold {
+export function replayTold(res: ToldResult | null | undefined, lang?: Lang | null): ReplayTold {
   const warning = res?.ok ? (res.warning ?? "").trim() : "";
   return {
     ask: askAfterPunch(res, "in"),
-    told: tellAppChose(res),
+    told: tellAppChose(res, lang),
     said: warning ? [warning] : [],
     retryable: !!res && !res.ok && TRANSIENT_REFUSAL.test(res.error ?? ""),
   };

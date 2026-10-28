@@ -385,7 +385,7 @@ describe("the wiring, pinned", () => {
     expect(loop).toContain("{ here: () => window.location.pathname + window.location.search, push: (p) => router.push(p) },");
     // A miss is said under the chat and the box comes back; so does a new card, a picker or a confirm.
     expect(loop).toContain("onMiss: (s) => {");
-    expect(loop).toContain("setMissNote(spotMissNote(s.label))"); // the model's label, else "that spot" — never the anchor name (cn-v1123)
+    expect(loop).toContain("setMissNote(spotMissNote(s.label, lang))"); // the model's label, else "that spot" — never the anchor name (cn-v1123); in the person's language (cn-v1138)
     expect(chat).toContain("const statusText = status ?? missNote ??");
     expect(chat).toContain("if (pickDir || proposal) openBox();");
     expect(chat).toContain("if (key !== lastCardRef.current) {\n            lastCardRef.current = key;\n            openBox();");

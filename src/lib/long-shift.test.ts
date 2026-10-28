@@ -206,6 +206,7 @@ describe("clockedOutWords: the deed is said as a clock-out (Erik: \"Brian is Clo
       told: "Brian has been told.",
       subject: "Brian",
       was: "was",
+      is: "is",
       clockOutVerb: "Clock Brian out",
       clockOutFirst: "Clock Brian out first",
     });
@@ -225,6 +226,35 @@ describe("clockedOutWords: the deed is said as a clock-out (Erik: \"Brian is Clo
     expect(w.headline).toBe("You're Clocked Out");
     expect(w.told).toBe("");
     expect(`${w.subject} ${w.was} already clocked out`).toBe("You were already clocked out");
+    expect(`${w.subject} ${w.is} still on the clock`).toBe("You are still on the clock");
+  });
+
+  it("in Spanish (cn-v1138): the headline, who was told, the door, and the subject with its own verb forms", () => {
+    const brian = clockedOutWords("Brian Cole", false, "es");
+    expect(brian).toEqual({
+      headline: "Brian Tiene Salida Marcada",
+      told: "Ya se le avisó a Brian.",
+      subject: "Brian",
+      was: "tenía",
+      is: "sigue",
+      clockOutVerb: "Márcale salida a Brian",
+      clockOutFirst: "Primero márcale salida a Brian",
+    });
+    const you = clockedOutWords("Erik Taylor", true, "es");
+    expect(you.headline).toBe("Tienes Salida Marcada");
+    expect(you.told).toBe("");
+    expect(`${you.subject} ya ${you.was} salida marcada`).toBe("Tú ya tenías salida marcada");
+    expect(`${you.subject} ${you.is} en el reloj`).toBe("Tú sigues en el reloj");
+    const nameless = clockedOutWords("—", false, "es");
+    expect(nameless.headline).toBe("Esa Persona Tiene Salida Marcada");
+    expect(nameless.told).toBe("Ya se le avisó.");
+    expect(`${nameless.subject} ya ${nameless.was} salida marcada`).toBe("Esa persona ya tenía salida marcada");
+    expect(clockDoorWords("Brian Cole", { lang: "es" })).toEqual({ clockOut: "Marcar Salida De Brian" });
+    expect(clockDoorWords(null, { lang: "es" })).toEqual({ clockOut: "Marcar Su Salida" });
+    expect(clockDoorWords("Brian Cole", { self: true, lang: "es" })).toEqual({ clockOut: "Marcar Salida" });
+    // English with a language passed is the English without one.
+    expect(clockedOutWords("Brian Cole", false, "en")).toEqual(clockedOutWords("Brian Cole"));
+    expect(clockDoorWords("Brian Cole", { lang: "en" })).toEqual(clockDoorWords("Brian Cole"));
   });
 
   it("never says the clock was stopped", () => {

@@ -18,6 +18,8 @@ import { isNativeShell } from "@/lib/native-shell";
 import { nativePushPermission, registerForNativePush } from "@/lib/native-push";
 import { featureOn, type FeatureMap } from "@/lib/features";
 import { menuSections, visibleDock } from "@/lib/dock";
+import { dockTileLabel } from "@/lib/dock-words";
+import { asLang, translator } from "@/lib/i18n";
 import { isStaffRole } from "@/lib/actions/perms";
 import { helpRows, openSetup } from "@/lib/onboarding/help-rows";
 import type { Answers } from "@/lib/playbook/types";
@@ -122,6 +124,10 @@ export function AccountMenu({
   const [lessonsOpen, setLessonsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const isStaff = isStaffRole(profile?.role ?? "");
+  // The words in the person's language (cn-v1138): `lang` is the layout's profiles.language, the
+  // same value the LangProvider carries; the rows behind the initials go through lib/dock-words.
+  const t = translator(lang);
+  const words = asLang(lang);
   // The sections the dock keeps behind the initials, for THIS person and these switches.
   const inMenu = menuSections(visibleDock({ isStaff, features, lapsed }));
   // Nort on, these rows live under Search Or Ask instead (command-bar.tsx); techs have none. A
@@ -172,7 +178,7 @@ export function AccountMenu({
           setByTour(false);
           setOpen((v) => !v);
         }}
-        aria-label="Account"
+        aria-label={t("sh_account")}
         aria-haspopup="menu"
         aria-expanded={open}
         // `data-upright`: the top bar never rotates in the App Store app, so when the phone is turned
@@ -180,7 +186,7 @@ export function AccountMenu({
         // ON THE BUTTON — the panel below is a SIBLING, and a transform on the wrapper would anchor its
         // position:fixed to this control instead of the viewport (globals.css says why).
         data-upright
-        title={setupDot ? "Account — setup is waiting under Help" : "Account"}
+        title={setupDot ? t("sh_accountSetupWaiting") : t("sh_account")}
         className="relative flex h-11 w-11 items-center justify-center rounded-full hover:bg-slate-100"
       >
         {profile?.avatar_url ? (
@@ -234,12 +240,13 @@ export function AccountMenu({
               the Leads switch (0352): it is the lead link, handed out. */}
           {featureOn(features, "leads") && !lapsed && (
             <div className="relative z-10 flex min-h-[44px] items-center justify-between gap-3 px-4 py-1">
-              <span className="text-sm font-medium text-slate-700">Estimate QR</span>
+              <span className="text-sm font-medium text-slate-700">{t("sh_estimateQr")}</span>
               <ShareQrButton />
             </div>
           )}
-          <div className="relative z-10 flex min-h-[44px] items-center justify-between gap-3 px-4 py-1">
-            <span className="text-sm font-medium text-slate-700">Language</span>
+          {/* The row wraps: the switcher's line about what Spanish covers sits under the label. */}
+          <div className="relative z-10 flex min-h-[44px] flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-4 py-1">
+            <span className="text-sm font-medium text-slate-700">{t("sh_language")}</span>
             <LanguageSwitcher current={lang} />
           </div>
           {/* THE settings door — every phone app parks Settings behind the avatar.
@@ -251,14 +258,14 @@ export function AccountMenu({
             onClick={() => setOpen(false)}
             className={ROW}
           >
-            <Settings className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Settings
+            <Settings className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {t("sh_settings")}
           </Link>
           {/* Office, then Tools (Calculators on): the sections off the bar, with their own icons. */}
           {inMenu.map((s) => {
             const Icon = s.icon;
             return (
               <Link key={s.key} href={s.href} data-tour={`menu-${s.key}`} onClick={() => setOpen(false)} className={ROW}>
-                <Icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {s.label}
+                <Icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {dockTileLabel(s, words)}
               </Link>
             );
           })}
@@ -275,7 +282,7 @@ export function AccountMenu({
           {help.length > 0 && (
             <>
               <div className="relative z-10 my-1 border-t border-white/50" />
-              <div className="relative z-10 px-4 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Help</div>
+              <div className="relative z-10 px-4 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t("sh_help")}</div>
               {help.map((r) =>
                 r.key === "lessons" ? (
                   <div key={r.key}>
@@ -320,7 +327,7 @@ export function AccountMenu({
           )}
           <div className="relative z-10 my-1 border-t border-white/50" />
           <form action={signOutAfterUnbindingPush}>
-            <SignOutButton />
+            <SignOutButton t={t} />
           </form>
         </div>
       )}
@@ -390,7 +397,7 @@ async function signOutAfterUnbindingPush(): Promise<void> {
 }
 
 /** Sign Out goes quiet while the action runs: a second tap must never fire a second sign-out. */
-function SignOutButton() {
+function SignOutButton({ t }: { t: (key: string) => string }) {
   const { pending } = useFormStatus();
   return (
     <button
@@ -398,7 +405,7 @@ function SignOutButton() {
       aria-busy={pending || undefined}
       className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-60"
     >
-      <LogOut className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? "Signing Out…" : "Sign Out"}
+      <LogOut className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? t("sh_signingOut") : t("sh_signOut")}
     </button>
   );
 }

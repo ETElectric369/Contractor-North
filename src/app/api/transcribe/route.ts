@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { voiceGate } from "@/lib/voice-gate";
 import { reportError } from "@/lib/observe";
+import { createClient } from "@/lib/supabase/server";
+import { translator } from "@/lib/i18n";
+import { profileLang, sttCodes, transcribeLang } from "./lang";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -16,25 +19,37 @@ export const maxDuration = 30;
  *
  * PLAIN WORDS OUT (Wave 0): the person talking sees `error` (use-dictation shows it), so it never
  * names a provider, a key or a status code. The provider's own reply goes to reportError instead.
+ *
+ * IN THE PERSON'S LANGUAGE (cn-v1138): the profile says which language is being spoken (./lang —
+ * the profile wins over any `lang` field the client sent, and nothing is ever auto-detected), Scribe
+ * and Whisper are told it outright, and the words back are in it too. The gate already proved the
+ * session; the profile read is the one more trip the language needs.
  */
-const HEAR_FAIL = "Couldn't hear that. Try again, or type it instead.";
 export async function POST(req: Request) {
   const gate = await voiceGate("stt", 90);
   if (gate) return gate;
+  const stored = await profileLang(await createClient());
+  let t = translator(stored ?? "en");
   const elKey = process.env.ELEVENLABS_API_KEY;
   const oaKey = process.env.OPENAI_API_KEY;
   if (!elKey && !oaKey) {
-    return NextResponse.json({ error: "Voice isn't available right now. Type it instead." }, { status: 503 });
+    return NextResponse.json({ error: t("nt_voiceUnavailable") }, { status: 503 });
   }
 
   let audio: Blob | null = null;
+  let field: unknown = null;
   try {
     const form = await req.formData();
     const a = form.get("audio");
     if (a instanceof Blob) audio = a;
+    field = form.get("lang");
   } catch {
-    return NextResponse.json({ error: "Bad upload." }, { status: 400 });
+    return NextResponse.json({ error: t("nt_badUpload") }, { status: 400 });
   }
+  const lang = transcribeLang(stored, field);
+  t = translator(lang);
+  const codes = sttCodes(lang);
+  const HEAR_FAIL = t("nt_hearFail");
   if (!audio || audio.size < 800) return NextResponse.json({ text: "" });
   const name = (audio as any).name || "turn.webm";
 
@@ -44,7 +59,10 @@ export async function POST(req: Request) {
       const fd = new FormData();
       fd.append("file", audio, name);
       fd.append("model_id", process.env.ELEVENLABS_STT_MODEL || "scribe_v1");
-      fd.append("language_code", "eng"); // force English — auto-detect was guessing Portuguese on noisy audio
+      // NEVER auto-detect: the language is the profile's (./lang), told to Scribe outright. Auto-detect
+      // was guessing Portuguese on noisy audio, and a Spanish speaker heard as English would be the
+      // same wrong guess the other way; so it is always named, never omitted.
+      fd.append("language_code", codes.elevenlabs);
       fd.append("tag_audio_events", "false"); // don't emit "(applause)" / "(sound of water)" sound-effect tags
       const r = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
         method: "POST",
@@ -70,7 +88,7 @@ export async function POST(req: Request) {
     const oa = new FormData();
     oa.append("file", audio, name);
     oa.append("model", process.env.OPENAI_STT_MODEL || "whisper-1");
-    oa.append("language", "en");
+    oa.append("language", codes.whisper); // the profile's language, never guessed (see Scribe above)
     oa.append("response_format", "json");
     try {
       const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {

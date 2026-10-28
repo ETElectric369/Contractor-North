@@ -16,6 +16,7 @@ vi.mock("@/app/(app)/assistant/actions", () => ({
 }));
 
 import { MISSING_BOX_NOTE, recoveredLines, refuseStaleFill, screenStepsPossible, spotMissNote } from "@/app/(app)/assistant/assistant-chat";
+import { dict } from "@/lib/i18n";
 
 /**
  * CARRIED FROM audit v1120 (fix wave cn-v1123), the Nort chat: three findings in the stream loop and
@@ -68,8 +69,11 @@ describe("A Nort fill can land on the page being left when show_screen and fill_
   it("the loop asks the guard with the turn's move flag, says it under the chat and by voice, and sets the flag from the driver", () => {
     expect(chat).toContain("let movedThisTurn = false;");
     expect(chat).toContain("const stale = refuseStaleFill(step, window.location.pathname, turnPathRef.current, movedThisTurn);");
-    expect(chat).toContain('noteUnder("The screen changed — say that again.");');
-    expect(chat).toContain('if (viaVoice) say("The screen changed. Say that again.");');
+    // The words are the nt_ catalog's since cn-v1138 (a tech reads them in Spanish); the keys hold them.
+    expect(chat).toContain('noteUnder(t("nt_screenChanged"));');
+    expect(chat).toContain('if (viaVoice) say(t("nt_screenChangedSay"));');
+    expect(dict("en").nt_screenChanged).toBe("The screen changed — say that again.");
+    expect(dict("en").nt_screenChangedSay).toBe("The screen changed. Say that again.");
     expect(chat).toContain("const did = performScreen(");
     expect(chat).toContain("if (did.moved) movedThisTurn = true;");
     // The flag is a per-turn local: declared where the turn's stream starts, so a new turn starts clean.
@@ -106,8 +110,8 @@ describe("A screen-off dropped stream loses its fill/point blocks but the recove
   });
 
   it("both recovery paths use the lines; the dropped stream reads the rest of them out by voice", () => {
-    expect(chat).toContain("const lines = recoveredLines(rec, p.screen !== false);"); // reload catch-up: the marker carries it
-    expect(chat).toContain("const lines = recoveredLines(rec, screenTurn);"); // dropped stream: asked as the turn left
+    expect(chat).toContain("const lines = recoveredLines(rec, p.screen !== false, lang);"); // reload catch-up: the marker carries it
+    expect(chat).toContain("const lines = recoveredLines(rec, screenTurn, lang);"); // dropped stream: asked as the turn left
     expect(chat).toContain('const tail = lines.slice(1).map((l) => l.content).join(" ");');
     expect(chat).toContain('const toSay = [unspoken, tail].filter(Boolean).join(" ");');
     expect(chat).toContain("if (toSay) say(toSay, () => { if (voiceModeRef.current) startMic(); });");
@@ -165,8 +169,9 @@ describe("Failed fill and miss notes show raw door and anchor names to the user"
   });
 
   it("the loop shows those two sentences, and no user-facing note interpolates the door or the anchor", () => {
-    expect(chat).toContain("setMissNote(spotMissNote(s.label));");
-    expect(chat).toContain('const words = "missing" in o.result ? MISSING_BOX_NOTE : `Couldn\'t put that in: ${o.result.why}`;');
+    expect(chat).toContain("setMissNote(spotMissNote(s.label, lang));");
+    expect(chat).toContain('const words = "missing" in o.result ? t(MISSING_BOX_KEY) : fillText(t("nt_couldntPutIn"), { why: o.result.why });');
+    expect(dict("en").nt_couldntPutIn).toBe("Couldn't put that in: {why}");
     expect(chat).not.toContain("No box called ${o.door}");
     expect(chat).not.toContain('${s.label ?? s.anchor ?? "that"}');
     // What the MODEL is told keeps the names (they are its handles); only the person's lines changed.

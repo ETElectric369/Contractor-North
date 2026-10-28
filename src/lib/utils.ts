@@ -1,21 +1,57 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { localeOf } from "@/lib/locale";
 
 /** Merge Tailwind class names, resolving conflicts. */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const currency = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-});
+/**
+ * ONE FORMATTER PER LOCALE (cn-v1138). The money and date formatters take an optional trailing
+ * `lang` ("en" | "es", profiles.language): a Spanish-speaking tech reads "28 oct 2026" where the
+ * office reads "Oct 28, 2026", and the same dollars either way. The formatters are built once per
+ * locale and shape and kept in a Map (Intl constructors are the slow part), never a module const
+ * pinned to en-US. Every caller that passes no lang gets en-US, exactly as before.
+ */
+const numberFormats = new Map<string, Intl.NumberFormat>();
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
 
-export function formatCurrency(value: number | null | undefined) {
+function currencyFormat(lang?: string | null): Intl.NumberFormat {
+  const locale = localeOf(lang);
+  let f = numberFormats.get(locale);
+  if (!f) {
+    f = new Intl.NumberFormat(locale, { style: "currency", currency: "USD" });
+    numberFormats.set(locale, f);
+  }
+  return f;
+}
+
+/** The cache key names EVERY option, in name order, so two shapes that differ only in a weekday, a
+ *  second, hour12 or a zone name never share one formatter. */
+function dateFormatKey(locale: string, opts: Intl.DateTimeFormatOptions): string {
+  const parts = Object.keys(opts)
+    .sort()
+    .map((k) => `${k}=${String((opts as Record<string, unknown>)[k] ?? "")}`);
+  return `${locale}|${parts.join("|")}`;
+}
+
+function dateFormat(lang: string | null | undefined, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const locale = localeOf(lang);
+  const key = dateFormatKey(locale, opts);
+  let f = dateFormats.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, opts);
+    dateFormats.set(key, f);
+  }
+  return f;
+}
+
+export function formatCurrency(value: number | null | undefined, lang?: string | null) {
   const n = Number(value ?? 0);
   // A NaN/Infinity slipping in would render "$NaN"/"$∞" on a customer-facing
   // payment request — coerce non-finite to 0.
-  return currency.format(Number.isFinite(n) ? n : 0);
+  return currencyFormat(lang).format(Number.isFinite(n) ? n : 0);
 }
 
 /** THE canonical city/state/zip tail: "City, ST ZIP" — city+state comma-joined, ZIP
@@ -69,39 +105,23 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
  *  calendar day and is rendered literally — never shifted across zones. A full
  *  timestamp is rendered in the business timezone (default America/Los_Angeles),
  *  the same on the UTC server and in the browser. Pass `tz` for a specific org. */
-export function formatDate(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
+export function formatDate(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE, lang?: string | null) {
   if (!value) return "—";
   if (typeof value === "string" && DATE_ONLY.test(value)) {
     // Anchor to noon UTC + render in UTC → the literal day, stable in any zone.
-    return new Date(`${value}T12:00:00Z`).toLocaleDateString("en-US", {
-      timeZone: "UTC",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
+    return dateFormat(lang, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(new Date(`${value}T12:00:00Z`));
   }
   const d = typeof value === "string" ? new Date(value) : value;
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", {
-    timeZone: tz,
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return dateFormat(lang, { timeZone: tz, month: "short", day: "numeric", year: "numeric" }).format(d);
 }
 
 /** Format an instant (timestamp) as date + time in the business timezone. */
-export function formatDateTime(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
+export function formatDateTime(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE, lang?: string | null) {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
-    timeZone: tz,
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return dateFormat(lang, { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d);
 }
 
 /** Time-only ("h:mm AM") in the business timezone. */

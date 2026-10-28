@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { applyRangeEdit } from "@/lib/schedule-math";
 import { dayWords, type JobBlock } from "@/lib/schedule/job-block";
 import { BlockTimeControls, type BlockPatch } from "@/components/block-time-controls";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { setJobScheduleRanges, setJobTimes, type DateRange } from "../../schedule/actions";
 
 export interface ScheduleSegment {
@@ -49,6 +51,7 @@ export function JobScheduleControl({
   plannedMinutes?: number | null;
 }) {
   const router = useRouter();
+  const t = translator(useLang());
 
   const initial: DateRange[] =
     segments && segments.length
@@ -76,14 +79,14 @@ export function JobScheduleControl({
         // The start and the length are the block's: a day edit keeps them (undefined, undefined).
         const res = await setJobScheduleRanges(id, filled);
         if (!res.ok) {
-          setError(res.error ?? "The days didn't save. Try again.");
+          setError(res.error ?? t("jb_daysDidntSave"));
           return;
         }
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
         router.refresh();
       } catch {
-        setError("The days didn't save. You may be offline.");
+        setError(t("jb_daysDidntSaveOffline"));
       }
     });
   }
@@ -125,24 +128,24 @@ export function JobScheduleControl({
               onChange={(ev) => update(i, { start: ev.target.value })}
               disabled={pending}
               className="h-11 w-[150px]"
-              aria-label={`Start date ${i + 1}`}
+              aria-label={fillText(t("jb_startDateN"), { n: String(i + 1) })}
             />
-            <span className="text-xs text-slate-400">to</span>
+            <span className="text-xs text-slate-400">{t("jb_to")}</span>
             <Input
               type="date"
               value={r.end}
               onChange={(ev) => update(i, { end: ev.target.value })}
               disabled={pending}
               className="h-11 w-[150px]"
-              aria-label={`End date ${i + 1}`}
+              aria-label={fillText(t("jb_endDateN"), { n: String(i + 1) })}
             />
             {ranges.length > 1 && (
               <button
                 type="button"
                 onClick={() => removeRange(i)}
                 className="inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600"
-                aria-label="Remove date range"
-                title="Remove this range"
+                aria-label={t("jb_removeDateRange")}
+                title={t("jb_removeThisRange")}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -156,12 +159,12 @@ export function JobScheduleControl({
             onClick={addRange}
             className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline"
           >
-            <Plus className="h-3.5 w-3.5" /> Add Date Range
+            <Plus className="h-3.5 w-3.5" /> {t("jb_addDateRange")}
           </button>
-          {pending && <span className="text-xs text-slate-400">Saving…</span>}
+          {pending && <span className="text-xs text-slate-400">{t("jb_saving")}</span>}
           {saved && !pending && (
             <span className="flex items-center gap-1 text-xs font-medium text-green-600">
-              <Check className="h-3.5 w-3.5" /> Saved
+              <Check className="h-3.5 w-3.5" /> {t("jb_saved")}
             </span>
           )}
         </div>
@@ -171,10 +174,7 @@ export function JobScheduleControl({
       {/* EACH DAY KEEPS ITS OWN HOURS (0370): the time below is the job's usual hours, and a day with
           its own keeps them. Said, so a change here that leaves such a day where it was is no surprise. */}
       {ownDays.length > 0 && (
-        <p className="text-xs text-slate-500">
-          Its own hours: {ownDays.join(" · ")}. The time below is the usual hours of its other days; tap a day&apos;s block on the
-          schedule to change that day.
-        </p>
+        <p className="text-xs text-slate-500">{fillText(t("jb_ownHoursNote"), { days: ownDays.join(" · ") })}</p>
       )}
 
       {/* THE BLOCK: the start and the length, once the job has a day. */}
@@ -192,7 +192,7 @@ export function JobScheduleControl({
           plannedMinutes={plannedMinutes}
         />
       ) : (
-        <p className="text-xs text-slate-500">Pick a day and it lands as 2 hours from the start of the work day. Change it here after.</p>
+        <p className="text-xs text-slate-500">{t("jb_pickADayNote")}</p>
       )}
     </div>
   );

@@ -53,8 +53,10 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
 
     /// `notify`: whether an exit posts the lock-screen alert — the page says false for the office,
     /// the same techs-only rule the server's push keeps (audit v1120, class 6). False = not armed.
+    /// `title` / `body`: the alert's words, handed in by the page in the person's language (cn-v1138);
+    /// nil from a page built before that, and the English below is the fallback.
     @discardableResult
-    func arm(entryId: String, lat: Double, lng: Double, radiusM: Double, label: String, notify: Bool) -> Bool {
+    func arm(entryId: String, lat: Double, lng: Double, radiusM: Double, label: String, notify: Bool, title: String? = nil, body: String? = nil) -> Bool {
         guard GeofenceCore.monitorable() else {
             print("[Geofence] region monitoring is not available on this device")
             return false
@@ -71,7 +73,11 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
         region.notifyOnEntry = false
         region.notifyOnExit = true
         manager.startMonitoring(for: region)
-        UserDefaults.standard.set(["entryId": entryId, "label": label, "lat": lat, "lng": lng, "radiusM": radius, "notify": notify, "armedAt": ISO8601DateFormatter().string(from: Date())], forKey: GeofenceCore.armedKey)
+        var armed: [String: Any] = ["entryId": entryId, "label": label, "lat": lat, "lng": lng, "radiusM": radius, "notify": notify, "armedAt": ISO8601DateFormatter().string(from: Date())]
+        // The alert's words, beside the label, so the exit can post them without the page.
+        if let title, !title.isEmpty { armed["title"] = title }
+        if let body, !body.isEmpty { armed["body"] = body }
+        UserDefaults.standard.set(armed, forKey: GeofenceCore.armedKey)
         print("[Geofence] armed \(entryId) r=\(Int(radius))m auth=\(status.rawValue) notify=\(notify)")
         return true
     }
@@ -128,8 +134,9 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
         if let last = UserDefaults.standard.object(forKey: GeofenceCore.notifiedKey) as? Date, Date().timeIntervalSince(last) < GeofenceCore.notifyEvery { return }
         UserDefaults.standard.set(Date(), forKey: GeofenceCore.notifiedKey)
         let content = UNMutableNotificationContent()
-        content.title = "Still on the clock?"
-        content.body = "Looks like you left \(pending["label"] as? String ?? "the job site"). Open North to clock out or keep going."
+        // The page's words in the person's language (arm's title/body); today's English is the fallback.
+        content.title = armed["title"] as? String ?? "Still on the clock?"
+        content.body = armed["body"] as? String ?? "Looks like you left \(pending["label"] as? String ?? "the job site"). Open North to clock out or keep going."
         content.sound = .default
         content.userInfo = ["url": "/timeclock", "cn": "geofence-exit"]
         let request = UNNotificationRequest(identifier: "cn.geofence.exit", content: content, trigger: nil)
@@ -173,8 +180,11 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         let radius = call.getDouble("radiusM") ?? 150
         let label = call.getString("label") ?? "the job site"
         let notify = call.getBool("notify") ?? true
+        // The alert's words in the person's language (optional: an older page sends none).
+        let title = call.getString("title")
+        let body = call.getString("body")
         DispatchQueue.main.async {
-            let ok = GeofenceCore.shared.arm(entryId: entryId, lat: lat, lng: lng, radiusM: radius, label: label, notify: notify)
+            let ok = GeofenceCore.shared.arm(entryId: entryId, lat: lat, lng: lng, radiusM: radius, label: label, notify: notify, title: title, body: body)
             call.resolve(["ok": ok, "authorization": GeofenceCore.shared.authorization(), "monitorable": GeofenceCore.monitorable()])
         }
     }

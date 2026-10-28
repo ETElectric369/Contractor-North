@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { initials } from "@/lib/utils";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { setAvatarUrl } from "./actions";
 
 /** Profile picture: tap to pick/snap, auto-resized, stored publicly. */
@@ -27,6 +29,8 @@ export function AvatarUpload({
   const [url, setUrl] = useState(current);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The words in the person's language (cn-v1138).
+  const t = translator(useLang());
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const raw = e.target.files?.[0];
@@ -48,7 +52,7 @@ export function AvatarUpload({
       setUrl(data.publicUrl);
       router.refresh();
     } catch (err: any) {
-      setError(err?.message ?? "Upload failed.");
+      setError(err?.message ?? t("sh_uploadFailed"));
     } finally {
       setBusy(false);
     }
@@ -67,7 +71,7 @@ export function AvatarUpload({
       <button
         onClick={() => fileRef.current?.click()}
         className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-full"
-        title="Change photo"
+        title={t("sh_changePhotoTitle")}
       >
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -85,11 +89,11 @@ export function AvatarUpload({
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
-            {url ? "Change Photo" : "Add Photo"}
+            {url ? t("sh_changePhoto") : t("sh_addPhoto")}
           </Button>
           {url && (
             <Button size="sm" variant="outline" onClick={remove} disabled={busy} className="text-red-600">
-              <Trash2 className="h-3.5 w-3.5" /> Remove
+              <Trash2 className="h-3.5 w-3.5" /> {t("sh_remove")}
             </Button>
           )}
         </div>

@@ -54,7 +54,7 @@ describe("the page's doors", () => {
   });
   it("the fence arms iOS's circle when the anchor is known, disarms when the monitor goes, and an observed exit opens the same sheet with the time filled in", () => {
     const g = read("src/components/geofence-monitor.tsx");
-    expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);"); // readiness read back (audit v1120)
+    expect(g).toContain("void armFence(fenceArmOptions({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }, t)).then(dark);"); // readiness read back (audit v1120); the words ride along (cn-v1138)
     expect(g).toContain("useEffect(() => () => { void disarmFence(); }, []);");
     expect(g).toContain('if (how === "open") openPrompt("wake", notify);\n      const ms = Date.parse(e.exitedAt);'); // carried 1123: the shell already rang, so the server does not
     expect(g).toContain('setPhase("picking");');

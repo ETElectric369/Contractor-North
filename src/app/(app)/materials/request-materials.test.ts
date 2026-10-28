@@ -23,11 +23,13 @@ vi.mock("@/app/(app)/tasks/actions", () => ({ createTask: (...a: unknown[]) => c
 type Op = { table: string; verb: "select" | "insert" | "delete" | "update"; payload?: unknown; filters: string[] };
 const ops: Op[] = [];
 let listOnJob: string | null = "list-1";
+/** profiles.language on the asker's row: null is English, "es" a Spanish-speaking tech (cn-v1138). */
+let language: string | null = null;
 
 /** The caller's client: every read and write recorded, answered like the database would. */
 function answer(op: Op): { data: unknown; error: null } {
   if (op.table === "profiles" && op.verb === "select" && op.filters.includes("eq:id=u-brian")) {
-    return { data: { role: "tech", org_id: "org-1", full_name: "Brian Smith" }, error: null };
+    return { data: { role: "tech", org_id: "org-1", full_name: "Brian Smith", language }, error: null };
   }
   if (op.table === "profiles") return { data: [{ id: "boss-1", role: "owner" }, { id: "u-2", role: "tech" }], error: null };
   if (op.table === "jobs") return { data: { id: "job-1", org_id: "org-1", job_number: "J-028", name: "41 Larkspur Place" }, error: null };
@@ -66,10 +68,12 @@ function client() {
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client() }));
 
 import { requestMaterials } from "./actions";
+import { dict } from "@/lib/i18n";
 
 beforeEach(() => {
   ops.length = 0;
   listOnJob = "list-1";
+  language = null;
   [createNotifications, sendPushToProfiles, createTask].forEach((f) => f.mockClear());
 });
 
@@ -132,15 +136,33 @@ describe("requestMaterials: a line on the list, never a duplicate task", () => {
   it("the door asks for an item, not a message", async () => {
     const { readFileSync } = await import("node:fs");
     const door = readFileSync(new URL("./need-materials.tsx", import.meta.url), "utf8");
-    // An item, and any company's (no electrician's example: nort-examples.test.ts is the law).
-    expect(door).toContain('placeholder="Two more boxes of screws — need them tomorrow"');
+    // An item, and any company's (no electrician's example: nort-examples.test.ts is the law). The
+    // example comes through the catalog (cn-v1138), so it is checked in both languages.
+    expect(door).toContain('placeholder={t("mt_askPlaceholder")}');
+    expect(dict("en").mt_askPlaceholder).toBe("Two more boxes of screws — need them tomorrow");
+    expect(dict("es").mt_askPlaceholder).toBe("Dos cajas más de tornillos — las necesito mañana");
+    for (const lang of ["en", "es"] as const) {
+      expect(dict(lang).mt_askPlaceholder).not.toContain("won't do it for the far wall");
+      expect(dict(lang).mt_askPlaceholder).not.toMatch(/faceplate/i);
+    }
     expect(door).not.toContain("won't do it for the far wall");
-    expect(door).not.toMatch(/placeholder="[^"]*faceplate/i);
   });
 
   it("says what's wrong in words and writes nothing for an empty ask", async () => {
     expect(await requestMaterials("job-1", "   ")).toEqual({ ok: false, error: "Say what you need." });
     expect(ops.some((o) => o.verb === "insert")).toBe(false);
     expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("a Spanish-speaking asker is refused in Spanish; the office's bell keeps the office's words (cn-v1138)", async () => {
+    language = "es";
+    expect(await requestMaterials("job-1", "   ")).toEqual({ ok: false, error: "Di qué necesitas." });
+    expect(await requestMaterials("job-1", "x".repeat(2001))).toEqual({ ok: false, error: "Es mucho texto — acórtalo un poco." });
+    expect(ops.some((o) => o.verb === "insert")).toBe(false);
+    const r = await requestMaterials("job-1", "Faltan dos cajas de tornillos");
+    expect(r.ok).toBe(true);
+    const [, , n] = createNotifications.mock.calls[0] as [string, string[], Record<string, string>];
+    expect(n.title).toMatch(/^Materials needed — /);
+    expect(n.body).toBe("Brian Smith: Faltan dos cajas de tornillos");
   });
 });

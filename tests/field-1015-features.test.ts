@@ -74,6 +74,9 @@ describe("no money on the materials checklist; the shelf speaks instead (66c77f1
     expect(inStockWords({ onHand: 2.5, unit: "" })).toBe("In Stock · 2.5");
     expect(inStockWords({ onHand: 2.25, unit: "ft" })).toBe("In Stock · 2.25 ft");
     expect(inStockWords({ onHand: 0.04, unit: "ft" })).toBe("In Stock · 0.04 ft");
+    // In the reader's language (cn-v1138): the lead is mt_inStockLead; English with none, byte for byte.
+    expect(inStockWords({ onHand: 12, unit: "ea" }, "es")).toBe("En Inventario · 12 ea");
+    expect(inStockWords({ onHand: 12, unit: "ea" }, "en")).toBe("In Stock · 12 ea");
   });
   it("neither list page prints a price, a total or a cost box; both read the shelf with Shop Stock on", () => {
     const editor = read("src/app/(app)/materials/[id]/item-editor.tsx");

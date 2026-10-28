@@ -23,6 +23,7 @@
 		9582B6A32FEA0A020072D4E8 /* GeofencePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6A22FEA0A020072D4E8 /* GeofencePlugin.swift */; };
 		1CA6604959202E18A7591B95 /* MeasurePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D375541F266C897C82F6B4 /* MeasurePlugin.swift */; };
 		7A3C9E1D5B2F4A6C8D0E1F23 /* ScanPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4D0F2E6C3A5B7D9E1F2A34 /* ScanPlugin.swift */; };
+		9F1E5A7C2D3B4E5F6A7B8C90 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 9F1E5A7C2D3B4E5F6A7B8C91 /* InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +45,7 @@
 		F8D375541F266C897C82F6B4 /* MeasurePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurePlugin.swift; sourceTree = "<group>"; };
 		9B4D0F2E6C3A5B7D9E1F2A34 /* ScanPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanPlugin.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		9F1E5A7C2D3B4E5F6A7B8C92 /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +94,7 @@
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
+				9F1E5A7C2D3B4E5F6A7B8C91 /* InfoPlist.strings */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
@@ -144,6 +147,7 @@
 			knownRegions = (
 				en,
 				Base,
+				es,
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
 			packageReferences = (
@@ -169,6 +173,7 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+				9F1E5A7C2D3B4E5F6A7B8C90 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -208,6 +213,14 @@
 				504EC3111FED79650016851F /* Base */,
 			);
 			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+		9F1E5A7C2D3B4E5F6A7B8C91 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				9F1E5A7C2D3B4E5F6A7B8C92 /* es */,
+			);
+			name = InfoPlist.strings;
 			sourceTree = "<group>";
 		};
 /* End PBXVariantGroup section */

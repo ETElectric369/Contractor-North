@@ -8,6 +8,7 @@
  * (a stretch of silence after the user spoke) → POST the audio to /api/transcribe (Whisper) → deliver the
  * transcript. Exposes the SAME surface as lib/speech.ts, so the assistant swaps backends via the import.
  */
+import type { Lang } from "@/lib/locale";
 import { reportClientError } from "@/app/report-client-error";
 import { isNativeShell } from "@/lib/native-shell";
 import { flushTrace, trace } from "@/lib/nort/trace";
@@ -291,7 +292,17 @@ export function isGreeting(): boolean {
   return greetingActive;
 }
 
-export function startListening(_lang?: string): boolean {
+/** THE LANGUAGE THE TURNS ARE SPOKEN IN (cn-v1138), as the last start said it: Talk To Nort passes
+ *  the person's (an es-US / en-US tag, lib/i18n localeOf), and a re-arm that passes none keeps it.
+ *  It rides to /api/transcribe as a `lang` field — where the PROFILE wins anyway; this is the hint
+ *  for a session whose profile has no answer. An "es…" tag is Spanish; anything else is English. */
+let turnLang: Lang | null = null;
+export function turnLanguage(): Lang | null {
+  return turnLang;
+}
+
+export function startListening(lang?: string): boolean {
+  if (typeof lang === "string" && lang.trim()) turnLang = lang.trim().toLowerCase().startsWith("es") ? "es" : "en";
   if (!speechSupported()) return false;
   muted = false;
   silentTurns = 0; // a fresh (user-initiated) start resets the silent-retry budget
@@ -839,6 +850,7 @@ async function shipTurn(blob: Blob, ext: string) {
   try {
     const fd = new FormData();
     fd.append("audio", blob, `turn.${ext}`);
+    if (turnLang) fd.append("lang", turnLang); // the hint; the profile wins server-side (api/transcribe/lang)
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json().catch(() => null);
     trace("transcribe done", `HTTP ${r.status} ${String(j?.text ?? "").length} chars`);

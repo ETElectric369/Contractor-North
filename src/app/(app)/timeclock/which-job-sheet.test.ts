@@ -246,7 +246,8 @@ describe("My Day asks from the same list the clock asked from", () => {
     expect(html).not.toContain("<select");
     expect(html).not.toContain("Put It on the Job");
     const card = src("src/app/(app)/planner/now-card.tsx");
-    expect(card).toMatch(/onClick=\{\(\) => setAsk\(\{ entryId: open\.id, moment: "in" \}\)\}>\s*Pick The Job/);
+    // The door's words come through the catalog since cn-v1138 (md_pickTheJob is "Pick The Job" in English).
+    expect(card).toMatch(/onClick=\{\(\) => setAsk\(\{ entryId: open\.id, moment: "in" \}\)\}>\s*\{t\("md_pickTheJob"\)\}/);
     // The card mounts the sheet once: the same one the clock opens after a punch on no job.
     expect(card.match(/<WhichJobSheet /g)).toHaveLength(1);
     expect(card).not.toContain("/planner#which-job");

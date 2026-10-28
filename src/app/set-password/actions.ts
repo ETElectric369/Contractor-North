@@ -1,20 +1,24 @@
 "use server";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
+import { translator } from "@/lib/i18n";
+import { callerLang } from "@/lib/lang-of";
 
 import { createClient } from "@/lib/supabase/server";
 
 /** Set the signed-in user's own password and clear the must-reset flag. Used by the
- *  first-login "choose your password" gate. */
+ *  first-login "choose your password" gate. Its refusals come back in the caller's language
+ *  (callerLang, cn-v1138): a session exists here, so the profile is the one source of truth. */
 export async function updateMyPassword(newPassword: string): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
+  const t = translator(await callerLang(supabase));
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: t("au_notSignedIn") };
 
   const pw = (newPassword || "").trim();
-  if (pw.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
+  if (pw.length < 8) return { ok: false, error: t("au_password8") };
 
   const { error } = await supabase.auth.updateUser({ password: pw });
   if (error) return { ok: false, error: dbError(error) };
@@ -29,10 +33,7 @@ export async function updateMyPassword(newPassword: string): Promise<{ ok: boole
     .select("id");
   if (flagError || !(cleared ?? []).length) {
     reportError("set-password-clear-flag", flagError ?? new Error("no rows"), { userId: user.id });
-    return {
-      ok: false,
-      error: "Your new password is saved, but this screen couldn't finish. Sign out, sign back in with it, and tell an owner or admin if it asks again.",
-    };
+    return { ok: false, error: t("au_savedButStuck") };
   }
   return { ok: true };
 }

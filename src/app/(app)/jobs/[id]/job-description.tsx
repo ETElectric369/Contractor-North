@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Check, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { updateJobDescription, updateJobNotes } from "../actions";
 
 /**
@@ -29,18 +31,11 @@ import { updateJobDescription, updateJobNotes } from "../actions";
  */
 export type JobTextField = "description" | "notes";
 
-const WORDS: Record<JobTextField, { label: string; helper: string; placeholder: string }> = {
-  description: {
-    label: "Description",
-    helper: "The scope. It prints on the customer's invoice.",
-    placeholder: "What's this job? The scope, in the words the customer will read.",
-  },
-  notes: {
-    label: "Notes",
-    helper: "Only your company sees these. Never on a customer's paper.",
-    placeholder: "Gate codes, access, where to park, the dog…",
-  },
-};
+/** Each box's label, helper and placeholder, in the viewer's language (cn-v1138). */
+const wordsFor = (t: (key: string) => string, field: JobTextField): { label: string; helper: string; placeholder: string } =>
+  field === "notes"
+    ? { label: t("jb_notes"), helper: t("jb_notesHelper"), placeholder: t("jb_notesPh") }
+    : { label: t("jb_description"), helper: t("jb_descriptionHelper"), placeholder: t("jb_descriptionPh") };
 
 export function JobTextBox({
   jobId,
@@ -53,7 +48,8 @@ export function JobTextBox({
   value: string | null;
   viewerIsStaff?: boolean;
 }) {
-  const words = WORDS[field];
+  const t = translator(useLang());
+  const words = wordsFor(t, field);
   const [value, setValue] = useState(initial ?? "");
   // Local baseline (not the prop): the server trims on save, so comparing the
   // typed value against the revalidated prop could read as forever-dirty.
@@ -84,12 +80,12 @@ export function JobTextBox({
           <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{initial}</p>
         ) : (
           // The empty state is a sentence, not a form — nothing here invites typing.
-          <p className="mt-1 text-sm text-slate-400">The office hasn&rsquo;t written one yet.</p>
+          <p className="mt-1 text-sm text-slate-400">{t("jb_officeHasntWritten")}</p>
         )}
         <p className="mt-2 text-xs text-slate-500">
-          Need materials? Add them on the{" "}
+          {t("jb_needMaterials")}{" "}
           <Link href={`/jobs/${jobId}?tab=materials`} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
-            Materials Tab
+            {t("jb_materialsTab")}
           </Link>
           .
         </p>
@@ -104,7 +100,7 @@ export function JobTextBox({
       const res = field === "notes" ? await updateJobNotes(jobId, value) : await updateJobDescription(jobId, value);
       if (!res.ok) {
         // Stay dirty on failure so the Save affordance can't vanish over unsaved text.
-        setError(res.error ?? "That didn't save. Try again.");
+        setError(res.error ?? t("jb_didntSaveTryAgain"));
         return;
       }
       setSavedValue(value);
@@ -118,7 +114,7 @@ export function JobTextBox({
       <div>
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{words.label}</div>
         <Button type="button" variant="outline" className="mt-1" onClick={() => setOpened(true)}>
-          <Plus className="h-4 w-4" /> Add A Note
+          <Plus className="h-4 w-4" /> {t("jb_addANote")}
         </Button>
         <p className="mt-1 text-xs text-slate-500">{words.helper}</p>
       </div>
@@ -146,15 +142,15 @@ export function JobTextBox({
         {(dirty || pending) && (
           <Button onClick={save} disabled={pending || !dirty}>
             {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            Save
+            {t("jb_save")}
           </Button>
         )}
         {done && !dirty && !pending && (
           <span className="flex items-center gap-1 text-xs font-medium text-green-600">
-            <Check className="h-3.5 w-3.5" /> Saved
+            <Check className="h-3.5 w-3.5" /> {t("jb_saved")}
           </span>
         )}
-        {dirty && !pending && <span className="text-xs text-slate-400">Unsaved</span>}
+        {dirty && !pending && <span className="text-xs text-slate-400">{t("jb_unsaved")}</span>}
         {error && <span className="text-xs text-red-600">{error}</span>}
       </div>
     </div>

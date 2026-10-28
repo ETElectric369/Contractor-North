@@ -62,8 +62,31 @@ describe("nobody reads appointments.inspection_answers from the table", () => {
     expect(appts.length).toBeGreaterThan(40);
   });
 
+  /**
+   * THE OWNER'S EXPORT READS THE TABLE, ON THE SERVICE CLIENT (cn-v1138). The view answers nothing to
+   * the service role (its WHERE reads auth.uid() and auth_org_id(), both null there), and the export
+   * is the one reader entitled to the column as stored: it runs behind requireOwnerExport (the owner,
+   * who reads prices anyway), on the service client, filtered to that company's org_id, to list every
+   * file a walk-through's answers point at. Each file here is pinned to that guard and that client.
+   */
+  const EXPORT_READS = ["app/(app)/settings/export/job/[id]/route.ts", "lib/export-files/jobs-with-files.ts"];
+
+  it("the export's two readers stand behind the owner guard on the service client", () => {
+    expect(read("app/(app)/settings/export/job/[id]/route.ts")).toMatch(/requireOwnerExport\(/);
+    expect(read("app/(app)/settings/export/job/[id]/route.ts")).toMatch(/createServiceClient\(\)/);
+    // jobs-with-files takes its client from two callers, both behind the guard, both the service client.
+    for (const f of ["app/(app)/settings/your-data.tsx", "app/(app)/settings/your-data-actions.ts"]) {
+      const s = read(f);
+      expect(s, f).toMatch(/requireOwnerExport\(/);
+      expect(s, f).toMatch(/readJobsWithFiles\(\s*svc\b/);
+      expect(s, f).toMatch(/const svc = createServiceClient\(\)/);
+    }
+    for (const f of EXPORT_READS) expect(appts.some((a) => a.file === f), f).toBe(true);
+  });
+
   it("no select names inspection_answers, filters on it, or asks for every column", () => {
-    const bad = appts.filter(({ chain }) => {
+    const bad = appts.filter(({ chain, file }) => {
+      if (EXPORT_READS.includes(file) && /\.eq\(\s*"org_id"/.test(chain)) return false;
       const selects = [...chain.matchAll(/\.select\(\s*([^)]*)\)/g)].map((m) => m[1]);
       return (
         selects.some((s) => /inspection_answers|\*/.test(s)) ||

@@ -86,7 +86,7 @@ describe("migration 0397 pins the owner-only settings", () => {
           readFileSync(p, "utf8")
             .split("\n")
             .forEach((line, i) => {
-              if (line.includes("lead_inbound_secret") && !/^\s*(\*|\/\/|\/\*)|\.eq\(|PROTECTED_SETTINGS_KEYS|^\s*\*/.test(line)) writes.push(`${p}:${i + 1}: ${line.trim()}`);
+              if (line.includes("lead_inbound_secret") && !/^\s*(\*|\/\/|\/\*)|\.eq\(|PROTECTED_SETTINGS_KEYS|COMPANY_SECRET_KEYS|^\s*\*/.test(line)) writes.push(`${p}:${i + 1}: ${line.trim()}`);
             });
         }
       }

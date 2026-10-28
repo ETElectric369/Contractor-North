@@ -189,7 +189,18 @@ describe("Nort's button: one tap", () => {
     expect(tag).toContain("h-11 w-11");
     expect(tag).toContain("rounded-full bg-brand");
     // Nort's mark from before the Search Or Ask change (lucide AudioLines).
-    expect(src).toMatch(/aria-label="Talk To Nort"[\s\S]{0,300}<AudioLines /);
+    expect(src).toMatch(/aria-label=\{t\("sh_talkToNort"\)\}[\s\S]{0,300}<AudioLines /);
+  });
+
+  it("a Spanish-speaking tech (cn-v1138): Hablar Con Nort, Buscar O Preguntar, Volver — the same buttons, his words; English byte for byte as before", () => {
+    const es = render(tech, ALL_ON, { lang: "es" });
+    expect(nortTag(es)).toContain('aria-label="Hablar Con Nort"');
+    expect(nortTag(es)).toContain('title="Hablar Con Nort"');
+    expect(es).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Buscar O Preguntar"/);
+    expect(es).toContain('aria-label="Volver"');
+    expect(es).not.toMatch(/Talk To Nort|Search Or Ask|aria-label="Go back"/);
+    expect(render(tech, ALL_ON, { lang: "en" })).toBe(render(tech, ALL_ON));
+    expect(byLabel(Topbar(props(tech, ALL_ON, { lang: "es" })), "Hablar Con Nort")).not.toBeNull();
   });
 
   it("calls the SAME start as Search Or Ask's Talk To Nort row: talkToNort, which fires cn:nort-talk inside the tap", () => {

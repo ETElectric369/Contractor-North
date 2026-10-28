@@ -20,6 +20,14 @@
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { todayStrInTz } from "@/lib/tz";
+import { fillText, translator, type Lang } from "@/lib/i18n";
+
+/**
+ * THE WORDS, IN THE PERSON'S LANGUAGE (cn-v1138). Every sentence here is a function of `lang`
+ * (lib/words/clockserver, cs_); omitted, it is English, so every door and test that has not learned
+ * to pass one reads exactly what it always did. The server action passes the caller's language
+ * (which-job-actions), the sheet passes useLang().
+ */
 
 export type WhichJobOption = {
   id: string;
@@ -122,7 +130,10 @@ export function orderWhichJobChoices(input: {
   /** The job the punch is already on (a "move" off the app's pick): never offered to itself, or the
    *  sheet would list the very job the sentence is asking about and the write would refuse the tap. */
   excludeJobId?: string | null;
+  /** The reader's language for each row's why (English when omitted). */
+  lang?: Lang | null;
 }): WhichJobOption[] {
+  const t = translator(input.lang);
   const byId = new Map<string, ChoiceJob>();
   for (const j of input.jobs ?? []) if (j?.id && !byId.has(j.id) && j.id !== input.excludeJobId) byId.set(j.id, j);
   const out: WhichJobOption[] = [];
@@ -134,13 +145,13 @@ export function orderWhichJobChoices(input: {
   };
 
   const last = input.lastJobId ? byId.get(input.lastJobId) : undefined;
-  if (last && active(last)) add(last, "Where you worked last");
+  if (last && active(last)) add(last, t("cs_whereYouWorkedLast"));
 
   const all = [...byId.values()].filter(active);
   const today = all
     .filter((j) => onToday(j, input.segToday, input.hasSegments, input.todayStr, input.tz))
     .sort((a, b) => String(a.scheduled_start ?? "").localeCompare(String(b.scheduled_start ?? "")));
-  for (const j of today) add(j, "On today's schedule");
+  for (const j of today) add(j, t("cs_onTodaysSchedule"));
 
   const going = all
     .filter((j) => j.status === "in_progress")
@@ -153,12 +164,16 @@ export function orderWhichJobChoices(input: {
   if (!held.size) return out;
   return [
     ...out.filter((o) => !held.has(o.id)),
-    ...out.filter((o) => held.has(o.id)).map((o) => ({ ...o, why: ON_HOLD_WHY })),
+    ...out.filter((o) => held.has(o.id)).map((o) => ({ ...o, why: onHoldWhy(input.lang) })),
   ];
 }
 
 /** The why on a held job's row: what the tap will do besides place the punch. */
-export const ON_HOLD_WHY = "On hold: picking it takes it off hold";
+export function onHoldWhy(lang?: Lang | null): string {
+  return translator(lang)("cs_onHoldWhy");
+}
+/** The same, in English: the catalog's word, so the two cannot drift. */
+export const ON_HOLD_WHY = onHoldWhy("en");
 
 /**
  * Which moment the sheet is open at: right after the punch in, right after the clock-out, or to MOVE
@@ -195,15 +210,10 @@ export type SheetPhase =
 /** What the sheet says when it has no job to offer: where the punch is, and who puts it on its job.
  *  On a MOVE the punch is NOT on no job — it is on the job the app chose — so it never borrows this
  *  sentence; that would be the clock telling a lie about where the hours are. */
-export function noJobsToOffer(isStaff: boolean, moment: WhichJobMoment = "in"): string {
-  if (moment === "move") {
-    return isStaff
-      ? "There's no other job going right now. Leave it here, or move it from Timecards when you know the job."
-      : "There's no other job going right now. Leave it here and tell the office which job it was.";
-  }
-  return isStaff
-    ? "No job is going right now, so your punch is saved on no job. Put it on its job from Timecards when you know it."
-    : "No job is going right now, so your punch is saved on no job. The office puts it on the right job.";
+export function noJobsToOffer(isStaff: boolean, moment: WhichJobMoment = "in", lang?: Lang | null): string {
+  const t = translator(lang);
+  if (moment === "move") return isStaff ? t("cs_noJobsMoveStaff") : t("cs_noJobsMoveTech");
+  return isStaff ? t("cs_noJobsAskStaff") : t("cs_noJobsAskTech");
 }
 
 /** The job a MOVE is coming off, as the sheet knows it. Named, so no sentence about it is vague. */
@@ -223,26 +233,25 @@ export type SheetWhere = { moment: WhichJobMoment; from?: MoveFrom };
  * carries a job is not in Hours On No Job, so "the office will put it on its job" promises a prompt
  * the office will never see.
  */
-export function punchStillOn(where: SheetWhere): string {
-  return where.moment === "move" ? `still on ${where.from?.label ?? "the job the app picked"}` : "still on no job";
+export function punchStillOn(where: SheetWhere, lang?: Lang | null): string {
+  const t = translator(lang);
+  return where.moment === "move" ? fillText(t("cs_stillOnJob"), { label: where.from?.label ?? t("cs_theJobAppPicked") }) : t("cs_stillOnNoJob");
 }
 
 /** The sheet's line when its OWN job list didn't load. Same law: at the ask the office picks it up
  *  from Hours On No Job; on a move the punch has a job, so the line says where it still is and names
  *  the door that can still move it. */
-export function jobsDidntLoadSentence(where: SheetWhere): string {
-  return where.moment === "move"
-    ? `No connection, so the jobs didn't load. Your punch is ${punchStillOn(where)} — try again when you have signal, or move it from Timecards.`
-    : "No connection, so the jobs didn't load. Your punch is saved; skip, and the office will put it on its job.";
+export function jobsDidntLoadSentence(where: SheetWhere, lang?: Lang | null): string {
+  const t = translator(lang);
+  return where.moment === "move" ? fillText(t("cs_jobsDidntLoadMove"), { still: punchStillOn(where, lang) }) : t("cs_jobsDidntLoadAsk");
 }
 
 /** The same thing said by the READ behind the sheet (which-job-actions). It knows it is a move but
  *  not the job's label — the job read is the one that failed — so it says where the punch is without
  *  naming it, and never that the office will pick. */
-export function choicesUnavailable(moving: boolean): string {
-  return moving
-    ? "Couldn't load the jobs just now. Your punch stays on the job the app picked — try again, or move it from Timecards."
-    : "Couldn't load the jobs just now. Skip, and the office will put this punch on its job.";
+export function choicesUnavailable(moving: boolean, lang?: Lang | null): string {
+  const t = translator(lang);
+  return moving ? t("cs_choicesUnavailableMove") : t("cs_choicesUnavailableAsk");
 }
 
 /**
@@ -255,10 +264,10 @@ export function choicesUnavailable(moving: boolean): string {
  */
 export function sheetAfterLoad(
   r: WhichJobChoices,
-  door: { confirmInline: boolean; moment?: WhichJobMoment },
+  door: { confirmInline: boolean; moment?: WhichJobMoment; lang?: Lang | null },
 ): { close: true; sentence: string } | { close: false; state: SheetPhase } {
   if (!r.ok) return { close: false, state: { phase: "failed", error: r.error } };
-  if (!r.jobs.length && !door.confirmInline) return { close: true, sentence: noJobsToOffer(r.isStaff, door.moment ?? "in") };
+  if (!r.jobs.length && !door.confirmInline) return { close: true, sentence: noJobsToOffer(r.isStaff, door.moment ?? "in", door.lang) };
   return { close: false, state: { phase: "ready", jobs: r.jobs, isStaff: r.isStaff } };
 }
 
@@ -280,23 +289,26 @@ export async function pickOutcome(
   /** Which question this tap answered, and on a move the job the punch is on: every sentence below
    *  that says where the punch STILL is reads it, so a move never borrows the ask's words. */
   where: SheetWhere = { moment: "in" },
+  /** The reader's language (English when omitted). */
+  lang?: Lang | null,
 ): Promise<PickOutcome> {
+  const t = translator(lang);
   // A move's way out is "Leave It Where It Is", never Skip — the punch already has a job.
-  const orSkip = where.moment === "move" ? "" : ", or skip";
+  const orSkip = where.moment === "move" ? "" : t("cs_orSkip");
   let res: WhichJobResult;
   try {
     res = await put(entryId, job.id);
   } catch {
-    return { kind: "refused", sentence: `No connection, so the punch is ${punchStillOn(where)}. Try again when you have a bar or two${orSkip}.` };
+    return { kind: "refused", sentence: fillText(t("cs_noConnectionPunchStill"), { still: punchStillOn(where, lang), orSkip }) };
   }
   // What else the pick did rides after the placed sentence, in the same words, so routePick carries
   // both to the toast (or to the sheet at the offline queue's door) with nothing of its own to add.
   if (res?.ok) {
-    const placed = `Your punch is on ${res.label || job.label}.`;
+    const placed = fillText(t("cs_yourPunchIsOn"), { label: res.label || job.label });
     const also = (res.warning ?? "").trim();
     return { kind: "placed", sentence: also ? `${placed} ${also}` : placed };
   }
-  const sentence = res?.error || `That didn't go through. Your punch is saved, ${punchStillOn(where)}.`;
+  const sentence = res?.error || fillText(t("cs_didntGoThroughStill"), { still: punchStillOn(where, lang) });
   return res?.stale ? { kind: "stale", sentence } : { kind: "refused", sentence };
 }
 

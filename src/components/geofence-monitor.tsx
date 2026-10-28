@@ -7,13 +7,15 @@ import { Loader2, MapPin } from "lucide-react";
 import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
 import { adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
-import { PICK_WITHIN_CEILING, isLongOpenShift, stopWindow } from "@/lib/long-shift";
+import { isLongOpenShift, pickWithinCeiling, stopWindow } from "@/lib/long-shift";
 import { splitClock } from "@/lib/split-preview";
 import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
 import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
-import { armFence, disarmFence, fenceReadiness, onFenceExit, shellMayReadLocation, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
+import { armFence, disarmFence, fenceArmOptions, fenceReadiness, onFenceExit, shellMayReadLocation, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { trace } from "@/lib/nort/trace";
 import type { GeoPoint } from "@/lib/types";
 
@@ -68,21 +70,17 @@ export function GeofenceIdleLine({
   jobLabel: string;
   onTurnOn: () => void;
 }) {
+  // The person's language (cn-v1138): every line is a gf_ key; outside a provider (a test) it is English.
+  const t = translator(useLang());
   const line = "mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800";
-  if (watchOff)
-    return (
-      <div className={line}>
-        Location is off for this app, so I can&rsquo;t offer to clock you out when you leave. Clock out
-        yourself, or turn location back on in Settings.
-      </div>
-    );
+  if (watchOff) return <div className={line}>{t("gf_locationOffForApp")}</div>;
   if (waitingGrant)
     return (
       <div className={line}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>Location isn&rsquo;t on yet for North, so I can&rsquo;t notice when you leave {jobLabel}.</span>
+          <span>{fillText(t("gf_locationNotOnYet"), { label: jobLabel })}</span>
           <Button type="button" size="sm" variant="outline" className="shrink-0" disabled={grantBusy} onClick={onTurnOn}>
-            {grantBusy && <Loader2 className="animate-spin" />} Turn On Location
+            {grantBusy && <Loader2 className="animate-spin" />} {t("gf_turnOnLocation")}
           </Button>
         </div>
         {grantNote && <p className="mt-1">{grantNote}</p>}
@@ -92,19 +90,13 @@ export function GeofenceIdleLine({
     return (
       <div className={line}>
         {fenceDark === "unavailable"
-          ? "This phone can’t watch the job site with the screen off, so I’ll only notice you leaving while North is open."
+          ? t("gf_phoneCantWatchScreenOff")
           : fenceDark === "denied"
-            ? "Location is off for North, so I can’t notice you leaving the job site with the screen off. Turn it on in Settings, under Location Services, North, Always."
-            : "Location for North is set to While Using, so I can’t notice you leaving the job site with the screen off. Set it to Always in Settings, under Location Services, North."}
+            ? t("gf_locationOffForNorth")
+            : t("gf_locationWhileUsing")}
       </div>
     );
-  if (anchorLost && !anchorKnown)
-    return (
-      <div className={line}>
-        I couldn&rsquo;t get a location at {jobLabel}, so I can&rsquo;t offer to clock you out when you leave this job.
-        Clock out yourself when you&rsquo;re done.
-      </div>
-    );
+  if (anchorLost && !anchorKnown) return <div className={line}>{fillText(t("gf_couldntGetLocationAt"), { label: jobLabel })}</div>;
   return null;
 }
 
@@ -244,7 +236,7 @@ export function GeofenceMonitor({
   clockInIso,
   radiusM,
   graceMin = 4,
-  jobLabel = "the job site",
+  jobLabel: jobLabelProp,
   jobId = null,
   startedBySwitch = false,
   shiftStartIso = null,
@@ -275,6 +267,12 @@ export function GeofenceMonitor({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  // The person's language (cn-v1138): the sheet, the idle line, the spoken and lock-screen words, and
+  // the words handed to the shell's compiled alert (fenceArmOptions). A job with no label is "the job
+  // site" in that language.
+  const lang = useLang();
+  const t = translator(lang);
+  const jobLabel = jobLabelProp ?? t("gf_theJobSite");
 
   // ── one shared truth for both detection paths + the sheet's handlers ──────────
   const doneRef = useRef(false);
@@ -305,8 +303,10 @@ export function GeofenceMonitor({
   // Context rides in a ref so openPrompt keeps touching ONLY refs + stable setters
   // (the property both detection effects rely on to omit it from their deps).
   const exitPushSentRef = useRef<string | null>(null);
-  const exitPushCtxRef = useRef({ entryId, jobLabel });
-  exitPushCtxRef.current = { entryId, jobLabel };
+  // The label goes as given (undefined for a job with none): the server says "the job site" in the
+  // reader's own language.
+  const exitPushCtxRef = useRef<{ entryId: string; jobLabel: string | undefined }>({ entryId, jobLabel: jobLabelProp });
+  exitPushCtxRef.current = { entryId, jobLabel: jobLabelProp };
   // An exit iOS saw that the sheet could not take yet (see exitHandoff). The phone cleared its own
   // copy when the page read it, so this ref is the only one left; takeKeptRef is how the live fence
   // effect takes it up again once a sheet is free (or when it replaced the effect that read it).
@@ -472,14 +472,16 @@ export function GeofenceMonitor({
     geoClockOut(gps, atIso, auto, entryId, picked)
       .then((res) => {
         if (!res.ok) {
-          if (/not clocked in|already ended/i.test(res.error ?? "")) {
+          // `ended` is the server's own word for a terminal refusal (cn-v1138); the English match stays
+          // for a server built before it.
+          if (res.ended || /not clocked in|already ended/i.test(res.error ?? "")) {
             // Already closed elsewhere (the panel, the office) — terminal; sync the UI.
             doneRef.current = true;
             setPhase("idle");
             router.refresh();
             return;
           }
-          setError(res.error ?? "Could not clock out — try again.");
+          setError(res.error ?? t("gf_couldNotClockOut"));
           // The clock crossed LONG_SHIFT_HOURS while the sheet was up: the answer is a picked time.
           if (res.needsTime) {
             longPromptRef.current = true;
@@ -498,15 +500,15 @@ export function GeofenceMonitor({
         } catch {}
         if (auto) {
           try {
-            speakSmart("Clocked out — you left the job site.");
+            speakSmart(t("gf_clockedOutYouLeftSpoken"));
           } catch {}
           // Works while the page is alive even if it was just backgrounded; if
           // notifications aren't granted, the in-app banner on /timeclock catches them.
           try {
             if ("Notification" in window && Notification.permission === "granted") {
-              const n = new Notification("Clocked out — you left the job site", {
+              const n = new Notification(t("gf_clockedOutYouLeftTitle"), {
                 // /timeclock asks only about lunch now (audit v994 SI8): no job codes to log.
-                body: "Tap to finish your timecard.",
+                body: t("gf_tapToFinishTimecard"),
                 tag: "geo-clockout",
               });
               n.onclick = () => {
@@ -521,7 +523,7 @@ export function GeofenceMonitor({
         setTimeout(() => router.refresh(), 2600);
       })
       .catch(() => {
-        setError("No connection — your shift is untouched, try again.");
+        setError(t("gf_noConnectionUntouched"));
         setPhase("prompt");
       });
   }
@@ -536,14 +538,14 @@ export function GeofenceMonitor({
     // this sheet exists to avoid. Long = twelve hours of the SHIFT (SW1).
     const long = longPromptRef.current || isLongOpenShift(shiftStartRef.current, Date.now());
     if (long && !pickedIso) {
-      setError(PICK_WITHIN_CEILING);
+      setError(pickWithinCeiling(lang));
       return;
     }
     const iso = pickedIso ?? new Date().toISOString(); // picker's "Use now" ⇒ now
     const ms = Date.parse(iso);
     const win = Number.isFinite(ci) ? stopWindow(ci, Date.now()) : null;
     if (isNaN(ms) || (win && (ms < win.minMs || ms > win.maxMs)) || ms > Date.now() + 60_000) {
-      setError(PICK_WITHIN_CEILING);
+      setError(pickWithinCeiling(lang));
       return;
     }
     submit(lastFixRef.current, iso, false, true);
@@ -712,11 +714,7 @@ export function GeofenceMonitor({
         setWatchOff(true);
         return;
       }
-      setGrantNote(
-        r.status === "timeout"
-          ? "The phone didn’t answer with a location in time. Try again."
-          : "This phone couldn’t give a location just now. Try again.",
-      );
+      setGrantNote(r.status === "timeout" ? t("gf_phoneDidntAnswerInTime") : t("gf_phoneCouldntGiveLocation"));
     });
   };
 
@@ -840,7 +838,7 @@ export function GeofenceMonitor({
     if (typeof anchorLat !== "number" || typeof anchorLng !== "number") return;
     let cancelled = false;
     const dark = (r: FenceReadiness | null) => { if (!cancelled) setFenceDark(r === null || r === "ready" ? null : r); };
-    void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);
+    void armFence(fenceArmOptions({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }, t)).then(dark);
     // The phone cleared its copy when the page read this one, so nothing here may just return (carried
     // 1123, #24): exitHandoff says whether it opens the sheet, fills the one that is up, is kept for the next
     // free sheet, or is truly moot.
@@ -883,13 +881,13 @@ export function GeofenceMonitor({
     };
     takeKeptRef.current = () => { const k = keptExitRef.current; if (k) takeExit(k); };
     takeKeptRef.current(); // an exit the last effect read and could not place
-    void takePendingExit().then((e) => { if (e) takeExit(e); });
+    void takePendingExit(t("gf_theJobSite")).then((e) => { if (e) takeExit(e); });
     let stop: () => void = () => {};
     // A listener that arrives after this effect was torn down must not be left listening.
-    void onFenceExit(takeExit).then((s) => { if (cancelled) s(); else stop = s; });
+    void onFenceExit(takeExit, t("gf_theJobSite")).then((s) => { if (cancelled) s(); else stop = s; });
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
-      void takePendingExit().then((e) => { if (e) takeExit(e); });
+      void takePendingExit(t("gf_theJobSite")).then((e) => { if (e) takeExit(e); });
       void fenceReadiness().then(dark); // the Always prompt may have been answered while we were away
     };
     document.addEventListener("visibilitychange", onVis);
@@ -904,7 +902,7 @@ export function GeofenceMonitor({
       window.removeEventListener("focus", onVis);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripKey, anchorLat, anchorLng, radiusM]);
+  }, [tripKey, anchorLat, anchorLng, radiusM, lang]);
   // A sheet that closes (he came back inside, or answered) frees the place a kept exit was waiting for.
   useEffect(() => {
     if (phase === "idle") takeKeptRef.current();
@@ -959,12 +957,12 @@ export function GeofenceMonitor({
             <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
             <div className="text-sm">
               <div className="font-semibold text-slate-900">
-                Clocked out at {closedTime} — you left {jobLabel}.
+                {fillText(t("gf_clockedOutAtYouLeft"), { time: closedTime, label: jobLabel })}
               </div>
               {/* /timeclock asks only about lunch now (audit v994 SI8). A geofence close is always
                   auto_gps and unanswered, so the prompt there is pending whenever this shows. */}
               <Link href="/timeclock" className="mt-0.5 inline-block font-medium text-brand hover:underline">
-                Finish Your Timecard →
+                {t("gf_finishYourTimecard")}
               </Link>
             </div>
           </div>
@@ -974,12 +972,9 @@ export function GeofenceMonitor({
               <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
               <div className="text-sm">
                 <div className="font-semibold text-slate-900">
-                  Looks like you left {jobLabel}. Clock out?
+                  {fillText(t("gf_looksLikeYouLeftClockOut"), { label: jobLabel })}
                 </div>
-                <div className="mt-0.5 text-xs text-slate-500">
-                  You&apos;re still on the clock. Left a while ago with the app closed? Pick the
-                  time you actually left.
-                </div>
+                <div className="mt-0.5 text-xs text-slate-500">{t("gf_stillOnClockPickTime")}</div>
                 {/* SAY WHAT HAPPENS IF HE SAYS NOTHING (audit 6).
                     The sheet asks a question and then, five minutes later, answers it for him at
                     a time he was never shown. Naming it is what makes a wrong one catchable by
@@ -988,9 +983,7 @@ export function GeofenceMonitor({
                     fallback can actually fire; a wake prompt waits for a human indefinitely. */}
                 {autoAtLabel && (
                   <div className="mt-1 text-xs font-medium text-amber-700">
-                    {phase === "picking"
-                      ? `No answer in 5 minutes? We'll clock you out at ${autoAtLabel}, when you were last at the site.`
-                      : `No answer? We'll clock you out at ${autoAtLabel}.`}
+                    {fillText(t(phase === "picking" ? "gf_noAnswer5MinPicking" : "gf_noAnswerClockOutAt"), { at: autoAtLabel })}
                   </div>
                 )}
               </div>
@@ -1010,11 +1003,7 @@ export function GeofenceMonitor({
                   tz={tz}
                   /* A long shift's picker starts at the clock-in, which is not a stop time anybody
                      chose, so it never says "the time above" until he has picked one (SI7). */
-                  caption={
-                    longShift && pickedIso == null
-                      ? "Pick when you actually left."
-                      : "Clocking out at the time above. Pick when you actually left."
-                  }
+                  caption={longShift && pickedIso == null ? t("gf_pickWhenYouLeft") : t("gf_clockingOutAtTimeAbove")}
                   onChange={setPickedIso}
                 />
               </div>
@@ -1022,14 +1011,14 @@ export function GeofenceMonitor({
 
             {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
             {phase === "picking" && !pickedValid && (
-              <p className="mt-2 text-xs text-amber-600">{PICK_WITHIN_CEILING}</p>
+              <p className="mt-2 text-xs text-amber-600">{pickWithinCeiling(lang)}</p>
             )}
 
             <div className="mt-3 space-y-2">
               {phase === "picking" ? (
                 <>
                   <Button className="w-full" disabled={!pickedValid} onClick={clockOutPicked}>
-                    Clock Out At That Time
+                    {t("tc_clockOutAtThatTime")}
                   </Button>
                   <div className="flex gap-2">
                     {/* Back leads to Clock Out Now, which a long shift does not offer. */}
@@ -1043,11 +1032,11 @@ export function GeofenceMonitor({
                           setPhase("prompt");
                         }}
                       >
-                        Back
+                        {t("gf_back")}
                       </Button>
                     )}
                     <Button variant="ghost" className="flex-1" onClick={stillWorking}>
-                      Still Working
+                      {t("gf_stillWorking")}
                     </Button>
                   </div>
                 </>
@@ -1055,12 +1044,12 @@ export function GeofenceMonitor({
                 <>
                   {phase === "saving" ? (
                     <Button className="w-full" disabled>
-                      <Loader2 className="h-4 w-4 animate-spin" /> Clocking Out…
+                      <Loader2 className="h-4 w-4 animate-spin" /> {t("tc_clockingOut")}
                     </Button>
                   ) : (
                     !longShift && (
                       <Button className="w-full" onClick={clockOutNow}>
-                        Clock Out Now
+                        {t("gf_clockOutNow")}
                       </Button>
                     )
                   )}
@@ -1075,10 +1064,10 @@ export function GeofenceMonitor({
                         setPhase("picking");
                       }}
                     >
-                      Pick The Time…
+                      {t("gf_pickTheTime")}
                     </Button>
                     <Button variant="ghost" className="flex-1" disabled={phase === "saving"} onClick={stillWorking}>
-                      Still Working
+                      {t("gf_stillWorking")}
                     </Button>
                   </div>
                 </>

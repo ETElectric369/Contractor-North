@@ -359,6 +359,9 @@ export const LAPSED_DOCK: DockSection = {
     { id: "lp-pick", label: "Pick A Plan", icon: CreditCard, href: "/subscribe" },
     { id: "lp-settings", label: "Settings", icon: Settings, href: "/settings" },
     { id: "lp-accountant", label: "Download For Your Accountant", icon: Download, href: "/analytics/accountant" },
+    // EVERYTHING THE COMPANY HAS (cn-v1138): the export door lives on Settings › Getting Paid, an
+    // open door while lapsed (the wall matches /settings by path; the ?tab= only picks the cluster).
+    { id: "lp-export", label: "Download Everything", icon: Download, href: "/settings?tab=getpaid" },
   ],
 };
 

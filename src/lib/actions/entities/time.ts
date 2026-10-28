@@ -9,6 +9,7 @@ import { resolveJobId, resolveProfileId } from "../resolve-id";
 import { todayStrInTz, tzDayStartUtc, tzNaiveIsoToUtc } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { quotedData } from "@/lib/org-local-time";
+import { fillText, localeOf, translator, type Lang } from "@/lib/i18n";
 
 /**
  * ONE CONVERTER FOR EVERY TIME VERB (audit 7). cn-v728 converted addEntry and left fixEntry and
@@ -48,14 +49,12 @@ import type { ActionDef } from "../types";
  * HERE: `mode` comes back from switchJob, which made the decision. The hours are never dropped from
  * the sentence either way: nothing silent.
  */
-export function switchJobSpoken(mode: "cut" | "repointed" | undefined, closedHours: number | undefined, stayedOn: string | null): string {
-  if (mode === "repointed") return "Done — this whole punch is on the new job now. Any earlier part of the day stays where it was.";
+export function switchJobSpoken(mode: "cut" | "repointed" | undefined, closedHours: number | undefined, stayedOn: string | null, lang: Lang = "en"): string {
+  // In the person's language (cn-v1138): the words are the catalog's (lib/words/nort), the rule is here.
+  const t = translator(lang);
+  if (mode === "repointed") return t("nt_switchRepointed");
   const hours = Number(closedHours ?? 0).toFixed(2);
-  return (
-    `Switched — the clock is running on the new job now. The ${hours} hours before the switch stayed on ` +
-    `${stayedOn ?? "the job you were on"}: a switch starts a new entry, it never moves hours already worked. ` +
-    `If those hours belong on the new job too, the office moves them on Timecards.`
-  );
+  return fillText(t("nt_switchCut"), { hours, stayed: stayedOn ?? t("nt_theJobYouWereOn") });
 }
 
 async function jobSaidAs(supabase: Awaited<ReturnType<typeof createClient>>, jobId: string): Promise<string | null> {
@@ -79,7 +78,7 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.clockIn",
     group: "time",
     label: "Clock in",
-    description: "Start the clock for the current user, optionally on a job. job_id is the job's uuid, OR the job's name, number or street address EXACTLY as the person said it ('12 Larkspur Lane', 'J-099') — the app resolves a name itself and asks when none or several match. WHEN THE PERSON NAMES A JOB, PASS IT: never leave job_id empty for a named job, because an empty job_id makes the app pick the job on its own. ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts. WHEN NO job_id IS GIVEN THE APP PICKS THE JOB ITSELF: if the result carries `warning`, REPEAT IT WORD FOR WORD — it names the job the app chose and nobody picked, and the person has to hear it before those hours bill the wrong customer. When the result carries `recorded`, say it: it names the job the punch is on.",
+    description: "Start the clock for the current user, optionally on a job. job_id is the job's uuid, OR the job's name, number or street address EXACTLY as the person said it ('12 Larkspur Lane', 'J-099') — the app resolves a name itself and asks when none or several match. WHEN THE PERSON NAMES A JOB, PASS IT: never leave job_id empty for a named job, because an empty job_id makes the app pick the job on its own. ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts. WHEN NO job_id IS GIVEN THE APP PICKS THE JOB ITSELF: if the result carries `warning`, REPEAT IT WORD FOR WORD — it names the job the app chose and nobody picked, and the person has to hear it before those hours bill the wrong customer. When the result carries `recorded`, say it: it names the job the punch is on. `warning` and `recorded` come back already in the user's own language (their profile's): repeat them as they are, never translate them.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       job_code: z.string().nullable().optional(),
@@ -87,7 +86,7 @@ export const timeActions: Record<string, ActionDef> = {
     }),
     auth: "any", // a tech clocks themselves in
     effect: "write",
-    handler: async (i) => {
+    handler: async (i, ctx) => {
       const supabase = await createClient();
       // A NAMED JOB IS THE JOB (2026-10-19; Erik, screen locked: "clock me in on 12 Larkspur Lane" —
       // the punch landed on Snowbell, the day's scheduled job). The model passed the name where a uuid belongs, the
@@ -106,7 +105,8 @@ export const timeActions: Record<string, ActionDef> = {
       // so the person hears which job the words matched, and the deeds law has a result to quote.
       // Best effort — a label that cannot be read leaves the punch's answer exactly as it was.
       const onJob = punched.ok && job.id ? await jobSaidAs(supabase, job.id) : null;
-      const res = onJob ? { ...punched, recorded: `Clocked in on ${onJob}.` } : punched;
+      // Said word for word (the description above), so said in the person's language (ctx.lang, cn-v1138).
+      const res = onJob ? { ...punched, recorded: fillText(translator(ctx?.lang ?? "en")("nt_clockedInOn"), { job: onJob }) } : punched;
       // NOTHING SILENT AT THIS DOOR EITHER — AND THIS IS THE ONE DOOR THAT CANNOT SHOW A BUTTON, so
       // the sentence has to reach the model or nothing reaches the person at all. It comes from the
       // ONE function every other door calls (clock-told: tellAppChose), so Nort cannot word it
@@ -134,7 +134,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Clock out",
     description:
-      "Close the current user's open time entry — the end of a LIVE shift, never a way to log finished past work (that is time.addEntry). One tap: the job was set at clock-in, and a day on two jobs is two entries (time.switchJob when it happens, or time.splitEntry after). Do NOT ask for a job/hours breakdown. miles = round-trip job mileage; lunch_minutes = unpaid lunch taken. ALWAYS announce what the RESULT says was recorded (span and date) — not what you intended.",
+      "Close the current user's open time entry — the end of a LIVE shift, never a way to log finished past work (that is time.addEntry). One tap: the job was set at clock-in, and a day on two jobs is two entries (time.switchJob when it happens, or time.splitEntry after). Do NOT ask for a job/hours breakdown. miles = round-trip job mileage; lunch_minutes = unpaid lunch taken. ALWAYS announce what the RESULT says was recorded (span and date) — not what you intended. `recorded` comes back already in the user's own language (their profile's): repeat it as it is, never translate it.",
     input: z.object({
       miles: z.number().optional(),
       notes: z.string().optional(),
@@ -142,12 +142,14 @@ export const timeActions: Record<string, ActionDef> = {
     }),
     auth: "any",
     effect: "write",
-    handler: async (i) => {
+    handler: async (i, ctx) => {
+      const lang: Lang = ctx?.lang ?? "en"; // the read-back is said word for word: in the person's language (cn-v1138)
+      const t = translator(lang);
       const res = await clockOutCurrent({ miles: i.miles, notes: i.notes, lunch_minutes: i.lunch_minutes });
       if (!res || (res as { ok?: boolean }).ok === false) return res;
       // A punch taken back (under two minutes old, lib/long-shift): nothing was recorded, so the
       // read-back below would announce the PREVIOUS shift as this one. Say what happened instead.
-      if ((res as { undone?: boolean }).undone) return { ...res, recorded: (res as { warning?: string }).warning ?? "That punch was taken back; nothing was recorded." };
+      if ((res as { undone?: boolean }).undone) return { ...res, recorded: (res as { warning?: string }).warning ?? t("nt_punchTakenBack") };
       // ANNOUNCE THE DEED, NOT THE INTENT (Erik's phantom "3 hours yesterday": the model
       // clocked in and straight out — a 3.4-second entry on the wrong day with no job — then
       // announced the hours it meant to log). Read back what was actually recorded; a
@@ -179,8 +181,9 @@ export const timeActions: Record<string, ActionDef> = {
           const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
           const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone || "America/Los_Angeles";
           const fmt = (iso: string) =>
-            new Date(iso).toLocaleString("en-US", { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-          const recorded = `Recorded: ${fmt(last.clock_in)} → ${fmt(last.clock_out)} (${hrs.toFixed(2)}h${lunch ? `, ${Math.round(lunch * 60)}m lunch deducted` : ""}${last.job_id ? "" : ", NO job attached"}).`;
+            new Date(iso).toLocaleString(localeOf(lang), { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+          const extra = `${lunch ? fillText(t("nt_lunchDeducted"), { minutes: String(Math.round(lunch * 60)) }) : ""}${last.job_id ? "" : t("nt_noJobAttached")}`;
+          const recorded = fillText(t("nt_recorded"), { from: fmt(last.clock_in), to: fmt(last.clock_out), hours: hrs.toFixed(2), extra });
           if (hrs < 0.05) {
             return {
               ...res,
@@ -393,18 +396,20 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Switch job",
     description:
-      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. IT DOES ONE OF TWO THINGS AND THE RESULT SAYS WHICH. A punch that STARTED IN THE LAST FIFTEEN MINUTES (or has no job yet) MOVES OVER WHOLE: every minute of it lands on the new job, which is how a punch the app put on the wrong job gets fixed while it is fresh. After that it CUTS: the part so far closes as its own timecard entry, the clock keeps running on the new job, and the hours already worked STAY on the job they were worked on — so once a shift has been running a while this is NOT a way to correct a wrong job, and you say where that is done instead (My Day's Now card, Timeclock, or the office on Timecards; the office can also move a whole entry with time.fixEntry and its job_id, which asks first). Never promise which one it will do before you call it, and never say a punch moved unless this tool's result says so. Announce what the result's `speak` says, word for word, including where any hours before a cut stayed.",
+      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. IT DOES ONE OF TWO THINGS AND THE RESULT SAYS WHICH. A punch that STARTED IN THE LAST FIFTEEN MINUTES (or has no job yet) MOVES OVER WHOLE: every minute of it lands on the new job, which is how a punch the app put on the wrong job gets fixed while it is fresh. After that it CUTS: the part so far closes as its own timecard entry, the clock keeps running on the new job, and the hours already worked STAY on the job they were worked on — so once a shift has been running a while this is NOT a way to correct a wrong job, and you say where that is done instead (My Day's Now card, Timeclock, or the office on Timecards; the office can also move a whole entry with time.fixEntry and its job_id, which asks first). Never promise which one it will do before you call it, and never say a punch moved unless this tool's result says so. Announce what the result's `speak` says, word for word, including where any hours before a cut stayed. `speak` and any `error` come back already in the user's own language (their profile's): repeat them as they are, never translate them.",
     input: z.object({
       job_id: z.string(),
       job_code: z.string().nullable().optional(),
     }),
     auth: "any", // a tech switches his own running shift
     effect: "write",
-    handler: async (i) => {
+    handler: async (i, ctx) => {
+      const lang: Lang = ctx?.lang ?? "en"; // `speak` is said word for word: in the person's language (cn-v1138)
+      const t = translator(lang);
       const supabase = await createClient();
       const { data: me } = await supabase.auth.getUser();
       const meId = me?.user?.id;
-      if (!meId) return { ok: false, error: "Not signed in." };
+      if (!meId) return { ok: false, error: t("nt_notSignedIn") };
       // THE PUNCH FIRST, THE JOB SECOND (2026-10-19). With no shift running there is nothing to
       // switch, whatever was said — and the refusal has to say THAT, the true state, not "No job
       // named 'just no job'" from the resolver, after which Nort told the person where he was on
@@ -415,10 +420,10 @@ export const timeActions: Record<string, ActionDef> = {
         .eq("profile_id", meId)
         .eq("status", "open")
         .maybeSingle();
-      if (!open) return { ok: false, error: "You're not clocked in." };
+      if (!open) return { ok: false, error: t("nt_notClockedIn") };
       const job = await resolveJobId(supabase, i.job_id ?? null);
       if ("error" in job) return { ok: false, error: job.error };
-      if (!job.id) return { ok: false, missingFields: ["job_id"], error: "Which job are you switching to?" };
+      if (!job.id) return { ok: false, missingFields: ["job_id"], error: t("nt_whichJobSwitch") };
       const wasOn = (open as { job_id?: string | null }).job_id ?? null;
       const res = await switchJob({
         entry_id: (open as { id: string }).id,
@@ -429,7 +434,7 @@ export const timeActions: Record<string, ActionDef> = {
       });
       if (!res.ok) return res;
       const stayedOn = wasOn ? await jobSaidAs(supabase, wasOn) : null;
-      return { ...res, speak: switchJobSpoken(res.mode, res.closed_hours, stayedOn) };
+      return { ...res, speak: switchJobSpoken(res.mode, res.closed_hours, stayedOn, lang) };
     },
   },
   /**

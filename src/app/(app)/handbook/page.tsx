@@ -12,7 +12,7 @@ export default async function HandbookPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const [{ data: me }, { data: org }] = await Promise.all([
-    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("profiles").select("role, language").eq("id", user?.id ?? "").maybeSingle(),
     supabase.from("organizations").select("settings, name").limit(1).maybeSingle(),
   ]);
   const settings = getOrgSettings((org as any)?.settings);
@@ -24,7 +24,8 @@ export default async function HandbookPage() {
         title="Employee handbook"
         description={`Policies and expectations at ${(org as any)?.name ?? "the company"}.`}
       />
-      <PhoneSetupChecklist />
+      {/* The checklist in the person's language (cn-v1138): profiles.language rides the role read. */}
+      <PhoneSetupChecklist lang={(me as { language?: string | null } | null)?.language ?? null} />
       <HandbookView text={settings.employee_handbook} isAdmin={isAdmin} />
     </div>
   );

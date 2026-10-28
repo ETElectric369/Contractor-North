@@ -6,6 +6,7 @@ import { JobPhotoQuick } from "./job-photo-quick";
 import { JobManageMenu } from "./job-manage-menu";
 import { JobEditButton } from "./job-edit-button";
 import { FinishJobButton } from "./finish-job-button";
+import { translator } from "@/lib/i18n";
 import type { Job } from "@/lib/types";
 
 /** 44px secondary slot. On a phone the label is VISIBLE — a tiny 9px caption under
@@ -55,10 +56,13 @@ export function JobActionDock({
   customers,
   templates,
   taskPhotos = false,
+  lang = "en",
 }: {
   job: any;
   viewerIsStaff: boolean;
   tz: string;
+  /** The viewer's language (profiles.language, cn-v1138): the dock's captions read in it. */
+  lang?: string | null;
   openEntry: OpenEntry | null;
   techs: { id: string; full_name: string | null }[];
   defaultProfileId: string;
@@ -74,6 +78,7 @@ export function JobActionDock({
 }) {
   // Same lifecycle gate the old header row used for Finish job.
   const schedulable = job.status !== "complete" && job.status !== "invoiced" && job.status !== "cancelled";
+  const t = translator(lang);
 
   return (
     // THE SLOT BUDGET AT 375 (Geist captions, stacked slots): TIME "Clock In" 104 + Photo 44 + Call 44
@@ -95,9 +100,9 @@ export function JobActionDock({
         />
         <JobPhotoQuick orgId={job.org_id} jobId={job.id} className={ICON_BTN} taskDoor={taskPhotos} />
         {customerPhone && (
-          <a href={`tel:${customerPhone}`} title="Call customer" className={ICON_BTN}>
+          <a href={`tel:${customerPhone}`} title={t("jb_callCustomer")} className={ICON_BTN}>
             <Phone className="h-4 w-4 shrink-0" />
-            <span>Call</span>
+            <span>{t("jb_call")}</span>
           </a>
         )}
         {jobAddress && (
@@ -106,7 +111,7 @@ export function JobActionDock({
             {/* The whole word at every width. It once shrank to "Map" for an earlier
                 six-slot bar; this bar pays for it with the gap and the padding instead —
                 never with this caption. */}
-            <span>Navigate</span>
+            <span>{t("jb_navigate")}</span>
           </NavLink>
         )}
         {viewerIsStaff && (

@@ -1,0 +1,11 @@
+/* THE PHONE'S PERMISSION PROMPTS IN SPANISH (cn-v1138). iOS picks this file when the phone is set to
+   Spanish (Info.plist lists es under CFBundleLocalizations). Same meaning as the English in
+   Info.plist, plain words, "tú". Nort, North and Tap to Pay on iPhone keep their names. */
+
+"NSBluetoothAlwaysUsageDescription" = "North puede usar Bluetooth para comunicarse con un lector de tarjetas compatible. Tap to Pay on iPhone no necesita lector: el teléfono es el lector.";
+"NSCameraUsageDescription" = "North usa la cámara para que fotografíes sitios de trabajo, materiales, recibos y documentos y los adjuntes al trabajo, y para medir un largo o un área en el sitio con Medir. Escaneo 3D la usa junto con el sensor LiDAR para fotografiar cada superficie y armar un modelo 3D.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Mientras tienes la entrada marcada, North mantiene un círculo alrededor del sitio de trabajo para notar cuando te vas, aun con la pantalla apagada, y preguntarte si sigues trabajando. No rastrea a dónde vas, no registra nada entre llegar y salir, y se detiene en cuanto marcas salida.";
+"NSLocationWhenInUseUsageDescription" = "North usa tu ubicación para registrar dónde marcaste entrada, verificar que estás en el sitio de trabajo, obtener el clima local para la agenda, y para cobrar con Tap to Pay on iPhone: Apple exige una ubicación para aceptar una tarjeta.";
+"NSMicrophoneUsageDescription" = "North usa el micrófono cuando hablas con Nort, el asistente de la app, o dictas notas. La grabación se envía a un servicio de voz para convertirla en texto.";
+"NSPhotoLibraryAddUsageDescription" = "North puede guardar en tu biblioteca los documentos y fotos que genera.";
+"NSPhotoLibraryUsageDescription" = "North te deja adjuntar fotos de tu biblioteca a trabajos, inspecciones y recibos.";

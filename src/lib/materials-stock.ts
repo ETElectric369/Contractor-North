@@ -1,4 +1,5 @@
 import type { ShelfRow } from "@/lib/stock-take";
+import { translator, type Lang } from "@/lib/i18n";
 
 /**
  * WHAT THE SHELF HAS of a list's lines (Erik, 2026-10-15, twice: "get rid of pricing on the
@@ -37,8 +38,9 @@ export function stockForLines(
   return out;
 }
 
-/** "In Stock · 12 ea" — the line's own words for what the shelf holds. */
-export function inStockWords(s: { onHand: number; unit: string }): string {
+/** "In Stock · 12 ea" — the line's own words for what the shelf holds, in the reader's language
+ *  (mt_inStockLead; English when none is passed). */
+export function inStockWords(s: { onHand: number; unit: string }, lang?: Lang | null): string {
   const n = String(Math.round(s.onHand * 100) / 100);
-  return `In Stock · ${n}${s.unit ? ` ${s.unit}` : ""}`;
+  return `${translator(lang)("mt_inStockLead")} · ${n}${s.unit ? ` ${s.unit}` : ""}`;
 }

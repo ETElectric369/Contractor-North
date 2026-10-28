@@ -3,6 +3,7 @@
 // through this registry, so "anything the user can do, Claude can do" is structural,
 // not maintained by hand. Each handler just wraps the EXISTING server action.
 
+import type { Lang } from "@/lib/locale";
 import type { z } from "zod";
 
 /** Everything every server action already returns, plus optional agent extras. */
@@ -53,6 +54,10 @@ export type ActionCtx = {
   userId: string | null;
   orgId: string | null;
   role: string | null;
+  /** profiles.language (cn-v1138): a read-back the person hears word for word comes back in it.
+   *  Resolved server-side with the role (buildActionCtx), never from a client; absent (a context
+   *  built by hand, a test's literal) means English, which is what every handler assumes. */
+  lang?: Lang;
 };
 
 export type ActionAuth = "any" | "staff" | "owner";

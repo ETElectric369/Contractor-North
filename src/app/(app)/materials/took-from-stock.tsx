@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Delete, Loader2, PackageMinus, Search } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { formatDateShort } from "@/lib/utils";
 import { isTransportError } from "@/lib/chunk-reload";
-import { fmtQty, TAKES_READ_FAILED, takeDoor, takeLine, takeShort, takeShortWords, takeUnheardWords, type JobTake, type ShelfRow } from "@/lib/stock-take";
+import { fmtQty, takeDoor, takeLine, takeShort, takeShortWords, takeUnheardWords, takesReadFailed, type JobTake, type ShelfRow } from "@/lib/stock-take";
 import { loadShelf, takeFromStockAction, undoTakeAction } from "./stock-actions";
 
 /**
@@ -77,10 +79,11 @@ export function TakeSheetView({
   onBack: () => void;
   onTake: () => void;
 }) {
+  const t = translator(useLang());
   if (step.kind === "count") {
     const row = step.row;
     const qty = Number(entry || "0");
-    const shortSaid = takeShortWords({ ...takeShort(row, qty), unit: row.unit });
+    const shortSaid = takeShortWords({ ...takeShort(row, qty), unit: row.unit }, t);
     return (
       <div className="space-y-3">
         <button
@@ -88,11 +91,11 @@ export function TakeSheetView({
           onClick={onBack}
           className="-ml-1 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-slate-600 hover:text-slate-900"
         >
-          <ArrowLeft className="h-4 w-4" /> Pick Another Item
+          <ArrowLeft className="h-4 w-4" /> {t("mt_pickAnotherItem")}
         </button>
         <div>
           <p className="text-base font-semibold text-slate-900">{row.name}</p>
-          <p className="text-sm text-slate-500">{onHandWords(row)}</p>
+          <p className="text-sm text-slate-500">{onHandWords(row, t)}</p>
         </div>
         {/* The count, with the item's own unit already there: nobody types "ft". */}
         <div className="flex items-baseline justify-end gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3" aria-live="polite">
@@ -114,7 +117,7 @@ export function TakeSheetView({
               key={k}
               type="button"
               onClick={() => onKey(k)}
-              aria-label={k === "back" ? "Delete" : k}
+              aria-label={k === "back" ? t("mt_deleteKey") : k}
               className="flex min-h-[56px] items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-2xl font-semibold text-slate-900 active:bg-slate-200"
             >
               {k === "back" ? <Delete className="h-6 w-6" /> : k}
@@ -129,7 +132,7 @@ export function TakeSheetView({
           className="btn-gloss flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl bg-[rgb(var(--glass-ink))] text-lg font-semibold text-white disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-          Take It
+          {t("mt_takeIt")}
         </button>
       </div>
     );
@@ -145,17 +148,17 @@ export function TakeSheetView({
           type="search"
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search stock"
-          aria-label="Search stock"
+          placeholder={t("mt_searchStock")}
+          aria-label={t("mt_searchStock")}
           className="h-11 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-base"
         />
       </label>
-      {loading && <p className="py-4 text-center text-sm text-slate-500">Reading stock…</p>}
+      {loading && <p className="py-4 text-center text-sm text-slate-500">{t("mt_readingStock")}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!loading && !error && rows.length === 0 && (
-        <p className="py-4 text-center text-sm text-slate-500">Nothing is in stock yet. The office puts rolls and boxes in stock from their tickets.</p>
+        <p className="py-4 text-center text-sm text-slate-500">{t("mt_nothingInStockYet")}</p>
       )}
-      {!loading && rows.length > 0 && shown.length === 0 && <p className="py-4 text-center text-sm text-slate-500">Nothing in stock is called that.</p>}
+      {!loading && rows.length > 0 && shown.length === 0 && <p className="py-4 text-center text-sm text-slate-500">{t("mt_nothingCalledThat")}</p>}
       <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
         {shown.map((r) => (
           <li key={r.id}>
@@ -165,7 +168,7 @@ export function TakeSheetView({
               className="flex min-h-[52px] w-full items-center justify-between gap-3 px-4 py-2 text-left hover:bg-slate-50"
             >
               <span className="text-base font-medium text-slate-900">{r.name}</span>
-              <span className="shrink-0 text-sm text-slate-500">{onHandWords(r)}</span>
+              <span className="shrink-0 text-sm text-slate-500">{onHandWords(r, t)}</span>
             </button>
           </li>
         ))}
@@ -174,8 +177,8 @@ export function TakeSheetView({
   );
 }
 
-function onHandWords(r: ShelfRow): string {
-  return r.onHand > 0 ? `${fmtQty(r.onHand)} ${r.unit} in stock` : `None on the stock record`;
+function onHandWords(r: ShelfRow, t: (key: string) => string): string {
+  return r.onHand > 0 ? fillText(t("mt_inStockCount"), { n: fmtQty(r.onHand), unit: r.unit }) : t("mt_noneOnRecord");
 }
 
 /** THE JOB'S TAKES, drawn from the rows alone. */
@@ -193,12 +196,13 @@ export function TakesListView({
   /** stock_takes_for_job failed: `takes` is empty because nothing was read, not because nothing was taken. */
   readFailed?: boolean;
 }) {
+  const t = translator(useLang());
   if (readFailed) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900">Taken From Stock</div>
+        <div className="border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900">{t("mt_takenFromStock")}</div>
         <p data-testid="takes-read-failed" className="px-4 py-2.5 text-sm text-amber-700">
-          {TAKES_READ_FAILED}
+          {takesReadFailed(t)}
         </p>
       </div>
     );
@@ -206,32 +210,32 @@ export function TakesListView({
   if (!takes.length) return null;
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
-      <div className="border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900">Taken From Stock</div>
+      <div className="border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900">{t("mt_takenFromStock")}</div>
       <ul className="divide-y divide-slate-100">
-        {takes.map((t) => {
-          const door = takeDoor(t);
+        {takes.map((tk) => {
+          const door = takeDoor(tk, t);
           return (
-            <li key={t.drawGroup} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
-              <span className="text-slate-800">{takeLine(t)}</span>
-              <span className="text-xs text-slate-400">{formatDateShort(t.takenAt)}</span>
+            <li key={tk.drawGroup} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
+              <span className="text-slate-800">{takeLine(tk, t)}</span>
+              <span className="text-xs text-slate-400">{formatDateShort(tk.takenAt)}</span>
               <span className="ml-auto">
                 {door.kind === "undo" && (
                   <button
                     type="button"
-                    disabled={pendingGroup === t.drawGroup}
-                    onClick={() => onUndo(t)}
+                    disabled={pendingGroup === tk.drawGroup}
+                    onClick={() => onUndo(tk)}
                     className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-3 text-sm font-medium text-brand hover:underline disabled:opacity-50"
                   >
-                    Undo
+                    {t("mt_undo")}
                   </button>
                 )}
                 {door.kind === "billed" &&
-                  (viewerIsStaff && t.billedInvoiceId ? (
+                  (viewerIsStaff && tk.billedInvoiceId ? (
                     <>
                       {/* Billed in part: said beside the door, so this row agrees with the Costs tab. */}
                       {door.part && <span className="text-xs text-amber-700">{door.status}</span>}
                       <Link
-                        href={`/billing/${t.billedInvoiceId}`}
+                        href={`/billing/${tk.billedInvoiceId}`}
                         className="inline-flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-brand hover:underline"
                       >
                         {door.label}
@@ -272,6 +276,8 @@ export function TookFromStock({
   const pathname = usePathname();
   const params = useSearchParams();
   const toast = useToast();
+  const lang = useLang();
+  const t = useMemo(() => translator(lang), [lang]);
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<ShelfRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -295,7 +301,7 @@ export function TookFromStock({
       r = await loadShelf();
     } catch (e) {
       // No signal in the truck: say so and leave the sheet usable, never "Reading the shelf…" forever.
-      r = { ok: false, error: isTransportError(e) ? "No signal, so stock couldn't be read. Close this and try again." : "Stock couldn't be read. Close this and try again." };
+      r = { ok: false, error: isTransportError(e) ? t("mt_noSignalStock") : t("mt_stockNotRead") };
     } finally {
       setLoading(false);
     }
@@ -305,7 +311,7 @@ export function TookFromStock({
     }
     setRows(r.rows);
     return r.rows;
-  }, []);
+  }, [t]);
 
   const openSheet = useCallback(
     async (fill?: { item: string; qty: string } | null) => {
@@ -322,10 +328,10 @@ export function TookFromStock({
         if (row) {
           setStep({ kind: "count", row });
           setEntry(/^\d*\.?\d{0,3}$/.test(fill.qty) ? fill.qty : "");
-        } else setError("That item isn't in stock any more. Pick what you took.");
+        } else setError(t("mt_itemGone"));
       }
     },
-    [read],
+    [read, t],
   );
 
   // NORT'S FILL: the job's link carries ?take=<item>&qty=60. Open the sheet filled in once, then take
@@ -358,8 +364,8 @@ export function TookFromStock({
         r = {
           ok: false,
           error: isTransportError(e)
-            ? "No signal, so the Undo didn't hear back. Check Taken From Stock once you have signal before tapping it again."
-            : "The Undo didn't go through. Reload the job to see where it stands.",
+            ? t("mt_undoNoSignal")
+            : t("mt_undoFailed"),
         };
       } finally {
         setPendingGroup(null);
@@ -369,14 +375,14 @@ export function TookFromStock({
       else toast(r.error, "error", undefined, { sticky: true });
       router.refresh();
     },
-    [jobId, router, toast],
+    [jobId, router, toast, t],
   );
 
   const take = () => {
     if (step.kind !== "count") return;
     const qty = Number(entry || "0");
     if (!(qty > 0)) {
-      setError("Say how many you took.");
+      setError(t("mt_sayHowMany"));
       return;
     }
     const itemId = step.row.id;
@@ -413,16 +419,16 @@ export function TookFromStock({
           onClick={() => void openSheet(null)}
           className="btn-gloss flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
         >
-          <PackageMinus className="h-5 w-5 shrink-0" /> Took From Stock
+          <PackageMinus className="h-5 w-5 shrink-0" /> {t("mt_tookFromStock")}
         </button>
       )}
       <TakesListView takes={takes} viewerIsStaff={viewerIsStaff} pendingGroup={pendingGroup} onUndo={(t) => void undo(t.drawGroup)} readFailed={readFailed} />
-      <Modal open={open} onClose={() => setOpen(false)} title="Took From Stock" size="md" dirty={step.kind === "count" && entry !== ""}>
+      <Modal open={open} onClose={() => setOpen(false)} title={t("mt_tookFromStock")} size="md" dirty={step.kind === "count" && entry !== ""}>
         <TakeSheetView
           step={step}
           rows={rows}
           loading={loading}
-          error={unheard ? takeUnheardWords(unheard.noSignal, !readFailed) : error}
+          error={unheard ? takeUnheardWords(unheard.noSignal, !readFailed, t) : error}
           search={search}
           entry={entry}
           busy={busy}

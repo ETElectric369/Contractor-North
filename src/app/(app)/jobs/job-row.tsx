@@ -3,6 +3,7 @@ import { MapPin } from "lucide-react";
 import { Badge, statusTone, type Tone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { formatDate } from "@/lib/utils";
+import { translator, type Lang } from "@/lib/i18n";
 import { JOB_BILLING_STATUS_LABEL, type JobBillingStatus } from "@/lib/analytics/money-metrics";
 
 /** Badge tone per billing tag — amber "go bill it", blue "waiting on money",
@@ -35,9 +36,12 @@ export type JobRowData = {
  * the job; the billing tag (when present) links to the job's Invoices tab — the
  * same money deep-link the /billing board uses (`?tab=invoices`).
  * `hideStatus` drops the redundant green "complete" badge inside the Completed
- * section, where the section header already says it.
+ * section, where the section header already says it. `lang` (cn-v1138): the viewer's
+ * language for the status badge and the invoices door's title — a prop, because this
+ * row is drawn on the server (the page) and in the client (the Completed section).
  */
-export function JobRow({ job, hideStatus = false }: { job: JobRowData; hideStatus?: boolean }) {
+export function JobRow({ job, hideStatus = false, lang = "en" }: { job: JobRowData; hideStatus?: boolean; lang?: Lang }) {
+  const t = translator(lang);
   return (
     <li className="flex items-center gap-4 px-5 py-3 hover:bg-slate-50">
       <Link href={`/jobs/${job.id}`} className="min-w-0 flex-1">
@@ -53,11 +57,11 @@ export function JobRow({ job, hideStatus = false }: { job: JobRowData; hideStatu
           {job.scheduled_start && <span>· {formatDate(job.scheduled_start)}</span>}
         </div>
       </Link>
-      {!hideStatus && <Badge tone={statusTone(job.status)}>{jobStatusLabel(job.status)}</Badge>}
+      {!hideStatus && <Badge tone={statusTone(job.status)}>{jobStatusLabel(job.status, lang, t)}</Badge>}
       {job.billing && (
         <Link
           href={`/jobs/${job.id}?tab=invoices`}
-          title="Open this job's invoices"
+          title={t("jb_openJobsInvoices")}
           className="shrink-0 rounded-full transition-transform hover:scale-105"
         >
           <Badge tone={BILLING_TONE[job.billing]}>{JOB_BILLING_STATUS_LABEL[job.billing]}</Badge>

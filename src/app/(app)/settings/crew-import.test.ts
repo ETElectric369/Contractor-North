@@ -105,6 +105,7 @@ vi.mock("@/lib/observe", () => ({ reportError: (...a: unknown[]) => reportError(
 const { importCrew } = await import("./actions");
 const { CrewImportResults } = await import("./crew-import-button");
 const { crewSetupLink, CREW_IMPORT_WORDS, CREW_SETUP_NEXT } = await import("./crew-setup-link");
+const { dict } = await import("@/lib/i18n");
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ");
@@ -227,6 +228,35 @@ describe("the import door, on a recording admin fake", () => {
     expect((await importCrew(ROWS)).ok).toBe(false);
     expect(state.calls.createUser).toEqual([]);
   });
+
+  /**
+   * THE ROSTER'S LANGUAGE COLUMN (cn-v1138): a Spanish-speaking tech is imported in Spanish and
+   * never has to find the toggle. "es" / "español" / "espanol" / "spanish" in any case is Spanish;
+   * any other word is English; a row with no language column leaves the profile's default. And
+   * still nothing is emailed.
+   */
+  it("the language column lands on the row: Spanish for the Spanish words, English for a bad value, nothing when the column is absent; no email either way", async () => {
+    const res = await importCrew([
+      { full_name: "Larkspur Catbird", email: "larkspur@example.test", language: "Español" },
+      { full_name: "Snowbell Thistlewood", email: "snowbell@example.test", language: "klingon" },
+      { full_name: "Bayberry Thistlewood", email: "bayberry@example.test", language: "spanish" },
+      { full_name: "Catbird Larkspur", email: "catbird@example.test" },
+    ]);
+    expect(res.ok).toBe(true);
+    expect(res.results!.map((r) => r.status)).toEqual(["created", "created", "created", "created"]);
+    expect(state.calls.profileUpdates.map((u) => u.patch.language)).toEqual(["es", "en", "es", undefined]);
+    expect(state.calls.profileUpdates[3].patch).not.toHaveProperty("language");
+    // The link carries the row's language: a Spanish row's ends in &lang=es (the confirm door speaks
+    // Spanish on any phone); an English row's, a bad word's, and a row with no column are as they were.
+    expect(res.results![0].setupLink).toBe("https://app.example.test/auth/confirm?token_hash=hash-for-larkspur%40example.test&type=recovery&next=%2Fset-password&lang=es");
+    expect(res.results![2].setupLink).toMatch(/&lang=es$/);
+    expect(res.results![1].setupLink).toBe("https://app.example.test/auth/confirm?token_hash=hash-for-snowbell%40example.test&type=recovery&next=%2Fset-password");
+    expect(res.results![3].setupLink).not.toContain("lang=");
+    // The seat is otherwise as it was: the company, the role, the password reset.
+    expect(state.calls.profileUpdates[0].patch).toMatchObject({ org_id: "org-1", role: "tech", active: true, must_reset_password: true });
+    expect(state.calls.emailDoors).toEqual([]);
+    for (const r of res.results!) expect(r).not.toHaveProperty("password");
+  });
 });
 
 describe("the link builder is pure", () => {
@@ -234,6 +264,13 @@ describe("the link builder is pure", () => {
     expect(CREW_SETUP_NEXT).toBe("/set-password");
     expect(crewSetupLink("https://app.example.test/", "abc+def/ghi")).toBe("https://app.example.test/auth/confirm?token_hash=abc%2Bdef%2Fghi&type=recovery&next=%2Fset-password");
     expect(crewSetupLink("https://app.example.test", "h1")).toBe("https://app.example.test/auth/confirm?token_hash=h1&type=recovery&next=%2Fset-password");
+  });
+
+  it("a Spanish row's link carries &lang=es so the door speaks Spanish on any phone; an English row's, or no language, is as it was (cn-v1138)", () => {
+    expect(crewSetupLink("https://app.example.test", "h1", "es")).toBe("https://app.example.test/auth/confirm?token_hash=h1&type=recovery&next=%2Fset-password&lang=es");
+    expect(crewSetupLink("https://app.example.test", "h1", "en")).toBe("https://app.example.test/auth/confirm?token_hash=h1&type=recovery&next=%2Fset-password");
+    expect(crewSetupLink("https://app.example.test", "h1", null)).toBe("https://app.example.test/auth/confirm?token_hash=h1&type=recovery&next=%2Fset-password");
+    expect(crewSetupLink("https://app.example.test", "h1", "klingon")).toBe("https://app.example.test/auth/confirm?token_hash=h1&type=recovery&next=%2Fset-password");
   });
 
   it("answers null with no base, no hash, or a base that is not a bare origin", () => {
@@ -295,7 +332,9 @@ describe("the door the link walks through (source pins)", () => {
     const body = actions.slice(actions.indexOf("export async function importCrew("), actions.indexOf("export async function syncScheduleToGoogle("));
     expect(body).toContain("const password = `${crypto.randomUUID()}${crypto.randomUUID()}`;");
     expect(body).toContain('admin.auth.admin.generateLink({ type: "recovery", email })');
-    expect(body).toContain("crewSetupLink(process.env.NEXT_PUBLIC_SITE_URL, link?.properties?.hashed_token)");
+    expect(body).toContain(
+      "crewSetupLink(process.env.NEXT_PUBLIC_SITE_URL, link?.properties?.hashed_token, r.language !== undefined ? langFromWord(r.language) : undefined)",
+    );
     expect(body).toContain("must_reset_password: true");
     expect(body).not.toMatch(/inviteUserByEmail|resetPasswordForEmail|sendEmail\(|\.action_link|replace\(\/\\D\/g|deck-|password,? status/);
     expect(body).not.toMatch(/console\.(log|info)/);
@@ -316,8 +355,12 @@ describe("the door the link walks through (source pins)", () => {
     expect(get).toContain('<input type="hidden" name="token_hash" value="${attr(tokenHash)}">');
     expect(get).toContain('<input type="hidden" name="type" value="recovery">');
     expect(get).toContain('<input type="hidden" name="next" value="${attr(next)}">');
-    expect(get).toContain('<button type="submit">Set My Password</button>');
-    expect(get).toContain("<p>Tap to set your password.</p>");
+    // The words come through the catalog in the link's or the phone's language (cn-v1138); the English is as it was.
+    expect(get).toContain('<button type="submit">${t("au_setMyPassword")}</button>');
+    expect(get).toContain('<p>${t("au_tapToSet")}</p>');
+    expect(get).toContain('<input type="hidden" name="lang" value="${lang}">');
+    expect(dict("en").au_setMyPassword).toBe("Set My Password");
+    expect(dict("en").au_tapToSet).toBe("Tap to set your password.");
     expect(get).toContain('"cache-control": "no-store"');
     expect(get).toContain('<meta name="robots" content="noindex, nofollow">');
     expect(get).not.toContain("verifyOtp");
@@ -329,12 +372,14 @@ describe("the door the link walks through (source pins)", () => {
     expect(post).toContain('safeNextPath(field("next")) ?? "/set-password"');
     expect(post).toContain("NextResponse.redirect(`${origin}${next}`, 303)");
     // A used or expired link names ONE way out (the office cannot re-issue a link today).
-    expect(route).toContain('const USED_OR_EXPIRED = "That link has already been used or has expired. Sign in with a code instead.";');
+    expect(dict("en").au_linkUsed).toBe("That link has already been used or has expired. Sign in with a code instead.");
+    expect(route.match(/t\("au_linkUsed"\)/g)).toHaveLength(2); // the GET's bad link and the POST's failed verify
     expect(route).not.toMatch(/Ask your office for a new one/);
     // Set A Password is the app's own page: it needs the session the door just wrote and clears the must-reset flag.
     const page = src("src/app/set-password/page.tsx");
     expect(page).toContain('if (!user) redirect("/login");');
-    expect(page).toContain("Choose your password. You&apos;ll use it from now on.");
+    expect(page).toContain('{t("au_chooseSub")}');
+    expect(dict("en").au_chooseSub).toBe("Choose your password. You'll use it from now on.");
     expect(page).not.toContain("temporary password");
     const setPw = src("src/app/set-password/actions.ts");
     expect(setPw).toContain(".update({ must_reset_password: false })");

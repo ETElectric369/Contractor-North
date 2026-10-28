@@ -9,7 +9,9 @@ import { getPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
 import { enqueue, listPending, remove as removeQueued } from "@/lib/offline/queue";
 import { clockIn, clockOut } from "../timeclock/actions";
-import { lunchMinutesFor, LUNCH_LABEL } from "@/lib/lunch-rule";
+import { lunchMinutesFor } from "@/lib/lunch-rule";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { isLongOpenShift } from "@/lib/long-shift";
 import { useToast } from "@/components/toast";
 import { WhichJobSheet } from "./which-job";
@@ -29,7 +31,9 @@ async function getGps(capMs: number): Promise<GeoPoint | null> {
   return Promise.race([fix, new Promise<GeoPoint | null>((res) => setTimeout(() => res(null), capMs))]);
 }
 
-const OFFLINE_MSG = "No connection — try again when you have bars.";
+// The offline line (md_offline, lib/words/myday — "No connection — try again when you have bars."
+// in English) is read through t() inside the card since cn-v1138, so a Spanish-speaking tech reads it
+// in Spanish; the words themselves are unchanged.
 
 /** The job on the punch, as the card shows it: its name, customer · address, and where it opens.
  *  Nothing priced ever crosses into this client component (a tech's phone reads it too). */
@@ -104,6 +108,9 @@ export function NowCard({
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
   const toast = useToast();
+  // THE PERSON'S LANGUAGE (cn-v1138): every word on the card comes through t() and lib/words/myday.
+  const lang = useLang();
+  const t = translator(lang);
   // Unpaid lunch — off by default; nothing is deducted unless the tech ticks it.
   const [tookLunch, setTookLunch] = useState(false);
   const [held, setHeld] = useState(false);
@@ -129,10 +136,10 @@ export function NowCard({
       if (alive) setHeld(ops.some((o) => !o.blocked));
     };
     void sync();
-    const t = setInterval(sync, 15_000);
+    const timer = setInterval(sync, 15_000);
     return () => {
       alive = false;
-      clearInterval(t);
+      clearInterval(timer);
     };
   }, [userId]);
 
@@ -140,8 +147,8 @@ export function NowCard({
   useEffect(() => {
     if (!open) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, [open]);
 
   const liveMs = open ? Math.max(0, now - new Date(open.clock_in).getTime()) : 0;
@@ -183,11 +190,11 @@ export function NowCard({
       // `persisted` is whether the phone actually holds it — the banner below may only promise
       // what is true (audit 9). The op (and its idempotency key) comes back either way, so the
       // live attempt still de-dupes a double tap.
-      const { op, persisted } = await enqueue("time.clockIn", queued, "Clock in", userId);
+      const { op, persisted } = await enqueue("time.clockIn", queued, t("md_queuedClockIn"), userId);
       try {
         const res = await clockIn({ job_id: null, job_code: null, gps, clock_in_at: null, clientOpId: op.clientOpId });
         if (persisted) await removeQueued(op.clientOpId);
-        if (!res.ok) setErr(res.error ?? "Could not clock in.");
+        if (!res.ok) setErr(res.error ?? t("md_couldNotClockIn"));
         else {
           setHeld(false);
           // Anything the punch did on the way in (a job it took off hold, say) is said, and kept
@@ -204,7 +211,7 @@ export function NowCard({
         // telling someone standing in a dead zone to try again when they have bars. But if the
         // phone REFUSED to hold it, there is nothing to file later and saying so is the whole job.
         if (persisted) setHeld(true);
-        else setErr(OFFLINE_MSG);
+        else setErr(t("md_offline"));
       }
     });
   }
@@ -221,9 +228,9 @@ export function NowCard({
           notes: open.notes ?? "", // round-trip the mid-shift note, never wipe it
           gps,
         });
-        if (!res.ok) setErr(res.error ?? "Could not clock out.");
+        if (!res.ok) setErr(res.error ?? t("md_couldNotClockOut"));
         else if (res.undone) {
-          toast(res.warning ?? "That punch is gone.", "success"); // under two minutes old: taken back, nothing asked
+          toast(res.warning ?? t("md_punchGone"), "success"); // under two minutes old: taken back, nothing asked
         } else {
           // Where the lunch landed after a Switch Job (the part before it, when it didn't fit this
           // one) is said here too, and kept until it is read, as the Timeclock panel does.
@@ -232,7 +239,7 @@ export function NowCard({
           setAsk(askAfterPunch(res, "out"));
         }
       } catch {
-        setErr(OFFLINE_MSG);
+        setErr(t("md_offline"));
       }
     });
   }
@@ -245,9 +252,7 @@ export function NowCard({
       {/* Not an error. The punch is saved on the phone WITH the time it was made — a tech who
           knows that carries on working instead of standing around retrying. */}
       {held && !err && (
-        <div className="mt-1 text-xs text-sky-600">
-          Clocked in — saved on your phone at the right time, and it&rsquo;ll file itself when you have signal.
-        </div>
+        <div className="mt-1 text-xs text-sky-600">{t("md_heldLine")}</div>
       )}
     </>
   );
@@ -259,7 +264,7 @@ export function NowCard({
         <>
           <div className="bg-brand-light/30 px-5 py-4">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-brand">Now</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-brand">{t("md_now")}</span>
               {/* Live ticker derives from Date.now(), so the server's first render and the
                   client's can't match → React #418 unless suppressed; the value self-corrects
                   on the 1s tick (the cn-v405/DayClock idiom). */}
@@ -280,19 +285,17 @@ export function NowCard({
             ) : open.job_id ? (
               /* The punch is on a job this page couldn't read (a lost read, a job the list can't
                  see). Said, not skipped: the doors are one tap away on Timeclock. */
-              <p className="mt-1 text-sm text-slate-600">
-                Your punch is on a job this page couldn&rsquo;t load just now. Timeclock shows it.
-              </p>
+              <p className="mt-1 text-sm text-slate-600">{t("md_punchUnreadable")}</p>
             ) : (
               /* On the clock with no job on the punch: ask, don't vanish. One door, the clock's own
                  sheet, with the same list the clock asked from (the job he punched last, today's
                  schedule, the jobs in progress). One pick puts the whole punch on the job, and the
                  job's doors take this question's place on the refresh. */
               <>
-                <div className="mt-0.5 text-lg font-bold text-slate-900">Which job are you on?</div>
-                <p className="text-sm text-slate-500">You&rsquo;re on the clock, but this punch has no job yet.</p>
+                <div className="mt-0.5 text-lg font-bold text-slate-900">{t("md_whichJob")}</div>
+                <p className="text-sm text-slate-500">{t("md_noJobYetLine")}</p>
                 <Button type="button" className="mt-3" onClick={() => setAsk({ entryId: open.id, moment: "in" })}>
-                  Pick The Job
+                  {t("md_pickTheJob")}
                 </Button>
               </>
             )}
@@ -314,11 +317,11 @@ export function NowCard({
                     onChange={(e) => setTookLunch(e.target.checked)}
                     className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand"
                   />
-                  {LUNCH_LABEL}
+                  {t("md_tookLunch")}
                 </label>
               )}
               <Link href="/timeclock" className={TIMECLOCK_LINK}>
-                Timeclock
+                {t("md_timeclock")}
               </Link>
             </div>
             {longShift ? (
@@ -330,11 +333,11 @@ export function NowCard({
                 href="/timeclock"
                 className="ml-auto inline-flex h-12 shrink-0 items-center gap-2 rounded-lg bg-red-600 px-5 text-base font-medium text-white hover:bg-red-700"
               >
-                <Square className="h-5 w-5" /> Set When You Stopped
+                <Square className="h-5 w-5" /> {t("md_setWhenStopped")}
               </Link>
             ) : (
               <Button variant="destructive" size="lg" onClick={doClockOut} disabled={pending} className="ml-auto shrink-0">
-                {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Square className="h-5 w-5" />} Clock Out
+                {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Square className="h-5 w-5" />} {t("md_clockOut")}
               </Button>
             )}
           </div>
@@ -356,14 +359,14 @@ export function NowCard({
       ) : (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-slate-900">Not Clocked In</div>
+            <div className="text-sm font-semibold text-slate-900">{t("md_notClockedIn")}</div>
             <Link href="/timeclock" className={TIMECLOCK_LINK}>
-              Timeclock
+              {t("md_timeclock")}
             </Link>
             {lines}
           </div>
           <Button size="lg" onClick={doClockIn} disabled={pending} className="ml-auto shrink-0">
-            {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />} Clock In
+            {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />} {t("md_clockIn")}
           </Button>
         </div>
       )}
@@ -373,17 +376,15 @@ export function NowCard({
       {crew !== undefined && (
         <div className="border-t border-brand/20 px-5 py-2.5">
           {crew === null ? (
-            <p className="text-xs text-amber-800">Couldn&rsquo;t read who&rsquo;s on the clock — reload to try again.</p>
+            <p className="text-xs text-amber-800">{t("md_crewUnread")}</p>
           ) : (
             <>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">On The Clock</span>
-                <span className="text-xs text-slate-500">
-                  {crew.on} of {crew.of}
-                </span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t("md_onTheClock")}</span>
+                <span className="text-xs text-slate-500">{fillText(t("md_nOfM"), { on: String(crew.on), of: String(crew.of) })}</span>
               </div>
               {crew.rows.length === 0 ? (
-                <p className="mt-0.5 text-sm text-slate-500">{crew.on > 0 ? "Just you." : "Nobody right now."}</p>
+                <p className="mt-0.5 text-sm text-slate-500">{crew.on > 0 ? t("md_justYou") : t("md_nobodyNow")}</p>
               ) : (
                 <ul className="mt-0.5 divide-y divide-slate-100">
                   {crew.rows.map((r) => (
@@ -391,9 +392,9 @@ export function NowCard({
                       <Link href={r.href} className="flex min-h-11 items-center justify-between gap-3 text-sm">
                         <span className="min-w-0 truncate">
                           <span className="font-medium text-slate-900">{r.name}</span>
-                          {r.job ? <span className="text-slate-600"> · {r.job}</span> : <span className="text-amber-700"> · no job yet</span>}
+                          {r.job ? <span className="text-slate-600"> · {r.job}</span> : <span className="text-amber-700">{t("md_noJobYet")}</span>}
                         </span>
-                        <span className="shrink-0 text-xs text-slate-500">since {r.since}</span>
+                        <span className="shrink-0 text-xs text-slate-500">{fillText(t("md_since"), { when: r.since })}</span>
                       </Link>
                     </li>
                   ))}

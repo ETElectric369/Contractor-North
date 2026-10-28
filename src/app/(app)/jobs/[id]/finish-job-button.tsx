@@ -6,6 +6,8 @@ import { CheckCircle2, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { finishJob, finishJobPreview, type FinishJobPreview } from "../actions";
 
@@ -45,6 +47,7 @@ export function FinishJobButton({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +81,7 @@ export function FinishJobButton({
     setDone(null);
     setPreview(null);
     setOpen(true);
-    void finishJobPreview(jobId).then(setPreview, () => setPreview({ ok: false, error: "Couldn't read this job's bills just now." }));
+    void finishJobPreview(jobId).then(setPreview, () => setPreview({ ok: false, error: t("jb_couldntReadBills") }));
   }
 
   function go() {
@@ -89,12 +92,12 @@ export function FinishJobButton({
         finalBlocked ? { withoutBilling: true } : drawBilled || finalLine ? {} : { importLabor, importCosts, sendInvoice: wantSend },
       );
       if (!res.ok) {
-        setError(res.error ?? "Could not finish the job.");
+        setError(res.error ?? t("jb_couldNotFinish"));
         return;
       }
       // THE FINAL WAS BUILT: land on it, with the sentence of what was built (and any heads-up).
       if (res.final && res.id) {
-        toast(res.speak ?? "Job finished.", "info");
+        toast(res.speak ?? t("jb_jobFinished"), "info");
         if (res.warning) toast(res.warning, "error");
         setOpen(false);
         router.push(`/billing/${res.id}`);
@@ -108,40 +111,40 @@ export function FinishJobButton({
       const notSent =
         wantSend && !res.sent
           ? res.warning
-            ? "It wasn't emailed: there's a question above waiting on the draft. Answer that, then send it from the invoice."
-            : "The invoice wasn't emailed — the customer may have no email on file, or there was nothing billable to send. It's saved as a draft for you to review and send."
+            ? t("jb_notEmailedQuestion")
+            : t("jb_notEmailedNoEmail")
           : undefined;
-      setDone({ id: res.id, speak: res.speak ?? "Job finished.", warning: [res.warning, notSent].filter(Boolean).join(" ") || undefined });
+      setDone({ id: res.id, speak: res.speak ?? t("jb_jobFinished"), warning: [res.warning, notSent].filter(Boolean).join(" ") || undefined });
       router.refresh();
     });
   }
 
-  const draftNo = preview?.openDraft?.number ?? "the open progress payment";
+  const draftNo = preview?.openDraft?.number ?? t("jb_openProgressPayment");
   const drawLine = !preview?.ok
     ? null
     : preview.schedule
-      ? "This job bills on a payment schedule. Finishing marks it complete; request the Final draw from Billing."
+      ? t("jb_drawSchedule")
       : preview.openDraft?.refreshable
-        ? `Finishing pulls the last hours and bills onto ${draftNo} (still a draft) and marks the job complete. Nothing is sent.`
+        ? fillText(t("jb_drawRefreshable"), { draft: draftNo })
         : preview.openDraft
-          ? `${draftNo} is still a draft and bills a set part of the contract. Finishing marks the job complete; send ${draftNo} (or delete it), then bill the rest as the final progress payment.`
-          : "This job bills with progress payments. Finishing marks it complete; it doesn't write or send a bill.";
+          ? fillText(t("jb_drawOpenDraft"), { draft: draftNo })
+          : t("jb_drawPlain");
   const offBill = drawBilled ? preview?.offBill ?? null : null;
   const saveLabel = finalLine
     ? finalBlocked
-      ? "Finish Without Billing"
+      ? t("jb_finishWithoutBilling")
       : preview?.finalBuilds
         ? preview.finalDoc === "final"
-          ? "Finish & Draft the Final"
-          : "Finish & Draft the Invoice"
-        : "Finish Job"
+          ? t("jb_finishDraftFinal")
+          : t("jb_finishDraftInvoice")
+        : t("jb_finishJob")
     : drawBilled
-      ? (offBill ? "Finish Without Billing" : "Finish Job")
+      ? (offBill ? t("jb_finishWithoutBilling") : t("jb_finishJob"))
       : tmUnread
-        ? "Finish Job"
+        ? t("jb_finishJob")
         : wantSend
-          ? "Finish & Send Invoice"
-          : "Finish & Review Invoice";
+          ? t("jb_finishSendInvoice")
+          : t("jb_finishReviewInvoice");
   // "...and draft the invoice" only when the press really drafts one.
   const draftsOne = finalLine ? !!preview?.finalBuilds : !drawBilled && !tmUnread;
 
@@ -149,24 +152,24 @@ export function FinishJobButton({
     <>
       {menuItem ? (
         <button type="button" onClick={openModal} className={MANAGE_ROW_CLS}>
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Finish Job
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {t("jb_finishJob")}
         </button>
       ) : (
         <Button onClick={openModal}>
-          <CheckCircle2 className="h-4 w-4" /> Finish Job
+          <CheckCircle2 className="h-4 w-4" /> {t("jb_finishJob")}
         </Button>
       )}
 
       <Modal
         open={open}
         onClose={() => !pending && setOpen(false)}
-        title="Finish This Job"
+        title={t("jb_finishThisJob")}
         portal
         footer={
           done ? (
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setOpen(false)}>Close</Button>
-              {done.id && <Button onClick={() => router.push(`/billing/${done.id}`)}>Open The Invoice</Button>}
+              <Button variant="outline" onClick={() => setOpen(false)}>{t("jb_close")}</Button>
+              {done.id && <Button onClick={() => router.push(`/billing/${done.id}`)}>{t("jb_openTheInvoice")}</Button>}
             </div>
           ) : (
             <ModalActions
@@ -193,38 +196,38 @@ export function FinishJobButton({
           ) : (
             <>
               <p className="text-sm text-slate-600">
-                {draftsOne ? "Quick check before I mark it complete and draft the invoice:" : "Quick check before I mark it complete:"}
+                {draftsOne ? t("jb_quickCheckDraft") : t("jb_quickCheck")}
               </p>
               <div className="space-y-2">
                 <label className={`flex min-h-11 items-start gap-2 rounded-lg border px-3 py-2 text-sm ${timeIn ? "border-slate-200" : "border-amber-300 bg-amber-50"}`}>
                   <input type="checkbox" checked={timeIn} onChange={(e) => setTimeIn(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-                  <span className="text-slate-700">All time entries for this job are in</span>
+                  <span className="text-slate-700">{t("jb_allTimeIn")}</span>
                 </label>
                 <label className={`flex min-h-11 items-start gap-2 rounded-lg border px-3 py-2 text-sm ${costsIn ? "border-slate-200" : "border-amber-300 bg-amber-50"}`}>
                   <input type="checkbox" checked={costsIn} onChange={(e) => setCostsIn(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-                  <span className="text-slate-700">All materials, POs &amp; bills are logged</span>
+                  <span className="text-slate-700">{t("jb_allMaterialsLogged")}</span>
                 </label>
               </div>
 
               {finalLine ? (
                 <div className="space-y-2 border-t border-slate-100 pt-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Billing</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_billing")}</div>
                   <p className={finalBlocked ? "rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800" : "text-sm text-slate-600"}>{finalLine}</p>
                   {blockingDraft && (
                     <Button type="button" variant="outline" className="min-h-11" onClick={() => router.push(`/billing/${blockingDraft.id}`)}>
-                      <FileText className="h-4 w-4" /> Open {blockingDraft.number ?? "The Draft"}
+                      <FileText className="h-4 w-4" /> {t("jb_open")} {blockingDraft.number ?? t("jb_theDraft")}
                     </Button>
                   )}
                 </div>
               ) : drawBilled || waitForPlan || (isTm && preview && !preview.ok) ? (
                 <div className="space-y-2 border-t border-slate-100 pt-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Billing</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_billing")}</div>
                   {!preview ? (
                     <p className="flex items-center gap-2 text-sm text-slate-500">
-                      <Loader2 className="h-4 w-4 animate-spin" /> Checking what&apos;s billed…
+                      <Loader2 className="h-4 w-4 animate-spin" /> {t("jb_checkingBilled")}
                     </p>
                   ) : !preview.ok ? (
-                    <p className="text-sm text-amber-800">{preview.error ?? "Couldn't read this job's bills just now."} Look at the Invoices tab before you finish.</p>
+                    <p className="text-sm text-amber-800">{preview.error ?? t("jb_couldntReadBills")} {t("jb_lookAtInvoices")}</p>
                   ) : (
                     <>
                       {drawLine && <p className="text-sm text-slate-600">{drawLine}</p>}
@@ -235,30 +238,28 @@ export function FinishJobButton({
               ) : (
                 <>
                   <div className="space-y-2 border-t border-slate-100 pt-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Build the invoice from</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_buildInvoiceFrom")}</div>
                     {hasQuote && (
-                      <p className="text-sm text-slate-600">✓ The job&apos;s estimate (line items copy over automatically)</p>
+                      <p className="text-sm text-slate-600">{t("jb_estimateCopies")}</p>
                     )}
                     <label className="flex min-h-11 items-center gap-2 text-sm text-slate-700">
                       <input type="checkbox" checked={importLabor} onChange={(e) => setImportLabor(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-                      Add labor from timecards (hours × each person&apos;s rate)
+                      {t("jb_addLaborFromTimecards")}
                     </label>
                     <label className="flex min-h-11 items-center gap-2 text-sm text-slate-700">
                       <input type="checkbox" checked={importCosts} onChange={(e) => setImportCosts(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-                      Add materials from POs &amp; bills (at the job&apos;s markup — adjust after)
+                      {t("jb_addMaterialsFromPos")}
                     </label>
                   </div>
 
                   <div className="space-y-1 border-t border-slate-100 pt-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">When done</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_whenDone")}</div>
                     <label className="flex min-h-11 items-start gap-2 text-sm text-slate-700">
                       <input type="checkbox" checked={sendInvoice} onChange={(e) => setSendInvoice(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
                       <span>
-                        Email the invoice to the customer now
+                        {t("jb_emailInvoiceNow")}
                         <span className="block text-xs text-slate-500">
-                          {sendInvoice
-                            ? "Sends as soon as you finish — double-check the amounts first."
-                            : "Leave unchecked to hold it as a draft for review."}
+                          {sendInvoice ? t("jb_sendsOnFinish") : t("jb_leaveUnchecked")}
                         </span>
                       </span>
                     </label>

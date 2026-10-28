@@ -5,6 +5,8 @@ import { Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { clockInputValue } from "@/lib/split-preview";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
+import { fillText, translator } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 
 /** The phone's own zone: the fallback when a host passes no org timezone. */
 function deviceTz(): string {
@@ -66,13 +68,16 @@ export function ClockStartPicker({
    *  stop picker opens on the CLOCK-IN, so a man who forgot yesterday starts from the right day. */
   initialIso?: string;
   /** What the two inputs set, for screen readers: "Start" on a clock-in, "Stop" when the picker is
-   *  the stop time of a forgotten punch (the Timeclock long-shift block, the geofence sheet). */
-  fieldLabel?: string;
+   *  the stop time of a forgotten punch (the Timeclock long-shift block, the geofence sheet). The
+   *  word itself is read in the person's language here (tc_startWord / tc_stopWord). */
+  fieldLabel?: "Start" | "Stop";
   /** The org's timezone: the fields are its wall clock, whatever the phone is set to (audit v994
    *  TZ1). Absent: the phone's own zone, as before. */
   tz?: string;
 }) {
   const zone = tz || deviceTz();
+  const t = translator(useLang());
+  const field = fieldLabel === "Stop" ? t("tc_stopWord") : t("tc_startWord");
   const [custom, setCustom] = useState(startExpanded);
   const [rounded, setRounded] = useState(false);
   const init = pickerParts(initialIso, zone);
@@ -98,7 +103,7 @@ export function ClockStartPicker({
         className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand ${className}`}
       >
         <Clock className="h-3.5 w-3.5" />
-        {rounded ? `Rounded to ${lbl} · tap for now` : onBoundary ? "Starting Now" : `Starting now · round back to ${lbl}`}
+        {rounded ? fillText(t("tc_roundedTo"), { time: lbl }) : onBoundary ? t("tc_startingNow") : fillText(t("tc_startingNowRound"), { time: lbl })}
       </button>
     );
   }
@@ -120,7 +125,7 @@ export function ClockStartPicker({
         }}
         className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand ${className}`}
       >
-        <Clock className="h-3.5 w-3.5" /> Starting Now · Pick A Different Time
+        <Clock className="h-3.5 w-3.5" /> {t("tc_startingNowPick")}
       </button>
     );
   }
@@ -138,7 +143,7 @@ export function ClockStartPicker({
           // 44px when the picker IS the control (a stop time picked on a phone), 36px as the quiet
           // clock-in extra.
           className={startExpanded ? "h-11 w-[9.5rem]" : "h-9 w-[9.5rem]"}
-          aria-label={`${fieldLabel} date`}
+          aria-label={fillText(t("tc_fieldDate"), { field })}
         />
         <Input
           type="time"
@@ -148,7 +153,7 @@ export function ClockStartPicker({
             emit(date, e.target.value);
           }}
           className={startExpanded ? "h-11 w-28" : "h-9 w-28"}
-          aria-label={`${fieldLabel} time`}
+          aria-label={fillText(t("tc_fieldTime"), { field })}
         />
         {/* In startExpanded mode the HOST owns escape/"now" (its buttons), and
             collapsing here would show the clock-IN "Starting now" label in the
@@ -162,12 +167,12 @@ export function ClockStartPicker({
             }}
             className="text-xs font-medium text-slate-400 hover:text-slate-700"
           >
-            Use Now
+            {t("tc_useNow")}
           </button>
         )}
       </div>
       <p className="mt-1 text-xs text-amber-600">
-        {caption ?? "Starting the shift at the time above — use this if you forgot to clock in."}
+        {caption ?? t("tc_startingAtAbove")}
       </p>
     </div>
   );

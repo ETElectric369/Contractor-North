@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dict } from "@/lib/i18n";
 import { join, relative } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -109,7 +110,9 @@ describe("Tasks & Reminders: the one Add line up top (Erik, 2026-09-26)", () => 
     // shows plain undated Reminders, not because something stamped a pin on it that then expired.
     expect(src).toContain("createTask(job ? { title, job_id: job.id } : { title, today: todayStr })");
     expect(src).not.toContain("{ title, focus_date: todayStr }");
-    expect(src).toContain('toast("Added To Tasks & Reminders", "success")');
+    // The words live in lib/words/myday since cn-v1138 (English unchanged); the door reads them through t().
+    expect(src).toContain('toast(t("md_addedToReminders"), "success")');
+    expect(dict("en").md_addedToReminders).toBe("Added To Tasks & Reminders");
     expect(src).not.toMatch(/Reminder added and pinned/);
   });
 
@@ -160,8 +163,8 @@ describe("Tasks & Reminders: a carried pin says so on the row (Erik, 2026-09-30)
     // local state of a checked row, which a static render can't reach (no DOM in the unit project), so
     // what is pinned here is that the card asks the one function and gates the glyph with it.
     const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
-    expect(src).toContain("const carried = carriedPin(t, todayStr, done);");
-    expect(src).toContain("const pinned = isPinned(t.focus_date, todayStr) && !done;");
+    expect(src).toContain("const carried = carriedPin(row, todayStr, done);");
+    expect(src).toContain("const pinned = isPinned(row.focus_date, todayStr) && !done;");
     expect(src).not.toContain("const carried = pinCarriedFrom(t.focus_date, todayStr);");
   });
 
@@ -227,7 +230,9 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
 
   it("the pin row says what the pin does: it carries until you unpin it", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
-    expect(src).toContain('{pinned ? "Unpin" : "Pin To Top (Carries Until You Unpin It)"}');
+    expect(src).toContain('{pinned ? t("md_unpin") : t("md_pinToTop")}');
+    expect(dict("en").md_unpin).toBe("Unpin");
+    expect(dict("en").md_pinToTop).toBe("Pin To Top (Carries Until You Unpin It)");
     expect(src).not.toContain("Unpin From Today");
   });
 
@@ -266,7 +271,8 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
     expect(src).toContain('import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";');
     expect(src).not.toMatch(/const SHEET_ROW\s*=/);
     // Open goes to the Reminders page without closing the sheet first (SheetLink).
-    expect(src).toContain("<SheetLink href={taskHref(t)}>Open</SheetLink>");
+    expect(src).toContain('<SheetLink href={taskHref(row)}>{t("md_openDoor")}</SheetLink>');
+    expect(dict("en").md_openDoor).toBe("Open");
     expect(src).not.toContain("onClick={close}");
   });
 });
@@ -280,7 +286,7 @@ describe("nothing goes quiet without a day: In A Week, not Someday (Erik's open 
     expect(laterRow("someday", "2026-09-26")).toEqual({ label: "Someday (Clear Date)", due: null });
     const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
     expect(src).toContain("{later.label}");
-    expect(src).toContain("updateTask(t.id, { due_date: later.due }, opts)");
+    expect(src).toContain("updateTask(row.id, { due_date: later.due }, opts)");
   });
 
   it("a Reminder that leaves the card says where it went; a pin, or a day of today or earlier, needs no word", () => {
@@ -344,7 +350,8 @@ describe("My Day's cards (structural: the page is a server component over the da
   });
 
   it("the decision inbox is called Needs You (Nort's words and the morning push say it too, same release)", () => {
-    expect(pageCode).toContain('<h2 className="text-sm font-semibold text-slate-900">Needs You</h2>');
+    expect(pageCode).toContain('<h2 className="text-sm font-semibold text-slate-900">{t("md_needsYou")}</h2>');
+    expect(dict("en").md_needsYou).toBe("Needs You");
     expect(pageCode).not.toMatch(/Needs action/i);
     // ONE call for both lists (the shell's badge shares its fan-out).
     expect(pageCode).toContain('getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz, off: offFeatureKey(features) })');
@@ -387,8 +394,10 @@ describe("My Day's cards (structural: the page is a server component over the da
     // The job's name is the one link to the job: the separate Open door is cut. (A week-view day
     // with nothing on it still reads "Open", as a line, not a door.)
     expect(pageCode).not.toMatch(/<Link[^>]*>\s*Open\s*<\/Link>/);
-    expect(pageCode.match(/>\s*Open\s*</g) ?? []).toEqual(['>Open<']);
-    expect(pageCode).toContain('<p className="px-5 py-2 text-xs text-slate-300">Open</p>');
+    expect(pageCode).not.toMatch(/<Link[^>]*>\s*\{t\("md_open\w*"\)\}\s*<\/Link>/);
+    expect(pageCode.match(/\{t\("md_openDay"\)\}/g) ?? []).toHaveLength(1);
+    expect(pageCode).toContain('<p className="px-5 py-2 text-xs text-slate-300">{t("md_openDay")}</p>');
+    expect(dict("en").md_openDay).toBe("Open");
   });
 
   it("the job's doors render on the server inside the card; Add Cost only inside isStaff &&", () => {
@@ -405,13 +414,14 @@ describe("My Day's cards (structural: the page is a server component over the da
   });
 
   it("the Today card's header: no doors for the office, the tech's own Week link at 44px", () => {
-    const header = pageCode.slice(pageCode.indexOf('<CalendarCheck className="h-4 w-4 text-brand" /> Today'), pageCode.indexOf("Nothing else on the schedule today."));
+    const header = pageCode.slice(pageCode.indexOf('<CalendarCheck className="h-4 w-4 text-brand" /> {t("md_today")}'), pageCode.indexOf('t("md_nothingElseToday")'));
     expect(header).not.toMatch(/isStaff && <AppointmentButton/);
     expect(header).not.toContain("<AppointmentButton");
     expect(pageCode).not.toContain('"/schedule?view=week" : "/planner?view=week"');
     // The Week link is the tech's, and only the tech's.
     expect(header).toMatch(/\{!isStaff && \(\s*<Link\s+href="\/planner\?view=week"\s+className="[^"]*min-h-11[^"]*px-2[^"]*"/);
-    expect(pageCode.match(/Week →/g)).toHaveLength(1);
+    expect(pageCode.match(/t\("md_weekArrow"\)/g)).toHaveLength(1);
+    expect(dict("en").md_weekArrow).toBe("Week →");
     // The office still reaches both: THE week redirect stays, New Appointment stays on the + menu
     // (lane 3's file) and the Schedule tile stays on the dock (lane 1b's file).
     expect(page).toContain('if (view === "week" && isStaff) redirect("/schedule?view=week");');
@@ -422,10 +432,12 @@ describe("My Day's cards (structural: the page is a server component over the da
   });
 
   it("the tech's week pages at 44px too", () => {
-    for (const label of ["Previous week", "Next week"]) {
-      expect(pageCode).toMatch(new RegExp(`aria-label="${label}"\\s*className="flex h-11 w-11 `));
+    for (const [key, label] of [["md_prevWeek", "Previous week"], ["md_nextWeek", "Next week"]]) {
+      expect(pageCode).toMatch(new RegExp(`aria-label=\\{t\\("${key}"\\)\\}\\s*className="flex h-11 w-11 `));
+      expect(dict("en")[key]).toBe(label);
     }
-    expect(pageCode).toMatch(/<Link href="\/planner\?view=week" className="inline-flex min-h-11 [^"]*">\s*This Week/);
+    expect(pageCode).toMatch(/<Link href="\/planner\?view=week" className="inline-flex min-h-11 [^"]*">\s*\{t\("md_thisWeekDoor"\)\}/);
+    expect(dict("en").md_thisWeekDoor).toBe("This Week");
   });
 
   it("the quote sits ABOVE the clock (Erik, 2026-09-30), then the Now card, the office's Daily Reports, the Today card", () => {
@@ -434,15 +446,19 @@ describe("My Day's cards (structural: the page is a server component over the da
     const quoteAt = pageCode.indexOf("{dailyQuote}");
     const nowOpensAt = pageCode.indexOf("<NowCard");
     const nowAt = pageCode.indexOf("</NowCard>");
-    const reportsAt = pageCode.indexOf("Daily reports");
-    const todayAt = pageCode.indexOf('<CalendarCheck className="h-4 w-4 text-brand" /> Today');
+    const reportsAt = pageCode.indexOf('t("md_dailyReports")');
+    const todayAt = pageCode.indexOf('<CalendarCheck className="h-4 w-4 text-brand" /> {t("md_today")}');
+    expect(dict("en").md_dailyReports).toBe("Daily reports");
+    expect(dict("en").md_today).toBe("Today");
     expect(quoteAt).toBeGreaterThan(0);
     expect(nowOpensAt).toBeGreaterThan(quoteAt);
     expect(nowAt).toBeGreaterThan(nowOpensAt);
     expect(reportsAt).toBeGreaterThan(nowAt);
     expect(todayAt).toBeGreaterThan(reportsAt);
     // The Today card keeps its honest empty line when the only job today is the one you're on.
-    expect(page).toContain('empty(currentJob ? "Nothing else on the schedule today." : "Nothing left on the schedule today.")');
+    expect(page).toContain('empty(currentJob ? t("md_nothingElseToday") : t("md_nothingLeftToday"))');
+    expect(dict("en").md_nothingElseToday).toBe("Nothing else on the schedule today.");
+    expect(dict("en").md_nothingLeftToday).toBe("Nothing left on the schedule today.");
   });
 
   it("the Reminders page hears To-Do Extras", () => {
@@ -540,8 +556,11 @@ describe("the Now card (rendered)", () => {
 
   it("the held line and the offline line keep their exact words (the shell's offline drain keeps the promise)", () => {
     const card = readFileSync(join(process.cwd(), "src/app/(app)/planner/now-card.tsx"), "utf8");
-    expect(card).toContain("Clocked in — saved on your phone at the right time, and it&rsquo;ll file itself when you have signal.");
-    expect(card).toContain('const OFFLINE_MSG = "No connection — try again when you have bars.";');
+    // Since cn-v1138 both lines live in lib/words/myday (English byte-for-byte) and the card reads them through t().
+    expect(card).toContain('{t("md_heldLine")}');
+    expect(dict("en").md_heldLine).toBe("Clocked in — saved on your phone at the right time, and it’ll file itself when you have signal.");
+    expect(card).toContain('setErr(t("md_offline"))');
+    expect(dict("en").md_offline).toBe("No connection — try again when you have bars.");
     // Queue first, then the live punch; each punch's warning is toasted and kept until it is read.
     expect(card.indexOf('await enqueue("time.clockIn"')).toBeLessThan(card.indexOf("await clockIn("));
     expect(card.match(/if \(res\.warning\) toast\(res\.warning, "info", undefined, \{ sticky: true \}\);/g)).toHaveLength(2);

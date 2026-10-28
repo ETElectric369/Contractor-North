@@ -5,6 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, X } from "lucide-react";
 import { useCoversTheScreen } from "@/components/ui/modal-lock";
+import { useLang } from "@/components/lang-provider";
+import { dockLabel, dockTileLabel } from "@/lib/dock-words";
+import { fillText, translator } from "@/lib/i18n";
 import type { DockNode, DockSection } from "@/lib/dock";
 
 /**
@@ -69,7 +72,12 @@ export function SectionSheet({
   // (detail routes like /billing/[id], where no sibling is "current").
   const active = items.find((c) => c.href && c.href === activeHref);
   const HandleIcon = (active ?? group).icon;
-  const handleLabel = active?.label ?? group.label;
+  // The words in the person's language (cn-v1138): rows and the tile through lib/dock-words, the
+  // sheet's own chrome through the shell's catalog.
+  const lang = useLang();
+  const t = translator(lang);
+  const groupLabel = dockTileLabel(group, lang);
+  const handleLabel = active ? dockLabel(active, lang) : groupLabel;
   const GroupIcon = group.icon;
 
   return (
@@ -89,10 +97,10 @@ export function SectionSheet({
         // The tour finds the nav by name and takes the first VISIBLE match — so this handle and
         // the desktop column below it can share one anchor and each screen gets the right one.
         data-tour={`sections-${group.key}`}
-        aria-label={`${group.label} pages`}
+        aria-label={fillText(t("sh_sectionPages"), { section: groupLabel })}
         aria-expanded={open}
         aria-haspopup="menu"
-        title={`${group.label} — ${handleLabel}`}
+        title={`${groupLabel} — ${handleLabel}`}
         // CLEAR THE DOCK RAIL. This handle is `left: 0` because on a phone the dock is a BOTTOM
         // bar and the left edge is free. Between 640 and 1024 on a mouse the dock is the 84px
         // vertical RAIL at z-70 — and this handle is z-60, so it sat completely behind it. Erik,
@@ -139,11 +147,11 @@ export function SectionSheet({
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-white/50 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <GroupIcon className="h-5 w-5 shrink-0 text-[rgb(var(--glass-ink))]" />
-          <span className="text-sm font-semibold text-slate-900">{group.label}</span>
+          <span className="text-sm font-semibold text-slate-900">{groupLabel}</span>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            aria-label="Close"
+            aria-label={t("sh_close")}
             className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-white/60"
           >
             <X className="h-5 w-5" />
@@ -172,7 +180,7 @@ export function SectionSheet({
                   className="mt-3 flex items-center gap-1.5 px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 first:mt-1"
                 >
                   <CIcon className="h-3.5 w-3.5 shrink-0" />
-                  {c.label}
+                  {dockLabel(c, lang)}
                 </div>
               );
             }
@@ -187,7 +195,7 @@ export function SectionSheet({
                 }`}
               >
                 <CIcon className="relative z-10 h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
-                <span className="relative z-10 truncate">{c.label}</span>
+                <span className="relative z-10 truncate">{dockLabel(c, lang)}</span>
               </Link>
             );
           })}

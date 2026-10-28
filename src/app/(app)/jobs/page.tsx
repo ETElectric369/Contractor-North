@@ -12,6 +12,7 @@ import { jobBillingStatus, type JobBillingInvoice, type JobBillingStatus } from 
 import { NewJobButton } from "../schedule/new-job-button";
 import { JobImportButton } from "./job-import-button";
 import { JobRow, type JobRowData } from "./job-row";
+import { asLang, fillText, translator } from "@/lib/i18n";
 import { CompletedJobsSection } from "./completed-section";
 import type { Job } from "@/lib/types";
 
@@ -58,7 +59,8 @@ export default async function JobsPage({
   const [{ data: jobsData }, { data: customerRows }, { data: me }, invoiceRes, milestoneRes, { data: orgRow }, usualBilling, { data: unitRows }] = await Promise.all([
     query,
     listNewJobCustomerOptions(supabase),
-    user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+    // `language` rides the role read (cn-v1138): the list's words are the viewer's, no extra round trip.
+    user ? supabase.from("profiles").select("role, language").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
     needBillingTags
       ? supabase
           .from("invoices")
@@ -89,6 +91,8 @@ export default async function JobsPage({
     unitStreets: unitStreetKeys((unitRows ?? []) as { address?: string | null; unit?: string | null }[]),
   };
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
+  const lang = asLang((me as { language?: string | null } | null)?.language);
+  const t = translator(lang);
   // id/name + the one-line address so picking a customer prefills the site address.
   const customers = toNewJobCustomerOptions(customerRows);
   const allJobs = (jobsData ?? []) as JobWithCustomer[];
@@ -139,7 +143,7 @@ export default async function JobsPage({
 
   return (
     <div>
-      <PageHeader title="Jobs" description="All jobs across the business.">
+      <PageHeader title={t("jb_jobsTitle")} description={t("jb_jobsDesc")}>
         {/* data-tour: the spot Nort rings for "where do I start a job" (lib/nort/screens). */}
         <div className="flex items-center gap-2" data-tour="new-job">
           {isStaff && <JobImportButton />}
@@ -156,10 +160,10 @@ export default async function JobsPage({
         <div className="mb-4">
           <Link
             href="/jobs"
-            title="Clear filter"
+            title={t("jb_clearFilter")}
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm"
           >
-            Filtered: {jobStatusLabel(status)}
+            {fillText(t("jb_filtered"), { status: jobStatusLabel(status, lang, t) })}
             <X className="h-3.5 w-3.5" />
           </Link>
         </div>
@@ -168,8 +172,8 @@ export default async function JobsPage({
       {jobs.length === 0 ? (
         <EmptyState
           icon={Briefcase}
-          title={!status && allJobs.length > 0 ? "No active jobs" : "No jobs"}
-          description={isStaff ? "Create a job to get started." : "The office adds your jobs."}
+          title={!status && allJobs.length > 0 ? t("jb_noActiveJobs") : t("jb_noJobs")}
+          description={isStaff ? t("jb_createJobToStart") : t("jb_officeAddsYourJobs")}
         >
           {isStaff && <NewJobButton customers={customers} {...newJobDefaults} />}
         </EmptyState>
@@ -178,7 +182,7 @@ export default async function JobsPage({
           <ul className="divide-y divide-slate-100">
             {jobs.map((j) => (
               // ?status=complete rows wear the same billing tags as the shelf (shared row).
-              <JobRow key={j.id} job={toRow(j, isStaff && status === "complete" ? billingOf(j.id) : undefined)} />
+              <JobRow key={j.id} job={toRow(j, isStaff && status === "complete" ? billingOf(j.id) : undefined)} lang={lang} />
             ))}
           </ul>
         </Card>
@@ -197,7 +201,7 @@ export default async function JobsPage({
       {!status && cancelledCount > 0 && (
         <p className="mt-3 text-center text-xs text-slate-400">
           <Link href="/jobs?status=cancelled" className="hover:text-brand hover:underline">
-            {cancelledCount} cancelled
+            {fillText(t("jb_nCancelled"), { n: String(cancelledCount) })}
           </Link>
         </p>
       )}

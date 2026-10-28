@@ -21,6 +21,8 @@ import { todayStrInTz } from "@/lib/tz";
 import { jobNameFrom } from "@/lib/job-name";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
+import { translator } from "@/lib/i18n";
+import { callerLang } from "@/lib/lang-of";
 import { escapeLike, formatCurrency, formatPhone } from "@/lib/utils";
 import { estimateIsTheContract, shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
@@ -2336,7 +2338,10 @@ export async function deleteDocument(
   // Read the row FIRST (RLS scopes it to the caller's org) so we delete the file it actually
   // points at, not a client path that could name another org's object; row-check the delete.
   const { data: row } = await supabase.from("documents").select("id, org_id, file_url, uploaded_by").eq("id", id).maybeSingle();
-  if (!row) return { ok: false, error: "Document not found." };
+  // THE ANSWER IS IN THE CALLER'S LANGUAGE (cn-v1138): a tech deleting his own photo reads the refusal
+  // in Spanish. The language rides the profile read below; a vanished row is answered before that
+  // read, so it asks once on its own (callerLang never throws: English on any failure).
+  if (!row) return { ok: false, error: translator(await callerLang(supabase))("jb_actDocumentNotFound") };
 
   /**
    * STAFF, OR THE PERSON WHO PUT IT THERE (audit, 2026-09-17).
@@ -2355,15 +2360,13 @@ export async function deleteDocument(
   const { data: me } = await supabase.auth.getUser();
   const uid = me?.user?.id ?? null;
   const { data: prof } = uid
-    ? await supabase.from("profiles").select("role, active").eq("id", uid).maybeSingle()
-    : { data: null as { role?: string; active?: boolean } | null };
+    ? await supabase.from("profiles").select("role, active, language").eq("id", uid).maybeSingle()
+    : { data: null as { role?: string; active?: boolean; language?: string | null } | null };
+  const t = translator((prof as { language?: string | null } | null)?.language);
   const isStaff = !!prof && prof.active !== false && isStaffRole(prof.role);
   const mine = !!uid && (row as { uploaded_by?: string | null }).uploaded_by === uid;
   if (!isStaff && !mine) {
-    return {
-      ok: false,
-      error: "Only the office can delete this one. You can delete photos and receipts you added yourself.",
-    };
+    return { ok: false, error: t("jb_actOnlyOfficeDeletes") };
   }
 
   const storedPath = (row as { file_url?: string | null }).file_url ?? null;
@@ -2373,16 +2376,13 @@ export async function deleteDocument(
   if (!isStaff && storedPath) {
     const held = await fileHeldByOthers(orgId, storedPath, id, uid);
     if (held === "money") {
-      return {
-        ok: false,
-        error: "The office recorded this receipt as a cost, so only the office can delete it now. Ask them if it should go.",
-      };
+      return { ok: false, error: t("jb_actReceiptIsCost") };
     }
     keepFile = held !== "none";
   }
   const { data: del, error } = await supabase.from("documents").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!del?.length) return { ok: false, error: "Document not found." };
+  if (!del?.length) return { ok: false, error: t("jb_actDocumentNotFound") };
   if (storedPath && !keepFile && (await tiesLetGoOfFile(supabase, orgId, storedPath, id))) {
     await supabase.storage.from("documents").remove([storedPath]);
   }

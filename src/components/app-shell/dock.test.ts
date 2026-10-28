@@ -15,6 +15,7 @@ vi.mock("next/link", () => ({
 
 import { Dock, isThenable, plainBadges } from "./dock";
 import { ALL_ON } from "@/lib/features";
+import { LangProvider } from "@/components/lang-provider";
 
 /**
  * THE cn-v930 CRASH, pinned. The app shell hands <Dock> its badge counts as a value that may
@@ -79,6 +80,20 @@ describe("the dock's tiles", () => {
     expect(tiles(render("tech"))).toEqual(["today", "clock", "jobs", "you"]);
   });
 
+  it("a Spanish-speaking tech (cn-v1138): the same four tiles, the page column and the logo's door in his words; the data stays English", () => {
+    nav.pathname = "/jobs";
+    const html = renderToStaticMarkup(createElement(LangProvider, { lang: "es", children: createElement(Dock, { role: "tech" }) }));
+    expect(tiles(html)).toEqual(["today", "clock", "jobs", "you"]);
+    for (const word of ["Hoy", "Reloj", "Trabajos", "Tú"]) expect(html).toMatch(new RegExp(`<a [^>]*data-tour="dock-[a-z]+"[^>]*aria-label="${word}"`));
+    expect(html).toContain('aria-label="Inicio"');
+    // The Jobs column: the section's name and its rows.
+    expect(html).toContain(">Trabajos</div>");
+    for (const row of ["Todos", "Por Programar", "En Curso", "En Pausa", "Terminados", "Cancelados"]) expect(html).toContain(`>${row}</span>`);
+    for (const en of ["Today", "Clock", "Jobs", "You", "In Progress", "To Be Scheduled", 'aria-label="Home"']) expect(html).not.toContain(en);
+    // English, untouched: the same render in English is byte for byte what the tech saw before.
+    expect(renderToStaticMarkup(createElement(LangProvider, { lang: "en", children: createElement(Dock, { role: "tech" }) }))).toBe(render("tech"));
+  });
+
   it("every tile, rail and bar, is a 44px target; the bar's icon is 20px and its label 11px", () => {
     const html = render("owner");
     const tags = [...html.matchAll(/<a [^>]*data-tour="dock-[a-z]+"[^>]*>/g)].map((m) => m[0]);
@@ -104,8 +119,10 @@ describe("the dock's tiles", () => {
       const html = render(role, { ...ALL_ON, leads: false }, true);
       expect(tiles(html), role).toEqual(["plan"]);
       const hrefs = [...new Set([...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1]))].sort();
-      expect(hrefs, role).toEqual(["/analytics/accountant", "/settings", "/subscribe"]);
+      // The export door (cn-v1138) is Settings' door with its own words: /settings?tab=getpaid.
+      expect(hrefs, role).toEqual(["/analytics/accountant", "/settings", "/settings?tab=getpaid", "/subscribe"]);
       expect(html).toContain("Download For Your Accountant");
+      expect(html).toContain("Download Everything");
       expect(html).toMatch(/<a href="\/subscribe"[^>]*aria-label="Home"/);
       expect(html).not.toContain("/jobs");
       expect(html).not.toContain("/planner");

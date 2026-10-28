@@ -8,8 +8,11 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { todayStrInTz } from "@/lib/tz";
-import { LONG_SHIFT_PHRASE, isLongOpenShift } from "@/lib/long-shift";
+import { LONG_SHIFT_HOURS, isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
+import { useLang } from "@/components/lang-provider";
+import { fillNodes } from "@/components/fill-nodes";
+import { fillText, translator } from "@/lib/i18n";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
 import { switchMovesWholeNow } from "../../timeclock/switch-window";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
@@ -81,6 +84,7 @@ export function JobTimeButton({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -107,8 +111,8 @@ export function JobTimeButton({
   useEffect(() => {
     if (!openEntry) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
   }, [openEntry]);
 
   // C: the running entry from its clock_in. B: the same figure, because a switch closes the running
@@ -136,18 +140,18 @@ export function JobTimeButton({
       try {
         res = await fn();
       } catch {
-        setErr("No connection — that didn't go through. Try again when you have a bar or two.");
+        setErr(t("jb_noConnection"));
         return;
       }
       if (!res?.ok) {
-        setErr(res?.error ?? "Something went wrong.");
+        setErr(res?.error ?? t("jb_somethingWrong"));
         return;
       }
       setOpen(false);
       // A pay rate left on the part before a switch, or a lunch that moved: money, so it is said and
       // kept on screen until read (the Timeclock panel says the same thing the same way). A punch
       // taken back (under two minutes old) is said once and is not money.
-      if (res.undone) toast(res.warning ?? "That punch is gone.", "success");
+      if (res.undone) toast(res.warning ?? t("jb_punchGone"), "success");
       else if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
       if (after) after(res);
       else router.refresh();
@@ -175,11 +179,11 @@ export function JobTimeButton({
       // clock a second later, so on the fifteen-minute line the two can still disagree — and a man
       // who was promised a whole move must not have to go to Timecards to find out it was cut.
       (res) => {
-        const was = openEntry ? openEntry.jobLabel ?? openEntry.job_code ?? "the other job" : "the other job";
+        const was = openEntry ? openEntry.jobLabel ?? openEntry.job_code ?? t("jb_theOtherJob") : t("jb_theOtherJob");
         toast(
           res.mode === "repointed"
-            ? `Now on ${jobNumber}. This whole punch moved over.`
-            : `Switched to ${jobNumber}. The ${Math.round((res.closed_hours ?? 0) * 100) / 100} h before the switch stayed on ${was}.`,
+            ? fillText(t("jb_switchedWhole"), { job: jobNumber })
+            : fillText(t("jb_switchedCut"), { job: jobNumber, hours: String(Math.round((res.closed_hours ?? 0) * 100) / 100), was }),
           "success",
         );
         router.refresh();
@@ -218,24 +222,24 @@ export function JobTimeButton({
   // Staff-only "or log hours" block — shown in states A and C (never mid-switch).
   const logHoursSection = isStaff && (
     <div className="space-y-2 border-t border-slate-100 pt-3">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Or log hours</div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_orLogHours")}</div>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <Label htmlFor="jt-date">Date</Label>
+          <Label htmlFor="jt-date">{t("jb_date")}</Label>
           <Input id="jt-date" type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} />
         </div>
         <div>
-          <Label htmlFor="jt-hours">Hours</Label>
+          <Label htmlFor="jt-hours">{t("jb_hours")}</Label>
           <NumberInput id="jt-hours" value={hours} onValueChange={setHours} placeholder="0" />
         </div>
       </div>
       {techs.length > 1 && (
         <div>
-          <Label htmlFor="jt-who">Who</Label>
+          <Label htmlFor="jt-who">{t("jb_who")}</Label>
           <Select id="jt-who" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            {techs.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.full_name ?? "Unnamed"}
+            {techs.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.full_name ?? t("jb_unnamed")}
               </option>
             ))}
           </Select>
@@ -258,7 +262,7 @@ export function JobTimeButton({
         />
       )}
       <Button type="button" variant="outline" size="sm" onClick={doLogHours} disabled={pending || hours <= 0}>
-        Log {hours > 0 ? `${hours}h` : "Hours"} On This Job
+        {hours > 0 ? fillText(t("jb_logHoursOnThisJob"), { hours: `${hours}h` }) : t("jb_logHoursOnThisJobNone")}
       </Button>
     </div>
   );
@@ -276,23 +280,23 @@ export function JobTimeButton({
         suppressHydrationWarning
         aria-label={
           state === "in"
-            ? "Clock in to this job"
+            ? t("jb_clockInAria")
             : state === "switch"
-              ? "Switch your open shift to this job"
-              : `On the clock here for ${fmtHm(elapsedMs)}`
+              ? t("jb_switchAria")
+              : fillText(t("jb_onClockAria"), { time: fmtHm(elapsedMs) })
         }
-        title="Time"
+        title={t("jb_time")}
       >
         {state === "here" ? <Clock className="h-4 w-4 shrink-0" /> : state === "switch" ? <ArrowLeftRight className="h-4 w-4 shrink-0" /> : <Play className="h-4 w-4 shrink-0" />}
-        {state === "in" && "Clock In"}
+        {state === "in" && t("jb_clockIn")}
         {state === "switch" && (
           <>
-            Switch<span className="hidden sm:inline">&nbsp;Here</span>
+            {t("jb_switch")}<span className="hidden sm:inline">&nbsp;{t("jb_here")}</span>
           </>
         )}
         {state === "here" && (
           <>
-            <span className="hidden sm:inline">On Clock ·&nbsp;</span>
+            <span className="hidden sm:inline">{t("jb_onClock")} ·&nbsp;</span>
             <span className="tabular-nums" suppressHydrationWarning>{fmtHm(elapsedMs)}</span>
           </>
         )}
@@ -307,7 +311,7 @@ export function JobTimeButton({
       <Modal
         open={open}
         onClose={() => !pending && setOpen(false)}
-        title={state === "in" ? "Clock In" : state === "switch" ? "Switch To This Job" : "On The Clock"}
+        title={state === "in" ? t("jb_clockIn") : state === "switch" ? t("jb_switchToThisJob") : t("jb_onTheClock")}
         size="md"
         portal
         footer={
@@ -327,17 +331,17 @@ export function JobTimeButton({
             saving={pending}
             saveLabel={
               state === "in"
-                ? "Clock Me In"
+                ? t("jb_clockMeIn")
                 : longShift
                   ? // Probably forgotten (lib/long-shift): Timeclock asks when he stopped. A close
                     // (or a switch's cut) at now would write the night onto payroll, and the server
                     // refuses it anyway.
-                    "Set When You Stopped"
+                    t("jb_setWhenYouStopped")
                   : state === "switch"
-                    ? "Switch To This Job"
+                    ? t("jb_switchToThisJob")
                     : isStaff
-                      ? "Clock Me Out"
-                      : "Clock Out On The Timeclock"
+                      ? t("jb_clockMeOut")
+                      : t("jb_clockOutOnTimeclock")
             }
           />
         }
@@ -348,7 +352,7 @@ export function JobTimeButton({
           {state === "in" && (
             <>
               <p className="text-sm text-slate-600">
-                Clock <span className="font-medium">yourself</span> in to {jobNumber} — you stay right here on the job.
+                {fillNodes(t("jb_clockYourselfIn"), { job: jobNumber, em: <span className="font-medium">{t("jb_yourselfWord")}</span> })}
               </p>
               <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} tz={tz} />
               {logHoursSection}
@@ -362,19 +366,27 @@ export function JobTimeButton({
             // part of the day (lib/shift-chain), and the morning's closed parts stay where they are.
             switchMovesWholeNow(!!openEntry.job_id || !!openEntry.job_code, Date.parse(openEntry.clock_in), now) ? (
               <p className="text-sm text-slate-600">
-                You&apos;re on the clock since {fmtTime(openEntry.clock_in)}
-                {!openEntry.job_id && !openEntry.job_code ? " with no job yet" : ` on ${openEntry.jobLabel ?? openEntry.job_code ?? "another job"}`}. Switching puts this whole punch on{" "}
-                <span className="font-medium">{jobNumber}</span> — none of it stays behind.
+                {!openEntry.job_id && !openEntry.job_code
+                  ? fillText(t("jb_switchWholeNoJob"), { since: fmtTime(openEntry.clock_in), job: jobNumber })
+                  : fillText(t("jb_switchWholeFrom"), { since: fmtTime(openEntry.clock_in), from: openEntry.jobLabel ?? openEntry.job_code ?? t("jb_anotherJob"), job: jobNumber })}
               </p>
             ) : longShift ? (
               <p className="text-sm text-amber-800">
-                You&apos;re still on the clock at <span className="font-medium">{openEntry.jobLabel ?? openEntry.job_code ?? "another job"}</span> since{" "}
-                {new Date(openEntry.clock_in).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}, {LONG_SHIFT_PHRASE}. Set when you stopped on the Timeclock first, then clock in here.
+                {fillText(t("jb_stillOnClockLong"), {
+                  from: openEntry.jobLabel ?? openEntry.job_code ?? t("jb_anotherJob"),
+                  since: new Date(openEntry.clock_in).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }),
+                  // The same figure lib/long-shift's LONG_SHIFT_PHRASE quotes, in the viewer's words.
+                  phrase: fillText(t("jb_moreThanHours"), { n: String(LONG_SHIFT_HOURS) }),
+                })}
               </p>
             ) : (
               <p className="text-sm text-slate-600">
-                You&apos;re on the clock at <span className="font-medium">{openEntry.jobLabel ?? openEntry.job_code ?? "another job"}</span> since {fmtTime(openEntry.clock_in)}.
-                Switching closes that entry at <span className="font-medium">{segmentHours}h</span> and starts a new one on {jobNumber} right now.
+                {fillText(t("jb_switchCutBody"), {
+                  from: openEntry.jobLabel ?? openEntry.job_code ?? t("jb_anotherJob"),
+                  since: fmtTime(openEntry.clock_in),
+                  hours: String(segmentHours),
+                  job: jobNumber,
+                })}
               </p>
             )
           )}
@@ -382,9 +394,8 @@ export function JobTimeButton({
           {state === "here" && openEntry && (
             <>
               <p className="text-sm text-slate-600">
-                You&apos;ve been on the clock here since {fmtTime(openEntry.clock_in)} —{" "}
-                <span className="font-medium tabular-nums">{fmtHm(elapsedMs)}</span> so far.
-                {!isStaff && " Clocking out asks for your job codes and hours — that happens on the Timeclock."}
+                {fillText(t("jb_onClockHereBody"), { since: fmtTime(openEntry.clock_in), elapsed: fmtHm(elapsedMs) })}
+                {!isStaff && ` ${t("jb_clockOutOnTimeclockNote")}`}
               </p>
               {logHoursSection}
             </>

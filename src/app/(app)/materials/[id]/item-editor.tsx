@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { useToast } from "@/components/toast";
-import { checklistGroups, openToBuyCount, tickWord, toBuyWords } from "@/lib/materials-checklist";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
+import { checklistGroups, openToBuyCount, tickWord } from "@/lib/materials-checklist";
 import { inStockWords, type StockOnShelf } from "@/lib/materials-stock";
 import {
   addMaterialItem,
@@ -90,6 +92,13 @@ export function ItemEditor({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
+  // The tick's word is lib/materials-checklist's rule (a tool is GOT from the shop, never bought); the
+  // catalog holds the word in the person's language. Likewise "3 to buy" and what the shelf holds.
+  const tick = (it: Item) => (tickWord(it) === "Got" ? t("mt_got") : t("mt_bought"));
+  const toBuy = (open: number) => (open > 0 ? fillText(t("mt_nToBuy"), { n: String(open) }) : t("mt_nothingLeftToBuy"));
+  const inStock = (s: StockOnShelf[string]) => inStockWords(s, lang);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   // add
@@ -142,10 +151,10 @@ export function ItemEditor({
     start(async () => {
       let lid = listId;
       if (!lid) {
-        if (!jobId) return setError("No list to add to.");
+        if (!jobId) return setError(t("mt_noListToAddTo"));
         const ensured = await ensureJobMaterialList(jobId);
         if (!ensured.ok || !ensured.id)
-          return setError(ensured.error ?? "Could not start the job's materials list.");
+          return setError(ensured.error ?? t("mt_couldNotStartList"));
         lid = ensured.id;
       }
       // A tech's line lands with no vendor and no cost — the office fills those in
@@ -160,7 +169,7 @@ export function ItemEditor({
         vendor: viewerIsStaff ? vendor || null : null,
         est_cost: null, // no money on a checklist: the column stays, nothing here fills it
       });
-      if (!res.ok) return setError(res.error ?? "Could not add the item.");
+      if (!res.ok) return setError(res.error ?? t("mt_couldNotAdd"));
       setDesc("");
       setPart("");
       setQty(1);
@@ -179,7 +188,7 @@ export function ItemEditor({
     setError(null);
     start(async () => {
       const res = await deleteMaterialItem(id, lid);
-      if (!res.ok) return setError(res.error ?? "Could not remove the item.");
+      if (!res.ok) return setError(res.error ?? t("mt_couldNotRemove"));
       setEditId(null);
       router.refresh();
     });
@@ -207,7 +216,7 @@ export function ItemEditor({
     void (async () => {
       const res = await setMaterialItemPurchased(it.id, lid, next).catch(() => ({
         ok: false as const,
-        error: "Couldn't reach the server. Try again.",
+        error: t("mt_noServer"),
       }));
       setSaving((s) => {
         const n = new Set(s);
@@ -222,7 +231,7 @@ export function ItemEditor({
           n.delete(it.id);
           return n;
         });
-        const why = res.error ?? "Could not update.";
+        const why = res.error ?? t("mt_couldNotUpdate");
         setError(why);
         toast(why, "error");
         return;
@@ -231,8 +240,8 @@ export function ItemEditor({
       // Undo: a mis-tap at the counter is one tap to take back, never a fold to open and a line to
       // find (the job's Tasks card does the same when a checked task leaves it).
       if (next) {
-        toast(`${tickWord(it)}: ${it.description}`, "success", {
-          label: "Undo",
+        toast(fillText(t("mt_tickItem"), { tick: tick(it), item: it.description }), "success", {
+          label: t("mt_undo"),
           onClick: () => saveTick(lid, it, true, false),
         });
       }
@@ -246,7 +255,7 @@ export function ItemEditor({
     setError(null);
     start(async () => {
       const res = await setMaterialItemTool(it.id, lid, !it.is_tool);
-      if (!res.ok) return setError(res.error ?? "Could not update.");
+      if (!res.ok) return setError(res.error ?? t("mt_couldNotUpdate"));
       router.refresh();
     });
   }
@@ -255,12 +264,12 @@ export function ItemEditor({
     editId === it.id ? (
       <li key={it.id} className="space-y-2 bg-slate-50/80 px-3 py-3">
         <div className="flex gap-2">
-          <Input value={eDesc} onChange={(e) => setEDesc(e.target.value)} className="h-11 flex-1" placeholder="Description" aria-label="Description" />
-          <Input value={ePart} onChange={(e) => setEPart(e.target.value)} className="h-11 w-24 shrink-0" placeholder="Part #" aria-label="Part #" />
+          <Input value={eDesc} onChange={(e) => setEDesc(e.target.value)} className="h-11 flex-1" placeholder={t("mt_description")} aria-label={t("mt_description")} />
+          <Input value={ePart} onChange={(e) => setEPart(e.target.value)} className="h-11 w-24 shrink-0" placeholder={t("mt_partNo")} aria-label={t("mt_partNo")} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <NumberInput value={eQty} onValueChange={setEQty} className="h-11 w-16 text-center" aria-label="Quantity" />
-          <Input value={eUnit} onChange={(e) => setEUnit(e.target.value)} className="h-11 w-16 shrink-0" aria-label="Unit" />
+          <NumberInput value={eQty} onValueChange={setEQty} className="h-11 w-16 text-center" aria-label={t("mt_quantity")} />
+          <Input value={eUnit} onChange={(e) => setEUnit(e.target.value)} className="h-11 w-16 shrink-0" aria-label={t("mt_unit")} />
           {viewerIsStaff && (
             <>
               <Input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder={COMPANY_FIELD.material_line.placeholder} aria-label={COMPANY_FIELD.material_line.label} />
@@ -269,13 +278,13 @@ export function ItemEditor({
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" onClick={() => remove(it.id)} disabled={pending} className="px-3 text-red-600 hover:text-red-700">
-            <Trash2 /> Remove
+            <Trash2 /> {t("mt_remove")}
           </Button>
           <Button variant="outline" onClick={() => setEditId(null)} className="ml-auto">
-            Cancel
+            {t("mt_cancel")}
           </Button>
           <Button onClick={saveEdit} disabled={pending || !eDesc.trim()}>
-            <Check /> Save
+            <Check /> {t("mt_save")}
           </Button>
         </div>
       </li>
@@ -288,7 +297,7 @@ export function ItemEditor({
             checked={!!it.purchased}
             onChange={() => toggleBought(it)}
             disabled={saving.has(it.id)}
-            aria-label={it.purchased ? `Not ${tickWord(it)} Yet: ${it.description}` : `${tickWord(it)}: ${it.description}`}
+            aria-label={it.purchased ? fillText(t("mt_notYetTick"), { tick: tick(it), item: it.description }) : fillText(t("mt_tickItem"), { tick: tick(it), item: it.description })}
             className="h-5 w-5 rounded border-slate-300 text-brand focus:ring-brand"
           />
         </label>
@@ -296,7 +305,7 @@ export function ItemEditor({
           type="button"
           onClick={() => startEdit(it)}
           disabled={pending}
-          title="Edit this line"
+          title={t("mt_editThisLine")}
           className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 py-1 text-left"
         >
           <span className={`min-w-0 flex-1 ${it.purchased ? "opacity-50" : ""}`}>
@@ -306,7 +315,7 @@ export function ItemEditor({
               {it.quantity} {it.unit}
               {/* What the shop shelf holds of this line, when it does (lib/materials-stock). */}
               {!it.purchased && stock?.[it.id] && (
-                <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800">{inStockWords(stock[it.id])}</span>
+                <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800">{inStock(stock[it.id])}</span>
               )}
             </span>
           </span>
@@ -317,8 +326,8 @@ export function ItemEditor({
             onClick={() => toggleTool(it)}
             disabled={pending}
             className={`flex h-11 w-11 shrink-0 items-center justify-center ${it.is_tool ? "text-amber-500" : "text-slate-300 hover:text-amber-500"}`}
-            aria-label={it.is_tool ? "Unmark Tool" : "Mark As A Tool"}
-            title={it.is_tool ? "Tool — tap to unmark" : "Mark as a tool (sorts to the top)"}
+            aria-label={it.is_tool ? t("mt_unmarkTool") : t("mt_markAsTool")}
+            title={it.is_tool ? t("mt_toolTapToUnmark") : t("mt_markToolHint")}
           >
             <Wrench className="h-4 w-4" />
           </button>
@@ -350,7 +359,7 @@ export function ItemEditor({
         unit: eUnit || "ea",
         ...(viewerIsStaff ? { vendor: eVendor || null } : {}),
       });
-      if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (!res.ok) return setError(res.error ?? t("mt_couldNotSave"));
       setEditId(null);
       router.refresh();
     });
@@ -367,34 +376,34 @@ export function ItemEditor({
           Qty/unit/vendor/cost wrap onto their own line rather than sharing one crushed row. */}
       <div className="space-y-2 border-b border-slate-100 bg-slate-50/60 p-3">
         <div className="flex gap-2">
-          <Input placeholder="Add an item…" value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} className="h-11 flex-1" />
-          <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} className="h-11 w-24 shrink-0" />
+          <Input placeholder={t("mt_addAnItem")} value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} className="h-11 flex-1" />
+          <Input placeholder={t("mt_partNo")} value={part} onChange={(e) => setPart(e.target.value)} className="h-11 w-24 shrink-0" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <NumberInput value={qty} onValueChange={setQty} className="h-11 w-16 text-center" placeholder="Qty" />
-          <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="h-11 w-16 shrink-0" placeholder="ea" />
+          <NumberInput value={qty} onValueChange={setQty} className="h-11 w-16 text-center" placeholder={t("mt_qty")} />
+          <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="h-11 w-16 shrink-0" placeholder={t("mt_ea")} />
           {viewerIsStaff && (
             <>
               <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder={COMPANY_FIELD.material_line.placeholder} aria-label={COMPANY_FIELD.material_line.label} />
             </>
           )}
           <Button onClick={add} disabled={pending || !desc.trim()} className="ml-auto shrink-0">
-            <Plus className="h-4 w-4" /> Add
+            <Plus className="h-4 w-4" /> {t("mt_add")}
           </Button>
         </div>
       </div>
       <ul className="divide-y divide-slate-100">
         {groups.tools.length > 0 && (
           <li className="flex items-center gap-1.5 bg-amber-50/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-            <Wrench className="h-3.5 w-3.5" /> Tools — grab from the shop
+            <Wrench className="h-3.5 w-3.5" /> {t("mt_toolsHeading")}
           </li>
         )}
         {groups.tools.map(renderRow)}
         {groups.tools.length > 0 && groups.toBuy.length > 0 && (
-          <li className="bg-slate-50/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">To Buy</li>
+          <li className="bg-slate-50/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t("mt_toBuy")}</li>
         )}
         {groups.toBuy.map(renderRow)}
-        {items.length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items yet — add one above.</li>}
+        {items.length === 0 && <li className="px-4 py-6 text-center text-slate-400">{t("mt_noItemsYet")}</li>}
       </ul>
 
       {/* THE BOUGHT FOLD: every checked line, closed until someone opens it. Unchecking a line in
@@ -407,7 +416,7 @@ export function ItemEditor({
             aria-expanded={foldOpen}
             className="flex min-h-[44px] w-full items-center justify-between px-4 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
           >
-            Bought ({groups.bought.length})
+            {fillText(t("mt_boughtFold"), { n: String(groups.bought.length) })}
             <ChevronDown className={`h-4 w-4 transition-transform ${foldOpen ? "rotate-180" : ""}`} />
           </button>
           {foldOpen && <ul className="divide-y divide-slate-100 border-t border-slate-100">{groups.bought.map(renderRow)}</ul>}
@@ -420,7 +429,7 @@ export function ItemEditor({
       {items.length > 0 && (
         <div className="border-t border-slate-100 px-4 py-2 text-sm">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-slate-500">{toBuyWords(openCount)}</span>
+            <span className="text-slate-500">{toBuy(openCount)}</span>
           </div>
         </div>
       )}

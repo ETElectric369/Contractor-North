@@ -111,7 +111,7 @@ describe("the pick is one guarded write", () => {
     expect(pick).toContain("await writeStatusPick(id, next)");
     expect(pick).not.toContain("setJobHold(id, null)");
     expect(pick).not.toMatch(/if \(held\)/);
-    expect(pick).toContain('toast(res.speak ?? "Job finished.", "info")');
+    expect(pick).toContain('toast(res.speak ?? t("jb_jobFinished"), "info")');
     expect(pick).toContain("if (res.warning) toast(res.warning");
     // setJobHold is still the picker's writer (Hold It asks why first); it just never wakes a job.
     expect(control).toContain("await setJobHold(id, why, when)");

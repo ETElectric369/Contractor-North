@@ -19,6 +19,7 @@ import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { requireMember, requireStaff } from "@/lib/staff-guard";
 import { notifyPeople } from "@/lib/notifications";
+import { translator } from "@/lib/i18n";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
@@ -177,15 +178,16 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     // On the bell too (notifyPeople): the line says what the push says, to the one person it was for.
     // After the response (it was fire-and-forget before), but kept alive until it lands.
     const orgId = ctx.orgId;
-    after(() => notifyPeople(orgId, [assignedTo], "assigned", {
-      title: "New appointment assigned",
+    // In the tech's own language (cn-v1138, the function form); the body is the visit's title as typed.
+    after(() => notifyPeople(orgId, [assignedTo], "assigned", (lang) => ({
+      title: translator(lang)("nb_apptAssignedTitle"),
       body: title,
       // Deep-link the appointment's DAY so staff land where its edit/quick actions
       // live, not the generic week (audit cn-v328). apptDate is the org-local day the
       // user picked; a tech recipient is still bounced to /planner by the office-only
       // gate on /schedule — that's a separate, pre-existing constraint.
       url: apptDate ? `/schedule?view=day&date=${apptDate}` : "/schedule",
-    }));
+    })));
   }
 
   revalidatePath("/schedule");
@@ -2085,7 +2087,7 @@ export async function setAppointmentAssignee(id: string, profileId: string | nul
   if (who && who !== was && who !== ctx.userId) {
     const orgId = ctx.orgId;
     const title = (before as { title?: string | null }).title ?? null;
-    after(() => notifyPeople(orgId, [who], "assigned", { title: "New appointment assigned", body: title, url: `/appointments/${id}` }));
+    after(() => notifyPeople(orgId, [who], "assigned", (lang) => ({ title: translator(lang)("nb_apptAssignedTitle"), body: title, url: `/appointments/${id}` })));
   }
   await pushCalendarItem("appointment", id); // live Google push (fire-safe)
   revalidatePath("/schedule");

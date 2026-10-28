@@ -257,11 +257,11 @@ describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
     expect(src).toContain("onClick={() => tieToBill(d, tiePick[d.id] ?? billChoices[0].id)}");
     // The reader's "already on the books" answer carries the bill; the door is drawn only for a
     // bill on THIS job (the tie is job-contained), beside Different Purchase, and never reads again.
-    expect(src).toMatch(/\{n\.sameOnThisJob && n\.sameBillId && \(\s*<button[\s\S]*?onClick=\{\(\) => tieToBill\(d, n\.sameBillId!\)\}[\s\S]*?Same Purchase: It&apos;s That Bill/);
+    expect(src).toMatch(/\{n\.sameOnThisJob && n\.sameBillId && \(\s*<button[\s\S]*?onClick=\{\(\) => tieToBill\(d, n\.sameBillId!\)\}[\s\S]*?\{t\("jb_samePurchase"\)\}/);
     // In the row's JSX (the header comment names Different Purchase too), the tie door comes first.
-    expect(src.indexOf("Same Purchase: It&apos;s That Bill")).toBeLessThan(src.lastIndexOf("Different Purchase: Record It Anyway"));
+    expect(src.indexOf('t("jb_samePurchase")')).toBeLessThan(src.lastIndexOf('t("jb_differentPurchase")'));
     // A refusal lands on the row in words, never a silent no-op.
-    expect(src).toContain('note(d.id, { text: res.error ?? "The tie didn\'t save. Try again.", done: false, tone: "fail" });');
+    expect(src).toContain('note(d.id, { text: res.error ?? t("jb_tieDidntSave"), done: false, tone: "fail" });');
   });
 
   it("Snap The Bill's line offers the same door for a paper the reader matched to a bill of this job (source)", () => {

@@ -123,6 +123,7 @@ import { TookFromStock } from "../../materials/took-from-stock";
 import { stockForLines } from "@/lib/materials-stock";
 import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
+import { fillText, localeOf, translator } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -313,7 +314,8 @@ export default async function JobDetailPage({
       .select("id, role, customer_id, customers(name, phone)")
       .eq("job_id", j.id)
       .order("created_at"),
-    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+    // `language` rides the role read (cn-v1138): the page's words are the viewer's, no extra round trip.
+    supabase.from("profiles").select("role, language").eq("id", user?.id ?? "").maybeSingle(),
     // WHICH PAPER MADE WHICH BILL (Erik, 2026-09-27: bills and job photos kept separate): the links
     // the receipt reader, Add Cost and File It write, for this job's papers and this job's bills (a
     // bill moved here keeps its receipt on the old job; its link still names the bill). Rides this
@@ -326,6 +328,10 @@ export default async function JobDetailPage({
       .limit(2000),
   ]);
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
+  // THE VIEWER'S LANGUAGE (cn-v1138): every word this page writes comes through t(); a date a tech
+  // reads is formatted in his locale. Anything but "es" is English, as it always was.
+  const lang = ((meRow as any)?.language ?? null) as string | null;
+  const t = translator(lang);
 
   // THE job's materials list — Erik's rule: the Materials tab IS the list, not a
   // list-of-lists. Newest wins, which makes the estimate's take-off (created on
@@ -639,10 +645,7 @@ export default async function JobDetailPage({
           id,
         )
       : null;
-  const costGroupsNote =
-    viewerIsStaff && pilesOn && !costGroups
-      ? "Couldn't tell which bills are on an invoice right now, so this is every bill on the job. The Invoices tab has what each invoice holds."
-      : null;
+  const costGroupsNote = viewerIsStaff && pilesOn && !costGroups ? t("jb_costGroupsNote") : null;
   // ALREADY BILLED (0357, Erik's Pinyon Sage). Only where the piles exist (staff, a job whose next New
   // Invoice pulls its actuals, the claims readable): Already Billed on a Not Billed Yet row when a
   // sent bill the sheet offers could hold it (never one with no job for a Time & Material job: its
@@ -652,10 +655,7 @@ export default async function JobDetailPage({
   const alreadyBilledOffer = ((invoices ?? []) as any[]).some((i) => i.status !== "draft" && i.status !== "void" && (i.invoice_kind ?? "standard") !== "deposit");
   const alreadyBilledCan = abReach ?? { charge: alreadyBilledOffer, ret: alreadyBilledOffer };
   const handById = handClaims && handClaims !== "failed" && handClaims.ready ? handClaims.byId : null;
-  const handsNote =
-    handClaims === "failed"
-      ? "Couldn't tell which rows were marked billed by hand just now, so Not Billed After All isn't shown. Reload to try again."
-      : null;
+  const handsNote = handClaims === "failed" ? t("jb_handsNote") : null;
   // Without the piles (a fixed-price job, or the claims unreadable) the tab is one plain list, and a
   // row a person marked still says so there, with Not Billed After All: every row is a candidate.
   const alreadyBilledDoors =
@@ -717,7 +717,7 @@ export default async function JobDetailPage({
   // Appointment button takes {id,label} option lists.
   const apptJobOpts = [{ id: j.id, label: jobLabel(j), address: formatFullAddress(j.address, j.city, j.state, j.zip) || null }];
   const apptCustOpts = (allCustomers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
-  const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
+  const apptStaffOpts = (techs ?? []).map((m: any) => ({ id: m.id, label: m.full_name ?? t("jb_unnamed") }));
   const jobAddress = formatFullAddress(j.address, j.city, j.state, j.zip);
   // Where "Navigate" should point. Prefer the job's own structured address, else the
   // customer's saved address (jobs happen at the customer site), else the job NAME —
@@ -838,10 +838,10 @@ export default async function JobDetailPage({
     // and a full day must not read the same.
     const startTime = !j.scheduled_start || block.allDay
       ? null
-      : `${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? " each day" : ""}`;
+      : `${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? ` ${t("jb_eachDay")}` : ""}`;
     const days = segs.length
       ? segs
-          .map((sg) => (sg.start_date === sg.end_date ? formatDate(sg.start_date) : `${formatDate(sg.start_date)} – ${formatDate(sg.end_date)}`))
+          .map((sg) => (sg.start_date === sg.end_date ? formatDate(sg.start_date, undefined, lang) : `${formatDate(sg.start_date, undefined, lang)} – ${formatDate(sg.end_date, undefined, lang)}`))
           .join(" · ")
       : j.scheduled_start
         ? j.scheduled_end && formatDateTz(j.scheduled_end, tz) !== formatDateTz(j.scheduled_start, tz)
@@ -965,7 +965,7 @@ export default async function JobDetailPage({
   const stockShortsWords = jobStock
     ? stockShortsSentence(jobStock.shorts)
     : stockReadFailed
-      ? "The pieces taken from stock couldn't be read just now, so any taken past stock aren't named here. Reload to try again."
+      ? t("jb_stockReadFailed")
       : null;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
@@ -1098,7 +1098,7 @@ export default async function JobDetailPage({
   const billById = new Map(((bills ?? []) as any[]).map((b: any) => [String(b.id), b]));
   const billWords = (billId: string) => {
     const b = billById.get(billId);
-    return `the ${b?.supplier || "supplier"} bill${b?.bill_number ? ` #${b.bill_number}` : ""}`;
+    return `${fillText(t("jb_theSupplierBill"), { supplier: b?.supplier || t("jb_supplier") })}${b?.bill_number ? ` #${b.bill_number}` : ""}`;
   };
   const papersByBill = billPapers(paperSort.byBill, offJobPapers, docUrls, (billId) => billById.get(billId)?.supplier || "Receipt");
   const billOfPaper: Record<string, string> = Object.fromEntries(
@@ -1205,8 +1205,9 @@ export default async function JobDetailPage({
     }
   }
 
-  const empty = (label: string) => (
-    <p className="px-1 py-6 text-center text-sm text-slate-400">No {label} yet.</p>
+  /** A tab's empty line, the whole sentence in the viewer's words ("No time entries yet."). */
+  const empty = (sentence: string) => (
+    <p className="px-1 py-6 text-center text-sm text-slate-400">{sentence}</p>
   );
 
   // THE FIRST PIECE OF A SPLIT SAYS SO TOO. It keeps the shift's id and carries no split_from or
@@ -1289,7 +1290,7 @@ export default async function JobDetailPage({
   const tabs = [
     {
       id: "job",
-      label: "Overview",
+      label: t("jb_tabOverview"),
       content: (
         <div className="space-y-4">
           {/* ONE FIGURE AND ONE BUTTON LEAD (W1-19). A job billed by its WORK (every Time & Material
@@ -1338,7 +1339,7 @@ export default async function JobDetailPage({
           {viewerIsStaff && importsActuals && (j as any).billing_type === "tm" && (reportBack.hoursIn > 0 || j.report_back_at) && (
             <ReportBackCard
               jobId={j.id}
-              jobName={j.name ?? j.job_number ?? "the job"}
+              jobName={j.name ?? j.job_number ?? t("jb_theJob")}
               customerFirst={firstNameOf(j.customers?.name)}
               phone={j.customers?.phone ?? null}
               sentence={reportBack.sentence}
@@ -1353,7 +1354,7 @@ export default async function JobDetailPage({
             <CardContent className="space-y-4 py-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Customer</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_customer")}</div>
                   <div className="mt-1 flex items-center gap-2">
                     {j.customers ? (
                       <>
@@ -1373,7 +1374,7 @@ export default async function JobDetailPage({
                   {j.customers?.phone && <div className="mt-0.5 text-xs text-slate-500">{j.customers.phone}</div>}
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Address</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_address")}</div>
                   {/* One plain line (W1-19): "123 Main · Truckee, CA 96161". The dock's Navigate is
                       the one door that drives there. */}
                   <div className="mt-1 text-sm text-slate-700">
@@ -1383,7 +1384,7 @@ export default async function JobDetailPage({
                   </div>
                 </div>
                 <div className="sm:col-span-2">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scheduled</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("jb_scheduled")}</div>
                   <div className="mt-1">
                     {viewerIsStaff ? (
                       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
@@ -1408,7 +1409,7 @@ export default async function JobDetailPage({
                       </div>
                     ) : (
                       <span className={scheduleText ? "text-sm text-slate-700" : "text-sm text-slate-400"}>
-                        {scheduleText ?? "Not scheduled yet."}
+                        {scheduleText ?? t("jb_notScheduledYet")}
                       </span>
                     )}
                   </div>
@@ -1451,10 +1452,10 @@ export default async function JobDetailPage({
           ) : (
             <Card className="p-4">
               <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <HardHat className="h-4 w-4 text-slate-400" /> Subs &amp; contacts
+                <HardHat className="h-4 w-4 text-slate-400" /> {t("jb_subsContacts")}
               </div>
               {jobContacts.length === 0 ? (
-                <p className="py-3 text-center text-xs text-slate-400">No subs or extra contacts on this job.</p>
+                <p className="py-3 text-center text-xs text-slate-400">{t("jb_noSubsOnJob")}</p>
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {jobContacts.map((c) => (
@@ -1483,7 +1484,7 @@ export default async function JobDetailPage({
           {story.length > 0 && (
             <Card id="activity" className="scroll-mt-24">
               <CardContent className="py-5">
-                <h3 className="mb-3 text-sm font-semibold text-slate-900">Activity log</h3>
+                <h3 className="mb-3 text-sm font-semibold text-slate-900">{t("jb_activityLog")}</h3>
                 <ol className="space-y-2">
                   {story.map((ev, i) => (
                     <li key={i} className="flex items-baseline gap-2 text-sm">
@@ -1515,7 +1516,7 @@ export default async function JobDetailPage({
       id: "photos",
       // Holds a job-site photo or a plan (office only: for the crew Photos is a pinned chip).
       holds: !!docsErr || paperSort.photos.length > 0 || paperSort.pictures.length > 0,
-      label: "Photos",
+      label: t("jb_tabPhotos"),
       count: paperSort.photos.length,
       content: (
         <Card>
@@ -1544,7 +1545,7 @@ export default async function JobDetailPage({
           {
             id: "customer",
             holds: customerPageHolds,
-            label: "Customer Page",
+            label: t("jb_tabCustomerPage"),
             content: <JobCustomerPage jobId={j.id} orgId={j.org_id} customerName={j.customers?.name ?? null} portalOn={on("customer_portal")} />,
           },
         ]
@@ -1557,14 +1558,14 @@ export default async function JobDetailPage({
     // subtasks); that switch is the Reminders' now.
     {
       id: "tasks",
-      label: "Tasks",
+      label: t("jb_tabTasks"),
       count: openTaskCount,
       content: <JobTaskList {...taskListProps} />,
     },
     {
       id: "permits",
       holds: !!permitsErr || (permits ?? []).length > 0,
-      label: "Permits",
+      label: t("jb_tabPermits"),
       // Permits still in motion (not passed, not closed): a failed inspection counts most of all.
       count: countOpen((permits ?? []) as { status?: string | null }[], (p) => isOpenPermit(p.status)),
       content: (
@@ -1587,10 +1588,10 @@ export default async function JobDetailPage({
             ) : (
               <div>
                 <div className="mb-3 text-sm text-slate-500">
-                  {(permits ?? []).length} permit{(permits ?? []).length === 1 ? "" : "s"}
+                  {fillText(t((permits ?? []).length === 1 ? "jb_permitOne" : "jb_permitMany"), { n: String((permits ?? []).length) })}
                 </div>
                 {(permits ?? []).length === 0 ? (
-                  <p className="py-4 text-center text-sm text-slate-400">No permits on this job yet.</p>
+                  <p className="py-4 text-center text-sm text-slate-400">{t("jb_noPermitsYet")}</p>
                 ) : (
                   <ul className="space-y-2">
                     {(permits ?? []).map((p: any) => (
@@ -1609,12 +1610,12 @@ export default async function JobDetailPage({
                                   rel="noreferrer"
                                   className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
                                 >
-                                  Check With City ↗
+                                  {t("jb_checkWithCity")}
                                 </a>
                               )}
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
-                              {p.applied_date && <span>Applied {formatDate(p.applied_date)}</span>}
+                              {p.applied_date && <span>{fillText(t("jb_applied"), { date: formatDate(p.applied_date, undefined, lang) })}</span>}
                             </div>
                             {p.notes && <div className="mt-1 whitespace-pre-wrap text-xs text-slate-500">{p.notes}</div>}
                             {/* WHO STILL HAS TO COME (0378), read-only: the same line the office reads
@@ -1622,7 +1623,7 @@ export default async function JobDetailPage({
                                 town has to tag it before the utility will come. Nothing to press. */}
                             {(() => {
                               if (inspectionsUnread) {
-                                return <p className="mt-1 text-xs text-amber-700">Couldn&rsquo;t read this permit&rsquo;s inspections just now.</p>;
+                                return <p className="mt-1 text-xs text-amber-700">{t("jb_couldntReadInspections")}</p>;
                               }
                               const mine = jobInspections.filter((r) => String(r.permit_id) === String(p.id));
                               if (!mine.length) return null;
@@ -1655,14 +1656,14 @@ export default async function JobDetailPage({
       // THE PANEL (Panel plan, phase 2): the job's own circuit list, loaded when the tab opens.
       id: "panel",
       holds: panelHolds,
-      label: "Panel",
+      label: t("jb_tabPanel"),
       // Suggested circuits waiting on a Keep or a Not This (the read above), never the kept ones.
       count: panelCount,
       content: <JobPanelLoader jobId={j.id} />,
     },
     {
       id: "time",
-      label: "Time",
+      label: t("jb_tabTime"),
       // WHAT'S OPEN: the shifts no invoice has claimed yet (Erik, 2026-10-02 and 2026-10-15: "still
       // no badge number for open time on a job"; every badge counts only what's open, and a shift
       // is open until it is billed). The same rule as the Overview's "not billed yet" figure
@@ -1678,7 +1679,7 @@ export default async function JobDetailPage({
               flex-wrap lets the button drop to its own line instead of off the card's overflow-hidden
               edge; nothing here is allowed to be a half-visible tap target. */}
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-100 px-5 py-3 text-sm">
-            <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
+            <span className="font-semibold text-slate-900">{fillText(t("jb_timeOnThisJob"), { hours: formatDuration(laborHours) })}</span>
             <div className="flex flex-wrap items-center gap-2">
               {/* The office's one add-hours form (timecards/add-time-entry), with this job said, not
                   picked. Its Day starts on the company's today; miles, rate and notes are on the
@@ -1724,9 +1725,9 @@ export default async function JobDetailPage({
                     {/* A piece of a split shift says so: the rest of that shift is on another job's
                         page, and a row that looks like a short day with no reason is a question. */}
                     {e.split_how === "converted" || splitParents.get(e.id)?.converted ? (
-                      <Badge tone="blue" className="ml-2">Rebuilt From An Old Split</Badge>
+                      <Badge tone="blue" className="ml-2">{t("jb_rebuiltFromOldSplit")}</Badge>
                     ) : e.split_from || splitParents.has(e.id) ? (
-                      <Badge tone="blue" className="ml-2">part of a split shift</Badge>
+                      <Badge tone="blue" className="ml-2">{t("jb_partOfSplitShift")}</Badge>
                     ) : null}
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -1736,12 +1737,13 @@ export default async function JobDetailPage({
                         : !e.clock_out
                           ? /* A running clock says since when, with the day when it began on an
                                earlier one; the office's Clock Out <Name> sits right beside it. */
-                            `On The Clock Since ${
-                              todayStrInTz(tz, new Date(e.clock_in)) === todayStrInTz(tz)
-                                ? formatTime(e.clock_in, tz)
-                                : `${new Date(e.clock_in).toLocaleDateString("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" })}, ${formatTime(e.clock_in, tz)}`
-                            }`
-                          : "open"}
+                            fillText(t("jb_onTheClockSince"), {
+                              since:
+                                todayStrInTz(tz, new Date(e.clock_in)) === todayStrInTz(tz)
+                                  ? formatTime(e.clock_in, tz)
+                                  : `${new Date(e.clock_in).toLocaleDateString(localeOf(lang), { timeZone: tz, weekday: "short", month: "short", day: "numeric" })}, ${formatTime(e.clock_in, tz)}`,
+                            })
+                          : t("jb_openEntry")}
                     </span>
                     <EditEntryButton
                       entry={e}
@@ -1759,7 +1761,7 @@ export default async function JobDetailPage({
                 </li>
               );
             })}
-            {(!entries || entries.length === 0) && empty("time entries")}
+            {(!entries || entries.length === 0) && empty(t("jb_noTimeEntriesYet"))}
           </ul>
         </Card>
       ),
@@ -1768,7 +1770,7 @@ export default async function JobDetailPage({
       id: "appointments",
       // Any visit, past or ahead (a tech holds only the visits that are his: RLS).
       holds: !!jobApptsErr || (jobAppts ?? []).length > 0,
-      label: "Appointments",
+      label: t("jb_tabAppointments"),
       // Visits still ahead (booked, or proposed and waiting on the customer), never past ones.
       count: countOpen((jobAppts ?? []) as { status?: string | null }[], (a) => isOpenAppointment(a.status)),
       content: (
@@ -1798,13 +1800,13 @@ export default async function JobDetailPage({
                       {/* Spine label + predicate (statuses.ts): final_inspection lands exactly
                           here (code inspection at job end) — a raw {a.type} rendered it as
                           underscore text in default blue. */}
-                      <Badge tone={isInspectionType(a.type) ? "amber" : "blue"}>{appointmentTypeLabel(a.type)}</Badge>
+                      <Badge tone={isInspectionType(a.type) ? "amber" : "blue"}>{appointmentTypeLabel(a.type, lang, t)}</Badge>
                       <span className="truncate font-medium text-slate-900">{a.title}</span>
-                      {a.status === "completed" && <Badge tone="green">done</Badge>}
+                      {a.status === "completed" && <Badge tone="green">{t("jb_doneBadge")}</Badge>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       {/* A visit waiting for a day (0368) sorts last (ascending: nulls last) and says so. */}
-                      <span className="text-slate-500">{a.starts_at ? formatDateTime(a.starts_at) : "Waiting For A Day"}</span>
+                      <span className="text-slate-500">{a.starts_at ? formatDateTime(a.starts_at, undefined, lang) : t("jb_waitingForADay")}</span>
                       {viewerIsStaff && <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} appointment={appt} />}
                     </div>
                   </li>
@@ -1814,9 +1816,9 @@ export default async function JobDetailPage({
                   would be a claim about the job — the empty state says what HIS view holds. */}
               {(!jobAppts || jobAppts.length === 0) &&
                 (viewerIsStaff ? (
-                  empty("appointments")
+                  empty(t("jb_noAppointmentsYet"))
                 ) : (
-                  <p className="px-1 py-6 text-center text-sm text-slate-400">None assigned to you yet.</p>
+                  <p className="px-1 py-6 text-center text-sm text-slate-400">{t("jb_noneAssignedToYou")}</p>
                 ))}
             </ul>
           </Card>
@@ -1825,7 +1827,7 @@ export default async function JobDetailPage({
     },
     {
       id: "costs",
-      label: "Costs",
+      label: t("jb_tabCosts"),
       // WHAT'S OPEN ON THE COSTS TAB, never how many bills the job has (Erik, 2026-09-27: "all badges
       // only show whats open"): the Not Billed Yet pile (the Unbilled card's own verdict, so the chip
       // is the pile the tab leads with) plus the supplier papers naming this job that are in nobody's
@@ -1849,7 +1851,7 @@ export default async function JobDetailPage({
               that name this job and are in nobody's books. The totals follow. */}
           <Card>
             {!costGroups && (
-              <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">Supplier bills</div>
+              <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">{t("jb_supplierBills")}</div>
             )}
             <CardContent className="py-5">
               <JobBills
@@ -1873,10 +1875,13 @@ export default async function JobDetailPage({
                         <p className="text-sm text-slate-500">
                           {[
                             unbilled.hours > 0
-                              ? `Also not billed yet: ${formatDuration(unbilled.hours)} of time, ${formatCurrency(unbilled.laborAmount)}.`
+                              ? fillText(t("jb_alsoNotBilled"), { hours: formatDuration(unbilled.hours), amount: formatCurrency(unbilled.laborAmount) })
                               : null,
                             (unbilled.billsCount > 0 || unbilled.stockCount > 0) && unbilled.markupPct > 0
-                              ? `${unbilled.billsCount > 0 && unbilled.stockCount > 0 ? "Bills and pieces from stock go" : unbilled.stockCount > 0 ? "Pieces from stock go" : "Bills go"} on the invoice at +${unbilled.markupPct}%.`
+                              ? fillText(
+                                  t(unbilled.billsCount > 0 && unbilled.stockCount > 0 ? "jb_billsAndStockGo" : unbilled.stockCount > 0 ? "jb_stockGo" : "jb_billsGo"),
+                                  { pct: String(unbilled.markupPct) },
+                                )
                               : null,
                           ]
                             .filter(Boolean)
@@ -1886,7 +1891,7 @@ export default async function JobDetailPage({
                       {/* The open hours were charged by hand on a bill that went out: pick the line,
                           then the shifts (0357). Only when a sent bill could hold them. */}
                       {unbilled.hours > 0 && alreadyBilledCan.charge && (
-                        <AlreadyBilledButton jobId={j.id} target={{ kind: "time", ids: [], what: "Those hours" }} label="Already Billed: The Hours" />
+                        <AlreadyBilledButton jobId={j.id} target={{ kind: "time", ids: [], what: t("jb_thoseHours") }} label={t("jb_alreadyBilledHours")} />
                       )}
                       {/* Pieces taken past the shelf with no roll behind them: not in the pile and
                           not on the next bill until settled. Said here too, never silent. */}
@@ -1915,7 +1920,7 @@ export default async function JobDetailPage({
               photoTabIds={Array.from(paperSort.photoTabIds)}
               billOf={billOfPaper}
               looseIds={paperSort.loose ? paperSort.loose.map((d: any) => String(d.id)) : null}
-              tieNote={paperTies ? null : "Couldn't check which papers made which bill just now. Reload to try again."}
+              tieNote={paperTies ? null : t("jb_couldntCheckPapers")}
               // A loose receipt's Already On A Bill → Tie It (d1ff7c5a): the job's live bills, said
               // the way the rows say them ("the CED bill #8802-…"). The office only.
               bills={viewerIsStaff ? liveBillIds.map((id) => ({ id, label: billWords(id) })) : null}
@@ -1928,7 +1933,7 @@ export default async function JobDetailPage({
           {(pos ?? []).length > 0 && (
             <Card className="overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-                <span className="text-sm font-semibold text-slate-900">Material purchase orders</span>
+                <span className="text-sm font-semibold text-slate-900">{t("jb_materialPurchaseOrders")}</span>
                 {on("purchase_orders") && <NewPoButton jobs={thisJobOpt} lists={lists ?? []} defaultJobId={j.id} />}
               </div>
               <FeatureOffLine feature="purchase_orders" features={switches.features} isOwner={switches.isOwner} className="mx-5 mt-3" />
@@ -1936,7 +1941,7 @@ export default async function JobDetailPage({
                 {(pos ?? []).map((p: any) => (
                   <li key={p.id}>
                     <Link href={`/purchasing/${p.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                      <span>{p.po_number} · {p.vendor || "No Vendor"}</span>
+                      <span>{p.po_number} · {p.vendor || t("jb_noVendor")}</span>
                       <span className="text-slate-700">{formatCurrency(p.total)}</span>
                     </Link>
                   </li>
@@ -1956,7 +1961,7 @@ export default async function JobDetailPage({
             ownerCost={ownerCost}
             uncostedOwnerHours={uncostedOwnerHours}
             ownerHoursLabel={ownerVoice.hoursLabel}
-            ownerWho={ownerVoice.viewerIsOwner ? "you" : ownerVoice.who}
+            ownerWho={ownerVoice.viewerIsOwner ? t("jb_you") : ownerVoice.who}
             materialsAndBills={Math.round((materialCost + billsCost) * 100) / 100}
             shelfTouched={jobMaterials.shelfTouched}
             tickets={jobMaterials.tickets}
@@ -1973,7 +1978,7 @@ export default async function JobDetailPage({
     },
     {
       id: "materials",
-      label: "Materials",
+      label: t("jb_tabMaterials"),
       // What's still to buy, never the list's size (Erik: "the badge should only show whats open to
       // be purchased"). 0 = no badge.
       count: materialsOpen,
@@ -1991,7 +1996,7 @@ export default async function JobDetailPage({
                 href={`/print/pdf-preview?doc=material-list&id=${canonicalList.id}&back=/jobs/${j.id}?tab=materials`}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
-                <ListChecks className="h-4 w-4 shrink-0" /> Print Pick List
+                <ListChecks className="h-4 w-4 shrink-0" /> {t("jb_printPickList")}
               </Link>
               {on("purchase_orders") && (
                 <NewPoButton
@@ -2038,7 +2043,7 @@ export default async function JobDetailPage({
                 href={`/materials?job=${j.id}`}
                 className="text-xs text-slate-400 hover:text-slate-600"
               >
-                Other Lists ({(jobLists ?? []).length - 1})
+                {fillText(t("jb_otherLists"), { n: String((jobLists ?? []).length - 1) })}
               </Link>
             </div>
           )}
@@ -2048,7 +2053,7 @@ export default async function JobDetailPage({
     {
       id: "quotes",
       holds: !!quotesErr || (quotes ?? []).length > 0,
-      label: "Estimates",
+      label: t("jb_tabEstimates"),
       // Estimates still owed a move: a draft to send, or sent and waiting on the customer.
       count: countOpen((quotes ?? []) as { status?: string | null }[], (q) => isOpenQuote(q.status)),
       content: (
@@ -2059,7 +2064,7 @@ export default async function JobDetailPage({
                 href={`/quotes/new?customer=${j.customer_id ?? ""}&job=${j.id}`}
                 className="btn-gloss inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
               >
-                <Plus className="h-4 w-4 shrink-0" /> New Estimate
+                <Plus className="h-4 w-4 shrink-0" /> {t("jb_newEstimate")}
               </Link>
             </div>
           )}
@@ -2071,13 +2076,13 @@ export default async function JobDetailPage({
                   <span className="font-medium text-slate-900">
                     {q.quote_number}
                     {/* THE FIXED CHIP (W1-25): fixed-price rows only; Time & Material wears nothing. */}
-                    {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>Fixed</span>}
+                    {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>{t("jb_fixed")}</span>}
                   </span>
                   <span className="flex items-center gap-3"><span className="text-slate-600">{formatCurrency(q.total)}</span><Badge tone={statusTone(q.status)}>{q.status}</Badge></span>
                 </Link>
               </li>
             ))}
-            {(!quotes || quotes.length === 0) && empty("estimates")}
+            {(!quotes || quotes.length === 0) && empty(t("jb_noEstimatesYet"))}
           </ul>
           </Card>
         </div>
@@ -2086,7 +2091,7 @@ export default async function JobDetailPage({
     {
       id: "invoices",
       holds: !!invoicesErr || (invoices ?? []).length > 0,
-      label: "Invoices",
+      label: t("jb_tabInvoices"),
       // Invoices still owed: a draft not sent, or sent with a balance. Paid and void never badge.
       count: countOpen((invoices ?? []) as any[], isOpenInvoice),
       content: (
@@ -2126,13 +2131,13 @@ export default async function JobDetailPage({
                 {iv.status !== "void" && invoiceBalance(iv.total, iv.amount_paid) > 0.005 && (
                   <div className="-mt-2 flex justify-end px-3 pb-1">
                     <Link href={`/billing/${iv.id}`} className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
-                      Get Paid
+                      {t("jb_getPaid")}
                     </Link>
                   </div>
                 )}
               </li>
             ))}
-            {(!invoices || invoices.length === 0) && empty("invoices")}
+            {(!invoices || invoices.length === 0) && empty(t("jb_noInvoicesYet"))}
           </ul>
           </Card>
           {/* CONTRACTS & LIEN RIGHTS OFF (the switch board): the three cards below are its doors, so a
@@ -2183,7 +2188,7 @@ export default async function JobDetailPage({
     {
       id: "change-orders",
       holds: !!changeOrdersErr || (changeOrders ?? []).length > 0,
-      label: "Change Orders",
+      label: t("jb_tabChangeOrders"),
       // Change orders waiting on their answer (pending).
       count: countOpen((changeOrders ?? []) as { status?: string | null }[], (c) => isOpenChangeOrder(c.status)),
       content: (
@@ -2200,7 +2205,7 @@ export default async function JobDetailPage({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-slate-900">{c.co_number}</span>
-                      <span className="text-xs text-slate-400">{formatDate(c.created_at)}</span>
+                      <span className="text-xs text-slate-400">{formatDate(c.created_at, undefined, lang)}</span>
                     </div>
                     {c.description && <p className="mt-1 text-sm text-slate-600">{c.description}</p>}
                   </div>
@@ -2210,7 +2215,7 @@ export default async function JobDetailPage({
                       <Link
                         href={`/print/pdf-preview?doc=change-order&id=${c.id}&back=/jobs/${j.id}?tab=change-orders`}
                         className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        title="Print / PDF"
+                        title={t("jb_printPdf")}
                       >
                         <Printer className="h-4 w-4" />
                       </Link>
@@ -2220,7 +2225,7 @@ export default async function JobDetailPage({
                   </div>
                 </li>
               ))}
-              {(!changeOrders || changeOrders.length === 0) && empty("change orders")}
+              {(!changeOrders || changeOrders.length === 0) && empty(t("jb_noChangeOrdersYet"))}
             </ul>
           </Card>
         </div>
@@ -2229,7 +2234,7 @@ export default async function JobDetailPage({
     {
       id: "wos",
       holds: !!workOrdersErr || (workOrders ?? []).length > 0,
-      label: "Work Orders",
+      label: t("jb_tabWorkOrders"),
       // Work orders still to do (not complete, not cancelled).
       count: countOpen((workOrders ?? []) as { status?: string | null }[], (w) => isOpenWorkOrder(w.status)),
       content: (
@@ -2246,11 +2251,11 @@ export default async function JobDetailPage({
               <li key={w.id}>
                 <Link href={`/work-orders/${w.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
                   <span><span className="font-medium text-slate-900">{w.wo_number}</span> <span className="text-slate-500">{w.title}</span></span>
-                  <Badge tone={statusTone(w.status)}>{jobStatusLabel(w.status)}</Badge>
+                  <Badge tone={statusTone(w.status)}>{jobStatusLabel(w.status, lang, t)}</Badge>
                 </Link>
               </li>
             ))}
-            {(!workOrders || workOrders.length === 0) && empty("work orders")}
+            {(!workOrders || workOrders.length === 0) && empty(t("jb_noWorkOrdersYet"))}
           </ul>
           </Card>
         </div>
@@ -2263,11 +2268,11 @@ export default async function JobDetailPage({
       {/* THE J-NUMBER ONCE (W1-17): here in the breadcrumb, and nowhere else in the header. The Jobs
           crumb is the All Jobs door (it left Manage). 44px crumbs, like every tap target. */}
       <div className="mb-2 flex items-center gap-1.5 text-sm text-slate-500">
-        <Link href="/planner" aria-label="Home" className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-slate-800">
+        <Link href="/planner" aria-label={t("jb_home")} className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-slate-800">
           <Home className="h-4 w-4" />
         </Link>
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
-        <Link href="/jobs" className="inline-flex min-h-11 items-center px-1 hover:text-slate-800">Jobs</Link>
+        <Link href="/jobs" className="inline-flex min-h-11 items-center px-1 hover:text-slate-800">{t("jb_jobs")}</Link>
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
         <span className="font-medium text-slate-700">{j.job_number}</span>
       </div>
@@ -2315,7 +2320,7 @@ export default async function JobDetailPage({
               include putting it back." The origin lives on in the first chapter below. */}
           {(j as any).inquiry && (
             <Link href={`/jobs/${j.id}?tab=job#activity`} className="inline-flex min-h-11 items-center text-brand hover:underline">
-              ← From Lead: {(j as any).inquiry.name}
+              {fillText(t("jb_fromLead"), { name: String((j as any).inquiry.name ?? "") })}
             </Link>
           )}
         </div>
@@ -2349,6 +2354,7 @@ export default async function JobDetailPage({
         taskPhotos={jobTasks.stamps}
         viewerIsStaff={viewerIsStaff}
         tz={tz}
+        lang={lang}
         openEntry={openEntry}
         techs={techs ?? []}
         defaultProfileId={user?.id ?? ""}
@@ -2377,7 +2383,7 @@ export default async function JobDetailPage({
           never serializes to a tech; <Tabs> filters once more on the client.
           look="tiles": the role's pinned chips stay put, the rest ride the More chip. */}
       <Tabs
-        tabs={arrangeJobTabs(tabs, viewerIsStaff, switches).filter((t) => !t.staffOnly || viewerIsStaff)}
+        tabs={arrangeJobTabs(tabs, viewerIsStaff, switches, lang).filter((tab) => !tab.staffOnly || viewerIsStaff)}
         viewerIsStaff={viewerIsStaff}
         urlSync
         look="tiles"

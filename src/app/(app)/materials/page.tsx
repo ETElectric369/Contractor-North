@@ -8,7 +8,8 @@ import { formatDate } from "@/lib/utils";
 import { isStaffRole } from "@/lib/actions/perms";
 import { NewListButton } from "./new-list-button";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
-import { openToBuyCount, toBuyWords } from "@/lib/materials-checklist";
+import { openToBuyCount } from "@/lib/materials-checklist";
+import { asLang, fillText, translator } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +22,12 @@ export default async function MaterialsPage({
   // ?job= — the job hub's quiet "other lists (N)" link lands here scoped to
   // that job's lists (the hub itself only ever shows the ONE canonical list).
   const [{ job: jobFilter }, { data: { user } }] = await Promise.all([searchParams, supabase.auth.getUser()]);
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, language").eq("id", user?.id ?? "").maybeSingle();
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
+  // The person's language (profiles.language, cn-v1138): every word below, and the dates, read in it.
+  const lang = asLang((me as { language?: string | null } | null)?.language);
+  const t = translator(lang);
+  const toBuy = (open: number) => (open > 0 ? fillText(t("mt_nToBuy"), { n: String(open) }) : t("mt_nothingLeftToBuy"));
 
   // created_at DESC then id DESC — the same pick canonicalMaterialListId makes, so "the first row
   // for this job" below is the same list the job hub and the crew's editor resolve to. The id is
@@ -76,12 +81,8 @@ export default async function MaterialsPage({
       {/* The cards carry what's left to buy + date only — no cost, no total — for either role,
           so there's nothing to strip here; the money lives on the list page, gated there. */}
       <PageHeader
-        title="Material lists"
-        description={
-          isStaff
-            ? "Take-offs for jobs — build by hand or generate with AI."
-            : "Each job's materials list — the same one the office sees."
-        }
+        title={t("mt_materialLists")}
+        description={isStaff ? t("mt_indexDescStaff") : t("mt_indexDescTech")}
       >
         {/* New List is a material_lists INSERT — staff at the policy — so a tech
             never sees a button whose only outcome is a refusal. His lists start
@@ -91,9 +92,9 @@ export default async function MaterialsPage({
 
       {jobFilter && (
         <div className="-mt-3 mb-4 text-sm text-slate-500">
-          Showing this job&rsquo;s lists only ·{" "}
+          {t("mt_showingJobOnly")}{" "}
           <Link href="/materials" className="font-medium text-brand hover:underline">
-            Show All
+            {t("mt_showAll")}
           </Link>
         </div>
       )}
@@ -101,12 +102,8 @@ export default async function MaterialsPage({
       {materialLists.length === 0 ? (
         <EmptyState
           icon={ListChecks}
-          title="No material lists yet"
-          description={
-            isStaff
-              ? "Generate a take-off from a scope of work, or start an empty list — New List above."
-              : "A job's list starts the moment somebody adds the first item on its Materials tab."
-          }
+          title={t("mt_noListsYet")}
+          description={isStaff ? t("mt_noListsStaff") : t("mt_noListsTech")}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -126,13 +123,13 @@ export default async function MaterialsPage({
                         {l.jobs ? jobSiteLabel({ ...l.jobs, customer_name: l.jobs.customers?.name ?? null }) : l.name}
                       </div>
                       {/* Plain word, not a status code: this list is not the one the job reads. */}
-                      {isSuperseded(l) && <Badge tone="amber" className="shrink-0">Replaced</Badge>}
+                      {isSuperseded(l) && <Badge tone="amber" className="shrink-0">{t("mt_replaced")}</Badge>}
                     </div>
                     {/* What's still OPEN, never the list's size (Erik, 2026-09-27: every count shows
                         only what's open). Plain words, not a badge. */}
                     <div className="mt-0.5 text-xs text-slate-400">
-                      {(l.material_list_items?.length ?? 0) === 0 ? "No Items Yet" : toBuyWords(openToBuyCount(l.material_list_items))} ·{" "}
-                      {formatDate(l.created_at)}
+                      {(l.material_list_items?.length ?? 0) === 0 ? t("mt_noItemsYetCard") : toBuy(openToBuyCount(l.material_list_items))} ·{" "}
+                      {formatDate(l.created_at, undefined, lang)}
                     </div>
                     {l.jobs?.name && (
                       <div className="mt-1 truncate text-xs text-slate-500">

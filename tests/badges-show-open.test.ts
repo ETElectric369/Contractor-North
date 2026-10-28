@@ -169,7 +169,7 @@ describe("every tab count in the app is an open count", () => {
     expect(costsOpen).not.toMatch(/\? 1 : 0/);
     // The tab's sentence about the hours is still there, behind its costGroups && unbilled guard.
     expect(page).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
-    expect(page).toContain("`Also not billed yet: ${formatDuration(unbilled.hours)} of time, ${formatCurrency(unbilled.laborAmount)}.`");
+    expect(page).toContain('fillText(t("jb_alsoNotBilled"), { hours: formatDuration(unbilled.hours), amount: formatCurrency(unbilled.laborAmount) })');
   });
 
   it("the job's Tasks chip draws no number when the tasks couldn't be read (never the Buy Materials row alone)", () => {

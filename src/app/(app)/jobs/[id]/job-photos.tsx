@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { Fold } from "@/components/why-fold";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { deleteDocument } from "../actions";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { reshowPhoto, setPhotoShared } from "../portal-share-actions";
@@ -88,6 +90,7 @@ export function JobPhotos({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const photos = docs.filter(isImageDoc);
   const others = pictures.filter(isImageDoc);
   const [busy, setBusy] = useState(false);
@@ -129,11 +132,11 @@ export function JobPhotos({
           return n;
         });
       }
-      toast(res.error ?? "That didn't take. Try again.", "error");
+      toast(res.error ?? t("jb_didntTake"), "error");
       return;
     }
     dropStale(d.id);
-    toast("Shown again. The customer sees the photo as it is now.", "success");
+    toast(t("jb_shownAgain"), "success");
   }
 
   async function share(d: Doc, next: boolean, undoable = true) {
@@ -159,11 +162,11 @@ export function JobPhotos({
         else n.add(d.id);
         return n;
       });
-      toast(res.error ?? "That didn't take. Try again.", "error");
+      toast(res.error ?? t("jb_didntTake"), "error");
       return;
     }
-    const msg = next ? "Shown on the customer's page." : "Taken off the customer's page.";
-    if (undoable) toast(msg, "success", { label: "Undo", onClick: () => void share(d, !next, false) });
+    const msg = next ? t("jb_shownOnCustomerPage") : t("jb_takenOffCustomerPage");
+    if (undoable) toast(msg, "success", { label: t("jb_undo"), onClick: () => void share(d, !next, false) });
     else toast(msg, "success");
   }
   const captureRef = useRef<HTMLInputElement>(null);
@@ -177,7 +180,7 @@ export function JobPhotos({
       await uploadJobPhotos(orgId, jobId, files);
       router.refresh();
     } catch (e: any) {
-      setError(e?.message ?? "Upload failed.");
+      setError(e?.message ?? t("jb_uploadFailed"));
     } finally {
       setBusy(false);
     }
@@ -190,11 +193,11 @@ export function JobPhotos({
   }
 
   function remove(d: Doc) {
-    if (!confirm("Delete this photo?")) return;
+    if (!confirm(t("jb_deletePhotoConfirm"))) return;
     start(async () => {
       const res = await deleteDocument(d.id, d.file_url, jobId);
-      if (!res?.ok) { toast(res?.error ?? "Couldn't delete photo — try again.", "error"); return; }
-      toast("Photo deleted", "success");
+      if (!res?.ok) { toast(res?.error ?? t("jb_couldntDeletePhoto"), "error"); return; }
+      toast(t("jb_photoDeleted"), "success");
       router.refresh();
     });
   }
@@ -206,11 +209,11 @@ export function JobPhotos({
         <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
         <Button onClick={() => (onPhone() ? captureRef.current?.click() : fileRef.current?.click())} disabled={busy}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-          Take Photo
+          {t("jb_takePhoto")}
         </Button>
-        <DropTarget onFiles={(files) => void upload(files)} accept="image/*" label="Drop Photos">
+        <DropTarget onFiles={(files) => void upload(files)} accept="image/*" label={t("jb_dropPhotos")}>
           <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
-            <Upload className="h-4 w-4" /> Upload
+            <Upload className="h-4 w-4" /> {t("jb_upload")}
           </Button>
         </DropTarget>
       </div>
@@ -223,7 +226,7 @@ export function JobPhotos({
       {photos.length === 0 ? (
         <div className="py-10 text-center text-sm text-slate-400">
           <ImageOff className="mx-auto mb-2 h-8 w-8 text-slate-300" />
-          No photos yet — snap progress shots, panel labels, or the finished work.
+          {t("jb_noPhotosYet")}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">{photos.map(tile)}</div>
@@ -232,9 +235,9 @@ export function JobPhotos({
       {others.length > 0 && (
         <Fold
           className="mt-4 rounded-lg border border-slate-200 px-3"
-          summary={<span className="text-sm font-semibold text-slate-900">Plans &amp; Other Papers</span>}
+          summary={<span className="text-sm font-semibold text-slate-900">{t("jb_plansOtherPapers")}</span>}
         >
-          <p className="mb-2 text-xs text-slate-500">Pictures filed on this job as a plan, permit, note or other paper.</p>
+          <p className="mb-2 text-xs text-slate-500">{t("jb_picturesFiledNote")}</p>
           <div className="grid grid-cols-2 gap-2 pb-3 sm:grid-cols-3 md:grid-cols-4">{others.map(tile)}</div>
         </Fold>
       )}
@@ -243,12 +246,12 @@ export function JobPhotos({
           is never simply gone. Office only (the Costs tab is not a tech's), and only when there is one. */}
       {costsNote && (
         <p className="mt-4 flex flex-wrap items-center gap-x-2 text-sm text-slate-500">
-          Receipts and bills are kept with their bills on the Costs tab.
+          {t("jb_receiptsOnCosts")}
           <Link
             href={`/jobs/${jobId}?tab=costs`}
             className="inline-flex min-h-11 items-center font-medium text-brand underline-offset-2 hover:underline"
           >
-            Open Costs
+            {t("jb_openCosts")}
           </Link>
         </p>
       )}
@@ -269,7 +272,7 @@ export function JobPhotos({
             onClick={() => remove(d)}
             disabled={pending}
             className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
-            title="Delete"
+            title={t("jb_delete")}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -280,11 +283,11 @@ export function JobPhotos({
               type="button"
               onClick={() => void showAgain(d)}
               disabled={sharing === d.id}
-              title="This photo's file changed after it was shown, so the customer no longer sees it. Tap to show it as it is now."
+              title={t("jb_changedSinceShownTitle")}
               className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-amber-100/95 px-2 text-xs font-semibold text-amber-950 shadow-sm backdrop-blur"
             >
               {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              <span className="leading-tight">Changed Since Shown — Show Again</span>
+              <span className="leading-tight">{t("jb_changedSinceShown")}</span>
             </button>
           </div>
         ) : sharedIds && d.category === "Photo" ? (
@@ -298,14 +301,14 @@ export function JobPhotos({
               onClick={() => void share(d, !shown.has(d.id))}
               disabled={sharing === d.id}
               aria-pressed={shown.has(d.id)}
-              title={shown.has(d.id) ? "The customer sees this photo. Tap to take it off their page." : "Show this photo on the customer's page"}
+              title={shown.has(d.id) ? t("jb_customerSeesTitle") : t("jb_showCustomerTitle")}
               className={`inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold shadow-sm ${
                 shown.has(d.id) ? "seaglass-btn" : "bg-black/55 text-white backdrop-blur"
               }`}
             >
               <span className="relative z-10 inline-flex items-center gap-1.5">
                 {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : shown.has(d.id) ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                {shown.has(d.id) ? "Customer Sees It" : "Show Customer"}
+                {shown.has(d.id) ? t("jb_customerSeesIt") : t("jb_showCustomer")}
               </span>
             </button>
           </div>

@@ -13,6 +13,7 @@ import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
 import { sendEmail } from "@/lib/email";
+import { langFromWord } from "@/lib/locale";
 import { CREW_IMPORT_WORDS, crewSetupLink } from "./crew-setup-link";
 
 export async function disconnectQuickbooks(): Promise<Result> {
@@ -343,6 +344,8 @@ export async function createEmployee(input: {
   role: string;
   hourly_rate: number | null;
   requireReset?: boolean;
+  /** The person's language (cn-v1138): "es" or "en"; left out, the profile's default (English). */
+  language?: "en" | "es";
 }): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -393,6 +396,8 @@ export async function createEmployee(input: {
       hourly_rate: input.hourly_rate,
       active: true,
       must_reset_password: input.requireReset ?? true,
+      // Whitelisted: anything that is not "es" is English; left out, the column keeps its default.
+      ...(input.language !== undefined ? { language: input.language === "es" ? "es" : "en" } : {}),
     })
     .eq("id", created.user.id);
   if (profErr) return { ok: false, error: profErr.message };
@@ -402,7 +407,9 @@ export async function createEmployee(input: {
   return { ok: true };
 }
 
-export type CrewImportRow = { full_name: string; email: string; phone?: string; role?: string; hourly_rate?: number | null };
+/** One roster row. `language` (cn-v1138) is the CSV's language column as typed: "es", "español",
+ *  "espanol" or "spanish" is Spanish, anything else English; left out, the profile's default. */
+export type CrewImportRow = { full_name: string; email: string; phone?: string; role?: string; hourly_rate?: number | null; language?: string };
 /** One row of the import's answer. A created person carries their ONE-TIME LINK (setupLink); a
  *  created person with no link, or a failed row, carries the reason in words. Never a password. */
 export type CrewImportResult = { name: string; email: string; setupLink?: string; status: "created" | "failed"; reason?: string };
@@ -457,7 +464,17 @@ export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; 
     // above is never theirs to keep, whichever way they first get in.
     const { data: seat, error: profErr } = await admin
       .from("profiles")
-      .update({ org_id: me.org_id, full_name: name, role, phone, hourly_rate: r.hourly_rate ?? null, active: true, must_reset_password: true })
+      .update({
+        org_id: me.org_id,
+        full_name: name,
+        role,
+        phone,
+        hourly_rate: r.hourly_rate ?? null,
+        active: true,
+        must_reset_password: true,
+        // The roster's language column, when it has one: Spanish or English, never a free word.
+        ...(r.language !== undefined ? { language: langFromWord(r.language) } : {}),
+      })
       .eq("id", created.user.id)
       .select("id");
     if (profErr) {
@@ -483,7 +500,10 @@ export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; 
     // link carries to /auth/confirm (the app's token-hash door) and on to Set A Password. The
     // action_link it also answers is not used (the implicit flow; crew-setup-link.ts says why).
     const { data: link, error: linkErr } = await admin.auth.admin.generateLink({ type: "recovery", email });
-    const setupLink = linkErr ? null : crewSetupLink(process.env.NEXT_PUBLIC_SITE_URL, link?.properties?.hashed_token);
+    // The roster's language rides the link (&lang=es), so the confirm door speaks Spanish on any phone.
+    const setupLink = linkErr
+      ? null
+      : crewSetupLink(process.env.NEXT_PUBLIC_SITE_URL, link?.properties?.hashed_token, r.language !== undefined ? langFromWord(r.language) : undefined);
     if (!setupLink) {
       // The person exists and can get in by the login page's code; say so instead of a bare row.
       if (linkErr) reportError("crewImport.generateLink", linkErr, { row });
@@ -691,7 +711,7 @@ export async function setAvatarUrl(url: string | null): Promise<Result> {
  *  here locked nobody out and lifted no ban, and said nothing about either. */
 export async function updateMember(
   id: string,
-  patch: { full_name?: string; phone?: string; role?: string; hourly_rate?: number | null; home_address?: string | null; commute_baseline_miles?: number; crew_lead?: boolean },
+  patch: { full_name?: string; phone?: string; role?: string; hourly_rate?: number | null; home_address?: string | null; commute_baseline_miles?: number; crew_lead?: boolean; language?: "en" | "es" },
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -713,6 +733,9 @@ export async function updateMember(
   if (patch.commute_baseline_miles !== undefined) clean.commute_baseline_miles = Math.max(0, Number(patch.commute_baseline_miles) || 0);
   // Crew lead (any role) — owes Nort the end-of-day debrief at clock-out (migration 0128).
   if (patch.crew_lead !== undefined) clean.crew_lead = !!patch.crew_lead;
+  // The person's language (cn-v1138), set by the office for someone who never opens Settings:
+  // whitelisted to the two the app speaks; left out, unchanged.
+  if (patch.language !== undefined) clean.language = patch.language === "es" ? "es" : "en";
   if (!Object.keys(clean).length) return { ok: true };
 
   // Same-org + row check (audit v921 silent-write): the update was id-keyed with no org guard and

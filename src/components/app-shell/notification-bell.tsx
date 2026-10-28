@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { ToastProvider, useToast } from "@/components/toast";
 import { getMyBell, markNotificationsRead, type Notif } from "@/app/(app)/notification-actions";
-import { BELL_MORE_LINE, bellBadge, bellWhen } from "@/lib/bell-words";
+import { BELL_LIST_SIZE, bellBadge, bellWhen } from "@/lib/bell-words";
 import { getNortHolding, setNortHolding } from "@/lib/nort-holding";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /**
  * The in-app notification bell — the ALWAYS-WORKS channel (independent of push permission,
@@ -31,11 +33,12 @@ export function NotificationBell() {
   );
 }
 
-const MARK_FAILED = "Couldn't mark that read — try again";
-
 function BellInner() {
   const router = useRouter();
   const toast = useToast();
+  // The Bell's own words in the person's language (cn-v1138); the lines it lists were written in
+  // that language when they were sent (notifyPeople writes one line per person).
+  const t = translator(useLang());
   const [items, setItems] = useState<Notif[]>([]);
   // The unread count is the database's (getMyBell), moved by hand only while a mark-read is out.
   const [unread, setUnread] = useState(0);
@@ -94,7 +97,7 @@ function BellInner() {
           // The dot comes back, and it is said: the line is still unread.
           setItems((p) => p.map((x) => (x.id === n.id ? { ...x, read_at: null } : x)));
           setUnread((u) => u + 1);
-          toast(MARK_FAILED, "error");
+          toast(t("sh_markFailed"), "error");
         });
     }
     if (n.url) router.push(n.url);
@@ -108,7 +111,7 @@ function BellInner() {
       .then((r) => {
         if (r.ok) return;
         load(); // the truth, dots and count, from the database
-        toast(MARK_FAILED, "error");
+        toast(t("sh_markFailed"), "error");
       });
   }
 
@@ -122,8 +125,8 @@ function BellInner() {
         // to this control instead of the viewport (globals.css says why).
         data-upright
         className="relative flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
-        aria-label={badge ? `Notifications, ${unread} unread` : "Notifications"}
-        title="Notifications"
+        aria-label={badge ? fillText(t("sh_notificationsUnread"), { n: String(unread) }) : t("sh_notifications")}
+        title={t("sh_notifications")}
       >
         <Bell className="h-5 w-5" />
         {badge && (
@@ -137,18 +140,18 @@ function BellInner() {
           <div className="fixed inset-0 z-[75]" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full z-[80] mt-1 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1">
-              <span className="text-sm font-semibold text-slate-800">Notifications</span>
+              <span className="text-sm font-semibold text-slate-800">{t("sh_notifications")}</span>
               {unread > 0 && (
                 <button onClick={markAll} className="min-h-11 px-1 text-xs font-medium text-brand hover:underline">
-                  Mark All Read
+                  {t("sh_markAllRead")}
                 </button>
               )}
             </div>
             <div className="max-h-[70vh] overflow-y-auto">
               {failed ? (
-                <div className="px-3 py-8 text-center text-sm text-slate-500">Couldn&apos;t load your notifications just now. They&apos;re still there; open this again in a moment.</div>
+                <div className="px-3 py-8 text-center text-sm text-slate-500">{t("sh_bellFailed")}</div>
               ) : items.length === 0 ? (
-                <div className="px-3 py-8 text-center text-sm text-slate-400">You&apos;re all caught up.</div>
+                <div className="px-3 py-8 text-center text-sm text-slate-400">{t("sh_caughtUp")}</div>
               ) : (
                 <>
                   {items.map((n) => (
@@ -169,7 +172,7 @@ function BellInner() {
                       </div>
                     </button>
                   ))}
-                  {more && <p className="px-3 py-2 text-center text-xs text-slate-400">{BELL_MORE_LINE}</p>}
+                  {more && <p className="px-3 py-2 text-center text-xs text-slate-400">{fillText(t("sh_bellMore"), { n: String(BELL_LIST_SIZE) })}</p>}
                 </>
               )}
             </div>

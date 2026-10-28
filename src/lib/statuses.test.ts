@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { translator } from "@/lib/i18n";
 import {
   APPOINTMENT_STATUSES,
   APPOINTMENT_TYPES,
@@ -11,13 +12,27 @@ import {
 
 describe("the four kinds a person picks (W2-06, Service Call retired 2026-10-03)", () => {
   it("are Inspection, Job, Phone Call and Other, each a type the table allows, each with a real label", () => {
-    expect(PICKABLE_APPOINTMENT_TYPES.map(appointmentTypeLabel)).toEqual(["Inspection", "Job", "Phone Call", "Other"]);
+    expect(PICKABLE_APPOINTMENT_TYPES.map((t) => appointmentTypeLabel(t))).toEqual(["Inspection", "Job", "Phone Call", "Other"]);
     // An old row still READS as Service Call — the read set keeps it, only the pickers narrowed.
     expect(appointmentTypeLabel("service_call")).toBe("Service Call");
     for (const t of PICKABLE_APPOINTMENT_TYPES) {
       expect(APPOINTMENT_TYPES as readonly string[]).toContain(t);
       expect(appointmentTypeLabel(t)).not.toBe(t); // a raw enum value is not a label
     }
+  });
+
+  it("reads the catalog in Spanish through the caller's translator (cn-v1138, jb_appt…); English with none or with \"en\", byte for byte; an unknown value is itself in both", () => {
+    const es = translator("es");
+    expect(appointmentTypeLabel("inspection", "es", es)).toBe("Inspección");
+    expect(appointmentTypeLabel("final_inspection", "es", es)).toBe("Inspección Final");
+    expect(appointmentTypeLabel("job", "es", es)).toBe("Trabajo");
+    expect(appointmentTypeLabel("call", "es", es)).toBe("Llamada");
+    expect(appointmentTypeLabel("quote", "es", es)).toBe("Cotización / Presupuesto");
+    for (const t of APPOINTMENT_TYPES) expect(appointmentTypeLabel(t, "en", translator("en"))).toBe(appointmentTypeLabel(t));
+    // No translator handed in: English (this file carries no dictionary of its own).
+    expect(appointmentTypeLabel("inspection", "es")).toBe("Inspection");
+    expect(appointmentTypeLabel("walkabout", "es", es)).toBe("walkabout");
+    expect(appointmentTypeLabel(null, "es", es)).toBe("appointment");
   });
 
   it("an old row's kind still reads truly under its old label", () => {

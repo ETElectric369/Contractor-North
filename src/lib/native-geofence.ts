@@ -1,4 +1,5 @@
 import { isNativeShell } from "@/lib/native-shell";
+import { fillText } from "@/lib/i18n";
 
 /**
  * THE JOB'S FENCE WITH THE SCREEN OFF — the page's door to GeofencePlugin.swift (field feedback
@@ -10,8 +11,17 @@ import { isNativeShell } from "@/lib/native-shell";
  */
 export type PendingExit = { entryId: string; label: string; exitedAt: string };
 
+/**
+ * WHAT THE PAGE HANDS THE FENCE (cn-v1138). The lock-screen alert iOS posts with the app asleep is
+ * compiled into the shell, so its words are given to it at arm time, in the person's language: the
+ * title and the body ride beside the label, and GeofencePlugin.swift keeps today's English only as
+ * its fallback for a page built before this. fenceArmOptions is the one builder, so no arm can
+ * forget them (tests/geofence-words.test.ts pins it).
+ */
+export type FenceArmOptions = { entryId: string; lat: number; lng: number; radiusM: number; label: string; notify: boolean; title: string; body: string };
+
 type Plugin = {
-  arm(o: { entryId: string; lat: number; lng: number; radiusM: number; label: string; notify: boolean }): Promise<{ ok: boolean; authorization: string; monitorable?: boolean }>;
+  arm(o: FenceArmOptions): Promise<{ ok: boolean; authorization: string; monitorable?: boolean }>;
   disarm(): Promise<{ ok: boolean }>;
   readPendingExit(o: { clear?: boolean }): Promise<{ pending: unknown }>;
   status(): Promise<{ authorization: string; armed: unknown; monitorable?: boolean }>;
@@ -20,20 +30,33 @@ type Plugin = {
 
 export const EXIT_EVENT = "cn:geofence-exit";
 
+/** The label the plugin's exit carries when it has none: the English, for a caller with no language. */
+export const JOB_SITE_LABEL = "the job site";
+
+/** The arm call's options: the fence's circle and, in the person's language, the words of the alert
+ *  iOS posts for an exit (t is translator(lang)). */
+export function fenceArmOptions(
+  fence: { entryId: string; lat: number; lng: number; radiusM: number; label: string; notify: boolean },
+  t: (key: string) => string,
+): FenceArmOptions {
+  return { ...fence, title: t("gf_stillOnTheClock"), body: fillText(t("gf_looksLikeYouLeft"), { label: fence.label }) };
+}
+
 function plugin(): Plugin | null {
   if (typeof window === "undefined" || !isNativeShell()) return null;
   const p = (window as unknown as { Capacitor?: { Plugins?: { Geofence?: Plugin } } }).Capacitor?.Plugins?.Geofence;
   return p && typeof p.arm === "function" ? p : null;
 }
 
-/** A pending exit as the plugin hands it, or null for anything that isn't one (pure, tested). */
-export function parsePendingExit(raw: unknown): PendingExit | null {
+/** A pending exit as the plugin hands it, or null for anything that isn't one (pure, tested).
+ *  `fallbackLabel`: the words for a site with no label, in the reader's language. */
+export function parsePendingExit(raw: unknown, fallbackLabel: string = JOB_SITE_LABEL): PendingExit | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   const entryId = typeof o.entryId === "string" ? o.entryId.trim() : "";
   const exitedAt = typeof o.exitedAt === "string" ? o.exitedAt.trim() : "";
   if (!entryId || !exitedAt || !Number.isFinite(Date.parse(exitedAt))) return null;
-  const label = typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 80) : "the job site";
+  const label = typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 80) : fallbackLabel;
   return { entryId, label, exitedAt };
 }
 
@@ -50,8 +73,9 @@ export function readinessOf(r: { ok?: boolean; authorization?: string; monitorab
   return null; // not yet answered: the Always prompt is up — nothing to say until it is read again
 }
 
-/** `notify`: the lock-screen "Still on the clock?" alert — techs only, as the server's push is. */
-export async function armFence(o: { entryId: string; lat: number; lng: number; radiusM: number; label: string; notify: boolean }): Promise<FenceReadiness | null> {
+/** `notify`: the lock-screen "Still on the clock?" alert — techs only, as the server's push is.
+ *  The options come from fenceArmOptions, so the alert's words are always the person's. */
+export async function armFence(o: FenceArmOptions): Promise<FenceReadiness | null> {
   const p = plugin();
   if (!p) return null;
   try {
@@ -97,24 +121,24 @@ export async function disarmFence(): Promise<void> {
 }
 
 /** The exit iOS observed while the app was asleep, if any — cleared once read. */
-export async function takePendingExit(): Promise<PendingExit | null> {
+export async function takePendingExit(fallbackLabel: string = JOB_SITE_LABEL): Promise<PendingExit | null> {
   const p = plugin();
   if (!p) return null;
   try {
     const r = await p.readPendingExit({ clear: true });
-    return parsePendingExit(r?.pending);
+    return parsePendingExit(r?.pending, fallbackLabel);
   } catch {
     return null;
   }
 }
 
 /** Hear an exit while the app is awake. Returns the stop function. */
-export async function onFenceExit(cb: (p: PendingExit) => void): Promise<() => void> {
+export async function onFenceExit(cb: (p: PendingExit) => void, fallbackLabel: string = JOB_SITE_LABEL): Promise<() => void> {
   const p = plugin();
   if (!p) return () => {};
   try {
     const h = await p.addListener("exit", (raw) => {
-      const e = parsePendingExit(raw);
+      const e = parsePendingExit(raw, fallbackLabel);
       if (e) cb(e);
     });
     return () => h.remove();

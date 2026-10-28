@@ -291,7 +291,7 @@ describe("well-formed", () => {
           expect(line).not.toMatch(/\bTIME\b|Time tab/);
         }
       const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-time-button.tsx"), "utf8");
-      expect(button).toContain('{state === "in" && "Clock In"}');
+      expect(button).toContain('{state === "in" && t("jb_clockIn")}');
     });
 
     it("never claims an automation the code does not do", () => {

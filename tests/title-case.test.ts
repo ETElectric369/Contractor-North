@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
+import { dict } from "@/lib/i18n";
 
 /**
  * EVERY CLICKABLE IS TITLE CASE (Erik's law, cn-v1134: "Add A Task", "Won · Pick The Job",
@@ -20,7 +21,10 @@ import ts from "typescript";
  *   · a Modal's title="…";
  *   · the rows of a <select>: an <option value="…">'s text (an <option> with no value attribute
  *     SUBMITS its text — a stored word, not a label — and is left alone);
- *   · the dock's, the palette's and the + menu's `label: "…"` rows, and a SegmentedControl's items.
+ *   · the dock's, the palette's and the + menu's `label: "…"` rows, and a SegmentedControl's items;
+ *   · a t("key") door (cn-v1138), and fillText(t("key"), …): the key's words in BOTH languages from
+ *     the one dictionary (lib/i18n), each a hit of its own labelled [en:key] / [es:key]; a {slot} in
+ *     the words is a computed hole (the rule for a computed child applies to what follows it).
  *
  * THE RULE: every word begins with a capital letter, a digit or a symbol. "·", "&", "/", "—", "+"
  * and a quoted bit pass on their own; the word after a "·", an "&" or a "(" is a word and must be
@@ -47,7 +51,10 @@ const TITLE_TAG = (tag: string) => tag === "Modal";
 /** Files whose `label: "…"` rows are menu rows. */
 const MENU_FILES = ["src/lib/dock.ts", "src/components/command-bar.tsx", "src/components/global-quick-add.tsx"];
 
-export type Hit = { line: number; kind: string; text: string };
+/** `via`: the dictionary key and language a t() door's words came from ("es:tc_clockIn"). */
+export type Hit = { line: number; kind: string; text: string; via?: string };
+
+type Sink = (n: ts.Node, k: string, s: string, via?: string) => void;
 
 /** Entities the JSX text may carry, read as the symbol or space they stand for. */
 const plainText = (s: string) =>
@@ -67,14 +74,23 @@ export function collectClickables(source: string, fileName: string): Hit[] {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, fileName.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const hits: Hit[] = [];
   const seen = new Set<string>();
-  const add = (node: ts.Node, kind: string, raw: string) => {
+  const add: Sink = (node, kind, raw, via) => {
     const text = plainText(raw);
     if (!text || !/\p{L}/u.test(text)) return;
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-    const key = `${line}:${kind}:${text}`;
+    const key = `${line}:${kind}:${via ?? ""}:${text}`;
     if (seen.has(key)) return;
     seen.add(key);
-    hits.push({ line, kind, text });
+    hits.push(via ? { line, kind, text, via } : { line, kind, text });
+  };
+
+  /** The t("key") a door's words come from, when the expression is one: t("key"), or fillText(t("key"), …). */
+  const translatedKey = (e: ts.Expression): string | null => {
+    if (!ts.isCallExpression(e) || !ts.isIdentifier(e.expression) || e.arguments.length < 1) return null;
+    const [first] = e.arguments;
+    if (e.expression.text === "t") return ts.isStringLiteral(first) ? first.text : null;
+    if (e.expression.text === "fillText") return translatedKey(first);
+    return null;
   };
 
   const tagOf = (n: ts.JsxOpeningLikeElement) => n.tagName.getText(sf);
@@ -86,8 +102,25 @@ export function collectClickables(source: string, fileName: string): Hit[] {
    * Returns false when it met something that is not plain words (an identifier, a call, a template
    * with a hole): the door's words are COMPUTED from there on.
    */
-  const stringsOf = (e: ts.Expression | undefined, kind: string, into: (n: ts.Node, k: string, s: string) => void): boolean => {
+  const stringsOf = (e: ts.Expression | undefined, kind: string, into: Sink): boolean => {
     if (!e) return true;
+    // A t("key") door (cn-v1138): the key's words in BOTH languages are the door's words, each its
+    // own hit. A {slot} is a computed hole: the words before the first are the label; a tail after
+    // one is judged only when it is two or more words, as a computed child's tail is. An unknown key
+    // is not plain words (a local t that is not the translator) and is skipped, never guessed.
+    const key = translatedKey(e);
+    if (key !== null) {
+      if (!(key in dict("en"))) return false;
+      for (const lang of ["en", "es"] as const) {
+        const parts = (dict(lang)[key] ?? "").split(/\{\w+\}/);
+        into(e, kind, parts[0], `${lang}:${key}`);
+        for (const tail of parts.slice(1)) {
+          if (plainText(tail).split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 2) continue;
+          into(e, `${kind} (tail)`, tail, `${lang}:${key}`);
+        }
+      }
+      return true;
+    }
     // null, undefined, true, false: nothing on the door, and nothing computed either.
     if (e.kind === ts.SyntaxKind.NullKeyword || e.kind === ts.SyntaxKind.TrueKeyword || e.kind === ts.SyntaxKind.FalseKeyword) return true;
     if (ts.isIdentifier(e) && e.text === "undefined") return true;
@@ -125,13 +158,13 @@ export function collectClickables(source: string, fileName: string): Hit[] {
    * tail is a unit or a plural of a figure and a possessive tail is the name's — not judged. A tail of
    * two or more words ("Log {hours}h On This Job", "{icon} Read More") is a label of its own, and is.
    */
-  const doorWords = (n: ts.Node, kind: string, into: (n: ts.Node, k: string, s: string) => void): void => {
+  const doorWords = (n: ts.Node, kind: string, into: Sink): void => {
     let computed = false;
-    const quiet = (node: ts.Node, k: string, raw: string) => {
+    const quiet: Sink = (node, k, raw, via) => {
       const text = plainText(raw);
       if (/^['’]s\b/.test(text)) return; // {name}'s Panel: the name's possessive
       if (text.split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 2) return; // {n} people, item{s}: a unit or a plural
-      into(node, `${k} (tail)`, raw);
+      into(node, `${k} (tail)`, raw, via);
     };
     const visit = (node: ts.Node): void => {
       const children: ts.NodeArray<ts.JsxChild> | undefined = ts.isJsxElement(node) ? node.children : ts.isJsxFragment(node) ? node.children : undefined;
@@ -339,6 +372,44 @@ describe("the scanner reads the shapes a door's words take", () => {
     expect(collectClickables(src, "src/lib/other.ts")).toEqual([]);
   });
 
+  it("a t(\"key\") door is judged in both languages (cn-v1138): each language its own hit, a {slot} a computed hole, an unknown key skipped", () => {
+    const src = `
+      const A = () => (
+        <>
+          <Button>{t("tc_clockIn")}</Button>
+          <Button>{busy ? t("tc_clockingOut") : t("tc_clockOutAtThatTime")}</Button>
+          <button>{fillText(t("tc_putOnPrev"), { job })}</button>
+          <Button>{fillText(t("tc_nowChip"), { hours })}</Button>
+          <Button>{t("no_such_key")} Save changes</Button>
+          <Button>{t(key)}</Button>
+          <ModalActions saveLabel={t("tc_clockOut")} />
+        </>
+      );`;
+    expect(collectClickables(src, "a.tsx").map((h) => [h.kind, h.text, h.via])).toEqual([
+      ["<Button>", "Clock In", "en:tc_clockIn"],
+      ["<Button>", "Marcar Entrada", "es:tc_clockIn"],
+      ["<Button>", "Clocking Out…", "en:tc_clockingOut"],
+      ["<Button>", "Marcando Salida…", "es:tc_clockingOut"],
+      ["<Button>", "Clock Out At That Time", "en:tc_clockOutAtThatTime"],
+      ["<Button>", "Marcar Salida A Esa Hora", "es:tc_clockOutAtThatTime"],
+      // "Put It On {job} Instead": the words before the slot; "Instead" alone is a one-word tail.
+      ["<button>", "Put It On", "en:tc_putOnPrev"],
+      ["<button>", "Ponerlo En", "es:tc_putOnPrev"],
+      // "Now ({hours} h)": "Now (" before the slot; " h)" is a figure's unit.
+      ["<Button>", "Now (", "en:tc_nowChip"],
+      ["<Button>", "Ahora (", "es:tc_nowChip"],
+      // An unknown key is computed, so the two-word tail after it is still judged.
+      ["<Button> (tail)", "Save changes", undefined],
+      ["ModalActions saveLabel", "Clock Out", "en:tc_clockOut"],
+      ["ModalActions saveLabel", "Marcar Salida", "es:tc_clockOut"],
+    ]);
+    expect(titleCaseOffence("Marcar Entrada")).toBeNull();
+    expect(titleCaseOffence("Marcar entrada")).toBe("entrada");
+    // Unicode-aware: a capital with an accent is a capital.
+    expect(titleCaseOffence("Él Mismo")).toBeNull();
+    expect(titleCaseOffence("Él mismo")).toBe("mismo");
+  });
+
   it("the rule: every word capital, a digit or a symbol; a quoted bit passes; the word after · & ( / counts", () => {
     for (const ok of ["Save Changes", "Won · Pick The Job", "Verify & Sign In", "Add 3 More", "Bills & POs", "Saved — Open It", "Say “yes please” Now", "Yes/No", "+ New", "E-sign It", "Don't Stop", "(Optional) Field", "Import A .vcf", "Enable Tap to Pay on iPhone", "Get This iPhone Ready"])
       expect(titleCaseOffence(ok), ok).toBeNull();
@@ -378,7 +449,7 @@ describe("every clickable in the app is Title Case", () => {
       .filter((h) => !isSentence(h.text) && !allowed(h.file, h.text))
       .map((h) => ({ ...h, word: titleCaseOffence(h.text) }))
       .filter((h) => h.word)
-      .map((h) => `${h.file}:${h.line} ${h.kind} "${h.text}" — "${h.word}"`);
+      .map((h) => `${h.file}${h.via ? ` [${h.via}]` : ""}:${h.line} ${h.kind} "${h.text}" — "${h.word}"`);
     expect(offenders).toEqual([]);
   }, 60_000);
 });

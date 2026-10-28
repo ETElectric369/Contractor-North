@@ -4,6 +4,7 @@
  * job-status.ts spine). Values MIRROR the Postgres enums in 0001_init: `work_order_status`
  * and `quote_status`. The write actions validate against these before touching the DB.
  */
+
 export const WORK_ORDER_STATUSES = ["draft", "assigned", "in_progress", "complete", "cancelled"] as const;
 export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
 
@@ -148,10 +149,30 @@ const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
   other: "Other",
 };
 
+/** The catalog key a type reads its word from in another language (lib/words/jobs, jb_appt…). */
+const APPOINTMENT_TYPE_KEYS: Record<AppointmentType, string> = {
+  inspection: "jb_apptInspection",
+  final_inspection: "jb_apptFinalInspection",
+  service_call: "jb_apptServiceCall",
+  job: "jb_apptJob",
+  call: "jb_apptCall",
+  quote: "jb_apptQuote",
+  meeting: "jb_apptMeeting",
+  appointment: "jb_apptAppointment",
+  other: "jb_apptOther",
+};
+
 /** Human label for an appointment type — unknown/legacy values render as themselves
- *  rather than crashing or lying. */
-export function appointmentTypeLabel(t: string | null | undefined): string {
-  return APPOINTMENT_TYPE_LABELS[(t ?? "") as AppointmentType] ?? (t || "appointment");
+ *  rather than crashing or lying. `lang` + `words` (cn-v1138): a Spanish reader gets the catalog's
+ *  word for a known type through the caller's translator (lib/i18n translator(lang) — this file rides
+ *  customer bundles, so it imports no dictionary of its own; lib/catalog-free-libs.test.ts holds
+ *  that); English, the default, is the table above byte for byte, so a caller that passes nothing
+ *  reads what it always did. */
+export function appointmentTypeLabel(t: string | null | undefined, lang?: string | null, words?: (key: string) => string): string {
+  const type = (t ?? "") as AppointmentType;
+  const en = APPOINTMENT_TYPE_LABELS[type];
+  if (lang === "es" && words && en) return words(APPOINTMENT_TYPE_KEYS[type]);
+  return en ?? (t || "appointment");
 }
 
 /* A STORED TITLE FROM THE THREE DAYS THE VISIT WAS A "WALK-THROUGH", SAID IN TODAY'S WORD.

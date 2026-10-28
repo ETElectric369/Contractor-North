@@ -4,6 +4,7 @@
  * have to respond 'a good time for what?'") — and hands it over only on yes.
  */
 import { describe, expect, it } from "vitest";
+import { translator } from "@/lib/i18n";
 import { readFileSync, readdirSync } from "node:fs";
 import { callName, firstName, greetingPhrase, holdingCount, holdingPronoun, holdingWords, timeOfDay, NO_HOLDING } from "@/lib/nort/greeting";
 import { holdingFor, outcomeWords, readMyUpdates, safeFrom } from "@/lib/nort/updates";
@@ -148,8 +149,9 @@ describe("the doors (source pins)", () => {
   });
   it("the Talk tap arms it with this person's words; greeted only when HEARD; Stop Nort shows while he says hello", () => {
     const g = read("src/components/global-assistant.tsx");
-    expect(g).toMatch(/function launch\(\) \{[\s\S]*armGreeting\(greets, nortName, fullName\);\s*speech\.startListening\(\);/);
-    expect(g).toContain("greetingPhrase({ hour: new Date().getHours(), name: callName(nortName, fullName), holding })");
+    // In the person's language since cn-v1138: read off the document at the tap, handed to the words and the mic.
+    expect(g).toMatch(/function launch\(\) \{[\s\S]*const lang = voiceLang\(\);\s*armGreeting\(greets, nortName, fullName, lang\);\s*speech\.startListening\(localeOf\(lang\)\);/);
+    expect(g).toContain("greetingPhrase({ hour: new Date().getHours(), name: callName(nortName, fullName), holding, lang })");
     expect(g).toContain('if (how !== "skipped" && asks) markGreetedWithHolding();');
     const p = read("src/lib/nort/greeting-player.ts");
     expect(p).toContain('export type GreetingOutcome = "heard" | "cut" | "skipped";');
@@ -158,7 +160,7 @@ describe("the doors (source pins)", () => {
     expect(g).toContain(".finally(() => estimatorStore.setSpeaking(false));");
     expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain("greeted: consumeGreeted()");
     const t = read("src/components/app-shell/topbar.tsx");
-    expect(t).toContain('<GlobalAssistant greets={p?.nort_greets !== false} nortName={p?.nort_name ?? null} fullName={p?.full_name ?? null} />');
+    expect(t).toContain('<GlobalAssistant greets={p?.nort_greets !== false} nortName={p?.nort_name ?? null} fullName={p?.full_name ?? null} role={p?.role ?? null} />');
   });
   it("the greeting's clip is kept on the phone, bounded both ways, cut by his voice, and never left playing", () => {
     const p = read("src/lib/nort/greeting-player.ts");
@@ -172,7 +174,7 @@ describe("the doors (source pins)", () => {
     expect(p).toContain('if (o === "failed" && got.fromCache) void cacheDelete(clipKey(t));');
     expect(p).toContain("const SHELF_LIFE_MS = 30 * 24 * 60 * 60 * 1000;");
     const t = read("src/lib/tts.ts");
-    expect(t).toContain("export async function fetchClip(text: string): Promise<Blob | null>");
+    expect(t).toContain("export async function fetchClip(text: string, lang: Lang = voiceLang()): Promise<Blob | null>"); // the language rides the clip (cn-v1138)
     expect(t).toContain('startsWith("audio/")');
     expect(t).toContain("export function playClip(blob: Blob, fallbackText: string): { done: Promise<ClipOutcome>; playing: Promise<void>; stop: () => void }");
     expect(t).toContain('const onPause = () => finish("stopped");');
@@ -215,11 +217,15 @@ describe("the doors (source pins)", () => {
   });
   it("Settings › You: the switch and the name, saved to their own row", () => {
     const s = read("src/app/(app)/settings/nort-greeting.tsx");
-    expect(s).toContain("Nort speaks first");
-    expect(s).toContain("Nort greets you as");
+    // The words live in the shell catalog since cn-v1138 (English byte for byte what it was).
+    expect(s).toContain('{t("sh_nortSpeaksFirst")}');
+    expect(s).toContain('{t("sh_nortGreetsYouAs")}');
+    expect(translator("en")("sh_nortSpeaksFirst")).toBe("Nort speaks first");
+    expect(translator("en")("sh_nortGreetsYouAs")).toBe("Nort greets you as");
     expect(s).toContain("maxLength={40}");
     expect(s).not.toContain('size="sm"');
-    expect(s).toContain("Saved.");
+    expect(s).toContain('{t("sh_saved")}');
+    expect(translator("en")("sh_saved")).toBe("Saved.");
     const a = read("src/app/(app)/settings/nort-tone-actions.ts");
     expect(a).toContain(".update({ nort_greets: !!greets, nort_name: clean || null })");
     expect(a).toContain("Array.from(name.trim().replace(/[<>]/g, \"\")).slice(0, 40).join(\"\")");

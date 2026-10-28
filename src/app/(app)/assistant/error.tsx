@@ -5,6 +5,8 @@ import { AlertTriangle } from "lucide-react";
 import { reportClientError } from "@/app/report-client-error";
 import { recoverFromChunkError } from "@/lib/chunk-reload";
 import { useTryAgain } from "@/lib/try-again";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /** Segment error boundary for the assistant. A render crash anywhere in the chat / Estimator
  *  now shows this graceful fallback (with a reset) instead of blanking the whole app. The crash
@@ -17,6 +19,7 @@ export default function AssistantError({
   reset: () => void;
 }) {
   const { tryAgain, trying } = useTryAgain(reset);
+  const t = translator(useLang()); // the person's language (cn-v1138): a crash is said in it too
   useEffect(() => {
     if (recoverFromChunkError(error)) return; // stale Estimator/chat chunk after a deploy → reload fresh
     // Surface it in the console too, alongside the error_events forward below.
@@ -32,17 +35,14 @@ export default function AssistantError({
       <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-50">
         <AlertTriangle className="h-6 w-6 text-amber-500" />
       </div>
-      <h2 className="text-lg font-semibold text-slate-900">The assistant hit a snag</h2>
-      <p className="mt-2 text-sm text-slate-500">
-        Something went wrong mid-conversation. Your data is safe — nothing was lost. Start it back up
-        and pick up where you left off.
-      </p>
+      <h2 className="text-lg font-semibold text-slate-900">{t("nt_errTitle")}</h2>
+      <p className="mt-2 text-sm text-slate-500">{t("nt_errBody")}</p>
       <button
         onClick={tryAgain}
         disabled={trying}
         className="mt-5 min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
       >
-        {trying ? "Restarting Nort…" : "Restart Nort"}
+        {trying ? t("nt_restarting") : t("nt_restart")}
       </button>
     </div>
   );

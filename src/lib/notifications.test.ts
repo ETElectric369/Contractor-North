@@ -37,19 +37,107 @@ function builder() {
   return api;
 }
 
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ from: () => builder() }) }));
-const push = vi.fn(async () => {});
-vi.mock("@/lib/push", () => ({ sendPushToProfiles: (...a: unknown[]) => push(...(a as [])) }));
+/** The language read (lib/lang-of): profiles rows by id, under the company named, or a failed read. */
+let people: { id: string; language: string | null }[] = [];
+let failLangRead = false;
+let langReadFilters: [string, unknown][] = [];
+function profiles() {
+  let wanted: unknown[] = [];
+  const api: any = {
+    select: () => api,
+    in: (_k: string, vs: unknown[]) => ((wanted = vs), api),
+    eq: (k: string, v: unknown) => (langReadFilters.push([k, v]), api),
+    then: (res: (v: unknown) => void) => {
+      if (failLangRead) return res({ data: null, error: { message: "profiles unreadable" } });
+      res({ data: people.filter((p) => wanted.includes(p.id)), error: null });
+    },
+  };
+  return api;
+}
+
+vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ from: (t: string) => (t === "profiles" ? profiles() : builder()) }) }));
+const push = vi.fn(async (ids: string[], _kind?: string, _payload?: { title: string }) => ids);
+vi.mock("@/lib/push", () => ({
+  sendPushToProfiles: (...a: unknown[]) => push(...(a as [string[], string, { title: string }])),
+  pushKindIsOptIn: (kind: string) => kind === "day_ahead",
+}));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
-import { ringOffice } from "./notifications";
+import { reportError } from "@/lib/observe";
+import { createNotifications, notifyPeople, ringOffice } from "./notifications";
 
 const base = { type: "panel_changed", url: "/jobs/j1?tab=panel", windowMinutes: 60, mode: "once_per_window" as const };
 
 beforeEach(() => {
   table = [];
   failReads = false;
+  people = [];
+  failLangRead = false;
+  langReadFilters = [];
   push.mockClear();
+  vi.mocked(reportError).mockClear();
+});
+
+/**
+ * WORDS PER PERSON (cn-v1138): a payload given as a function of the language is built once per
+ * language the recipients read, after ONE profiles read that names the company (the service client
+ * reads across companies without it); a failed read is English for everyone, filed.
+ */
+describe("a payload that is a function of the language", () => {
+  const words = (lang: "en" | "es") => ({ type: "nudge", title: lang === "es" ? "Marca entrada cuando llegues." : "Clock in when you get there.", url: "/timeclock" });
+
+  it("writes a Spanish row for an es person and an English row for an en person in the same call, and pushes each group its own words", async () => {
+    people = [
+      { id: "larkspur", language: "es" },
+      { id: "snowbell", language: "en" },
+      { id: "bayberry", language: null },
+    ];
+    expect(await createNotifications("org", ["larkspur", "snowbell", "bayberry"], words)).toBe(true);
+    // Groups in the order their first reader appears: larkspur's Spanish, then the two English rows.
+    expect(table.map((r) => [r.user_id, r.title, r.type])).toEqual([
+      ["larkspur", "Marca entrada cuando llegues.", "nudge"],
+      ["snowbell", "Clock in when you get there.", "nudge"],
+      ["bayberry", "Clock in when you get there.", "nudge"],
+    ]);
+    // The one language read named the company.
+    expect(langReadFilters).toEqual([["org_id", "org"]]);
+    langReadFilters = [];
+    table = [];
+    const res = await notifyPeople("org", ["larkspur", "snowbell"], "assigned", words);
+    expect(res).toEqual({ bell: true, pushed: ["larkspur", "snowbell"] });
+    expect(langReadFilters).toEqual([["org_id", "org"]]);
+    expect(table.map((r) => [r.user_id, r.title])).toEqual([
+      ["larkspur", "Marca entrada cuando llegues."],
+      ["snowbell", "Clock in when you get there."],
+    ]);
+    // One push per language group, each with that group's words; the type is the push kind.
+    expect(push.mock.calls.map((c) => [c[0], c[1], (c[2] as { title: string }).title])).toEqual([
+      [["larkspur"], "assigned", "Marca entrada cuando llegues."],
+      [["snowbell"], "assigned", "Clock in when you get there."],
+    ]);
+    expect(table.every((r) => r.type === "assigned")).toBe(true);
+  });
+
+  it("a failed language read still writes the rows, in English, and files the read (never the ids)", async () => {
+    people = [{ id: "larkspur", language: "es" }];
+    failLangRead = true;
+    expect(await createNotifications("org", ["larkspur", "snowbell"], words)).toBe(true);
+    expect(table.map((r) => [r.user_id, r.title])).toEqual([
+      ["larkspur", "Clock in when you get there."],
+      ["snowbell", "Clock in when you get there."],
+    ]);
+    expect(reportError).toHaveBeenCalledWith("lang-of:read", { message: "profiles unreadable" }, { count: 2 });
+    expect(JSON.stringify(vi.mocked(reportError).mock.calls)).not.toContain("larkspur");
+    expect(await notifyPeople("org", ["larkspur"], "assigned", words)).toEqual({ bell: true, pushed: ["larkspur"] });
+    expect(table.at(-1)?.title).toBe("Clock in when you get there.");
+  });
+
+  it("a plain payload reads no language at all and writes as it always did", async () => {
+    failLangRead = true; // would be filed if anything asked
+    expect(await createNotifications("org", ["larkspur"], { title: "Hello", type: "general" })).toBe(true);
+    expect(table.map((r) => [r.user_id, r.title, r.type])).toEqual([["larkspur", "Hello", "general"]]);
+    expect(reportError).not.toHaveBeenCalled();
+  });
 });
 
 describe("the panel ring: one notice per job per hour", () => {

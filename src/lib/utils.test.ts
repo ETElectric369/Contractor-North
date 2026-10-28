@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hoursBetween, formatCurrency, formatCityStateZip, formatFullAddress } from "@/lib/utils";
+import { hoursBetween, formatCurrency, formatCityStateZip, formatFullAddress, formatDate, formatDateTime } from "@/lib/utils";
 
 describe("formatCityStateZip — the one canonical 'City, ST ZIP'", () => {
   it("joins city+state with a comma, ZIP after a SPACE (owner-chosen format)", () => {
@@ -50,5 +50,41 @@ describe("formatCurrency", () => {
   });
   it("handles negatives (credit lines)", () => {
     expect(formatCurrency(-10000)).toBe("-$10,000.00");
+  });
+});
+
+/**
+ * THE SAME FIGURES IN SPANISH (cn-v1138): the trailing `lang` picks es-US; every caller that passes
+ * none still reads en-US. The dollar assertions read the sign and the digits (ICU may set a
+ * no-break space between them); the dates are asserted on the day, the month's Spanish name and
+ * the order, never on ICU's exact punctuation.
+ */
+describe("the formatters in Spanish (es-US), and in English when no lang is passed", () => {
+  const digits = (s: string) => s.replace(/[^\d.,$-]/g, "");
+
+  it("money: the same dollars and cents, $ first, under es-US", () => {
+    expect(digits(formatCurrency(1234.56, "es"))).toBe("$1,234.56");
+    expect(digits(formatCurrency(-10000, "es"))).toBe("-$10,000.00");
+    expect(formatCurrency(1234.56, "en")).toBe("$1,234.56");
+    expect(formatCurrency(1234.56, null)).toBe("$1,234.56");
+    // The old module const is a per-locale cache now: the same answer twice.
+    expect(formatCurrency(5, "es")).toBe(formatCurrency(5, "es"));
+  });
+
+  it("a date: day first and the month's Spanish name under es-US; Oct 28, 2026 for everyone else", () => {
+    expect(formatDate("2026-10-28", "America/Los_Angeles", "es")).toMatch(/^28 oct\.? (de )?2026$/);
+    expect(formatDate("2026-10-28T17:15:00Z", "America/Los_Angeles", "es")).toMatch(/^28 oct\.? (de )?2026$/);
+    expect(formatDate("2026-10-28")).toBe("Oct 28, 2026");
+    expect(formatDate("2026-10-28", "America/Los_Angeles", undefined)).toBe("Oct 28, 2026");
+    expect(formatDate("2026-10-28T17:15:00Z", "America/Los_Angeles", "en")).toBe("Oct 28, 2026");
+  });
+
+  it("a date and time: the business timezone either way, Spanish words under es-US", () => {
+    const es = formatDateTime("2026-10-28T17:15:00Z", "America/Los_Angeles", "es");
+    expect(es).toMatch(/^28 oct/);
+    expect(es).toMatch(/10:15/);
+    expect(es.toLowerCase()).toMatch(/a\.?\s?m/);
+    expect(formatDateTime("2026-10-28T17:15:00Z", "America/Los_Angeles")).toBe("Oct 28, 10:15 AM");
+    expect(formatDateTime("2026-10-28T17:15:00Z", "America/Los_Angeles", "en")).toBe("Oct 28, 10:15 AM");
   });
 });

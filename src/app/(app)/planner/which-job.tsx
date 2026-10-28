@@ -6,6 +6,8 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator, type Lang } from "@/lib/i18n";
 import { putPunchOnJob, whichJobChoices } from "../timeclock/which-job-actions";
 import {
   jobsDidntLoadSentence,
@@ -74,6 +76,7 @@ export function WhichJobSheetView({
   err = null,
   placed = null,
   holdWhileBusy = false,
+  lang = "en",
   onPick,
   onSkip,
 }: {
@@ -89,23 +92,29 @@ export function WhichJobSheetView({
   /** The door has no toast, so the answer can only land on the sheet: while a pick is out, the X,
    *  a tap outside and Escape leave it open (Back still closes; Modal holdOpen says why). */
   holdWhileBusy?: boolean;
+  /** The person's language (cn-v1138), handed in by WhichJobSheet (useLang): the view stays hook-free,
+   *  so the tests can call it as a plain function. English when nothing is given. */
+  lang?: Lang;
   onPick: (job: WhichJobOption) => void;
   onSkip: () => void;
 }) {
+  // Every word on the sheet comes through the cs_ catalog; the headline is the Time Clock's own key
+  // (tc_whichJobHeadline), one spelling for every door.
+  const t = translator(lang);
   const footer = placed ? (
     <Button type="button" className="min-h-[44px] w-full" onClick={onSkip}>
-      Done
+      {t("cs_done")}
     </Button>
   ) : (
     /* A MOVE IS NEVER A DEAD END AND NEVER A DEMAND: the way out says the punch stays where the app
        put it, which is exactly what ignoring the sentence does. "Skip, The Office Will Pick" would be
        a lie here — the punch already has a job. */
     <Button type="button" variant="outline" className="min-h-[44px] w-full" onClick={onSkip} disabled={!!busyId}>
-      {moment === "move" ? "Leave It Where It Is" : "Skip, The Office Will Pick"}
+      {moment === "move" ? t("cs_leaveItWhereItIs") : t("cs_skipOfficeWillPick")}
     </Button>
   );
   return (
-    <Modal open onClose={onSkip} holdOpen={holdWhileBusy && !!busyId} title="Which Job Are You On?" size="sm" portal footer={footer}>
+    <Modal open onClose={onSkip} holdOpen={holdWhileBusy && !!busyId} title={t("tc_whichJobHeadline")} size="sm" portal footer={footer}>
       {placed ? (
         <p className="text-sm font-medium text-green-700" role="status">
           {placed}
@@ -114,14 +123,14 @@ export function WhichJobSheetView({
         <div data-testid="which-job-sheet">
           <p className="text-sm text-slate-600">
             {moment === "move"
-              ? `The app put this punch on ${from?.label ?? "the job it picked"}. Tap the job you're really on and the whole punch moves.`
+              ? fillText(t("cs_appPutPunchOnMove"), { label: from?.label ?? t("cs_theJobItPicked") })
               : moment === "in"
-                ? "You're clocked in. Tap the job you're on and the whole punch goes on it."
-                : "You're clocked out, and this punch has no job. Tap the job it was on."}
+                ? t("cs_clockedInTapJob")
+                : t("cs_clockedOutNoJobTap")}
           </p>
           {state.phase === "loading" ? (
             <p className="mt-3 flex min-h-[44px] items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Finding your jobs…
+              <Loader2 className="h-4 w-4 animate-spin" /> {t("cs_findingYourJobs")}
             </p>
           ) : state.phase === "failed" ? (
             <p className="mt-3 text-sm text-slate-600">{state.error}</p>
@@ -130,7 +139,7 @@ export function WhichJobSheetView({
                offline queue's (confirmInline, so sheetAfterLoad does not close first) — and on a
                MOVE the punch is on the job the app chose, so borrowing the ask's "saved on no job"
                would tell Brian his 2h19m is on nothing while it bills the wrong customer. */
-            <p className="mt-3 text-sm text-slate-600">{noJobsToOffer(state.isStaff, moment)}</p>
+            <p className="mt-3 text-sm text-slate-600">{noJobsToOffer(state.isStaff, moment, lang)}</p>
           ) : (
             <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
               {state.jobs.map((j) => (
@@ -184,6 +193,8 @@ export function WhichJobSheet({
 }) {
   const router = useRouter();
   const toast = useToast();
+  // The person's language, for every sentence the sheet says itself (which-job-choices takes it).
+  const lang = useLang();
   // The job the punch is coming off, as a plain id: the load effect depends on it, and an object
   // literal rebuilt on every render would re-run the read and re-load the list under the thumb.
   const fromId = from?.id ?? null;
@@ -222,7 +233,7 @@ export function WhichJobSheet({
     whichJobChoices(entryId, fromId).then(
       (r) => {
         if (!alive) return;
-        const next = sheetAfterLoad(r, { confirmInline, moment });
+        const next = sheetAfterLoad(r, { confirmInline, moment, lang });
         if (next.close) {
           // No job to offer: close, and say where the punch went instead of a Skip-only sheet.
           toastRef.current(next.sentence, "info");
@@ -234,13 +245,13 @@ export function WhichJobSheet({
       () => {
         // ON A MOVE THE PUNCH ALREADY HAS A JOB: "the office will put it on its job" would promise a
         // prompt the office never sees, because a punch with a job is not in Hours On No Job.
-        if (alive) setState({ phase: "failed", error: jobsDidntLoadSentence(where) });
+        if (alive) setState({ phase: "failed", error: jobsDidntLoadSentence(where, lang) });
       },
     );
     return () => {
       alive = false;
     };
-  }, [entryId, confirmInline, fromId, moment, where]);
+  }, [entryId, confirmInline, fromId, moment, where, lang]);
 
   async function pick(job: WhichJobOption) {
     if (busyId) return;
@@ -249,7 +260,7 @@ export function WhichJobSheet({
     try {
       // ONE WRITE for both: putPunchOnJob places a job-less punch, and moves one off the job the app
       // chose when the screen names that job. Nothing here decides which — `fromId` is the fact.
-      const out = await pickOutcome((eid, jid) => putPunchOnJob(eid, jid, fromId), entryId, job, where);
+      const out = await pickOutcome((eid, jid) => putPunchOnJob(eid, jid, fromId), entryId, job, where, lang);
       const gone = !mounted.current;
       const route = routePick(out, { confirmInline, gone });
       if (route.refresh) router.refresh();
@@ -272,6 +283,7 @@ export function WhichJobSheet({
       err={err}
       placed={placed}
       holdWhileBusy={confirmInline}
+      lang={lang}
       onPick={(j) => void pick(j)}
       onSkip={onClose}
     />

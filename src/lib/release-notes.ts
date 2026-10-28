@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1138", date: "2026-10-28", line: "The crew's side speaks Spanish — Time Clock, My Day, jobs, materials, texts, pushes and Nort; an owner downloads everything the company has from Settings › Getting Paid › Your Data." },
   { version: "cn-v1137", date: "2026-10-28", line: "Your free trial warns you 7, 3 and 1 days out and the day of; a lapsed plan pauses Nort, texts and reminders while payments and your books stay open; Both Are Real on Reconcile; Add A Note on a line." },
   { version: "cn-v1136", date: "2026-10-28", line: "Bug Watch lists every caught error with its first sighting and count, with Triaged, Fixed and Ignore doors; a platform-wide blocker pages North's team; a Monday digest; closed rows retire at 90 days." },
   { version: "cn-v1135", date: "2026-10-27", line: "Every trade gets one package: job codes, switches, sheet, calculators and Nort's words from one registry; Change My Trade and How You Price in Settings; nothing is electrician-first." },

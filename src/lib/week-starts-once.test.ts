@@ -302,7 +302,11 @@ describe("a weekend day earns its space", () => {
     expect(hidden.map(shortDayWords)).toEqual(["Sat 18", "Sun 19"]);
     // Said on BOTH week views, from the one spelling.
     expect(code("src/app/(app)/calendar/calendar-view.tsx")).toContain("shortDayWords(k)");
-    expect(code("src/app/(app)/planner/page.tsx")).toContain("weekHiddenDays.map(shortDayWords)");
+    // My Day maps the days through dayShort (cn-v1138), which is shortDayWords in English and the
+    // same shape in the person's own locale otherwise — still the one spelling.
+    const planner = code("src/app/(app)/planner/page.tsx");
+    expect(planner).toContain("weekHiddenDays.map(dayShort)");
+    expect(planner).toContain(": shortDayWords(ymd)");
   });
 
   it("and the schedule's named day is a 44px target, not a 20px word", () => {

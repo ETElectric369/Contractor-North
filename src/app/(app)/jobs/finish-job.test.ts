@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { dict } from "@/lib/i18n";
 
 /**
  * FINISH JOB SAYS THE TRUTH, AND ON A T&M JOB IT BUILDS THE FINAL.
@@ -351,9 +352,11 @@ describe("Finish & Send Invoice on a plain fixed-price job", () => {
 
   it("the button blames the question, not the customer's email address", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/finish-job-button.tsx"), "utf8");
-    expect(src).toContain("there's a question above waiting on the draft");
+    expect(src).toContain('t("jb_notEmailedQuestion")');
+    expect(dict("en").jb_notEmailedQuestion).toContain("there's a question above waiting on the draft");
     // The old copy is kept for the case it is actually about, and only then.
-    expect(src).toContain("the customer may have no email on file");
+    expect(src).toContain('t("jb_notEmailedNoEmail")');
+    expect(dict("en").jb_notEmailedNoEmail).toContain("the customer may have no email on file");
     expect(src).toContain("res.warning\n            ?");
   });
 });

@@ -10,6 +10,8 @@
  * to the point." So: "I've got Brian's daily report and two updates on things you reported —
  * want them now?" Never "good time?", never the contents until they say yes.
  */
+import { fillText, translator, type Lang } from "@/lib/i18n";
+
 export type NortHolding = {
   /** Resolved bug reports of theirs they have not heard about yet. */
   reports: number;
@@ -30,24 +32,38 @@ export function holdingCount(h: NortHolding | null | undefined): number {
   return (h?.reports ?? 0) + (h?.dailyReports.length ?? 0);
 }
 
-const SMALL = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
-const count = (n: number, one: string, many: string) => `${n < SMALL.length ? SMALL[n] : String(n)} ${n === 1 ? one : many}`;
+/** The small counts as words: "two daily reports", "dos reportes diarios". A report is masculine and
+ *  an update feminine in Spanish ("un reporte", "una actualización"), so Spanish has a word for each. */
+const SMALL: Record<Lang, { m: readonly string[]; f: readonly string[] }> = {
+  en: {
+    m: ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+    f: ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+  },
+  es: {
+    m: ["", "un", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"],
+    f: ["", "una", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"],
+  },
+};
+const countWord = (n: number, lang: Lang, gender: "m" | "f"): string => {
+  const words = SMALL[lang]?.[gender] ?? SMALL.en.m;
+  return n < words.length ? words[n] : String(n);
+};
 
-/** "Brian's daily report", "two daily reports", "three updates on things you reported", joined. */
-export function holdingWords(h: NortHolding | null | undefined): string | null {
+/** "Brian's daily report", "two daily reports", "three updates on things you reported", joined —
+ *  in the person's language (cn-v1138; the chat route's prompt and the Bell read the English). */
+export function holdingWords(h: NortHolding | null | undefined, lang: Lang = "en"): string | null {
   if (!h || holdingCount(h) === 0) return null;
+  const t = translator(lang);
   const parts: string[] = [];
   const d = h.dailyReports;
-  if (d.length === 1) parts.push(`${d[0].from}'s daily report`);
-  else if (d.length === 2) parts.push(`${d[0].from}'s and ${d[1].from}'s daily reports`);
-  else if (d.length > 2) parts.push(count(d.length, "daily report", "daily reports"));
-  if (h.reports > 0)
-    parts.push(
-      `${count(h.reports, "update", "updates")} on things you reported${
-        h.reportsBack ? (h.reports === 1 ? `, filed in ${h.reportsBack}` : `, filed as far back as ${h.reportsBack}`) : ""
-      }`,
-    );
-  return parts.join(" and ");
+  if (d.length === 1) parts.push(fillText(t("nt_dailyReportOf"), { from: d[0].from }));
+  else if (d.length === 2) parts.push(fillText(t("nt_dailyReportsOfTwo"), { a: d[0].from, b: d[1].from }));
+  else if (d.length > 2) parts.push(fillText(t("nt_dailyReportsN"), { n: countWord(d.length, lang, "m") }));
+  if (h.reports > 0) {
+    const back = h.reportsBack ? fillText(t(h.reports === 1 ? "nt_filedIn" : "nt_filedBack"), { month: h.reportsBack }) : "";
+    parts.push(fillText(t(h.reports === 1 ? "nt_updateOne" : "nt_updatesMany"), { n: countWord(h.reports, lang, "f") }) + back);
+  }
+  return parts.join(t("nt_and"));
 }
 
 /** "it" for one thing, "them" for more. */
@@ -79,14 +95,19 @@ export function timeOfDay(hour: number): "early" | "morning" | "afternoon" | "ev
  * The line Nort speaks when the mic is live. Short on purpose: the person is about to talk.
  *   "Morning, Erik. What do you need?"
  *   "Evening, Boss. I've got Brian's daily report — want it now?"
+ *   "Buenos días, Luis. ¿Qué necesitas?"  (lang "es", cn-v1138 — the words are the catalog's, lib/words/nort)
+ * Nort's name and the person's are the same in both; so are the clip keys (greeting-player keys a
+ * clip by its text, so a Spanish phrase gets its own clip and never replays an English one).
  */
-export function greetingPhrase(opts: { hour: number; name: string | null; holding?: NortHolding | null }): string {
+export function greetingPhrase(opts: { hour: number; name: string | null; holding?: NortHolding | null; lang?: Lang }): string {
+  const lang = opts.lang ?? "en";
+  const t = translator(lang);
   const tod = timeOfDay(opts.hour);
-  const hello = tod === "morning" ? "Morning" : tod === "evening" ? "Evening" : "Hey";
+  const hello = tod === "morning" ? t("nt_greetMorning") : tod === "evening" ? t("nt_greetEvening") : t("nt_greetHey");
   const who = opts.name ? `${hello}, ${opts.name}.` : `${hello}.`;
-  const words = holdingWords(opts.holding);
-  if (words) return `${who} I've got ${words} — want ${holdingPronoun(opts.holding)} now?`;
-  return `${who} What do you need?`;
+  const words = holdingWords(opts.holding, lang);
+  if (words) return `${who} ${fillText(t(holdingCount(opts.holding) === 1 ? "nt_greetHoldingOne" : "nt_greetHoldingMany"), { words })}`;
+  return `${who} ${t("nt_greetAsk")}`;
 }
 
 /** Bump when the voice or the phrasing changes, so every phone re-synthesizes its clips once. */

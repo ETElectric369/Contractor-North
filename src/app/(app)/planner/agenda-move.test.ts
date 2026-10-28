@@ -64,7 +64,10 @@ describe("the row's ⋯", () => {
     expect(src).not.toContain("rowTrigger");
     // Running Late? and Navigate stay on the row, outside the ⋯.
     const row = code.slice(code.indexOf("const agendaRows"), code.indexOf("<AgendaRowMenu"));
-    expect(row).toContain("Running Late?");
+    expect(row).toContain('t("md_runningLate")'); // "Running Late?" (lib/words/myday, cn-v1138)
+    // The text goes to the CUSTOMER: its body is English whatever the tech reads (nothing a customer sees changes).
+    expect(row).toContain('body=${encodeURIComponent(translator("en")("md_onMyWay"))}');
+    expect(row).not.toContain('encodeURIComponent(t("md_onMyWay"))');
     expect(row).toContain("<NavLink address={i.address}");
   });
 

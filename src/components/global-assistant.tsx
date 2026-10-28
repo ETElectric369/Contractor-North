@@ -8,13 +8,14 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { createClient } from "@/lib/supabase/client";
-import { unlockAudio, stopSpeaking } from "@/lib/tts";
+import { unlockAudio, stopSpeaking, voiceLang } from "@/lib/tts";
 import { isNativeShell } from "@/lib/native-shell";
 import { standDownReaderForVoice } from "@/lib/native-tap";
 import * as speech from "@/lib/voice";
 import { useEstimator } from "@/lib/estimator-store";
 import { NORT_TALK_EVENT } from "@/lib/onboarding/help-rows";
 import { callName, greetingPhrase, holdingCount } from "@/lib/nort/greeting";
+import { localeOf, type Lang } from "@/lib/locale";
 import { playGreeting } from "@/lib/nort/greeting-player";
 import { getNortHolding, markGreetedWithHolding } from "@/lib/nort-holding";
 import { estimatorStore } from "@/lib/estimator-store";
@@ -79,13 +80,13 @@ function DeepLinkOpener({ param, onLaunch }: { param: string; onLaunch: () => vo
  *  The words are picked on this phone (lib/nort/greeting) from the hour, the name this person
  *  chose, and what Nort is holding (the Bell's own poll). Plain and synchronous — launch() must
  *  reach speech.startListening() inside the tap with nothing asynchronous in front of it. */
-function armGreeting(greets: boolean, nortName: string | null, fullName: string | null) {
+function armGreeting(greets: boolean, nortName: string | null, fullName: string | null, lang: Lang) {
   if (!greets) {
     speech.setGreeting(null);
     return;
   }
   const holding = getNortHolding();
-  const text = greetingPhrase({ hour: new Date().getHours(), name: callName(nortName, fullName), holding });
+  const text = greetingPhrase({ hour: new Date().getHours(), name: callName(nortName, fullName), holding, lang });
   const asks = holdingCount(holding) > 0;
   speech.setGreeting({
     text,
@@ -107,12 +108,15 @@ export function GlobalAssistant({
   greets = false,
   nortName = null,
   fullName = null,
+  role = null,
 }: {
   /** Nort speaks first (0394, profiles.nort_greets): the greeting plays the moment the mic is live. */
   greets?: boolean;
   /** What Nort calls this person (profiles.nort_name); null = their first name. */
   nortName?: string | null;
   fullName?: string | null;
+  /** profiles.role (cn-v1138): the chat's first suggestions are a tech's or the office's by it. */
+  role?: string | null;
 } = {}) {
   const [open, setOpenState] = useState(false);
   // THE UNLOCK-STOP HUNT (2026-10-15): when the screen comes back, every client component of the
@@ -211,8 +215,12 @@ export function GlobalAssistant({
     // live. Voice launches only; the words are picked on this phone (lib/nort/greeting) from the
     // hour, the name this person chose, and what Nort is holding (the Bell's own poll). When the
     // greeting names what he holds, the first send tells the server so (markGreetedWithHolding).
-    armGreeting(greets, nortName, fullName);
-    speech.startListening();
+    // THE PERSON'S LANGUAGE (cn-v1138), for the greeting's words and the mic's hint: read off the
+    // document at the tap (the LangProvider writes profiles.language there; lib/tts voiceLang), so
+    // this listener — registered once — never holds a value a first render closed over.
+    const lang = voiceLang();
+    armGreeting(greets, nortName, fullName, lang);
+    speech.startListening(localeOf(lang));
     // Already open → Talk To Nort just re-opened the mic; tell the panel to resume the conversation.
     // openRef, not `open`: this runs from a listener registered once (see above).
     if (openRef.current) { window.dispatchEvent(new Event("cn:assistant-talk")); setCollapsed(false); return; }
@@ -416,7 +424,7 @@ export function GlobalAssistant({
             </button>
           </div>
           <div className={collapsed ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
-            <AssistantChat autoStart={voiceLaunch} initialQuery={pendingQuery ?? undefined} glass />
+            <AssistantChat autoStart={voiceLaunch} initialQuery={pendingQuery ?? undefined} glass role={role} />
           </div>
         </div>
       )}

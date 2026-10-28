@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { Plus, Camera, Briefcase, CalendarPlus, ClipboardCheck, FileText, Receipt, UserSearch, X, type LucideIcon } from "lucide-react";
 import { SnapOrNoteProvider, openSnapOrNote, snapStillSending } from "@/components/snap-or-note";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 /**
@@ -98,10 +100,12 @@ export function QuickAddMenu({
   /** A tap that couldn't go (no signal), said under the rows. */
   said?: string | null;
 }) {
+  // The paper door's name in the person's language (cn-v1138); the typed verbs are the office's.
+  const t = translator(useLang());
   return (
     <>
       <button type="button" onClick={onSnap} className={ROW}>
-        <Camera className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Snap Or Note
+        <Camera className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {t("sh_snapOrNote")}
       </button>
       {quickAddActions(isStaff, features).map((a) => (
         <button type="button" key={a.href} onClick={() => onGo(a)} className={ROW}>
@@ -133,6 +137,7 @@ export function GlobalQuickAdd({
   lapsed?: boolean;
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   /** The shell said the last navigation failed: the next tap is a full load. */
@@ -200,8 +205,8 @@ export function GlobalQuickAdd({
           setSaid(null);
           setOpen((v) => !v);
         }}
-        aria-label={crew ? "Snap Or Note" : "Quick Add"}
-        title={crew ? "Snap Or Note" : "Quick Add"}
+        aria-label={crew ? t("sh_snapOrNote") : t("sh_quickAdd")}
+        title={crew ? t("sh_snapOrNote") : t("sh_quickAdd")}
         // `data-upright`: in the App Store app the top bar never rotates, so when the phone is turned
         // this button's face is painted through the same quarter turn and reads upright. ON THE BUTTON,
         // never on the wrapper above — the menu below is a SIBLING, and a transform on an ancestor

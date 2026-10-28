@@ -4,6 +4,9 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { activeRowHref, activeSection, dockTiles, visibleDock } from "@/lib/dock";
+import { dockLabel, dockTileLabel } from "@/lib/dock-words";
+import { translator } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 import { isStaffRole } from "@/lib/actions/perms";
 import { Turned } from "@/components/turned";
 import type { FeatureMap } from "@/lib/features";
@@ -94,6 +97,10 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
+  // THE WORDS IN THE PERSON'S LANGUAGE (cn-v1138): the rows and tiles through lib/dock-words (the
+  // dock's data stays English), the chrome through the shell's catalog.
+  const lang = useLang();
+  const t = translator(lang);
   // Who is office is lib/actions/perms, the one answer every door reads (W2). The dock hiding a
   // seat the server lets in is how a person finds a page by URL that the nav swore did not exist.
   const isStaff = isStaffRole(role);
@@ -121,7 +128,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
       <div className="hidden h-full shell:flex">
         <aside data-tour="dock" className="glass relative z-[70] flex h-full w-[84px] flex-col items-center gap-1 border-r border-white/40 py-3">
           {/* The logo is a door too: home, or the plan page while the company is lapsed (S1). */}
-          <Link href={lapsed ? "/subscribe" : "/planner"} className="mb-1 flex h-11 w-11 items-center justify-center rounded-2xl" aria-label={branding?.name ?? "Home"} title={branding?.name ?? "Contractor North"}>
+          <Link href={lapsed ? "/subscribe" : "/planner"} className="mb-1 flex h-11 w-11 items-center justify-center rounded-2xl" aria-label={branding?.name ?? t("sh_home")} title={branding?.name ?? "Contractor North"}>
             {logo ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logo} alt="" className="h-10 w-10 rounded-xl object-contain" />
@@ -137,6 +144,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
               const Icon = s.icon;
               const on = s.key === active?.key;
               const badge = s.children.reduce((sum, c) => sum + (c.href ? badges?.[c.href] ?? 0 : 0), 0);
+              const tile = dockTileLabel(s, lang);
               return (
                 <Link
                   key={s.key}
@@ -145,7 +153,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                   // then Money — instead of waving at the whole rail once. Both renderings carry
                   // the same name; the spotlight takes whichever is visible.
                   data-tour={`dock-${s.key}`}
-                  title={s.label}
+                  title={tile}
                   className={`group relative flex min-h-[44px] w-[74px] flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1.5 transition-transform ${
                     on ? "seaglass-active" : "hover:scale-[1.05]"
                   }`}
@@ -153,7 +161,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                   <span className={`relative z-10 flex h-9 w-9 items-center justify-center rounded-xl ${on ? "" : "text-slate-600"}`}>
                     <Icon className="h-[21px] w-[21px]" />
                   </span>
-                  <span className={`relative z-10 text-[10px] font-medium leading-none ${on ? "" : "text-slate-600"}`}>{s.short ?? s.label}</span>
+                  <span className={`relative z-10 text-[10px] font-medium leading-none ${on ? "" : "text-slate-600"}`}>{s.short ?? tile}</span>
                   {badge > 0 && (
                     <span className="absolute right-1 top-1 z-10 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-amber-900">
                       {/* Display-capped per the badge invariant (action-items/types.ts):
@@ -178,14 +186,14 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
             which costs no width at all. */}
         {active && items.filter((c) => c.href).length > 1 && (
           <nav className="hidden h-full w-[186px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-slate-200/80 bg-white/55 px-2.5 py-3 backdrop-blur-sm lg:flex">
-            <div className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{active.label}</div>
+            <div className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{dockTileLabel(active, lang)}</div>
             {items.map((c) => {
               const CIcon = c.icon;
               if (c.header || !c.href) {
                 return (
                   <div key={c.id} className="mt-2 flex items-center gap-1.5 px-2.5 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                     <CIcon className="h-3.5 w-3.5 shrink-0" />
-                    {c.label}
+                    {dockLabel(c, lang)}
                   </div>
                 );
               }
@@ -203,7 +211,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                   }`}
                 >
                   <CIcon className="relative z-10 h-4 w-4 shrink-0" />
-                  <span className="relative z-10 truncate">{c.label}</span>
+                  <span className="relative z-10 truncate">{dockLabel(c, lang)}</span>
                 </Link>
               );
             })}
@@ -234,6 +242,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
         {tiles.map((s) => {
           const Icon = s.icon;
           const onRoute = s.key === active?.key;
+          const tile = dockTileLabel(s, lang);
           return (
             <Link
               key={s.key}
@@ -253,14 +262,14 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                 // Icon+label carry `relative z-10` to sit above the gloss sheen.
                 onRoute ? "seaglass-active" : "text-slate-600"
               }`}
-              aria-label={s.label}
+              aria-label={tile}
             >
               {/* Upright this wrapper has no box at all, so the tile is byte for byte what it is today.
                   `region="the chrome"`: a tile stands up whenever the phone is turned at all, whatever
                   the turn belongs to — a button reads upright for the PERSON, not for a route. */}
               <Turned region="the chrome">
                 <Icon className="relative z-10 h-5 w-5 shrink-0" />
-                <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? s.label}</span>
+                <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? tile}</span>
               </Turned>
             </Link>
           );

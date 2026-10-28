@@ -39,11 +39,16 @@ export const CREW_IMPORT_WORDS = {
  * The one-time link for a hashed recovery token: `<base>/auth/confirm?token_hash=…&type=recovery&next=/set-password`.
  * `base` is the app's own origin (NEXT_PUBLIC_SITE_URL, the same door the reset email uses); a
  * trailing slash is dropped. Returns null when there is no base or no hash to build from.
+ *
+ * `lang` (cn-v1138): the roster's language for the row ("es" from langFromWord). A Spanish row's link
+ * carries `&lang=es`, so the confirm door speaks Spanish even on an English phone (lib/request-lang:
+ * the link's lang wins over the header); an English row's link is as it was.
  */
-export function crewSetupLink(base: string | undefined | null, hashedToken: string | undefined | null): string | null {
+export function crewSetupLink(base: string | undefined | null, hashedToken: string | undefined | null, lang?: string | null): string | null {
   const origin = String(base ?? "").trim().replace(/\/+$/, "");
   const hash = String(hashedToken ?? "").trim();
   if (!/^https?:\/\/[^/]+$/.test(origin) || !hash) return null;
   const q = new URLSearchParams({ token_hash: hash, type: "recovery", next: CREW_SETUP_NEXT });
+  if (lang === "es") q.set("lang", "es");
   return `${origin}/auth/confirm?${q.toString()}`;
 }

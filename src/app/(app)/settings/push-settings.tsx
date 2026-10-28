@@ -15,6 +15,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { registerForNativePush, nativePushPermission } from "@/lib/native-push";
 import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
+import { fillText, translator, type Lang } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -49,69 +51,43 @@ type Audience = "all" | "staff" | "tech" | "platform" | "admins";
  * words. "Quotes accepted" carries neither on purpose: an estimate already sent can still be
  * accepted with Estimates off, and that buzz is worth keeping (and muting).
  */
-const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; audience: Audience; feature?: FeatureKey; whenOff?: { feature: FeatureKey; label: string } }[] = [
-  { key: "assigned", label: "Jobs & appointments assigned to me", audience: "all" },
-  { key: "inquiry", label: "New inquiries / leads", audience: "staff", whenOff: { feature: "leads", label: "New requests from customers" } },
-  { key: "quote_accepted", label: "Quotes accepted by a customer", audience: "staff" },
-  { key: "invoice_paid", label: "Invoices paid", audience: "staff" },
+// THE WORDS LIVE IN THE CATALOG (cn-v1138, lib/words/shell.ts): a kind's label is sh_push_<kind>, its
+// line sh_pushHelp_<kind> (`help: true` says it has one), and its words with the feature off
+// sh_pushOff_<kind>; pushTriggersFor fills them in for the viewer's language, English by default.
+// {hours} in a label or a line is LONG_SHIFT_HOURS.
+const TRIGGERS: { key: string; help?: boolean; soon?: boolean; audience: Audience; feature?: FeatureKey; whenOff?: { feature: FeatureKey } }[] = [
+  { key: "assigned", audience: "all" },
+  { key: "inquiry", audience: "staff", whenOff: { feature: "leads" } },
+  { key: "quote_accepted", audience: "staff" },
+  { key: "invoice_paid", audience: "staff" },
   // day_ahead's sender is LIVE (sendDayAheadDigests via /api/automations/daily) — the toggle
   // was still marked "soon" after the backend shipped. It digests to orgStaffIds.
-  { key: "day_ahead", label: "My day ahead (morning summary)", audience: "staff" },
+  { key: "day_ahead", audience: "staff" },
   // clock_out has TWO senders: notifyGeofenceExit (techs who leave the job site while clocked in,
   // refused for staff) and the hourly long-shift job, which asks ANYONE whose own clock has run
   // LONG_SHIFT_HOURS. So everybody can receive it, and everybody gets the switch.
-  {
-    key: "clock_out",
-    label: "Clock-out reminders",
-    help: `When you leave the job site still clocked in (crew only), and when your own clock has run ${LONG_SHIFT_HOURS} hours.`,
-    audience: "all",
-  },
+  { key: "clock_out", help: true, audience: "all" },
   // The office's buzz about a crew member's clock still running at LONG_SHIFT_HOURS; the bell line
   // at OFFICE_BELL_HOURS is not a push and has no switch.
-  {
-    key: "long_shift",
-    label: `A crew clock running ${LONG_SHIFT_HOURS} hours`,
-    help: "Buzzes when somebody on your crew has been clocked in that long, so you can clock them out.",
-    audience: "staff",
-  },
-  { key: "daily_report", label: "Daily reports from crew leads", audience: "staff", feature: "daily_reports" },
+  { key: "long_shift", help: true, audience: "staff" },
+  { key: "daily_report", audience: "staff", feature: "daily_reports" },
   // A customer picked one of the times the office texted them (/api/pick/confirmed → orgStaffIds).
   // The kind had been on by default with no switch here since the pick link shipped (found by the
   // DEFAULTS mirror pin, cn-v1137): a buzz nobody could turn off.
-  {
-    key: "booked",
-    label: "A Customer Picked A Time",
-    help: "When a customer picks one of the times you sent them, it goes on the schedule and buzzes you.",
-    audience: "staff",
-  },
+  { key: "booked", help: true, audience: "staff" },
   // Its own row, not folded into "Invoices paid": Apple's Tap to Pay on iPhone requirements (the
   // launch announcement, 3.3; a decline the tech never saw, 5.12) must not go quiet as a side
   // effect of muting an unrelated alert. The help line says what it actually covers. Staff-only
   // because taking a payment is: createTapPaymentIntent runs behind requireStaff.
-  {
-    key: "tap_to_pay",
-    label: "Tap to Pay on iPhone",
-    help: "A card declined on Tap to Pay on iPhone (it buzzes even if you saw it on screen), and the one-time launch announcement.",
-    audience: "staff",
-  },
+  { key: "tap_to_pay", help: true, audience: "staff" },
   // The company's standing with North (cn-v1137): the trial's last days, a declined card and the
   // day a plan ends (lib/billing-notices from the daily cron; the Stripe webhook's declined-card
   // line). Addressed to the owner and admins only, so only they see the switch.
-  {
-    key: "billing",
-    label: "Billing And Your Plan",
-    help: "Your trial's last days, a declined card, and when a plan ends. Owners and admins only.",
-    audience: "admins",
-  },
+  { key: "billing", help: true, audience: "admins" },
   // North's own team only (cn-v1136): the blocker page (observe-blocker → platform-alert) and the
   // Monday digest (bug-watch-digest) ride the bug_watch kind. A company member never receives it,
   // so a company member never sees the switch.
-  {
-    key: "bug_watch",
-    label: "Bug Watch: Blockers And The Monday Digest",
-    help: "North's own team only: a page the moment something platform-wide breaks, and the Monday morning digest.",
-    audience: "platform",
-  },
+  { key: "bug_watch", help: true, audience: "platform" },
 ];
 // A hand copy of lib/push.ts's DEFAULTS (that file is server-only): keep the two the same.
 const DEFAULTS: Record<string, boolean> = {
@@ -136,15 +112,22 @@ const ADMIN_ROLES = ["owner", "admin"];
 /** The alert switches this person sees: by role (until the role is known, only the alerts every
  *  role receives — never a switch that can't work), then by the company's feature switches; the
  *  platform row only for a platform admin, whatever their company role. */
-export function pushTriggersFor(role: string | null, features?: FeatureMap | null, platformAdmin = false) {
-  return TRIGGERS.filter((t) => {
-    if (t.feature && !featureOn(features, t.feature)) return false;
-    if (t.audience === "platform") return platformAdmin;
-    if (t.audience === "all") return true;
+export function pushTriggersFor(role: string | null, features?: FeatureMap | null, platformAdmin = false, lang: Lang = "en") {
+  const t = translator(lang);
+  const hours = { hours: String(LONG_SHIFT_HOURS) };
+  return TRIGGERS.filter((row) => {
+    if (row.feature && !featureOn(features, row.feature)) return false;
+    if (row.audience === "platform") return platformAdmin;
+    if (row.audience === "all") return true;
     if (!role) return false;
-    if (t.audience === "admins") return ADMIN_ROLES.includes(role);
-    return t.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);
-  }).map((t) => (t.whenOff && !featureOn(features, t.whenOff.feature) ? { ...t, label: t.whenOff.label } : t));
+    if (row.audience === "admins") return ADMIN_ROLES.includes(role);
+    return row.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);
+  }).map((row) => {
+    const off = row.whenOff && !featureOn(features, row.whenOff.feature);
+    const label = fillText(t(off ? `sh_pushOff_${row.key}` : `sh_push_${row.key}`), hours);
+    const help = row.help ? fillText(t(`sh_pushHelp_${row.key}`), hours) : undefined;
+    return { ...row, label, help };
+  });
 }
 
 function urlB64ToUint8(base64String: string) {
@@ -173,6 +156,9 @@ export function PushSettings({
   /** Alerts whose feature is switched off (0352): not drawn. The stored choice is kept. */
   hiddenKeys?: string[];
 }) {
+  // The switches' words in the person's language (cn-v1138).
+  const lang = useLang();
+  const t = translator(lang);
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -267,20 +253,20 @@ export function PushSettings({
       }
       const saved = await saveDeviceToken(r.token, navigator.userAgent);
       if (!saved.ok) {
-        setMsg(saved.error ?? "Could not register this phone."); setMsgBad(true);
+        setMsg(saved.error ?? t("sh_pushCouldNotRegister")); setMsgBad(true);
         setBusy(false);
         return;
       }
       setDeviceToken(r.token);
       setEnabled(true);
-      setMsg("Notifications are on for this phone."); setMsgBad(false);
+      setMsg(t("sh_pushOnForPhone")); setMsgBad(false);
       setBusy(false);
       return;
     }
     try {
       const perm = await Notification.requestPermission();
       if (perm !== "granted") {
-        setMsg("Notifications were blocked — enable them in your browser settings to receive alerts."); setMsgBad(true);
+        setMsg(t("sh_pushBlocked")); setMsgBad(true);
         setBusy(false);
         return;
       }
@@ -291,14 +277,14 @@ export function PushSettings({
       });
       const res = await savePushSubscription(sub.toJSON() as any, navigator.userAgent);
       if (!res.ok) {
-        setMsg(res.error ?? "Could not save the subscription."); setMsgBad(true);
+        setMsg(res.error ?? t("sh_pushCouldNotSaveSub")); setMsgBad(true);
         setBusy(false);
         return;
       }
       setEnabled(true);
-      setMsg("Notifications are on for this device."); setMsgBad(false);
+      setMsg(t("sh_pushOnForDevice")); setMsgBad(false);
     } catch (e: any) {
-      setMsg(e?.message ?? "Could not enable notifications."); setMsgBad(true);
+      setMsg(e?.message ?? t("sh_pushCouldNotEnable")); setMsgBad(true);
     }
     setBusy(false);
   }
@@ -318,13 +304,13 @@ export function PushSettings({
       }
       const res = token ? await removeDeviceToken(token) : { ok: false, error: undefined };
       if (!res.ok) {
-        setMsg(res.error ?? "Couldn't turn this phone off on the server — try again."); setMsgBad(true);
+        setMsg(res.error ?? t("sh_pushCouldNotTurnOffPhone")); setMsgBad(true);
         setBusy(false);
         return;
       }
       setDeviceToken(null);
       setEnabled(false);
-      setMsg("This phone won't be sent notifications. iPhone Settings → North still shows them as allowed."); setMsgBad(false);
+      setMsg(t("sh_pushPhoneOff")); setMsgBad(false);
       setBusy(false);
       return;
     }
@@ -336,9 +322,9 @@ export function PushSettings({
         await sub.unsubscribe();
       }
       setEnabled(false);
-      setMsg("Turned off for this device."); setMsgBad(false);
+      setMsg(t("sh_pushOffForDevice")); setMsgBad(false);
     } catch (e: any) {
-      setMsg(e?.message ?? "Could not turn off."); setMsgBad(true);
+      setMsg(e?.message ?? t("sh_pushCouldNotTurnOff")); setMsgBad(true);
     }
     setBusy(false);
   }
@@ -349,39 +335,20 @@ export function PushSettings({
     savePushPrefs(next);
   }
 
-  if (!supported)
-    return (
-      <p className="text-sm text-slate-500">
-        {native
-          ? "This version of the app can't do notifications yet — update North from TestFlight."
-          : "This browser doesn't support push notifications."}
-      </p>
-    );
-  if (!configured)
-    return (
-      <p className="text-sm text-slate-500">
-        Push isn&apos;t switched on for your company yet (the server key hasn&apos;t been added). Once
-        it&apos;s in, you&apos;ll be able to enable notifications on each device right here.
-      </p>
-    );
+  if (!supported) return <p className="text-sm text-slate-500">{native ? t("sh_pushNotSupportedApp") : t("sh_pushNotSupportedBrowser")}</p>;
+  if (!configured) return <p className="text-sm text-slate-500">{t("sh_pushNotConfigured")}</p>;
 
-  const visibleTriggers = pushTriggersFor(role, features, platformAdmin);
+  const visibleTriggers = pushTriggersFor(role, features, platformAdmin, lang);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-medium text-slate-900">Notifications on this device</div>
-          <div className="text-xs text-slate-500">
-            {enabled
-              ? "On — you'll get the alerts you've turned on below."
-              : native
-                ? "Off — turn on to get alerts on this phone."
-                : "Off — turn on to get alerts on this device."}
-          </div>
+          <div className="text-sm font-medium text-slate-900">{t("sh_pushOnThisDevice")}</div>
+          <div className="text-xs text-slate-500">{enabled ? t("sh_pushOnLine") : native ? t("sh_pushOffPhoneLine") : t("sh_pushOffDeviceLine")}</div>
         </div>
         <Button onClick={enabled ? disable : enable} disabled={busy} variant={enabled ? "outline" : "primary"}>
-          {busy ? "…" : enabled ? "Turn Off" : "Enable"}
+          {busy ? "…" : enabled ? t("sh_turnOff") : t("sh_enable")}
         </Button>
       </div>
       {msg && (
@@ -397,33 +364,29 @@ export function PushSettings({
       )}
 
       <div className="space-y-2">
-        {visibleTriggers.map((t) => (
+        {visibleTriggers.map((row) => (
           <label
-            key={t.key}
-            className={`flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm ${t.soon ? "opacity-60" : ""}`}
+            key={row.key}
+            className={`flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm ${row.soon ? "opacity-60" : ""}`}
           >
             <span className="text-slate-700">
-              {t.label}
-              {t.soon && (
-                <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">soon</span>
+              {row.label}
+              {row.soon && (
+                <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">{t("sh_soon")}</span>
               )}
-              {t.help && <span className="block text-xs text-slate-500">{t.help}</span>}
+              {row.help && <span className="block text-xs text-slate-500">{row.help}</span>}
             </span>
             <input
               type="checkbox"
-              disabled={t.soon}
-              checked={prefs[t.key] ?? DEFAULTS[t.key]}
-              onChange={() => toggle(t.key)}
+              disabled={row.soon}
+              checked={prefs[row.key] ?? DEFAULTS[row.key]}
+              onChange={() => toggle(row.key)}
               className="h-4 w-4 accent-brand"
             />
           </label>
         ))}
-        {!role && !roleUnknown && <p className="text-xs text-slate-400">Loading the rest of your alerts…</p>}
-        {roleUnknown && (
-          <p className="text-xs text-red-600">
-            We couldn&apos;t check your role, so only the alerts everyone gets are listed. Reload the page to see the rest.
-          </p>
-        )}
+        {!role && !roleUnknown && <p className="text-xs text-slate-400">{t("sh_pushLoadingRest")}</p>}
+        {roleUnknown && <p className="text-xs text-red-600">{t("sh_pushRoleUnknown")}</p>}
       </div>
     </div>
   );

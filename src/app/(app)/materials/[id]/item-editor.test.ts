@@ -22,6 +22,7 @@ vi.mock("../actions", () => ({
 
 import { ItemEditor, settleFlips } from "./item-editor";
 import { COMPANY_FIELD } from "@/lib/vendor-words";
+import { LangProvider } from "@/components/lang-provider";
 
 const item = (id: string, description: string, over: Record<string, unknown> = {}) => ({
   id,
@@ -208,7 +209,46 @@ describe("quick ticks at the counter", () => {
   it("a tick that folds a line away says so with an Undo (it un-ticks that line); a refusal is a toast too", () => {
     const src = readFileSync(new URL("./item-editor.tsx", import.meta.url), "utf8");
     const body = src.slice(src.indexOf("function saveTick("), src.indexOf("function toggleTool("));
-    expect(body).toMatch(/if \(next\) \{\s*toast\([^]*?"success",\s*\{\s*label: "Undo",\s*onClick: \(\) => saveTick\(lid, it, true, false\)/);
+    // The Undo's word comes through the catalog (cn-v1138), so a Spanish-speaking tech reads Deshacer.
+    expect(body).toMatch(/if \(next\) \{\s*toast\([^]*?"success",\s*\{\s*label: t\("mt_undo"\),\s*onClick: \(\) => saveTick\(lid, it, true, false\)/);
     expect(body).toMatch(/toast\(why, "error"\)/);
+  });
+});
+
+/**
+ * THE SAME LIST IN SPANISH (cn-v1138). profiles.language reaches the editor through the (app)
+ * layout's LangProvider; every word on it comes from lib/words/materials (mt_), so a Spanish-speaking
+ * tech reads the headline, the doors and the tick's word in Spanish, and the English is byte-for-byte
+ * what it was.
+ */
+describe("in Spanish (cn-v1138)", () => {
+  const inLang = (lang: "en" | "es", props: Record<string, unknown>) =>
+    renderToStaticMarkup(createElement(LangProvider, { lang, children: createElement(ItemEditor, { listId: "l1", viewerIsStaff: false, ...props } as any) }));
+
+  it("a Spanish-speaking tech reads the headlines, the doors and the tick's word in Spanish", () => {
+    const html = inLang("es", { items: TECH_ITEMS });
+    expect(html).toContain('placeholder="Agregar un artículo…"');
+    expect(html).toContain("Herramientas — toma del taller");
+    expect(html).toContain("Por Comprar");
+    expect(html).toContain("Comprados (2)");
+    expect(html).toContain("2 por comprar");
+    expect(html).toContain("Agregar");
+    // A tool is GOT (Tomado), a material is bought (Comprado): lib/materials-checklist's rule, the catalog's word.
+    expect(html).toContain('aria-label="Tomado: Hole saw"');
+    expect(html).toContain('aria-label="Comprado: 12-2 Romex"');
+    expect(html).not.toContain("Bought (");
+    expect(html).not.toContain("To Buy");
+    expect(html).not.toContain("to buy");
+    expect(inLang("es", { items: [] })).toContain("Aún no hay artículos — agrega uno arriba.");
+    expect(inLang("es", { items: TECH_ITEMS.map((i) => ({ ...i, purchased: true })) })).toContain("No queda nada por comprar");
+    // What the shelf holds, in Spanish, with lib/materials-stock's count.
+    expect(inLang("es", { items: TECH_ITEMS, stock: { [TECH_ITEMS[0].id]: { onHand: 12, unit: "ea" } } })).toContain("En Inventario · 12 ea");
+  });
+
+  it("English is unchanged: the same render inside an English provider is the render with no provider", () => {
+    expect(inLang("en", { items: TECH_ITEMS })).toBe(tech());
+    expect(inLang("en", { items: [] })).toContain("No items yet — add one above.");
+    const html = inLang("en", { items: TECH_ITEMS });
+    for (const s of ['placeholder="Add an item…"', "Tools — grab from the shop", "To Buy", "Bought (2)", "2 to buy", 'aria-label="Got: Hole saw"', 'aria-label="Bought: 12-2 Romex"']) expect(html).toContain(s);
   });
 });

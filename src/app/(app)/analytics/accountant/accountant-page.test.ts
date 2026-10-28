@@ -95,7 +95,9 @@ describe("the page and its download agree", () => {
     expect(src("page.tsx")).toContain("periodChoices(period.kind, todayYmd, period)");
     const button = src("accountant-download.tsx");
     expect(button.match(/disabled=\{busy !== null \|\| opening !== null\}/g)).toHaveLength(3);
-    expect(button).toContain('redirect: "manual"');
+    // The fetch that never follows a redirect lives in the one download hook now (cn-v1138).
+    expect(button).toContain("useFileDownload()");
+    expect(readFileSync(join(process.cwd(), "src/components/download-button.tsx"), "utf8")).toContain('redirect: "manual"');
   });
 
   it("a file kept for Save The File never outlives its period: the card is keyed on the period, and Save The File waits while one opens", () => {

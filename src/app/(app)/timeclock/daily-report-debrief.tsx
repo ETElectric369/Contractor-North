@@ -6,6 +6,8 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Textarea } from "@/components/ui/input";
 import { formatDuration } from "@/lib/utils";
 import { useDictation } from "@/lib/use-dictation";
+import { fillText, translator } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 import { fileDailyReport, type DailyReportSummary } from "./actions";
 
 type Field = "did" | "mats";
@@ -26,6 +28,7 @@ type Field = "did" | "mats";
  * waiting on Erik flagging crew leads, not on missing code. Don't re-flag as junk.
  */
 export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = translator(useLang());
   const [did, setDid] = useState("");
   const [mats, setMats] = useState("");
   const [pending, start] = useTransition();
@@ -58,10 +61,10 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
     start(async () => {
       try {
         const res = await fileDailyReport({ did_today: did, materials_tomorrow: mats });
-        if (!res.ok) return setError(res.error ?? "Could not file the report.");
+        if (!res.ok) return setError(res.error ?? t("tc_couldNotFileReport"));
         setFiled(res.summary ?? { total_hours: 0, miles: 0, first_in: null, last_out: null, jobs: [] });
       } catch {
-        setError("No connection — your answers are kept, try again when you have bars.");
+        setError(t("tc_offlineAnswersKept"));
       }
     });
   }
@@ -83,11 +86,11 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
       >
         {dictation.recording && listening === field ? (
           <>
-            <MicOff className="h-4 w-4 shrink-0" /> Stop
+            <MicOff className="h-4 w-4 shrink-0" /> {t("tc_stop")}
           </>
         ) : (
           <>
-            <Mic className="h-4 w-4 shrink-0" /> {dictation.transcribing && listening === field ? "…" : "Dictate"}
+            <Mic className="h-4 w-4 shrink-0" /> {dictation.transcribing && listening === field ? "…" : t("tc_dictate")}
           </>
         )}
       </button>
@@ -97,18 +100,18 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
     <Modal
       open={open}
       onClose={close}
-      title="Nort — End Of Day"
+      title={t("tc_nortEndOfDay")}
       dirty={!filed && (!!did.trim() || !!mats.trim())}
       footer={
         filed ? (
-          <ModalActions onCancel={close} onSave={close} saveLabel="Done" hideCancel />
+          <ModalActions onCancel={close} onSave={close} saveLabel={t("tc_done")} hideCancel />
         ) : (
           <ModalActions
             onCancel={close}
             onSave={submit}
             saving={pending}
-            saveLabel="File Report"
-            cancelLabel="Skip"
+            saveLabel={t("tc_fileReport")}
+            cancelLabel={t("tc_skip")}
             disabled={!did.trim() && !mats.trim()}
           />
         )
@@ -119,30 +122,30 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
           <div className="flex items-start gap-2 rounded-xl border border-green-200 bg-green-50/60 p-3">
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
             <div className="text-sm">
-              <div className="font-semibold text-slate-900">Confirmed by Nort — filed for the office.</div>
+              <div className="font-semibold text-slate-900">{t("tc_confirmedByNort")}</div>
               {/* Where the office reads it now: My Day's Daily reports card (cn-v958), with Mark
                   Reviewed. "Crew Hours" was the Timeclock's door card to Timecards, gone in Wave 2,
-                  and Timecards no longer holds the reports. */}
-              <div className="mt-0.5 text-xs text-slate-500">The office reads it on their My Day.</div>
+                  and Timecards no longer holds the reports (tc_officeReadsMyDay). */}
+              <div className="mt-0.5 text-xs text-slate-500">{t("tc_officeReadsMyDay")}</div>
             </div>
           </div>
           {did.trim() && (
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">What you did today</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("tc_whatYouDidToday")}</div>
               <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{did.trim()}</p>
             </div>
           )}
           {mats.trim() && (
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Materials for tomorrow</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("tc_materialsTomorrow")}</div>
               <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{mats.trim()}</p>
             </div>
           )}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">GPS tells the story</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("tc_gpsTellsStory")}</div>
             <p className="mt-1 text-sm text-slate-700">
-              {formatDuration(filed.total_hours)} worked
-              {filed.miles > 0 ? ` · ${filed.miles} mi` : ""}
+              {fillText(t("tc_worked"), { hours: formatDuration(filed.total_hours) })}
+              {filed.miles > 0 ? ` · ${fillText(t("tc_milesShort"), { miles: String(filed.miles) })}` : ""}
               {filed.jobs.length
                 ? ` · ${filed.jobs.map((j) => `${j.label} (${formatDuration(j.hours)})`).join(", ")}`
                 : ""}
@@ -155,21 +158,18 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-white">
               <AudioLines className="h-4 w-4" />
             </span>
-            <p className="text-sm text-slate-700">
-              You&apos;re clocked out — before you go, two quick questions for the office. Nort files your
-              answers with the day&apos;s GPS story (hours, miles, time on each job).
-            </p>
+            <p className="text-sm text-slate-700">{t("tc_debriefIntro")}</p>
           </div>
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <Label className="mb-0" htmlFor="dr-did">What did you do today?</Label>
+              <Label className="mb-0" htmlFor="dr-did">{t("tc_whatToday")}</Label>
               {micButton("did")}
             </div>
             <Textarea
               id="dr-did"
               rows={3}
-              placeholder="What got done today, in plain words…"
+              placeholder={t("tc_didPlaceholder")}
               value={did}
               onChange={(e) => setDid(e.target.value)}
             />
@@ -177,13 +177,13 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <Label className="mb-0" htmlFor="dr-mats">What materials do you need tomorrow?</Label>
+              <Label className="mb-0" htmlFor="dr-mats">{t("tc_whatMaterialsTomorrow")}</Label>
               {micButton("mats")}
             </div>
             <Textarea
               id="dr-mats"
               rows={3}
-              placeholder="What was used or is still needed, and how much…"
+              placeholder={t("tc_matsPlaceholder")}
               value={mats}
               onChange={(e) => setMats(e.target.value)}
             />

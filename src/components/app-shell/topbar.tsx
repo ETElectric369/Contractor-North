@@ -14,6 +14,7 @@ import { useEstimator } from "@/lib/estimator-store";
 import { setupWaiting, talkToNort } from "@/lib/onboarding/help-rows";
 import { useNortHolding } from "@/lib/nort-holding";
 import { holdingCount, holdingWords } from "@/lib/nort/greeting";
+import { fillText, translator } from "@/lib/i18n";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import type { Answers } from "@/lib/playbook/types";
 import type { Profile } from "@/lib/types";
@@ -86,7 +87,10 @@ export function Topbar({
   const holding = useNortHolding();
   const nortHolds = nortOn && !nortBusy && holdingCount(holding) > 0;
   const holdsWords = holdingWords(holding);
-  const talkTitle = nortHolds && holdsWords ? `Nort has ${holdsWords}` : "Talk To Nort";
+  // The bar's words in the person's language (cn-v1138): `lang` is the layout's profiles.language,
+  // the same value the LangProvider carries (what Nort is holding is said in lib/nort/greeting's words).
+  const t = translator(lang);
+  const talkTitle = nortHolds && holdsWords ? fillText(t("sh_nortHas"), { what: holdsWords }) : t("sh_talkToNort");
   const talkRing = nortHolds ? " animate-pulse motion-reduce:animate-none ring-2 ring-red-500 ring-offset-1" : "";
   const p = profile as (Profile & { nort_greets?: boolean | null; nort_name?: string | null }) | null;
   // NOTHING SILENT: a person not yet walked through, or a company with setup questions open, gets a
@@ -125,8 +129,8 @@ export function Topbar({
           if (hasInAppHistory()) router.back();
           else router.push("/planner");
         }}
-        aria-label="Go back"
-        title="Back"
+        aria-label={t("sh_goBack")}
+        title={t("sh_back")}
       >
         <ArrowLeft className="h-5 w-5" />
       </button>
@@ -136,7 +140,7 @@ export function Topbar({
           the brand gives way before any control does, so the bar never scrolls sideways. */}
       {branding?.logo ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={branding.logo} alt={branding.name ?? "Company"} className="ml-1 h-8 w-auto min-w-0 max-w-[160px] shrink object-contain" />
+        <img src={branding.logo} alt={branding.name ?? t("sh_company")} className="ml-1 h-8 w-auto min-w-0 max-w-[160px] shrink object-contain" />
       ) : branding?.name ? (
         <span className="ml-1 min-w-0 max-w-[160px] shrink truncate text-base font-extrabold tracking-tight text-[rgb(var(--glass-ink))]">{branding.name}</span>
       ) : null}
@@ -149,17 +153,17 @@ export function Topbar({
           change. `turned:` puts the phone's own measurements back. */}
       <div className="flex shrink-0 items-center gap-2 sm:gap-3 turned:gap-2">
         {/* Nort's panel and deep-link openers — no DOM of its own in the bar (the panel floats). */}
-        {nortOn && <GlobalAssistant greets={p?.nort_greets !== false} nortName={p?.nort_name ?? null} fullName={p?.full_name ?? null} />}
+        {nortOn && <GlobalAssistant greets={p?.nort_greets !== false} nortName={p?.nort_name ?? null} fullName={p?.full_name ?? null} role={p?.role ?? null} />}
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}
           data-upright
           data-tour="ask"
-          aria-label={nortOn ? "Search Or Ask" : "Search"}
-          title={`${nortOn ? "Search or ask Nort" : "Search"} (${modKey})${nortOn && waiting ? " — setup is waiting inside" : ""}`}
+          aria-label={nortOn ? t("sh_searchOrAsk") : t("sh_search")}
+          title={`${nortOn ? t("sh_searchOrAskNort") : t("sh_search")} (${modKey})${nortOn && waiting ? t("sh_setupWaitingInside") : ""}`}
           className="relative flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 md:w-auto md:px-3 turned:w-11 turned:px-0"
         >
           <Search className="h-5 w-5 shrink-0" />
-          <span className="hidden text-sm md:inline turned:hidden">{nortOn ? "Search Or Ask" : "Search"}</span>
+          <span className="hidden text-sm md:inline turned:hidden">{nortOn ? t("sh_searchOrAsk") : t("sh_search")}</span>
           {/* The shortcut only where there is a keyboard to press it on. */}
           <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:pointer-fine:inline">{modKey}</span>
           {nortOn && waiting && (
@@ -174,8 +178,8 @@ export function Topbar({
               // The same anchor as Talk To Nort: it is the same button, in its other state.
               data-upright
               data-tour="nort"
-              aria-label="Stop Nort"
-              title="Stop Nort"
+              aria-label={t("sh_stopNort")}
+              title={t("sh_stopNort")}
               className="btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700"
             >
               <Square className="h-4 w-4 shrink-0 fill-current" />
@@ -189,7 +193,7 @@ export function Topbar({
               data-upright
               data-tour="nort"
               data-holding={nortHolds ? "yes" : undefined}
-              aria-label="Talk To Nort"
+              aria-label={t("sh_talkToNort")}
               title={talkTitle}
               className={"btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-brand text-white shadow-sm transition-colors hover:bg-brand-dark" + talkRing}
             >

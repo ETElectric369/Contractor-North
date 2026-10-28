@@ -211,6 +211,11 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             </p>
             <InfoPopup title="What Is In The File" label="About What Is In The File" bullets={fileBullets(todayYmd, through)} className="-mt-3 -mr-2" />
           </div>
+          {/* The books are the accountant's file; every record the company has is the export door on
+              Settings › Getting Paid (cn-v1138) — one link, where the owner is already looking for files. */}
+          <Link href="/settings?tab=getpaid" className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+            Download Everything
+          </Link>
         </Card>
       </div>
     </AccountantPeriodScope>

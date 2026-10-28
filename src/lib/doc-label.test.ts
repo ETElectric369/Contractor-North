@@ -17,7 +17,8 @@ describe("isFixedPrice — the office's Fixed chip (W1-25)", () => {
   it("the lists draw the Fixed pill and no Est / Quote pill", () => {
     for (const f of ["src/app/(app)/quotes/quotes-list.tsx", "src/app/(app)/jobs/[id]/page.tsx"]) {
       const src = readFileSync(join(process.cwd(), f), "utf8");
-      expect(src, f).toMatch(/isFixedPrice\(q\) && <span className=\{FIXED_PILL_CLASS\}>Fixed<\/span>/);
+      // The job page reads the word through its catalog (cn-v1138: jb_fixed = "Fixed"); the office list says it plain.
+      expect(src, f).toMatch(/isFixedPrice\(q\) && <span className=\{FIXED_PILL_CLASS\}>(?:Fixed|\{t\("jb_fixed"\)\})<\/span>/);
       expect(src, f).not.toContain('"Est" : "Quote"');
     }
   });

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { createTask } from "../../tasks/actions";
 
 /**
@@ -30,28 +32,29 @@ export function PhotoTaskSheet({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   function save() {
     if (!title.trim()) {
-      setError("Say what needs doing.");
+      setError(t("jb_sayWhatNeedsDoing"));
       return;
     }
     setError(null);
     start(async () => {
       const res = await createTask({ title, job_id: jobId, photo_path: photoPath });
       if (!res.ok) {
-        setError(res.error ?? "Couldn't add the task. Try again.");
+        setError(res.error ?? t("jb_couldntAddTask"));
         return;
       }
       // A same-words task was already open: nothing new was made, so the photo isn't on that task.
       if (res.duplicate)
-        toast(`${res.speak ?? "Already on the list."} The photo is on the Photos tab, not on that task.`, "info", undefined, { sticky: true });
+        toast(`${res.speak ?? t("jb_alreadyOnList")} ${t("jb_photoNotOnThatTask")}`, "info", undefined, { sticky: true });
       else if (res.photoSkipped)
-        toast("Task added. The photo is on the Photos tab: photos on tasks start after the next database update.", "info", undefined, { sticky: true });
-      else toast("Added to this job's Tasks", "success");
+        toast(t("jb_taskAddedPhotoSkipped"), "info", undefined, { sticky: true });
+      else toast(t("jb_addedToTasks"), "success");
       onClose();
       router.refresh();
     });
@@ -62,27 +65,27 @@ export function PhotoTaskSheet({
       open
       portal
       onClose={onClose}
-      title="Make It A Task"
+      title={t("jb_makeItATask")}
       size="sm"
       dirty={!!title.trim()}
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Add Task" disabled={!title.trim()} />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel={t("jb_addTask")} disabled={!title.trim()} />}
     >
       <div className="space-y-3">
         {previewUrl && (
           // eslint-disable-next-line @next/next/no-img-element -- a local object URL, not a remote image
-          <img src={previewUrl} alt="The photo you just took" className="max-h-48 w-full rounded-lg object-cover" />
+          <img src={previewUrl} alt={t("jb_photoYouJustTook")} className="max-h-48 w-full rounded-lg object-cover" />
         )}
         {/* Said, not assumed: Cancel keeps the photo, it just doesn't become a task. */}
-        <p className="text-xs text-slate-500">This photo is on the job&rsquo;s Photos tab either way.</p>
+        <p className="text-xs text-slate-500">{t("jb_photoOnTabEitherWay")}</p>
         <div>
-          <Label htmlFor="photo-task-title">What needs doing?</Label>
+          <Label htmlFor="photo-task-title">{t("jb_whatNeedsDoingQ")}</Label>
           <Input
             id="photo-task-title"
             autoFocus
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
-            placeholder="What needs doing here"
+            placeholder={t("jb_whatNeedsDoingHere")}
             className="h-11"
           />
         </div>

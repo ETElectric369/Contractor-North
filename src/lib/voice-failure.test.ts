@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { micBlockedLine, NO_VOICE_LINE, oncePerTurn, TRY_AGAIN_LINE, voiceFailureExtra } from "@/lib/voice-failure";
+import { micBlockedLine, NO_VOICE_LINE, noVoiceLine, oncePerTurn, TRY_AGAIN_LINE, tryAgainLine, voiceFailureExtra } from "@/lib/voice-failure";
+import { dict } from "@/lib/i18n";
 
 /**
  * Nort's voice loop failed on Erik's phone for a week (09-16 to 09-23) and left no trace: the
@@ -18,6 +19,15 @@ describe("the lines a failed voice turn shows", () => {
     expect(TRY_AGAIN_LINE).toContain("type below");
     expect(TRY_AGAIN_LINE.toLowerCase()).not.toContain("tap the mic");
     expect(NO_VOICE_LINE).toContain("Type below");
+  });
+
+  it("reads the catalog in the person's language (cn-v1138, nt_): the constants are the English, byte for byte", () => {
+    expect(tryAgainLine("en")).toBe(TRY_AGAIN_LINE);
+    expect(noVoiceLine("en")).toBe(NO_VOICE_LINE);
+    expect(TRY_AGAIN_LINE).toBe(dict("en").nt_tryAgainLine);
+    expect(tryAgainLine("es")).toBe("Toca Hablar Con Nort para intentarlo de nuevo, o escribe abajo.");
+    expect(noVoiceLine("es")).toBe("La voz no está disponible aquí. Escribe abajo.");
+    expect(tryAgainLine(null)).toBe(TRY_AGAIN_LINE);
   });
 
   it("fits one status line on a 375px phone (about 48 characters)", () => {

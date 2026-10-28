@@ -30,8 +30,9 @@ export async function requireStaff() {
   }
   // orgId comes back too: nearly every caller needs it (to org-scope an id-keyed write,
   // or to attribute cost), and re-fetching the same profile row in each action was a
-  // repeated papercut that quietly encouraged unscoped queries.
-  return { supabase, userId: user.id, orgId: (me as { org_id?: string | null }).org_id ?? null };
+  // repeated papercut that quietly encouraged unscoped queries. The role rides along for the
+  // same reason (cn-v1138: the owner-only export guard reads it, never the row again).
+  return { supabase, userId: user.id, orgId: (me as { org_id?: string | null }).org_id ?? null, role: String(me.role ?? "") };
 }
 
 /** Resolve a Supabase client for ANY signed-in, active member of a company: the crew as well as

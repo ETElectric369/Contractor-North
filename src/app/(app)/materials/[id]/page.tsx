@@ -21,6 +21,7 @@ import { stockForLines } from "@/lib/materials-stock";
 import { reportError } from "@/lib/observe";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
+import { asLang, fillText, translator } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +48,11 @@ export default async function MaterialListPage({
   if (!list) notFound();
   const l = list as any;
 
-  const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const { data: meRow } = await supabase.from("profiles").select("role, language").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
+  // The person's language (profiles.language, cn-v1138): every word on this page, and its dates, read in it.
+  const lang = asLang((meRow as { language?: string | null } | null)?.language);
+  const t = translator(lang);
 
   const jobId: string | null = l.jobs?.id ?? l.job_id ?? null;
 
@@ -87,7 +91,7 @@ export default async function MaterialListPage({
   // A tech can land here from a link, so it renders, but read-only with one sentence
   // saying whose it is rather than an editor whose every save would refuse.
   const techReadOnly = !viewerIsStaff && !jobId;
-  const keeperNoun = l.quote_id ? "a quote" : l.work_order_id ? "a work order" : "no job";
+  const keeperNoun = l.quote_id ? t("mt_keeperQuote") : l.work_order_id ? t("mt_keeperWorkOrder") : t("mt_keeperNoJob");
 
   // A SUPERSEDED LIST IS A TRAP, SO IT STOPS BEING AN EDITOR (for every role).
   //
@@ -129,7 +133,7 @@ export default async function MaterialListPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <BackLink fallback="/materials" fallbackLabel="Back to Material Lists" />
+      <BackLink fallback="/materials" fallbackLabel={t("mt_backToLists")} />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -143,7 +147,7 @@ export default async function MaterialListPage({
           </div>
           <div className="mt-1 flex items-center gap-3 text-sm text-slate-400">
             {l.jobs && <span className="text-slate-500">{l.name}</span>}
-            <span>Created {formatDate(l.created_at)}</span>
+            <span>{fillText(t("mt_created"), { date: formatDate(l.created_at, undefined, lang) })}</span>
             {l.jobs && (
               <Link
                 href={`/jobs/${l.jobs.id}`}
@@ -172,7 +176,7 @@ export default async function MaterialListPage({
                   href={`/print/pdf-preview?doc=material-list&id=${l.id}&back=/materials/${l.id}`}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  <ListChecks className="h-4 w-4 shrink-0" /> Pick List
+                  <ListChecks className="h-4 w-4 shrink-0" /> {t("mt_pickList")}
                 </Link>
                 {featureOn(sw.features, "purchase_orders") && (
                   <NewPoButton
@@ -190,7 +194,7 @@ export default async function MaterialListPage({
                 { quoteId: (l as any).quote_id ?? null },
                 {
                   run: deleteMaterialList.bind(null, l.id),
-                  confirm: "Delete this material list and all its items?",
+                  confirm: t("mt_deleteListConfirm"),
                 },
               )}
             />
@@ -204,20 +208,18 @@ export default async function MaterialListPage({
             /* NO DEAD ENDS: say what happened and where the live list is, in one breath. */
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
               <p className="text-sm text-amber-900">
-                This list was replaced. The job&rsquo;s materials list is a newer one, and that is the
-                list everybody works from. Anything added here would not show up on the job. The
-                items below are kept so nothing is lost.
+                {t("mt_replacedBody")}
               </p>
               <Link
                 href={`/materials/${supersededBy}`}
                 className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
               >
-                <ListChecks className="h-4 w-4 shrink-0" /> Open The Job&rsquo;s List
+                <ListChecks className="h-4 w-4 shrink-0" /> {t("mt_openJobsList")}
               </Link>
             </div>
           ) : (
             <p className="text-sm text-slate-500">
-              This list belongs to {keeperNoun} &mdash; the office keeps it.
+              {fillText(t("mt_belongsTo"), { keeper: keeperNoun })}
             </p>
           )}
           {/* The same checklist shape as the editor (lib/materials-checklist): what is still open
@@ -225,12 +227,12 @@ export default async function MaterialListPage({
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <ul className="divide-y divide-slate-100">
               {readOnlyGroups.open.map(readOnlyRow)}
-              {(items ?? []).length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items on this list.</li>}
+              {(items ?? []).length === 0 && <li className="px-4 py-6 text-center text-slate-400">{t("mt_noItemsOnList")}</li>}
             </ul>
             {readOnlyGroups.bought.length > 0 && (
               <details className="group border-t border-slate-100">
                 <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-4 text-sm font-medium text-slate-600 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
-                  Bought ({readOnlyGroups.bought.length})
+                  {fillText(t("mt_boughtFold"), { n: String(readOnlyGroups.bought.length) })}
                   <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
                 </summary>
                 <ul className="divide-y divide-slate-100 border-t border-slate-100">{readOnlyGroups.bought.map(readOnlyRow)}</ul>

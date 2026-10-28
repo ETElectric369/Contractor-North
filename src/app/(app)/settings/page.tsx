@@ -66,6 +66,7 @@ import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
 import { NortTone } from "./nort-tone";
 import { NortGreeting } from "./nort-greeting";
+import { YourData } from "./your-data";
 import { asRegister, clampHumor } from "@/lib/nort/tone";
 import { listPasskeys } from "./passkey-actions";
 import { gcalConfigured, connectionNeedsReauth } from "@/lib/google-calendar";
@@ -356,14 +357,14 @@ export default async function SettingsPage({
   // ── "You" — everything personal (profile, notifications, language, security). ─────────
   const youTab = {
     id: "you",
-    label: "You",
+    label: t("sh_you"),
     icon: User,
     content: (
       <div className="space-y-6">
         {/* HOW NORT TALKS TO YOU (0183) — under "You", not under the company, because register is
             personal: the same org holds somebody in a truck and somebody at a desk. */}
         {on("nort") && (
-          <Section title="How Nort talks to you">
+          <Section title={t("sh_howNortTalks")}>
             <NortTone
               humor={clampHumor((profile as any)?.nort_humor)}
               register={asRegister((profile as any)?.nort_register)}
@@ -378,7 +379,7 @@ export default async function SettingsPage({
             </div>
           </Section>
         )}
-        <Section title="Your profile">
+        <Section title={t("sh_yourProfile")}>
           <div className="flex flex-wrap items-center gap-5">
             <AvatarUpload
               userId={profile?.id ?? ""}
@@ -393,20 +394,20 @@ export default async function SettingsPage({
             </div>
           </div>
           <div className="mt-5 border-t border-slate-100 pt-4">
-            <div className="text-sm font-medium text-slate-700">{t("s_language")}</div>
-            <div className="mb-2 text-xs text-slate-400">{t("s_languageDesc")}</div>
+            <div className="text-sm font-medium text-slate-700">{t("sh_language")}</div>
+            <div className="mb-2 text-xs text-slate-400">{t("sh_languageDesc")}</div>
             <LanguageToggle current={profile?.language ?? "en"} />
           </div>
           <div className="mt-5 border-t border-slate-100 pt-4">
-            <div className="mb-1 text-sm font-medium text-slate-700">Navigation app</div>
+            <div className="mb-1 text-sm font-medium text-slate-700">{t("sh_navigationApp")}</div>
             <MapsProviderToggle />
           </div>
           <div className="mt-5 border-t border-slate-100 pt-4">
-            <div className="mb-2 text-sm font-medium text-slate-700">Sign-in &amp; security</div>
+            <div className="mb-2 text-sm font-medium text-slate-700">{t("sh_signInSecurity")}</div>
             <PasskeyManager passkeys={passkeys} />
           </div>
         </Section>
-        <Section title="Push notifications">
+        <Section title={t("sh_pushNotifications")}>
           <PushSettings
             initialPrefs={((profile as any)?.push_prefs ?? {}) as Record<string, boolean>}
             /* The server already read this row; passing it skips the client round trip that
@@ -766,6 +767,9 @@ export default async function SettingsPage({
                   );
                 })()}
               </Section>
+              {/* EVERYTHING THE COMPANY HAS, AS ONE FILE (cn-v1138): the export door, right under the
+                  plan it pays for; the lapsed dock's Download Everything row lands here (?tab=getpaid). */}
+              <YourData orgId={profile?.org_id ?? ""} isOwner={profile?.role === "owner"} />
             </div>
           ),
         },

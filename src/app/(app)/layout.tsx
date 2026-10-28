@@ -37,6 +37,8 @@ import { SectionSubnav } from "@/components/section-subnav";
 import { RouteOffLine } from "@/components/route-off-line";
 import { ToastProvider } from "@/components/toast";
 import { Turned } from "@/components/turned";
+import { LangProvider } from "@/components/lang-provider";
+import { asLang } from "@/lib/locale";
 import { offFeatureKey } from "@/lib/features";
 import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { Suspense } from "react";
@@ -406,6 +408,9 @@ export default async function AppLayout({
   })();
 
   return (
+    // THE PERSON'S LANGUAGE for every client component under the shell (cn-v1138): one read of
+    // profiles.language, here, and useLang() anywhere below — the dock, the top bar, every screen.
+    <LangProvider lang={asLang(profile.language)}>
     <div
       className="app-backdrop flex h-dvh overflow-hidden"
       style={
@@ -553,6 +558,7 @@ export default async function AppLayout({
           until the next clock-in (audit v1120, class 6). */}
       {(!settings.geofence_logout || (entryKnown && !openEntry)) && <FenceStandDown />}
     </div>
+    </LangProvider>
   );
 }
 

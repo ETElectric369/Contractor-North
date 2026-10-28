@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Sparkles, Plus, ArrowRight, Mic, GraduationCap, ChevronDown } from "lucide-react";
 import { visibleDock } from "@/lib/dock";
+import { dockLabel, dockTileLabel } from "@/lib/dock-words";
+import { fillText, translator, type Lang } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import { helpRows, openSetup, talkToNort } from "@/lib/onboarding/help-rows";
@@ -95,13 +98,16 @@ function aliasesFor(href: string, features: FeatureMap | null | undefined): stri
 // filter) beside "Estimates · Sales" (/quotes). Status filtering is the dock/strip's job.
 // THE SWITCH BOARD (0352) rides on the same list: it is built from visibleDock (role AND
 // switches), so a page whose dock row is switched off is not offered here either.
-type DockLeaf = { label: string; href?: string; children?: DockLeaf[]; staffOnly?: boolean };
-function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null | undefined, sectionStaff?: boolean): Item[] {
+// THE WORDS IN THE PERSON'S LANGUAGE (cn-v1138): a row's label and its section's name come through
+// lib/dock-words (the dock's data stays English); the aliases stay English words beside them, so
+// "clock in" still finds Reloj. `kind` is an id the icon and the chip read, never shown raw.
+type DockLeaf = { id: string; label: string; href?: string; children?: DockLeaf[]; staffOnly?: boolean };
+function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null | undefined, lang: Lang, sectionStaff?: boolean): Item[] {
   return nodes.flatMap((n) =>
     n.children?.length
-      ? navLeaves(n.children, n.label, features, sectionStaff || n.staffOnly)
+      ? navLeaves(n.children, dockLabel(n, lang), features, lang, sectionStaff || n.staffOnly)
       : n.href && !n.href.includes("?")
-        ? [{ kind: "Go to", label: n.label, sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: aliasesFor(n.href, features) }]
+        ? [{ kind: "Go to", label: dockLabel(n, lang), sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: aliasesFor(n.href, features) }]
         : [],
   );
 }
@@ -113,33 +119,36 @@ function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null |
  * rows (the layout's staff-only existence check) finds the page here, by its own words. A company
  * with none sees no row: a new cash purchase is a cost like any other (Snap Or Note, Add By Hand).
  */
-const PETTY_CASH_ROW: Item = {
+const pettyCashRow = (t: (key: string) => string): Item => ({
   kind: "Go to",
-  label: "Petty Cash",
+  label: t("sh_pettyCash"),
   sub: "Money",
   href: "/petty-cash",
   staffOnly: true,
   aliases: ["petty cash", "cash box", "cash", "atm"],
-};
+});
 
 /** The palette's "go to" list for this person: exported so the switch rule is pinned in a test.
- *  `lapsed` (the layout's red bar) offers the lapsed dock's three doors and nothing else. */
-export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, hasPettyCash = false, lapsed = false): Item[] {
-  if (lapsed) return visibleDock({ isStaff, features, lapsed: true }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly));
+ *  `lapsed` (the layout's red bar) offers the lapsed dock's open doors and nothing else (the
+ *  export door's row carries a ?tab=, so it stays out of the palette like every ?query row).
+ *  `lang` (cn-v1138): the words in the person's language; the default is English, as before. */
+export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, hasPettyCash = false, lapsed = false, lang: Lang = "en"): Item[] {
+  const t = translator(lang);
+  if (lapsed) return visibleDock({ isStaff, features, lapsed: true }).flatMap((s) => navLeaves(s.children, dockTileLabel(s, lang), features, lang, s.staffOnly));
   const items: Item[] = [
-    ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly)),
+    ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, dockTileLabel(s, lang), features, lang, s.staffOnly)),
     // Today is My Day alone on the dock (W1-03), so its two old pills are found here by name:
     // Reminders for everyone, Organize for the office (every save on it is requireStaff).
-    { kind: "Go to", label: "Reminders", sub: "Today", href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
-    { kind: "Go to", label: "Organize", sub: "Today", href: "/organize", staffOnly: true },
+    { kind: "Go to", label: t("sh_reminders"), sub: t("sh_dock_today"), href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
+    { kind: "Go to", label: t("sh_organize"), sub: t("sh_dock_today"), href: "/organize", staffOnly: true },
     // The Time Clock is a Money row of its own since cn-v1128 (dock.ts m-clock), so the dock feeds
     // the palette and its words (NAV_ALIASES["/timeclock"]) ride on that leaf; a tech has his Clock tile.
     // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
     // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates.
     ...(featureOn(features, "estimates")
-      ? [{ kind: "Go to", label: "New Estimate", sub: "Sales", href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] }]
+      ? [{ kind: "Go to", label: t("sh_newEstimate"), sub: "Sales", href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] }]
       : []),
-    ...(hasPettyCash ? [PETTY_CASH_ROW] : []),
+    ...(hasPettyCash ? [pettyCashRow(t)] : []),
   ];
   return isStaff ? items : items.filter((i) => !i.staffOnly);
 }
@@ -184,6 +193,7 @@ export function idleRows({
   onboarded,
   lessonsOpen = false,
   toggleLessons = () => {},
+  lang = "en",
 }: {
   isStaff: boolean;
   features?: FeatureMap | null;
@@ -191,9 +201,12 @@ export function idleRows({
   onboarded: boolean;
   lessonsOpen?: boolean;
   toggleLessons?: () => void;
+  /** The person's language (cn-v1138): Talk To Nort in it; the help rows are the office's and stay English. */
+  lang?: Lang;
 }): Item[] {
   if (!featureOn(features, "nort")) return [];
-  const rows: Item[] = [{ kind: "Nort", label: "Talk To Nort", sub: "Say it out loud", href: "#talk-to-nort", run: talkToNort }];
+  const t = translator(lang);
+  const rows: Item[] = [{ kind: "Nort", label: t("sh_talkToNort"), sub: t("sh_sayItOutLoud"), href: "#talk-to-nort", run: talkToNort }];
   for (const r of helpRows({ isStaff, onboarded, setup, nortOn: true, features })) {
     if (r.key === "lessons") {
       rows.push({ kind: "Help", label: r.label, sub: r.sub, href: "#show-me-how", run: toggleLessons, keepOpen: true, expanded: lessonsOpen });
@@ -214,6 +227,25 @@ function LeadIcon({ kind }: { kind: string }) {
   if (kind === "Create") return <Plus className="h-4 w-4 text-slate-400" />;
   if (kind === "Go to") return <ArrowRight className="h-4 w-4 text-slate-400" />;
   return <Search className="h-4 w-4 text-slate-400" />;
+}
+
+/** The chip's words for a row's kind (the palette's own kinds and /api/search's types), in the
+ *  person's language; a kind the catalog does not know is shown as it came. */
+const KIND_KEYS: Record<string, string> = {
+  "Go to": "sh_kind_goto",
+  Nort: "sh_kind_nort",
+  Help: "sh_kind_help",
+  Assistant: "sh_kind_assistant",
+  Create: "sh_kind_create",
+  Job: "sh_kind_job",
+  Customer: "sh_kind_customer",
+  Quote: "sh_kind_quote",
+  Invoice: "sh_kind_invoice",
+  Appointment: "sh_kind_appointment",
+};
+export function kindWords(kind: string, t: (key: string) => string): string {
+  const key = KIND_KEYS[kind];
+  return key ? t(key) : kind;
 }
 
 /**
@@ -243,7 +275,10 @@ export function CommandBar({
   lapsed?: boolean;
 }) {
   const router = useRouter();
-  const navItems = useMemo(() => commandNavItems(!!isStaff, features, hasPettyCash, lapsed), [isStaff, features, hasPettyCash, lapsed]);
+  // The person's language (cn-v1138): the rows, the placeholder and the chips read in it.
+  const lang = useLang();
+  const t = translator(lang);
+  const navItems = useMemo(() => commandNavItems(!!isStaff, features, hasPettyCash, lapsed, lang), [isStaff, features, hasPettyCash, lapsed, lang]);
   // Nort off: no "Ask Nort" row, no Talk To Nort, no help rows (they're under Help in the avatar
   // menu), and no promise that Enter asks him (the drawer isn't mounted).
   const nortOn = featureOn(features, "nort");
@@ -314,8 +349,8 @@ export function CommandBar({
   }, [q]);
 
   const idle = useMemo(
-    () => idleRows({ isStaff: !!isStaff, features, setup, onboarded, lessonsOpen, toggleLessons: () => setLessonsOpen((v) => !v) }),
-    [isStaff, features, setup, onboarded, lessonsOpen],
+    () => idleRows({ isStaff: !!isStaff, features, setup, onboarded, lessonsOpen, toggleLessons: () => setLessonsOpen((v) => !v), lang }),
+    [isStaff, features, setup, onboarded, lessonsOpen, lang],
   );
 
   const staticMatches = useMemo(() => {
@@ -324,8 +359,9 @@ export function CommandBar({
   }, [q, navItems, idle]);
 
   const askItem: Item | null = useMemo(
-    () => (q.trim() && nortOn ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` } : null),
-    [q, nortOn],
+    () => (q.trim() && nortOn ? { kind: "Assistant", label: fillText(t("sh_askNort"), { q: q.trim() }), href: `/assistant?q=${encodeURIComponent(q.trim())}` } : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is lang's, and lang is listed
+    [q, nortOn, lang],
   );
 
   const flat: Item[] = useMemo(
@@ -384,7 +420,7 @@ export function CommandBar({
                 if (it) go(it);
               }
             }}
-            placeholder={nortOn ? "Search or ask Nort…" : "Search jobs, customers, quotes… or jump to a page"}
+            placeholder={nortOn ? t("sh_searchPlaceholderNort") : t("sh_searchPlaceholder")}
             className="flex-1 bg-transparent py-3.5 text-sm outline-none placeholder:text-slate-400"
           />
           {loading && <span className="shrink-0 text-[11px] text-slate-400">…</span>}
@@ -393,7 +429,7 @@ export function CommandBar({
         <div className="max-h-[55vh] overflow-y-auto py-1">
           {flat.length === 0 && (
             <div className="px-4 py-6 text-center text-sm text-slate-400">
-              {nortOn ? "No matches. Press Enter to ask Nort." : "No matches."}
+              {nortOn ? t("sh_noMatchesNort") : t("sh_noMatches")}
             </div>
           )}
           {flat.map((it, i) => (
@@ -413,7 +449,7 @@ export function CommandBar({
               {it.expanded !== undefined && (
                 <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${it.expanded ? "rotate-180" : ""}`} />
               )}
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{it.kind}</span>
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{kindWords(it.kind, t)}</span>
             </button>
           ))}
         </div>
@@ -422,7 +458,7 @@ export function CommandBar({
             nobody has; a width breakpoint can't tell an iPad from a laptop, the pointer can
             (Tailwind's pointer-fine: a mouse or a trackpad). The chip names this computer's key. */}
         <div className="hidden pointer-fine:flex items-center justify-between border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400">
-          <span>↑↓ to navigate · ↵ to open · esc to close</span>
+          <span>{t("sh_keysLine")}</span>
           <span className="rounded border border-slate-200 px-1.5 py-0.5">{modKeyLabel(isApplePlatform())}</span>
         </div>
       </div>

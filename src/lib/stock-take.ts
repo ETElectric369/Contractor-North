@@ -11,6 +11,39 @@
  * The office reads what a take cost on Shop Stock and in the job's money, never here.
  */
 
+/**
+ * THE CREW'S WORDS, WITHOUT THE DICTIONARY (cn-v1138). This file rides the customer's bundles
+ * (portal/[token]/jobs → lib/portal/job-view → lib/unbilled-work → lib/stock-billing; i/[token] →
+ * lib/invoice-document-props → lib/job-financials → lib/stock-billing), so it must not import
+ * lib/i18n — that would carry every catalog (~218 KB) onto a homeowner's invoice page
+ * (lib/catalog-free-libs.test.ts holds the line). A helper that speaks to a person takes `t`, the
+ * caller's translator (lib/i18n translator(lang)); with none it reads EN below, which is byte for
+ * byte the catalog's English under the same mt_ keys (the same test pins them equal).
+ */
+export type Words = (key: string) => string;
+const EN: Record<string, string> = {
+  mt_shortWords: "{n} {unit} more than stock shows — the office will settle it",
+  mt_offRollWords: "{n} {unit} of that isn't on a filed roll yet — it still saves, and the office settles it",
+  mt_takesReadFailed: "Couldn't read what's been taken for this job just now. Reload before taking more.",
+  mt_takeUnheardNoSignal: "No signal, so Take It didn't hear back.",
+  mt_takeUnheard: "Take It didn't hear back.",
+  mt_takeMaySavedCheck: "{lead} It may have saved: check Taken From Stock below before tapping again.",
+  mt_takeMaySavedReload: "{lead} It may have saved: reload before tapping again.",
+  mt_takeItOffFirst: "Take It Off {invoice} First",
+  mt_partBilledOn: "Part billed on {invoice}, the rest not billed yet",
+  mt_billedOn: "Billed on {invoice}",
+  mt_someCameBack: "Some of it came back to stock, so this take can't be undone.",
+  mt_officeSettledPart: "The office settled part of this take, so ask the office to undo it.",
+  mt_takeLineTook: "{who} took {n} {unit} of {item}",
+  mt_takeLinePast: "{n} {unit} past stock, waiting on the office",
+  mt_takeLineBack: "{n} {unit} brought back",
+};
+/** The English the keys above hold; exported so the test can prove it is the catalog's. */
+export const STOCK_WORDS_EN: Readonly<Record<string, string>> = EN;
+const en: Words = (key) => EN[key] ?? key;
+/** lib/i18n's fillText, kept local for the same reason. */
+const fill = (template: string, vars: Record<string, string>): string => template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? vars[k] : m));
+
 /** One item on the shelf, as the crew (and this door, for everyone) sees it. */
 export type ShelfRow = {
   id: string;
@@ -113,13 +146,13 @@ export function shortOf(onHand: number, qty: number): number {
 }
 
 /** THE SHORT, SAID BEFORE AND AFTER THE TAP. It still saves: nobody hits a dead end in the field. */
-export function shortWords(short: number, unit: string): string {
-  return `${fmtQty(short)} ${unit} more than stock shows — the office will settle it`;
+export function shortWords(short: number, unit: string, t: Words = en): string {
+  return fill(t("mt_shortWords"), { n: fmtQty(short), unit });
 }
 
 /** Pieces the shelf's count shows but no filed roll holds (a count with no roll, a roll being repriced). */
-export function offRollWords(short: number, unit: string): string {
-  return `${fmtQty(short)} ${unit} of that isn't on a filed roll yet — it still saves, and the office settles it`;
+export function offRollWords(short: number, unit: string, t: Words = en): string {
+  return fill(t("mt_offRollWords"), { n: fmtQty(short), unit });
 }
 
 /**
@@ -131,10 +164,11 @@ export function takeShort(row: Pick<ShelfRow, "onHand" | "takeable">, qty: numbe
   return { short: shortOf(row.takeable, qty), past: shortOf(row.onHand, qty) };
 }
 
-/** What to say about a take's short, before or after the tap, or null when there is none. */
-export function takeShortWords(t: { short: number; past: number; unit: string }): string | null {
-  if (t.past > 0) return shortWords(t.past, t.unit);
-  if (t.short > 0) return offRollWords(t.short, t.unit);
+/** What to say about a take's short, before or after the tap, or null when there is none. In the
+ *  reader's words (cn-v1138) on the sheet; the toast and the office's bell keep the English. */
+export function takeShortWords(s: { short: number; past: number; unit: string }, t: Words = en): string | null {
+  if (s.past > 0) return shortWords(s.past, s.unit, t);
+  if (s.short > 0) return offRollWords(s.short, s.unit, t);
   return null;
 }
 
@@ -227,16 +261,19 @@ export function officeBellWords(t: { who: string; qty: number; unit: string; ite
 }
 
 /** Said in place of the job's takes when stock_takes_for_job couldn't be read: never an empty list. */
-export const TAKES_READ_FAILED = "Couldn't read what's been taken for this job just now. Reload before taking more.";
+export function takesReadFailed(t: Words = en): string {
+  return t("mt_takesReadFailed");
+}
+export const TAKES_READ_FAILED = takesReadFailed();
 
 /**
  * Take It threw, so nobody knows whether it saved. Each tap is a new take, so the words send the
  * person to the job's takes before tapping again, but only when that list read: pointing at a list
  * that failed would read as "it didn't save" and invite the same pieces twice.
  */
-export function takeUnheardWords(noSignal: boolean, listRead: boolean): string {
-  const lead = noSignal ? "No signal, so Take It didn't hear back." : "Take It didn't hear back.";
-  return listRead ? `${lead} It may have saved: check Taken From Stock below before tapping again.` : `${lead} It may have saved: reload before tapping again.`;
+export function takeUnheardWords(noSignal: boolean, listRead: boolean, t: Words = en): string {
+  const lead = noSignal ? t("mt_takeUnheardNoSignal") : t("mt_takeUnheard");
+  return fill(t(listRead ? "mt_takeMaySavedCheck" : "mt_takeMaySavedReload"), { lead });
 }
 
 /**
@@ -248,29 +285,31 @@ export function takeUnheardWords(noSignal: boolean, listRead: boolean): string {
  */
 export function takeDoor(
   t: Pick<JobTake, "canUndo" | "billedOn" | "back"> & { partBilled?: boolean; settledByOffice?: boolean },
+  w: Words = en,
 ): { kind: "undo" } | { kind: "billed"; label: string; status: string; part: boolean } | { kind: "none"; why: string | null } {
   if (t.billedOn) {
     const part = t.partBilled === true;
+    const invoice = t.billedOn;
     return {
       kind: "billed",
-      label: `Take It Off ${t.billedOn} First`,
-      status: part ? `Part billed on ${t.billedOn}, the rest not billed yet` : `Billed on ${t.billedOn}`,
+      label: fill(w("mt_takeItOffFirst"), { invoice }),
+      status: fill(w(part ? "mt_partBilledOn" : "mt_billedOn"), { invoice }),
       part,
     };
   }
   if (t.canUndo) return { kind: "undo" };
   // Nothing in the app undoes a return to the shelf yet, so this names no door that isn't there.
-  if (t.back > 0) return { kind: "none", why: "Some of it came back to stock, so this take can't be undone." };
+  if (t.back > 0) return { kind: "none", why: w("mt_someCameBack") };
   // stock_undo refuses the crew once the office's settlement is in the take (0303): say who can.
-  if (t.settledByOffice) return { kind: "none", why: "The office settled part of this take, so ask the office to undo it." };
+  if (t.settledByOffice) return { kind: "none", why: w("mt_officeSettledPart") };
   return { kind: "none", why: null };
 }
 
-/** A take as one line on the job: "Brian took 60 ft of 12/2 NM-B". */
-export function takeLine(t: Pick<JobTake, "who" | "qty" | "unit" | "item" | "short" | "back">): string {
-  const parts = [`${t.who} took ${fmtQty(t.qty)} ${t.unit} of ${t.item}`];
-  if (t.short > 0) parts.push(`${fmtQty(t.short)} ${t.unit} past stock, waiting on the office`);
-  if (t.back > 0) parts.push(`${fmtQty(t.back)} ${t.unit} brought back`);
+/** A take as one line on the job: "Brian took 60 ft of 12/2 NM-B". In the reader's words (cn-v1138). */
+export function takeLine(t: Pick<JobTake, "who" | "qty" | "unit" | "item" | "short" | "back">, w: Words = en): string {
+  const parts = [fill(w("mt_takeLineTook"), { who: t.who, n: fmtQty(t.qty), unit: t.unit, item: t.item })];
+  if (t.short > 0) parts.push(fill(w("mt_takeLinePast"), { n: fmtQty(t.short), unit: t.unit }));
+  if (t.back > 0) parts.push(fill(w("mt_takeLineBack"), { n: fmtQty(t.back), unit: t.unit }));
   return parts.join(" · ");
 }
 

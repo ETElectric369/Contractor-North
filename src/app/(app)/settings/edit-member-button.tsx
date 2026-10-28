@@ -20,6 +20,8 @@ interface Member {
   home_address?: string | null;
   commute_baseline_miles?: number | null;
   crew_lead?: boolean;
+  /** profiles.language (cn-v1138): "en" | "es"; the office can set it for someone who never opens Settings. */
+  language?: string | null;
 }
 
 /** Owner/admin edit for a team member: name/role/crew lead/login (email and password).
@@ -61,6 +63,7 @@ export function EditMemberButton({
   const [commuteBaseline, setCommuteBaseline] = useState(Number(member.commute_baseline_miles ?? 0));
   const [role, setRole] = useState(member.role);
   const [crewLead, setCrewLead] = useState(!!member.crew_lead);
+  const [language, setLanguage] = useState<"en" | "es">(member.language === "es" ? "es" : "en");
   const [email, setEmail] = useState(member.email ?? "");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -80,6 +83,7 @@ export function EditMemberButton({
       commute_baseline_miles: commuteBaseline,
       role,
       crew_lead: crewLead,
+      language,
     }, { isSelf });
     start(async () => {
       // A login change is its own door below, so a save with nothing else changed still has work to do.
@@ -172,6 +176,15 @@ export function EditMemberButton({
               </Select>
             </div>
           )}
+          {/* The person's language (cn-v1138): the app, the texts and pushes they get, and Nort.
+              The office sets it here for someone who never opens Settings; they can change it there. */}
+          <div>
+            <Label htmlFor="m-lang">Language</Label>
+            <Select id="m-lang" value={language} onChange={(e) => setLanguage(e.target.value === "es" ? "es" : "en")}>
+              <option value="en">English</option>
+              <option value="es">Español</option>
+            </Select>
+          </div>
           {/* Crew lead (any role): with Daily Reports on, Nort asks them the end-of-day debrief —
               "what did you do today?" + "what materials tomorrow?" — right after they clock out. And
               (0356) it is the switch that lets them fill in the inspection on a visit they're on,

@@ -7,6 +7,8 @@ import { type WhichJobAsk } from "@/app/(app)/timeclock/which-job-choices";
 import { NO_PUNCH_ON_SCREEN, replayTold, type AppChoseNotice } from "@/app/(app)/timeclock/clock-told";
 import { AppChoseJobNotice } from "@/app/(app)/timeclock/app-chose-notice";
 import { listPending, registerReplayer, remove, startAutoDrain, type QueuedOp } from "@/lib/offline/queue";
+import { useLang } from "@/components/lang-provider";
+import { fillText, localeOf, translator } from "@/lib/i18n";
 
 /**
  * THE QUEUE DRAINS FROM ANYWHERE IN THE APP (audit 9).
@@ -24,6 +26,9 @@ import { listPending, registerReplayer, remove, startAutoDrain, type QueuedOp } 
  * /timeclock read "Not clocked in", inviting a second one.
  */
 export function OfflineDrain({ userId }: { userId: string | null }) {
+  // The person's language (cn-v1138): the pill, the quarantine list and the replayed punch's sentence.
+  const lang = useLang();
+  const t = translator(lang);
   const [mine, setMine] = useState<QueuedOp[]>([]);
   const [showBlocked, setShowBlocked] = useState(false);
   // A punch that filed from the queue with no job gets the same "Which Job Are You On?" the live
@@ -48,7 +53,7 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
       // EVERYTHING A FILED PUNCH HAS TO SAY, decided in ONE place (clock-told: replayTold — which
       // asks askAfterPunch and tellAppChose, the same two rules the live doors call). This replayer
       // only puts the answers on screen; a rule written here is a rule that drifts from the clock's.
-      const told = replayTold(res);
+      const told = replayTold(res, lang);
       if (told.ask) setAsk(told.ask);
       if (told.told) setChose(told.told);
       for (const line of told.said) setSaid((s) => (s.includes(line) ? s : [...s, line]));
@@ -73,7 +78,7 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
       alive = false;
       stop();
     };
-  }, [userId]);
+  }, [userId, lang]);
 
   const blockedOps = mine.filter((o) => o.blocked);
   const pending = mine.length - blockedOps.length;
@@ -122,7 +127,7 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
         onClick={() => setSaid([])}
         className="mt-2 inline-flex h-11 items-center rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700"
       >
-        Got It
+        {t("cs_gotIt")}
       </button>
     </div>
   ) : null;
@@ -149,27 +154,25 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
       {saidLines}
       {blocked > 0 && showBlocked ? (
         <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-rose-200 bg-white p-3 text-xs shadow-lg">
-          <p className="font-medium text-rose-900">These never filed</p>
+          <p className="font-medium text-rose-900">{t("cs_theseNeverFiled")}</p>
           <ul className="mt-2 space-y-2">
             {blockedOps.map((o) => (
               <li key={o.clientOpId} className="rounded-xl bg-rose-50 p-2">
                 <div className="font-medium text-rose-900">
-                  {o.label} · {new Date(o.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                  {o.label} · {new Date(o.createdAt).toLocaleTimeString(localeOf(lang), { hour: "numeric", minute: "2-digit" })}
                 </div>
-                <div className="mt-0.5 text-rose-700">{o.blockedReason ?? "The server wouldn't accept it."}</div>
+                <div className="mt-0.5 text-rose-700">{o.blockedReason ?? t("cs_serverWouldntAccept")}</div>
                 <button
                   type="button"
                   onClick={() => void clear(o.clientOpId)}
                   className="mt-2 rounded-full border border-rose-300 px-2.5 py-1 font-medium text-rose-800"
                 >
-                  Clear It
+                  {t("cs_clearIt")}
                 </button>
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-slate-500">
-            Check your timecard first — if the hours are already on it, this one was a duplicate and clearing it changes nothing.
-          </p>
+          <p className="mt-2 text-slate-500">{t("cs_checkTimecardFirst")}</p>
         </div>
       ) : null}
       <div
@@ -181,8 +184,8 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
       >
         <span>
           {blocked
-            ? `${blocked} punch${blocked === 1 ? "" : "es"} the office has to enter — tell them the time you started.`
-            : `Holding ${pending} punch${pending === 1 ? "" : "es"} on this phone — filing as soon as you have signal.`}
+            ? fillText(t(blocked === 1 ? "cs_blockedOne" : "cs_blockedMany"), { n: String(blocked) })
+            : fillText(t(pending === 1 ? "cs_holdingOne" : "cs_holdingMany"), { n: String(pending) })}
         </span>
         {blocked ? (
           <button
@@ -190,7 +193,7 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
             onClick={() => setShowBlocked((v) => !v)}
             className="shrink-0 rounded-full border border-rose-300 px-2 py-0.5 font-medium text-rose-800"
           >
-            {showBlocked ? "Hide" : "Details"}
+            {showBlocked ? t("cs_hide") : t("cs_details")}
           </button>
         ) : null}
       </div>

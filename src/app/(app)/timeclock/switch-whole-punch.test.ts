@@ -303,11 +303,22 @@ describe("what a switch is said to do", () => {
     expect(es.tc_switchedWhole).not.toContain("turno");
     expect(switchJobSpoken("repointed", 0, "J-011 Honeysuckle")).toContain("this whole punch is on the new job now");
     expect(switchJobSpoken("repointed", 0, "J-011 Honeysuckle")).toContain("Any earlier part of the day stays where it was");
-    // The panel and the job page, where the sentence is shown BEFORE the tap.
-    expect(src("./timeclock-panel.tsx")).toContain("so this whole punch moves onto the job you pick: none of it stays on ${currentJobName}.");
+    // The panel and the job page, where the sentence is shown BEFORE the tap. The panel's words
+    // come through the catalog (cn-v1138), in both languages.
+    expect(src("./timeclock-panel.tsx")).toContain('fillText(t("tc_switchWholeWarn"), { job: currentJobName })');
+    expect(en.tc_switchWholeWarn).toContain("so this whole punch moves onto the job you pick: none of it stays on {job}.");
+    expect(en.tc_switchWholeWarn).not.toContain("the whole shift moves onto the job you pick");
+    expect(es.tc_switchWholeWarn).toContain("toda esta marcación pasa al trabajo que elijas");
+    expect(es.tc_switchWholeWarn).not.toContain("turno");
     expect(src("./timeclock-panel.tsx")).not.toContain("the whole shift moves onto the job you pick");
-    expect(src("../jobs/[id]/job-time-button.tsx")).toContain("Switching puts this whole punch on");
-    expect(src("../jobs/[id]/job-time-button.tsx")).not.toContain("puts this whole shift on");
+    // The job's door reads the sentence through its catalog (cn-v1138): both shapes say PUNCH.
+    expect(src("../jobs/[id]/job-time-button.tsx")).toContain('t("jb_switchWholeNoJob")');
+    expect(src("../jobs/[id]/job-time-button.tsx")).toContain('t("jb_switchWholeFrom")');
+    expect(en.jb_switchWholeNoJob).toContain("Switching puts this whole punch on");
+    expect(en.jb_switchWholeFrom).toContain("Switching puts this whole punch on");
+    expect(en.jb_switchWholeNoJob).not.toContain("puts this whole shift on");
+    expect(en.jb_switchWholeFrom).not.toContain("puts this whole shift on");
+    expect(es.jb_switchWholeFrom).toContain("toda esta marcación pasa a");
   });
 });
 
@@ -340,7 +351,7 @@ describe("the doors read the one rule, on a clock that is still running", () => 
   });
 
   it("THE DEFECT: the job page's clock ticks whenever a clock is running, not only in state 'here'", () => {
-    expect(jobDoor).toMatch(/useEffect\(\(\) => \{\s*if \(!openEntry\) return;\s*setNow\(Date\.now\(\)\);\s*const t = setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\);/);
+    expect(jobDoor).toMatch(/useEffect\(\(\) => \{\s*if \(!openEntry\) return;\s*setNow\(Date\.now\(\)\);\s*const tick = setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\);/);
     // The guard that froze it: state "switch" is exactly where the sentence is drawn.
     expect(jobDoor).not.toContain('if (state !== "here") return;');
     // And the fork reads that ticking value, from the shared rule.
@@ -353,8 +364,10 @@ describe("the doors read the one rule, on a clock that is still running", () => 
     // On the fifteen-minute line the sheet's clock and the server's can still disagree by a second, so
     // the outcome is read off the server's own answer and said out loud. Nothing silent.
     expect(jobDoor).toContain("res.mode === \"repointed\"");
-    expect(jobDoor).toContain("`Now on ${jobNumber}. This whole punch moved over.`");
-    expect(jobDoor).toContain("h before the switch stayed on ${was}.`");
+    expect(jobDoor).toContain('fillText(t("jb_switchedWhole"), { job: jobNumber })');
+    expect(en.jb_switchedWhole).toBe("Now on {job}. This whole punch moved over.");
+    expect(jobDoor).toContain('fillText(t("jb_switchedCut"), { job: jobNumber, hours:');
+    expect(en.jb_switchedCut).toContain("h before the switch stayed on {was}.");
   });
 
   it("the panel's own clock is still unconditional, which is what its comment rests on", () => {

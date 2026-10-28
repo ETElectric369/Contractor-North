@@ -10,6 +10,8 @@ import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import {
   canDeleteTask,
   checkedOffWords,
@@ -90,6 +92,7 @@ export function JobTaskList({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   // Optimistic check state, reverted on a refusal; the refresh brings the server's answer.
   const [override, setOverride] = useState<Map<string, boolean>>(new Map());
@@ -104,39 +107,39 @@ export function JobTaskList({
   const buyOpen = !!materials && materials.open > 0;
   const isDone = (t: JobTaskRow) => override.get(t.id) ?? t.status === "done";
 
-  function toggle(t: JobTaskRow) {
-    const next = !isDone(t);
-    setOverride((m) => new Map(m).set(t.id, next));
+  function toggle(task: JobTaskRow) {
+    const next = !isDone(task);
+    setOverride((m) => new Map(m).set(task.id, next));
     start(async () => {
-      let res: ToggleTaskResult = await toggleTask(t.id, next, { jobId });
+      let res: ToggleTaskResult = await toggleTask(task.id, next, { jobId });
       if (!res.ok && res.needsCascade && next) {
         const n = res.openChildren ?? 0;
-        if (!confirm(`"${t.title}" has ${n} open step${n === 1 ? "" : "s"}. Mark ${n === 1 ? "it" : "them"} done too?`)) {
-          setOverride((m) => new Map(m).set(t.id, !next));
+        if (!confirm(n === 1 ? fillText(t("jb_cascadeOne"), { title: task.title }) : fillText(t("jb_cascadeMany"), { title: task.title, n: String(n) }))) {
+          setOverride((m) => new Map(m).set(task.id, !next));
           return;
         }
-        res = await toggleTask(t.id, next, { jobId, cascade: true });
+        res = await toggleTask(task.id, next, { jobId, cascade: true });
       }
       if (!res.ok) {
-        setOverride((m) => new Map(m).set(t.id, !next));
-        toast(res.error ?? "Couldn't update the task. Try again.", "error");
+        setOverride((m) => new Map(m).set(task.id, !next));
+        toast(res.error ?? t("jb_couldntUpdateTask"), "error");
         return;
       }
       // Reopening takes a task's done photo off it (0358 clears it); the file stays on the job. Said.
-      const doneShot = photos[t.id]?.done;
-      if (!next && doneShot && typeof doneShot === "object") toast("Reopened. Its done photo is still on the Photos tab.", "info");
+      const doneShot = photos[task.id]?.done;
+      if (!next && doneShot && typeof doneShot === "object") toast(t("jb_reopenedPhotoStays"), "info");
       // A checked task leaves the open list for the Done fold, so the check-off carries an Undo:
       // never a mis-tap that takes opening the fold and checking the row again to take back. A
       // check-off that closed open steps with it says so, and its Undo reopens exactly those steps
       // (closedSteps), never one already done.
       if (next) {
         const closed = res.closedSteps ?? [];
-        toast(checkedOffWords(t.title, closed.length), "success", {
-          label: "Undo",
+        toast(checkedOffWords(task.title, closed.length), "success", {
+          label: t("jb_undo"),
           onClick: () => {
-            setOverride((m) => new Map(m).set(t.id, false));
-            void undoCheckOff(toggleTask, t, closed, jobId).then((back) => {
-              if (!back.ok) setOverride((m) => new Map(m).set(t.id, true));
+            setOverride((m) => new Map(m).set(task.id, false));
+            void undoCheckOff(toggleTask, task, closed, jobId).then((back) => {
+              if (!back.ok) setOverride((m) => new Map(m).set(task.id, true));
               if (back.say) toast(back.say.text, back.say.tone);
               router.refresh();
             });
@@ -147,36 +150,36 @@ export function JobTaskList({
     });
   }
 
-  const row = (t: JobTaskRow) => {
-    const checked = isDone(t);
-    const p = photos[t.id];
+  const row = (task: JobTaskRow) => {
+    const checked = isDone(task);
+    const p = photos[task.id];
     return (
-      <li key={t.id} className="flex items-center gap-1 pr-2">
+      <li key={task.id} className="flex items-center gap-1 pr-2">
         {/* 44px: the checkbox is the row's most-tapped target, one-handed on a ladder. */}
         <label className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
           <input
             type="checkbox"
             checked={checked}
-            onChange={() => toggle(t)}
+            onChange={() => toggle(task)}
             disabled={pending}
-            aria-label={checked ? `Reopen ${t.title}` : `Check off ${t.title}`}
+            aria-label={checked ? fillText(t("jb_reopenAria"), { title: task.title }) : fillText(t("jb_checkOffAria"), { title: task.title })}
             className="h-5 w-5 rounded border-slate-300 text-brand focus:ring-brand"
           />
         </label>
         <button
           type="button"
-          onClick={() => setEditing(t)}
+          onClick={() => setEditing(task)}
           className="flex min-h-[44px] min-w-0 flex-1 flex-col justify-center py-1 text-left"
         >
-          <span className={checked ? "text-sm text-slate-400 line-through" : "text-sm font-medium text-slate-900"}>{t.title}</span>
-          {t.status === "done" && <span className="text-xs text-slate-500">{doneWords(t, tz, now)}</span>}
+          <span className={checked ? "text-sm text-slate-400 line-through" : "text-sm font-medium text-slate-900"}>{task.title}</span>
+          {task.status === "done" && <span className="text-xs text-slate-500">{doneWords(task, tz, now)}</span>}
         </button>
-        <Thumb photo={p?.task ?? null} label={`Photo for ${t.title}`} onOpen={setViewing} />
-        {t.status === "done" && stamps && (
+        <Thumb photo={p?.task ?? null} label={fillText(t("jb_photoFor"), { title: task.title })} onOpen={setViewing} />
+        {task.status === "done" && stamps && (
           p?.done ? (
-            <Thumb photo={p.done} label={`Photo of ${t.title} done`} onOpen={setViewing} />
+            <Thumb photo={p.done} label={fillText(t("jb_photoOfDone"), { title: task.title })} onOpen={setViewing} />
           ) : (
-            <DonePhotoButton orgId={orgId} jobId={jobId} taskId={t.id} />
+            <DonePhotoButton orgId={orgId} jobId={jobId} taskId={task.id} />
           )
         )}
       </li>
@@ -213,7 +216,7 @@ export function JobTaskList({
     <Card className="overflow-hidden">
       {header}
       {failed && (
-        <p className="px-4 py-3 text-sm text-red-600">Couldn&rsquo;t read this job&rsquo;s tasks just now. Reload to try again.</p>
+        <p className="px-4 py-3 text-sm text-red-600">{t("jb_couldntReadTasks")}</p>
       )}
       {/* Every open task, the live Buy Materials row first when it is open. No cap and no "+N more":
           the list is the list, wherever it is drawn (b7f23be0). */}
@@ -224,7 +227,7 @@ export function JobTaskList({
         </ul>
       )}
       {!failed && total > 0 && tally.open === 0 && (
-        <p className="px-4 py-3 text-sm text-slate-500">Everything on this list is done.</p>
+        <p className="px-4 py-3 text-sm text-slate-500">{t("jb_everythingDone")}</p>
       )}
       {!failed && <AddTaskLine jobId={jobId} orgId={orgId} photoDoor={stamps} bordered={total > 0} />}
       {!failed && tally.done > 0 && (
@@ -235,7 +238,7 @@ export function JobTaskList({
             aria-expanded={foldOpen}
             className="flex min-h-[44px] w-full items-center justify-between px-4 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
           >
-            {tally.done} Done
+            {tally.done} {t("jb_done")}
             <ChevronDown className={`h-4 w-4 transition-transform ${foldOpen ? "rotate-180" : ""}`} />
           </button>
           {foldOpen && (
@@ -247,9 +250,7 @@ export function JobTaskList({
         </div>
       )}
       {!stamps && !failed && (
-        <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">
-          Photos on tasks, and who checked each one off, start after the next database update.
-        </p>
+        <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">{t("jb_tasksStampsNote")}</p>
       )}
 
       {editing && (
@@ -261,7 +262,7 @@ export function JobTaskList({
           onClose={() => setEditing(null)}
         />
       )}
-      {viewing && <MediaLightbox url={viewing} name="Task photo" onClose={() => setViewing(null)} />}
+      {viewing && <MediaLightbox url={viewing} name={t("jb_taskPhoto")} onClose={() => setViewing(null)} />}
     </Card>
   );
 }
@@ -269,9 +270,10 @@ export function JobTaskList({
 /** The task's photo: a 44px thumbnail that opens it full screen, or a plain word when the photo is
  *  gone ("Photo removed" — it was deleted from the Photos tab) or can't be shown just now. */
 function Thumb({ photo, label, onOpen }: { photo: TaskPhoto; label: string; onOpen: (url: string) => void }) {
+  const t = translator(useLang());
   if (!photo) return null;
-  if (photo === "removed") return <span className="shrink-0 text-xs text-slate-400">Photo removed</span>;
-  if (photo === "unavailable") return <span className="shrink-0 text-xs text-slate-400">Photo unavailable</span>;
+  if (photo === "removed") return <span className="shrink-0 text-xs text-slate-400">{t("jb_photoRemoved")}</span>;
+  if (photo === "unavailable") return <span className="shrink-0 text-xs text-slate-400">{t("jb_photoUnavailable")}</span>;
   return (
     <button
       type="button"
@@ -292,6 +294,7 @@ function Thumb({ photo, label, onOpen }: { photo: TaskPhoto; label: string; onOp
 function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; orgId: string; photoDoor: boolean; bordered: boolean }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [title, setTitle] = useState("");
   const [pending, start] = useTransition();
   const [uploading, setUploading] = useState(false);
@@ -303,12 +306,12 @@ function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; org
     start(async () => {
       const res = await createTask({ title, job_id: jobId });
       if (!res.ok) {
-        toast(res.error ?? "Couldn't add the task. Try again.", "error");
+        toast(res.error ?? t("jb_couldntAddTask"), "error");
         return;
       }
       // Said every time: on the Overview card a new task can land past the three it shows.
-      if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
-      else toast("Added to this job's Tasks", "success");
+      if (res.duplicate) toast(res.speak ?? t("jb_alreadyOnList"), "info");
+      else toast(t("jb_addedToTasks"), "success");
       setTitle("");
       router.refresh();
     });
@@ -323,7 +326,7 @@ function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; org
       const [path] = await uploadJobPhotos(orgId, jobId, [file]);
       setSheet({ path, preview: URL.createObjectURL(file) });
     } catch (err: any) {
-      toast(err?.message ?? "The photo didn't upload. Try again.", "error");
+      toast(err?.message ?? t("jb_photoDidntUpload"), "error");
     } finally {
       setUploading(false);
     }
@@ -335,12 +338,12 @@ function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; org
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && add()}
-        placeholder="Add A Task…"
-        aria-label="Add A Task"
+        placeholder={t("jb_addATaskPh")}
+        aria-label={t("jb_addATask")}
         className="h-11 min-w-0 flex-1"
       />
       <Button onClick={add} disabled={pending || !title.trim()} className="shrink-0 px-3">
-        <Plus /> Add
+        <Plus /> {t("jb_add")}
       </Button>
       {photoDoor && (
         <>
@@ -351,9 +354,9 @@ function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; org
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             className="shrink-0 px-3"
-            title="Take a photo and make it a task"
+            title={t("jb_takePhotoMakeTask")}
           >
-            {uploading ? <Loader2 className="animate-spin" /> : <Camera />} Photo
+            {uploading ? <Loader2 className="animate-spin" /> : <Camera />} {t("jb_photo")}
           </Button>
         </>
       )}
@@ -376,6 +379,7 @@ function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; org
 function DonePhotoButton({ orgId, jobId, taskId }: { orgId: string; jobId: string; taskId: string }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
 
@@ -387,11 +391,11 @@ function DonePhotoButton({ orgId, jobId, taskId }: { orgId: string; jobId: strin
     try {
       const [path] = await uploadJobPhotos(orgId, jobId, [file]);
       const res = await setTaskDonePhoto(taskId, path, { jobId });
-      if (!res.ok) toast(res.error ?? "The photo is on the Photos tab, but it didn't go on the task.", "error");
-      else toast("Photo added", "success");
+      if (!res.ok) toast(res.error ?? t("jb_photoNotOnTask"), "error");
+      else toast(t("jb_photoAdded"), "success");
       router.refresh();
     } catch (err: any) {
-      toast(err?.message ?? "The photo didn't upload. Try again.", "error");
+      toast(err?.message ?? t("jb_photoDidntUpload"), "error");
     } finally {
       setBusy(false);
     }
@@ -406,7 +410,7 @@ function DonePhotoButton({ orgId, jobId, taskId }: { orgId: string; jobId: strin
         disabled={busy}
         className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-brand disabled:opacity-50"
       >
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />} Add Photo
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />} {t("jb_addPhoto")}
       </button>
     </>
   );
@@ -426,6 +430,7 @@ function TaskEditSheet({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [title, setTitle] = useState(task.title);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -433,7 +438,7 @@ function TaskEditSheet({
 
   function save() {
     if (!title.trim()) {
-      setError("A task needs its words.");
+      setError(t("jb_taskNeedsWords"));
       return;
     }
     if (!changed) {
@@ -443,7 +448,7 @@ function TaskEditSheet({
     start(async () => {
       const res = await updateTask(task.id, { title }, { jobId });
       if (!res.ok) {
-        setError(res.error ?? "Couldn't save. Try again.");
+        setError(res.error ?? t("jb_couldntSave"));
         return;
       }
       onClose();
@@ -452,14 +457,14 @@ function TaskEditSheet({
   }
 
   function remove() {
-    if (!confirm(`Delete "${task.title}"? This can't be undone.`)) return;
+    if (!confirm(fillText(t("jb_deleteTaskConfirm"), { title: task.title }))) return;
     start(async () => {
       const res = await deleteTask(task.id, { jobId });
       if (!res.ok) {
-        setError(res.error ?? "Couldn't delete the task. Try again.");
+        setError(res.error ?? t("jb_couldntDeleteTask"));
         return;
       }
-      toast("Task deleted", "success");
+      toast(t("jb_taskDeleted"), "success");
       onClose();
       router.refresh();
     });
@@ -470,7 +475,7 @@ function TaskEditSheet({
       open
       portal
       onClose={onClose}
-      title="Task"
+      title={t("jb_task")}
       size="sm"
       dirty={changed}
       footer={
@@ -478,11 +483,11 @@ function TaskEditSheet({
           onCancel={onClose}
           onSave={save}
           saving={pending}
-          saveLabel="Save Changes"
+          saveLabel={t("jb_saveChanges")}
           extra={
             canDelete ? (
               <Button type="button" variant="ghost" onClick={remove} disabled={pending} className="text-red-600 hover:text-red-700">
-                Delete Task
+                {t("jb_deleteTask")}
               </Button>
             ) : undefined
           }
@@ -491,7 +496,7 @@ function TaskEditSheet({
     >
       <div className="space-y-3">
         <div>
-          <Label htmlFor={`task-title-${task.id}`}>What needs doing</Label>
+          <Label htmlFor={`task-title-${task.id}`}>{t("jb_whatNeedsDoing")}</Label>
           <Input
             id={`task-title-${task.id}`}
             value={title}
@@ -502,11 +507,7 @@ function TaskEditSheet({
         </div>
         {/* The note: e.g. an older materials request's whole text and who asked (the title stops at 120). */}
         {task.notes && <p className="whitespace-pre-wrap text-sm text-slate-600">{task.notes}</p>}
-        {!canDelete && (
-          <p className="text-xs text-slate-500">
-            The office or whoever added this task can delete it. You can check it off from the list.
-          </p>
-        )}
+        {!canDelete && <p className="text-xs text-slate-500">{t("jb_whoCanDelete")}</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
     </Modal>

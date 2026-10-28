@@ -84,6 +84,17 @@ describe("the Office and Tools rows follow the role and the Calculators switch",
       expect(html).toContain("Sign Out");
     }
   });
+
+  it("a Spanish-speaking tech (cn-v1138): Ajustes, Oficina, Herramientas, Idioma, Cerrar Sesión — his rows in his words; English byte for byte as before", () => {
+    const es = render(ALL_ON, "tech", { lang: "es" });
+    expect(links(es)).toEqual(["/settings:Ajustes", "/compliance:Oficina", "/tools:Herramientas"]);
+    expect(es).toContain("Idioma");
+    expect(buttonWords(es)).toContain("Cerrar Sesión");
+    expect(es).toMatch(/<button[^>]*aria-label="Cuenta"/);
+    for (const en of ["Settings", "Sign Out", ">Language<", "Office", "Tools", 'aria-label="Account"']) expect(es).not.toContain(en);
+    expect(render(ALL_ON, "owner", { lang: "es" })).toContain("QR de presupuesto");
+    expect(render(ALL_ON, "tech", { lang: "en" })).toBe(render(ALL_ON, "tech"));
+  });
 });
 
 /**

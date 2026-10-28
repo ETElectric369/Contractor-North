@@ -8,6 +8,7 @@ import { reportError } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { withoutHeldCrumb } from "@/lib/held-crumb";
 import { EOD_LOCAL_HOUR, atLocalHour, readActiveOrgs } from "@/lib/cron-orgs";
+import { asLang, fillText, translator } from "@/lib/i18n";
 
 // Every company in one run, one after another: the budget every cron carries now (cn-v1130).
 export const maxDuration = 300;
@@ -89,9 +90,10 @@ export async function GET(request: Request) {
       // Pacific evening shift counts toward today rather than tomorrow.
       const { dayStart } = todayBoundsInTz(getOrgSettings(org.settings).timezone);
       const [techsR, entriesR] = await Promise.all([
+        // `language` rides the one people read (cn-v1138): each text speaks the tech's own language.
         supabase
           .from("profiles")
-          .select("id, full_name, phone")
+          .select("id, full_name, phone, language")
           .eq("org_id", org.id)
           .eq("active", true)
           .eq("role", "tech"),
@@ -121,23 +123,25 @@ export async function GET(request: Request) {
       }
 
       counts.checked += techs.length;
-      for (const t of techs) {
-        const todays = byTech.get(t.id) ?? [];
+      for (const tech of techs) {
+        const todays = byTech.get(tech.id) ?? [];
         if (todays.length === 0) continue; // never clocked in — handled by /nudge
 
         const stillOpen = todays.some((e) => e.status === "open");
         const anyDocumented = todays.some((e) => withoutHeldCrumb(e.notes)); // the clock's own take-back line is not a note
 
+        const t = translator(asLang(tech.language));
+        const name = tech.full_name ?? "";
         let message = "";
         if (stillOpen) {
-          message = `Hi ${t.full_name ?? ""} — you're still clocked in. Please clock out and fill out your end-of-day form in Contractor North.`;
+          message = fillText(t("nb_eodStillIn"), { name });
         } else if (!anyDocumented) {
-          message = `Hi ${t.full_name ?? ""} — please fill out your end-of-day form (what you worked on today) in Contractor North.`;
+          message = fillText(t("nb_eodNoForm"), { name });
         } else {
           continue; // done for the day
         }
 
-        const sent = await sendSms(t.phone, message, (org.settings as any)?.sms_from_number);
+        const sent = await sendSms(tech.phone, message, (org.settings as any)?.sms_from_number);
         if (sent) counts.reminded++;
       }
     } catch (e) {

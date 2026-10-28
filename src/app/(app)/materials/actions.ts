@@ -17,6 +17,8 @@ import { sendPushToProfiles } from "@/lib/push";
 import { jobLabel } from "@/lib/schedule-options";
 import { askLine } from "@/lib/materials-checklist";
 import type { CaptureItem } from "@/lib/inspection/capture";
+import { asLang, translator, type Lang } from "@/lib/i18n";
+import { callerLang } from "@/lib/lang-of";
 
 export interface DraftMaterial {
   description: string;
@@ -36,7 +38,7 @@ export type Result = { ok: boolean; error?: string; id?: string; /** What the do
  *  how many, the catalog #, whether it's been bought — is the crew's as much as the office's. */
 const MONEY_FIELDS = ["vendor", "est_cost", "is_tool"] as const;
 type Db = Awaited<ReturnType<typeof createClient>>;
-type Actor = { id: string; staff: boolean; orgId: string | null; name: string };
+type Actor = { id: string; staff: boolean; orgId: string | null; name: string; /** profiles.language: the words a refusal comes back in (cn-v1138). */ lang: Lang };
 
 /**
  * WHO IS WRITING — resolved from the session's own profile row, the way requestMaterials resolves
@@ -56,13 +58,14 @@ async function actorOf(supabase: Db): Promise<Actor | null> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data: me } = await supabase.from("profiles").select("role, org_id, full_name").eq("id", user.id).maybeSingle();
-  const p = (me ?? {}) as { role?: string | null; org_id?: string | null; full_name?: string | null };
+  const { data: me } = await supabase.from("profiles").select("role, org_id, full_name, language").eq("id", user.id).maybeSingle();
+  const p = (me ?? {}) as { role?: string | null; org_id?: string | null; full_name?: string | null; language?: string | null };
   return {
     id: user.id,
     staff: isStaffRole(p.role),
     orgId: p.org_id ?? null,
     name: p.full_name?.trim() || "A crew member",
+    lang: asLang(p.language),
   };
 }
 
@@ -213,7 +216,7 @@ export async function ensureJobMaterialList(jobId: string): Promise<Result> {
     .eq("id", jobId)
     .maybeSingle();
   if (jErr) return { ok: false, error: jErr.message };
-  if (!job) return { ok: false, error: "Job not found." };
+  if (!job) return { ok: false, error: translator(await callerLang(supabase))("mt_jobNotFound") };
 
   const { data: list, error } = await supabase
     .from("material_lists")
@@ -304,8 +307,9 @@ async function insertMaterialLine(
   listId: string,
   item: DraftMaterial,
 ): Promise<Result & { description?: string; /** The row with this key was already on the list: this call added nothing. */ kept?: boolean; /** He deleted this key from the list before (dismissed_keys, 0390): nothing was added. */ leftOff?: boolean }> {
+  const t = translator(actor.lang);
   const description = String(item.description ?? "").trim();
-  if (!description) return { ok: false, error: "Say what the item is." };
+  if (!description) return { ok: false, error: t("mt_sayWhatItem") };
 
   // A KEYED ROW HE DELETED STAYS GONE (cn-v1134): the delete door put its key on the list's
   // dismissed_keys (0390) so the estimate's sync never births it again (sync-job-materials) — the same
@@ -351,7 +355,7 @@ async function insertMaterialLine(
     if (have) return { ok: true, id: (have as { id: string }).id, description, kept: true };
   }
   if (error) return { ok: false, error: dbError(error) };
-  if (!inserted) return { ok: false, error: "You don't have permission to change this list." };
+  if (!inserted) return { ok: false, error: t("mt_noPermissionList") };
   revalidatePath(`/materials/${listId}`);
   return { ok: true, id: (inserted as { id: string }).id, description };
 }
@@ -450,10 +454,11 @@ export async function updateMaterialItem(
   const supabase = await createClient();
   const actor = await actorOf(supabase);
   if (!actor) return { ok: false, error: "Not signed in." };
+  const t = translator(actor.lang);
   const clean: Record<string, unknown> = {};
   if (patch.description !== undefined) {
     const description = String(patch.description ?? "").trim();
-    if (!description) return { ok: false, error: "Say what the item is." };
+    if (!description) return { ok: false, error: t("mt_sayWhatItem") };
     clean.description = description;
   }
   if (patch.part_number !== undefined) clean.part_number = patch.part_number || null;
@@ -469,9 +474,9 @@ export async function updateMaterialItem(
   // rather than return an ok for a no-op — the tech's editor never sends these, so reaching this
   // means a caller assumed otherwise.
   if (!Object.keys(clean).length)
-    return { ok: false, error: "Cost, vendor and the tool flag are the office's to set." };
+    return { ok: false, error: t("mt_moneyIsOffices") };
   const { data, error } = await supabase.from("material_list_items").update(clean).eq("id", itemId).select("id");
-  if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
+  if (!error && !data?.length) return { ok: false, error: t("mt_noPermissionList") };
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
@@ -489,7 +494,8 @@ export async function setMaterialItemPurchased(
     .eq("id", itemId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
+  // The language is read only on the refusal: a tick at the counter pays for no extra round trip.
+  if (!data?.length) return { ok: false, error: translator(await callerLang(supabase))("mt_noPermissionList") };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
 }
@@ -507,9 +513,10 @@ export async function setMaterialItemTool(
   const supabase = await createClient();
   const actor = await actorOf(supabase);
   if (!actor) return { ok: false, error: "Not signed in." };
-  if (!actor.staff) return { ok: false, error: "Tools are marked by the office." };
+  const t = translator(actor.lang);
+  if (!actor.staff) return { ok: false, error: t("mt_toolsOffice") };
   const { data, error } = await supabase.from("material_list_items").update({ is_tool: isTool }).eq("id", itemId).select("id");
-  if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
+  if (!error && !data?.length) return { ok: false, error: t("mt_noPermissionList") };
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
@@ -531,7 +538,7 @@ export async function deleteMaterialItem(
     .eq("id", itemId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
+  if (!data?.length) return { ok: false, error: translator(await callerLang(supabase))("mt_noPermissionList") };
   if (key) {
     // Through the one door the crew can use too (dismiss_material_key, 0390: material_lists is
     // staff-writable, a tech's direct update would match nothing). Atomic, idempotent. Best-effort: the
@@ -743,9 +750,10 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
   const supabase = await createClient();
   const actor = await actorOf(supabase);
   if (!actor) return { ok: false, error: "Sign in first." };
+  const t = translator(actor.lang);
   const text = String(what ?? "").trim();
-  if (!text) return { ok: false, error: "Say what you need." };
-  if (text.length > 2000) return { ok: false, error: "That's a lot — trim it down a bit." };
+  if (!text) return { ok: false, error: t("mt_sayWhatYouNeed") };
+  if (text.length > 2000) return { ok: false, error: t("mt_tooLong") };
 
   // RLS scopes both: a job id from another tenant simply doesn't resolve.
   const { data: job } = await supabase
@@ -753,7 +761,7 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
     .select("id, org_id, job_number, name")
     .eq("id", jobId)
     .maybeSingle();
-  if (!job) return { ok: false, error: "That job no longer exists." };
+  if (!job) return { ok: false, error: t("mt_jobGone") };
 
   const who = actor.name;
   const label = jobLabel(job as { job_number?: string | null; name?: string | null });
@@ -761,7 +769,7 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
   // A LINE on the job's one list (the canonical one; the first line on a list-less job starts it),
   // never a task: the live Buy Materials row on the job's Tasks already carries every open line.
   const list = await ensureJobMaterialList(jobId);
-  if (!list.ok || !list.id) return { ok: false, error: list.error ?? "Couldn't reach this job's materials list." };
+  if (!list.ok || !list.id) return { ok: false, error: list.error ?? t("mt_listUnreachable") };
   const line = await insertMaterialLine(supabase, actor, list.id, {
     description: askLine(text),
     part_number: null,

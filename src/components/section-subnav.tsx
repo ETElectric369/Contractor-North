@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { activeRowHref, activeSection, visibleDock } from "@/lib/dock";
+import { dockLabel } from "@/lib/dock-words";
+import { useLang } from "@/components/lang-provider";
 import type { FeatureMap } from "@/lib/features";
 import { SectionSheet } from "./section-sheet";
 
@@ -26,6 +28,8 @@ export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?:
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
+  // The rows' words in the person's language (lib/dock-words; the dock's data stays English).
+  const lang = useLang();
 
   // THE ONE DOCK FILTER (lib/dock visibleDock): the same tiles and rows the dock draws, role and
   // switches both (and the lapsed mode), so the strip can never offer a page the dock has put away.
@@ -90,7 +94,7 @@ export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?:
             }`}
           >
             <Icon className="relative z-10 h-[18px] w-[18px] shrink-0" />
-            <span className="relative z-10">{c.label}</span>
+            <span className="relative z-10">{dockLabel(c, lang)}</span>
           </Link>
         );
       })}

@@ -144,3 +144,48 @@ describe("undoTakeAction", () => {
     expect(requireMember).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A SPANISH-SPEAKING CALLER IS ANSWERED IN SPANISH (cn-v1138). The words are read from the caller's own
+ * profile (lib/lang-of callerLang) only where a refusal or an answer is said, never before sign-in and
+ * never on a take that went through; the toast after Take It keeps lib/stock-take's words.
+ */
+describe("a Spanish-speaking caller (cn-v1138)", () => {
+  /** A member whose profile says es: the client carries auth and answers the language read. */
+  function spanishMember(staff: boolean) {
+    const builder: any = {
+      select: () => builder,
+      eq: () => builder,
+      limit: () => builder,
+      maybeSingle: async () => ({ data: { id: JOB, job_number: "J-011", name: "Honeysuckle" }, error: null }),
+    };
+    const profiles: any = { select: () => profiles, eq: () => profiles, limit: () => profiles, maybeSingle: async () => ({ data: { language: "es" }, error: null }) };
+    const supabase = { auth: { getUser: async () => ({ data: { user: { id: "u-brian" } } }) }, from: (t: string) => (t === "profiles" ? profiles : builder) };
+    requireMember.mockResolvedValue({ supabase, userId: "u-brian", orgId: ORG, staff, name: "Brian" });
+  }
+
+  it("Undo's refusal and its answer come back in Spanish", async () => {
+    spanishMember(false);
+    undoTake.mockResolvedValue({ ok: true, undone: 0 });
+    expect(await undoTakeAction(GROUP, JOB)).toEqual({ ok: false, error: "Esa toma ya se deshizo. Recarga para ver cómo quedó." });
+    undoTake.mockResolvedValue({ ok: true, undone: 1 });
+    expect(await undoTakeAction(GROUP, JOB)).toEqual({ ok: true, message: "Deshecho: las piezas volvieron al inventario." });
+  });
+
+  it("a take the stock record did not answer is refused in Spanish; a take that went through keeps the plan's words", async () => {
+    spanishMember(false);
+    takeFromStock.mockResolvedValue({ ok: true, drawGroup: null });
+    expect(await takeFromStockAction({ itemId: ITEM, jobId: JOB, qty: 60 })).toEqual({ ok: false, error: "El registro de inventario no dijo qué tomó. Recarga el trabajo para ver cómo quedó." });
+    takeFromStock.mockResolvedValue({ ok: true, drawGroup: GROUP, item: "12/2 NM-B", unit: "ft", qty: 60, short: 0, onHand: 190 });
+    const r = await takeFromStockAction({ itemId: ITEM, jobId: JOB, qty: 60 });
+    expect(r.ok && r.message).toBe("Took 60 ft of 12/2 NM-B for Honeysuckle");
+  });
+
+  it("English callers are unchanged, and a refusal before sign-in has no profile to read, so it reads English", async () => {
+    expect(await takeFromStockAction({ itemId: ITEM, jobId: JOB, qty: 0 })).toEqual({ ok: false, error: "Say how many you took." });
+    expect(await undoTakeAction("not-a-group")).toEqual({ ok: false, error: "That take isn't one this job knows. Reload to see where it stands." });
+    member(false);
+    undoTake.mockResolvedValue({ ok: true, undone: 1 });
+    expect(await undoTakeAction(GROUP, JOB)).toEqual({ ok: true, message: "Undone: the pieces are back in stock." });
+  });
+});

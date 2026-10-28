@@ -82,14 +82,16 @@ export function carriedPin(
  * past six days back would be a lie — three Mondays ago also reads "Monday" — so it stops there.
  * Pure UTC math on the org-local day strings, so it never slides a day on a phone in another zone.
  */
-export function carriedDay(dayStr: string, todayStr: string): string {
+export function carriedDay(dayStr: string, todayStr: string, lang?: string | null): string {
   const d = new Date(`${dayStr}T00:00:00Z`);
   const t = new Date(`${todayStr}T00:00:00Z`);
   if (Number.isNaN(d.getTime()) || Number.isNaN(t.getTime())) return dayStr;
   const days = Math.round((t.getTime() - d.getTime()) / 86_400_000);
-  if (days === 1) return "Yesterday";
-  if (days > 1 && days <= 6) return d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
-  return formatDate(dayStr);
+  // In the person's language (cn-v1138): English unless the profile says Spanish, as lib/utils' dates.
+  const es = lang === "es";
+  if (days === 1) return es ? "Ayer" : "Yesterday";
+  if (days > 1 && days <= 6) return d.toLocaleDateString(es ? "es-US" : "en-US", { weekday: "long", timeZone: "UTC" });
+  return formatDate(dayStr, undefined, lang);
 }
 
 /** THE PIN ARM, as PostgREST writes it. `lte`, not `eq`: a carried pin has to be FETCHED to be shown

@@ -11,6 +11,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, candidateStartMs, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { readActiveOrgs } from "@/lib/cron-orgs";
+import { asLang, fillText, localeOf, translator } from "@/lib/i18n";
 
 // Every company in one run, one after another (cn-v1130).
 export const maxDuration = 300;
@@ -107,14 +108,15 @@ export async function GET(request: Request) {
       const { data: open, error } = await supabase
         .from("time_entries")
         .select(
-          "id, profile_id, clock_in, split_from, job_code, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active, phone)",
+          // `language` rides the one people join (cn-v1138): the question speaks the person's own language.
+          "id, profile_id, clock_in, split_from, job_code, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active, phone, language)",
         )
         .eq("org_id", org.id)
         .eq("status", "open")
         .or("long_shift_warned_at.is.null,long_shift_nudged_at.is.null");
       if (error) throw error;
 
-      type Person = { full_name?: string | null; role?: string | null; active?: boolean | null; phone?: string | null };
+      type Person = { full_name?: string | null; role?: string | null; active?: boolean | null; phone?: string | null; language?: string | null };
       type Job = { job_number?: string | null; name?: string | null };
       type Row = {
         id: string;
@@ -178,16 +180,28 @@ export async function GET(request: Request) {
         if (relErr) reportError("cron-long-shift", relErr, { orgId: org.id, entryId: id, release: column });
       };
 
-      /** The facts every sentence names, in the org's clock. */
+      // The office reads English today (sh_spanishCovers: office screens stay in English for now);
+      // its words come from the same catalog so this file keeps no literal, and the day the office
+      // reads Spanish this one line becomes the reader's language.
+      const office_t = translator("en");
+
+      /** The facts every sentence names, in the org's clock \u2014 and, for the person, in his own language (cn-v1138). */
       const facts = (r: Row) => {
         const person = one(r.profiles);
         const job = one(r.job);
+        const lang = asLang(person?.language);
+        const t = translator(lang);
         // The SHIFT's start, not the switch's (audit v994 SW1).
         const inAt = new Date(candidateStartMs(r));
-        const clock = (d: Date) =>
-          d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/\u202f/g, " "); // ICU's narrow no-break space before AM/PM, as a plain space
-        const day = (d: Date) => d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" });
-        const since = `${day(inAt)} ${clock(inAt)}`;
+        // ICU's narrow no-break space before AM/PM, as a plain space. The office's clock is en-US
+        // ("Thu 7:00 AM"); the person's is his own locale ("jue 7:00 am" for Spanish: ICU's "a.m."
+        // ends in a stop and the sentence adds its own, so the es marker is written without dots).
+        const clock = (d: Date, locale: string) =>
+          d
+            .toLocaleTimeString(locale, { timeZone: tz, hour: "numeric", minute: "2-digit" })
+            .replace(/\u202f/g, " ")
+            .replace(/\b([ap])\.\s?m\.$/i, "$1m");
+        const day = (d: Date, locale: string) => d.toLocaleDateString(locale, { timeZone: tz, weekday: "short" });
         const name = (person?.full_name ?? "").trim();
         const label = job ? jobLabel(job) : (r.job_code ?? "").trim() || null;
         const hours = Math.floor((nowMs - inAt.getTime()) / 3_600_000);
@@ -196,23 +210,33 @@ export async function GET(request: Request) {
         // way the office's Stop Clock sheet words it. "Clocked in Tue 7:00 AM at Job B" was false.
         const pieceAt = new Date(Date.parse(r.clock_in));
         const switched = Number.isFinite(pieceAt.getTime()) && pieceAt.getTime() - inAt.getTime() >= 60_000;
-        const switchAt = switched ? (day(pieceAt) === day(inAt) ? clock(pieceAt) : `${day(pieceAt)} ${clock(pieceAt)}`) : "";
+        /** The shift's start and the switch's time, in one locale. */
+        const times = (locale: string) => ({
+          since: `${day(inAt, locale)} ${clock(inAt, locale)}`,
+          switchAt: switched ? (day(pieceAt, locale) === day(inAt, locale) ? clock(pieceAt, locale) : `${day(pieceAt, locale)} ${clock(pieceAt, locale)}`) : "",
+        });
+        const office = times("en-US");
+        const own = times(localeOf(lang));
+        const first = name.split(/\s+/)[0] || "A crew member";
+        const n = { label: label ?? "", hours: String(hours) };
         return {
           person,
+          lang,
+          t,
           crew: !isStaffRole(person?.role ?? ""),
           label,
-          since,
-          first: name.split(/\s+/)[0] || "A crew member",
+          since: office.since,
+          first,
           door: clockDoorWords(name).clockOut,
           hours,
           /** The office's lead, no closing stop: "Clocked in Thu 7:00 AM at Job A, 10 hours ago". */
           officeLead: switched
-            ? `On the clock since ${since}, ${hours} hours${label ? `; at ${label} since ${switchAt}` : ""}`
-            : `Clocked in ${since}${label ? ` at ${label}` : ""}, ${hours} hours ago`,
-          /** The crew member's lead, no closing stop: "You've been clocked in at Job A since Thu 7:00 AM". */
+            ? fillText(office_t(label ? "nb_officeOnClockAt" : "nb_officeOnClock"), { ...n, ...office })
+            : fillText(office_t(label ? "nb_officeClockedInAt" : "nb_officeClockedIn"), { ...n, ...office }),
+          /** The crew member's lead, no closing stop, in his language: "You've been clocked in at Job A since Thu 7:00 AM". */
           crewLead: switched
-            ? `You've been on the clock since ${since}${label ? ` (at ${label} since ${switchAt})` : ""}`
-            : `You've been clocked in${label ? ` at ${label}` : ""} since ${since}`,
+            ? fillText(t(label ? "nb_crewOnClockSinceAt" : "nb_crewOnClockSince"), { ...n, ...own })
+            : fillText(t(label ? "nb_crewClockedInAtSince" : "nb_crewClockedInSince"), { ...n, ...own }),
         };
       };
 
@@ -231,14 +255,12 @@ export async function GET(request: Request) {
           f.person?.active === false || !(askAtMs > nowMs)
             ? ""
             : quietHold(askAtMs, tz)
-              ? ` ${f.first} is asked in the morning.`
-              : ` At ${LONG_SHIFT_HOURS} hours ${f.first} is asked.`;
+              ? fillText(office_t("nb_officeTailMorning"), { first: f.first })
+              : fillText(office_t("nb_officeTailAtHours"), { hours: String(LONG_SHIFT_HOURS), first: f.first });
         const ok = await createNotifications(org.id, to, {
           type: "long_shift",
-          title: `${f.first} Is Still On The Clock`,
-          body:
-            `${f.officeLead}. ` +
-            `If the shift is over, ${f.door} on Timecards.${tail}`,
+          title: fillText(office_t("nb_officeStillTitle"), { first: f.first }),
+          body: fillText(office_t("nb_officeBellBody"), { officeLead: f.officeLead, door: f.door, tail }),
           url: `/timecards?entry=${r.id}`,
         });
         if (!ok) {
@@ -258,8 +280,9 @@ export async function GET(request: Request) {
         if (!(await claim(r.id, "long_shift_nudged_at"))) continue;
 
         if (f.person?.active !== false) {
-          const title = "Still On The Clock?";
-          const body = `${f.crewLead}. Tap to set when you stopped.`;
+          // In his own language (cn-v1138): the join carried profiles.language with the phone.
+          const title = f.t("nb_stillOnClockTitle");
+          const body = fillText(f.t("nb_stillOnClockBody"), { crewLead: f.crewLead });
           await sendPushToProfiles([r.profile_id], "clock_out", { title, body, url: "/timeclock" });
           // The push has gone, so the claim stays spent (giving it back would push twice); a bell
           // line the database refused is reported by createNotifications and counted here.
@@ -279,9 +302,7 @@ export async function GET(request: Request) {
               counts.text_not_ready++;
             } else {
               const who = ((org as { name?: string | null }).name ?? "").trim();
-              const text =
-                `${who ? `${who}: ` : ""}${f.crewLead}, ` +
-                `more than ${LONG_SHIFT_HOURS} hours. Open Timeclock to set when you stopped.`;
+              const text = `${who ? `${who}: ` : ""}${fillText(f.t("nb_stillOnClockText"), { crewLead: f.crewLead, hours: String(LONG_SHIFT_HOURS) })}`;
               // A refusal or a dropped connection answers false (sendSms logs why). The catch is the
               // belt: nothing about a text may cost the office its buzz below.
               try {
@@ -296,12 +317,10 @@ export async function GET(request: Request) {
         }
 
         if (f.crew && to.length) {
+          // The office's buzz stays English (office_t): see the note above facts().
           await sendPushToProfiles(to, "long_shift", {
-            title: `${f.first} Is Still On The Clock`,
-            body:
-              f.officeLead +
-              `${f.person?.active === false ? " (no longer on your crew)" : `. ${f.first} has been asked when the shift ended`}. ` +
-              `${f.door} on Timecards if you know.`,
+            title: fillText(office_t("nb_officeStillTitle"), { first: f.first }),
+            body: fillText(office_t(f.person?.active === false ? "nb_officeBuzzGone" : "nb_officeBuzzAsked"), { officeLead: f.officeLead, first: f.first, door: f.door }),
             url: `/timecards?entry=${r.id}`,
           });
           counts.office_buzzes++;

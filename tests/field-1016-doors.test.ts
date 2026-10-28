@@ -439,12 +439,12 @@ describe("the wiring, pinned", () => {
     // (the guard is refuseStaleFill since cn-v1123: it also refuses a fill after THIS turn's own move — tests/carried-1123-assistant-chat.test.ts)
     expect(chat).toContain("const stale = refuseStaleFill(step, window.location.pathname, turnPathRef.current, movedThisTurn);");
     expect(chat).toContain("if (pathNow !== pathAtSend) return `${typing.door}: NOT filled — the screen moved from ${pathAtSend} to ${pathNow} since its boxes were listed; use the next turn's list`;");
-    expect(chat).toContain('noteUnder("The screen changed — say that again.");');
-    expect(chat).toContain('if (viaVoice) say("missing" in o.result ? "That box isn\'t on this screen." : `That didn\'t go in. ${o.result.why}`);');
+    expect(chat).toContain('noteUnder(t("nt_screenChanged"));'); // the catalog's words since cn-v1138
+    expect(chat).toContain('if (viaVoice) say("missing" in o.result ? t("nt_missingBoxSay") : fillText(t("nt_didntGoIn"), { why: o.result.why }));'); // the catalog's words since cn-v1138
     const loop = chat.slice(chat.indexOf("onDoor: (o) => {"), chat.indexOf("} catch {\n            /* a point not made is not a broken turn */"));
     expect(loop).toContain("if (o.result.ok) seenRef.current.push(`${o.door}: landed — ${o.result.landed}`);");
     expect(loop).toContain("seenRef.current.push(`${o.door}: NOT filled — ${o.result.why}`);");
-    expect(loop).toContain('const words = "missing" in o.result ? MISSING_BOX_NOTE : `Couldn\'t put that in: ${o.result.why}`;');
+    expect(loop).toContain('const words = "missing" in o.result ? t(MISSING_BOX_KEY) : fillText(t("nt_couldntPutIn"), { why: o.result.why });');
   });
   it("the Inspector registers ONE provider that reads a per-render ref, and its boxes carry the door names as ids", () => {
     expect(insp).toContain("useEffect(() => registerNortDoors(() => doorsRef.current), []);");

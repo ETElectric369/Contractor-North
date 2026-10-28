@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import type { TabDef } from "@/components/tabs";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { ALL_ON, featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
+import { translator } from "@/lib/i18n";
 // The More-panel chip icons must come through a "use client" re-export so the
 // component REFERENCES survive the server→client serialization into <Tabs>.
 import {
@@ -73,6 +74,9 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   customer: { group: "Money", icon: Eye },
 };
 
+/** The cluster headers, in the viewer's language (cn-v1138): the key each English group reads through. */
+const GROUP_KEY: Record<string, string> = { Docs: "jb_groupDocs", Work: "jb_groupWork", Money: "jb_groupMoney" };
+
 /** THE TABS A TECH CAN ADD THE FIRST ROW TO: the crew works the Panel at the panel (Erik's decision
  *  1, 2026-09-25). Permits, visits and work orders are the office's writes, so an EMPTY one is never
  *  a row on his More (a door he couldn't use, with nothing to read behind it); it still opens by
@@ -94,13 +98,18 @@ export const JOB_TECH_ADDABLE: ReadonlySet<string> = new Set(["panel"]);
  *  as holding, so an error never hides a door), for the open counts and for the ONE rule emptiness
  *  still decides: for the crew, an empty tab he can't add to (JOB_TECH_ADDABLE) is no row at all — it
  *  leaves his strip (offStrip) and still opens from a link; when nothing is left his strip draws no
- *  More chip. A switched-off tab is never listed either (offStrip). */
+ *  More chip. A switched-off tab is never listed either (offStrip).
+ *
+ *  `lang` (cn-v1138): the viewer's language (profiles.language); the More panel's cluster headers
+ *  (Docs, Work, Money) read in it. Omitted = English, byte-for-byte what they were. */
 export function arrangeJobTabs(
   tabs: TabDef[],
   viewerIsStaff: boolean,
   switches: { features: FeatureMap; isOwner: boolean } = { features: ALL_ON, isOwner: false },
+  lang: string | null | undefined = "en",
 ): TabDef[] {
   const pinned = viewerIsStaff ? JOB_PINNED_STAFF : JOB_PINNED_TECH;
+  const words = translator(lang);
   return [...tabs]
     .sort((a, b) => JOB_TAB_ORDER.indexOf(a.id) - JOB_TAB_ORDER.indexOf(b.id))
     .map((t) => {
@@ -110,9 +119,11 @@ export function arrangeJobTabs(
       const empty = !isPinned && t.holds === false;
       // Nothing in it and nothing the crew can put in it: no row on his More at all.
       const notForCrew = empty && !viewerIsStaff && !JOB_TECH_ADDABLE.has(t.id);
+      const meta = JOB_TAB_META[t.id] ?? {};
       return {
         ...t,
-        ...(JOB_TAB_META[t.id] ?? {}),
+        ...meta,
+        ...(meta.group ? { group: words(GROUP_KEY[meta.group] ?? meta.group) } : {}),
         pinned: isPinned,
         staffOnly: JOB_STAFF_ONLY.has(t.id),
         // A switched-off feature's tab loses its chip and still opens from a ?tab= link. (Tasks used

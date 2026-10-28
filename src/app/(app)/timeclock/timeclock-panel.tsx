@@ -19,7 +19,7 @@ import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
-import { fillText, translator } from "@/lib/i18n";
+import { fillText, localeOf, translator } from "@/lib/i18n";
 import { useDictation } from "@/lib/use-dictation";
 import { drivingDistanceMiles } from "@/lib/google-maps";
 import { getPosition } from "@/lib/geo";
@@ -79,8 +79,7 @@ async function getGps(capMs?: number): Promise<GeoPoint | null> {
 
 // Shown when a punch can't reach the server — the form state is kept, so nothing is
 // lost; the tech taps again with signal (the await used to throw straight to the
-// error boundary and eat the whole form).
-const OFFLINE_MSG = "No connection — your entry is kept, try again when you have bars.";
+// error boundary and eat the whole form). The words are t("tc_offline"), in the person's language.
 
 export function TimeclockPanel({
   openEntry,
@@ -140,7 +139,7 @@ export function TimeclockPanel({
   // dropdown that quietly grew by one.
   function addNewJob(j: CreatedJob) {
     setNewJobs((p) => (p.some((x) => x.id === j.id) ? p : [...p, { id: j.id, job_number: "", name: j.name }]));
-    toast(`Created ${j.name}`, "success");
+    toast(fillText(t("tc_createdJob"), { name: j.name }), "success");
   }
   const [error, setError] = useState<string | null>(null);
   const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
@@ -251,7 +250,7 @@ export function TimeclockPanel({
           gps,
           clock_in_at: startAt || null,
         });
-        if (!res.ok) setError(res.error ?? "Could not clock in.");
+        if (!res.ok) setError(res.error ?? t("tc_couldNotClockIn"));
         else {
           setShowTools(false); // fresh punch → the running view's disclosure starts closed
           // The clock couldn't tell the job: the punch is saved, and now it asks (Skip is there).
@@ -264,12 +263,12 @@ export function TimeclockPanel({
           // GPS is optional, but don't pretend it was captured — if it's off/denied/slow, say the
           // punch isn't location-stamped (this used to fall through to gps:null silently). The note
           // now renders in the clocked-in view too, so the crew actually sees it post-punch.
-          if (!gps) setGpsNote("Clocked in — location wasn't ready, so this punch isn't GPS-stamped.");
+          if (!gps) setGpsNote(t("tc_gpsNote"));
         }
       } catch {
         // Dead spot / airplane mode — don't throw to the error boundary; the form
         // is intact, so the punch just needs another tap when there's signal.
-        setError(OFFLINE_MSG);
+        setError(t("tc_offline"));
       }
     });
   }
@@ -344,7 +343,7 @@ export function TimeclockPanel({
             setShowTools(false);
             return;
           }
-          setError(res.error ?? "Could not switch jobs.");
+          setError(res.error ?? t("tc_couldNotSwitch"));
           return;
         }
         // The note typed so far stayed on the part that just closed; the new part starts clean
@@ -361,7 +360,7 @@ export function TimeclockPanel({
         // retire it then anyway; this is so it never flickers a job he has just left).
         setChose(null);
         const j = jobOptions.find((x) => x.id === switchJobId);
-        const name = j ? optionLabel(j) : "the new job";
+        const name = j ? optionLabel(j) : t("tc_theNewJob");
         toast(
           res.mode === "repointed"
             ? fillText(t("tc_switchedWhole"), { job: name })
@@ -371,7 +370,7 @@ export function TimeclockPanel({
         // A pay rate or a lunch that landed somewhere else is money: it stays until it is read.
         if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
       } catch {
-        setError(OFFLINE_MSG);
+        setError(t("tc_offline"));
       }
     });
   }
@@ -410,7 +409,7 @@ export function TimeclockPanel({
             setSwitching(false);
             return;
           }
-          setError(res.error ?? "Could not clock out.");
+          setError(res.error ?? t("tc_couldNotClockOut"));
         } else {
           setForceLongFor(null);
           setStopIso(null);
@@ -424,7 +423,7 @@ export function TimeclockPanel({
           setChose(null);
           // A punch taken back (under two minutes old) is not a shift: said once, nothing asked after it.
           if (res.undone) {
-            toast(res.warning ?? "That punch is gone.", "success");
+            toast(res.warning ?? t("tc_punchGone"), "success");
             return;
           }
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
@@ -441,7 +440,7 @@ export function TimeclockPanel({
       } catch {
         // Dead spot — the entry stays open and every field on this form is kept;
         // tapping again with signal completes the same clock-out.
-        setError(OFFLINE_MSG);
+        setError(t("tc_offline"));
       }
     });
   }
@@ -512,7 +511,7 @@ export function TimeclockPanel({
       ? jobCodesEnabled
         ? currentJob.name
         : jobSiteLabel(currentJob)
-      : "No job selected";
+      : t("tc_noJobSelected");
 
     // THE LONG SHIFT. One rule (lib/long-shift) decides it, and the server answers the same way.
     const ciMs = Date.parse(openEntry.clock_in);
@@ -523,13 +522,15 @@ export function TimeclockPanel({
     const longShift = forceLongFor === openEntry.id || isLongOpenShift(shiftMs, now);
     const earlierDay = mounted && startedEarlierDay(ciMs, now, tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
     const zone = tz ? { timeZone: tz } : {};
+    // The clock words in the person's language (cn-v1138): "Tue, Oct 28, 7:00 AM" / "mar, 28 oct, 7:00 a. m.".
+    const locale = localeOf(lang);
     const sinceText = mounted
       ? earlierDay
-        ? new Date(ciMs).toLocaleString("en-US", { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-        : new Date(ciMs).toLocaleTimeString("en-US", { ...zone, hour: "numeric", minute: "2-digit" })
+        ? new Date(ciMs).toLocaleString(locale, { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+        : new Date(ciMs).toLocaleTimeString(locale, { ...zone, hour: "numeric", minute: "2-digit" })
       : "";
     const longWhen = mounted
-      ? new Date(shiftMs).toLocaleString("en-US", { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+      ? new Date(shiftMs).toLocaleString(locale, { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
       : "";
     const stopMs = stopIso ? Date.parse(stopIso) : NaN;
     const stopSentence = stopIso
@@ -615,13 +616,13 @@ export function TimeclockPanel({
               Options). Not answering is fine too: the office picks. */}
           {!openEntry.job_id && !openEntry.job_code && (
             <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-xs text-slate-500">
-              <span>No job on this punch yet.</span>
+              <span>{t("tc_noJobOnPunch")}</span>
               <button
                 type="button"
                 onClick={() => setAsk({ entryId: openEntry.id, moment: "in" })}
                 className="inline-flex min-h-[44px] items-center px-1 font-medium text-brand hover:underline"
               >
-                Pick The Job
+                {t("tc_pickTheJob")}
               </button>
             </p>
           )}
@@ -703,7 +704,7 @@ export function TimeclockPanel({
                     aria-expanded={showTools}
                     className="flex w-full items-center justify-center gap-1 py-1 text-xs font-medium text-slate-400 hover:text-slate-600"
                   >
-                    More Options
+                    {t("tc_moreOptions")}
                     <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showTools ? "rotate-180" : ""}`} />
                   </button>
                   {showTools && (
@@ -711,7 +712,7 @@ export function TimeclockPanel({
                       {switching ? (
                         <div className="space-y-2 rounded-xl border border-brand/30 bg-brand/5 p-3">
                           <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
-                            <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
+                            <ArrowLeftRight className="h-4 w-4 text-brand" /> {t("tc_switchJobLabel")}
                           </Label>
                           {/* WHAT THE SWITCH IS ABOUT TO DO, IN THE SERVER'S OWN RULE. The young-punch
                               test is switchMovesWholePunch — the very function switchJob decides the
@@ -724,10 +725,10 @@ export function TimeclockPanel({
                               three hours stay on the job they were worked on. */}
                           <p className="text-xs text-slate-500">
                             {!openEntry.job_id && !openEntry.job_code
-                              ? "This punch has no job yet, so all of it moves onto the job you pick."
+                              ? t("tc_switchNoJob")
                               : switchMovesWholePunch(Date.parse(openEntry.clock_in), now)
-                                ? `You clocked in on ${currentJobName} a few minutes ago, so this whole punch moves onto the job you pick: none of it stays on ${currentJobName}.`
-                                : `Your time on ${currentJobName} closes as its own entry now, and the clock keeps running on the new job.`}
+                                ? fillText(t("tc_switchWholeWarn"), { job: currentJobName })
+                                : fillText(t("tc_switchCutWarn"), { job: currentJobName })}
                           </p>
                           <Select
                             value={switchJobId}
@@ -736,9 +737,9 @@ export function TimeclockPanel({
                               setSwitchJobCode("");
                             }}
                             className="h-11 w-full"
-                            aria-label="New job"
+                            aria-label={t("tc_newJobAria")}
                           >
-                            <option value="">— New job —</option>
+                            <option value="">{t("tc_newJobOption")}</option>
                             {jobOptions
                               .filter((j) => j.id !== openEntry.job_id)
                               .map((j) => (
@@ -763,9 +764,9 @@ export function TimeclockPanel({
                               value={switchJobCode}
                               onChange={(e) => setSwitchJobCode(e.target.value)}
                               className="h-11 w-full"
-                              aria-label="New job code"
+                              aria-label={t("tc_newJobCodeAria")}
                             >
-                              <option value="">Code (Optional)</option>
+                              <option value="">{t("tc_codeOptional")}</option>
                               {codesForJob(switchJobId).map((c) => (
                                 <option key={c.id} value={c.code}>
                                   {c.code}{c.description ? ` · ${c.description}` : ""}
@@ -775,16 +776,16 @@ export function TimeclockPanel({
                           )}
                           <div className="flex gap-2">
                             <Button className="flex-1" onClick={doSwitchJob} disabled={switchPending || !switchJobId}>
-                              {switchPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />} Switch
+                              {switchPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />} {t("tc_switch")}
                             </Button>
                             <Button variant="outline" onClick={() => setSwitching(false)} disabled={switchPending}>
-                              Cancel
+                              {t("tc_cancel")}
                             </Button>
                           </div>
                         </div>
                       ) : (
                         <Button type="button" variant="outline" className="w-full" onClick={() => setSwitching(true)}>
-                          <ArrowLeftRight className="h-4 w-4" /> Switch Job
+                          <ArrowLeftRight className="h-4 w-4" /> {t("tc_switchJob")}
                         </Button>
                       )}
                       {/* The wrap-up details (lunch, miles, notes) — not the default path. */}
@@ -793,7 +794,7 @@ export function TimeclockPanel({
                         onClick={() => setClockingOut(true)}
                         className="w-full text-center text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
                       >
-                        Clock Out With Details…
+                        {t("tc_clockOutWithDetails")}
                       </button>
                     </div>
                   )}
@@ -826,14 +827,14 @@ export function TimeclockPanel({
               /payroll, never an app-computed rate×miles promise to the tech. */}
           <div>
             <Label className="mb-1 flex items-center gap-1">
-              <MapPin className="h-4 w-4 text-slate-400" /> Miles
+              <MapPin className="h-4 w-4 text-slate-400" /> {t("tc_miles")}
             </Label>
             <div className="flex items-center gap-2">
               <NumberInput value={miles} onValueChange={setMiles} className="h-8 w-24" />
-              <span className="text-xs text-slate-400">round trip</span>
+              <span className="text-xs text-slate-400">{t("tc_roundTrip")}</span>
               {!!(homeAddress && jobAddressForMiles() && process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) && (
-                <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcingMiles} title="Round trip: home ↔ job">
-                  {calcingMiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} Auto
+                <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcingMiles} title={t("tc_roundTripTitle")}>
+                  {calcingMiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} {t("tc_auto")}
                 </Button>
               )}
             </div>
@@ -877,7 +878,7 @@ export function TimeclockPanel({
 
               <div className="flex gap-2">
                 <Button variant="outline" size="lg" onClick={() => setClockingOut(false)} disabled={pending}>
-                  Back
+                  {t("tc_back")}
                 </Button>
                 <Button
                   variant="destructive"
@@ -892,7 +893,7 @@ export function TimeclockPanel({
                     </>
                   ) : (
                     <>
-                      <Square className="h-5 w-5" /> Confirm &amp; Clock Out
+                      <Square className="h-5 w-5" /> {t("tc_confirmClockOut")}
                     </>
                   )}
                 </Button>
@@ -917,7 +918,7 @@ export function TimeclockPanel({
         </div>
 
         <div>
-          <Label>Start time</Label>
+          <Label>{t("tc_startTime")}</Label>
           <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} tz={tz} />
         </div>
 
@@ -934,7 +935,7 @@ export function TimeclockPanel({
               aria-expanded={showTools}
               className="flex w-full items-center justify-center gap-1 py-1 text-xs font-medium text-slate-400 hover:text-slate-600"
             >
-              More Options
+              {t("tc_moreOptions")}
               <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showTools ? "rotate-180" : ""}`} />
             </button>
             {showTools && (
@@ -1001,10 +1002,7 @@ export function TimeclockPanel({
             day-assignment → a job scheduled today → the org's only in-progress job → none, and on
             none the punch is saved and "Which Job Are You On?" asks, with a Skip. */}
         {!isStaff && (
-          <p className="text-center text-xs text-slate-500">
-            Your job comes from today&apos;s crew assignment. Nothing assigned? Clock in anyway — you&apos;ll
-            be asked which job, or skip and the office picks it.
-          </p>
+          <p className="text-center text-xs text-slate-500">{t("tc_techJobNote")}</p>
         )}
         <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
           <MapPin className="h-3.5 w-3.5" /> {t("tc_locationNote")}

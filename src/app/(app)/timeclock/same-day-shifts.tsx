@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
+import { fillText, localeOf, translator } from "@/lib/i18n";
+import { useLang } from "@/components/lang-provider";
 import { putShiftOnJob, shiftsOnDay, takeShiftOffJob, type DayShift, type DayShifts } from "./actions";
 
 /**
@@ -24,19 +26,23 @@ import { putShiftOnJob, shiftsOnDay, takeShiftOffJob, type DayShift, type DayShi
  * Job field there (onRead), and a day the office marked them off says so here.
  */
 
-/** The line a day marked off on the schedule gets (0170's OFF row). */
-export const OFF_THAT_DAY = "Marked off that day on the schedule.";
+// The line a day marked off on the schedule gets (0170's OFF row) is t("tc_offThatDay").
 
-const at = (iso: string, tz: string) =>
-  new Date(iso).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
-const dayWord = (ymd: string) =>
-  new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
+// The clock and day words in the person's language (cn-v1138): "10:31 AM" / "10:31 a. m.",
+// "Fri, Sep 11" / "vie, 11 sep". No lang is English, as every caller read before.
+const at = (iso: string, tz: string, lang?: string | null) =>
+  new Date(iso).toLocaleTimeString(localeOf(lang), { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+const dayWord = (ymd: string, lang?: string | null) =>
+  new Date(`${ymd}T12:00:00Z`).toLocaleDateString(localeOf(lang), { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 
-/** The words for one shift's line, pure (shared with the tests). */
-export function shiftLine(s: DayShift, tz: string): { when: string; where: string } {
-  const when = s.clockOut ? `${at(s.clockIn, tz)} to ${at(s.clockOut, tz)} · ${s.hours.toFixed(2)} h` : `since ${at(s.clockIn, tz)}, still on the clock`;
-  const where = s.jobLabel ? s.jobLabel : s.jobCode ? s.jobCode : "No job";
-  return { when, where: s.billedBy ? `${where} · on ${s.billedBy}` : where };
+/** The words for one shift's line, pure (shared with the tests), in the person's language. */
+export function shiftLine(s: DayShift, tz: string, lang?: string | null): { when: string; where: string } {
+  const t = translator(lang);
+  const when = s.clockOut
+    ? fillText(t("tc_shiftWhen"), { from: at(s.clockIn, tz, lang), to: at(s.clockOut, tz, lang), hours: s.hours.toFixed(2) })
+    : fillText(t("tc_shiftSince"), { from: at(s.clockIn, tz, lang) });
+  const where = s.jobLabel ? s.jobLabel : s.jobCode ? s.jobCode : t("tc_noJobWord");
+  return { when, where: s.billedBy ? fillText(t("tc_onBilled"), { where, inv: s.billedBy }) : where };
 }
 
 /**
@@ -45,16 +51,20 @@ export function shiftLine(s: DayShift, tz: string): { when: string; where: strin
  * are paid on their own (payroll's second bucket) and a lunch changes the paid hours, so the form
  * says which ones, instead of closing over them. Null when nothing was typed.
  */
-export function notCarriedWords(f: { miles?: number; lunch?: boolean; code?: string | null; rate?: number; notes?: string | null }): string | null {
+export function notCarriedWords(
+  f: { miles?: number; lunch?: boolean; code?: string | null; rate?: number; notes?: string | null },
+  lang?: string | null,
+): string | null {
+  const t = translator(lang);
   const parts: string[] = [];
-  if ((f.miles ?? 0) > 0) parts.push(`${f.miles} miles`);
-  if (f.lunch) parts.push("the lunch");
-  if ((f.code ?? "").trim()) parts.push(`code ${(f.code ?? "").trim()}`);
-  if ((f.rate ?? 0) > 0) parts.push("the rate");
-  if ((f.notes ?? "").trim()) parts.push("the notes");
+  if ((f.miles ?? 0) > 0) parts.push(fillText(t("tc_nMiles"), { n: String(f.miles) }));
+  if (f.lunch) parts.push(t("tc_theLunch"));
+  if ((f.code ?? "").trim()) parts.push(fillText(t("tc_codeX"), { code: (f.code ?? "").trim() }));
+  if ((f.rate ?? 0) > 0) parts.push(t("tc_theRate"));
+  if ((f.notes ?? "").trim()) parts.push(t("tc_theNotes"));
   if (!parts.length) return null;
-  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-  return `Not added to that shift: ${list} typed on the form. Open it to add ${parts.length === 1 ? "that" : "them"}.`;
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} ${t("tc_and")} ${parts[parts.length - 1]}`;
+  return fillText(t("tc_notCarried"), { list, them: parts.length === 1 ? t("tc_that") : t("tc_them") });
 }
 
 /** The list, given what shiftsOnDay answered. Presentational: the doors are the caller's. */
@@ -75,22 +85,27 @@ export function SameDayShiftsList({
    *  shift's editor is up, so two modals never answer one Back. */
   onOpenShift?: (s: DayShift) => void;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   if (!data.shifts.length) {
     // Nothing on the day, but the office marked this person off: said, so a day off is never
     // mistaken for a day nobody planned (and the form never guesses a job for it).
-    return data.offThatDay ? <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{OFF_THAT_DAY}</p> : null;
+    return data.offThatDay ? <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{t("tc_offThatDay")}</p> : null;
   }
   const first = data.name.split(/\s+/)[0] || data.name;
   const anyNoJob = data.shifts.some((s) => s.noJob && !s.billedBy);
+  const day = dayWord(date, lang);
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm" data-testid="same-day-shifts">
       <p className="flex items-center gap-1.5 font-medium text-amber-900">
         <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
-        {first} already has {data.shifts.length === 1 ? "a shift" : `${data.shifts.length} shifts`} on {dayWord(date)}
+        {data.shifts.length === 1
+          ? fillText(t("tc_alreadyHasOne"), { name: first, day })
+          : fillText(t("tc_alreadyHasMany"), { name: first, n: String(data.shifts.length), day })}
       </p>
       <ul className="mt-1 divide-y divide-amber-200/70">
         {data.shifts.map((s) => {
-          const line = shiftLine(s, data.tz);
+          const line = shiftLine(s, data.tz, lang);
           const door = s.noJob && !s.billedBy && data.forJob;
           return (
             <li
@@ -113,7 +128,7 @@ export function SameDayShiftsList({
                   onClick={() => onPut?.(s)}
                   disabled={!!busyId}
                 >
-                  {busyId === s.id ? "Putting…" : `Put This On ${data.forJob!.label}`}
+                  {busyId === s.id ? t("tc_putting") : fillText(t("tc_putThisOn"), { job: data.forJob!.label })}
                 </Button>
               ) : (
                 <Link
@@ -121,7 +136,7 @@ export function SameDayShiftsList({
                   onClick={() => onOpenShift?.(s)}
                   className="inline-flex min-h-[44px] items-center px-1 text-sm font-medium text-brand hover:underline"
                 >
-                  Open That Shift
+                  {t("tc_openThatShift")}
                 </Link>
               )}
             </li>
@@ -130,13 +145,13 @@ export function SameDayShiftsList({
       </ul>
       <p className="mt-1 text-xs text-amber-800">
         {anyNoJob && data.forJob
-          ? `A shift on no job is usually this same work. Put it on ${data.forJob.label} instead of adding the hours again.`
+          ? fillText(t("tc_noJobSameWorkPut"), { job: data.forJob.label })
           : anyNoJob
             ? // Only Add Time Entry on Timecards can have no job yet, and its Job field sits above this list.
-              "A shift on no job is usually this same work. Pick the job above to put it there instead of adding the hours again."
-            : "Hours that overlap these would be counted twice."}
+              t("tc_noJobSameWorkPick")
+            : t("tc_overlapTwice")}
       </p>
-      {data.offThatDay && <p className="mt-1 text-xs text-amber-800">{OFF_THAT_DAY}</p>}
+      {data.offThatDay && <p className="mt-1 text-xs text-amber-800">{t("tc_offThatDay")}</p>}
     </div>
   );
 }
@@ -170,12 +185,16 @@ export function SameDayShifts({
 }) {
   const toast = useToast();
   const router = useRouter();
+  const t = translator(useLang());
   const [data, setData] = useState<DayShifts | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const seq = useRef(0);
-  // The latest callback, so a new function each render never re-arms the read below.
+  // The latest callback, so a new function each render never re-arms the read below; the translator
+  // rides the same way, for the failed read's words.
   const onReadRef = useRef(onRead);
   onReadRef.current = onRead;
+  const tRef = useRef(t);
+  tRef.current = t;
   const take = (r: DayShifts) => {
     setData(r);
     onReadRef.current?.(r);
@@ -187,22 +206,26 @@ export function SameDayShifts({
       return;
     }
     const mine = ++seq.current;
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       shiftsOnDay({ profile_id: profileId || null, date, for_job_id: jobId })
         .then((r) => {
           if (mine === seq.current) take(r);
         })
         .catch(() => {
-          if (mine === seq.current) take({ ok: false, error: "Couldn't check this person's day just now." });
+          if (mine === seq.current) take({ ok: false, error: tRef.current("tc_couldNotCheckDay") });
         });
     }, 250);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [profileId, date, jobId, refreshKey]);
 
   if (!data) return null;
   if (!data.ok) {
     // NOTHING SILENT: a day that could not be read is not a clear day.
-    return <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{data.error} Check Timecards before adding hours twice.</p>;
+    return (
+      <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        {data.error} {t("tc_checkTimecardsFirst")}
+      </p>
+    );
   }
 
   // THE 60MPH LAW (job-time-button.tsx): a server action that rejects (no signal, a dropped
@@ -216,28 +239,28 @@ export function SameDayShifts({
       try {
         r = await putShiftOnJob({ entry_id: s.id, job_id: jobId });
       } catch {
-        toast("No connection, so that shift may not have moved. Try again when you have a bar or two.", "error");
+        toast(t("tc_offlineShiftMayNotMove"), "error");
         return;
       }
       if (!r.ok) {
-        toast(r.error ?? "That shift didn't move.", "error");
+        toast(r.error ?? t("tc_shiftDidntMove"), "error");
         seq.current++;
         try {
           setData(await shiftsOnDay({ profile_id: profileId || null, date, for_job_id: jobId }));
         } catch {
-          setData({ ok: false, error: "Couldn't check this person's day just now." });
+          setData({ ok: false, error: t("tc_couldNotCheckDay") });
         }
         return;
       }
-      toast(r.sentence ?? "Put on the job.", "success", {
-        label: "Undo",
+      toast(r.sentence ?? t("tc_putOnTheJob"), "success", {
+        label: t("tc_undo"),
         onClick: () => {
           void takeShiftOffJob({ entry_id: s.id, job_id: jobId }).then(
             (u) => {
-              toast(u.ok ? "Back to no job." : (u.error ?? "Couldn't undo."), u.ok ? "success" : "error");
+              toast(u.ok ? t("tc_backToNoJob") : (u.error ?? t("tc_couldNotUndo")), u.ok ? "success" : "error");
               router.refresh();
             },
-            () => toast("No connection, so the Undo didn't go through. The shift may still be on the job: check it on Timecards when you have a bar or two.", "error"),
+            () => toast(t("tc_offlineUndoFailed"), "error"),
           );
         },
       });

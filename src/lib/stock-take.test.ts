@@ -1,26 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  belowZeroWords,
-  fmtQty,
-  matchShelfItem,
-  normUnit,
-  officeBellOpensShelf,
-  officeBellWords,
-  parseShelf,
-  parseTakes,
-  personNote,
-  settleRefusalWords,
-  shortOf,
-  shortWords,
-  takeDoor,
-  takeHref,
-  takeLine,
-  takeShort,
-  takeShortWords,
-  takeUnheardWords,
-  tookWords,
-  type ShelfRow,
-} from "./stock-take";
+import { dict, translator } from "@/lib/i18n";
+import { belowZeroWords, fmtQty, matchShelfItem, normUnit, officeBellOpensShelf, officeBellWords, parseShelf, parseTakes, personNote, settleRefusalWords, shortOf, shortWords, STOCK_WORDS_EN, takeDoor, takeHref, takeLine, TAKES_READ_FAILED, takeShort, takeShortWords, takesReadFailed, takeUnheardWords, tookWords, type ShelfRow } from "./stock-take";
 
 /**
  * TOOK FROM STOCK'S WORDS (Shop Stock, Phase 3), in the plan's own sentences: "Took 60 ft of 12/2
@@ -140,6 +120,32 @@ describe("the words", () => {
     expect(takeDoor({ canUndo: true, billedOn: null, back: 0, settledByOffice: true })).toEqual({ kind: "undo" });
     expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0, settledByOffice: true }).kind).toBe("billed");
     expect(takeLine({ who: "Brian", qty: 60, unit: "ft", item: "12/2 NM-B", short: 0, back: 0 })).toBe("Brian took 60 ft of 12/2 NM-B");
+  });
+
+  it("the crew's words take the reader's translator (cn-v1138, mt_): the line, the door, the short, the read that failed; English with none, byte for byte", () => {
+    const es = translator("es");
+    const take = { who: "Brian", qty: 60, unit: "ft", item: "12/2 NM-B", short: 10, back: 5 };
+    expect(takeLine(take, es)).toBe("Brian tomó 60 ft de 12/2 NM-B · 10 ft más del inventario, en espera de la oficina · 5 ft devueltos");
+    expect(takeLine(take, translator("en"))).toBe(takeLine(take));
+    expect(takeLine(take)).toBe("Brian took 60 ft of 12/2 NM-B · 10 ft past stock, waiting on the office · 5 ft brought back");
+    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0 }, es)).toEqual({ kind: "billed", label: "Quítalo De INV-078 Primero", status: "Facturado en INV-078", part: false });
+    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0, partBilled: true }, es)).toMatchObject({ status: "Una parte facturada en INV-078, el resto todavía sin facturar" });
+    expect(takeDoor({ canUndo: false, billedOn: null, back: 5 }, es)).toEqual({ kind: "none", why: "Una parte volvió al inventario, así que esta toma no se puede deshacer." });
+    expect(takeDoor({ canUndo: false, billedOn: null, back: 0, settledByOffice: true }, es)).toMatchObject({ why: "La oficina ajustó parte de esta toma, así que pídele a la oficina que la deshaga." });
+    expect(takeDoor({ canUndo: true, billedOn: null, back: 0 }, es)).toEqual({ kind: "undo" });
+    expect(takeShortWords({ short: 0, past: 20, unit: "ft" }, es)).toBe("20 ft más de lo que muestra el inventario — la oficina lo ajustará");
+    expect(takeShortWords({ short: 20, past: 0, unit: "ft" }, es)).toBe("20 ft de eso todavía no está en un rollo registrado — se guarda igual, y la oficina lo ajusta");
+    expect(takeShortWords({ short: 0, past: 0, unit: "ft" }, es)).toBeNull();
+    expect(takesReadFailed(es)).toBe("No se pudo leer lo que se ha tomado para este trabajo ahora. Recarga antes de tomar más.");
+    expect(takesReadFailed(translator("en"))).toBe(TAKES_READ_FAILED);
+    expect(takeUnheardWords(true, true, es)).toBe("Sin señal, así que Tomarlo no recibió respuesta. Puede que se haya guardado: revisa Lo Tomado Del Inventario abajo antes de tocar otra vez.");
+    expect(takeUnheardWords(false, false, es)).toBe("Tomarlo no recibió respuesta. Puede que se haya guardado: recarga antes de tocar otra vez.");
+    // The toast and the office's bell are built with no translator: English, as before.
+    expect(tookWords({ qty: 60, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 20, onHandAfter: -20 })).toBe(
+      "Took 60 ft of 12/2 NM-B for Honeysuckle. 20 ft more than stock shows — the office will settle it.",
+    );
+    // The local English (this file rides customer bundles, so it carries no dictionary) IS the catalog's.
+    for (const [k, v] of Object.entries(STOCK_WORDS_EN)) expect(dict("en")[k], k).toBe(v);
   });
 });
 

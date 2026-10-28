@@ -9,6 +9,7 @@ import { cogsWords, overheadWords } from "./analytics/profit-and-loss";
 import { DOCK, visibleDock } from "./dock";
 import { helpRows } from "./onboarding/help-rows";
 import { ALL_ON } from "./features";
+import { translator } from "./i18n";
 import { appointmentTypeLabel } from "./statuses";
 import { RECONCILE_KINDS } from "./reconcile-kinds";
 
@@ -28,7 +29,9 @@ describe("Nort's product map after the shell wave", () => {
     expect(labels).toEqual(expect.arrayContaining(["Start Here", "Show Me How"]));
     const withOpen = helpRows({ isStaff: true, onboarded: true, setup: {}, nortOn: true, features: ALL_ON }).map((r) => r.label);
     expect(withOpen.some((l) => l.startsWith("Finish Setting Up"))).toBe(true);
-    expect(readFileSync(join(process.cwd(), "src/components/command-bar.tsx"), "utf8")).toContain('label: "Talk To Nort"');
+    // The row's words live in the shell catalog since cn-v1138 (sh_talkToNort: "Talk To Nort" / "Hablar Con Nort").
+    expect(readFileSync(join(process.cwd(), "src/components/command-bar.tsx"), "utf8")).toContain('label: t("sh_talkToNort")');
+    expect(translator("en")("sh_talkToNort")).toBe("Talk To Nort");
   });
 
   it("puts Customers under Sales, Timecards under Money, and Office and Tools behind the initials", () => {
@@ -74,8 +77,8 @@ describe("Nort's product map after the shell wave", () => {
     expect(NORT_PRODUCT_MAP).not.toMatch(/\bTIME\b/);
     // True in code: the button's three faces, and the Time tab holds no clock of its own.
     const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-time-button.tsx"), "utf8");
-    expect(button).toContain('{state === "in" && "Clock In"}');
-    expect(button).toMatch(/Switch<span/);
+    expect(button).toContain('{state === "in" && t("jb_clockIn")}');
+    expect(button).toMatch(/\{t\("jb_switch"\)\}<span/);
     const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
     expect(page).not.toContain("job-time-button");
     expect(readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-action-dock.tsx"), "utf8")).toContain("job-time-button");

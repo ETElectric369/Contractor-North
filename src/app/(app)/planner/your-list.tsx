@@ -29,6 +29,8 @@ import { Input } from "@/components/ui/input";
 import { MoveToDay } from "@/components/move-to-day";
 import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator, type Lang } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 import { carriedDay, carriedPin, isPinned, ranksToday } from "@/lib/six-rank";
 import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
@@ -80,9 +82,11 @@ export function addDaysStr(dayStr: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** The later row as the sheet draws it: its words and the due date it writes (null clears it). */
-export function laterRow(choice: typeof LATER_CHOICE, todayStr: string): { label: string; due: string | null } {
-  return choice === "someday" ? { label: "Someday (Clear Date)", due: null } : { label: "In A Week", due: addDaysStr(todayStr, 7) };
+/** The later row as the sheet draws it: its words (in the person's language; English when none is
+ *  named) and the due date it writes (null clears it). */
+export function laterRow(choice: typeof LATER_CHOICE, todayStr: string, lang: Lang = "en"): { label: string; due: string | null } {
+  const t = translator(lang);
+  return choice === "someday" ? { label: t("md_somedayClear"), due: null } : { label: t("md_inAWeek"), due: addDaysStr(todayStr, 7) };
 }
 
 /**
@@ -94,15 +98,17 @@ export function laterRow(choice: typeof LATER_CHOICE, todayStr: string): { label
  * changed, this sentence would have started lying about four different rows.
  */
 export function movedWords(
-  t: { focus_date: string | null; priority: number | null; category: string | null },
+  row: { focus_date: string | null; priority: number | null; category: string | null },
   due: string | null,
   todayStr: string,
+  lang: Lang = "en",
 ): string | null {
-  const after = { id: "x", focus_date: t.focus_date, priority: t.priority, category: t.category, due_date: due };
+  const t = translator(lang);
+  const after = { id: "x", focus_date: row.focus_date, priority: row.priority, category: row.category, due_date: due };
   if (ranksToday(after, todayStr)) return null;
-  if (due === null) return "No due date now. It waits on your Reminders list under Someday.";
-  const when = due === addDaysStr(todayStr, 1) ? "tomorrow" : formatDate(due);
-  return `Due ${when}. It waits on your Reminders list till then.`;
+  if (due === null) return t("md_noDueDateSomeday");
+  const when = due === addDaysStr(todayStr, 1) ? t("md_tomorrowLower") : formatDate(due, undefined, lang);
+  return fillText(t("md_dueWhenWaits"), { when });
 }
 
 /** How many marks a phone can carry beside a heading before they stop reading as progress. The
@@ -114,6 +120,7 @@ export const PROGRESS_MARKS = 10;
  *  total is the day's own: what is done plus what is still open on the card. A day with neither
  *  draws nothing. */
 export function DoneMarks({ done, total }: { done: number; total: number }) {
+  const t = translator(useLang());
   const all = Math.max(0, total);
   if (all === 0) return null;
   const n = Math.max(0, Math.min(all, done));
@@ -121,7 +128,7 @@ export function DoneMarks({ done, total }: { done: number; total: number }) {
   // Abbreviated days scale the fill so the proportion stays honest (3 of 20 → 2 of 10 filled).
   const filled = all === marks ? n : Math.round((n / all) * marks);
   return (
-    <span role="img" aria-label={`${n} of ${all} done today`} className="flex items-center gap-1">
+    <span role="img" aria-label={fillText(t("md_doneToday"), { n: String(n), all: String(all) })} className="flex items-center gap-1">
       {Array.from({ length: marks }, (_, i) => (
         <span
           key={i}
@@ -133,15 +140,16 @@ export function DoneMarks({ done, total }: { done: number; total: number }) {
   );
 }
 
-/** Small relative due chip — computed against the ORG's day, not the phone's. */
-function dueChip(due: string | null, todayStr: string): { label: string; overdue: boolean } | null {
+/** Small relative due chip — computed against the ORG's day, not the phone's, in the person's words. */
+function dueChip(due: string | null, todayStr: string, lang: Lang): { label: string; overdue: boolean; today: boolean } | null {
   if (!due) return null;
+  const t = translator(lang);
   if (due < todayStr) {
     const days = Math.max(1, Math.round((Date.parse(todayStr) - Date.parse(due)) / 86_400_000));
-    return { label: `${days}d overdue`, overdue: true };
+    return { label: fillText(t("md_daysOverdue"), { n: String(days) }), overdue: true, today: false };
   }
-  if (due === todayStr) return { label: "Today", overdue: false };
-  return { label: formatDate(due), overdue: false };
+  if (due === todayStr) return { label: t("md_today"), overdue: false, today: true };
+  return { label: formatDate(due, undefined, lang), overdue: false, today: false };
 }
 
 /**
@@ -168,6 +176,8 @@ export function AddReminderLine({
 }) {
   const router = useRouter();
   const toast = useToast();
+  // THE PERSON'S LANGUAGE (cn-v1138): the line's words come through t() and lib/words/myday.
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
   const [jobId, setJobId] = useState("");
@@ -180,12 +190,12 @@ export function AddReminderLine({
       // tell whether the Reminder he just re-typed is one he can actually see (tasks/actions).
       const res = await createTask(job ? { title, job_id: job.id } : { title, today: todayStr });
       if (!res.ok) {
-        toast(res.error ?? "Couldn't add it. Try again.", "error");
+        toast(res.error ?? t("md_couldNotAdd"), "error");
         return;
       }
-      if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
-      else if (job) toast(`Added To ${job.number || job.label}'s Tasks`, "success");
-      else toast("Added To Tasks & Reminders", "success");
+      if (res.duplicate) toast(res.speak ?? t("md_alreadyOnList"), "info");
+      else if (job) toast(fillText(t("md_addedToJobTasks"), { job: job.number || job.label }), "success");
+      else toast(t("md_addedToReminders"), "success");
       setTitle("");
       setJobId("");
       router.refresh();
@@ -199,12 +209,12 @@ export function AddReminderLine({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
-          placeholder="Add A Reminder Or Task…"
-          aria-label="Add A Reminder Or Task"
+          placeholder={t("md_addPlaceholder")}
+          aria-label={t("md_addAria")}
           className="h-11 min-w-0 flex-1"
         />
         <Button onClick={add} disabled={pending || !title.trim()} className="shrink-0 px-3">
-          <Plus /> Add
+          <Plus /> {t("md_add")}
         </Button>
       </div>
       {jobs.length > 0 && (
@@ -212,15 +222,15 @@ export function AddReminderLine({
         <select
           value={jobId}
           onChange={(e) => setJobId(e.target.value)}
-          aria-label="Job (optional)"
+          aria-label={t("md_jobOptional")}
           className={`h-11 max-w-full truncate rounded-full border px-3 text-sm ${
             jobId ? "border-brand bg-brand-light/40 font-medium text-brand" : "border-slate-300 bg-white text-slate-600"
           }`}
         >
-          <option value="">No Job: A Reminder For Me</option>
+          <option value="">{t("md_noJobReminderForMe")}</option>
           {jobs.map((j) => (
             <option key={j.id} value={j.id}>
-              On {j.label}
+              {fillText(t("md_onJob"), { job: j.label })}
             </option>
           ))}
         </select>
@@ -252,6 +262,10 @@ export function YourList({
 }) {
   const router = useRouter();
   const toast = useToast();
+  // THE PERSON'S LANGUAGE (cn-v1138): every word on the card comes through t() and lib/words/myday;
+  // the dates read in the same language.
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   // Optimistic done-state overrides (parents AND subtasks): applied instantly,
   // reverted on server error. The refresh re-ranks the rows server-side.
@@ -268,37 +282,38 @@ export function YourList({
 
   // Tomorrow in the ORG's day (todayStr is already org-tz; pure date math).
   const tomorrowStr = useMemo(() => addDaysStr(todayStr, 1), [todayStr]);
-  const later = useMemo(() => laterRow(LATER_CHOICE, todayStr), [todayStr]);
+  const later = useMemo(() => laterRow(LATER_CHOICE, todayStr, lang), [todayStr, lang]);
 
   const mark = (id: string, done: boolean) =>
     setOverride((prev) => new Map(prev).set(id, done));
-  const slotDone = (t: SixSlot) => override.get(t.id) ?? false;
+  const slotDone = (row: SixSlot) => override.get(row.id) ?? false;
   const kidDone = (k: SixSubtask) => override.get(k.id) ?? k.status === "done";
 
-  const doneCount = doneToday + rows.filter((t) => slotDone(t)).length;
+  const doneCount = doneToday + rows.filter((row) => slotDone(row)).length;
 
-  function toggleSlot(t: SixSlot) {
-    const nowDone = !slotDone(t);
-    const openKids = (kidsByParent.get(t.id) ?? []).filter((k) => !kidDone(k));
-    mark(t.id, nowDone);
+  function toggleSlot(row: SixSlot) {
+    const nowDone = !slotDone(row);
+    const openKids = (kidsByParent.get(row.id) ?? []).filter((k) => !kidDone(k));
+    mark(row.id, nowDone);
     start(async () => {
-      const opts = { category: t.category, jobId: t.job_id };
+      const opts = { category: row.category, jobId: row.job_id };
       // The toggleTask cascade contract: completing a parent with open subtasks
       // returns needsCascade (nothing written) — confirm, then retry cascade:true.
-      let res: ToggleTaskResult = await toggleTask(t.id, nowDone, opts);
+      let res: ToggleTaskResult = await toggleTask(row.id, nowDone, opts);
       if (!res.ok && res.needsCascade && nowDone) {
         const n = res.openChildren ?? openKids.length;
-        if (confirm(`"${t.title}" has ${n} open subtask${n === 1 ? "" : "s"} — mark ${n === 1 ? "it" : "them"} done too?`)) {
-          res = await toggleTask(t.id, nowDone, { ...opts, cascade: true });
+        const ask = n === 1 ? fillText(t("md_openSubtaskAskOne"), { title: row.title }) : fillText(t("md_openSubtasksAskMany"), { title: row.title, n: String(n) });
+        if (confirm(ask)) {
+          res = await toggleTask(row.id, nowDone, { ...opts, cascade: true });
           if (res.ok) for (const k of openKids) mark(k.id, true);
         } else {
-          mark(t.id, false); // declined — leave the parent open
+          mark(row.id, false); // declined — leave the parent open
           return;
         }
       }
       if (!res.ok) {
-        mark(t.id, !nowDone); // roll back the optimistic check
-        toast(res.error ?? "Couldn't update task — try again.", "error");
+        mark(row.id, !nowDone); // roll back the optimistic check
+        toast(res.error ?? t("md_couldNotUpdate"), "error");
         return;
       }
       router.refresh();
@@ -312,7 +327,7 @@ export function YourList({
       const res = await toggleTask(k.id, nowDone, { category: parent.category, jobId: parent.job_id });
       if (!res.ok) {
         mark(k.id, !nowDone);
-        toast(res.error ?? "Couldn't update subtask — try again.", "error");
+        toast(res.error ?? t("md_couldNotUpdateSubtask"), "error");
         return;
       }
       router.refresh();
@@ -325,7 +340,7 @@ export function YourList({
     start(async () => {
       const res = await fn();
       if (!res.ok) {
-        toast(res.error ?? "Couldn't update task — try again.", "error");
+        toast(res.error ?? t("md_couldNotUpdate"), "error");
         return;
       }
       close();
@@ -336,49 +351,49 @@ export function YourList({
 
   /** The Reminder's ⋯ sheet: the app's one row sheet, its rows saying exactly what they write
    *  (the swap grammar, amendment 3: on an overdue row "tomorrow" destroys a stated deadline). */
-  const sheetFor = (t: SixSlot) => {
-    const c = dueChip(t.due_date, todayStr);
-    const due = t.due_date ? `Due ${formatDate(t.due_date)}${c?.overdue ? ` · ${c.label}` : ""}` : "No due date";
-    const opts = { category: t.category, jobId: t.job_id };
-    const pinned = isPinned(t.focus_date, todayStr);
+  const sheetFor = (row: SixSlot) => {
+    const c = dueChip(row.due_date, todayStr, lang);
+    const due = row.due_date ? `${fillText(t("md_dueDate"), { date: formatDate(row.due_date, undefined, lang) })}${c?.overdue ? ` · ${c.label}` : ""}` : t("md_noDueDate");
+    const opts = { category: row.category, jobId: row.job_id };
+    const pinned = isPinned(row.focus_date, todayStr);
     // The same one function the row's chip asks (lib/six-rank carriedPin), so the sheet's subline and
     // the chip above it can never say different things about the same pin.
-    const carried = carriedPin(t, todayStr);
-    const pinWords = carried ? ` · Pinned, carried from ${carriedDay(carried, todayStr)}` : pinned ? " · Pinned" : "";
+    const carried = carriedPin(row, todayStr);
+    const pinWords = carried ? fillText(t("md_pinnedCarried"), { day: carriedDay(carried, todayStr, lang) }) : pinned ? t("md_pinned") : "";
     return (
-      <RowMoreSheet title={t.title} subline={`${due}${pinWords}`}>
+      <RowMoreSheet title={row.title} subline={`${due}${pinWords}`}>
         {({ close }) => (
           <>
             <button
               type="button"
               disabled={pending}
-              onClick={() => sheetAct(close, () => updateTask(t.id, { due_date: tomorrowStr }, opts), movedWords(t, tomorrowStr, todayStr))}
+              onClick={() => sheetAct(close, () => updateTask(row.id, { due_date: tomorrowStr }, opts), movedWords(row, tomorrowStr, todayStr, lang))}
               className={SHEET_ROW}
             >
-              Move Due Date To Tomorrow
+              {t("md_moveDueTomorrow")}
             </button>
             <MoveToDay
-              label="Pick a Day"
+              label={t("md_pickADay")}
               triggerClassName={SHEET_ROW}
               onPick={async (iso) => {
                 if (!iso) return { ok: true };
-                const res = await updateTask(t.id, { due_date: iso }, opts);
+                const res = await updateTask(row.id, { due_date: iso }, opts);
                 if (res.ok) {
                   close();
-                  const said = movedWords(t, iso, todayStr);
+                  const said = movedWords(row, iso, todayStr, lang);
                   if (said) toast(said, "success");
                   router.refresh();
                 }
                 return res;
               }}
             >
-              Pick a Day…
+              {t("md_pickADayDots")}
             </MoveToDay>
             {/* Nothing goes quiet without a day: In A Week, not Someday (LATER_CHOICE above). */}
             <button
               type="button"
               disabled={pending}
-              onClick={() => sheetAct(close, () => updateTask(t.id, { due_date: later.due }, opts), movedWords(t, later.due, todayStr))}
+              onClick={() => sheetAct(close, () => updateTask(row.id, { due_date: later.due }, opts), movedWords(row, later.due, todayStr, lang))}
               className={SHEET_ROW}
             >
               {later.label}
@@ -389,14 +404,14 @@ export function YourList({
               onClick={() =>
                 // focus_date is the pin. It no longer expires at midnight: lib/six-rank honours any
                 // focus_date on or before today, so this row says what the pin actually does.
-                sheetAct(close, () => updateTask(t.id, { focus_date: pinned ? null : todayStr }, opts))
+                sheetAct(close, () => updateTask(row.id, { focus_date: pinned ? null : todayStr }, opts))
               }
               className={SHEET_ROW}
             >
-              {pinned ? "Unpin" : "Pin To Top (Carries Until You Unpin It)"}
+              {pinned ? t("md_unpin") : t("md_pinToTop")}
             </button>
             {/* Goes to the Reminders page; the page change takes the sheet with it (SheetLink). */}
-            <SheetLink href={taskHref(t)}>Open</SheetLink>
+            <SheetLink href={taskHref(row)}>{t("md_openDoor")}</SheetLink>
           </>
         )}
       </RowMoreSheet>
@@ -411,7 +426,7 @@ export function YourList({
         <div className="flex items-center gap-2.5">
           {/* ERIK NAMED IT: "lets not limit it and call it something more clear like Tasks &
               Reminders". No number in the heading, because there is no cap behind it. */}
-          <h2 className="text-sm font-semibold text-slate-900">Tasks &amp; Reminders</h2>
+          <h2 className="text-sm font-semibold text-slate-900">{t("md_tasksAndReminders")}</h2>
           {/* One mark per thing on the day, filled as they get checked off: checkboxes are their own
               affordance, and this is progress, not a count to clear. */}
           <DoneMarks done={doneCount} total={doneToday + rows.length} />
@@ -420,7 +435,7 @@ export function YourList({
             was hidden ("N More For You"), the deep review's reminders-01 — Erik: "I only see 3 and
             don't know where to find the full list". Always drawn, count or no count. */}
         <Link href="/tasks" className="ml-auto text-sm font-medium text-brand hover:underline">
-          All Reminders
+          {t("md_allReminders")}
         </Link>
       </div>
 
@@ -428,34 +443,34 @@ export function YourList({
 
       {rows.length === 0 ? (
         <p className="px-5 py-5 text-center text-sm text-slate-400">
-          Nothing urgent today.{" "}
+          {t("md_nothingUrgent")}{" "}
           {restCount > 0 && (
             <Link href="/tasks" className="font-medium text-brand hover:underline">
-              Grab One →
+              {t("md_grabOne")}
             </Link>
           )}
         </p>
       ) : (
         <ul className="divide-y divide-slate-100">
-          {rows.map((t) => {
-            const done = slotDone(t);
-            const chip = dueChip(t.due_date, todayStr);
-            const screaming = !!chip && (chip.overdue || chip.label === "Today");
-            const kids = kidsByParent.get(t.id) ?? [];
+          {rows.map((row) => {
+            const done = slotDone(row);
+            const chip = dueChip(row.due_date, todayStr, lang);
+            const screaming = !!chip && (chip.overdue || chip.today);
+            const kids = kidsByParent.get(row.id) ?? [];
             // A pin he set on an earlier day: the chip is why the row is still here, in two words.
             // BOTH PIN MARKS GO WHEN THE ROW IS CHECKED, like the flag and the due chip beside them —
             // a struck-through line saying "Carried From Yesterday" is a sentence about finished work
             // (lib/six-rank carriedPin owns that gate for this card and for /tasks both).
-            const carried = carriedPin(t, todayStr, done);
-            const pinned = isPinned(t.focus_date, todayStr) && !done;
+            const carried = carriedPin(row, todayStr, done);
+            const pinned = isPinned(row.focus_date, todayStr) && !done;
             return (
-              <li key={t.id}>
+              <li key={row.id}>
                 <div className="flex items-center pr-2">
                   <button
                     type="button"
-                    onClick={() => toggleSlot(t)}
+                    onClick={() => toggleSlot(row)}
                     className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 px-5 py-1.5 text-left hover:bg-slate-50"
-                    aria-label={done ? `Uncheck ${t.title}` : `Mark ${t.title} done`}
+                    aria-label={fillText(t(done ? "md_uncheck" : "md_markDone"), { title: row.title })}
                   >
                     <span
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
@@ -466,20 +481,20 @@ export function YourList({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className={`block truncate text-sm ${done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
-                        {t.priority > 0 && !done && (
-                          <Flag className={`mr-1 inline h-3.5 w-3.5 ${t.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
+                        {row.priority > 0 && !done && (
+                          <Flag className={`mr-1 inline h-3.5 w-3.5 ${row.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
                         )}
-                        {t.title}
+                        {row.title}
                       </span>
-                      {(carried || t.category === "office") && (
+                      {(carried || row.category === "office") && (
                         <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
                           {carried && (
                             <span className="rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-600">
-                              Carried From {carriedDay(carried, todayStr)}
+                              {fillText(t("md_carriedFrom"), { day: carriedDay(carried, todayStr, lang) })}
                             </span>
                           )}
-                          {t.category === "office" && (
-                            <span className="rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">Office</span>
+                          {row.category === "office" && (
+                            <span className="rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">{t("md_office")}</span>
                           )}
                         </span>
                       )}
@@ -494,7 +509,7 @@ export function YourList({
                     {pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-brand" fill="currentColor" />}
                   </button>
                   {/* The row's ⋯: the app's one row sheet (components/row-more-sheet). */}
-                  {sheetFor(t)}
+                  {sheetFor(row)}
                 </div>
 
                 {/* Subtasks — indented smaller check rows (44px targets all the same), never
@@ -510,9 +525,9 @@ export function YourList({
                           <li key={k.id}>
                             <button
                               type="button"
-                              onClick={() => toggleKid(t, k)}
+                              onClick={() => toggleKid(row, k)}
                               className="flex min-h-[44px] w-full items-center gap-2.5 py-1 pl-[3.25rem] pr-4 text-left hover:bg-slate-50"
-                              aria-label={kd ? `Uncheck ${k.title}` : `Mark ${k.title} done`}
+                              aria-label={fillText(t(kd ? "md_uncheck" : "md_markDone"), { title: k.title })}
                             >
                               <span
                                 className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
@@ -544,7 +559,7 @@ export function YourList({
               waiting on a later day, the undated office ones, and anything past the fetch's bound.
               "For you": /tasks also lists the ones you made for someone else, which this doesn't
               count. */}
-          All Reminders · {restCount} More For You
+          {fillText(t("md_moreForYou"), { n: String(restCount) })}
         </Link>
       )}
     </Card>

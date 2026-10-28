@@ -6,6 +6,7 @@ import { todayBoundsInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { NUDGE_LOCAL_HOUR, atLocalHour, readActiveOrgs } from "@/lib/cron-orgs";
+import { asLang, fillText, translator } from "@/lib/i18n";
 
 // Every company in one run, one after another: the budget every cron carries now (cn-v1130).
 export const maxDuration = 300;
@@ -76,9 +77,10 @@ export async function GET(request: Request) {
         counts.not_ready++;
         continue;
       }
+      // `language` rides the one people read (cn-v1138): the text speaks each tech's own language.
       const { data: techs, error: techErr } = await supabase
         .from("profiles")
-        .select("id, full_name, phone")
+        .select("id, full_name, phone, language")
         .eq("org_id", org.id)
         .eq("active", true)
         .eq("role", "tech");
@@ -97,12 +99,9 @@ export async function GET(request: Request) {
       const clockedSet = new Set((clockedIn ?? []).map((e: any) => e.profile_id));
 
       counts.checked += techs.length;
-      for (const t of techs.filter((t: any) => !clockedSet.has(t.id))) {
-        const sent = await sendSms(
-          t.phone,
-          `Good morning ${t.full_name ?? ""}! You haven't clocked in yet. Open Contractor North to clock in.`,
-          (org.settings as any)?.sms_from_number,
-        );
+      for (const tech of techs.filter((t: any) => !clockedSet.has(t.id))) {
+        const t = translator(asLang(tech.language));
+        const sent = await sendSms(tech.phone, fillText(t("nb_nudgeMorning"), { name: tech.full_name ?? "" }), (org.settings as any)?.sms_from_number);
         if (sent) counts.texted++;
       }
     } catch (e) {

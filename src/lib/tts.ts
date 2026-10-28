@@ -1,5 +1,6 @@
 import { trace } from "@/lib/nort/trace";
 import { nativePlaybackOn, playNative, stopPlaybackNative } from "@/lib/native-audio";
+import { asLang, localeOf, type Lang } from "@/lib/locale";
 
 /** A clip began to play ON THE ELEMENT. voice-stream listens (cn:nort-play): in the shell the
  *  recorder's fast wake ends here, because WebKit's playback at the slow tick is the proven-clean
@@ -28,18 +29,31 @@ function score(v: SpeechSynthesisVoice): number {
   return s;
 }
 
-export function bestVoice(): SpeechSynthesisVoice | null {
+/** THE LANGUAGE THE VOICE SPEAKS (cn-v1138): the page's own, which the LangProvider writes on the
+ *  document from profiles.language — so every speak path (the assistant, the geofence, an alert)
+ *  inherits it with no plumbing, and a caller that knows better passes its own. Outside a document
+ *  (a test, the server) it is English. */
+export function voiceLang(): Lang {
+  // A document with no element (a test's stub of visibilityState) is a document that says nothing.
+  const el = typeof document !== "undefined" ? document.documentElement : undefined;
+  return asLang((el?.lang || "").toLowerCase().slice(0, 2));
+}
+
+/** The browser voice for a language: an es-* voice for Spanish, an en-* voice otherwise — the best
+ *  of them by score, and any voice at all only when the device has none in that language. */
+export function bestVoice(lang: Lang = voiceLang()): SpeechSynthesisVoice | null {
   if (typeof window === "undefined" || !window.speechSynthesis) return null;
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
-  const en = voices.filter((v) => (v.lang || "").toLowerCase().startsWith("en"));
-  const pool = en.length ? en : voices;
+  const mine = voices.filter((v) => (v.lang || "").toLowerCase().startsWith(lang));
+  const pool = mine.length ? mine : voices;
   return [...pool].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
 
-export function tuneUtterance(u: SpeechSynthesisUtterance): SpeechSynthesisUtterance {
-  const v = bestVoice();
+export function tuneUtterance(u: SpeechSynthesisUtterance, lang: Lang = voiceLang()): SpeechSynthesisUtterance {
+  const v = bestVoice(lang);
   if (v) u.voice = v;
+  u.lang = localeOf(lang);
   u.rate = 1.0;
   u.pitch = 1.0;
   return u;
@@ -101,11 +115,11 @@ export function quietBrowserVoice() {
 /** ONE CLIP FROM THE NEURAL VOICE, as a blob (null when there is no provider or it failed): the
  *  greeting keeps these on the phone (lib/nort/greeting-player) so a greeting never waits on a
  *  synthesis round trip at open. */
-export async function fetchClip(text: string): Promise<Blob | null> {
-  const t = speakable((text || "").trim());
+export async function fetchClip(text: string, lang: Lang = voiceLang()): Promise<Blob | null> {
+  const t = speakable((text || "").trim(), lang);
   if (!t || neuralDisabled) return null;
   try {
-    const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) });
+    const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t, lang }) });
     if (r.status === 503) { neuralDisabled = true; return null; }
     if (!r.ok) return null;
     // Only audio is a clip: a redirected page or a truncated body must never be kept and replayed.
@@ -144,7 +158,7 @@ export function playClip(blob: Blob, fallbackText: string): { done: Promise<Clip
       trace("clip done", o);
       // Refused = the plugin would not start it: the one fallback voice. Failed = it broke after
       // starting: reported as such (a cached greeting is dropped), never spoken a second time.
-      if (o === "refused") { resolvePlaying(); browserSpeak(speakable(fallbackText), () => fire("ended")); return; }
+      if (o === "refused") { resolvePlaying(); browserSpeak(speakable(fallbackText, voiceLang()), () => fire("ended")); return; }
       fire(o);
     });
     return { done, playing, stop: () => { stopSpeaking(); fire("stopped"); } };
@@ -152,7 +166,7 @@ export function playClip(blob: Blob, fallbackText: string): { done: Promise<Clip
   const a = getAudio();
   if (!a) {
     resolvePlaying();
-    browserSpeak(speakable(fallbackText), () => fire("ended"));
+    browserSpeak(speakable(fallbackText, voiceLang()), () => fire("ended"));
     return { done, playing, stop: () => { stopSpeaking(); fire("stopped"); } };
   }
   const url = URL.createObjectURL(blob);
@@ -185,7 +199,7 @@ export function playClip(blob: Blob, fallbackText: string): { done: Promise<Clip
       try { URL.revokeObjectURL(url); } catch {}
       releaseElement(a);
       resolvePlaying();
-      browserSpeak(speakable(fallbackText), () => fire("ended"));
+      browserSpeak(speakable(fallbackText, voiceLang()), () => fire("ended"));
     });
   return {
     done,
@@ -220,12 +234,12 @@ export function stopSpeaking() {
   } catch {}
 }
 
-function browserSpeak(text: string, fire: () => void, onStart?: () => void) {
+function browserSpeak(text: string, fire: () => void, onStart?: () => void, lang: Lang = voiceLang()) {
   try {
     const synth = window.speechSynthesis;
     if (!synth) { fire(); return; }
     synth.cancel();
-    const u = tuneUtterance(new SpeechSynthesisUtterance(text));
+    const u = tuneUtterance(new SpeechSynthesisUtterance(text), lang);
     if (onStart) u.onstart = () => onStart();
     u.onend = fire;
     u.onerror = fire;
@@ -265,46 +279,122 @@ function collapseCostBreakdown(text: string): string {
   return lines.filter((ln) => !isCostBreakdownLine(ln)).join("\n");
 }
 
+/** The spoken forms of the trade's notation, one table per language: the English the voice has
+ *  always used, and the Spanish beside it (cn-v1138). The rules are ONE function below; only the
+ *  words differ. Street suffixes are a proper name's and expand the same way in both. */
+type SpokenWords = {
+  number: string; // "#10 AWG"
+  doc: Record<string, string>; // E / Q / J / INV / WO / CO / PO
+  aught: Record<string, string>; // 1/0 … 4/0
+  amp: string;
+  volt: string;
+  kwh: string;
+  kw: string;
+  feet: string;
+  inches: string;
+  hours: string;
+  each: string;
+  sqft: string;
+  fourS: string;
+  tm: string;
+  equals: string;
+  by: string;
+  dollars: string;
+  and: string; // "82 dollars AND 50 cents" / "82 dólares CON 50 centavos"
+  cents: string;
+  percent: string;
+  ampersand: string;
+};
+const SPOKEN: Record<Lang, SpokenWords> = {
+  en: {
+    number: "number",
+    doc: { E: "estimate", Q: "quote", J: "job", INV: "invoice", WO: "work order", CO: "change order", PO: "purchase order" },
+    aught: { "1": "one aught", "2": "two aught", "3": "three aught", "4": "four aught" },
+    amp: "amp",
+    volt: "volt",
+    kwh: "kilowatt hours",
+    kw: "kilowatts",
+    feet: "feet",
+    inches: "inches",
+    hours: "hours",
+    each: "each",
+    sqft: "square feet",
+    fourS: "four S",
+    tm: "time and materials",
+    equals: "equals",
+    by: "by",
+    dollars: "dollars",
+    and: "and",
+    cents: "cents",
+    percent: "percent",
+    ampersand: "and",
+  },
+  es: {
+    number: "número",
+    doc: { E: "presupuesto", Q: "cotización", J: "trabajo", INV: "factura", WO: "orden de trabajo", CO: "orden de cambio", PO: "orden de compra" },
+    aught: { "1": "un cero", "2": "dos cero", "3": "tres cero", "4": "cuatro cero" },
+    amp: "amperios",
+    volt: "voltios",
+    kwh: "kilovatios hora",
+    kw: "kilovatios",
+    feet: "pies",
+    inches: "pulgadas",
+    hours: "horas",
+    each: "cada uno",
+    sqft: "pies cuadrados",
+    fourS: "cuatro S",
+    tm: "tiempo y materiales",
+    equals: "igual a",
+    by: "por",
+    dollars: "dólares",
+    and: "con",
+    cents: "centavos",
+    percent: "por ciento",
+    ampersand: "y",
+  },
+};
+
 /**
  * SPEAKABLE TEXT — the voice was reading contractor shorthand raw ("E-009" as
  * "E dash zero zero nine", "10/3" as "ten slash three", "$5,550.00" digit by
- * digit). Translate app/trade notation into spoken English JUST for the voice —
+ * digit). Translate app/trade notation into spoken words JUST for the voice —
  * the screen keeps the compact text. Applied at the speakSmart choke point so
- * every speak path (assistant, geofence, alerts) inherits it.
+ * every speak path (assistant, geofence, alerts) inherits it. In the person's
+ * language (cn-v1138): E-009 is "estimate 9" to one tech and "presupuesto 9" to
+ * the next; the rules are the same, the words come from SPOKEN.
  */
-export function speakable(input: string): string {
+export function speakable(input: string, lang: Lang = "en"): string {
+  const w = SPOKEN[lang] ?? SPOKEN.en;
   let t = String(input ?? "");
   // Voice-only: drop itemized cost lines so speech jumps to highlights + total, not the math.
   t = collapseCostBreakdown(t);
   // Wire gauge FIRST — "#10 AWG" → "number 10" (the markdown strip below would eat the #).
-  t = t.replace(/#(\d+)\s*(AWG\b)?/gi, "number $1 ");
+  t = t.replace(/#(\d+)\s*(AWG\b)?/gi, `${w.number} $1 `);
   // Markdown + symbols that read as noise.
   t = t.replace(/[*_`#]+/g, "").replace(/\u2026|\.{3}/g, ",").replace(/[–—]/g, ", ");
   // Doc numbers: E-009 → "estimate 9", INV-00012 → "invoice 12", J-018 → "job 18".
   // Strip leading list bullets so a kept line never reads as "dash …" / "star …".
   t = t.replace(/^[ \t]*[-•]\s+/gm, "");
-  const DOC: Record<string, string> = { E: "estimate", Q: "quote", J: "job", INV: "invoice", WO: "work order", CO: "change order", PO: "purchase order" };
-  t = t.replace(/\b(E|Q|J|INV|WO|CO|PO)-0*(\d+)\b/g, (_, l: string, n: string) => `${DOC[l]} ${n}`);
+  t = t.replace(/\b(E|Q|J|INV|WO|CO|PO)-0*(\d+)\b/g, (_, l: string, n: string) => `${w.doc[l]} ${n}`);
   // Wire sizes — the trade reads these as words: 4/0 → "four aught"; 10/3 → "ten three".
-  const AUGHT: Record<string, string> = { "1": "one aught", "2": "two aught", "3": "three aught", "4": "four aught" };
-  t = t.replace(/\b([1-4])\/0\b/g, (_, n: string) => AUGHT[n]);
+  t = t.replace(/\b([1-4])\/0\b/g, (_, n: string) => w.aught[n]);
   t = t.replace(/\b(\d{1,2})\/(\d)\b/g, "$1 $2"); // 10/3, 12/2, 14/2 → "ten three" …
   // Units & electrical notation.
-  t = t.replace(/\b(\d[\d,\.]*)\s*A\b/g, "$1 amp").replace(/\b(\d[\d,\.]*)\s*V\b/g, "$1 volt");
-  t = t.replace(/\b(\d[\d,\.]*)\s*kWh\b/gi, "$1 kilowatt hours").replace(/\b(\d[\d,\.]*)\s*kW\b/gi, "$1 kilowatts");
-  t = t.replace(/(\d)\s*'\s*/g, "$1 feet ").replace(/(\d)\s*"\s*/g, "$1 inches ");
-  t = t.replace(/\b(\d[\d,\.]*)\s*ft\b/gi, "$1 feet").replace(/\b(\d[\d,\.]*)\s*(hrs?|hours?)\b/gi, "$1 hours");
-  t = t.replace(/\b(\d+)\s*ea\b/gi, "$1 each").replace(/\bsq\s*ft\b/gi, "square feet");
-  t = t.replace(/\b4S\b/g, "four S").replace(/\bT&M\b/gi, "time and materials");
+  t = t.replace(/\b(\d[\d,\.]*)\s*A\b/g, `$1 ${w.amp}`).replace(/\b(\d[\d,\.]*)\s*V\b/g, `$1 ${w.volt}`);
+  t = t.replace(/\b(\d[\d,\.]*)\s*kWh\b/gi, `$1 ${w.kwh}`).replace(/\b(\d[\d,\.]*)\s*kW\b/gi, `$1 ${w.kw}`);
+  t = t.replace(/(\d)\s*'\s*/g, `$1 ${w.feet} `).replace(/(\d)\s*"\s*/g, `$1 ${w.inches} `);
+  t = t.replace(/\b(\d[\d,\.]*)\s*ft\b/gi, `$1 ${w.feet}`).replace(/\b(\d[\d,\.]*)\s*(hrs?|hours?)\b/gi, `$1 ${w.hours}`);
+  t = t.replace(/\b(\d+)\s*ea\b/gi, `$1 ${w.each}`).replace(/\bsq\s*ft\b/gi, w.sqft);
+  t = t.replace(/\b4S\b/g, w.fourS).replace(/\bT&M\b/gi, w.tm);
   // Street-suffix abbreviations (addresses) — capitalized only, so "3rd"/"have" can't trip.
   const SUFFIX: Record<string, string> = { Ct: "Court", Ave: "Avenue", Blvd: "Boulevard", Rd: "Road", Ln: "Lane", Hwy: "Highway", Ste: "Suite" };
-  t = t.replace(/\b(Ct|Ave|Blvd|Rd|Ln|Hwy|Ste)\b\.?/g, (_, w: string) => SUFFIX[w]);
-  t = t.replace(/\s*=\s*/g, " equals "); // any math that survives the breakdown collapse
-  t = t.replace(/\s*×\s*/g, " by ").replace(/(\d)\s*x\s*(\d)/gi, "$1 by $2");
+  t = t.replace(/\b(Ct|Ave|Blvd|Rd|Ln|Hwy|Ste)\b\.?/g, (_, x: string) => SUFFIX[x]);
+  t = t.replace(/\s*=\s*/g, ` ${w.equals} `); // any math that survives the breakdown collapse
+  t = t.replace(/\s*×\s*/g, ` ${w.by} `).replace(/(\d)\s*x\s*(\d)/gi, `$1 ${w.by} $2`);
   // Money: strip trailing .00; "$5,550" → "5,550 dollars"; cents spoken plainly.
-  t = t.replace(/\$(\d[\d,]*)\.(\d{2})\b/g, (_, d: string, c: string) => (c === "00" ? `${d} dollars` : `${d} dollars and ${c} cents`));
-  t = t.replace(/\$(\d[\d,]*)\b/g, "$1 dollars");
-  t = t.replace(/%/g, " percent").replace(/&/g, " and ");
+  t = t.replace(/\$(\d[\d,]*)\.(\d{2})\b/g, (_, d: string, c: string) => (c === "00" ? `${d} ${w.dollars}` : `${d} ${w.dollars} ${w.and} ${c} ${w.cents}`));
+  t = t.replace(/\$(\d[\d,]*)\b/g, `$1 ${w.dollars}`);
+  t = t.replace(/%/g, ` ${w.percent}`).replace(/&/g, ` ${w.ampersand} `);
   return t.replace(/\s{2,}/g, " ").trim();
 }
 
@@ -326,7 +416,7 @@ export const CLIP_WAIT_MS = 8000;
 /** Bumped by stopSpeaking(): a clip still on its way for a phrase the person cut off is dropped when
  *  it lands, never played late ("never on a cut"), and its second try is not made. */
 let sayEpoch = 0;
-async function clipTwice(t: string, alive: () => boolean = () => true): Promise<{ blob: Blob } | { why: string }> {
+async function clipTwice(t: string, alive: () => boolean = () => true, lang: Lang = voiceLang()): Promise<{ blob: Blob } | { why: string }> {
   let why = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt) {
@@ -335,7 +425,7 @@ async function clipTwice(t: string, alive: () => boolean = () => true): Promise<
     }
     try {
       const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(CLIP_WAIT_MS) : undefined;
-      const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }), ...(signal ? { signal } : {}) });
+      const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t, lang }), ...(signal ? { signal } : {}) });
       if (!alive()) return { why: "stopped" };
       if (r.status === 503) { neuralDisabled = true; return { why: "no provider" }; }
       // Only audio is a clip: a redirected page (a sign-in, say) must never be handed to the player.
@@ -363,27 +453,27 @@ async function clipTwice(t: string, alive: () => boolean = () => true): Promise<
  *  fires exactly once. `onStart` fires once, only when a sound has actually begun (a clip still
  *  being fetched, or a fetch that never answers, has not started anything): a caller that treats
  *  the line as audible, or listens over it, waits for this and never assumes it. */
-export function speakSmart(text: string, onEnd?: (heard: boolean) => void, onStart?: () => void) {
+export function speakSmart(text: string, onEnd?: (heard: boolean) => void, onStart?: () => void, lang: Lang = voiceLang()) {
   let began = false;
   const begin = () => { if (began) return; began = true; onStart?.(); };
   let fired = false;
   // `heard`: false when nothing could be heard (the dark, no clip) — a caller that would listen for
   // an answer to a question must not listen for one nobody heard.
   const fire = (heard = true) => { if (fired) return; fired = true; onEnd?.(heard); };
-  const t = speakable((text || "").trim());
+  const t = speakable((text || "").trim(), lang);
   if (!t) { fire(); return; }
   const dark = () => nativePlaybackOn() && pageHidden();
-  if (neuralDisabled) { if (dark()) fire(false); else browserSpeak(t, fire, begin); return; }
+  if (neuralDisabled) { if (dark()) fire(false); else browserSpeak(t, fire, begin, lang); return; }
   const mine = sayEpoch;
   const alive = () => sayEpoch === mine;
   trace("say sent", `${t.length} chars`);
 
-  void clipTwice(t, alive).then((got) => {
+  void clipTwice(t, alive, lang).then((got) => {
     if (!alive()) return; // cut while the clip was on its way: never late, never onEnd (a Stop re-arms by its own hand)
     if ("why" in got) {
       trace("say failed", got.why);
       if (dark()) { fire(false); return; } // nothing can be heard in the dark: the caller is told so
-      browserSpeak(t, fire, begin);
+      browserSpeak(t, fire, begin, lang);
       return;
     }
     const blob = got.blob;
@@ -400,22 +490,22 @@ export function speakSmart(text: string, onEnd?: (heard: boolean) => void, onSta
         // runs only when the screen comes back), so a hands-free person would wait on a card with no
         // voice. The browser voice says the line, and the caller is told whether THAT was heard. In the
         // dark the browser voice is silent, so the caller is told the line was not heard (below).
-        if (o === "failed" && !dark()) { browserSpeak(t, fire, begin); return; }
+        if (o === "failed" && !dark()) { browserSpeak(t, fire, begin, lang); return; }
         // Only a clip that played to its end was HEARD: one that broke after it started was not,
         // and a caller that would listen for a yes must not open the mic for a question nobody
         // finished hearing (the confirm gate).
-        if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin); }
+        if (o === "refused") { if (dark()) fire(false); else browserSpeak(t, fire, begin, lang); }
         else if (o !== "stopped") fire(o === "ended");
       });
       return;
     }
     const url = URL.createObjectURL(blob);
     const a = getAudio();
-    if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire, begin); return; }
+    if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire, begin, lang); return; }
     quietBrowserVoice();
     a.onended = () => { URL.revokeObjectURL(url); releaseElement(a); fire(); };
     a.src = url;
-    a.play().then(() => begin(), () => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire, begin); });
+    a.play().then(() => begin(), () => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire, begin, lang); });
   });
 }
 
@@ -476,11 +566,11 @@ export function splitSentences(text: string): { sentences: string[]; rest: strin
 
 /** Synthesize ONE already-speakable clip → its bytes. Resolves to null when the neural provider is
  *  unavailable/errored (caller then browser-speaks the text). Never rejects. */
-function synthClip(speakableText: string, alive: () => boolean): Promise<Blob | null> {
+function synthClip(speakableText: string, alive: () => boolean, lang: Lang): Promise<Blob | null> {
   if (neuralDisabled) return Promise.resolve(null);
   // The same two tries the directive phrase gets (clipTwice): a sentence lost to one failed request
   // was skipped or read by the silent browser voice in the dark. A stopped queue makes no second try.
-  return clipTwice(speakableText, alive).then((got) => {
+  return clipTwice(speakableText, alive, lang).then((got) => {
     if ("blob" in got) return got.blob;
     trace("clip failed", got.why);
     return null;
@@ -545,18 +635,20 @@ export class SpeakQueue {
   private stopped = false;
   private fired = false;
   private onDone?: () => void;
+  /** The language of this reply (cn-v1138): the page's unless the caller says otherwise. */
+  private lang: Lang;
   // Resolved by stop() so an in-flight clip's await can't outlive a teardown (no hung pump).
   private stopResolve!: () => void;
   private stopped$: Promise<void> = new Promise((r) => { this.stopResolve = r; });
 
-  constructor(onDone?: () => void) { this.onDone = onDone; }
+  constructor(onDone?: () => void, lang: Lang = voiceLang()) { this.onDone = onDone; this.lang = lang; }
 
   /** Queue a chunk of text to speak. It's synthesized immediately (fetch fires now) but played in order. */
   push(text: string) {
     if (this.stopped) return;
-    const t = speakable((text || "").trim());
+    const t = speakable((text || "").trim(), this.lang);
     if (!t) return;
-    this.items.push({ speakable: t, clip: synthClip(t, () => !this.stopped) });
+    this.items.push({ speakable: t, clip: synthClip(t, () => !this.stopped, this.lang) });
     if (!this.playing) void this.pump();
   }
 
@@ -606,7 +698,7 @@ export class SpeakQueue {
         trace("clip skipped", "dark"); // the browser voice cannot be heard here (pageHidden); the next sentence follows
       } else {
         // Neural failed for this clip — speak it with the browser voice, still in order.
-        await Promise.race([new Promise<void>((res) => browserSpeak(item.speakable, res)), this.stopped$]);
+        await Promise.race([new Promise<void>((res) => browserSpeak(item.speakable, res, undefined, this.lang)), this.stopped$]);
       }
     }
     this.playing = false;

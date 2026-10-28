@@ -107,7 +107,7 @@ describe("the law covers what Nort looked up and what he knows (the 10-19 phone 
   it("time.switchJob reads the running shift before it resolves the job", () => {
     const t = src("src/lib/actions/entities/time.ts");
     const body = t.slice(t.indexOf('"time.switchJob": {'), t.indexOf("WHICH SHIFT DID THEY MEAN?"));
-    const openRead = body.indexOf('if (!open) return { ok: false, error: "You\'re not clocked in." };');
+    const openRead = body.indexOf('if (!open) return { ok: false, error: t("nt_notClockedIn") };'); // "You're not clocked in.", in the person's language (cn-v1138)
     const resolve = body.indexOf("const job = await resolveJobId(supabase, i.job_id ?? null);");
     expect(openRead).toBeGreaterThan(0);
     expect(resolve).toBeGreaterThan(openRead);

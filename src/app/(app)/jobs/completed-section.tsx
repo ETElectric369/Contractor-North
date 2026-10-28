@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { JobRow, type JobRowData } from "./job-row";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /** Per-session memory of the expand state — a mis-tap away from losing your place
  *  otherwise. sessionStorage (not local): a fresh visit starts collapsed again. */
@@ -19,6 +21,8 @@ const OPEN_KEY = "jobs.completed.open";
  * and says so honestly.
  */
 export function CompletedJobsSection({ jobs, total }: { jobs: JobRowData[]; total: number }) {
+  const lang = useLang();
+  const t = translator(lang);
   const [open, setOpen] = useState(false);
 
   // Collapsed on the server render; re-open after mount if this session left it open.
@@ -54,7 +58,7 @@ export function CompletedJobsSection({ jobs, total }: { jobs: JobRowData[]; tota
         {/* The shelf's size in plain words, never a badge: finished jobs wait on nobody (Erik,
             2026-09-27: "all badges only show whats open"). */}
         <span className="text-sm font-semibold text-slate-700">
-          Completed <span className="font-normal text-slate-500">({total})</span>
+          {t("jb_completedShelf")} <span className="font-normal text-slate-500">({total})</span>
         </span>
         <ChevronDown
           className={`ml-auto h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
@@ -64,14 +68,14 @@ export function CompletedJobsSection({ jobs, total }: { jobs: JobRowData[]; tota
         <>
           <ul className="divide-y divide-slate-100 border-t border-slate-100">
             {jobs.map((j) => (
-              <JobRow key={j.id} job={j} hideStatus />
+              <JobRow key={j.id} job={j} hideStatus lang={lang} />
             ))}
           </ul>
           {total > jobs.length && (
             <p className="border-t border-slate-100 px-5 py-2 text-center text-xs text-slate-400">
-              Showing the latest {jobs.length} of {total} —{" "}
+              {fillText(t("jb_showingLatestOf"), { n: String(jobs.length), total: String(total) })}{" "}
               <Link href="/jobs?status=complete" className="text-brand hover:underline">
-                View All Completed
+                {t("jb_viewAllCompleted")}
               </Link>
             </p>
           )}

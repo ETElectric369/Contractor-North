@@ -2,6 +2,8 @@
 import { dismissalEntry } from "@/lib/estimate/sync-job-tasks";
 import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
+import { callerLang } from "@/lib/lang-of";
+import { fillText, localeOf, translator, type Lang } from "@/lib/i18n";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -24,20 +26,33 @@ function revalidateTaskViews(_category?: string | null, jobId?: string | null) {
   if (jobId) revalidatePath(`/jobs/${jobId}`);
 }
 
-/** A JOB'S TASK BELONGS TO THE JOB (Erik, 2026-09-26: "a crew leader can assign them verbally").
- *  Said, never silently dropped, wherever a name meets a job. */
-const JOB_TASK_HAS_NO_ASSIGNEE =
-  "A job's task belongs to the job, not one person: the crew lead hands it out. Leave the name off, or make it a Reminder for them with no job.";
+type Client = Awaited<ReturnType<typeof createClient>>;
 
-/** 0358's delete rule, in words, for the tap that crossed it. */
-const TASK_DELETE_RULE = "Only the office or whoever added this task can delete it. You can still check it off.";
+/**
+ * THE CALLER'S OWN WORDS (cn-v1138). Every refusal and the duplicate's sentence come from
+ * lib/words/tasks in the caller's language (profiles.language through lib/lang-of callerLang).
+ * The language is read ONCE per action and only when an answer needs words, so the happy path of a
+ * tap pays no extra round trip; English when nobody is signed in or the read fails. The sentences
+ * themselves are unchanged: "A job's task belongs to the job, not one person: the crew lead hands it
+ * out …" (tk_jobTaskNoAssignee; Erik, 2026-09-26, "a crew leader can assign them verbally"), 0358's
+ * delete rule for the tap that crossed it (tk_deleteRule), the photo that isn't ours (tk_photoNotOurs).
+ */
+function wordsOf(supabase: Client) {
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase));
+  const say = async (key: string, vars?: Record<string, string>): Promise<string> => {
+    const text = translator(await lang())(key);
+    return vars ? fillText(text, vars) : text;
+  };
+  return { say, lang };
+}
+type Say = ReturnType<typeof wordsOf>["say"];
 
 /** A storage path a task may carry: a company folder first ({org}/…), nothing climbing out. The
  *  database checks it is THIS company's folder (0358's task_photo_path_ok); this checks the shape. */
 function photoPathShapeOk(p: string): boolean {
   return /^[0-9a-f-]{36}\/[^/]/.test(p) && !/(^|\/)\.\.(\/|$)/.test(p);
 }
-const PHOTO_NOT_OURS = "That photo isn't in this company's job files, so it can't go on the task.";
 
 /**
  * THE SILENT-WRITE LAW, applied to every task write. PostgREST answers a zero-row UPDATE or
@@ -49,14 +64,10 @@ const PHOTO_NOT_OURS = "That photo isn't in this company's job files, so it can'
  * still see but couldn't write is a permission answer; a row we can't see is gone. (Under the
  * tasks policies read and write are the same org test, so "can't see" is the honest reading.)
  */
-async function zeroRowsReason(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  id: string,
-  verb: "change" | "delete",
-): Promise<string> {
+async function zeroRowsReason(supabase: Client, say: Say, id: string, verb: "change" | "delete"): Promise<string> {
   const { data } = await supabase.from("tasks").select("id").eq("id", id).maybeSingle();
-  if (data) return verb === "delete" ? TASK_DELETE_RULE : "You don't have permission to change that task.";
-  return "Couldn't find that task. It may already be deleted. Refresh the page to see the current list.";
+  if (data) return verb === "delete" ? say("tk_deleteRule") : say("tk_noPermissionChange");
+  return say("tk_taskNotFound");
 }
 
 export type CreateTaskResult = Result & {
@@ -93,27 +104,28 @@ export async function createTask(input: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const { say, lang } = wordsOf(supabase);
+  if (!user) return { ok: false, error: await say("tk_notSignedIn") };
   const title = input.title.trim();
-  if (!title) return { ok: false, error: "Title is required." };
-  if (input.job_id && input.assigned_to) return { ok: false, error: JOB_TASK_HAS_NO_ASSIGNEE };
+  if (!title) return { ok: false, error: await say("tk_titleRequired") };
+  if (input.job_id && input.assigned_to) return { ok: false, error: await say("tk_jobTaskNoAssignee") };
   const photoPath = input.photo_path?.trim() || null;
-  if (photoPath && !input.job_id) return { ok: false, error: "A photo goes on a job's task. Pick the job first." };
-  if (photoPath && !photoPathShapeOk(photoPath)) return { ok: false, error: PHOTO_NOT_OURS };
+  if (photoPath && !input.job_id) return { ok: false, error: await say("tk_photoNeedsJob") };
+  if (photoPath && !photoPathShapeOk(photoPath)) return { ok: false, error: await say("tk_photoNotOurs") };
 
   // A JOB TASK NAMES ONE OF THIS COMPANY'S JOBS. 0358 makes the database say it too; this says it on
   // a database without 0358, where the policy only checked the company (the RLS-scoped jobs read
   // returns nothing for another company's id or a stray one).
   if (input.job_id) {
     const { data: j } = await supabase.from("jobs").select("id").eq("id", input.job_id).maybeSingle();
-    if (!j) return { ok: false, error: "That job isn't available. Refresh and pick it again." };
+    if (!j) return { ok: false, error: await say("tk_jobUnavailable") };
   }
   // A STEP LIVES WHERE ITS TASK LIVES: a step of a job's task is on that job (so the crew sees it),
   // a step of a Reminder is private with it. Unless the caller named the job itself.
   let jobId: string | null = input.job_id || null;
   if (input.parent_id && !jobId) {
     const { data: parent } = await supabase.from("tasks").select("job_id").eq("id", input.parent_id).maybeSingle();
-    if (!parent) return { ok: false, error: "Couldn't find the task this step goes under. Refresh and try again." };
+    if (!parent) return { ok: false, error: await say("tk_stepParentNotFound") };
     jobId = (parent.job_id as string | null) ?? null;
   }
 
@@ -147,11 +159,11 @@ export async function createTask(input: {
   if (!jobId) dupQ = dupQ.or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`);
   const { data: dup } = await dupQ.limit(1).maybeSingle();
   if (dup) {
-    const openedOn = new Date(dup.created_at as string).toLocaleDateString("en-US", {
+    const openedOn = new Date(dup.created_at as string).toLocaleDateString(localeOf(await lang()), {
       month: "short",
       day: "numeric",
     });
-    const was = `Already on the list: "${dup.title}" — open since ${openedOn}.`;
+    const was = await say("tk_alreadyOpenSince", { title: String(dup.title), date: openedOn });
     // AN ANSWER WITH A DOOR IN IT. A twin is not minted — but "already on the list" is only true if
     // he can SEE the list it is on. A Reminder waiting on a later day, or an undated office one, is
     // not on My Day's Tasks & Reminders, so a re-type used to change nothing at all and say nothing
@@ -169,17 +181,17 @@ export async function createTask(input: {
         .select("id");
       if (pinErr) return { ok: false, error: dbError(pinErr) };
       if (!pinned?.length) {
-        return { ok: true, id: dup.id as string, duplicate: true, speak: `${was} ${await zeroRowsReason(supabase, dup.id as string, "change")}` };
+        return { ok: true, id: dup.id as string, duplicate: true, speak: `${was} ${await zeroRowsReason(supabase, say, dup.id as string, "change")}` };
       }
       revalidateTaskViews((dup.category as string | null) ?? null, null);
       return {
         ok: true,
         id: dup.id as string,
         duplicate: true,
-        speak: `${was} It was waiting out of sight, so it's pinned to the top of Tasks & Reminders now.`,
+        speak: `${was} ${await say("tk_dupPinnedNow")}`,
       };
     }
-    const where = !jobId && today && isPinned(dup.focus_date as string | null, today) ? " It's pinned at the top of Tasks & Reminders." : "";
+    const where = !jobId && today && isPinned(dup.focus_date as string | null, today) ? await say("tk_dupAlreadyPinned") : "";
     return {
       ok: true,
       id: dup.id as string,
@@ -265,6 +277,7 @@ export async function toggleTask(
   },
 ): Promise<ToggleTaskResult> {
   const supabase = await createClient();
+  const { say } = wordsOf(supabase);
   let closedSteps: string[] = [];
 
   // PARENT-CASCADE GUARD: children are nested everywhere (never counted, never
@@ -285,7 +298,7 @@ export async function toggleTask(
           ok: false,
           needsCascade: true,
           openChildren,
-          error: `This task has ${openChildren} open subtask${openChildren === 1 ? "" : "s"} — complete them too?`,
+          error: openChildren === 1 ? await say("tk_hasOpenSubtaskOne") : await say("tk_hasOpenSubtasksMany", { n: String(openChildren) }),
         };
       }
       const kidIds = openKids!.map((k) => k.id as string);
@@ -307,7 +320,10 @@ export async function toggleTask(
           revalidateTaskViews(opts?.category, opts?.jobId);
           return {
             ok: false,
-            error: `Couldn't complete ${missed} of the ${kidIds.length} subtask${kidIds.length === 1 ? "" : "s"}. Refresh the page and try again.`,
+            error:
+              kidIds.length === 1
+                ? await say("tk_couldNotCompleteOne", { missed: String(missed) })
+                : await say("tk_couldNotCompleteMany", { missed: String(missed), total: String(kidIds.length) }),
           };
         }
       }
@@ -323,7 +339,7 @@ export async function toggleTask(
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!flipped?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "change") };
+  if (!flipped?.length) return { ok: false, error: await zeroRowsReason(supabase, say, id, "change") };
 
   // UNDO OF A CASCADED CHECK-OFF: the task is open again, so now exactly the steps its check-off
   // closed (handed back from closedSteps), only while they are still this task's and still done.
@@ -364,6 +380,7 @@ export async function updateTask(
   opts?: { category?: string | null; jobId?: string | null },
 ): Promise<Result> {
   const supabase = await createClient();
+  const { say } = wordsOf(supabase);
   const clean: Record<string, unknown> = {};
   if (patch.title !== undefined) clean.title = patch.title.trim();
   if (patch.category !== undefined) clean.category = patch.category?.trim() || null;
@@ -384,7 +401,7 @@ export async function updateTask(
     // A job's task has no assignee (0358): refused in words, never stored beside the job.
     const { data: cur } = await supabase.from("tasks").select("job_id").eq("id", id).maybeSingle();
     const landsOnJob = patch.job_id !== undefined ? !!clean.job_id : !!cur?.job_id;
-    if (landsOnJob) return { ok: false, error: JOB_TASK_HAS_NO_ASSIGNEE };
+    if (landsOnJob) return { ok: false, error: await say("tk_jobTaskNoAssignee") };
   }
   if (patch.assigned_to !== undefined) {
     // Persist an assignee only if they're actually in the caller's org (the RLS-scoped
@@ -404,7 +421,7 @@ export async function updateTask(
 
   const { data: changed, error } = await supabase.from("tasks").update(clean).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!changed?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "change") };
+  if (!changed?.length) return { ok: false, error: await zeroRowsReason(supabase, say, id, "change") };
   revalidateTaskViews(opts?.category, opts?.jobId);
   // If the task was re-linked to a different job, refresh that job's page too.
   const newJobId = clean.job_id as string | null | undefined;
@@ -420,21 +437,22 @@ export async function deleteTask(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const { say } = wordsOf(supabase);
+  if (!user) return { ok: false, error: await say("tk_notSignedIn") };
   // THE DELETE RULE (Erik, 2026-09-26): a job's task is deleted by the office or whoever added it; a
   // tech checks an office task off, never deletes it. 0358's tasks_delete policy is the boundary;
   // this says it first, and holds on a database without 0358.
   const { data: row } = await supabase.from("tasks").select("id, job_id, created_by, source_key, title").eq("id", id).maybeSingle();
-  if (!row) return { ok: false, error: await zeroRowsReason(supabase, id, "delete") };
+  if (!row) return { ok: false, error: await zeroRowsReason(supabase, say, id, "delete") };
   if (row.job_id && row.created_by !== user.id) {
     const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    if (!isStaffRole((me as { role?: string } | null)?.role ?? "")) return { ok: false, error: TASK_DELETE_RULE };
+    if (!isStaffRole((me as { role?: string } | null)?.role ?? "")) return { ok: false, error: await say("tk_deleteRule") };
   }
   // A zero-row delete used to come back ok and the tab said "Task deleted" over a task that
   // was still there; see zeroRowsReason. Children go with the parent (parent_id cascades).
   const { data: gone, error } = await supabase.from("tasks").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!gone?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "delete") };
+  if (!gone?.length) return { ok: false, error: await zeroRowsReason(supabase, say, id, "delete") };
   // A TASK HE DELETED STAYS GONE (2026-10-10). A task an estimate line put on the job (source_key
   // "line:…", 0358) would be born again by the next sync of the job with its estimate
   // (lib/estimate/sync-job-tasks) — so its key goes on jobs.dismissed_task_keys, the column 0358 made
@@ -463,8 +481,9 @@ export async function deleteTask(
  */
 export async function setTaskDonePhoto(id: string, path: string, opts?: { jobId?: string | null }): Promise<Result> {
   const supabase = await createClient();
+  const { say } = wordsOf(supabase);
   const p = String(path ?? "").trim();
-  if (!p || !photoPathShapeOk(p)) return { ok: false, error: PHOTO_NOT_OURS };
+  if (!p || !photoPathShapeOk(p)) return { ok: false, error: await say("tk_photoNotOurs") };
   const { data: hit, error } = await supabase
     .from("tasks")
     .update({ done_photo_path: p })
@@ -473,19 +492,16 @@ export async function setTaskDonePhoto(id: string, path: string, opts?: { jobId?
     .select("id");
   if (error) {
     if (isMissingColumn(error)) {
-      return { ok: false, error: "The photo is on the job's Photos tab. Photos on tasks start after the next database update." };
+      return { ok: false, error: await say("tk_photoAfterMigration") };
     }
     return { ok: false, error: dbError(error) };
   }
   if (!hit?.length) {
     const { data: t } = await supabase.from("tasks").select("status").eq("id", id).maybeSingle();
-    if (!t) return { ok: false, error: "Couldn't find that task. It may already be deleted. Refresh the page to see the current list." };
+    if (!t) return { ok: false, error: await say("tk_taskNotFound") };
     return {
       ok: false,
-      error:
-        t.status !== "done"
-          ? "That task isn't checked off any more, so the photo stays on the Photos tab."
-          : "You don't have permission to change that task.",
+      error: t.status !== "done" ? await say("tk_taskNotDoneAnymore") : await say("tk_noPermissionChange"),
     };
   }
   revalidateTaskViews(null, opts?.jobId);

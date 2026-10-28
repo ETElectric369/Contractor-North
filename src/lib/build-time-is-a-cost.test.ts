@@ -417,6 +417,7 @@ describe("what an hour of build time costs is written in exactly one place", () 
       ["src/app/(app)/settings/save-what-changed.ts", "decides which BOX a save carries. It reads no row and prices nothing"],
       ["src/app/(app)/team/page.tsx", "hands the stored figure to the box as a prop. It prices nothing"],
       ["src/lib/analytics/owner-money.ts", "the engine: it passes the person's rate INTO buildTimeRate and does no arithmetic of its own"],
+      ["src/lib/export/registry.ts", "names the column as a CSV header in the owner's export of the company's records (cn-v1138). It prices nothing"],
     ]);
     const hits: string[] = [];
     eachAppSource((path, code) => {

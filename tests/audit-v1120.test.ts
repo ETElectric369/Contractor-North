@@ -10,6 +10,7 @@ import { HOURS_WORDS, UNITS_WORDS, strictNumber } from "@/lib/inspection/doors";
 import { buildTaskDetail, reexpandTaskDetail } from "@/lib/estimate/task-lines";
 import { MAX_PHOTOS, parseInspectorCapture } from "@/lib/inspection/capture";
 import { readinessOf } from "@/lib/native-geofence";
+import { translator } from "@/lib/i18n";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -142,16 +143,18 @@ describe("class 6: the site fence has one lifecycle", () => {
   it("the page arms with notify, reads the readiness back, re-reads on foreground and says a dark fence", () => {
     const g = read("src/components/geofence-monitor.tsx");
     expect(g).toContain("notify = true,");
-    expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);");
+    // cn-v1138: the arm carries the alert's words in the person's language (fenceArmOptions).
+    expect(g).toContain("void armFence(fenceArmOptions({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }, t)).then(dark);");
     expect(g).toContain("void fenceReadiness().then(dark);");
     // cn-v1137 (Bug Watch #14): the idle banners moved into GeofenceIdleLine, where a dark fence is
     // still said (denied > the location ask > fenceDark > anchor lost).
     expect(g).toContain("export function GeofenceIdleLine({");
     expect(g).toContain("if (fenceDark)");
     expect(g).toContain("fenceDark={fenceDark}");
-    expect(g).toContain("Set it to Always in Settings, under Location Services, North.");
+    expect(g).toContain('t("gf_locationWhileUsing")');
+    expect(read("src/lib/words/geofence.ts")).toContain("Set it to Always in Settings, under Location Services, North.");
     const n = read("src/lib/native-geofence.ts");
-    expect(n).toContain("label: string; notify: boolean }): Promise<FenceReadiness | null>");
+    expect(n).toContain("export async function armFence(o: FenceArmOptions): Promise<FenceReadiness | null>");
   });
   it("the layout arms the alert for techs only and stands the fence down whenever no entry is open", () => {
     const l = read("src/app/(app)/layout.tsx");
@@ -173,7 +176,9 @@ describe("class 6: the site fence has one lifecycle", () => {
     expect(s).toContain("UserDefaults.standard.removeObject(forKey: GeofenceCore.notifiedKey)");
     // the exit is still remembered for the sheet BEFORE the alert gate
     expect(s.indexOf("UserDefaults.standard.set(pending, forKey: GeofenceCore.pendingKey)")).toBeLessThan(s.indexOf('guard armed["notify"]'));
-    expect(read("src/components/phone-setup-checklist.tsx")).toContain("North → &ldquo;Always.&rdquo;");
+    // The checklist's words live in the shell catalog since cn-v1138 (the same characters the JSX entities drew).
+    expect(read("src/components/phone-setup-checklist.tsx")).toContain('t("sh_phonePathShell")');
+    expect(translator("en")("sh_phonePathShell")).toContain("North → “Always.”");
   });
 });
 

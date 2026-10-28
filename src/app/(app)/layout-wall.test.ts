@@ -199,16 +199,20 @@ describe("the layout's wiring (source pins)", () => {
 
   it("the lapsed dock is the wall's own open doors, one row each, Title Case — for staff and crew, whatever the switches", () => {
     const open = new Set<string>(LAPSED_OPEN_DOORS);
+    // The wall matches a door by its PATH (lapsedDoorOpen); a row's ?tab= only picks the cluster, so
+    // the export row (/settings?tab=getpaid, cn-v1138) is Settings' door with its own words.
+    const door = (href: string | undefined) => (href ?? "").split("?")[0];
     for (const isStaff of [true, false]) {
       const sections = visibleDock({ isStaff, features: { leads: false, estimates: false } as never, lapsed: true });
       expect(sections).toEqual([LAPSED_DOCK]);
       for (const row of sections[0].children) {
-        expect(open.has(row.href ?? ""), row.href).toBe(true);
+        expect(open.has(door(row.href)), row.href).toBe(true);
         for (const w of row.label.split(/\s+/)) expect(w, row.label).toMatch(/^[A-Z]/);
       }
     }
-    expect(LAPSED_DOCK.children.map((r) => r.href).sort()).toEqual([...LAPSED_OPEN_DOORS].sort());
-    expect(LAPSED_DOCK.children.map((r) => r.label)).toEqual(["Pick A Plan", "Settings", "Download For Your Accountant"]);
+    expect([...new Set(LAPSED_DOCK.children.map((r) => door(r.href)))].sort()).toEqual([...LAPSED_OPEN_DOORS].sort());
+    expect(LAPSED_DOCK.children.map((r) => r.label)).toEqual(["Pick A Plan", "Settings", "Download For Your Accountant", "Download Everything"]);
+    expect(LAPSED_DOCK.children.map((r) => r.href)).toEqual(["/subscribe", "/settings", "/analytics/accountant", "/settings?tab=getpaid"]);
     // Not lapsed: the dock is what it was.
     expect(visibleDock({ isStaff: true }).some((s) => s.key === "plan")).toBe(false);
   });

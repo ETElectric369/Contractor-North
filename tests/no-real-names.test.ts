@@ -380,8 +380,10 @@ describe("the scanner can see", () => {
    * allowlist. If the allowlist entry goes, this fails rather than the quote going wrong again.
    */
   it("passes the quote of the day on the planner, as it is actually written", () => {
-    const planner = readFileSync(path.join(ROOT, "src/app/(app)/planner/page.tsx"), "utf8");
-    const quotes = planner.split("\n").filter((l) => /^\s*"[^"]+",\s*$/.test(l));
+    // The 34 quotes moved into lib/words/myday in cn-v1138 (md_quote_01 … md_quote_34, English and
+    // Spanish, the author's name as written on both lines); the planner reads them through t().
+    const planner = readFileSync(path.join(ROOT, "src/lib/words/myday.ts"), "utf8");
+    const quotes = planner.split("\n").filter((l) => /^\s*md_quote_\d{2}: "[^"]+",\s*$/.test(l));
     expect(quotes.length, "the QUOTES array did not read").toBeGreaterThan(20);
     for (const line of quotes) {
       expect(scrubbedNamesIn(line), `a quote of the day trips the gate: ${line.trim()}`).toEqual([]);

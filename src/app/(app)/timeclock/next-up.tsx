@@ -5,6 +5,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { todayStrInTz } from "@/lib/tz";
 import { jobLabel } from "@/lib/schedule-options";
 import { Card, CardContent } from "@/components/ui/card";
+import { fillText, translator } from "@/lib/i18n";
 import { pickScheduledJobForDay } from "./crew-plan";
 
 /**
@@ -83,7 +84,9 @@ type MyJob = {
   scheduled_end: string | null;
 };
 
-export async function NextUp({ userId, tz }: { userId: string; tz: string }) {
+/** The person's language (profiles.language, read once by the page): the two rows read in it. */
+export async function NextUp({ userId, tz, lang }: { userId: string; tz: string; lang?: string | null }) {
+  const t = translator(lang);
   const supabase = await createClient();
   const today = todayStrInTz(tz);
   const tomorrow = nextDay(today);
@@ -229,17 +232,17 @@ export async function NextUp({ userId, tz }: { userId: string; tz: string }) {
   };
 
   const rows: DayRow[] = [
-    { when: "Today", answer: answerFor(today) },
-    { when: "Tomorrow", answer: answerFor(tomorrow) },
+    { when: t("tc_today"), answer: answerFor(today) },
+    { when: t("tc_tomorrow"), answer: answerFor(tomorrow) },
   ];
 
   return (
     <Card>
       <CardContent className="py-4">
-        <h3 className="mb-1 text-sm font-semibold text-slate-900">Next up</h3>
+        <h3 className="mb-1 text-sm font-semibold text-slate-900">{t("tc_nextUp")}</h3>
         <div className="divide-y divide-slate-100">
           {rows.map((r) => (
-            <NextUpRow key={r.when} row={r} />
+            <NextUpRow key={r.when} row={r} t={t} />
           ))}
         </div>
       </CardContent>
@@ -250,9 +253,12 @@ export async function NextUp({ userId, tz }: { userId: string; tz: string }) {
 /** One day. A row that leads somewhere is a LINK and the whole row is the target (44px, one thumb,
  *  easier to hit than a chip inside it); a row with no job is plain text, because a control that
  *  goes nowhere is the dead end the house rule exists to stop. */
-function NextUpRow({ row }: { row: DayRow }) {
+function NextUpRow({ row, t }: { row: DayRow; t: (key: string) => string }) {
   const a = row.answer;
 
+  // 0170's two reasons worth the word (vacation, sick), in the person's language; any other stored
+  // value reads as itself.
+  const reasonWord = (r: string) => (r === "vacation" ? t("tc_reasonVacation") : r === "sick" ? t("tc_reasonSick") : r);
   // The job NAME, never J-0xx (jobLabel is the SSOT and prefers the name). Erik has said this
   // three times: three dwellings at one address read as J-009 / J-013 / J-017, and the only text
   // that tells them apart lives in the name.
@@ -262,16 +268,18 @@ function NextUpRow({ row }: { row: DayRow }) {
       : a.kind === "off"
         // 'other' is a real off_reason value and reads like a shrug in a parenthesis, so it stays
         // off the line; vacation and sick are worth the four words.
-        ? `Off${a.reason && a.reason !== "other" ? ` (${a.reason})` : ""}`
-        : "nothing scheduled yet";
+        ? a.reason && a.reason !== "other"
+          ? fillText(t("tc_offWithReason"), { reason: reasonWord(a.reason) })
+          : t("tc_off")
+        : t("tc_nothingScheduled");
 
   const why =
     a.kind === "job"
       ? a.source === "assigned"
-        ? "The office put you on this job"
-        : "From the job schedule, not assigned yet"
+        ? t("tc_officePutYou")
+        : t("tc_fromSchedule")
       : a.kind === "off"
-        ? "The office marked you off"
+        ? t("tc_officeMarkedOff")
         : null;
 
   const body = (

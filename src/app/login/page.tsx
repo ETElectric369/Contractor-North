@@ -2,6 +2,8 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { shellFromUserAgent } from "@/lib/native-shell";
 import { NO_INDEX } from "@/lib/no-index";
+import { fillText, translator } from "@/lib/i18n";
+import { langFromAcceptLanguage } from "@/lib/request-lang";
 import { login, signup, sendLoginCode, verifyLoginCode } from "./actions";
 import { APP_VERSION } from "@/lib/version";
 import { FormSubmit } from "@/components/form-submit";
@@ -9,15 +11,23 @@ import { Input, Label } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { PurgePageCache } from "@/components/purge-page-cache";
 
+/** Nobody is signed in here, so the words are the phone's (cn-v1138): the Accept-Language header's first tag. */
+async function pageLang() {
+  return langFromAcceptLanguage((await headers()).get("accept-language"));
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string; message?: string; mode?: string; email?: string; sent?: string; next?: string }>;
 }) {
   const { error, message, mode, email, sent, next } = await searchParams;
+  const h = await headers();
   // Inside the native shell there is no signup door: accounts come from an org's invite (0125), and
   // the app must not offer account creation to Apple's reviewer (4.2 / 3.1.1). Web keeps it.
-  const inShell = shellFromUserAgent((await headers()).get("user-agent")).native;
+  const inShell = shellFromUserAgent(h.get("user-agent")).native;
+  // The same header the actions read (login/actions.ts), so the page's words and the errors it shows agree.
+  const t = translator(langFromAcceptLanguage(h.get("accept-language")));
   const isSignup = mode === "signup" && !inShell;
   const isCode = mode === "code";
   const codeSent = isCode && sent === "1";
@@ -26,14 +36,14 @@ export default async function LoginPage({
   const withNext = (href: string) =>
     next ? `${href}${href.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}` : href;
 
-  const heading = isSignup ? "Create your account" : isCode ? "Sign in with a code" : "Sign in";
+  const heading = isSignup ? t("au_createYourAccount") : isCode ? t("au_signInWithCodeHeading") : t("au_signInHeading");
   const sub = isSignup
-    ? "Set up your account to get started."
+    ? t("au_setUpSub")
     : isCode
       ? codeSent
-        ? "Enter the 6-digit code we just emailed you."
-        : "No password needed — we'll email you a code."
-      : "Welcome back.";
+        ? t("au_enterCodeSub")
+        : t("au_noPasswordSub")
+      : t("au_welcomeBack");
 
   return (
     <>
@@ -47,9 +57,9 @@ export default async function LoginPage({
               the home screen and the dock (the iOS tinted-mode lesson: the mark must be the
               bright thing on a dark ground). */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/icon-192.png" alt="Contractor North" className="mx-auto mb-3 h-16 w-16 rounded-2xl shadow-lg ring-1 ring-white/15" />
-          <h1 className="text-2xl font-bold tracking-tight">Contractor North</h1>
-          <p className="mt-1 text-sm text-white/80">The all-in-one platform for contractors</p>
+          <img src="/icon-192.png" alt={t("au_appName")} className="mx-auto mb-3 h-16 w-16 rounded-2xl shadow-lg ring-1 ring-white/15" />
+          <h1 className="text-2xl font-bold tracking-tight">{t("au_appName")}</h1>
+          <p className="mt-1 text-sm text-white/80">{t("au_tagline")}</p>
           <p className="mt-2 text-[11px] font-medium tracking-wider text-white/40">{APP_VERSION}</p>
         </div>
 
@@ -66,7 +76,7 @@ export default async function LoginPage({
               <form className="space-y-4">
                 <input type="hidden" name="email" value={email ?? ""} />
                 <div>
-                  <Label htmlFor="code">6-digit code</Label>
+                  <Label htmlFor="code">{t("au_codeLabel")}</Label>
                   <Input
                     id="code"
                     name="code"
@@ -79,30 +89,30 @@ export default async function LoginPage({
                     autoFocus
                     className="text-center text-2xl tracking-[0.4em]"
                   />
-                  <p className="mt-1 text-xs text-slate-400">Sent to {email} — enter the code, or just tap the sign-in link in the email. Check spam if it&apos;s not there.</p>
+                  <p className="mt-1 text-xs text-slate-400">{fillText(t("au_sentTo"), { email: email ?? "" })}</p>
                 </div>
                 <FormSubmit className="w-full" size="lg" formAction={verifyLoginCode}>
-                  Verify &amp; Sign In
+                  {t("au_verifySignIn")}
                 </FormSubmit>
                 <div className="flex items-center justify-between text-xs">
                   <button formAction={sendLoginCode} formNoValidate className="font-medium text-brand hover:underline">
-                    Resend Code
+                    {t("au_resendCode")}
                   </button>
-                  <Link href="/login" className="text-slate-500 hover:underline">Use A Password Instead</Link>
+                  <Link href="/login" className="text-slate-500 hover:underline">{t("au_usePassword")}</Link>
                 </div>
               </form>
             ) : (
               // ── Request a code ──
               <form className="space-y-4">
                 <div>
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" name="email" type="email" autoComplete="username" placeholder="you@company.com" defaultValue={email ?? ""} required autoFocus />
+                  <Label htmlFor="email">{t("au_email")}</Label>
+                  <Input id="email" name="email" type="email" autoComplete="username" placeholder={t("au_emailPlaceholder")} defaultValue={email ?? ""} required autoFocus />
                 </div>
                 <FormSubmit className="w-full" size="lg" formAction={sendLoginCode}>
-                  Email Me A Code
+                  {t("au_emailMeCode")}
                 </FormSubmit>
                 <p className="text-center text-xs">
-                  <Link href="/login" className="text-slate-500 hover:underline">Use A Password Instead</Link>
+                  <Link href="/login" className="text-slate-500 hover:underline">{t("au_usePassword")}</Link>
                 </p>
               </form>
             )
@@ -112,30 +122,30 @@ export default async function LoginPage({
               {next && <input type="hidden" name="next" value={next} />}
               {isSignup && (
                 <div>
-                  <Label htmlFor="full_name">Full name</Label>
-                  <Input id="full_name" name="full_name" placeholder="Jane Sparks" required />
+                  <Label htmlFor="full_name">{t("au_fullName")}</Label>
+                  <Input id="full_name" name="full_name" placeholder={t("au_fullNamePlaceholder")} required />
                 </div>
               )}
               <div>
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" autoComplete="username" placeholder="you@company.com" defaultValue={email ?? ""} required />
+                <Label htmlFor="email">{t("au_email")}</Label>
+                <Input id="email" name="email" type="email" autoComplete="username" placeholder={t("au_emailPlaceholder")} defaultValue={email ?? ""} required />
               </div>
               <div>
                 <div className="mb-1.5 flex items-center justify-between">
-                  <Label htmlFor="password" className="mb-0">Password</Label>
-                  {!isSignup && <Link href="/forgot" className="text-xs font-medium text-brand hover:underline">Forgot Password?</Link>}
+                  <Label htmlFor="password" className="mb-0">{t("au_password")}</Label>
+                  {!isSignup && <Link href="/forgot" className="text-xs font-medium text-brand hover:underline">{t("au_forgotPassword")}</Link>}
                 </div>
                 <PasswordInput id="password" name="password" autoComplete={isSignup ? "new-password" : "current-password"} placeholder="••••••••" required minLength={6} />
               </div>
 
               <FormSubmit className="w-full" size="lg" formAction={isSignup ? signup : login}>
-                {isSignup ? "Create Account" : "Sign In"}
+                {isSignup ? t("au_createAccount") : t("au_signIn")}
               </FormSubmit>
 
               {!isSignup && (
                 <p className="text-center text-xs">
                   <Link href="/login?mode=code" className="font-medium text-brand hover:underline">
-                    Sign In With A Code Instead — No Password
+                    {t("au_signInWithCode")}
                   </Link>
                 </p>
               )}
@@ -146,13 +156,13 @@ export default async function LoginPage({
             {inShell && mode === "signup" ? (
               // An invite link opened INSIDE the shell: say why there's no create-account form here
               // instead of silently showing Sign in (NOTHING SILENT / NO DEAD ENDS).
-              <>Accounts are created from your invite email in Safari. Open the invite there, create your account, then sign in here.</>
+              <>{t("au_shellSignupNote")}</>
             ) : inShell ? (
-              <>Got an invite email? Open it in your browser to create your account, then sign in here.</>
+              <>{t("au_shellInviteNote")}</>
             ) : isSignup ? (
-              <>Already have an account? <Link href={withNext("/login")} className="font-medium text-brand hover:underline">Sign In</Link></>
+              <>{t("au_alreadyHave")} <Link href={withNext("/login")} className="font-medium text-brand hover:underline">{t("au_signIn")}</Link></>
             ) : (
-              <>Need an account? <Link href={withNext("/login?mode=signup")} className="font-medium text-brand hover:underline">Sign Up</Link></>
+              <>{t("au_needAccount")} <Link href={withNext("/login?mode=signup")} className="font-medium text-brand hover:underline">{t("au_signUp")}</Link></>
             )}
           </p>
         </div>
@@ -166,4 +176,7 @@ export default async function LoginPage({
 // Never index auth/utility chrome — on a tenant's custom domain this page previously leaked a
 // "Contractor North" title into crawlers with no noindex (the SEO vendor's "hosted on
 // contractornorth" ammunition). Both layers per the no-index doctrine: this metadata + robots.txt.
-export const metadata = { title: "Team login", robots: NO_INDEX };
+// A function, not a constant (cn-v1138): the tab's title is in the phone's language like the page.
+export async function generateMetadata() {
+  return { title: translator(await pageLang())("au_teamLogin"), robots: NO_INDEX };
+}

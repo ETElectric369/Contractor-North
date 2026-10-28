@@ -19,12 +19,29 @@ import { requireStaff } from "@/lib/staff-guard";
 import { prettyDay } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
+import { fillText, localeOf, translator, type Lang } from "@/lib/i18n";
+import { callerLang, langOf } from "@/lib/lang-of";
 import { setJobCrew } from "../schedule/actions";
 
 export type CrewActionResult = { ok: boolean; error?: string };
 
 const isYmd = (s: string): boolean =>
   /^\d{4}-\d{2}-\d{2}$/.test(s ?? "") && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime());
+
+/** "Tuesday, October 28" in the reader's language (lib/tz prettyDay is the English). */
+function prettyDayIn(ymd: string, lang: Lang): string {
+  if (lang !== "es") return prettyDay(ymd);
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString(localeOf(lang), { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
+}
+
+/** The day's bell line and push to the member, in THEIR language: one builder, read per recipient
+ *  (createNotifications' function form groups by language; the bare push resolves it once, langOf). */
+function crewAssignmentWords(label: string, workDate: string) {
+  return (lang: Lang) => {
+    const t = translator(lang);
+    return { title: t("cs_crewAssignmentTitle"), body: fillText(t("cs_youreOnJobForDay"), { label, day: prettyDayIn(workDate, lang) }), url: "/timeclock" };
+  };
+}
 
 /**
  * Upsert (or clear) one member's assignment for one day — the day-picker board's
@@ -63,9 +80,11 @@ export async function setCrewDayAssignment(input: {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { profileId, workDate, jobId } = input;
+  // The office's own words follow the caller's language (cn-v1138); the member's push follows the member's.
+  const t = translator(await callerLang(supabase, ctx.userId));
 
-  if (!profileId) return { ok: false, error: "Pick a crew member." };
-  if (!isYmd(workDate)) return { ok: false, error: "I couldn't read that date." };
+  if (!profileId) return { ok: false, error: t("cs_pickACrewMember") };
+  if (!isYmd(workDate)) return { ok: false, error: t("cs_couldntReadDate") };
 
   // CLEAR — jobId null wipes the member's row for that day. RLS org-scopes the
   // delete; removals are silent by design (the notifyJobCrewAdded doctrine).
@@ -110,7 +129,7 @@ export async function setCrewDayAssignment(input: {
 
   // The member must be visible to the caller (RLS keeps this org-scoped).
   const { data: member } = await supabase.from("profiles").select("id").eq("id", profileId).maybeSingle();
-  if (!member) return { ok: false, error: "Member not found." };
+  if (!member) return { ok: false, error: t("cs_memberNotFound") };
 
   // The job too — org_id rides along as the explicit belt for the upsert (the
   // set_org_id trigger is the suspenders), assigned_to feeds the write-through
@@ -120,7 +139,7 @@ export async function setCrewDayAssignment(input: {
     .select("id, org_id, job_number, name, assigned_to")
     .eq("id", jobId)
     .maybeSingle();
-  if (!jobRow) return { ok: false, error: "Job not found." };
+  if (!jobRow) return { ok: false, error: t("cs_jobNotFound") };
   const job = jobRow as {
     id: string;
     org_id: string | null;
@@ -173,14 +192,12 @@ export async function setCrewDayAssignment(input: {
   // try/catch internally, and they're awaited so serverless can't drop them.
   const jobChanged = prevJobId !== jobId;
   if (jobChanged && alreadyOnCrew && profileId !== ctx.userId && job.org_id) {
-    const label = [job.job_number, job.name].filter(Boolean).join(" · ") || "a job";
-    const payload = {
-      title: "Crew assignment",
-      body: `You're on ${label} for ${prettyDay(workDate)}.`,
-      url: "/timeclock",
-    };
-    await createNotifications(job.org_id, [profileId], { type: "assigned", ...payload });
-    await sendPushToProfiles([profileId], "assigned", payload);
+    // The member's own language, not the office's (cn-v1138): the bell line through the function
+    // form, the bare push resolved once. The job's label is the job's name, the same in both.
+    const words = crewAssignmentWords([job.job_number, job.name].filter(Boolean).join(" · ") || translator("en")("cs_aJob"), workDate);
+    await createNotifications(job.org_id, [profileId], (lang) => ({ type: "assigned", ...words(lang) }));
+    const memberLang = (await langOf(supabase, [profileId], job.org_id)).get(profileId) ?? "en";
+    await sendPushToProfiles([profileId], "assigned", words(memberLang));
   }
 
   revalidatePath("/timeclock"); // the day-picker board
@@ -210,10 +227,11 @@ export async function setCrewOffRange(input: {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { profileId, fromDate, toDate } = input;
+  const t = translator(await callerLang(supabase, ctx.userId));
 
-  if (!profileId) return { ok: false, error: "Pick a crew member." };
-  if (!isYmd(fromDate) || !isYmd(toDate)) return { ok: false, error: "I couldn't read those dates." };
-  if (toDate < fromDate) return { ok: false, error: "The last day is before the first one." };
+  if (!profileId) return { ok: false, error: t("cs_pickACrewMember") };
+  if (!isYmd(fromDate) || !isYmd(toDate)) return { ok: false, error: t("cs_couldntReadThoseDates") };
+  if (toDate < fromDate) return { ok: false, error: t("cs_lastDayBeforeFirst") };
 
   // A bounded span. Anything longer isn't a vacation, it's a leave of absence, and that should be
   // a deliberate conversation rather than 400 silent rows.
@@ -221,15 +239,15 @@ export async function setCrewOffRange(input: {
   for (let d = new Date(`${fromDate}T00:00:00Z`); ; d.setUTCDate(d.getUTCDate() + 1)) {
     const ds = d.toISOString().slice(0, 10);
     if (ds > toDate) break;
-    if (days.length > 120) return { ok: false, error: "That's over four months — set it in shorter stretches." };
+    if (days.length > 120) return { ok: false, error: t("cs_overFourMonths") };
     const dow = d.getUTCDay();
     if (!input.includeWeekends && (dow === 0 || dow === 6)) continue;
     days.push(ds);
   }
-  if (!days.length) return { ok: false, error: "No working days in that range." };
+  if (!days.length) return { ok: false, error: t("cs_noWorkingDays") };
 
   const { data: member } = await supabase.from("profiles").select("id, org_id").eq("id", profileId).maybeSingle();
-  if (!member) return { ok: false, error: "Member not found." };
+  if (!member) return { ok: false, error: t("cs_memberNotFound") };
 
   // One upsert for the whole span — a partial write would leave somebody half on vacation, which
   // is worse than a clean failure because nothing on screen would say so.
@@ -262,7 +280,7 @@ export async function clearCrewOffRange(input: {
 }): Promise<CrewActionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  if (!isYmd(input.fromDate) || !isYmd(input.toDate)) return { ok: false, error: "I couldn't read those dates." };
+  if (!isYmd(input.fromDate) || !isYmd(input.toDate)) return { ok: false, error: translator(await callerLang(ctx.supabase, ctx.userId))("cs_couldntReadThoseDates") };
   // Only OFF rows are cleared — a real job pinned inside the range is a plan somebody made, and
   // cancelling a vacation must never quietly delete it.
   const { error } = await ctx.supabase

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { dict } from "@/lib/i18n";
 
 /**
  * CARRIED FROM audit v1120 (fix wave cn-v1123): two findings in the site fence's sheet.
@@ -93,8 +94,8 @@ describe("The pending exit is cleared on read, then dropped when the sheet is bu
   });
 
   it("a listener that arrives after its effect was torn down is removed, not left listening", () => {
-    expect(g).toContain("void onFenceExit(takeExit).then((s) => { if (cancelled) s(); else stop = s; });");
-    expect(g).not.toContain("void onFenceExit(takeExit).then((s) => { stop = s; });");
+    expect(g).toContain('void onFenceExit(takeExit, t("gf_theJobSite")).then((s) => { if (cancelled) s(); else stop = s; });');
+    expect(g).not.toContain("then((s) => { stop = s; });");
   });
 
   it("the picker opens on the time that will be saved, so the filled-in exit is what he sees", () => {
@@ -127,8 +128,8 @@ describe("One site exit rings the phone twice: the native local notification, th
     // the wake check's own GPS fix and the live watch are not the shell's alert: they claim nothing
     expect(g.split('openPrompt("wake");').length - 1).toBe(1);
     expect(g.split('openPrompt("live");').length - 1).toBe(1);
-    // `notify` is what the shell was armed with in this very effect run
-    expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);");
+    // `notify` is what the shell was armed with in this very effect run (cn-v1138: with the alert's words)
+    expect(g).toContain("void armFence(fenceArmOptions({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }, t)).then(dark);");
   });
 });
 
@@ -190,8 +191,9 @@ describe("Turn On Location: the fence says it is waiting, and the tap is the ges
     // The arm the tap reaches is the live effect's own, and it is let go when the effect is.
     expect(g).toContain("armRef.current = () => void arm();\n    void arm();");
     expect(g).toContain("disposed = true;\n      armRef.current = () => {};");
-    // The clock-in words on Time Clock are untouched.
+    // The clock-in words on Time Clock are untouched (read through the catalog since cn-v1138).
     const panel = readFileSync(path.join(ROOT, "src/app/(app)/timeclock/timeclock-panel.tsx"), "utf8");
-    expect(panel).toContain('if (!gps) setGpsNote("Clocked in — location wasn\'t ready, so this punch isn\'t GPS-stamped.");');
+    expect(panel).toContain('if (!gps) setGpsNote(t("tc_gpsNote"));');
+    expect(dict("en").tc_gpsNote).toBe("Clocked in — location wasn't ready, so this punch isn't GPS-stamped.");
   });
 });

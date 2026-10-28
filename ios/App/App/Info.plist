@@ -11,6 +11,14 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<!-- THE PHONE'S PROMPTS IN THE PHONE'S LANGUAGE (cn-v1138). iOS shows the NS*UsageDescription
+	     strings below in English, or the Spanish in es.lproj/InfoPlist.strings when the phone is set to
+	     Spanish — only for a language listed here. The app's own screens follow profiles.language. -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>North</string>
 	<key>CFBundleExecutable</key>

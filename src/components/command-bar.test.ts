@@ -6,7 +6,8 @@ const calls = vi.hoisted(() => ({ order: [] as string[] }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/tts", () => ({ unlockAudio: vi.fn(() => calls.order.push("unlockAudio")) }));
 
-import { commandNavItems, idleRows, matchNavItems } from "./command-bar";
+import { commandNavItems, idleRows, kindWords, matchNavItems } from "./command-bar";
+import { translator } from "@/lib/i18n";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import { NORT_TALK_EVENT, SETUP_EVENT } from "@/lib/onboarding/help-rows";
@@ -35,8 +36,11 @@ describe("commandNavItems", () => {
   it("lapsed (skeptic #43, S1): the three open doors alone — for staff and tech, whatever the switches — and the accountant's export is found by name", () => {
     for (const isStaff of [true, false]) {
       const items = commandNavItems(isStaff, ALL_ON, true, true);
+      // The lapsed dock's fourth row, Download Everything (/settings?tab=getpaid, cn-v1138), carries a
+      // ?query like every status row and stays out of the palette; Settings is its door here.
       expect(hrefs(items), String(isStaff)).toEqual(["/subscribe", "/settings", "/analytics/accountant"]);
       expect(items.map((i) => i.label)).toEqual(["Pick A Plan", "Settings", "Download For Your Accountant"]);
+      expect(commandNavItems(isStaff, ALL_ON, true, true, "es").map((i) => i.label)).toEqual(["Elegir Un Plan", "Ajustes", "Descargar Para Tu Contador"]);
       expect(hrefs(matchNavItems(items, "accountant"))).toEqual(["/analytics/accountant"]);
       expect(hrefs(matchNavItems(items, "jobs"))).toEqual([]);
     }
@@ -248,7 +252,11 @@ describe("every dock row is findable by the words a person would type", () => {
  */
 describe("the command bar's footer", () => {
   it("is hidden until a fine pointer (mouse or trackpad) is there", () => {
-    const footer = barSrc.slice(barSrc.indexOf("↑↓ to navigate") - 400, barSrc.indexOf("↑↓ to navigate"));
+    // The line's words live in the shell catalog (sh_keysLine, cn-v1138); the span that holds them is the anchor.
+    const at = barSrc.indexOf('{t("sh_keysLine")}');
+    expect(at).toBeGreaterThan(0);
+    expect(translator("en")("sh_keysLine")).toBe("↑↓ to navigate · ↵ to open · esc to close");
+    const footer = barSrc.slice(at - 400, at);
     const cls = footer.slice(footer.lastIndexOf('className="') + 11, footer.lastIndexOf('">'));
     expect(cls.startsWith("hidden pointer-fine:flex")).toBe(true);
     expect(cls).not.toMatch(/\b(sm|md|lg|xl):flex\b/);
@@ -272,7 +280,9 @@ describe("the command bar's footer", () => {
     expect(barSrc).toContain('e.key === "ArrowDown"');
     expect(barSrc).toContain('e.key === "Enter"');
     expect(barSrc).toContain('e.key === "Escape"');
-    expect(barSrc).toContain('"No matches. Press Enter to ask Nort."');
+    expect(barSrc).toContain('{nortOn ? t("sh_noMatchesNort") : t("sh_noMatches")}');
+    expect(translator("en")("sh_noMatchesNort")).toBe("No matches. Press Enter to ask Nort.");
+    expect(translator("en")("sh_noMatches")).toBe("No matches.");
   });
 });
 
@@ -307,7 +317,8 @@ describe("Search Or Ask's rows before anything is typed", () => {
 
   it("Nort off: nothing here (Search only; the setup rows live under Help, behind the initials)", () => {
     expect(idleRows({ isStaff: true, features: off("nort"), setup: {}, onboarded: false })).toEqual([]);
-    expect(barSrc).toContain('placeholder={nortOn ? "Search or ask Nort…"');
+    expect(barSrc).toContain('placeholder={nortOn ? t("sh_searchPlaceholderNort") : t("sh_searchPlaceholder")}');
+    expect(translator("en")("sh_searchPlaceholderNort")).toBe("Search or ask Nort…");
   });
 
   it("Show Me How folds its lessons open under it, and lists only lessons whose switch is on", () => {
@@ -318,6 +329,55 @@ describe("Search Or Ask's rows before anything is typed", () => {
     // Its own row keeps the sheet open (it only folds) and says which way it's folded.
     const show = idleRows({ isStaff: true, features: ALL_ON, setup: DONE, onboarded: true }).find((r) => r.label === "Show Me How")!;
     expect(show).toMatchObject({ keepOpen: true, expanded: false });
+  });
+});
+
+/**
+ * A SPANISH-SPEAKING TECH'S PALETTE (cn-v1138): the same rows, in his words — the dock's labels
+ * through dockLabel, Talk To Nort, the kind chip, the lapsed rows. The English list is byte for
+ * byte what it was (the default language is "en").
+ */
+describe("the palette in Spanish", () => {
+  const labelsOf = (items: { label: string }[]) => items.map((i) => i.label);
+
+  it("a tech's rows: Mi Día under Hoy, Reloj, Trabajos, Tú — the hrefs and aliases unchanged", () => {
+    const en = commandNavItems(false, ALL_ON, false, false, "en");
+    const es = commandNavItems(false, ALL_ON, false, false, "es");
+    expect(hrefs(es)).toEqual(hrefs(en));
+    expect(es.map((i) => i.aliases)).toEqual(en.map((i) => i.aliases));
+    expect(hrefs(commandNavItems(false, ALL_ON))).toEqual(hrefs(en));
+    expect(labelsOf(commandNavItems(false, ALL_ON))).toEqual(labelsOf(en));
+    const byHref = (items: ReturnType<typeof commandNavItems>, href: string) => items.find((i) => i.href === href)!;
+    expect(byHref(es, "/planner")).toMatchObject({ label: "Mi Día", sub: "Hoy" });
+    expect(byHref(en, "/planner")).toMatchObject({ label: "My Day", sub: "Today" });
+    expect(byHref(es, "/timeclock")).toMatchObject({ label: "Reloj", sub: "Reloj" });
+    expect(byHref(es, "/jobs")).toMatchObject({ label: "Todos", sub: "Trabajos" });
+    // A tech's Your Settings row carries ?tab=you, so it stays out of the palette as before; his Handbook is under Tú.
+    expect(byHref(es, "/handbook")).toMatchObject({ label: "Manual", sub: "Tú" });
+    expect(byHref(es, "/tasks")).toMatchObject({ label: "Recordatorios", sub: "Hoy" });
+    // The ?status= rows stay out of the palette in every language (the collision note in the source).
+    expect(hrefs(es).some((h) => h.includes("?"))).toBe(false);
+    expect(labelsOf(es).some((l) => /^(My Day|Time Clock|All|Jobs|You|Your Settings|Handbook|Reminders)$/.test(l))).toBe(false);
+  });
+
+  it("before anything is typed: Hablar Con Nort, said out loud", () => {
+    expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false, lang: "es" }).map((r) => [r.label, r.sub])).toEqual([["Hablar Con Nort", "Dilo en voz alta"]]);
+    expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false }).map((r) => [r.label, r.sub])).toEqual([["Talk To Nort", "Say it out loud"]]);
+  });
+
+  it("the kind chip: Go to → Ir a; a kind the catalog does not name stays as typed", () => {
+    const es = translator("es");
+    expect(kindWords("Go to", es)).toBe("Ir a");
+    expect(kindWords("Go to", translator("en"))).toBe("Go to");
+    expect(kindWords("Nort", es)).toBe("Nort");
+    expect(kindWords("Job", es)).toBe("Trabajo");
+    expect(kindWords("Something New", es)).toBe("Something New");
+  });
+
+  it("lapsed: the three open doors in Spanish, Title Case", () => {
+    const rows = labelsOf(commandNavItems(false, ALL_ON, false, true, "es"));
+    expect(rows).toEqual(["Elegir Un Plan", "Ajustes", "Descargar Para Tu Contador"]);
+    for (const r of rows) for (const w of r.split(" ")) expect(w).toMatch(/^[A-ZÁÉÍÓÚÑ]/);
   });
 });
 

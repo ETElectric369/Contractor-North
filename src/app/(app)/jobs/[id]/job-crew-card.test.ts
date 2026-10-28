@@ -42,7 +42,7 @@ describe("the office", () => {
     const s = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-crew-card.tsx"), "utf8");
     expect(s).toContain("await changeJobCrew(jobId, change)");
     expect(s).toContain("setCrew(prev)");
-    expect(s).toContain("Take {nameOf(asking)} Off This Job?");
+    expect(s).toContain('fillText(t("jb_takeOffQ"), { name: nameOf(asking) })');
   });
 });
 

@@ -23,6 +23,9 @@ function parseCsv(text: string): CrewImportRow[] {
   const headers = rows[0].map((h) => h.trim().toLowerCase());
   const at = (re: RegExp) => headers.findIndex((h) => re.test(h));
   const iName = at(/name/), iEmail = at(/e-?mail/), iPhone = at(/phone|cell|mobile/), iRole = at(/role/);
+  // A `language` column (cn-v1138): "es", "español", "espanol" or "spanish" is Spanish, anything
+  // else English (the action reads the word; a roster without the column leaves the default).
+  const iLang = at(/^(language|idioma|lang)$/);
   return rows
     .slice(1)
     .map((c) => ({
@@ -30,6 +33,7 @@ function parseCsv(text: string): CrewImportRow[] {
       email: (c[iEmail] ?? "").trim(),
       phone: iPhone >= 0 ? (c[iPhone] ?? "").trim() : "",
       role: iRole >= 0 ? (c[iRole] ?? "").trim().toLowerCase() : "tech",
+      ...(iLang >= 0 ? { language: (c[iLang] ?? "").trim() } : {}),
     }))
     // drop blank rows + any row flagged to skip (e.g. the owner who signs up themselves)
     .filter((r) => r.full_name && r.email.includes("@") && !/skip/i.test(r.role));

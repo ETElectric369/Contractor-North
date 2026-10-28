@@ -75,7 +75,7 @@ describe("Clear The Date", () => {
     expect(walks).toContain('.order("starts_at", { ascending: false, nullsFirst: false })');
     expect(walks).toContain("<span>Waiting For A Day</span>");
     expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain("<span>Waiting For A Day</span>");
-    expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain('a.starts_at ? formatDateTime(a.starts_at) : "Waiting For A Day"');
+    expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain('a.starts_at ? formatDateTime(a.starts_at, undefined, lang) : t("jb_waitingForADay")');
     // A waiting visit made into a job makes a job waiting for a day, not a "scheduled" one with none.
     expect(read("src/app/(app)/appointments/actions.ts")).toContain('status: appt.starts_at ? "scheduled" : "to_be_scheduled"');
   });

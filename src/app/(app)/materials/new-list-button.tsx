@@ -13,6 +13,8 @@ import {
   type DraftMaterial,
 } from "./actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 interface JobOption {
   id: string;
@@ -44,7 +46,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
   const [generating, startGen] = useTransition();
   const [saving, startSave] = useTransition();
   const router = useRouter();
-
+  const t = translator(useLang());
 
   function onGenerate() {
     setError(null);
@@ -64,7 +66,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
         job_id: jobId || null,
         items,
       });
-      if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (!res.ok) return setError(res.error ?? t("mt_couldNotSave"));
       setOpen(false);
       if (res.id) router.push(`/materials/${res.id}`);
     });
@@ -73,20 +75,21 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New List
+        <Plus className="h-4 w-4" /> {t("mt_newList")}
       </Button>
 
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="New Material List"
+        title={t("mt_newMaterialList")}
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}
             onSave={onSave}
             saving={saving}
             disabled={!name.trim()}
-            saveLabel="Create List"
+            saveLabel={t("mt_createList")}
+            cancelLabel={t("mt_cancel")}
           />
         }
       >
@@ -98,18 +101,18 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="ml-name">List name</Label>
+              <Label htmlFor="ml-name">{t("mt_listName")}</Label>
               <Input
                 id="ml-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="What this list is for"
+                placeholder={t("mt_listNamePlaceholder")}
               />
             </div>
             <div>
-              <Label htmlFor="ml-job">Job (optional)</Label>
+              <Label htmlFor="ml-job">{t("mt_jobOptional")}</Label>
               <Select id="ml-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
-                <option value="">— None —</option>
+                <option value="">{t("mt_noneOption")}</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>
                     {jobLabel(j)}
@@ -123,14 +126,14 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
             <div className="mb-2 flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-brand" />
               <span className="text-sm font-semibold text-slate-900">
-                Generate from a scope
+                {t("mt_generateFromScope")}
               </span>
             </div>
             <Textarea
               rows={2}
               value={scope}
               onChange={(e) => setScope(e.target.value)}
-              placeholder="Describe the work: what, where and how much, the way you'd say it on site."
+              placeholder={t("mt_scopePlaceholder")}
             />
             <Button
               size="sm"
@@ -140,11 +143,11 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
             >
               {generating ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+                  <Loader2 className="h-4 w-4 animate-spin" /> {t("mt_generating")}
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4" /> Generate Items
+                  <Sparkles className="h-4 w-4" /> {t("mt_generateItems")}
                 </>
               )}
             </Button>
@@ -152,13 +155,13 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
 
           {/* Or add items by hand */}
           <div className="rounded-lg border border-slate-200 p-3">
-            <div className="mb-2 text-sm font-semibold text-slate-900">Add an item</div>
+            <div className="mb-2 text-sm font-semibold text-slate-900">{t("mt_addAnItemHeading")}</div>
             <div className="flex flex-wrap items-center gap-2">
-              <Input value={mDesc} onChange={(e) => setMDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addManual())} placeholder="The item, the way you'd ask for it at the counter" className="min-w-[160px] flex-1" />
-              <NumberInput value={mQty} onValueChange={setMQty} className="w-16 text-center" placeholder="Qty" />
-              <Input value={mUnit} onChange={(e) => setMUnit(e.target.value)} className="w-14" placeholder="ea" />
+              <Input value={mDesc} onChange={(e) => setMDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addManual())} placeholder={t("mt_itemPlaceholder")} className="min-w-[160px] flex-1" />
+              <NumberInput value={mQty} onValueChange={setMQty} className="w-16 text-center" placeholder={t("mt_qty")} />
+              <Input value={mUnit} onChange={(e) => setMUnit(e.target.value)} className="w-14" placeholder={t("mt_ea")} />
               <Button size="sm" variant="outline" onClick={addManual} disabled={!mDesc.trim()}>
-                <Plus className="h-3.5 w-3.5" /> Add
+                <Plus className="h-3.5 w-3.5" /> {t("mt_add")}
               </Button>
             </div>
           </div>
@@ -179,7 +182,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
                             setItems((p) => p.filter((_, i) => i !== idx))
                           }
                           className="text-slate-400 hover:text-red-600"
-                          aria-label="Remove"
+                          aria-label={t("mt_remove")}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -189,7 +192,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
                 </tbody>
               </table>
               <div className="flex justify-between border-t border-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
-                <span>{items.length} items</span>
+                <span>{fillText(t("mt_nItems"), { n: String(items.length) })}</span>
               </div>
             </div>
           )}

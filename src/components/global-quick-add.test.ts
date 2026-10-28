@@ -9,6 +9,7 @@ vi.mock("@/components/snap-or-note", () => ({ SnapOrNoteProvider: () => null, op
 
 import { GlobalQuickAdd, QuickAddMenu, STUCK_MS, plusOpens, quickAddActions, quickAddGo } from "./global-quick-add";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
+import { LangProvider } from "@/components/lang-provider";
 
 /**
  * THE + (W1-11: eight rows to six) AND THE SWITCH BOARD (0352). The office: Snap Or Note first, then
@@ -60,6 +61,17 @@ describe("the + on screen", () => {
     const office = renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: true, placement: "topbar" }));
     expect(office).toMatch(/<button[^>]*aria-label="Quick Add"[^>]*aria-haspopup="menu"/);
     for (const html of [tech, office]) expect(html).toMatch(/<button[^>]*class="[^"]*\bh-11 w-11\b/);
+  });
+
+  it("a Spanish-speaking tech (cn-v1138): his + is Foto O Nota; the office's menu keeps Snap Or Note in its words; English byte for byte as before", () => {
+    const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es", children: el }));
+    const tech = es(createElement(GlobalQuickAdd, { isStaff: false }));
+    expect(tech).toMatch(/<button[^>]*aria-label="Foto O Nota"[^>]*title="Foto O Nota"/);
+    expect(tech).not.toContain("Snap Or Note");
+    expect(rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })))[0]).toBe("Foto O Nota");
+    expect(es(createElement(GlobalQuickAdd, { isStaff: true, placement: "topbar" }))).toMatch(/<button[^>]*aria-label="Agregar Rápido"/);
+    const en = renderToStaticMarkup(createElement(LangProvider, { lang: "en", children: createElement(GlobalQuickAdd, { isStaff: false }) }));
+    expect(en).toBe(renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: false })));
   });
 
   it("lapsed (skeptic #43, S1): the + is not drawn at all — every verb of it is a closed door", () => {

@@ -14,25 +14,49 @@ import { isYmd, shortDay } from "@/lib/come-back-days";
 import { finishJob, setJobStatus } from "../actions";
 import { setJobHold, snoozeJobHold } from "../../schedule/actions";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { JOB_STATUSES, finishesTheJob, jobStatusLabel } from "@/lib/job-status";
 
 /** "in_progress" → "In Progress": the pill and the menu rows are Title Case (the clickables law). */
-export const statusTitle = (s: string | null | undefined): string => jobStatusLabel(s).replace(/\b\w/g, (c) => c.toUpperCase());
+export const statusTitle = (s: string | null | undefined): string => jobStatusLabel(s, "en").replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** The catalog key each job status reads through (cn-v1138); a status not in the spine keeps statusTitle. */
+const STATUS_KEY: Record<string, string> = {
+  to_be_scheduled: "jb_statusToBeScheduled",
+  scheduled: "jb_statusScheduled",
+  in_progress: "jb_statusInProgress",
+  on_hold: "jb_statusOnHold",
+  complete: "jb_statusComplete",
+  cancelled: "jb_statusCancelled",
+};
+
+/** The status in the viewer's language: "On Hold" / "En Pausa". English is statusTitle, byte for byte. */
+export const statusWords = (t: (key: string) => string, s: string | null | undefined): string => {
+  const key = STATUS_KEY[String(s ?? "")];
+  return key ? t(key) : statusTitle(s);
+};
 
 /**
  * THE HELD LINE (W1-17, NY-hold 0366): what rides beside the On Hold pill. "waiting on the permit ·
  * back Oct 3". `holdUntil` undefined means the database has no such column yet (0366 not applied):
  * then no day is said at all, never a false "no day set". null (a hold from before 0366) says so,
  * and the office's Snooze picks one. A day already come or passed is "back today": it waits on a
- * person now. Pure, so the header and its test read the same words.
+ * person now. Pure, so the header and its test read the same words. `t` (cn-v1138) is the viewer's
+ * translator; omitted, the words are English.
  */
-export function heldWords(holdReason: string | null | undefined, holdUntil: string | null | undefined, todayStr: string): string {
+export function heldWords(
+  holdReason: string | null | undefined,
+  holdUntil: string | null | undefined,
+  todayStr: string,
+  t: (key: string) => string = translator("en"),
+): string {
   const parts: string[] = [];
   const why = String(holdReason ?? "").trim();
   if (why) parts.push(why);
   if (holdUntil !== undefined) {
-    if (!isYmd(holdUntil)) parts.push("no day set");
-    else parts.push(holdUntil <= todayStr ? "back today" : `back ${shortDay(holdUntil)}`);
+    if (!isYmd(holdUntil)) parts.push(t("jb_noDaySet"));
+    else parts.push(holdUntil <= todayStr ? t("jb_backToday") : fillText(t("jb_backOn"), { day: shortDay(holdUntil) }));
   }
   return parts.join(" · ");
 }
@@ -103,6 +127,7 @@ export function JobStatusControl({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   /** Which picker is open under the pill: putting it on hold, or moving a hold's day. */
@@ -131,7 +156,7 @@ export function JobStatusControl({
   }, [open]);
 
   const held = status === "on_hold";
-  const words = held ? heldWords(holdReason, holdUntil, todayStr) : "";
+  const words = held ? heldWords(holdReason, holdUntil, todayStr, t) : "";
   const tone = toneClasses(statusTone(status));
 
   function pick(next: string) {
@@ -146,11 +171,11 @@ export function JobStatusControl({
     start(async () => {
       setErr(null);
       const res = await writeStatusPick(id, next);
-      if (!res.ok) setErr(res.error ?? "That didn't save.");
+      if (!res.ok) setErr(res.error ?? t("jb_didntSave"));
       else if (next === "complete") {
         // Finish Job's own sentence (which draft was built, or that nothing new was left to bill),
         // and its warning (hours or bills still off a bill) has to be READ, so it stays until tapped.
-        toast(res.speak ?? "Job finished.", "info");
+        toast(res.speak ?? t("jb_jobFinished"), "info");
         if (res.warning) toast(res.warning, "error", undefined, { sticky: true });
       }
       router.refresh();
@@ -158,7 +183,7 @@ export function JobStatusControl({
   }
 
   const heldLine = held && words && (
-    <span className="text-sm text-slate-500" title={holdBy ? `Put on hold by ${holdBy}` : undefined}>
+    <span className="text-sm text-slate-500" title={holdBy ? fillText(t("jb_putOnHoldBy"), { name: holdBy }) : undefined}>
       · {words}
     </span>
   );
@@ -166,7 +191,7 @@ export function JobStatusControl({
   if (!viewerIsStaff) {
     return (
       <div className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
-        <span className={cn(PILL, tone)}>{statusTitle(status)}</span>
+        <span className={cn(PILL, tone)}>{statusWords(t, status)}</span>
         {heldLine}
       </div>
     );
@@ -181,11 +206,11 @@ export function JobStatusControl({
           disabled={pending}
           aria-haspopup="menu"
           aria-expanded={open}
-          aria-label={`Status: ${statusTitle(status)}. Change it`}
+          aria-label={fillText(t("jb_statusChangeAria"), { status: statusWords(t, status) })}
           data-tour="job-status"
           className={cn(PILL, tone, "hover:brightness-95 disabled:opacity-60")}
         >
-          {pending ? "Saving…" : statusTitle(status)}
+          {pending ? t("jb_saving") : statusWords(t, status)}
           <ChevronDown className="h-3.5 w-3.5 shrink-0" />
         </button>
         {open && (
@@ -205,7 +230,7 @@ export function JobStatusControl({
                 className="relative z-10 flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
               >
                 {s === status ? <Check className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> : <span aria-hidden className="h-4 w-4 shrink-0" />}
-                {statusTitle(s)}
+                {statusWords(t, s)}
               </button>
             ))}
           </div>
@@ -221,13 +246,13 @@ export function JobStatusControl({
           }}
           className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-brand hover:underline"
         >
-          Snooze
+          {t("jb_snooze")}
         </button>
       )}
       {asking && (
         <div className="w-full max-w-sm">
           <ComeBackPicker
-            label={asking === "hold" ? "Hold It" : "Snooze"}
+            label={asking === "hold" ? t("jb_holdIt") : t("jb_snooze")}
             requireWhy={asking === "hold"}
             askWhy={asking === "snooze" && !String(holdReason ?? "").trim()}
             autoFocus
@@ -245,7 +270,7 @@ export function JobStatusControl({
                 const res = asking === "hold" ? await setJobHold(id, why, when) : await snoozeJobHold(id, when, why || null);
                 // Stay open on a refusal: the reason typed and the day picked aren't lost.
                 if (!res.ok) {
-                  setErr(res.error ?? "That didn't save.");
+                  setErr(res.error ?? t("jb_didntSave"));
                   return;
                 }
                 setAsking(null);

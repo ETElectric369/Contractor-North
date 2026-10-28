@@ -123,7 +123,7 @@ const ARR_ROW = { id: ARR, job_number: "J-013", name: "ARR 56 rough-in", address
 const schedulePutsHimOnArr =
   (over: { jobRow?: Reply; insert?: Reply } = {}) =>
   (q: Q): Reply => {
-    if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+    if (q.table === "profiles" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1" } };
     if (q.table === "profiles") return { data: { role: "tech" } };
     if (q.table === "organizations") return SETTINGS;
     if (q.table === "crew_day_assignments") return { data: { job_id: ARR, kind: "job" } };
@@ -139,7 +139,7 @@ const schedulePutsHimOnArr =
 
 /** A day nothing resolves at all: no day row, no job of his, two jobs in progress. */
 const nothingResolves = (q: Q): Reply => {
-  if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+  if (q.table === "profiles" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1" } };
   if (q.table === "profiles") return { data: { role: "tech" } };
   if (q.table === "organizations") return SETTINGS;
   if (q.table === "crew_day_assignments") return { data: null };
@@ -182,7 +182,7 @@ describe("PART 1 — the clock says what it decided", () => {
 
   it("a punch whose job the PERSON picked says nothing new — they already know", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+      if (q.table === "profiles" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1" } };
       if (q.table === "profiles") return { data: { role: "owner" } };
       if (q.table === "jobs" && q.cols === "id") return { data: { id: ARR } };
       if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: "scheduled" } };
@@ -465,7 +465,7 @@ describe("PART 3 — the offline queue's replay says it too (Brian in the truck)
 /** A day with NOTHING on the schedule and exactly ONE job in progress: resolveTechJobToday tier 2,
  *  which has nothing to do with today's schedule and must not say that it has. */
 const onlyOneJobGoing = (q: Q): Reply => {
-  if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+  if (q.table === "profiles" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1" } };
   if (q.table === "profiles") return { data: { role: "tech" } };
   if (q.table === "organizations") return SETTINGS;
   if (q.table === "crew_day_assignments") return { data: null };
@@ -539,7 +539,7 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
 
   it("a job the PERSON named says nothing new to the model either", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+      if (q.table === "profiles" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1" } };
       if (q.table === "profiles") return { data: { role: "owner" } };
       if (q.table === "jobs" && q.cols === "id") return { data: { id: ARR } };
       if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: "in_progress" } };
@@ -654,7 +654,7 @@ describe("the truck's held punch: a punch that already filed still says where it
    * on the app's job with not one word on screen.
    */
   const alreadyFiled = (over: { entry?: Reply } = {}) => (q: Q): Reply => {
-    if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+    if (q.table === "profiles" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1" } };
     if (q.table === "client_operations" && q.verb === "insert")
       return { error: { code: "23505", message: 'duplicate key value violates unique constraint "client_operations_org_op"' } };
     if (q.table === "client_operations") return { data: { result_id: PUNCH } };
@@ -963,7 +963,8 @@ describe("PART 4 — teeth: no clock door may report a resolved job without sayi
   it("nobody writes the rule twice: the sentence and the \"did the app choose this\" test live in one file", () => {
     const offenders: string[] = [];
     for (const f of allSources()) {
-      if (f.endsWith("clock-told.ts") || f.endsWith("clock-told.test.ts")) continue;
+      // The cs_ catalog is where the sentence LIVES since cn-v1138 (clock-told reads it through t()).
+      if (f.endsWith("clock-told.ts") || f.endsWith("clock-told.test.ts") || f.endsWith("lib/words/clockserver.ts")) continue;
       const src = read(f);
       // Re-deriving the rule: comparing chosenBy to a string anywhere but the one module.
       if (/chosenBy\s*[=!]==?\s*["']/.test(src)) offenders.push(`${f}: re-tests chosenBy`);
