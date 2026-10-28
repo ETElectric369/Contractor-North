@@ -10,7 +10,15 @@ import { fakeDb } from "@/lib/bank-transfer-fake.test-util";
  *        async_payment_failed books nothing, ends the mark, and tells the office once.
  * Every write stands behind the org<->connected-account check the payment itself does.
  */
-const state = vi.hoisted(() => ({ db: null as any, event: null as any, pushes: [] as any[], sigError: null as string | null, noKey: false }));
+const state = vi.hoisted(() => ({
+  db: null as any,
+  event: null as any,
+  pushes: [] as any[],
+  sigError: null as string | null,
+  noKey: false,
+  /** What subscriptions.retrieve answers (the declined-card branch asks Stripe for the subscription). */
+  subscription: null as any,
+}));
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     ...(state.noKey ? (() => { throw new Error("STRIPE_SECRET_KEY is not configured."); })() : {}),
@@ -20,6 +28,7 @@ vi.mock("@/lib/stripe", () => ({
         return state.event;
       },
     },
+    subscriptions: { retrieve: async () => state.subscription },
   }),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => state.db }));
@@ -380,5 +389,275 @@ describe("a refused webhook is filed, never only answered", () => {
     const res = await call({ "stripe-signature": "t=1,v1=x" });
     expect(res.status).toBe(200);
     expect(filed()).toHaveLength(0);
+  });
+});
+
+/**
+ * THE COMPANY'S OWN BILLING (cn-v1137, 0400). A declined card is told ONCE per unpaid period, to the
+ * owner and admins under the `billing` kind, behind the stamp claim_billing_notice writes first —
+ * Stripe's Smart Retries fire the same event again and claim nothing, push nothing. A late delete of
+ * a subscription that is no longer the company's current one is skipped and filed, never applied
+ * over a paying company. A sync that lands the company active hands the `lapsed` key back, so the
+ * next lapse is told.
+ */
+describe("the company's own billing (cn-v1137)", () => {
+  const PERIOD_END = 1_800_000_000; // seconds; the item's current_period_end
+  const PERIOD_END_ISO = new Date(PERIOD_END * 1000).toISOString();
+  const subscription = (over: Record<string, unknown> = {}) => ({
+    id: "sub_1",
+    status: "past_due",
+    customer: "cus_1",
+    metadata: {},
+    items: { data: [{ price: { id: "price_crew", nickname: "crew" }, current_period_end: PERIOD_END }] },
+    ...over,
+  });
+  const billingTables = () => ({
+    organizations: [{ id: ORG, stripe_account_id: ACCT, stripe_customer_id: "cus_1", stripe_subscription_id: "sub_1", subscription_status: "active" }],
+    profiles: [
+      { id: "owner-1", org_id: ORG, role: "owner", active: true },
+      { id: "admin-1", org_id: ORG, role: "admin", active: true },
+      { id: "office-1", org_id: ORG, role: "office", active: true },
+      { id: "tech-1", org_id: ORG, role: "tech", active: true },
+      { id: "gone-owner", org_id: ORG, role: "owner", active: false },
+      { id: "owner-elsewhere", org_id: "org-thistlewood", role: "owner", active: true },
+    ],
+    notifications: [] as any[],
+  });
+  /** The stamps (0400) as a set: a key claimed once answers false after; releasing drops it. */
+  let stamps: Set<string>;
+  let rpcs: [string, any][];
+  let rpcError: { message: string } | null;
+  const org = () => state.db.tables.organizations[0];
+  const ourEvent = (type: string, obj: any, id: string) => deliver(type, obj, id, null as any);
+
+  beforeEach(() => {
+    state.db = fakeDb(billingTables());
+    state.pushes = [];
+    stamps = new Set();
+    rpcs = [];
+    rpcError = null;
+    state.db.rpc = vi.fn(async (fn: string, args: any) => {
+      rpcs.push([fn, args]);
+      if (rpcError) return { data: null, error: rpcError };
+      const k = `${args.p_org}:${args.p_key}`;
+      if (fn === "claim_billing_notice") {
+        if (stamps.has(k)) return { data: false, error: null };
+        stamps.add(k);
+        return { data: true, error: null };
+      }
+      if (fn === "release_billing_notice") return { data: stamps.delete(k), error: null };
+      return { data: null, error: { message: `unknown function ${fn}` } };
+    });
+    state.subscription = subscription();
+    vi.mocked(reportError).mockClear();
+  });
+
+  it("a declined card: the state is mirrored, past_due:<period_end> is claimed, and ONE push under billing to the active owner and admins only", async () => {
+    expect((await ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf1")).status).toBe(200);
+    expect(org()).toMatchObject({ subscription_status: "past_due", stripe_subscription_id: "sub_1", current_period_end: PERIOD_END_ISO });
+    expect(rpcs).toEqual([["claim_billing_notice", { p_org: ORG, p_key: `past_due:${PERIOD_END_ISO}` }]]);
+    expect(state.pushes).toHaveLength(1);
+    expect(state.pushes[0]).toEqual([
+      ["owner-1", "admin-1"],
+      "billing",
+      { title: "Your Card Was Declined", body: "Update the card in Settings › Getting Paid › Manage Billing. The crew keeps working for now.", url: "/settings?tab=getpaid" },
+    ]);
+    // The bell records it, for the same two people, under the same kind.
+    const lines = state.db.tables.notifications as any[];
+    expect(lines.map((l) => [l.user_id, l.type, l.title])).toEqual([
+      ["owner-1", "billing", "Your Card Was Declined"],
+      ["admin-1", "billing", "Your Card Was Declined"],
+    ]);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("Stripe's retry of the decline (a second payment_failed for the same period): the claim answers false, nothing is pushed, nothing is written to the bell", async () => {
+    await ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf1");
+    await ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf2");
+    expect(rpcs.filter(([fn]) => fn === "claim_billing_notice")).toHaveLength(2);
+    expect(state.pushes).toHaveLength(1);
+    expect(state.db.tables.notifications).toHaveLength(2);
+    // The next period's decline is its own key, and is told.
+    state.subscription = subscription({ items: { data: [{ price: { id: "price_crew" }, current_period_end: PERIOD_END + 30 * 86_400 }] } });
+    await ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf3");
+    expect(rpcs.at(-1)).toEqual(["claim_billing_notice", { p_org: ORG, p_key: `past_due:${new Date((PERIOD_END + 30 * 86_400) * 1000).toISOString()}` }]);
+    expect(state.pushes).toHaveLength(2);
+  });
+
+  it("a claim that could not be read: 500 so Stripe retries (the sync is idempotent), nothing pushed", async () => {
+    rpcError = { message: "function claim_billing_notice does not exist" };
+    await expect(ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf1")).rejects.toThrow(/claim_billing_notice past_due:.* failed/);
+    expect(state.pushes).toHaveLength(0);
+  });
+
+  it("a decline on a connected account (a contractor's own customer) is not our billing: nothing claimed, nothing pushed", async () => {
+    await deliver("invoice.payment_failed", { subscription: "sub_x", customer: "cus_x" }, "evt_pf_connect");
+    expect(rpcs).toEqual([]);
+    expect(state.pushes).toHaveLength(0);
+  });
+
+  describe("customer.subscription.deleted", () => {
+    it("for a subscription that is NOT the company's current one: skipped and filed, the company stays active", async () => {
+      org().stripe_subscription_id = "sub_2"; // the company re-subscribed; sub_1 is history
+      expect((await ourEvent("customer.subscription.deleted", subscription({ status: "canceled", metadata: { org_id: ORG } }), "evt_del_old")).status).toBe(200);
+      expect(org()).toMatchObject({ subscription_status: "active", stripe_subscription_id: "sub_2" });
+      expect(reportError).toHaveBeenCalledTimes(1);
+      expect(reportError).toHaveBeenCalledWith("stripe:webhook:stale-subscription-event", expect.any(Error), { orgId: ORG, eventSub: "sub_1", storedSub: "sub_2" });
+      expect(rpcs).toEqual([]);
+    });
+
+    it("the same, matched by the customer when the event carries no org_id", async () => {
+      org().stripe_subscription_id = "sub_2";
+      await ourEvent("customer.subscription.deleted", subscription({ status: "canceled" }), "evt_del_old");
+      expect(org().subscription_status).toBe("active");
+      expect(reportError).toHaveBeenCalledWith("stripe:webhook:stale-subscription-event", expect.any(Error), { orgId: ORG, eventSub: "sub_1", storedSub: "sub_2" });
+    });
+
+    it("for the company's current subscription: applied, the company is canceled", async () => {
+      await ourEvent("customer.subscription.deleted", subscription({ status: "canceled", metadata: { org_id: ORG } }), "evt_del");
+      expect(org()).toMatchObject({ subscription_status: "canceled", stripe_subscription_id: "sub_1" });
+      expect(reportError).not.toHaveBeenCalled();
+    });
+
+    it("when no subscription is recorded yet: applied (there is nothing to be stale against)", async () => {
+      org().stripe_subscription_id = null;
+      await ourEvent("customer.subscription.deleted", subscription({ status: "canceled", metadata: { org_id: ORG } }), "evt_del");
+      expect(org().subscription_status).toBe("canceled");
+      expect(reportError).not.toHaveBeenCalled();
+    });
+
+    it("a read that failed: 500 so Stripe retries, nothing applied, nothing guessed", async () => {
+      state.db.failing.add("organizations");
+      await expect(ourEvent("customer.subscription.deleted", subscription({ status: "canceled", metadata: { org_id: ORG } }), "evt_del")).rejects.toThrow(/subscription read failed/);
+      state.db.failing.delete("organizations");
+      expect(org().subscription_status).toBe("active");
+    });
+  });
+
+  /**
+   * STRIPE DELIVERS OUT OF ORDER AND RETRIES FOR DAYS (skeptic #43, S5). A late `updated` for the
+   * subscription a company canceled last month, landing after its new one is active, would have
+   * written past_due or canceled over a paying company. Every sync — created, updated, and the one
+   * payment_failed retrieves — applies only when the company holds no subscription, THIS one, or a
+   * dead one (canceled / incomplete_expired); the rest are skipped and filed with both ids.
+   */
+  describe("a subscription that is not the company's current one (created / updated / payment_failed)", () => {
+    it("a late `updated` for the old subscription after the new one is active: skipped, filed with both ids, nothing released", async () => {
+      org().stripe_subscription_id = "sub_2";
+      expect((await ourEvent("customer.subscription.updated", subscription({ status: "past_due", metadata: { org_id: ORG } }), "evt_up_old")).status).toBe(200);
+      expect(org()).toMatchObject({ subscription_status: "active", stripe_subscription_id: "sub_2" });
+      expect(reportError).toHaveBeenCalledTimes(1);
+      expect(reportError).toHaveBeenCalledWith("stripe:webhook:stale-subscription-event", expect.any(Error), {
+        orgId: ORG,
+        eventSub: "sub_1",
+        storedSub: "sub_2",
+        eventStatus: "past_due",
+      });
+      expect(rpcs).toEqual([]);
+    });
+
+    it("the same for a late `created`, and when the event is matched by the customer alone", async () => {
+      org().stripe_subscription_id = "sub_2";
+      await ourEvent("customer.subscription.created", subscription({ status: "active", metadata: { org_id: ORG } }), "evt_cr_old");
+      await ourEvent("customer.subscription.updated", subscription({ status: "canceled" }), "evt_up_old_cus");
+      expect(org()).toMatchObject({ subscription_status: "active", stripe_subscription_id: "sub_2" });
+      expect(reportError).toHaveBeenCalledTimes(2);
+      expect(rpcs).toEqual([]);
+    });
+
+    it("the company's current subscription (the same id): applied", async () => {
+      await ourEvent("customer.subscription.updated", subscription({ status: "past_due", metadata: { org_id: ORG } }), "evt_up");
+      expect(org()).toMatchObject({ subscription_status: "past_due", stripe_subscription_id: "sub_1", current_period_end: PERIOD_END_ISO });
+      expect(reportError).not.toHaveBeenCalled();
+    });
+
+    it("a stored canceled or incomplete_expired subscription lets a NEW id in (the company subscribed again)", async () => {
+      for (const dead of ["canceled", "incomplete_expired"]) {
+        org().stripe_subscription_id = "sub_1";
+        org().subscription_status = dead;
+        await ourEvent("customer.subscription.updated", subscription({ id: "sub_2", status: "active", metadata: { org_id: ORG } }), `evt_new_${dead}`);
+        expect(org(), dead).toMatchObject({ subscription_status: "active", stripe_subscription_id: "sub_2" });
+      }
+      expect(reportError).not.toHaveBeenCalled();
+    });
+
+    it("no subscription recorded yet: applied (nothing to be stale against)", async () => {
+      org().stripe_subscription_id = null;
+      org().subscription_status = "trialing";
+      await ourEvent("customer.subscription.created", subscription({ status: "active", metadata: { org_id: ORG } }), "evt_first");
+      expect(org()).toMatchObject({ subscription_status: "active", stripe_subscription_id: "sub_1" });
+      expect(reportError).not.toHaveBeenCalled();
+    });
+
+    it("a decline on the OLD subscription after the new one is active: not the company's card — nothing mirrored, claimed or pushed", async () => {
+      org().stripe_subscription_id = "sub_2";
+      expect((await ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf_old")).status).toBe(200);
+      expect(org()).toMatchObject({ subscription_status: "active", stripe_subscription_id: "sub_2" });
+      expect(reportError).toHaveBeenCalledWith("stripe:webhook:stale-subscription-event", expect.any(Error), expect.objectContaining({ eventSub: "sub_1", storedSub: "sub_2" }));
+      expect(rpcs).toEqual([]);
+      expect(state.pushes).toHaveLength(0);
+      expect(state.db.tables.notifications).toHaveLength(0);
+    });
+
+    it("the holders read failing: 500 so Stripe retries, nothing applied", async () => {
+      state.db.failing.add("organizations");
+      await expect(ourEvent("customer.subscription.updated", subscription({ status: "past_due", metadata: { org_id: ORG } }), "evt_up")).rejects.toThrow(/subscription read failed/);
+      state.db.failing.delete("organizations");
+      expect(org().subscription_status).toBe("active");
+    });
+  });
+
+  /**
+   * THE PEOPLE ARE READ BEFORE THE CLAIM (skeptic #43, N1): a read that threw after the claim had
+   * stamped the period and lost the one notice for good. And a claim that answers nothing is a 500,
+   * never a silent skip.
+   */
+  describe("the declined-card notice's order", () => {
+    it("the owner and admins that could not be read: 500 with NO stamp, so Stripe's retry can still tell them", async () => {
+      state.db.failing.add("profiles");
+      await expect(ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf1")).rejects.toThrow(/the owner and admins could not be read/);
+      state.db.failing.delete("profiles");
+      expect(rpcs.filter(([fn]) => fn === "claim_billing_notice")).toEqual([]);
+      expect(stamps.size).toBe(0);
+      expect(state.pushes).toHaveLength(0);
+      // The retry, with the read working, claims and tells them.
+      expect((await ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf1")).status).toBe(200);
+      expect(state.pushes).toHaveLength(1);
+    });
+
+    it("a claim that answers nothing (no boolean, no error) is a 500, never a notice and never a quiet skip", async () => {
+      state.db.rpc = vi.fn(async () => ({ data: null, error: null }));
+      await expect(ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf1")).rejects.toThrow(/claim_billing_notice past_due:.* answered nothing/);
+      expect(state.pushes).toHaveLength(0);
+    });
+  });
+
+  describe("a sync that lands the company active releases the lapsed notice", () => {
+    it("customer.subscription.updated to active: release_billing_notice(org, 'lapsed')", async () => {
+      stamps.add(`${ORG}:lapsed`);
+      await ourEvent("customer.subscription.updated", subscription({ status: "active", metadata: { org_id: ORG } }), "evt_up");
+      expect(org().subscription_status).toBe("active");
+      expect(rpcs).toEqual([["release_billing_notice", { p_org: ORG, p_key: "lapsed" }]]);
+      expect(stamps.has(`${ORG}:lapsed`)).toBe(false);
+    });
+
+    it("a sync to past_due or canceled releases nothing", async () => {
+      await ourEvent("customer.subscription.updated", subscription({ status: "past_due", metadata: { org_id: ORG } }), "evt_up");
+      await ourEvent("customer.subscription.deleted", subscription({ status: "canceled", metadata: { org_id: ORG } }), "evt_del");
+      expect(rpcs.filter(([fn]) => fn === "release_billing_notice")).toEqual([]);
+    });
+
+    it("a release that errored is filed and never fails the webhook", async () => {
+      rpcError = { message: "permission denied for function release_billing_notice" };
+      expect((await ourEvent("customer.subscription.updated", subscription({ status: "active", metadata: { org_id: ORG } }), "evt_up")).status).toBe(200);
+      expect(org().subscription_status).toBe("active");
+      expect(reportError).toHaveBeenCalledWith("stripe:webhook:release-lapsed", expect.objectContaining({ message: "permission denied for function release_billing_notice" }), { orgId: ORG, subscriptionId: "sub_1" });
+    });
+
+    it("a subscription that matched no company releases nothing, and says so as before", async () => {
+      await ourEvent("customer.subscription.updated", subscription({ status: "active", customer: "cus_stranger" }), "evt_up");
+      expect(rpcs).toEqual([]);
+      expect(reportError).toHaveBeenCalledWith("stripe:webhook:subscription-no-org", expect.any(Error), expect.objectContaining({ subscriptionId: "sub_1" }));
+    });
   });
 });

@@ -30,7 +30,7 @@ import {
 import { reviewAgainstBook, type BookReview } from "@/lib/pricing/book-review";
 import { runCalc } from "@/lib/electrical-calc";
 import { estimatorCalcTools, estimatorQuantitiesLine } from "@/lib/nort/trade-prompt";
-import { recordAiUsage, aiSpendExceeded, currentOrgId, fullEstimatesThisMonth, orgPlanTier, noteEstimateRun, modelFor } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, currentOrgId, fullEstimatesThisMonth, orgPlanTier, noteEstimateRun, modelFor } from "@/lib/ai-cost";
 import { estimateTierFor, overFullEstimateAllowance, planByTier } from "@/lib/plans";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -55,6 +55,8 @@ import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms, smsReadiness } from "@/lib/sms";
 import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
+import { orgAccess } from "@/lib/org-access";
+import { textingPausedWordsFor } from "@/lib/lapse-words";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
@@ -106,10 +108,15 @@ export async function textQuote(
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
-  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("id, name, settings").maybeSingle();
   // TEXTING NOT SET UP (lib/sms-readiness): said here, where he tapped, before anything is promised
   // or stamped. Nothing is sent and the estimate stays a draft.
   if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL };
+  // THE PLAN HAS ENDED (cn-v1137, decision 3): a lapsed company sends no texts. Said where he
+  // tapped, in his role (the owner is told the door, everyone else the owner); nothing is sent.
+  const quoteOrgId = (org as { id?: string } | null)?.id;
+  const access = await orgAccess(quoteOrgId);
+  if (!access.state.active) return { ok: false, error: await textingPausedWordsFor(quoteOrgId) };
   // Same order the document itself resolves in: the customer when there is one, else the lead.
   const customer = (quote as any).customers ?? (quote as any).inquiry;
   if (!customer?.phone)
@@ -2573,8 +2580,10 @@ async function guardEstimator(): Promise<
   if (await rateLimited(`estimator:${ctx.userId}`, 10, 900, { failClosed: true }))
     return { ok: false, error: "That's a lot of estimates in a row — give it a minute." };
   const orgId = await currentOrgId();
-  if (await aiSpendExceeded(orgId))
-    return { ok: false, error: "Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it." };
+  // ONE GATE (cn-v1137, aiAllowed): a company whose plan has ended gets no estimator — said in the
+  // asker's role — and then the ceiling, in its own words.
+  const gate = await aiAllowed(orgId, undefined, { ceilingWords: "Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it." });
+  if (!gate.ok) return { ok: false, error: gate.why };
   // THE PLAN'S ALLOWANCE, ENFORCED (cn-v1128). plans.ts has promised "40 / 120 / unlimited full
   // estimates a month" since July and nothing ever read it (the deep review's pricing-01). Past the
   // month's line the run moves to the routine model and the draft SAYS so, as the first line of

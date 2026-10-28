@@ -77,7 +77,7 @@ afterEach(() => vi.useRealTimers());
 describe("the recurring engine and the Recurring Billing switch", () => {
   it("no switches stored (every company today): a due repeat invoice is made, exactly as before", async () => {
     const { client, writes } = fakeDb([{ id: "org-a", settings: LA }], [invoiceTpl("org-a", "2026-09-01")]);
-    expect(await generateDueTemplates(client, null)).toBe(1);
+    expect((await generateDueTemplates(client, null)).generated).toBe(1);
     const w = writes();
     expect(w.some((c) => c.table === "invoices" && c.op === "insert")).toBe(true);
     const claim = w.find((c) => c.table === "recurring_templates" && c.op === "update")!;
@@ -91,7 +91,7 @@ describe("the recurring engine and the Recurring Billing switch", () => {
       // Three months behind: an invoice would make one.
       [invoiceTpl("org-a", "2026-07-01")],
     );
-    expect(await generateDueTemplates(client, null)).toBe(0);
+    expect((await generateDueTemplates(client, null)).generated).toBe(0);
     const w = writes();
     expect(w.filter((c) => c.op === "insert")).toEqual([]);
     const skips = w.filter((c) => c.table === "recurring_templates" && c.op === "update");
@@ -110,7 +110,7 @@ describe("the recurring engine and the Recurring Billing switch", () => {
         { ...invoiceTpl("org-a", "2026-07-01"), id: "tpl-rent", kind: "expense", vendor: "Landlord", category: "rent" },
       ],
     );
-    expect(await generateDueTemplates(client, null)).toBe(6);
+    expect((await generateDueTemplates(client, null)).generated).toBe(6);
     const w = writes();
     expect(w.filter((c) => c.table === "jobs" && c.op === "insert")).toHaveLength(3);
     expect(w.filter((c) => c.table === "bills" && c.op === "insert")).toHaveLength(3);
@@ -122,7 +122,7 @@ describe("the recurring engine and the Recurring Billing switch", () => {
   it("turning it back on never back-fills: the skipped template's next run is simply the next one due", async () => {
     vi.setSystemTime(new Date("2026-09-27T19:00:00Z"));
     const { client, writes } = fakeDb([{ id: "org-a", settings: { ...LA, features: { recurring_billing: true } } }], [invoiceTpl("org-a", "2026-10-01")]);
-    expect(await generateDueTemplates(client, null)).toBe(0);
+    expect((await generateDueTemplates(client, null)).generated).toBe(0);
     expect(writes()).toEqual([]);
   });
 
@@ -134,7 +134,7 @@ describe("the recurring engine and the Recurring Billing switch", () => {
       ],
       [invoiceTpl("org-off", "2026-09-01"), invoiceTpl("org-on", "2026-09-01")],
     );
-    expect(await generateDueTemplates(client, null)).toBe(1);
+    expect((await generateDueTemplates(client, null)).generated).toBe(1);
     const inserts = writes().filter((c) => c.table === "invoices" && c.op === "insert");
     expect(inserts).toHaveLength(1);
     expect(inserts[0].payload.org_id).toBe("org-on");
@@ -148,6 +148,6 @@ describe("the recurring engine and the Recurring Billing switch", () => {
 
   it("Sales Tax or any other switch off changes nothing here", async () => {
     const { client } = fakeDb([{ id: "org-a", settings: { ...LA, features: { sales_tax: false, website: false } } }], [invoiceTpl("org-a", "2026-09-01")]);
-    expect(await generateDueTemplates(client, null)).toBe(1);
+    expect((await generateDueTemplates(client, null)).generated).toBe(1);
   });
 });

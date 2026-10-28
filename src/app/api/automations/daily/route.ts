@@ -11,6 +11,7 @@ import { findShelfProblems } from "@/lib/stock-reconcile-check";
 import { tellStaleBankTransfers } from "@/lib/bank-transfer-alerts";
 import { sweepErrorEvents } from "@/lib/error-retention";
 import { sendBugWatchDigest } from "@/lib/bug-watch-digest";
+import { sendBillingNotices } from "@/lib/billing-notices";
 
 export const runtime = "nodejs";
 // The steps run one after another and the Nort review is a model call per company (cn-v1130):
@@ -21,9 +22,9 @@ export const maxDuration = 300;
  *  runs on): it is the slow step, and the three after it still need their turn. */
 const NORT_REVIEW_BUDGET_MS = 200_000;
 
-/** The try blocks below, counted: when EVERY one of them failed the night is a blocker, not ten
+/** The try blocks below, counted: when EVERY one of them failed the night is a blocker, not eleven
  *  errors (cn-v1136). Keep this the number of steps, or the page never comes. */
-const STEP_COUNT = 10;
+const STEP_COUNT = 11;
 
 /**
  * The daily automation runner (Vercel Cron). One scheduled endpoint that does the
@@ -48,7 +49,11 @@ export async function GET(request: Request) {
 
   const result: Record<string, unknown> = { ok: true };
   try {
-    result.recurring_generated = await generateDueTemplates(supabase, null);
+    // The engine answers two counts (cn-v1137): what it made, and the templates it left alone
+    // because their company's plan has ended. Flattened, so the run's body reads one key per fact.
+    const recurring = await generateDueTemplates(supabase, null);
+    result.recurring_generated = recurring.generated;
+    result.recurring_lapsed_skipped = recurring.lapsed_skipped;
   } catch (e: any) {
     result.recurring_error = e?.message ?? "failed";
     reportError("cron-recurring", e);
@@ -71,6 +76,16 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.stale_bank_transfers_error = e?.message ?? "failed";
     reportError("cron-stale-bank-transfers", e);
+  }
+  try {
+    // THE BILLING NOTICES (cn-v1137, 0400): the trial's last days, a declined card with the grace
+    // window closing, the day a plan ends — to the owner and admins, once each, behind the stamp
+    // claim_billing_notice writes first. North's own work, so it reads every company, comped ones
+    // counted as skipped; with billing off nothing is read.
+    result.billing_notices = await sendBillingNotices(supabase, startedAt);
+  } catch (e: any) {
+    result.billing_notices_error = e?.message ?? "failed";
+    reportError("cron-billing-notices", e);
   }
   // Customer reminders (quote follow-up / invoice due / appts) moved to their OWN cron
   // /api/automations/reminders (a few times a day, not just here) — see that route.
@@ -171,7 +186,7 @@ export async function GET(request: Request) {
   // without throwing, so "all eight" was unreachable and a failed step stayed green.
   const errors = Object.keys(result).filter((k) => k.endsWith("_error"));
   result.ok = errors.length === 0;
-  // EVERY STEP FAILED IS A BLOCKER (cn-v1136): ten rows in the sink read as ten troubles; one night
+  // EVERY STEP FAILED IS A BLOCKER (cn-v1136): eleven rows in the sink read as eleven troubles; one night
   // where nothing ran is the database or the service key gone, platform-wide, and pages North's own
   // team. Waited for: this function answers on the tick it files.
   if (errors.length === STEP_COUNT) {

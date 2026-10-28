@@ -25,7 +25,9 @@ import {
   acceptSupplierMerge,
   dismissSupplierMerge,
   fileSpellingAsItsOwnAccount,
+  markBothReal,
   resolveDuplicateBill,
+  unmarkBothReal,
   unresolveDuplicateBill,
 } from "@/app/(app)/bills/supplier-actions";
 import { BankDropLine } from "./bank-drop-line";
@@ -403,11 +405,19 @@ export default async function ReconcilePage() {
       )}
 
       {/* The picker is not drawn at all on a database without 0271's superseded_by_bill_id: a
-          control that could only refuse is a dead end wearing a button. */}
-      {work.supersedeReady && work.duplicates.length > 0 && (
+          control that could only refuse is a dead end wearing a button. Mounted whenever the picker
+          CAN work, groups or none: the card draws nothing with no groups and nothing said, and keeps
+          its done banner and Undo after the last pair is answered (skeptic #43, S3). */}
+      {work.supersedeReady && (
         <SupplierDuplicates
           groups={work.duplicates}
-          actions={{ resolveDuplicate: resolveDuplicateBill, unresolveDuplicate: unresolveDuplicateBill }}
+          actions={{
+            resolveDuplicate: resolveDuplicateBill,
+            unresolveDuplicate: unresolveDuplicateBill,
+            // BOTH ARE REAL (0400): both costs stay where they are and the pair stops being asked about.
+            markBothReal,
+            unmarkBothReal,
+          }}
         />
       )}
 

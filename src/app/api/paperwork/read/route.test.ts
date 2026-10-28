@@ -42,6 +42,30 @@ describe("/api/paperwork/read", () => {
     expect(body).toEqual({ ok: false, error: "AI could not read this file. It is saved and waiting; press Read Now to try again." });
   });
 
+  /**
+   * THE PLAN GATE IS THE READER'S, ONCE (cn-v1137; skeptic #43, S8). The route used to ask aiAllowed
+   * and then readInto asked it again: two reads of the same standing per paper on the hot path. The
+   * route asks nothing; the reader's refusal comes through in its own {ok, error} shape.
+   */
+  it("a company whose plan has ended is refused by the reader, in words, and the route passes that through unchanged", async () => {
+    const why = "This company's free trial has ended, so Nort is paused. Ask Larkspur to pick a plan.";
+    state.read.mockResolvedValue({ ok: false, error: why });
+    state.review.mockResolvedValue({ ok: false, message: why }); // aiReviewItem speaks in `message`
+    const res = await ask({ id: ID });
+    expect(res.status).toBe(200); // the reader's own {ok, error} shape, shown on the paper's line
+    expect(await res.json()).toEqual({ ok: false, error: why });
+    expect(await (await ask({ id: ID, note: true })).json()).toEqual({ ok: false, error: why });
+  });
+
+  it("the route itself never asks aiAllowed: the gate lives in readInto and aiReviewItem, which every caller passes", async () => {
+    const { readFileSync } = await import("node:fs");
+    const route = readFileSync("src/app/api/paperwork/read/route.ts", "utf8");
+    expect(route).not.toContain("aiAllowed(");
+    expect(route).not.toContain("@/lib/ai-cost");
+    const actions = readFileSync("src/app/(app)/organize/actions.ts", "utf8");
+    expect((actions.match(/await aiAllowed\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("the crew is refused in words, and nothing is read", async () => {
     state.staff = { error: "This action is staff-only." };
     const res = await ask({ id: ID });

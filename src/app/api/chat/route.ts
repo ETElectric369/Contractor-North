@@ -16,7 +16,9 @@ import { orgTrade } from "@/lib/org-trade";
 import { featureOn } from "@/lib/features";
 import { quoteDraftShown, quoteDraftToolFor } from "@/lib/nort/quote-draft-tax";
 import { NORT_EXAMPLES_RULE, calcToolsFor, engineeringLine, tradeRuleWords, voiceEstimateRule } from "@/lib/nort/trade-prompt";
-import { recordAiUsage, aiSpendExceeded, modelFor, type TokenUsage } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, modelFor, type TokenUsage } from "@/lib/ai-cost";
+import { accessOfRow, nortPausedWords } from "@/lib/lapse-words";
+import { BILLING_COLUMNS, type BillingOrg } from "@/lib/subscription";
 import { rateLimited } from "@/lib/rate-limit";
 import { errorMessage, reportError } from "@/lib/observe";
 import { reportBlocker } from "@/lib/observe-blocker";
@@ -254,12 +256,15 @@ export async function POST(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Respond in the user's preferred language + follow the org's quoting playbook.
+  // Respond in the user's preferred language + follow the org's quoting playbook. THE BILLING
+  // COLUMNS RIDE THE SAME READ (cn-v1137, projection law): the standing check below reads them, so
+  // the select names them — one trip, never a second read of the same row.
   const [{ data: prof }, { data: org }] = await Promise.all([
     supabase.from("profiles").select("language, role, nort_humor, nort_register, nort_notes").eq("id", user.id).maybeSingle(),
-    supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
+    supabase.from("organizations").select(`id, settings, ${BILLING_COLUMNS.join(", ")}`).limit(1).maybeSingle(),
   ]);
   const orgId = (org as { id?: string } | null)?.id ?? null;
+  const role = (prof as { role?: string } | null)?.role;
   // THE SWITCH BOARD (0352). Nort off: its button is gone from the shell, and a request that still
   // arrives (an open tab, an old link) is answered in words, before it spends anything. Paper
   // reading does not come through here, so it keeps working. With Nort on, a switched-off
@@ -267,11 +272,23 @@ export async function POST(req: Request) {
   const features = getOrgSettings((org as { settings?: unknown } | null)?.settings).features;
   if (!featureOn(features, "nort")) {
     return new Response(
-      (prof as { role?: string } | null)?.role === "owner"
+      role === "owner"
         ? "Nort is off for your company. You can turn it on in Settings, under Features."
         : "Nort is off for your company. Ask the owner to turn it on.",
       { status: 403 },
     );
+  }
+
+  // THE PLAN HAS ENDED (cn-v1137, decision 3): a company whose trial expired, whose grace is spent
+  // or whose plan was canceled gets no Nort. The refusal is a NORMAL assistant turn — the same
+  // plain-text body a streamed answer has, so the phone renders it as Nort speaking — with the one
+  // action in it (the owner is told the door; everyone else who holds the key, by name). No model
+  // call, no ledger tick, no limiter tick. accessOfRow is orgAccess's rule on the row just read.
+  const access = accessOfRow(org as BillingOrg | null);
+  if (!access.active) {
+    return new Response(await nortPausedWords(access, role, orgId), {
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache, no-transform" },
+    });
   }
 
   // ── SPEND GUARDS (0162) ─────────────────────────────────────────────────────
@@ -292,16 +309,15 @@ export async function POST(req: Request) {
   // The monthly dollar ceiling is an ABUSE stop, not a usage tier — set well above what
   // a heavy legitimate user costs. It fails OPEN on error: a metering outage must never
   // lock a contractor out of their own assistant mid-job.
-  if (await aiSpendExceeded(orgId)) {
-    return new Response(
-      "Nort has hit your company's AI ceiling for the last 30 days. Message us and we'll lift it.",
-      { status: 429 },
-    );
-  }
+  // ONE GATE (aiAllowed, cn-v1137): the standing it was just handed (no second read), then the ceiling.
+  const gate = await aiAllowed(orgId, role, {
+    state: access,
+    ceilingWords: "Nort has hit your company's AI ceiling for the last 30 days. Message us and we'll lift it.",
+  });
+  if (!gate.ok) return new Response(gate.why, { status: 429 });
 
   // Phase E: the tier-1 write tools this role may use, generated from the registry. Every
   // call still goes through executeAction (role + audit + confirm/step-up gate).
-  const role = (prof as { role?: string } | null)?.role;
   const { tools: writeTools, resolve: resolveWrite } = agentWriteToolsForRole(role, features);
   // L5: defense-in-depth — don't even OFFER financial/sales read tools to a tech (the DB RLS
   // already returns zero rows, but least-privilege at the tool layer too).

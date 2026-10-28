@@ -1,6 +1,6 @@
 "use server";
 
-import { aiSpendExceeded } from "@/lib/ai-cost";
+import { aiAllowed } from "@/lib/ai-cost";
 import { getAnthropic } from "@/lib/anthropic";
 import { featureOn, normalizeFeatures } from "@/lib/features";
 import { reportError } from "@/lib/observe";
@@ -61,13 +61,15 @@ function failureWords(why: ReadFailure, status?: number): string {
 }
 
 /** May the model read the rest? "off" = Nort is switched off (say nothing), "allowance" = the month's
- *  AI allowance is used (say so, softly), "on" = go. */
+ *  AI allowance is used (say so, softly), a refusal = the company's plan has ended (say why,
+ *  cn-v1137), "on" = go. */
 type Db = Extract<Awaited<ReturnType<typeof requireStaff>>, { supabase: unknown }>["supabase"];
-async function modelMayRead(supabase: Db, orgId: string): Promise<"on" | "off" | "allowance"> {
+async function modelMayRead(supabase: Db, orgId: string): Promise<"on" | "off" | "allowance" | { paused: string }> {
   const { data } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
   const settings = (data as { settings?: { features?: unknown } | null } | null)?.settings;
   if (!featureOn(normalizeFeatures(settings?.features), "nort")) return "off";
-  if (await aiSpendExceeded(orgId)) return "allowance";
+  const gate = await aiAllowed(orgId);
+  if (!gate.ok) return gate.reason === "ceiling" ? "allowance" : { paused: gate.why };
   return "on";
 }
 
@@ -106,6 +108,8 @@ export async function fillFromSite(input: { url: string; need?: string[] }): Pro
     return { ok: true, fields, note: "This month's AI allowance is used up, so only what the site lists plainly was filled." };
   }
   if (gate === "off") return { ok: true, fields };
+  // The plan has ended: the page's own details still land, and the line says the one action.
+  if (typeof gate === "object") return { ok: true, fields, note: gate.paused };
 
   let client;
   try {

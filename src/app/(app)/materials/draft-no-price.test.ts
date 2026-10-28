@@ -38,11 +38,34 @@ vi.mock("@/lib/anthropic", () => ({
     },
   }),
 }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(async () => {}), currentOrgId: vi.fn(async () => "org-1") }));
+// THE OFFICE'S DOOR, GATED (cn-v1137): requireStaff and aiAllowed both stood at nothing before.
+const door = vi.hoisted(() => ({
+  staff: { supabase: {}, userId: "user-1", orgId: "org-1" } as any,
+  gate: { ok: true } as { ok: true } | { ok: false; why: string; reason: "lapsed" | "ceiling" },
+}));
+vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => door.staff) }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(async () => {}), aiAllowed: vi.fn(async () => door.gate) }));
 
 import { generateMaterialDraft } from "./actions";
 
 describe("generateMaterialDraft", () => {
+  it("is the office's: the crew is refused in words, and no model is reached", async () => {
+    door.staff = { error: "This action is staff-only." };
+    const before = calls.length;
+    expect(await generateMaterialDraft("200A panel swap")).toEqual({ ok: false, error: "This action is staff-only." });
+    expect(calls.length).toBe(before);
+    door.staff = { supabase: {}, userId: "user-1", orgId: "org-1" };
+  });
+
+  it("a company whose plan has ended is told the one action, and no model is reached (cn-v1137)", async () => {
+    const why = "This company's plan has ended, so Nort is paused. Pick a plan in Settings › Getting Paid.";
+    door.gate = { ok: false, reason: "lapsed", why };
+    const before = calls.length;
+    expect(await generateMaterialDraft("200A panel swap")).toEqual({ ok: false, error: why });
+    expect(calls.length).toBe(before);
+    door.gate = { ok: true };
+  });
+
   it("asks the model for no price and no vendor, and drops any it volunteers", async () => {
     const r = await generateMaterialDraft("200A panel swap, 12 circuits");
     expect(r.ok).toBe(true);

@@ -14,6 +14,17 @@ import type Stripe from "stripe";
 
 export const runtime = "nodejs";
 
+/** Statuses under which a stored subscription is dead for good, so a NEW id may take its place:
+ *  canceled, or expired before its first payment ever came. */
+const DEAD_SUBSCRIPTION_STATUSES = new Set(["canceled", "incomplete_expired"]);
+
+/** May this event's subscription be written over what the company holds? Yes when it holds none,
+ *  holds THIS one, or holds a dead one (skeptic #43, S5). Not exported: a route file exports only
+ *  handlers and segment config. */
+function subscriptionMayReplace(held: { stripe_subscription_id: string | null; subscription_status: string | null }, eventSub: string): boolean {
+  return !held.stripe_subscription_id || held.stripe_subscription_id === eventSub || DEAD_SUBSCRIPTION_STATUSES.has(String(held.subscription_status ?? ""));
+}
+
 /**
  * Stripe webhook: keeps organizations.subscription_status / plan in sync.
  * Configure TWO endpoints at this URL in Stripe → Developers → Webhooks — "your account" (secret →
@@ -192,7 +203,43 @@ export async function POST(req: Request) {
     return outcome !== "refused";
   }
 
-  async function syncSubscription(sub: Stripe.Subscription) {
+  /** The org rows a subscription event is about: by org_id metadata if present, else by stripe_customer_id. */
+  function matchOrgs(sub: Stripe.Subscription, q: any) {
+    const orgId = sub.metadata?.org_id;
+    const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+    return orgId ? q.eq("id", orgId) : q.eq("stripe_customer_id", customerId);
+  }
+
+  /**
+   * A LATE DELETE OF A SUPERSEDED SUBSCRIPTION (cn-v1137). A company that cancels and re-subscribes
+   * holds the NEW subscription's id; Stripe may still deliver (or retry) the OLD one's
+   * customer.subscription.deleted after the new one is active, and applying it would write
+   * `canceled` over a paying company and lock the crew out. So a delete is applied only when the
+   * event's subscription IS the company's current one (or none is recorded yet); otherwise it is
+   * skipped and filed. A failed read throws: Stripe retries, and nothing is guessed.
+   */
+  async function staleDelete(sub: Stripe.Subscription): Promise<{ orgId: string; storedSub: string | null } | null> {
+    const { data, error } = await matchOrgs(sub, supabase.from("organizations").select("id, stripe_subscription_id"));
+    if (error) throw new Error(`subscription read failed: ${error.message}`);
+    const rows = (data ?? []) as { id: string; stripe_subscription_id: string | null }[];
+    const stale = rows.length > 0 && rows.every((r) => !!r.stripe_subscription_id && r.stripe_subscription_id !== sub.id);
+    return stale ? { orgId: rows[0].id, storedSub: rows[0].stripe_subscription_id } : null;
+  }
+
+  /** The active owner and admins of a company — the people a billing notice is for. The service
+   *  client bypasses RLS, so `active` and the company are filtered by hand. A failed read throws. */
+  async function ownerAndAdminIds(orgId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("active", true)
+      .in("role", ["owner", "admin"]);
+    if (error) throw new Error(`the owner and admins could not be read: ${error.message}`);
+    return ((data ?? []) as { id: string }[]).map((p) => p.id);
+  }
+
+  async function syncSubscription(sub: Stripe.Subscription): Promise<{ status: string; periodEndIso: string | null; orgIds: string[]; applied: boolean }> {
     const orgId = sub.metadata?.org_id;
     const customerId =
       typeof sub.customer === "string" ? sub.customer : sub.customer.id;
@@ -216,6 +263,24 @@ export async function POST(req: Request) {
           : undefined;
     const periodEndIso =
       periodEndSec && Number.isFinite(periodEndSec) ? new Date(periodEndSec * 1000).toISOString() : null;
+    // THE EVENT MUST BE ABOUT THE COMPANY'S CURRENT SUBSCRIPTION (skeptic #43, S5). Stripe delivers
+    // out of order and retries for days: a late `updated` for the subscription a company CANCELED
+    // last month, landing after its new one is active, would write past_due or canceled over a
+    // paying company. So a sync is applied only when the company holds no subscription yet, holds
+    // THIS one, or holds a dead one (subscriptionMayReplace) — anything else is skipped and filed
+    // with both ids, never applied; a failed read throws and Stripe retries.
+    const { data: held, error: heldErr } = await matchOrgs(sub, supabase.from("organizations").select("id, stripe_subscription_id, subscription_status"));
+    if (heldErr) throw new Error(`subscription read failed: ${heldErr.message}`);
+    const holders = (held ?? []) as { id: string; stripe_subscription_id: string | null; subscription_status: string | null }[];
+    if (holders.length > 0 && holders.every((r) => !subscriptionMayReplace(r, sub.id))) {
+      reportError("stripe:webhook:stale-subscription-event", new Error("this subscription is not the company's current one; not applied"), {
+        orgId: holders[0].id,
+        eventSub: sub.id,
+        storedSub: holders[0].stripe_subscription_id,
+        eventStatus: sub.status,
+      });
+      return { status: sub.status, periodEndIso, orgIds: [], applied: false };
+    }
     const update = {
       subscription_status: sub.status, // active, trialing, past_due, canceled…
       stripe_subscription_id: sub.id,
@@ -223,27 +288,37 @@ export async function POST(req: Request) {
       stripe_price_id: priceId,
       ...(periodEndIso ? { current_period_end: periodEndIso } : {}),
     };
-    // Match by org_id metadata if present, else by stripe_customer_id.
-    const { data: synced, error: syncErr } = orgId
-      ? await supabase.from("organizations").update(update).eq("id", orgId).select("id")
-      : await supabase
-          .from("organizations")
-          .update(update)
-          .eq("stripe_customer_id", customerId)
-          .select("id");
+    // Match by org_id metadata if present, else by stripe_customer_id (matchOrgs).
+    const { data: synced, error: syncErr } = await matchOrgs(sub, supabase.from("organizations").update(update)).select("id");
     // A ZERO-ROW UPDATE IS A 204 (audit v921). This was fire-and-forget: a subscription carrying
     // no org_id metadata whose customer id no org row holds (a comped or dashboard-made one)
     // moved nothing, answered Stripe 200, and left the paywall reading the old state — Stripe
     // says paid, the app says locked, nobody is told. A DB error can be retried, so throw and let
     // Stripe resend it; a no-match can't be, so it goes to the ops log instead.
     if (syncErr) throw new Error(`subscription sync failed: ${syncErr.message}`);
-    if (!synced?.length) {
+    const orgIds = ((synced ?? []) as { id: string }[]).map((r) => r.id);
+    if (!orgIds.length) {
       reportError("stripe:webhook:subscription-no-org", new Error("no organization matched this subscription"), {
         subscriptionId: sub.id,
         orgId: orgId ?? null,
         customerId,
       });
     }
+    // A COMPANY THAT IS PAYING AGAIN MAY LAPSE AGAIN (cn-v1137, 0400): the one `lapsed` notice is
+    // claimed once per lapse, so a sync that lands the company active hands the key back, and the
+    // next lapse is told. A courtesy: its error is filed, never a failed webhook (Stripe would only
+    // resend the sync).
+    if (sub.status === "active") {
+      for (const id of orgIds) {
+        try {
+          const { error } = await supabase.rpc("release_billing_notice", { p_org: id, p_key: "lapsed" });
+          if (error) throw error;
+        } catch (e) {
+          reportError("stripe:webhook:release-lapsed", e, { orgId: id, subscriptionId: sub.id });
+        }
+      }
+    }
+    return { status: sub.status, periodEndIso, orgIds, applied: true };
   }
 
   // CONNECT (0161): events for a DIRECT charge originate on the contractor's own
@@ -281,11 +356,21 @@ export async function POST(req: Request) {
     // A card was declined. Stripe Smart Retries keep trying in the background; our job
     // is to mirror the state (which starts the grace clock) and TELL the owner, because
     // the failure is silent to them otherwise until the day access stops.
+    //
+    // TOLD ONCE PER UNPAID PERIOD (cn-v1137, 0400): every Smart Retry that fails fires this event
+    // again, and each one used to buzz the whole office. Now the line is claimed under
+    // past_due:<period_end> — the stamp is written first (claim_billing_notice), and only a TRUE
+    // sends — so the retries claim nothing and push nothing; the grace countdown itself is the daily
+    // cron's (lib/billing-notices). Under the `billing` kind, to the owner and admins only: they are
+    // the ones who can update the card.
     case "invoice.payment_failed": {
       const inv = event.data.object as Stripe.Invoice;
       if (!fromConnectedAccount && inv.subscription) {
         const sub = await getStripe().subscriptions.retrieve(inv.subscription as string);
-        await syncSubscription(sub);
+        const landed = await syncSubscription(sub);
+        // A decline on a subscription that is no longer the company's current one is not the
+        // company's card (S5): nothing was mirrored above, nothing is claimed, nobody is told.
+        if (!landed.applied) break;
         const customerId = typeof inv.customer === "string" ? inv.customer : inv.customer?.id;
         const { data: org } = await supabase
           .from("organizations")
@@ -294,22 +379,49 @@ export async function POST(req: Request) {
           .maybeSingle();
         const orgId = (org as { id?: string } | null)?.id;
         if (orgId) {
-          await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
-            title: "Card declined",
-            body: "Your Contractor North payment didn't go through. Update your card to keep the crew working.",
-            url: "/settings",
-          });
+          const key = `past_due:${landed.periodEndIso ?? "unknown"}`;
+          // THE PEOPLE ARE READ BEFORE THE CLAIM (skeptic #43, N1): a read that threw after the claim
+          // had stamped the period and lost its one notice for good; before it, the 500 leaves no
+          // stamp and Stripe retries. supabase-js hands a database error back; it never throws it. A
+          // claim that could not be read, or that answered nothing, is the same 500 — retried by
+          // Stripe (the sync above is idempotent), never guessed.
+          const people = await ownerAndAdminIds(orgId);
+          const { data: claimed, error } = await supabase.rpc("claim_billing_notice", { p_org: orgId, p_key: key });
+          if (error) throw new Error(`claim_billing_notice ${key} failed: ${error.message}`);
+          if (claimed == null) throw new Error(`claim_billing_notice ${key} answered nothing`);
+          if (claimed === true) {
+            await notifyPeople(orgId, people, "billing", {
+              title: "Your Card Was Declined",
+              body: "Update the card in Settings › Getting Paid › Manage Billing. The crew keeps working for now.",
+              url: "/settings?tab=getpaid",
+            });
+          }
         }
       }
       break;
     }
     case "customer.subscription.created":
     case "customer.subscription.updated":
-    case "customer.subscription.deleted":
       // Our OWN billing only. A subscription living on a contractor's connected account
       // is their business with their customers, not our paywall.
       if (!fromConnectedAccount) await syncSubscription(event.data.object as Stripe.Subscription);
       break;
+    case "customer.subscription.deleted": {
+      if (fromConnectedAccount) break;
+      const sub = event.data.object as Stripe.Subscription;
+      // Only the company's CURRENT subscription may end its access (staleDelete, cn-v1137).
+      const stale = await staleDelete(sub);
+      if (stale) {
+        reportError("stripe:webhook:stale-subscription-event", new Error("a deleted subscription is not the company's current one; not applied"), {
+          orgId: stale.orgId,
+          eventSub: sub.id,
+          storedSub: stale.storedSub,
+        });
+        break;
+      }
+      await syncSubscription(sub);
+      break;
+    }
     case "checkout.session.async_payment_succeeded":
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;

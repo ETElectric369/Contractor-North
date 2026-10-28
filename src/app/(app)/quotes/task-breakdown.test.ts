@@ -19,6 +19,7 @@ import { renderers, text } from "./editor-test-mocks";
  */
 
 const { EstimateEditor } = await import("./estimate-editor");
+const { splitLineNote, joinLineNote } = await import("./task-breakdown");
 const { unsaved, saved } = renderers(EstimateEditor);
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
@@ -311,5 +312,63 @@ describe("Remember As A Kit (W4)", () => {
   it("a plain line has no door, and the company's Kits switch off hides it", () => {
     expect(text(builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] }))).not.toContain("Remember As A Kit");
     expect(text(builder({ seededLines: [taskLine], kitsOn: false }))).not.toContain("Remember As A Kit");
+  });
+});
+
+describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head, behind Add A Note / Edit Note", () => {
+  const src = read("src/app/(app)/quotes/task-breakdown.tsx");
+
+  it("the box holds the head only, the note's lines read under it, and the door says Edit Note", () => {
+    const html = builder({ seededLines: [{ description: "Panel upgrade, 200A\nIncludes the permit\nTwo-day job", quantity: 1, unit: "ea", unit_price: 2400 }] });
+    expect(html).toContain('value="Panel upgrade, 200A"');
+    expect(html).not.toContain('value="Panel upgrade, 200A\n');
+    expect(html).toContain("<li>Includes the permit</li><li>Two-day job</li>");
+    expect(text(html)).toContain("Edit Note");
+    expect(text(html)).not.toContain("Add A Note");
+  });
+
+  it("a line with no note offers Add A Note, once per line and never on a task's parts", () => {
+    const plain = builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] });
+    expect(text(plain)).toContain("Add A Note");
+    expect(text(plain)).not.toContain("Edit Note");
+    expect((plain.match(/Add A Note/g) ?? []).length).toBe(1);
+    // A task line has two part boxes (the same LineDescInput): still one door, the line's.
+    const task = builder({ seededLines: [taskLine] });
+    expect((task.match(/Add A Note|Edit Note/g) ?? []).length).toBe(1);
+    expect(src).toContain('placeholder="Part"\n              className={box}\n              value={m.name}\n              noteDoor={false}');
+  });
+
+  it("join and split live in lib/estimate/line-note (skeptic #43, S6), so the task, part and kit readers share the one rule; the breakdown re-exports them", () => {
+    const breakdown = read("src/app/(app)/quotes/task-breakdown.tsx");
+    expect(breakdown).toContain('import { joinLineNote, splitLineNote } from "@/lib/estimate/line-note";');
+    expect(breakdown).toContain("export { joinLineNote, splitLineNote };");
+    expect(breakdown).not.toContain("export function splitLineNote(");
+    for (const rel of ["src/lib/estimate/task-lines.ts", "src/lib/estimate/born-with-tasks.ts"]) expect(read(rel), rel).toMatch(/import \{ (joinLineNote, )?splitLineNote \} from "\.\/line-note";/);
+    expect(read("src/lib/estimate/born-with-tasks.ts")).toContain('const title = splitLineNote(String(r.description ?? "")).head.trim();');
+  });
+
+  it("join and split: the head stays the first line, an empty or blank note puts the description back on one line", () => {
+    expect(joinLineNote("Head", "")).toBe("Head");
+    expect(joinLineNote("Head", "   \n ")).toBe("Head");
+    expect(joinLineNote("Head", "Note line")).toBe("Head\nNote line");
+    expect(joinLineNote("Head", "A\nB")).toBe("Head\nA\nB");
+    expect(splitLineNote("Head\nA\nB")).toEqual({ head: "Head", note: "A\nB" });
+    expect(splitLineNote("Head")).toEqual({ head: "Head", note: "" });
+    expect(splitLineNote("")).toEqual({ head: "", note: "" });
+    // A newline cannot be typed into the head: it would make a second note line out of the name.
+    expect(joinLineNote("Head\nsneaky", "Note")).toBe("Head sneaky\nNote");
+    // Round trip, with a trailing newline he is mid-typing kept (the box would lose it otherwise).
+    for (const d of ["Head\nNote", "Head\nA\nB\n", "Head"]) {
+      const { head, note } = splitLineNote(d);
+      expect(joinLineNote(head, note)).toBe(d);
+    }
+  });
+
+  it("every keystroke in either box goes out as the one joined description; the autocomplete matches the head alone; leaving the note commits and closes it", () => {
+    expect(src).toContain("onText(joinLineNote(e.target.value, note));");
+    expect(src).toContain("onChange={(e) => onText(joinLineNote(head, e.target.value))}");
+    expect(src).toContain("const q = head.trim().toLowerCase();");
+    expect(src).toContain("onBlur={() => {\n                setNoteOpen(false);\n                onBlur?.();\n              }}");
+    expect(src).toContain('{hasNote ? "Edit Note" : "Add A Note"}');
   });
 });

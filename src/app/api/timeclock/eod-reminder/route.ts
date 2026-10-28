@@ -7,7 +7,7 @@ import { todayBoundsInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { withoutHeldCrumb } from "@/lib/held-crumb";
-import { EOD_LOCAL_HOUR, atLocalHour, readAllOrgs } from "@/lib/cron-orgs";
+import { EOD_LOCAL_HOUR, atLocalHour, readActiveOrgs } from "@/lib/cron-orgs";
 
 // Every company in one run, one after another: the budget every cron carries now (cn-v1130).
 export const maxDuration = 300;
@@ -28,7 +28,8 @@ type Org = { id: string; name: string | null; settings: unknown };
  * Per-org opt-out via settings.remind_timeclock === false (default on). An org that cannot text
  * yet (lib/sms-readiness) is skipped and counted in `not_ready`; the night debrief push below still
  * goes to it, since that never needed texting: it is handed every company at its 6 PM, before the
- * opt-out and readiness checks.
+ * opt-out and readiness checks. A company whose plan has ended gets neither the texts nor the
+ * debrief (cn-v1137, decision 3: readActiveOrgs drops it) and is counted in `lapsed_skipped`.
  *
  * NOTHING FAILS SILENTLY (the 2026-10-26 deep review, ops layer). The company list is whole or the
  * run is a 500 that is filed (readAllOrgs pages past PostgREST's silent 1,000-row cap and throws on
@@ -43,13 +44,15 @@ export async function GET(request: Request) {
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
 
-  const counts = { checked: 0, reminded: 0, not_ready: 0, due: 0, not_due_yet: 0, failed: 0 };
+  const counts = { checked: 0, reminded: 0, not_ready: 0, due: 0, not_due_yet: 0, lapsed_skipped: 0, failed: 0 };
   // One clock for the whole run, taken BEFORE the company read: a company late in the list (or a
   // slow read) is judged on the hour the run began, never on the one it happened to reach.
   const nowMs = Date.now();
   let orgs: Org[];
   try {
-    orgs = await readAllOrgs<Org>(supabase, "id, name, settings");
+    const active = await readActiveOrgs<Org>(supabase, "id, name, settings", nowMs);
+    orgs = active.rows;
+    counts.lapsed_skipped = active.lapsedSkipped;
   } catch (e) {
     // Waited for (cn-v1130, skeptic #34): this function answers on the tick it files, and a
     // fire-and-forget write can freeze with it. A BLOCKER (cn-v1136): no company was reached, so

@@ -5,14 +5,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * quiet night AND for a missing key, a model failure and a refused insert, and the all-companies
  * runner swallowed every throw, so a review that had not run for weeks read as "nothing happened".
  * Pinned: null is only the quiet night (no model call); the three failures throw with the vendor's or
- * PostgREST's words; the runner reads the companies through readAllOrgs (a failed read throws to the
+ * PostgREST's words; the runner reads the companies through readActiveOrgs (a failed read throws to the
  * cron), counts made and failed, files each failure with its orgId, and past its deadline stops and
  * files ONE row saying how many companies it did not reach — under a FIXED message with the count in
  * the extras (the sink dedupes on the words), and every model call carries its own clock and no
  * retries (skeptic #34), so a hung call cannot outlive the run.
  */
 const model = vi.hoisted(() => ({ create: vi.fn(), keyUnset: false }));
-const spies = vi.hoisted(() => ({ reportError: vi.fn(), reportBlocker: vi.fn(), readAllOrgs: vi.fn(), recordAiUsage: vi.fn() }));
+const spies = vi.hoisted(() => ({ reportError: vi.fn(), reportBlocker: vi.fn(), readActiveOrgs: vi.fn(), recordAiUsage: vi.fn() }));
 
 vi.mock("@/lib/anthropic", () => ({
   DEFAULT_MODEL: "claude-test-model",
@@ -31,7 +31,9 @@ vi.mock("@/lib/observe", () => ({
   reportError: spies.reportError,
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : String((e as { message?: string } | null)?.message ?? e)),
 }));
-vi.mock("@/lib/cron-orgs", () => ({ readAllOrgs: spies.readAllOrgs }));
+// readActiveOrgs (cn-v1137): the companies still standing, and how many lapsed ones were dropped.
+vi.mock("@/lib/cron-orgs", () => ({ readActiveOrgs: spies.readActiveOrgs }));
+const standing = (rows: { id: string }[], lapsedSkipped = 0) => ({ rows, lapsedSkipped });
 
 import { generateNortReview, generateNortReviewsForAllOrgs } from "./review";
 
@@ -170,29 +172,37 @@ describe("generateNortReview", () => {
 });
 
 describe("generateNortReviewsForAllOrgs", () => {
-  it("reads the companies through readAllOrgs by id, counts made and failed, files each failure with its orgId", async () => {
-    spies.readAllOrgs.mockResolvedValue([{ id: "org-a" }, { id: "org-b" }, { id: "org-c" }]);
+  it("reads the companies through readActiveOrgs by id, counts made and failed, files each failure with its orgId", async () => {
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }, { id: "org-b" }, { id: "org-c" }]));
     model.create
       .mockResolvedValueOnce(MODEL_ANSWER)
       .mockRejectedValueOnce(new Error("overloaded_error: the vendor is busy"))
       .mockResolvedValueOnce(MODEL_ANSWER);
     const { client } = fake(BUSY);
-    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 2, failed: 1, left: 0 });
-    expect(spies.readAllOrgs).toHaveBeenCalledWith(client, "id");
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 2, failed: 1, left: 0, lapsed_skipped: 0 });
+    expect(spies.readActiveOrgs).toHaveBeenCalledWith(client, "id");
     expect(spies.reportError).toHaveBeenCalledTimes(1);
     expect(spies.reportError).toHaveBeenCalledWith("nort:review", expect.any(Error), { orgId: "org-b" });
     expect(spies.reportError.mock.calls[0][1].message).toMatch(/the vendor is busy/);
   });
 
+  it("a company whose plan has ended is not reviewed, and the run says how many (cn-v1137)", async () => {
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }], 2));
+    model.create.mockResolvedValue(MODEL_ANSWER);
+    const { client } = fake(BUSY);
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 1, failed: 0, left: 0, lapsed_skipped: 2 });
+    expect(model.create).toHaveBeenCalledTimes(1); // the standing company only
+  });
+
   it("a quiet company is neither made nor failed", async () => {
-    spies.readAllOrgs.mockResolvedValue([{ id: "org-a" }]);
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }]));
     const { client } = fake(QUIET);
-    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 0, failed: 0, left: 0 });
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 0, failed: 0, left: 0, lapsed_skipped: 0 });
     expect(spies.reportError).not.toHaveBeenCalled();
   });
 
   it("a failed companies read THROWS to the cron (which files it as cron-nort-review): never an empty run", async () => {
-    spies.readAllOrgs.mockRejectedValue(new Error("organizations could not be read: connection reset"));
+    spies.readActiveOrgs.mockRejectedValue(new Error("organizations could not be read: connection reset"));
     const { client } = fake(BUSY);
     await expect(generateNortReviewsForAllOrgs(client)).rejects.toThrow(/organizations could not be read/);
     expect(model.create).not.toHaveBeenCalled();
@@ -202,14 +212,14 @@ describe("generateNortReviewsForAllOrgs", () => {
     const T = Date.parse("2026-10-27T09:00:00Z");
     vi.useFakeTimers();
     vi.setSystemTime(T);
-    spies.readAllOrgs.mockResolvedValue([{ id: "org-a" }, { id: "org-b" }]);
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }, { id: "org-b" }]));
     // The first company's model call eats the budget; the check before the second sees it gone.
     model.create.mockImplementationOnce(async () => {
       vi.setSystemTime(T + 5_000);
       return MODEL_ANSWER;
     });
     const { client } = fake(BUSY);
-    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: T + 1_000 })).toEqual({ made: 1, failed: 0, left: 1 });
+    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: T + 1_000 })).toEqual({ made: 1, failed: 0, left: 1, lapsed_skipped: 0 });
     expect(model.create).toHaveBeenCalledTimes(1);
     expect(spies.reportError).toHaveBeenCalledTimes(1);
     expect(spies.reportError).toHaveBeenCalledWith("nort:review", expect.any(Error), { left: 1 });
@@ -222,9 +232,9 @@ describe("generateNortReviewsForAllOrgs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(T);
     const { client } = fake(BUSY);
-    spies.readAllOrgs.mockResolvedValue([{ id: "org-a" }, { id: "org-b" }, { id: "org-c" }]);
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }, { id: "org-b" }, { id: "org-c" }]));
     await generateNortReviewsForAllOrgs(client, { deadlineMs: T - 1 }); // spent before the first company
-    spies.readAllOrgs.mockResolvedValue([{ id: "org-a" }]);
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }]));
     await generateNortReviewsForAllOrgs(client, { deadlineMs: T - 1 });
     expect(spies.reportError).toHaveBeenCalledTimes(2);
     expect(spies.reportError.mock.calls.map((c) => c[1].message)).toEqual(["cut short: companies not reviewed", "cut short: companies not reviewed"]);
@@ -236,7 +246,7 @@ describe("generateNortReviewsForAllOrgs", () => {
     const T = Date.parse("2026-10-27T09:00:00Z");
     vi.useFakeTimers();
     vi.setSystemTime(T);
-    spies.readAllOrgs.mockResolvedValue([{ id: "org-a" }]);
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }]));
     model.create.mockResolvedValue(MODEL_ANSWER);
     const { client } = fake(BUSY);
     const timeoutFor = async (deadlineMs: number) => {
@@ -254,10 +264,10 @@ describe("generateNortReviewsForAllOrgs", () => {
   });
 
   it("a deadline still ahead changes nothing: every company runs, no row", async () => {
-    spies.readAllOrgs.mockResolvedValue([{ id: "org-a" }, { id: "org-b" }]);
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }, { id: "org-b" }]));
     model.create.mockResolvedValue(MODEL_ANSWER);
     const { client } = fake(BUSY);
-    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: Date.now() + 60_000 })).toEqual({ made: 2, failed: 0, left: 0 });
+    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: Date.now() + 60_000 })).toEqual({ made: 2, failed: 0, left: 0, lapsed_skipped: 0 });
     expect(spies.reportError).not.toHaveBeenCalled();
   });
 });

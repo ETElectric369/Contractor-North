@@ -110,6 +110,8 @@ export interface NameWorkBill {
   bill_date?: string | null;
   supplier_invoice_number?: string | null;
   superseded_by_bill_id?: string | null;
+  /** bills.both_real_at (0400): he said both copies of this ticket are real purchases. */
+  both_real_at?: string | null;
   notes?: string | null;
   /** The job's own row. `job_number` and `customers(name)` are read ONLY to name a job in full
    *  (jobSaidLabel) for a sentence read away from the job; a read that does not select them gets a
@@ -476,8 +478,13 @@ export function duplicateTicketGroups(input: {
     };
   });
 
-  const groups = findDuplicateBills(fingerprints).map((d) => {
+  const groups = findDuplicateBills(fingerprints).flatMap((d) => {
     const ids = d.bills.map((b) => String(b.id));
+    // BOTH ARE REAL (0400 both_real_at; cn-v1137). Two identical counter runs a month apart are an
+    // ordinary thing, and the card said so while offering no way to say it. A pair whose copies ALL
+    // carry the stamp is his answer: both costs stay where they are and the question is not asked
+    // again. A half-stamped pair (one copy stamped, a new third copy scanned since) still asks.
+    if (ids.every((id) => billById.get(id)?.both_real_at)) return [];
     const copies = ids.map((id) => {
       const row = billById.get(id);
       const j = row?.jobs ?? null;
@@ -501,14 +508,16 @@ export function duplicateTicketGroups(input: {
     // Already sorted out? The copy he set aside points at the copy he kept.
     const supersededCopy = copies.find((c) => billById.get(c.billId)?.superseded_by_bill_id);
     const keptBillId = supersededCopy ? String(billById.get(supersededCopy.billId)?.superseded_by_bill_id ?? "") : "";
-    return {
-      // BOTH BILL IDS RIDE IN THE ID, because Undo is handed nothing else.
-      id: `dup:${JSON.stringify([...ids].sort())}`,
-      amount: d.amount,
-      lineCount: Number(d.bills[0]?.lineCount ?? 0),
-      copies,
-      resolution: keptBillId && ids.includes(keptBillId) ? { keptBillId } : null,
-    };
+    return [
+      {
+        // BOTH BILL IDS RIDE IN THE ID, because Undo is handed nothing else.
+        id: `dup:${JSON.stringify([...ids].sort())}`,
+        amount: d.amount,
+        lineCount: Number(d.bills[0]?.lineCount ?? 0),
+        copies,
+        resolution: keptBillId && ids.includes(keptBillId) ? { keptBillId } : null,
+      },
+    ];
   });
   return { groups, ready: true };
 }

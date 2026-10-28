@@ -4,7 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { INSURANCE_TYPES, COMPLIANCE_TYPES, AUDIT_TYPES } from "@/lib/compliance-types";
 
 export type Result = { ok: boolean; error?: string };
@@ -127,8 +127,9 @@ export async function importPolicyDoc(input: {
 
   const baseName = input.fileName.replace(/\.[^.]+$/, "").trim() || input.fileName;
 
-  // Failure STILL files: the fallback row keeps the document reachable no matter what.
-  async function fileAnyway(): Promise<ImportPolicyResult> {
+  // Failure STILL files: the fallback row keeps the document reachable no matter what. `because`
+  // names why it was not read when that is a sentence worth keeping (a paused plan, cn-v1137).
+  async function fileAnyway(because?: string): Promise<ImportPolicyResult> {
     const { data, error } = await supabase
       .from("compliance_items")
       .insert({
@@ -138,7 +139,7 @@ export async function importPolicyDoc(input: {
         amount: 0,
         issued_date: null,
         expires_date: null,
-        notes: "Imported — auto-read failed, fill in the details.",
+        notes: because ? `Imported — not auto-read. ${because} Fill in the details.` : "Imported — auto-read failed, fill in the details.",
         file_url: input.path,
         created_by: ctx.userId,
       })
@@ -151,13 +152,17 @@ export async function importPolicyDoc(input: {
       return { ok: false, error: error?.message ?? "Could not save the import." };
     }
     revalidate();
-    return { ok: true, id: data.id, type: "Other", name: baseName, summary: "Auto-read failed — filed for review.", reviewNeeded: true };
+    return { ok: true, id: data.id, type: "Other", name: baseName, summary: because ?? "Auto-read failed — filed for review.", reviewNeeded: true };
   }
 
   // Only images and PDFs can be AI-read; anything else (e.g. HEIC) files straight to review.
   const isImage = IMPORT_IMAGE_TYPES.includes(input.mime);
   const isPdf = input.mime === "application/pdf";
   if (!isImage && !isPdf) return fileAnyway();
+  // MAY THIS COMPANY PAY FOR A READ (cn-v1137, aiAllowed: a plan that has ended, then the ceiling)?
+  // The law above holds either way: the document is filed for review, and the summary says why.
+  const gate = await aiAllowed(ctx.orgId);
+  if (!gate.ok) return fileAnyway(gate.why);
 
   const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(input.path);
   if (dlErr || !blob) return fileAnyway();
@@ -316,6 +321,9 @@ export async function importFromCslb(licenseNumber: string): Promise<CslbImportR
     return { ok: false, error: "A CSLB license number is 4–8 digits — check it and try again." };
   }
   const notALicense = `CSLB didn't return a license page for #${licNum} — check the number.`;
+  // MAY THIS COMPANY PAY FOR A READ (cn-v1137)? Asked before the fetch: nothing is reached, nothing filed.
+  const gate = await aiAllowed(ctx.orgId);
+  if (!gate.ok) return { ok: false, error: gate.why };
 
   let html: string;
   try {

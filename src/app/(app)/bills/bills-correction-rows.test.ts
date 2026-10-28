@@ -72,7 +72,7 @@ describe("All Bills draws a correction under its original", () => {
   it("the page reads the column on the newest rung of its ladder, says when it could not, and passes that down", () => {
     const page = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
     expect(page).toContain('${o.corrects ? ", corrects_bill_id, amount_paid" : ""}');
-    expect(page).toContain("{ billable: true, supplierAccount: true, supersede: true, corrects: true },");
+    expect(page).toContain("{ billable: true, supplierAccount: true, supersede: true, corrects: true, bothReal: true },");
     expect(page).toContain("correctionsReady: !attempt.error && ladder[rung].corrects");
     expect(page).toContain("correctionsReady={correctionsReady}");
     const job = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");

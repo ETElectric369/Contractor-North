@@ -1200,6 +1200,92 @@ export async function unresolveDuplicateBill(groupId: string): Promise<SupplierA
   return { ok: true, message: "Put back. Both copies count again, the way they did before." };
 }
 
+/**
+ * BOTH ARE REAL (0400 bills.both_real_at; cn-v1137).
+ *
+ * The card's own words admitted it — "two identical runs a month apart are normal too" — and then
+ * offered only Keep It On <job>, which removes one job's cost. The third answer is the one an
+ * electrician gives most: he bought the same eight things twice, a month apart, for two jobs. Both
+ * costs stay exactly where they are; the stamp is what stops the pair being asked about
+ * (duplicateTicketGroups skips a group whose copies all carry it). Nothing else moves: not a
+ * supersede, not a claim, not a dollar.
+ *
+ * THE SILENT-WRITE LAW: the update returns its rows, and none means the bills are not this shop's
+ * any more (deleted, or another company's ids on the wire), which is said rather than reported as
+ * done. The stamp is set on every copy named, stamped or not, so a copy that was already stamped
+ * does not turn "both are real" into a refusal.
+ */
+const MAX_BOTH_REAL_IDS = 10;
+
+export async function markBothReal(billIds: string[]): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+
+  const ids = [...new Set((Array.isArray(billIds) ? billIds : []).map((x) => String(x ?? "").trim()).filter(Boolean))];
+  if (ids.length < 2) return { ok: false, error: "Couldn't tell which pair you meant. Reload the page." };
+  // One group's copies, never a list from the wire: the matcher pairs a handful at most (N6).
+  if (ids.length > MAX_BOTH_REAL_IDS) return { ok: false, error: "That's more than one pair's worth of bills. Reload the page and answer one pair at a time." };
+
+  const { data, error } = await ctx.supabase
+    .from("bills")
+    .update({ both_real_at: new Date().toISOString() })
+    .in("id", ids)
+    .eq("org_id", org.orgId)
+    .select("id, job_id");
+  if (error) return { ok: false, error: `That didn't save, so the pair is still waiting on you. ${dbError(error)}` };
+  if (!data?.length) return { ok: false, error: "Those bills aren't there any more." };
+  if (data.length < ids.length) {
+    // SOME OF THE PAIR LANDED AND SOME DID NOT (a copy deleted or moved under him): a half-stamped
+    // pair keeps asking with one copy already answered, so the stamps that landed come back off
+    // BEFORE the refusal, and the page he reloads shows the pair exactly as it was (skeptic #43,
+    // N6). A rollback that did not land is filed: nothing more can be said from here.
+    const landed = (data as { id: string }[]).map((r) => String(r.id));
+    const { data: back, error: backErr } = await ctx.supabase
+      .from("bills")
+      .update({ both_real_at: null })
+      .in("id", landed)
+      .eq("org_id", org.orgId)
+      .select("id");
+    if (backErr || (back ?? []).length < landed.length) {
+      reportError("markBothReal:rollback", backErr ?? new Error("the rollback matched fewer rows than landed"), { orgId: org.orgId, landed, back: (back ?? []).length });
+    }
+    return { ok: false, error: "Those bills changed under you — reload and try again." };
+  }
+
+  revalidateSupplierNames();
+  for (const row of data as any[]) if (row.job_id) revalidatePath(`/jobs/${row.job_id}`);
+  return { ok: true, message: "Both are real. Both copies keep counting where they are, and this pair won't be asked about again." };
+}
+
+/** PUT IT BACK: the stamp comes off every copy in the pair, and the question is asked again. The same
+ *  door shape as unresolveDuplicateBill — the group id carries the bill ids, because Undo is handed
+ *  nothing else. */
+export async function unmarkBothReal(groupId: string): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+
+  const ids = billIdsInGroupId(groupId);
+  if (!ids.length) return { ok: false, error: "Couldn't tell which pair you meant. Reload the page." };
+
+  const { data, error } = await ctx.supabase
+    .from("bills")
+    .update({ both_real_at: null })
+    .in("id", ids)
+    .eq("org_id", org.orgId)
+    .not("both_real_at", "is", null)
+    .select("id, job_id");
+  if (error) return { ok: false, error: `That didn't go back. ${dbError(error)}` };
+  if (!data?.length) return { ok: false, error: "That pair is already back the way it was. Reload the page." };
+
+  revalidateSupplierNames();
+  for (const row of data as any[]) if (row.job_id) revalidatePath(`/jobs/${row.job_id}`);
+  return { ok: true, message: "Put back. The pair will be asked about again." };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // MONEY OUT
 // ─────────────────────────────────────────────────────────────────────────────────────────────

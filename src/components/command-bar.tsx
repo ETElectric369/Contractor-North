@@ -122,8 +122,10 @@ const PETTY_CASH_ROW: Item = {
   aliases: ["petty cash", "cash box", "cash", "atm"],
 };
 
-/** The palette's "go to" list for this person: exported so the switch rule is pinned in a test. */
-export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, hasPettyCash = false): Item[] {
+/** The palette's "go to" list for this person: exported so the switch rule is pinned in a test.
+ *  `lapsed` (the layout's red bar) offers the lapsed dock's three doors and nothing else. */
+export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, hasPettyCash = false, lapsed = false): Item[] {
+  if (lapsed) return visibleDock({ isStaff, features, lapsed: true }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly));
   const items: Item[] = [
     ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly)),
     // Today is My Day alone on the dock (W1-03), so its two old pills are found here by name:
@@ -226,6 +228,7 @@ export function CommandBar({
   setup,
   onboarded = true,
   hasPettyCash = false,
+  lapsed = false,
 }: {
   isStaff?: boolean;
   features?: FeatureMap;
@@ -235,9 +238,12 @@ export function CommandBar({
   onboarded?: boolean;
   /** The company has petty-cash rows (the layout's staff-only check): offer the Petty Cash row. */
   hasPettyCash?: boolean;
+  /** The company has lapsed and this person is on an open door (the layout's red bar): the "go to"
+   *  rows are the lapsed dock's three doors alone (lib/dock LAPSED_DOCK). */
+  lapsed?: boolean;
 }) {
   const router = useRouter();
-  const navItems = useMemo(() => commandNavItems(!!isStaff, features, hasPettyCash), [isStaff, features, hasPettyCash]);
+  const navItems = useMemo(() => commandNavItems(!!isStaff, features, hasPettyCash, lapsed), [isStaff, features, hasPettyCash, lapsed]);
   // Nort off: no "Ask Nort" row, no Talk To Nort, no help rows (they're under Help in the avatar
   // menu), and no promise that Enter asks him (the drawer isn't mounted).
   const nortOn = featureOn(features, "nort");

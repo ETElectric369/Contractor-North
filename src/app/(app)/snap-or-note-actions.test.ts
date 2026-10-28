@@ -29,7 +29,7 @@ vi.mock("@/lib/anthropic", () => ({
   }),
 }));
 vi.mock("@/lib/ai-json", () => ({ parseAiJson: async () => ({ action: "keep_note", reason: "Reference." }) }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model" }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model", aiAllowed: async () => ({ ok: true }) }));
 const imports = vi.hoisted(() => ({ importCedInvoices: vi.fn() }));
 vi.mock("@/app/(app)/bills/supplier-import-actions", () => imports);
 

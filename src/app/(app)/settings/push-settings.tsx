@@ -36,7 +36,10 @@ const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
  */
 // "platform" (cn-v1136): North's own team, never a company role — is_platform_admin() answers it
 // (0176), and nobody else is ever addressed under its kind, so nobody else sees its switch.
-type Audience = "all" | "staff" | "tech" | "platform";
+// "admins" (cn-v1137): the owner and the admins only — the billing notices (lib/billing-notices and
+// the Stripe webhook's declined-card line) are addressed to role owner/admin, so the office, which
+// can neither pick a plan nor update the card, never sees a switch for a buzz it cannot receive.
+type Audience = "all" | "staff" | "tech" | "platform" | "admins";
 
 /**
  * AND THE SWITCH BOARD (0352). `feature`: an alert only a switched-on feature sends, so its switch
@@ -72,6 +75,15 @@ const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; aud
     audience: "staff",
   },
   { key: "daily_report", label: "Daily reports from crew leads", audience: "staff", feature: "daily_reports" },
+  // A customer picked one of the times the office texted them (/api/pick/confirmed → orgStaffIds).
+  // The kind had been on by default with no switch here since the pick link shipped (found by the
+  // DEFAULTS mirror pin, cn-v1137): a buzz nobody could turn off.
+  {
+    key: "booked",
+    label: "A Customer Picked A Time",
+    help: "When a customer picks one of the times you sent them, it goes on the schedule and buzzes you.",
+    audience: "staff",
+  },
   // Its own row, not folded into "Invoices paid": Apple's Tap to Pay on iPhone requirements (the
   // launch announcement, 3.3; a decline the tech never saw, 5.12) must not go quiet as a side
   // effect of muting an unrelated alert. The help line says what it actually covers. Staff-only
@@ -81,6 +93,15 @@ const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; aud
     label: "Tap to Pay on iPhone",
     help: "A card declined on Tap to Pay on iPhone (it buzzes even if you saw it on screen), and the one-time launch announcement.",
     audience: "staff",
+  },
+  // The company's standing with North (cn-v1137): the trial's last days, a declined card and the
+  // day a plan ends (lib/billing-notices from the daily cron; the Stripe webhook's declined-card
+  // line). Addressed to the owner and admins only, so only they see the switch.
+  {
+    key: "billing",
+    label: "Billing And Your Plan",
+    help: "Your trial's last days, a declined card, and when a plan ends. Owners and admins only.",
+    audience: "admins",
   },
   // North's own team only (cn-v1136): the blocker page (observe-blocker → platform-alert) and the
   // Monday digest (bug-watch-digest) ride the bug_watch kind. A company member never receives it,
@@ -92,6 +113,7 @@ const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; aud
     audience: "platform",
   },
 ];
+// A hand copy of lib/push.ts's DEFAULTS (that file is server-only): keep the two the same.
 const DEFAULTS: Record<string, boolean> = {
   assigned: true,
   inquiry: true,
@@ -100,10 +122,16 @@ const DEFAULTS: Record<string, boolean> = {
   day_ahead: false,
   clock_out: true,
   daily_report: true,
+  booked: true,
   tap_to_pay: true,
   long_shift: true,
   bug_watch: true,
+  billing: true,
 };
+
+/** The roles the billing notices are addressed to: the people who can pick a plan or update the
+ *  card. The senders read profiles with the same two roles (lib/billing-notices, the webhook). */
+const ADMIN_ROLES = ["owner", "admin"];
 
 /** The alert switches this person sees: by role (until the role is known, only the alerts every
  *  role receives — never a switch that can't work), then by the company's feature switches; the
@@ -114,6 +142,7 @@ export function pushTriggersFor(role: string | null, features?: FeatureMap | nul
     if (t.audience === "platform") return platformAdmin;
     if (t.audience === "all") return true;
     if (!role) return false;
+    if (t.audience === "admins") return ADMIN_ROLES.includes(role);
     return t.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);
   }).map((t) => (t.whenOff && !featureOn(features, t.whenOff.feature) ? { ...t, label: t.whenOff.label } : t));
 }

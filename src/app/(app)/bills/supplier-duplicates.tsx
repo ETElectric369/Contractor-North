@@ -23,7 +23,18 @@ export interface SupplierDuplicateActions {
   }) => Promise<SupplierActionResult>;
   /** Optional, and asked for: put the group back the way it was. A pick on a phone can be a mis-tap. */
   unresolveDuplicate?: (groupId: string) => Promise<SupplierActionResult>;
+  /**
+   * BOTH ARE REAL (0400 both_real_at; cn-v1137): two identical runs a month apart are normal, and the
+   * card said so while offering only Keep It On <job>. This keeps both costs where they are and the
+   * pair stops being asked about. Optional: a mount without the door draws no button.
+   */
+  markBothReal?: (billIds: string[]) => Promise<SupplierActionResult>;
+  /** Undo for Both Are Real: the stamp comes off the pair (the group id carries the bill ids). */
+  unmarkBothReal?: (groupId: string) => Promise<SupplierActionResult>;
 }
+
+/** The one way back from an action: the undo door, its busy key, and the words if the server says none. */
+type Undo = { fn: () => Promise<SupplierActionResult>; key: string; fallback: string };
 
 /**
  * THE SAME TICKET, FILED TO TWO JOBS (Erik, 2026-09-18).
@@ -53,11 +64,16 @@ export function SupplierDuplicates({
   const [pending, start] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ text: string; groupId: string | null } | null>(null);
+  /** What the last action said, and the one way back from it (when the action has one). */
+  const [done, setDone] = useState<{ text: string; undo: Undo | null } | null>(null);
 
-  if (!groups.length) return null;
+  // THE CARD STAYS WHILE THERE IS A WAY BACK (skeptic #43, S3): Both Are Real on the only open pair
+  // takes the last group off the page, and a card that unmounted with it took the Undo away in the
+  // same breath. So it stays mounted while `done` is set — the banner and its Undo — and goes
+  // only once there is neither a group nor a word to say.
+  if (!groups.length && !done) return null;
 
-  function run(fn: () => Promise<SupplierActionResult>, key: string, fallback: string, undoGroupId?: string | null) {
+  function run(fn: () => Promise<SupplierActionResult>, key: string, fallback: string, undo?: Undo | null) {
     setError(null);
     setBusy(key);
     start(async () => {
@@ -68,10 +84,19 @@ export function SupplierDuplicates({
         setError(res.error ?? "Nothing was changed. Try again.");
         return;
       }
-      setDone({ text: res.message ?? fallback, groupId: undoGroupId ?? null });
+      setDone({ text: res.message ?? fallback, undo: undo ?? null });
       router.refresh();
     });
   }
+  // THE TWO WAYS BACK, each the shape of the door it undoes: a pick is unresolved, a Both Are Real is unmarked.
+  const undoKeep = (groupId: string): Undo | null =>
+    actions.unresolveDuplicate
+      ? { fn: () => actions.unresolveDuplicate!(groupId), key: `unresolve:${groupId}`, fallback: "Put back. Both copies are counting again, the way they were." }
+      : null;
+  const undoBoth = (groupId: string): Undo | null =>
+    actions.unmarkBothReal
+      ? { fn: () => actions.unmarkBothReal!(groupId), key: `unmark:${groupId}`, fallback: "Put back. The pair will be asked about again." }
+      : null;
 
   const openGroups = groups.filter((g) => !g.resolution);
 
@@ -84,7 +109,7 @@ export function SupplierDuplicates({
         <WhyFold>
           <p>
             {openGroups.length > 0
-              ? "These receipts match line for line, to the penny, so one job is carrying a cost that is not its own. You say which job it belongs to. Nothing gets deleted either way."
+              ? `These receipts match line for line, to the penny, so one job may be carrying a cost that is not its own. You say which job it belongs to${actions.markBothReal ? ", or that both are real purchases" : ""}. Nothing gets deleted either way.`
               : "Nothing is waiting on you here. The picks you made are below, and you can change any of them."}
           </p>
         </WhyFold>
@@ -95,19 +120,8 @@ export function SupplierDuplicates({
       {done && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
           <span className="min-w-0 text-sm text-slate-700">{done.text}</span>
-          {done.groupId && actions.unresolveDuplicate && (
-            <Button
-              variant="outline"
-              className="shrink-0"
-              disabled={pending}
-              onClick={() =>
-                run(
-                  () => actions.unresolveDuplicate!(done.groupId as string),
-                  `unresolve:${done.groupId}`,
-                  "Put back. Both copies are counting again, the way they were.",
-                )
-              }
-            >
+          {done.undo && (
+            <Button variant="outline" className="shrink-0" disabled={pending} onClick={() => run(done.undo!.fn, done.undo!.key, done.undo!.fallback)}>
               <Undo2 className="h-4 w-4" /> Undo
             </Button>
           )}
@@ -181,7 +195,7 @@ export function SupplierDuplicates({
                                   }),
                                 `keep:${c.billId}`,
                                 `Kept on ${copyPlace(c)}. The other copy stops counting as a job cost.`,
-                                g.id,
+                                undoKeep(g.id),
                               )
                             }
                           >
@@ -193,6 +207,28 @@ export function SupplierDuplicates({
                   );
                 })}
               </ul>
+
+              {/* THE THIRD ANSWER (0400 both_real_at): he bought the same things twice. Both costs stay where
+                  they are; the pair stops being asked about. One button for the group, not one per copy. */}
+              {!g.resolution && actions.markBothReal && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={pending && busy === `both:${g.id}`}
+                    onClick={() =>
+                      run(
+                        () => actions.markBothReal!(g.copies.map((c) => c.billId)),
+                        `both:${g.id}`,
+                        "Both are real. Both copies keep counting where they are, and this pair won't be asked about again.",
+                        undoBoth(g.id),
+                      )
+                    }
+                  >
+                    Both Are Real
+                  </Button>
+                  <span className="text-xs text-slate-500">Two separate trips: both costs stay where they are.</span>
+                </div>
+              )}
 
               <div className="mt-2 text-xs leading-relaxed text-slate-500">
                 {g.resolution ? (
@@ -232,6 +268,9 @@ export function SupplierDuplicates({
                   <WhyFold>
                     <p>
                       Picking a job marks the other copy as the duplicate so it stops counting as that job&apos;s cost.
+                      {actions.markBothReal
+                        ? " Both Are Real keeps both costs where they are and the pair stops being asked about."
+                        : ""}{" "}
                       Neither one is deleted, and you can change your mind.
                     </p>
                   </WhyFold>

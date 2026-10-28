@@ -56,6 +56,8 @@ vi.mock("@/lib/ai-cost", async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   recordAiUsage: async () => {},
   aiSpendExceeded: async () => state.over,
+  aiAllowed: async (_o: unknown, _r: unknown, opts?: { ceilingWords?: string }) =>
+    state.over ? { ok: false, reason: "ceiling", why: opts?.ceilingWords ?? "the ceiling" } : { ok: true },
 }));
 
 import { readStatementScan } from "./statement-scan-actions";

@@ -32,6 +32,18 @@ describe("commandNavItems", () => {
     expect(find(staff, "/bills")?.label).toBe("Bills & POs");
   });
 
+  it("lapsed (skeptic #43, S1): the three open doors alone — for staff and tech, whatever the switches — and the accountant's export is found by name", () => {
+    for (const isStaff of [true, false]) {
+      const items = commandNavItems(isStaff, ALL_ON, true, true);
+      expect(hrefs(items), String(isStaff)).toEqual(["/subscribe", "/settings", "/analytics/accountant"]);
+      expect(items.map((i) => i.label)).toEqual(["Pick A Plan", "Settings", "Download For Your Accountant"]);
+      expect(hrefs(matchNavItems(items, "accountant"))).toEqual(["/analytics/accountant"]);
+      expect(hrefs(matchNavItems(items, "jobs"))).toEqual([]);
+    }
+    // The default is not lapsed.
+    expect(hrefs(commandNavItems(true, ALL_ON, true))).toEqual(hrefs(commandNavItems(true, ALL_ON, true, false)));
+  });
+
   it("Recurring Billing off: Recurring stays (repeat jobs and expenses), only the invoice words go", () => {
     const rec = find(commandNavItems(true, off("recurring_billing")), "/recurring");
     expect(rec).toBeDefined();

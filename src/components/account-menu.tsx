@@ -92,6 +92,7 @@ export function AccountMenu({
   onboarded = true,
   setupDot = false,
   bugCount,
+  lapsed = false,
 }: {
   profile: Profile | null;
   lang?: string;
@@ -108,6 +109,9 @@ export function AccountMenu({
   setupDot?: boolean;
   /** Bug Watch's open count (platform admins only), possibly still in flight. */
   bugCount?: Pending<number | null>;
+  /** The company has lapsed and this person is on an open door (the layout's red bar): only the
+   *  open doors — Settings, Language, Sign Out; no Office, Tools, Estimate QR or Help (lib/dock). */
+  lapsed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // The TOUR opened it, not the user. While that's true, outside-clicks must not close it: the
@@ -119,9 +123,10 @@ export function AccountMenu({
   const ref = useRef<HTMLDivElement>(null);
   const isStaff = isStaffRole(profile?.role ?? "");
   // The sections the dock keeps behind the initials, for THIS person and these switches.
-  const inMenu = menuSections(visibleDock({ isStaff, features }));
-  // Nort on, these rows live under Search Or Ask instead (command-bar.tsx); techs have none.
-  const help = featureOn(features, "nort") ? [] : helpRows({ isStaff, onboarded, setup, nortOn: false, features });
+  const inMenu = menuSections(visibleDock({ isStaff, features, lapsed }));
+  // Nort on, these rows live under Search Or Ask instead (command-bar.tsx); techs have none. A
+  // lapsed company's Nort is paused, so its lessons are not offered either.
+  const help = featureOn(features, "nort") || lapsed ? [] : helpRows({ isStaff, onboarded, setup, nortOn: false, features });
   const bugs = useCount(platformAdmin ? bugCount : null);
 
   // Nort drives this menu during the guided tour — see TourStep.opens. A plain window event so no
@@ -227,7 +232,7 @@ export function AccountMenu({
           {/* Every employee's personal estimate link/QR — leads through it are
               credited to them. The control keeps its known face from the bar. It goes with
               the Leads switch (0352): it is the lead link, handed out. */}
-          {featureOn(features, "leads") && (
+          {featureOn(features, "leads") && !lapsed && (
             <div className="relative z-10 flex min-h-[44px] items-center justify-between gap-3 px-4 py-1">
               <span className="text-sm font-medium text-slate-700">Estimate QR</span>
               <ShareQrButton />

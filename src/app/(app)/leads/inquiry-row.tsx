@@ -204,6 +204,19 @@ export function InquiryRow({
             {step.bucket && <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${BUCKET_DOT[step.bucket]}`} />}
             {step.label}
           </Badge>
+          {/* THE TRIAGE'S SCORE, SHOWN INSTEAD OF SILENTLY ORDERING (cn-v1137; lib/leads/board-order).
+              The website's triage scores a web lead by size, readiness and reach (lib/lead-triage);
+              the board no longer sorts by it, so the score is said here, on the leads that have one.
+              A hand-added lead has none and shows nothing — zero is no chip. */}
+          {Number(inquiry.priority) > 0 && (
+            <Badge
+              tone="slate"
+              className="normal-case"
+              title={inquiry.intake?.reason ?? "The website's triage score — bigger, readier and easier to reach scores higher."}
+            >
+              Priority {Number(inquiry.priority)}
+            </Badge>
+          )}
         </span>
         <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={`Added ${formatDateTime(inquiry.created_at)}`}>
           {formatDateTime(inquiry.created_at)}

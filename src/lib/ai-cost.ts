@@ -1,5 +1,8 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
+import { orgAccess } from "@/lib/org-access";
+import { callerRole, nortPausedWords } from "@/lib/lapse-words";
+import type { AccessState } from "@/lib/subscription";
 
 /**
  * THE AI COST LAYER — what a call costs, which model to use, and whether this org
@@ -163,6 +166,44 @@ export async function aiSpendExceeded(orgId: string | null | undefined): Promise
   } catch {
     return false;
   }
+}
+
+/** The ceiling's words where a door has none of its own (the estimator's, since cn-v1128). */
+export const AI_CEILING_WORDS = "Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it.";
+
+export type AiGate = { ok: true } | { ok: false; why: string; reason: "lapsed" | "ceiling" };
+
+/**
+ * MAY THIS COMPANY SPEND A CENT ON A MODEL? ONE RULE (cn-v1137, decision 3). Every AI door — the
+ * estimator, Nort's chat, the paper readers, the vendor lookups, the site designer, the setup
+ * interview — asks this before the model, in this order:
+ *
+ *   1. THE COMPANY'S STANDING (orgAccess): a plan that has ended — trial expired, grace spent,
+ *      canceled — gets no AI at all. The words are refusalWords in the asker's role: the owner is
+ *      told the door (Settings › Getting Paid), everyone else who holds the key. A role the caller
+ *      did not pass is read here, only on this path (lapse-words callerRole).
+ *   2. THE MONTHLY CEILING (aiSpendExceeded): the abuse stop, as before.
+ *
+ * `opts.state`: a caller that already read the company's standing (Nort's chat route reads the
+ * billing columns with the org) hands it over, so the read is never made twice. `opts.lapsedWords`
+ * / `opts.ceilingWords`: a door's own sentence where the generic one would mislead — the public
+ * site chat speaks to a stranger, the panel reader names Add A Circuit. The answer is one shape
+ * for every door: ok, or `why` in words with the reason; the door returns `why` in its own
+ * envelope (an action's error field, a route's JSON, a chat turn). Fails OPEN the way both halves
+ * do: a failed read never locks a contractor out mid-job.
+ */
+export async function aiAllowed(
+  orgId: string | null | undefined,
+  role?: string | null,
+  opts: { ceilingWords?: string; lapsedWords?: string; state?: AccessState } = {},
+): Promise<AiGate> {
+  const state = opts.state ?? (await orgAccess(orgId)).state;
+  if (!state.active) {
+    const why = opts.lapsedWords ?? (await nortPausedWords(state, role === undefined ? await callerRole() : role, orgId));
+    return { ok: false, reason: "lapsed", why };
+  }
+  if (await aiSpendExceeded(orgId)) return { ok: false, reason: "ceiling", why: opts.ceilingWords ?? AI_CEILING_WORDS };
+  return { ok: true };
 }
 
 /**

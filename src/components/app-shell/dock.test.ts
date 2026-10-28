@@ -60,7 +60,7 @@ describe("plainBadges — the renderer only ever sees a count map", () => {
  * the initials, never tiles, but their pages keep their section: on /team the page column still
  * lists Office's pages.
  */
-const render = (role: string, features?: FeatureMap) => renderToStaticMarkup(createElement(Dock, { role, features }));
+const render = (role: string, features?: FeatureMap, lapsed = false) => renderToStaticMarkup(createElement(Dock, { role, features, lapsed }));
 /** Every tile's anchor, in order, as the phone bar draws them (the rail draws the same list). */
 const tiles = (html: string) => [...new Set([...html.matchAll(/data-tour="dock-([a-z]+)"/g)].map((m) => m[1]))];
 
@@ -91,6 +91,27 @@ describe("the dock's tiles", () => {
   it("with Leads and Estimates off the Sales tile says Customers and lands on /crm", () => {
     const html = render("owner", { ...ALL_ON, leads: false, estimates: false });
     expect(html).toMatch(/<a href="\/crm"[^>]*data-tour="dock-sales"[^>]*aria-label="Customers"/);
+  });
+
+  /**
+   * LAPSED (skeptic #43, S1): on an open door the dock draws the Plan tile alone — Pick A Plan,
+   * Settings, Download For Your Accountant — for the owner and for a tech alike, whatever the
+   * switches; a soft navigation can reach no page the wall turns a hard load away from.
+   */
+  it("lapsed: one tile, Plan, whose rows are the three open doors; nothing else — not even the logo's /planner — for anyone", () => {
+    nav.pathname = "/settings"; // an open door: the page column lists the section's rows
+    for (const role of ["owner", "office", "tech"]) {
+      const html = render(role, { ...ALL_ON, leads: false }, true);
+      expect(tiles(html), role).toEqual(["plan"]);
+      const hrefs = [...new Set([...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1]))].sort();
+      expect(hrefs, role).toEqual(["/analytics/accountant", "/settings", "/subscribe"]);
+      expect(html).toContain("Download For Your Accountant");
+      expect(html).toMatch(/<a href="\/subscribe"[^>]*aria-label="Home"/);
+      expect(html).not.toContain("/jobs");
+      expect(html).not.toContain("/planner");
+    }
+    // Not lapsed (the default): untouched.
+    expect(tiles(render("owner", ALL_ON, false))).toEqual(["today", "schedule", "sales", "jobs", "invoices"]);
   });
 
   it("on /team no tile lights, but the page column still lists Office's pages, Team lit", () => {

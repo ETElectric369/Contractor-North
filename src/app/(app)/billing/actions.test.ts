@@ -1670,6 +1670,53 @@ describe("importCostsIntoInvoice — the same ticket on two jobs, asked before i
   });
 
   /**
+   * BOTH ARE REAL (0400 both_real_at; skeptic #43, S2). A pair he said is two purchases is a pair the
+   * matcher drops — so the invoice's check must read the stamp, or it warns about a question he has
+   * answered. And a database without the column yet is read again without it, never left unchecked.
+   */
+  it("a pair stamped Both Are Real is not warned about: the read carries both_real_at", async () => {
+    const stamped = "2026-10-20T17:00:00.000Z";
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [HERE_BILL],
+        lines: ticketLines(HERE_BILL.id),
+        landedAfter: [HERE_BILL.id],
+        everyBillOfTheseAmounts: [{ ...HERE_ROW, both_real_at: stamped }, { ...THERE_BILL, both_real_at: stamped }],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    expect((res.stats?.warnings ?? []).join(" ")).not.toContain("is also on");
+    expect(res.stats?.same_ticket_two_jobs ?? 0).toBe(0);
+    // Paged by id (readAllPages reads until an empty page): every page asks for the stamp.
+    const reads = calls.filter((c) => c.table === "bills" && c.verb === "select" && c.cols.includes("superseded_by_bill_id"));
+    expect(reads.length).toBeGreaterThanOrEqual(1);
+    for (const r of reads) expect(r.cols).toContain("superseded_by_bill_id, both_real_at, jobs(job_number, name, customers(name))");
+  });
+
+  it("a database without both_real_at yet (42703) is read again without it, and the question is still asked", async () => {
+    const base = costsImportRoute({
+      bills: [HERE_BILL],
+      lines: ticketLines(HERE_BILL.id),
+      landedAfter: [HERE_BILL.id],
+      everyBillOfTheseAmounts: [HERE_ROW, THERE_BILL],
+    });
+    state.client = fakeSupabase(
+      (q) => (q.table === "bills" && q.cols.includes("both_real_at") ? { error: { code: "42703", message: "column bills.both_real_at does not exist" } } : base(q)),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 20);
+    expect(res.ok).toBe(true);
+    expect((res.stats?.warnings ?? []).join(" ")).toContain("The same $95.27 Halverson Electric Supply ticket is also on");
+    // The first page asked for the stamp and was refused; every page after it is read without.
+    const reads = calls.filter((c) => c.table === "bills" && c.verb === "select" && c.cols.includes("superseded_by_bill_id"));
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+    expect(reads[0].cols).toContain("both_real_at");
+    expect(reads.slice(1).every((r) => !r.cols.includes("both_real_at"))).toBe(true);
+  });
+
+  /**
    * IT READS AS A SENTENCE WHERE IT IS PRINTED (review, 2026-10-03). invoice-detail joins the warnings
    * with ". " and prints them under the import row, and every other import warning starts a sentence
    * ("Removed …", "Merged …"). A lowercase clause read as a sentence cut in half — and the job's own

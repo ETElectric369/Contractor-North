@@ -8,7 +8,7 @@ import { rowPlace } from "@/lib/doc-place";
 import { docLabel } from "@/lib/doc-label";
 import { reminderSuppressed } from "@/lib/automations-math";
 import { pendingTransfers } from "@/lib/bank-transfer";
-import { readAllOrgs } from "@/lib/cron-orgs";
+import { readActiveOrgs } from "@/lib/cron-orgs";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
  *  org that has turned a reminder toggle ON, find what's due, send a branded email,
@@ -16,21 +16,25 @@ import { readAllOrgs } from "@/lib/cron-orgs";
  *  spammed. Email-only and best-effort: a customer with no email is skipped, a send
  *  failure is not logged to reminder_log (so it retries next run) but IS reported to
  *  error_events and counted (audit v921 — a rotated Resend key used to fail every reminder
- *  for weeks in total silence). Nothing sends for an org whose toggles are off. */
+ *  for weeks in total silence). Nothing sends for an org whose toggles are off, and nothing for a
+ *  company whose plan has ended (cn-v1137, decision 3: readActiveOrgs drops it, `lapsed_skipped`
+ *  counts it). */
 
-type Counts = { invoice_due: number; quote_followup: number; appointment: number; skipped_no_email: number; failed: number };
+type Counts = { invoice_due: number; quote_followup: number; appointment: number; skipped_no_email: number; lapsed_skipped: number; failed: number };
 const DAY = 86_400_000;
 
 export async function sendDueReminders(supabase: any): Promise<Counts> {
   const now = Date.now();
-  const counts: Counts = { invoice_due: 0, quote_followup: 0, appointment: 0, skipped_no_email: 0, failed: 0 };
+  const counts: Counts = { invoice_due: 0, quote_followup: 0, appointment: 0, skipped_no_email: 0, lapsed_skipped: 0, failed: 0 };
 
   // Every company, whole, or a throw the reminders route answers 500 with and files (cn-v1130): a
   // failed read used to be a run that sent nothing and counted zeros.
-  const orgs = await readAllOrgs<{ id: string; name: string | null; phone: string | null; email: string | null; settings: unknown }>(
+  const { rows: orgs, lapsedSkipped } = await readActiveOrgs<{ id: string; name: string | null; phone: string | null; email: string | null; settings: unknown }>(
     supabase,
     "id, name, phone, email, settings",
+    now,
   );
+  counts.lapsed_skipped = lapsedSkipped;
 
   for (const org of orgs) {
     try {

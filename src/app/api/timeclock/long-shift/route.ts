@@ -10,7 +10,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, candidateStartMs, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
-import { readAllOrgs } from "@/lib/cron-orgs";
+import { readActiveOrgs } from "@/lib/cron-orgs";
 
 // Every company in one run, one after another (cn-v1130).
 export const maxDuration = 300;
@@ -78,12 +78,17 @@ export async function GET(request: Request) {
     text_not_ready: 0,
     text_off: 0,
     office_buzzes: 0,
+    lapsed_skipped: 0,
     failed: 0,
   };
-  // Every company, whole, or a filed 500 (readAllOrgs, cn-v1130): never an empty run.
+  // Every company, whole, or a filed 500 (readAllOrgs, cn-v1130): never an empty run. A company
+  // whose plan has ended is dropped and counted (cn-v1137, decision 3: readActiveOrgs): its office
+  // is not paged and its crew not asked on North's dime.
   let orgs: { id: string; name: string | null; settings: unknown }[];
   try {
-    orgs = await readAllOrgs<{ id: string; name: string | null; settings: unknown }>(supabase, "id, name, settings");
+    const active = await readActiveOrgs<{ id: string; name: string | null; settings: unknown }>(supabase, "id, name, settings", Date.now());
+    orgs = active.rows;
+    counts.lapsed_skipped = active.lapsedSkipped;
   } catch (e) {
     // Waited for (cn-v1130, skeptic #34): this function answers on the tick it files, and a
     // fire-and-forget write can freeze with it. A BLOCKER (cn-v1136): no company was reached, so

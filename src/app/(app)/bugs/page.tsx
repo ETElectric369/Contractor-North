@@ -6,6 +6,8 @@ import { listBugReports } from "@/app/(app)/bug-report-actions";
 import { BugList } from "./bug-list";
 import { listErrorEvents } from "./error-actions";
 import { ErrorList } from "./error-list";
+import { listCompanies } from "./company-actions";
+import { CompanyList } from "./company-list";
 import { AiStatus } from "./ai-status";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +24,7 @@ export default async function BugsPage() {
   // A failed read is said on the page (cn-v1130), never shown as "All clear".
   const { rows, error } = await listBugReports();
   const errors = await listErrorEvents();
+  const companies = await listCompanies();
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -38,6 +41,13 @@ export default async function BugsPage() {
           Every caught failure, deduped: the first sighting is kept, repeats are counted, a fixed one that returns comes back as new. Mark them as you go.
         </p>
         <ErrorList initial={errors.rows} readError={errors.error} openCapped={errors.openCapped} />
+      </div>
+      <div>
+        <h2 className="mb-1 text-base font-semibold text-slate-900">Companies</h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Every company&apos;s standing: trial, grace, comped or lapsed. Comp the founding cohort here; a comp is access and no billing notices until it ends.
+        </p>
+        <CompanyList initial={companies.rows} readError={companies.error} />
       </div>
       <div>
         <h2 className="mb-2 text-base font-semibold text-slate-900">AI Assistant</h2>

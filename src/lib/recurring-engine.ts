@@ -10,7 +10,7 @@ import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { jobNameFrom, typedNameMayBeATag } from "@/lib/job-name";
 import { featureOn } from "@/lib/features";
-import { readAllOrgs } from "@/lib/cron-orgs";
+import { readActiveOrgs } from "@/lib/cron-orgs";
 
 /** The recurring jobs/expenses/invoices generation engine, extracted so BOTH the
  *  in-app "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
@@ -265,8 +265,10 @@ async function skipDueRun(supabase: any, t: any, today: string): Promise<void> {
  *  expenses CATCH UP multiple overdue periods (internal rows; capped at 24). Invoices
  *  generate exactly ONE per run (a customer-facing email/bill — no back-dated storm).
  *  Works with ANY client: a user client (RLS scopes to one org) or the service client
- *  (all orgs — the cron). Returns how many occurrences were created. */
-export async function generateDueTemplates(supabase: any, userId: string | null): Promise<number> {
+ *  (all orgs — the cron). Answers how many occurrences were created, and how many companies were
+ *  passed over because their plan has ended (cn-v1137, decision 3: readActiveOrgs drops a lapsed
+ *  company, so its templates stay due — not stepped — and are made up when a plan is picked). */
+export async function generateDueTemplates(supabase: any, userId: string | null): Promise<{ generated: number; lapsed_skipped: number }> {
   // "Due" is judged against each ORG's local today — a UTC today rolls over at ~5 PM
   // Pacific, generating tomorrow's occurrences tonight. Fetch every reachable org's
   // settings once (service client = all orgs; user client = RLS-scoped to one), query
@@ -274,7 +276,7 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
   // Every reachable company, whole, or a throw (cn-v1130): a failed read used to be an EMPTY run that
   // generated nothing and said nothing. Now the cron files it, and the next run makes up what is owed
   // — a repeat invoice's one occurrence (exactly ONE per run, below), a job's or expense's periods.
-  const orgs = await readAllOrgs<{ id: string; settings: unknown }>(supabase);
+  const { rows: orgs, lapsedSkipped } = await readActiveOrgs<{ id: string; settings: unknown }>(supabase);
   const todayByOrg: Record<string, string> = {};
   const settingsByOrg: Record<string, unknown> = {};
   // Companies with Recurring Billing switched off (0352): their repeat invoices are skipped. Every
@@ -302,6 +304,9 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
     // Isolate each template: one malformed row (e.g. a bad next_date that makes new Date(...)
     // throw) must NOT abort the whole run OR re-crash the cron every night. Name it, skip it.
     try {
+      // A lapsed company's template (not in the active map, and the map is whole: a failed read
+      // fails the run) waits: nothing generated, nothing stepped. Only when a company was read.
+      if (lapsedSkipped > 0 && !(t.org_id in todayByOrg)) continue;
       const today = todayByOrg[t.org_id] ?? fallbackToday;
       if (t.next_date > today) continue; // due in another org's tz, not this org's yet
       if (switchedOff.has(t.org_id) && t.kind === "invoice") {
@@ -325,5 +330,5 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
       reportError("recurring-template-crash", e, { templateId: t?.id, kind: t?.kind });
     }
   }
-  return count;
+  return { generated: count, lapsed_skipped: lapsedSkipped };
 }

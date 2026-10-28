@@ -1,4 +1,4 @@
-import { recordAiUsage, aiSpendExceeded } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed } from "@/lib/ai-cost";
 import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropic } from "@/lib/anthropic";
@@ -429,12 +429,15 @@ export async function POST(req: Request) {
   // on the contractor's public website and there is no seat, no login and no upper bound on how
   // many of them there are. Refusing is the kind answer: the alternative is an unbounded bill
   // arriving at a one-truck electrician.
-  if (await aiSpendExceeded(org.id)) {
-    return Response.json({
-      reply: "Thanks for stopping by — the chat is taking a short break. Please use the contact form and we'll get right back to you.",
-      done: true,
-    });
-  }
+  //
+  // AND THE PLAN THAT HAS ENDED (cn-v1137, decision 3), through the same one gate (aiAllowed:
+  // orgAccess first, the ceiling second): a lapsed company's public assistant answers one line and
+  // never reaches the model. A stranger is told nothing about plans — that is the owner's business.
+  const gate = await aiAllowed(org.id, null, {
+    lapsedWords: "This company's assistant is paused.",
+    ceilingWords: "Thanks for stopping by — the chat is taking a short break. Please use the contact form and we'll get right back to you.",
+  });
+  if (!gate.ok) return Response.json({ reply: gate.why, done: true });
 
   const threshold = org.settings.site_inspection_threshold || 20000;
 

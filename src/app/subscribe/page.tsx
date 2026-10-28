@@ -3,15 +3,30 @@ import { NO_INDEX } from "@/lib/no-index";
 import { Zap, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { billingEnabled } from "@/lib/stripe";
-import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
-import { startCheckout } from "@/app/(app)/settings/billing-actions";
+import { accessState, hasActiveAccess, isCompedOrg, type BillingOrg } from "@/lib/subscription";
+import { canPickPlan, stripeSubscriptionLive, subscribeHeadline } from "@/lib/lapse-doors";
+import { ownerFirstName } from "@/lib/lapse-words";
+import { startCheckout, openPortal } from "@/app/(app)/settings/billing-actions";
 import { PLANS, INCLUDED_EVERYWHERE, plansConfigured } from "@/lib/plans";
 import { signOut } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
-import type { Organization } from "@/lib/types";
+import { reportError } from "@/lib/observe";
 
 export const dynamic = "force-dynamic";
 
+/** The columns this page decides from: the billing spine's plus the two Stripe ids. */
+type SubscribeOrg = BillingOrg & {
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+};
+
+/**
+ * THE WALL'S OWN PAGE (cn-v1137). The headline comes from the one access rule (accessState → the
+ * reason), never re-derived from the columns. An owner/admin gets ONE door: Manage Billing when a
+ * Stripe subscription is live (update the card, change the plan — Checkout beside it would bill
+ * twice), the plan cards otherwise (a canceled subscription cannot be restarted from the portal; a
+ * customer Stripe knows is reused by Checkout). Everyone else is told who holds the key, by name.
+ */
 export default async function SubscribePage({
   searchParams,
 }: {
@@ -31,18 +46,41 @@ export default async function SubscribePage({
     .maybeSingle();
   if (!profile?.org_id) redirect("/onboarding");
 
-  const { data: org } = await supabase
+  const { data: orgRow, error: orgErr } = await supabase
     .from("organizations")
     .select("*")
     .eq("id", profile.org_id)
     .maybeSingle();
+  // A failed read is said (in the sink here, on the page below) — never a confident wrong headline.
+  if (orgErr) reportError("subscribe:org-read", orgErr, { orgId: profile.org_id });
+  const org = (orgRow as SubscribeOrg | null) ?? null;
 
-  // If billing is off, the org is comped, or access is fine, no need to be here.
-  if (!billingEnabled || isCompedOrg(profile.org_id) || (org && hasActiveAccess(org as Organization))) {
+  // If billing is off, the org is comped (the env list, or comped_until through hasActiveAccess),
+  // or access is fine, no need to be here.
+  if (!billingEnabled || isCompedOrg(profile.org_id) || (org && hasActiveAccess(org))) {
     redirect("/planner");
   }
 
-  const isAdmin = profile.role === "owner" || profile.role === "admin";
+  const isAdmin = canPickPlan(profile.role);
+  const state = org ? accessState(org) : null;
+  const headline = state ? subscribeHeadline(state.reason) : "Your Plan Needs Attention";
+  // The portal is the door only while a subscription is live; otherwise Checkout (one rule,
+  // lib/lapse-doors, the same one startCheckout refuses on).
+  const portal = !!org && stripeSubscriptionLive(org);
+
+  // WHO HOLDS THE KEY, for everyone who cannot pick a plan: the company's active owner, by first
+  // name, through THE one owner read every paused door uses (lib/lapse-words ownerFirstName — the
+  // service client, so a tech's RLS cannot hide the owner's row; a failed read is filed there and
+  // reads "the owner"). Read only for someone who cannot pick a plan.
+  const ownerFirst = isAdmin ? "the owner" : ((await ownerFirstName(profile.org_id)) ?? "the owner");
+
+  const subline = !org
+    ? "We couldn't read your plan just now — try again in a moment."
+    : !isAdmin
+      ? `Ask ${ownerFirst} to pick a plan.`
+      : portal
+        ? "Your card or plan needs a look."
+        : "Pick a plan to keep using Contractor North.";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
@@ -51,10 +89,8 @@ export default async function SubscribePage({
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
             <Zap className="h-7 w-7" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Your trial has ended</h1>
-          <p className="mt-1 text-sm text-white/80">
-            Subscribe to keep using Contractor North.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight">{headline}</h1>
+          <p className="mt-1 text-sm text-white/80">{subline}</p>
         </div>
 
         <div className="rounded-2xl bg-white p-8 shadow-xl text-center">
@@ -64,8 +100,20 @@ export default async function SubscribePage({
             </div>
           )}
 
-          {isAdmin ? (
-            plansConfigured() ? (
+          {!org ? (
+            // The plan could not be read: one action, and nothing decided on a guess.
+            <a href="/subscribe" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white">
+              Try Again
+            </a>
+          ) : isAdmin ? (
+            portal ? (
+              <>
+                <form action={openPortal}>
+                  <Button type="submit" size="lg" className="w-full">Manage Billing</Button>
+                </form>
+                <p className="mt-3 text-sm text-slate-600">Update the card or pick a plan there.</p>
+              </>
+            ) : plansConfigured() ? (
               <>
                 {/* GATE ON COST, NEVER ON LEVERAGE. Every tier ships the whole product to the
                     whole crew. What changes is how much genuinely expensive work is included —
@@ -113,7 +161,17 @@ export default async function SubscribePage({
             )
           ) : (
             <p className="text-sm text-slate-600">
-              Ask your company owner to renew the subscription to regain access.
+              Nothing is lost. Your work is here the moment a plan is picked.
+            </p>
+          )}
+
+          {/* THE DOOR THE LAPSED NOTICE PROMISED (skeptic #43, S7): "Download For Your Accountant stays
+              open" — so the page the wall lands on links it, for the people the wall lets through. */}
+          {org && isAdmin && (
+            <p className="mt-4">
+              <a href="/analytics/accountant" className="inline-flex min-h-11 items-center justify-center text-sm font-medium text-brand hover:underline">
+                Download For Your Accountant
+              </a>
             </p>
           )}
 

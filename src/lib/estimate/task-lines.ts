@@ -2,6 +2,7 @@ import type { DraftLineItem, TaskDetail, TaskDetailMaterial, TaskLabor } from ".
 import type { TaskMaterial, TaskValue } from "@/lib/playbook/tasks";
 import { describeChoice, priceBookLine, type BookPricing, type OptionedPriceItem } from "@/lib/pricing/item-options";
 import { kitLineView, type KitLineRaw, type KitPricing } from "@/lib/kit-line";
+import { joinLineNote, splitLineNote } from "./line-note";
 
 /**
  * A TASK BECOMES ONE LINE ON THE ESTIMATE.
@@ -192,20 +193,24 @@ export function coerceDraftLine<T extends DraftLineItem>(line: T): T {
   return { ...line, detail: d ?? undefined, ...(d ? { flag: taskFlags(d) } : {}) };
 }
 
-/** A line's task name without the units it carries ("Footings ×7" → "Footings"). */
+/** A line's task name without the units it carries ("Footings ×7" → "Footings") — the HEAD alone:
+ *  a note under the line (line-note) is never part of the name. */
 export function stripUnits(description: string): string {
-  return description.replace(/\s*×\s*\d+(?:[.,]\d+)?\s*$/u, "").trim();
+  return splitLineNote(description).head.replace(/\s*×\s*\d+(?:[.,]\d+)?\s*$/u, "").trim();
 }
 
 /** The suffix a count writes on a line's name: " ×N" when N is not one (taskLine's rule). */
 const unitsSuffix = (units: number | null): string => (units !== null && units !== 1 ? ` ×${units}` : "");
 
 /** The line's name for another count: ONLY the suffix the previous count wrote is replaced, so a
- *  name that ends in his own "4×4" (or one he edited by hand) is never rewritten under him. */
+ *  name that ends in his own "4×4" (or one he edited by hand) is never rewritten under him. The
+ *  count lands on the HEAD; a note under the line rides along untouched (skeptic #43, S6: it used
+ *  to land after the note). */
 export function lineNameWithUnits(description: string, prevUnits: number | null, units: number | null): string {
+  const { head, note } = splitLineNote(description);
   const prev = unitsSuffix(prevUnits);
-  const base = prev && description.endsWith(prev) ? description.slice(0, -prev.length) : description;
-  return `${base}${unitsSuffix(units)}`;
+  const base = prev && head.endsWith(prev) ? head.slice(0, -prev.length) : head;
+  return joinLineNote(`${base}${unitsSuffix(units)}`, note);
 }
 
 /** A part the builder added and nobody named yet is not a part: it prices nothing and asks nothing

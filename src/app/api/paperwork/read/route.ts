@@ -17,6 +17,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * org-scoped twice: here, and inside readPaperworkItem (the row is read by id AND the caller's
  * company). It reads and stops: nothing is filed, and the answer is the same OrganizedResult the
  * server action gives Organize.
+ *
+ * WHETHER THE COMPANY MAY PAY FOR THE READ (cn-v1137, aiAllowed: the plan that has ended, then the
+ * ceiling) is asked ONCE, inside the reader every caller passes — readInto for a paper, aiReviewItem
+ * for a note (organize/actions) — not a second time here: two gates on one hot path were two reads
+ * of the same standing per paper (skeptic #43, S8). The refusal comes back in the reader's own
+ * {ok, error} shape, and the sheet shows it on the paper's line; the paper itself is already saved.
  */
 export async function POST(req: Request) {
   const ctx = await requireStaff();

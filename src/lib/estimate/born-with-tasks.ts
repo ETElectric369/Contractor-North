@@ -5,6 +5,7 @@ import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { dbError } from "@/lib/db-error";
 import { PLANNED_MINUTES_MAX, coerceTaskDetail, expandTaskKit, laborMinutes, lineQty, minutesPastBound, taskMinutesFor, type TaskKit } from "./task-lines";
+import { splitLineNote } from "./line-note";
 
 /** The bound lives with the minutes rule (task-lines); callers that knew it here still find it. */
 export { PLANNED_MINUTES_MAX } from "./task-lines";
@@ -187,7 +188,9 @@ export function tasksFromLines(rows: ReadonlyArray<LineRow>): Birth {
   rows.forEach((r, i) => {
     const d = coerceTaskDetail(r.detail);
     if (!d) return;
-    const title = String(r.description ?? "").trim();
+    // THE TASK'S TITLE IS THE LINE'S HEAD (line-note): a note typed under the line on the estimate is
+    // the customer's reading, never the crew's task name (skeptic #43, S6).
+    const title = splitLineNote(String(r.description ?? "")).head.trim();
     if (!title) return;
     const source_key = `line:${r.id}`;
     const qty = lineQty(r);

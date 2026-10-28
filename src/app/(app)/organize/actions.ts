@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
@@ -137,12 +137,22 @@ async function readInto(
   opts: { personSaysCost?: boolean } = {},
 ): Promise<OrganizedResult> {
   const supabase = ctx.supabase;
-  const { markJobs, pos, selfNames } = await loadMarkContext(supabase, ctx.orgId);
-
   // EVERY WRITE HERE LANDS ONLY WHILE THE PAPER IS STILL WAITING (audit v994, TD6). A read takes
   // 5 to 20 seconds; a paper filed from another screen meanwhile keeps its filing, and the late read
   // changes nothing and says so.
   const waiting = { onlyIfStatus: "needs_review" };
+  // MAY THIS COMPANY PAY FOR A READ (cn-v1137, aiAllowed: a plan that has ended, then the ceiling)?
+  // This door had no gate at all — the one paper reader every company's office uses most. The paper
+  // is NOT lost: it sits in the tray, the row says it was not read, and the answer says the one action.
+  const gate = await aiAllowed(ctx.orgId);
+  if (!gate.ok) {
+    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the reader is paused" } }, waiting);
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    return { ok: false, error: `${gate.why} The paper is saved and waiting.` };
+  }
+  const { markJobs, pos, selfNames } = await loadMarkContext(supabase, ctx.orgId);
+
   const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(file.path);
   if (dlErr || !blob) {
     await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the file couldn't be opened" } }, waiting);
@@ -1929,6 +1939,9 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   if (!item) return { ok: false, message: "Item not found." };
 
   const orgId = ctx.orgId ?? (item as { org_id?: string }).org_id ?? null;
+  // The same gate as readInto (cn-v1137): a paused company's note is kept, and not reviewed.
+  const gate = await aiAllowed(orgId);
+  if (!gate.ok) return { ok: false, message: gate.why };
   const { markJobs: allJobs, pos, selfNames } = await loadMarkContext(supabase, orgId);
   // The model is offered the OPEN jobs only; a finished job is filed to by a person's own pick.
   const markJobs = allJobs.filter((j) => !j.closed);

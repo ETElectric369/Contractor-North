@@ -27,6 +27,87 @@ async function mayReadLocation(): Promise<boolean> {
   return (await shellMayReadLocation()) ?? ((await geoPermission()) === "granted");
 }
 
+/**
+ * LOCATION HAS NOT BEEN ASKED YET — which is not "no" (cn-v1137; Bug Watch: Time Clock says nothing
+ * while permission is still "prompt"). The gate above refuses an off-gesture read in "prompt" (the
+ * iOS rule), and until now the fence then went quietly dark: a console.warn and a tech who thought
+ * the clock would notice him leaving. Off the shell this is the web's "prompt"; inside the shell it
+ * is the phone before its first answer (shellMayReadLocation null). A denial is never this — the
+ * denied banner says that.
+ */
+async function locationUnasked(): Promise<boolean> {
+  if ((await shellMayReadLocation()) !== null) return false;
+  return (await geoPermission()) === "prompt";
+}
+
+/**
+ * WHAT THE FENCE SAYS WHILE NOTHING ELSE IS HAPPENING — one line, or none. Pure, so the words can be
+ * rendered in a test without a phone. The order is the order of what matters: a denial beats
+ * everything (there is no fence to turn on), then the ask, then the screen-off readiness, then a
+ * lost anchor. `onTurnOn` must run navigator.geolocation.getCurrentPosition INSIDE the tap (the iOS
+ * rule): a prompt fired off a gesture is denied silently by the installed PWA, and that can persist.
+ */
+export function GeofenceIdleLine({
+  watchOff,
+  waitingGrant,
+  grantBusy = false,
+  grantNote = null,
+  fenceDark,
+  anchorLost,
+  anchorKnown,
+  jobLabel,
+  onTurnOn,
+}: {
+  watchOff: boolean;
+  waitingGrant: boolean;
+  grantBusy?: boolean;
+  grantNote?: string | null;
+  fenceDark: FenceReadiness | null;
+  anchorLost: boolean;
+  anchorKnown: boolean;
+  jobLabel: string;
+  onTurnOn: () => void;
+}) {
+  const line = "mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800";
+  if (watchOff)
+    return (
+      <div className={line}>
+        Location is off for this app, so I can&rsquo;t offer to clock you out when you leave. Clock out
+        yourself, or turn location back on in Settings.
+      </div>
+    );
+  if (waitingGrant)
+    return (
+      <div className={line}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>Location isn&rsquo;t on yet for North, so I can&rsquo;t notice when you leave {jobLabel}.</span>
+          <Button type="button" size="sm" variant="outline" className="shrink-0" disabled={grantBusy} onClick={onTurnOn}>
+            {grantBusy && <Loader2 className="animate-spin" />} Turn On Location
+          </Button>
+        </div>
+        {grantNote && <p className="mt-1">{grantNote}</p>}
+      </div>
+    );
+  if (fenceDark)
+    return (
+      <div className={line}>
+        {fenceDark === "unavailable"
+          ? "This phone can’t watch the job site with the screen off, so I’ll only notice you leaving while North is open."
+          : fenceDark === "denied"
+            ? "Location is off for North, so I can’t notice you leaving the job site with the screen off. Turn it on in Settings, under Location Services, North, Always."
+            : "Location for North is set to While Using, so I can’t notice you leaving the job site with the screen off. Set it to Always in Settings, under Location Services, North."}
+      </div>
+    );
+  if (anchorLost && !anchorKnown)
+    return (
+      <div className={line}>
+        I couldn&rsquo;t get a location at {jobLabel}, so I can&rsquo;t offer to clock you out when you leave this job.
+        Clock out yourself when you&rsquo;re done.
+      </div>
+    );
+  return null;
+}
+
 /** Great-circle distance in meters. */
 function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6_371_000;
@@ -258,6 +339,12 @@ export function GeofenceMonitor({
   const [error, setError] = useState<string | null>(null);
   /** Location permission is off/revoked — the fence can't watch, and he needs to know. */
   const [watchOff, setWatchOff] = useState(false);
+  /** Location has not been asked yet (locationUnasked): the fence waits for a tap, and says so. */
+  const [waitingGrant, setWaitingGrant] = useState(false);
+  const [grantBusy, setGrantBusy] = useState(false);
+  const [grantNote, setGrantNote] = useState<string | null>(null);
+  /** The live watch's arm(), so the tap that wins the grant can arm it at once (set by the effect below). */
+  const armRef = useRef<() => void>(() => {});
   /** iOS's fence can't work with the screen off (While Using, Denied, or no region monitoring): said, not swallowed. */
   const [fenceDark, setFenceDark] = useState<FenceReadiness | null>(null);
 
@@ -565,6 +652,11 @@ export function GeofenceMonitor({
     const arm = async () => {
       if (disposed || doneRef.current) return;
       if (!(await mayReadLocation())) {
+        // NOT ASKED YET IS SAID, NOT SWALLOWED (cn-v1137): in "prompt" the idle line offers Turn On
+        // Location, whose tap is the gesture the rule needs; a denial leaves this false and the
+        // denied banner (onErr / the tap's own answer) speaks instead.
+        const unasked = await locationUnasked();
+        if (!disposed) setWaitingGrant(unasked);
         if (!warnedGate) {
           warnedGate = true;
           console.warn("[geofence] location not granted yet — live exit tracking waits for the first granted fix");
@@ -572,10 +664,12 @@ export function GeofenceMonitor({
         return;
       }
       if (disposed || doneRef.current) return;
+      setWaitingGrant(false);
       stop();
       stop = watchPosition(onFix, onErr, opts);
       trace("fence watch", "armed");
     };
+    armRef.current = () => void arm();
     void arm();
     // iOS quietly kills the watch when the PWA suspends — re-arm it on every return
     // to the foreground (the old monitor never did, so it went deaf after one pocket).
@@ -586,11 +680,45 @@ export function GeofenceMonitor({
     document.addEventListener("visibilitychange", rearm);
     return () => {
       disposed = true;
+      armRef.current = () => {};
       document.removeEventListener("visibilitychange", rearm);
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripKey, anchorLat, anchorLng, radiusM, graceMin]);
+
+  /**
+   * TURN ON LOCATION — the one read that may fire the permission prompt, because it is INSIDE a tap
+   * (the iOS rule). A fix that lands memoizes the grant (geo.ts recordFix), so the gate answers
+   * "granted" from here on: the live watch arms at once and the wake check runs with its throttle
+   * slot handed back (an anchor the clock-in could not capture is adopted from this very fix). A
+   * refusal is the denied banner's to say; a timeout or a phone with no fix keeps the line and says
+   * what happened, so a tap that did nothing is never a tap that said nothing.
+   */
+  const turnOnLocation = () => {
+    setGrantBusy(true);
+    setGrantNote(null);
+    void getPosition({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 }).then((r) => {
+      setGrantBusy(false);
+      if (r.status === "ok") {
+        setWaitingGrant(false);
+        lastWakeCheckRef.current = 0;
+        armRef.current();
+        checkRef.current();
+        return;
+      }
+      if (r.status === "denied") {
+        setWaitingGrant(false);
+        setWatchOff(true);
+        return;
+      }
+      setGrantNote(
+        r.status === "timeout"
+          ? "The phone didn’t answer with a location in time. Try again."
+          : "This phone couldn’t give a location just now. Try again.",
+      );
+    });
+  };
 
   // ── 1 + 3. WAKE EXIT-CHECK (and anchor adoption) ───────────────────────────────
   // Kept in a ref so the route-change effect below always calls the CURRENT check.
@@ -786,25 +914,19 @@ export function GeofenceMonitor({
   useEffect(() => () => { void disarmFence(); }, []);
 
   if (phase === "idle")
-    return watchOff ? (
-      <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        Location is off for this app, so I can&rsquo;t offer to clock you out when you leave. Clock out
-        yourself, or turn location back on in Settings.
-      </div>
-    ) : fenceDark ? (
-      <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        {fenceDark === "unavailable"
-          ? "This phone can\u2019t watch the job site with the screen off, so I\u2019ll only notice you leaving while North is open."
-          : fenceDark === "denied"
-            ? "Location is off for North, so I can\u2019t notice you leaving the job site with the screen off. Turn it on in Settings, under Location Services, North, Always."
-            : "Location for North is set to While Using, so I can\u2019t notice you leaving the job site with the screen off. Set it to Always in Settings, under Location Services, North."}
-      </div>
-    ) : anchorLost && typeof anchorLat !== "number" ? (
-      <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        I couldn&rsquo;t get a location at {jobLabel}, so I can&rsquo;t offer to clock you out when you leave this job.
-        Clock out yourself when you&rsquo;re done.
-      </div>
-    ) : null;
+    return (
+      <GeofenceIdleLine
+        watchOff={watchOff}
+        waitingGrant={waitingGrant}
+        grantBusy={grantBusy}
+        grantNote={grantNote}
+        fenceDark={fenceDark}
+        anchorLost={anchorLost}
+        anchorKnown={typeof anchorLat === "number"}
+        jobLabel={jobLabel}
+        onTurnOn={turnOnLocation}
+      />
+    );
 
   const closedTime = closedAt ? splitClock(closedAt, tz) : "";
   const pickedMs = pickedIso ? Date.parse(pickedIso) : null;

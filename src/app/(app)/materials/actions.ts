@@ -7,7 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import { HOW_MANY, takeOffFromQuote, takeOffWords, isDuplicateKey } from "@/lib/estimate/take-off-from-quote";
 import { materialsWords, syncQuoteMaterials } from "@/lib/estimate/sync-job-materials";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
+import { aiAllowed, recordAiUsage } from "@/lib/ai-cost";
+import { requireStaff } from "@/lib/staff-guard";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createNotifications, officeRecipients, ringOffice } from "@/lib/notifications";
@@ -644,11 +645,17 @@ function parseDraftArray(raw: string): unknown[] {
   }
 }
 
-/** Ask Claude to build a material take-off from a scope of work. */
+/** Ask Claude to build a material take-off from a scope of work. The office's door (requireStaff:
+ *  a take-off is priced by the price book), and gated like every AI door (aiAllowed, cn-v1137: a
+ *  plan that has ended, then the ceiling) — it had neither. */
 export async function generateMaterialDraft(
   scope: string,
 ): Promise<{ ok: true; items: DraftMaterial[] } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
+  const gate = await aiAllowed(ctx.orgId);
+  if (!gate.ok) return { ok: false, error: gate.why };
 
   try {
     const client = getAnthropic();
@@ -672,7 +679,7 @@ export async function generateMaterialDraft(
       // prepending "[" below would produce "[[{…}]" and fail both the parse and the salvage.
       messages: [{ role: "user", content: scope }],
     });
-    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "materials", usage: msg.usage as never });
+    void recordAiUsage({ orgId: ctx.orgId, model: DEFAULT_MODEL, surface: "materials", usage: msg.usage as never });
 
     const block = msg.content.find((b) => b.type === "text") as
       | { text: string }

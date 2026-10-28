@@ -52,6 +52,21 @@ describe("the bills page asks for every column it reads", () => {
 });
 
 /**
+ * BOTH ARE REAL RIDES THE BILLS READ (0400 both_real_at; skeptic #43, S2). The page's Needs You line
+ * and its open-duplicates count come from the same matcher Reconcile uses, and that matcher drops a
+ * pair he stamped — only if the stamp is in the select. The newest column falls off the ladder first.
+ */
+describe("the bills page reads both_real_at, and drops it first when the database hasn't got it", () => {
+  it("the column rides on the top rung alone, after the corrects columns; the ladder's next rung is the same read without it", () => {
+    expect(PAGE).toContain('${o.corrects ? ", corrects_bill_id, amount_paid" : ""}${o.bothReal ? ", both_real_at" : ""}');
+    expect(PAGE).toContain("{ billable: true, supplierAccount: true, supersede: true, corrects: true, bothReal: true },\n    { billable: true, supplierAccount: true, supersede: true, corrects: true, bothReal: false },");
+    expect((PAGE.match(/bothReal: true/g) ?? []).length).toBe(1);
+    // The missing-column shape names the new column, so a 42703 on it steps down one rung, not six.
+    expect(PAGE).toMatch(/isMissingColumn[\s\S]{0,400}both_real_at/);
+  });
+});
+
+/**
  * "$10k UNPAID" UNDER ALL BILLS OVER "$5k OWED" ON THE SUPPLIERS CARD (8a982483). Applying a CED
  * open list closes CED's documents (supplier_invoices.closed) and never a bill, so every ticket
  * ever bought on account read Unpaid forever. The page now reads, from the same covering walk

@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { DEFAULT_MODEL, getAnthropic } from "@/lib/anthropic";
-import { aiSpendExceeded, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { createServiceClient } from "@/lib/supabase/server";
 import { rateLimited } from "@/lib/rate-limit";
@@ -125,8 +125,9 @@ export async function runPlanBrief(
 
   // Spend gates BEFORE any claim, download or model call — and when a good report exists they
   // write NOTHING (a refusal to work must not cost the work already done).
-  if (await aiSpendExceeded(orgId)) {
-    const msg = "This month's AI budget is used up — the plans are still on the lead.";
+  const gate = await aiAllowed(orgId, undefined, { ceilingWords: "This month's AI budget is used up — the plans are still on the lead." });
+  if (!gate.ok) {
+    const msg = gate.why;
     return priorReady ? { ok: false, error: msg } : fail(msg, [], "skipped");
   }
   if (await rateLimited(`plan-brief:${orgId}`, 20, 86400, { failClosed: true })) {

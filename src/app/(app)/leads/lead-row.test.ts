@@ -141,6 +141,13 @@ describe("B. one next-step chip on the row", () => {
     expect(row(lead(), { visits: { done: 0, upcoming: 1, nextAt: "2026-10-01T17:00:00.000Z" } })).toContain("Inspection · Thu Oct 1");
   });
 
+  it("THE TRIAGE'S SCORE IS A CHIP (cn-v1137): a scored web lead says Priority N; a hand-added lead (0) shows no chip", () => {
+    const scored = row(lead({ priority: 42, source: "intake" as Inquiry["source"], lead_bucket: "B", intake: { reason: "Bucket B · $12,000 — quote it" } as Inquiry["intake"] }));
+    expect(scored).toMatch(/<span[^>]*title="Bucket B · \$12,000 — quote it"[^>]*>Priority 42<\/span>/);
+    expect(row(lead())).not.toContain("Priority ");
+    expect(row(lead({ priority: 0 }))).not.toContain("Priority 0");
+  });
+
   it("Referred By lives in the ⋯ panel, and only with Track Referrals on", () => {
     const referred = lead({ ...({ referrer: { full_name: "Chris Lane" } } as object) });
     expect(row(referred)).not.toContain("Chris Lane");

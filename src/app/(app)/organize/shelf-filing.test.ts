@@ -20,7 +20,7 @@ vi.mock("@/lib/job-in-org", () => jobGuard);
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 vi.mock("@/lib/anthropic", () => ({ DEFAULT_MODEL: "test-model", getAnthropic: () => ({}) }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model" }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model", aiAllowed: async () => ({ ok: true }) }));
 vi.mock("@/lib/analytics/job-profitability", () => ({ listJobScopes: async () => [] }));
 const importCosts = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => ({ ok: true as boolean, error: undefined as string | undefined })));
 vi.mock("@/app/(app)/billing/actions", async (orig) => ({ ...(await orig<Record<string, unknown>>()), importCostsIntoInvoice: importCosts }));

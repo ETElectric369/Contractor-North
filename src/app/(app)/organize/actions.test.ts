@@ -44,7 +44,7 @@ vi.mock("@/lib/anthropic", () => ({
   getAnthropic: () => ({ messages: { create: async () => ({ model: "test-model", content: [{ type: "text", text: "{}" }], usage: {} }) } }),
 }));
 vi.mock("@/lib/ai-json", () => ({ parseAiJson: async () => ai.parsed }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model" }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model", aiAllowed: async () => ({ ok: true }) }));
 vi.mock("@/lib/analytics/job-profitability", () => ({ listJobScopes: async () => [] }));
 const reported = vi.hoisted(() => ({ calls: [] as { where: string }[] }));
 vi.mock("@/lib/observe", () => ({

@@ -244,10 +244,45 @@ export function renderPortalCodeEmail(input: {
   </div>`;
 }
 
+/**
+ * A NOTE FROM NORTH ITSELF (cn-v1137): the billing notices — the trial's last days, a declined card,
+ * the day a plan ends. The sibling of renderReminderEmail with the company taken out: it is North
+ * writing to the contractor, not the contractor writing to a customer, so the header is North's,
+ * there is no "Hi <customer>", and it signs "— Contractor North". No company name is passed in, so
+ * none can leak into another company's mail. The heading, the message and the button's words go
+ * through the same escape as every other email here; the button's address is escaped for an
+ * attribute as well, so a quote in it cannot open a second one.
+ */
+export function renderPlatformNoticeEmail(input: {
+  heading: string;
+  message: string;
+  cta?: { label: string; href: string };
+}): string {
+  return `
+  <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
+    <div style="border-bottom:3px solid ${PLATFORM_BRAND};padding-bottom:12px;margin-bottom:16px">
+      <div style="font-size:20px;font-weight:700">Contractor North</div>
+    </div>
+    <p style="font-size:16px;font-weight:600;margin:0 0 12px">${escape(input.heading)}</p>
+    <p style="font-size:14px;color:#475569;margin:0">${escape(input.message)}</p>
+    ${input.cta ? `<p style="margin:18px 0"><a href="${attr(input.cta.href)}" style="display:inline-block;background:${PLATFORM_BRAND};color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600">${escape(input.cta.label)}</a></p>` : ""}
+    <p style="font-size:13px;color:#64748b;margin-top:24px">— Contractor North</p>
+  </div>`;
+}
+
+/** North's own blue: the color every email falls back to when a company has set none, and the
+ *  color of a note from North itself. */
+const PLATFORM_BRAND = "#0b57c4";
+
 /** A brand color is injected raw into email style attributes — constrain it to a
  *  valid hex so a malformed/hostile settings value can't break out of the attribute. */
 function safeColor(c: string | null | undefined): string {
-  return /^#[0-9a-fA-F]{3,8}$/.test(String(c ?? "")) ? String(c) : "#0b57c4";
+  return /^#[0-9a-fA-F]{3,8}$/.test(String(c ?? "")) ? String(c) : PLATFORM_BRAND;
+}
+
+/** A value inside a double-quoted attribute: the text escape, plus the quote itself. */
+function attr(s: string | null | undefined): string {
+  return escape(s).replace(/"/g, "&quot;");
 }
 
 function escape(s: string | null | undefined): string {

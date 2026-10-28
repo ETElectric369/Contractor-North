@@ -1,5 +1,5 @@
 "use server";
-import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, currentOrgId } from "@/lib/ai-cost";
 import { dbError } from "@/lib/db-error";
 import { isStaffRole } from "@/lib/actions/perms";
 
@@ -117,9 +117,13 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
     return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
   // Over the ceiling, the interview keeps WORKING — it just stops paying a model to phrase it.
   // fallbackSay is the same escape used when the API key is absent, so somebody setting their
-  // company up is never blocked; they get the plain question instead of the spoken one.
-  if (await aiSpendExceeded(orgId))
+  // company up is never blocked; they get the plain question instead of the spoken one. A company
+  // whose plan has ENDED (cn-v1137, aiAllowed's first check) is told so instead: one action.
+  const gate = await aiAllowed(orgId);
+  if (!gate.ok) {
+    if (gate.reason === "lapsed") return { ok: false, error: gate.why };
     return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
+  }
 
   let raw = "";
   try {
@@ -309,7 +313,8 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
   if (!process.env.ANTHROPIC_API_KEY) return undrafted;
   const orgId = await currentOrgId();
   if ((await nortSwitch(supabase, orgId)) !== "on") return undrafted;
-  if (await aiSpendExceeded(orgId)) return undrafted;
+  const gate = await aiAllowed(orgId);
+  if (!gate.ok) return gate.reason === "lapsed" ? { ok: false, error: gate.why } : undrafted;
 
   const orgQ = supabase.from("organizations").select("settings");
   const { data: org } = await (orgId ? orgQ.eq("id", orgId) : orgQ.limit(1)).maybeSingle();

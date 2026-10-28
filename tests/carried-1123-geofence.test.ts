@@ -10,7 +10,9 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/app/(app)/timeclock/actions", () => ({ adoptGeofenceAnchor: vi.fn(), geoClockOut: vi.fn(), notifyGeofenceExit: vi.fn() }));
 vi.mock("next/link", () => ({ default: () => null }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }), usePathname: () => "/" }));
-const { exitHandoff, shouldPushExit } = await import("@/components/geofence-monitor");
+const { exitHandoff, shouldPushExit, GeofenceIdleLine } = await import("@/components/geofence-monitor");
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
 
 const ROOT = path.resolve(__dirname, "..");
 const g = readFileSync(path.join(ROOT, "src/components/geofence-monitor.tsx"), "utf8");
@@ -127,5 +129,69 @@ describe("One site exit rings the phone twice: the native local notification, th
     expect(g.split('openPrompt("live");').length - 1).toBe(1);
     // `notify` is what the shell was armed with in this very effect run
     expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);");
+  });
+});
+
+/**
+ * LOCATION NOT ASKED YET IS SAID (cn-v1137; Bug Watch: Time Clock says nothing while permission is
+ * still "prompt"). The gate refuses an off-gesture read in "prompt" (the iOS rule) and the fence used
+ * to go quietly dark on a console.warn. Now the idle line says so and offers Turn On Location, whose
+ * tap is the gesture the rule needs; the words are a pure component, rendered here without a phone.
+ */
+describe("Turn On Location: the fence says it is waiting, and the tap is the gesture", () => {
+  const idle = (over: Partial<Parameters<typeof GeofenceIdleLine>[0]> = {}) =>
+    renderToStaticMarkup(
+      createElement(GeofenceIdleLine, {
+        watchOff: false,
+        waitingGrant: false,
+        fenceDark: null,
+        anchorLost: false,
+        anchorKnown: true,
+        jobLabel: "85 Larkspur",
+        onTurnOn: () => {},
+        ...over,
+      }),
+    );
+
+  it("in 'prompt' the line names the job and the one button, Title Case", () => {
+    const html = idle({ waitingGrant: true });
+    expect(html).toContain("Location isn’t on yet for North, so I can’t notice when you leave 85 Larkspur.");
+    expect(html).toMatch(/<button[^>]*type="button"[^>]*>\s*Turn On Location<\/button>/);
+    expect(html).not.toContain("Location is off for this app");
+    // A tap that did nothing is never a tap that said nothing.
+    expect(idle({ waitingGrant: true, grantNote: "The phone didn’t answer with a location in time. Try again." })).toContain("Try again.");
+    expect(idle({ waitingGrant: true, grantBusy: true })).toMatch(/<button[^>]*disabled=""/);
+  });
+
+  it("a denial takes over the line; granted and nothing else wrong is no line at all", () => {
+    const denied = idle({ waitingGrant: true, watchOff: true });
+    expect(denied).toContain("Location is off for this app");
+    expect(denied).not.toContain("Turn On Location");
+    expect(idle()).toBe("");
+    // The ask comes before the screen-off readiness words and before a lost anchor.
+    expect(idle({ waitingGrant: true, fenceDark: "whenInUse", anchorLost: true, anchorKnown: false })).toContain("Turn On Location");
+    expect(idle({ fenceDark: "denied" })).toContain("Location Services, North, Always");
+    expect(idle({ anchorLost: true, anchorKnown: false })).toContain("I couldn’t get a location at 85 Larkspur");
+  });
+
+  it("arm() sets the waiting state from the one unasked rule (denied is never it), and the monitor draws the idle line", () => {
+    expect(g).toContain("async function locationUnasked(): Promise<boolean> {\n  if ((await shellMayReadLocation()) !== null) return false;\n  return (await geoPermission()) === \"prompt\";\n}");
+    expect(g).toContain("const unasked = await locationUnasked();\n        if (!disposed) setWaitingGrant(unasked);");
+    expect(g).toContain("setWaitingGrant(false);\n      stop();\n      stop = watchPosition(onFix, onErr, opts);");
+    expect(g).toContain("<GeofenceIdleLine");
+    expect(g).toContain("onTurnOn={turnOnLocation}");
+  });
+
+  it("the tap reads inside the gesture (getPosition is navigator.geolocation.getCurrentPosition), then arms the watch and runs the wake check; a denial hands over to the denied banner", () => {
+    const tap = g.slice(g.indexOf("const turnOnLocation = () => {"), g.indexOf("};", g.indexOf("const turnOnLocation = () => {")) + 2);
+    expect(tap).toContain("void getPosition({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 }).then((r) => {");
+    expect(tap).toContain('if (r.status === "ok") {\n        setWaitingGrant(false);\n        lastWakeCheckRef.current = 0;\n        armRef.current();\n        checkRef.current();');
+    expect(tap).toContain('if (r.status === "denied") {\n        setWaitingGrant(false);\n        setWatchOff(true);');
+    // The arm the tap reaches is the live effect's own, and it is let go when the effect is.
+    expect(g).toContain("armRef.current = () => void arm();\n    void arm();");
+    expect(g).toContain("disposed = true;\n      armRef.current = () => {};");
+    // The clock-in words on Time Clock are untouched.
+    const panel = readFileSync(path.join(ROOT, "src/app/(app)/timeclock/timeclock-panel.tsx"), "utf8");
+    expect(panel).toContain('if (!gps) setGpsNote("Clocked in — location wasn\'t ready, so this punch isn\'t GPS-stamped.");');
   });
 });

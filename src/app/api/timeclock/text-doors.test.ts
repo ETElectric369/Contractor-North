@@ -44,6 +44,10 @@ vi.mock("@/lib/observe", async (orig) => ({
 }));
 // A failed company read is a BLOCKER (cn-v1136): no company was reached, so it pages North's own team.
 vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: vi.fn(), reportBlockerAwaited: vi.fn(async () => {}) }));
+// BILLING ON (cn-v1137): with a Stripe key a company's standing is read — the texting crons pass a
+// lapsed company over (readActiveOrgs) and the two human doors refuse for one (orgAccess). With
+// billing off nothing lapses, so the fixtures below carry a live status to be read at all.
+vi.mock("@/lib/stripe", async (orig) => ({ ...(await orig<typeof import("@/lib/stripe")>()), billingEnabled: true }));
 vi.mock("@/lib/cron-orgs", async (orig) => {
   const real = await orig<typeof import("@/lib/cron-orgs")>();
   return {
@@ -97,6 +101,8 @@ function fakeSupabase(route: (q: Q) => Reply) {
     return { data: r.data ?? null, error: r.error ?? null };
   };
   return {
+    // The signed-in person (the lapse refusal reads the caller's role through the user client).
+    auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     from(table: string) {
       const q: Q = { table, verb: "select", cols: "", filters: [] };
       const chain: any = {
@@ -139,9 +145,18 @@ const sentTexts = () =>
   });
 
 const TZ = { timezone: "America/Los_Angeles" };
-const ORG = { id: "org-1", name: "ET Electric", settings: { ...TZ } };
-const SECOND_ORG = { id: "org-2", name: "Snowbell Electric", settings: { ...TZ } };
-const BAD_ZONE_ORG = { id: "org-bad", name: "Larkspur Electric", settings: { ...TZ } };
+const ORG = { id: "org-1", name: "ET Electric", settings: { ...TZ }, subscription_status: "active" };
+const SECOND_ORG = { id: "org-2", name: "Snowbell Electric", settings: { ...TZ }, subscription_status: "active" };
+const BAD_ZONE_ORG = { id: "org-bad", name: "Larkspur Electric", settings: { ...TZ }, subscription_status: "active" };
+/** A company whose plan has ended (cn-v1137): never texted for, counted as lapsed. */
+const LAPSED_ORG = { id: "org-lapsed", name: "Bayberry Electric", settings: { ...TZ }, subscription_status: "canceled" };
+/** A comped company (the founding cohort, 0400's column): canceled at Stripe and still standing. */
+const COMPED_ORG = { id: "org-comped", name: "Catbird Electric", settings: { ...TZ }, subscription_status: "canceled", comped_until: "2099-01-01T00:00:00.000Z" };
+/** The profile reads the lapse refusal makes: the caller's role (by id), else the company's owner. */
+const peopleFor = (role: string) => (q: Q): Reply =>
+  q.filters.some((f) => f[0] === "eq" && f[1] === "id") ? { data: { role } } : { data: { full_name: "Larkspur Owner" } };
+const TEXTING_PAUSED_OWNER = "Texting is paused until a plan is picked. Pick a plan in Settings › Getting Paid.";
+const TEXTING_PAUSED_CREW = "Texting is paused until a plan is picked. Ask Larkspur to pick a plan.";
 const req = () => new Request("https://app.test/api", { headers: { authorization: "Bearer x" } });
 
 /** The company list the way readAllOrgs pages it (cn-v1130): every row on the page at from=0, and
@@ -246,6 +261,14 @@ describe("the morning nudge: no clock-in yet", () => {
     expect(reportError).toHaveBeenCalledWith("cron-nudge", { message: "boom" }, { orgId: "org-1" });
   });
 
+  it("a company whose plan has ended is not texted for and is counted; a comped one still is (cn-v1137)", async () => {
+    textingReady();
+    state.client = fakeSupabase((q) => (q.table === "organizations" ? orgPage(q, [LAPSED_ORG, COMPED_ORG]) : routes(q)));
+    const body = await (await nudge(req())).json();
+    expect(body).toMatchObject({ texted: 1, lapsed_skipped: 1, due: 1, failed: 0 });
+    expect(sentTexts()).toHaveLength(1);
+  });
+
   it("a failed company read is a 500 that is filed, never an empty run", async () => {
     textingReady();
     state.client = fakeSupabase(failing("organizations"));
@@ -329,6 +352,15 @@ describe("the evening reminder: still clocked in", () => {
     expect(body).toMatchObject({ due: 1, checked: 0, reminded: 0, failed: 1 });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1" });
+  });
+
+  it("a company whose plan has ended gets neither the reminder nor the debrief and is counted; a comped one gets both (cn-v1137)", async () => {
+    textingReady();
+    state.client = fakeSupabase((q) => (q.table === "organizations" ? orgPage(q, [LAPSED_ORG, COMPED_ORG]) : routes(q)));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ reminded: 1, lapsed_skipped: 1, due: 1, failed: 0 });
+    expect(sentTexts()).toHaveLength(1);
+    expect((spies.closeOutOrgs as { id: string }[]).map((o) => o.id)).toEqual(["org-comped"]);
   });
 
   it("a failed company read is a 500 that is filed, and the debrief is not sent either", async () => {
@@ -438,6 +470,16 @@ describe("the 12-hour question, as a text too", () => {
     expect(p.get("MessagingServiceSid")).toBe("MG-test");
   });
 
+  it("a company whose plan has ended is passed over whole — no bell line, no push, no text — and counted (cn-v1137)", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes("(530) 555-0100", LAPSED_ORG as typeof ORG));
+    const body = await (await longShift(req())).json();
+    expect(body).toMatchObject({ orgs: 0, asked: 0, texted: 0, office_buzzes: 0, lapsed_skipped: 1, failed: 0 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.push).toEqual([]);
+    expect(spies.notify).toEqual([]);
+  });
+
   it("a failed company read is a 500 filed through the waited-for door, never an empty run", async () => {
     state.client = fakeSupabase((q) => (q.table === "organizations" ? { error: { message: "boom" } } : routes("(530) 555-0100")(q)));
     const res = await longShift(req());
@@ -487,6 +529,22 @@ describe("Text on an invoice", () => {
     const updates: Q[] = [];
     state.client = fakeSupabase(routes(updates));
     expect(await textInvoice("inv-1")).toEqual({ ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+  });
+
+  it("a company whose plan has ended: refused where he tapped, in his role, nothing sent, nothing stamped (cn-v1137)", async () => {
+    textingReady();
+    const updates: Q[] = [];
+    const lapsed = (role: string) => (q: Q): Reply => {
+      if (q.table === "organizations") return { data: { ...LAPSED_ORG, settings: { ...LAPSED_ORG.settings, invoice_due_days: 14 } } };
+      if (q.table === "profiles") return peopleFor(role)(q);
+      return routes(updates)(q);
+    };
+    state.client = fakeSupabase(lapsed("owner"));
+    expect(await textInvoice("inv-1")).toEqual({ ok: false, error: TEXTING_PAUSED_OWNER });
+    state.client = fakeSupabase(lapsed("office"));
+    expect(await textInvoice("inv-1")).toEqual({ ok: false, error: TEXTING_PAUSED_CREW });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(updates).toEqual([]);
   });
@@ -588,6 +646,22 @@ describe("Text on an estimate", () => {
     const updates: Q[] = [];
     state.client = fakeSupabase(routes(updates));
     expect(await textQuote("q-1")).toEqual({ ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+  });
+
+  it("a company whose plan has ended: refused where he tapped, in his role, nothing sent, the draft stays a draft (cn-v1137)", async () => {
+    textingReady();
+    const updates: Q[] = [];
+    const lapsed = (role: string) => (q: Q): Reply => {
+      if (q.table === "organizations") return { data: LAPSED_ORG };
+      if (q.table === "profiles") return peopleFor(role)(q);
+      return routes(updates)(q);
+    };
+    state.client = fakeSupabase(lapsed("admin"));
+    expect(await textQuote("q-1")).toEqual({ ok: false, error: TEXTING_PAUSED_OWNER });
+    state.client = fakeSupabase(lapsed("tech"));
+    expect(await textQuote("q-1")).toEqual({ ok: false, error: TEXTING_PAUSED_CREW });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(updates).toEqual([]);
   });

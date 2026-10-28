@@ -47,6 +47,15 @@ describe("tasksFromLines — what an accepted estimate gives birth to", () => {
     ]);
   });
 
+  it("a note under the line (Add A Note: the description's second line) is not part of the task's title (skeptic #43, S6)", () => {
+    const b = tasksFromLines([
+      line("a", "Hang the fan\nCustomer supplies the fan", 0, detail(1)),
+      line("b", "Footings ×2\nUse the 10-inch tubes\nNorth side first", 1, detail(2)),
+    ]);
+    expect(b.tasks.map((t) => t.title)).toEqual(["Hang the fan", "Footings ×2"]);
+    expect(b.tasks.map((t) => t.planned_minutes)).toEqual([60, 120]);
+  });
+
   it("a task's minutes are its labor ROWS' hours summed (cn-v1131); a row still asking adds nothing; a line saved before the rows births the same", () => {
     const two = {
       task_id: "t-two",

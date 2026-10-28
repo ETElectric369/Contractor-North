@@ -34,7 +34,7 @@ vi.mock("@/lib/anthropic", () => ({
   }),
 }));
 vi.mock("@/lib/ai-json", () => ({ parseAiJson: async () => ai.parsed }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model" }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model", aiAllowed: async () => ({ ok: true }) }));
 // What the job's estimate is broken into: nothing, unless a test says otherwise (item C1-4 needs a
 // job with real parts before the reader can put a cost under one).
 const estimate = vi.hoisted(() => ({ scopes: [] as string[] }));

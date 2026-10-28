@@ -1,5 +1,7 @@
 import { PROFILE_SAFE_COLS } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { checkUser } from "@/lib/supabase/user-check";
@@ -8,7 +10,8 @@ import { Topbar } from "@/components/app-shell/topbar";
 import { CommandBar } from "@/components/command-bar";
 import { SetupHost } from "@/components/setup-host";
 import { billingEnabled, stripeConfigAlarm } from "@/lib/stripe";
-import { hasActiveAccess, isCompedOrg, graceDaysLeft } from "@/lib/subscription";
+import { hasActiveAccess, isCompedOrg, accessState, BILLING_COLUMNS } from "@/lib/subscription";
+import { lapseWall, PATHNAME_HEADER, SEARCH_HEADER } from "@/lib/lapse-doors";
 import { getOrgSettings } from "@/lib/org-settings";
 import { orgTrade } from "@/lib/org-trade";
 import { getActionItemsCount } from "@/lib/action-items/query";
@@ -101,19 +104,22 @@ export default async function AppLayout({
   // pick their own before they can use the app, so the temp can't be reused indefinitely.
   if (profile.must_reset_password) redirect("/set-password");
 
-  // THE PROJECTION LAW, on the paywall itself. graceDaysLeft counts forward from
-  // current_period_end and treats a MISSING one as "no period recorded → don't lock them out",
-  // which is the right call for an org Stripe never billed. But this select never asked for the
-  // column, so every past_due org looked like that org: graceDaysLeft returned the full 10 days
-  // forever, hasActiveAccess stayed true forever, and the grace window could never close. A
-  // declined card was permanent free access. The `as any` at the call site below is what let a
-  // missing column through the type checker — so the shape is named here and the cast is gone.
+  // THE PROJECTION LAW, on the paywall itself. The one access rule (lib/subscription accessState)
+  // counts the grace window forward from current_period_end and treats a MISSING one as "no period
+  // recorded → don't lock them out", which is the right call for an org Stripe never billed. But
+  // this select once never asked for the column, so every past_due org looked like that org: the
+  // grace read answered the full 10 days forever, hasActiveAccess stayed true forever, and the
+  // window could never close. A declined card was permanent free access. The `as any` at the call
+  // site below is what let a missing column through the type checker — so the shape is named here,
+  // the cast is gone, and the select builds from BILLING_COLUMNS.
   type OrgLite = {
     name: string | null;
     logo_url: string | null;
     subscription_status: string | null;
     trial_ends_at: string | null;
     current_period_end: string | null;
+    /** cn-v1137 (0400): a comped company stands on this column; accessState reads it (projection law). */
+    comped_until: string | null;
     settings: unknown;
     // The company's own address (the mailing one, organizations.*): where every address box
     // looks first when the phone has no fix of its own (lib/place-bias).
@@ -135,7 +141,9 @@ export default async function AppLayout({
     try {
       const { data } = await supabase
         .from("organizations")
-        .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings, address_line1, city, state, zip")
+        // THE BILLING COLUMNS COME FROM THE ONE LIST (lib/subscription BILLING_COLUMNS): the wall
+        // below reads them, so the select cannot drift from the rule (projection law; skeptic #43, N4).
+        .select(`name, logo_url, ${BILLING_COLUMNS.join(", ")}, settings, address_line1, city, state, zip`)
         .eq("id", profile.org_id)
         .maybeSingle();
       return (data as OrgLite | null) ?? null;
@@ -221,18 +229,43 @@ export default async function AppLayout({
   const isOwner = profile.role === "owner";
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
-  // The operator's own house org (COMPED_ORG_IDS) is never paywalled.
+  // The operator's own house org (COMPED_ORG_IDS) is never paywalled; a comped_until stamp (0400)
+  // is read by hasActiveAccess through accessState.
   // A missing key in production is said once in the error sink (cn-v1129), never a silent open wall.
+  //
+  // THE DOORS A LAPSED COMPANY KEEPS (cn-v1137, lib/lapse-doors): the owner or an admin on Settings,
+  // /subscribe or the accountant's export is NOT redirected — the shell is drawn with a red bar and
+  // Pick A Plan, so the fix is one tap away and the books are never held by the bill. Everyone
+  // else, every other path, and a request whose path header is missing go to /subscribe, carrying
+  // a billing_error that landed them here. The path and query are middleware's two headers; the
+  // headers() read happens only inside this branch, so a standing company pays nothing for it.
+  let lapseBar: string | null = null;
   stripeConfigAlarm();
   if (billingEnabled && org && !hasActiveAccess(org) && !isCompedOrg(profile.org_id)) {
-    redirect("/subscribe");
+    const h = await headers();
+    const wall = lapseWall({
+      state: accessState(org),
+      role: profile.role,
+      pathname: h.get(PATHNAME_HEADER),
+      search: h.get(SEARCH_HEADER),
+    });
+    if (wall.kind === "redirect") redirect(wall.to);
+    if (wall.kind === "bar") lapseBar = wall.words;
   }
+  // THE SHELL KNOWS IT IS LAPSED (skeptic #43, S1): a client navigation does not re-run this layout,
+  // so on an open door the dock, the strip, the + and the menus draw the open doors ALONE (lib/dock
+  // LAPSED_DOCK) — never a map of pages a hard load would have turned away from. No template.tsx:
+  // that would be a second database read on every navigation.
+  const lapsed = !!lapseBar;
 
   // Inside the grace window after a declined card: the crew keeps working, but the
   // owner must SEE it — a silent countdown that ends in a locked-out morning is the
   // worst possible version of this. Escalates as the days run down.
-  const graceLeft =
-    billingEnabled && org && !isCompedOrg(profile.org_id) ? graceDaysLeft(org) : 0;
+  // THE ONE ACCESS RULE decides this too (skeptic #43, S9): a company comped by the column (0400)
+  // while past due is comped, not in grace, so it sees no declined-card banner; the id rides in so
+  // the env list counts as it does everywhere else.
+  const standing = billingEnabled && org ? accessState({ ...org, id: profile.org_id }) : null;
+  const graceLeft = standing?.reason === "grace" ? (standing.daysLeft ?? 0) : 0;
 
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
   // WHAT THE COMPANY STILL HASN'T SAID ABOUT ITSELF, in the setup playbook's own keys — read off
@@ -385,9 +418,30 @@ export default async function AppLayout({
         } as React.CSSProperties
       }
     >
-      <Dock branding={branding} role={profile.role} badges={badges} features={doors} />
+      <Dock branding={branding} role={profile.role} badges={badges} features={doors} lapsed={lapsed} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={onboarded} platformAdmin={platformAdmin} features={doors} bugCount={bugCount} />
+        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={onboarded} platformAdmin={platformAdmin} features={doors} bugCount={bugCount} lapsed={lapsed} />
+        {/* THE RED BAR of a lapsed company on one of its open doors (cn-v1137): the words from the
+            one access rule, the one action, and the door the lapsed notice promised stays open —
+            Download For Your Accountant (skeptic #43, S7). Only an owner/admin ever sees the shell
+            lapsed. */}
+        {lapseBar && (
+          <div className="no-print flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-red-600 px-4 py-2 text-center text-sm font-medium text-white">
+            <span>{lapseBar}</span>
+            <Link
+              href="/subscribe"
+              className="inline-flex min-h-8 items-center rounded-md bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50"
+            >
+              Pick A Plan
+            </Link>
+            <Link
+              href="/analytics/accountant"
+              className="inline-flex min-h-8 items-center rounded-md border border-white/70 px-3 text-xs font-semibold text-white hover:bg-red-700"
+            >
+              Download For Your Accountant
+            </Link>
+          </div>
+        )}
         {graceLeft > 0 && (
           <div
             className={`no-print px-4 py-2 text-center text-sm font-medium ${
@@ -437,7 +491,7 @@ export default async function AppLayout({
                 going, and upright nothing about any of it changes. */}
             <PullToRefresh />
             <Suspense fallback={null}>
-              <SectionSubnav isStaff={isStaff} features={doors} />
+              <SectionSubnav isStaff={isStaff} features={doors} lapsed={lapsed} />
             </Suspense>
             {/* A page whose feature is switched off still opens from a link, with the Off line on top. */}
             <RouteOffLine features={features} isOwner={isOwner} />
@@ -450,7 +504,7 @@ export default async function AppLayout({
         </main>
       </div>
       {/* Search Or Ask's sheet: with nothing typed, Talk To Nort and (staff) the setup rows. */}
-      <CommandBar isStaff={isStaff} features={doors} setup={setup} onboarded={onboarded} hasPettyCash={hasPettyCash} />
+      <CommandBar isStaff={isStaff} features={doors} setup={setup} onboarded={onboarded} hasPettyCash={hasPettyCash} lapsed={lapsed} />
       {/* The setup screens (the tour, the questions, a lesson), mounted ONCE here and opened by the
           setup rows through cn:setup, so closing the sheet a row sat in never kills a lesson. */}
       <SetupHost initial={setup} isStaff={isStaff} onboarded={onboarded} features={doors} />

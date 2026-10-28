@@ -1,5 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { atLocalHour, readAllOrgs } from "./cron-orgs";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+/** The billing switch, as readActiveOrgs reads it: ON for the lapse cases below, OFF for the case
+ *  that proves nobody is lapsed when there is no Stripe key (cn-v1137: nothing to lapse from). */
+const billing = vi.hoisted(() => ({ enabled: true }));
+vi.mock("@/lib/stripe", () => ({
+  get billingEnabled() {
+    return billing.enabled;
+  },
+}));
+import { atLocalHour, readAllOrgs, readActiveOrgs, withBillingColumns } from "./cron-orgs";
+import { BILLING_COLUMNS } from "./subscription";
 import { todayStrInTz, tzDayOfWeek } from "./tz";
 
 /**
@@ -163,5 +173,81 @@ describe("tzDayOfWeek", () => {
     expect(lateThursday.getUTCDay()).toBe(5);
     expect(tzDayOfWeek("America/Los_Angeles", lateThursday)).toBe(4);
     expect(tzDayOfWeek("UTC", lateThursday)).toBe(5);
+  });
+});
+
+/**
+ * THE LAPSE POLICY'S READ (cn-v1137, decision 3): a company whose plan has ended gets no texts, no
+ * reminders, no nightly review — the crons that reach on a company's behalf read through
+ * readActiveOrgs, which drops the lapsed ones and counts them so the run says so. The filter is
+ * accessState (the one rule), so the select must carry the billing columns whatever the caller asked
+ * for: withBillingColumns adds only the missing names, once.
+ */
+describe("readActiveOrgs", () => {
+  beforeEach(() => {
+    billing.enabled = true;
+  });
+  const NOW = Date.parse("2026-10-28T17:00:00Z");
+  const days = (n: number) => new Date(NOW + n * 86_400_000).toISOString();
+  const ACTIVE = { id: "a", settings: {}, subscription_status: "active", trial_ends_at: null, current_period_end: null, comped_until: null };
+  const TRIALING = { id: "b", settings: {}, subscription_status: "trialing", trial_ends_at: days(5), current_period_end: null, comped_until: null };
+  const COMPED = { id: "c", settings: {}, subscription_status: "canceled", trial_ends_at: null, current_period_end: null, comped_until: days(60) };
+  const TRIAL_ENDED = { id: "d", settings: {}, subscription_status: "trialing", trial_ends_at: days(-2), current_period_end: null, comped_until: null };
+  const CANCELED = { id: "e", settings: {}, subscription_status: "canceled", trial_ends_at: null, current_period_end: null, comped_until: null };
+  const IN_GRACE = { id: "f", settings: {}, subscription_status: "past_due", trial_ends_at: null, current_period_end: days(-1), comped_until: null };
+
+  it("drops a trial that ended and a canceled plan, keeps active, trialing, comped and in-grace, and counts the skipped", async () => {
+    const { client, asked } = fakeOrgs((from) => ({ data: from === 0 ? [ACTIVE, TRIALING, COMPED, TRIAL_ENDED, CANCELED, IN_GRACE] : [], error: null }));
+    const { rows, lapsedSkipped } = await readActiveOrgs(client, "id, settings", NOW);
+    expect(rows.map((r) => r.id)).toEqual(["a", "b", "c", "f"]);
+    expect(lapsedSkipped).toBe(2);
+    // The read carried the billing columns the filter needs, whatever the caller asked for.
+    expect(asked[0].cols).toBe("id, settings, subscription_status, trial_ends_at, current_period_end, comped_until");
+    for (const q of asked) expect(q.order).toEqual(["id"]);
+  });
+
+  it("nothing lapsed: every row kept, zero skipped; nothing at all: empty and zero", async () => {
+    const all = fakeOrgs((from) => ({ data: from === 0 ? [ACTIVE, TRIALING] : [], error: null }));
+    expect(await readActiveOrgs(all.client, "id, settings", NOW)).toEqual({ rows: [ACTIVE, TRIALING], lapsedSkipped: 0 });
+    const none = fakeOrgs(() => ({ data: [], error: null }));
+    expect(await readActiveOrgs(none.client, "id, settings", NOW)).toEqual({ rows: [], lapsedSkipped: 0 });
+  });
+
+  it("a failed read throws, as readAllOrgs does — never an empty run with zero skipped", async () => {
+    const { client } = fakeOrgs(() => ({ data: null, error: { message: "boom" } }));
+    await expect(readActiveOrgs(client, "id, settings", NOW)).rejects.toThrow("organizations could not be read: boom");
+  });
+
+  it("the caller's own columns go through, the billing columns joined once", async () => {
+    const { client, asked } = fakeOrgs((from) => ({ data: from === 0 ? [{ ...ACTIVE, name: "Larkspur Electric" }] : [], error: null }));
+    await readActiveOrgs(client, "id, name, settings, trial_ends_at", NOW);
+    expect(asked[0].cols).toBe("id, name, settings, trial_ends_at, subscription_status, current_period_end, comped_until");
+  });
+
+  it("billing off (no Stripe key): nobody is lapsed — every company is read with the caller's own columns and none is skipped", async () => {
+    billing.enabled = false;
+    const { client, asked } = fakeOrgs((from) => ({ data: from === 0 ? [ACTIVE, TRIAL_ENDED, CANCELED] : [], error: null }));
+    const { rows, lapsedSkipped } = await readActiveOrgs(client, "id, settings", NOW);
+    expect(rows.map((r) => r.id)).toEqual(["a", "d", "e"]);
+    expect(lapsedSkipped).toBe(0);
+    expect(asked[0].cols).toBe("id, settings");
+    // And a failed read still throws.
+    const failed = fakeOrgs(() => ({ data: null, error: { message: "boom" } }));
+    await expect(readActiveOrgs(failed.client, "id, settings", NOW)).rejects.toThrow("organizations could not be read: boom");
+  });
+});
+
+describe("withBillingColumns", () => {
+  it("adds only the missing names, once, and leaves a complete list alone", () => {
+    expect(withBillingColumns("id, settings")).toBe("id, settings, subscription_status, trial_ends_at, current_period_end, comped_until");
+    expect(withBillingColumns("id, settings, comped_until")).toBe("id, settings, comped_until, subscription_status, trial_ends_at, current_period_end");
+    const whole = withBillingColumns("id, settings");
+    expect(withBillingColumns(whole)).toBe(whole);
+    expect(withBillingColumns(`id, ${BILLING_COLUMNS.join(", ")}`)).toBe(`id, ${BILLING_COLUMNS.join(", ")}`);
+  });
+
+  it("adds the id when the caller left it out (the pages are ordered by it), and reads the names however they are spaced", () => {
+    expect(withBillingColumns("settings")).toBe("settings, id, subscription_status, trial_ends_at, current_period_end, comped_until");
+    expect(withBillingColumns("id,settings,subscription_status ,trial_ends_at")).toBe("id,settings,subscription_status ,trial_ends_at, current_period_end, comped_until");
   });
 });

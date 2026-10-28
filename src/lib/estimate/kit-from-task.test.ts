@@ -29,6 +29,11 @@ describe("kitNameFromLine", () => {
     expect(kitNameFromLine("  Footings ")).toBe("Footings");
     expect(kitNameFromLine("Run 7 circuits")).toBe("Run 7 circuits");
   });
+
+  it("drops the note under the line too: a kit is named by the head alone (skeptic #43, S6)", () => {
+    expect(kitNameFromLine("Footings ×7\nUse the 10-inch tubes")).toBe("Footings");
+    expect(kitNameFromLine("Footings\nUse the 10-inch tubes\nNorth side first")).toBe("Footings");
+  });
 });
 
 describe("kitFromTaskDetail: per unit, from his totals", () => {

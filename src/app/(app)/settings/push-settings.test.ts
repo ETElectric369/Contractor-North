@@ -88,6 +88,73 @@ describe("pushTriggersFor: the Bug Watch row", () => {
 });
 
 /**
+ * BILLING AND YOUR PLAN (cn-v1137): the trial's last days, a declined card, the day a plan ends — the
+ * senders (lib/billing-notices, the Stripe webhook) address the owner and admins only, so only they
+ * see the switch; the office and the crew, who can neither pick a plan nor update the card, never see
+ * a switch for a buzz they cannot receive (KEEP THIS HONEST).
+ */
+describe("pushTriggersFor: the Billing And Your Plan row", () => {
+  const BILLING = "billing:Billing And Your Plan";
+
+  it("is there for an owner and an admin", () => {
+    expect(rows("owner")).toContain(BILLING);
+    expect(rows("admin")).toContain(BILLING);
+  });
+
+  it("is not there for the office, a tech, an unknown role, or a platform admin who is only office", () => {
+    expect(rows("office")).not.toContain(BILLING);
+    expect(rows("tech")).not.toContain(BILLING);
+    expect(rows(null)).not.toContain(BILLING);
+    expect(pushTriggersFor("office", ALL_ON, true).map((t) => t.key)).not.toContain("billing");
+  });
+
+  it("no company switch turns it off, and it is the only difference between an owner's list and the office's", () => {
+    for (const k of Object.keys(ALL_ON) as (keyof FeatureMap)[]) expect(rows("owner", off(k))).toContain(BILLING);
+    expect(rows("owner").filter((r) => r !== BILLING)).toEqual(rows("office"));
+    expect(rows("admin").filter((r) => r !== BILLING)).toEqual(rows("office"));
+  });
+
+  it("says what it covers, in Title Case, to admins", () => {
+    const row = pushTriggersFor("owner", ALL_ON).find((t) => t.key === "billing")!;
+    expect(row.label).toBe("Billing And Your Plan");
+    expect(row.help).toBe("Your trial's last days, a declined card, and when a plan ends. Owners and admins only.");
+    expect(row.audience).toBe("admins");
+    expect(row.soon).toBeUndefined();
+    for (const word of row.label.split(/[\s:]+/).filter(Boolean)) expect(word[0]).toBe(word[0].toUpperCase());
+  });
+});
+
+/**
+ * THE DEFAULTS HAND COPY MIRRORS lib/push.ts: that file is server-only, so the client screen keeps
+ * its own copy of what each kind defaults to, and a kind added to one and not the other would draw
+ * a switch that reads the wrong way (or none).
+ */
+describe("the DEFAULTS hand copy mirrors lib/push.ts", () => {
+  const defaultsIn = (file: string) => {
+    const src = readFileSync(join(process.cwd(), file), "utf8");
+    const block = src.match(/const DEFAULTS[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+    return Object.fromEntries([...block.matchAll(/^\s*(\w+):\s*(true|false),/gm)].map((m) => [m[1], m[2] === "true"]));
+  };
+
+  it("the same kinds, each with the same default, in both files", () => {
+    const screen = defaultsIn("src/app/(app)/settings/push-settings.tsx");
+    const server = defaultsIn("src/lib/push.ts");
+    expect(Object.keys(screen).length).toBeGreaterThanOrEqual(11);
+    expect(screen).toEqual(server);
+    expect(screen.billing).toBe(true);
+    expect(screen.bug_watch).toBe(true);
+    expect(screen.day_ahead).toBe(false);
+  });
+
+  it("every switch on the screen has a default, and every default is a switch (no kind without a row, no row without a kind)", () => {
+    const screen = defaultsIn("src/app/(app)/settings/push-settings.tsx");
+    const keys = new Set<string>();
+    for (const role of ["owner", "tech"]) for (const t of pushTriggersFor(role, ALL_ON, true)) keys.add(t.key);
+    expect([...keys].sort()).toEqual(Object.keys(screen).sort());
+  });
+});
+
+/**
  * THE PAGE ANSWERS THE PLATFORM QUESTION ITSELF (skeptic #42, S8): PushSettings used to get `role` but
  * not `platformAdmin`, so the effect fired myNotificationRole() — a profiles read and an RPC — on every
  * settings visit for every company member. Now the server page computes isPlatformAdmin with the

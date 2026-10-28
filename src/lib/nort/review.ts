@@ -1,7 +1,7 @@
 import { recordAiUsage } from "@/lib/ai-cost";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropic, DEFAULT_MODEL, isModelDead, modelDeadError } from "@/lib/anthropic";
-import { readAllOrgs } from "@/lib/cron-orgs";
+import { readActiveOrgs } from "@/lib/cron-orgs";
 import { errorMessage, reportError } from "@/lib/observe";
 import { reportBlocker } from "@/lib/observe-blocker";
 
@@ -207,14 +207,15 @@ export async function generateNortReview(
  * never swallowed, and the rest still run. `deadlineMs`: a model call per company adds up, and
  * Vercel kills the function at maxDuration with no row to say so — past the deadline the runner
  * stops and files ONE row saying how many companies it did not reach, so a month of missing
- * reviews has a name in the sink instead of a quiet gap.
+ * reviews has a name in the sink instead of a quiet gap. A company whose plan has ended is not
+ * reviewed (cn-v1137, decision 3: readActiveOrgs drops it) and is counted in `lapsed_skipped`.
  */
 export async function generateNortReviewsForAllOrgs(
   supabase: SupabaseClient,
   opts: { deadlineMs?: number } = {},
-): Promise<{ made: number; failed: number; left: number }> {
-  const orgs = await readAllOrgs<{ id: string }>(supabase, "id");
-  const out = { made: 0, failed: 0, left: 0 };
+): Promise<{ made: number; failed: number; left: number; lapsed_skipped: number }> {
+  const { rows: orgs, lapsedSkipped } = await readActiveOrgs<{ id: string }>(supabase, "id");
+  const out = { made: 0, failed: 0, left: 0, lapsed_skipped: lapsedSkipped };
   for (let i = 0; i < orgs.length; i++) {
     if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
       out.left = orgs.length - i;

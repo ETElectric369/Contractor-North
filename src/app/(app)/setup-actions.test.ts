@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   modelCalls: 0,
   hearCalls: 0,
   overCeiling: false,
+  lapsed: false,
   reply: "",
   seeded: 0,
   seedSchema: [] as unknown[],
@@ -26,7 +27,14 @@ vi.mock("./forms/actions", () => ({
 }));
 vi.mock("@/lib/ai-cost", () => ({
   recordAiUsage: vi.fn(async () => undefined),
-  aiSpendExceeded: vi.fn(async () => state.overCeiling),
+  // The one gate (cn-v1137): the ceiling as before, or a plan that has ended, in words.
+  aiAllowed: vi.fn(async () =>
+    state.lapsed
+      ? { ok: false, reason: "lapsed", why: "This company's free trial has ended, so Nort is paused. Pick a plan in Settings › Getting Paid." }
+      : state.overCeiling
+        ? { ok: false, reason: "ceiling", why: "the ceiling" }
+        : { ok: true },
+  ),
   currentOrgId: vi.fn(async () => "org-1"),
 }));
 vi.mock("@/lib/anthropic", () => ({
@@ -73,6 +81,7 @@ beforeEach(() => {
   state.modelCalls = 0;
   state.hearCalls = 0;
   state.overCeiling = false;
+  state.lapsed = false;
   state.reply = QUIET_REPLY;
   state.seeded = 0;
   state.seedSchema = SHEET;
@@ -206,6 +215,14 @@ describe("Nort on: the same doors as before", () => {
   it("...except past this month's ceiling, where the draft door now falls back like talkSetup does", async () => {
     state.overCeiling = true;
     expect(await draftMyPlaybook()).toMatchObject({ ok: true, wasDrafted: false });
+    expect(state.modelCalls).toBe(0);
+  });
+
+  it("a plan that has ENDED is refused in words at both doors (cn-v1137): no model, no plain-question fallback that hides it", async () => {
+    state.lapsed = true;
+    const why = "This company's free trial has ended, so Nort is paused. Pick a plan in Settings › Getting Paid.";
+    expect(await talkSetup(null, {}, "Hello")).toEqual({ ok: false, error: why });
+    expect(await draftMyPlaybook()).toEqual({ ok: false, error: why });
     expect(state.modelCalls).toBe(0);
   });
 

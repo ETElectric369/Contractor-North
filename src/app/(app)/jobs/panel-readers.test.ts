@@ -29,6 +29,9 @@ vi.mock("@/app/(app)/materials/actions", () => ({ addMaterialItem: vi.fn(), dele
 vi.mock("@/lib/anthropic", () => ({ getAnthropic: () => s.model }));
 vi.mock("@/lib/ai-cost", () => ({
   aiSpendExceeded: vi.fn(async () => s.spent),
+  aiAllowed: vi.fn(async (_o: unknown, _r: unknown, opts?: { ceilingWords?: string }) =>
+    s.spent ? { ok: false, reason: "ceiling", why: opts?.ceilingWords ?? "the ceiling" } : { ok: true },
+  ),
   modelFor: () => "claude-opus-4-8",
   recordAiUsage: vi.fn(async () => {}),
 }));

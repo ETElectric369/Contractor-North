@@ -34,6 +34,9 @@ import {
   CheckCircle2,
   Umbrella,
   ClipboardCheck,
+  CreditCard,
+  Download,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { titleCase } from "@/lib/utils";
@@ -338,6 +341,28 @@ export const DOCK: DockSection[] = [
 export const basePath = (href: string) => href.split("?")[0];
 
 /**
+ * THE DOORS A LAPSED COMPANY KEEPS, as the shell draws them (cn-v1137; lib/lapse-doors'
+ * LAPSED_OPEN_DOORS is the wall's list, this is its nav). When the layout draws the shell with the
+ * red bar — the owner or an admin on Settings, /subscribe or the accountant's export — every
+ * renderer that reads visibleDock (the rail, the phone bar, the section strip, the avatar menu's
+ * rows, Search Or Ask) draws THIS section alone, so a soft navigation from an open door cannot
+ * reach a page the wall turns a hard load away from (skeptic #43, S1: the (app) layout does not
+ * re-run on a client navigation, so the full dock on /settings was a map of every closed door).
+ * One mode inside the one filter, never a second nav tree.
+ */
+export const LAPSED_DOCK: DockSection = {
+  key: "plan",
+  label: "Plan",
+  icon: CreditCard,
+  href: "/subscribe",
+  children: [
+    { id: "lp-pick", label: "Pick A Plan", icon: CreditCard, href: "/subscribe" },
+    { id: "lp-settings", label: "Settings", icon: Settings, href: "/settings" },
+    { id: "lp-accountant", label: "Download For Your Accountant", icon: Download, href: "/analytics/accountant" },
+  ],
+};
+
+/**
  * THE ONE DOCK FILTER (the switch board, 0352): the dock this person sees. The rail, the phone
  * bar, the section strip/sheet and the command bar all draw from it, so the role rule and the
  * switch rule can't drift between them (the role filter used to be copied into each renderer).
@@ -356,8 +381,12 @@ export const basePath = (href: string) => href.split("?")[0];
  * A SWITCH HIDES DOORS ONLY: a page behind a hidden row still opens from a link, with the Off
  * line on top (components/route-off-line). `features` is what the layout hands the shell (lib/
  * feature-doors shellDoors); no map is everything on, which is the role filter alone.
+ *
+ * `lapsed` (the layout's red bar: a lapsed company's owner or admin on an open door) is the one
+ * other mode: the LAPSED_DOCK alone, whatever the role and the switches say.
  */
-export function visibleDock({ isStaff, features }: { isStaff: boolean; features?: FeatureMap | null }): DockSection[] {
+export function visibleDock({ isStaff, features, lapsed = false }: { isStaff: boolean; features?: FeatureMap | null; lapsed?: boolean }): DockSection[] {
+  if (lapsed) return [LAPSED_DOCK];
   const on = (k?: FeatureKey) => !k || featureOn(features, k);
   const mine = (c: DockNode) => (isStaff ? !c.techOnly : !c.staffOnly);
   return DOCK.filter((s) => (isStaff || !s.staffOnly) && (!isStaff || !s.techOnly) && on(s.feature)).flatMap((s) => {

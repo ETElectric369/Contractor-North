@@ -1,6 +1,8 @@
 import { readAllPages } from "@/lib/read-all-pages";
 import { tzDayOfWeek, tzMinutesOfDay } from "@/lib/tz";
 import { errorMessage } from "@/lib/observe";
+import { accessState, BILLING_COLUMNS } from "@/lib/subscription";
+import { billingEnabled } from "@/lib/stripe";
 
 /**
  * EVERY COMPANY, WHOLE, OR A FAILURE (cn-v1130). The org-wide crons used to read `organizations`
@@ -29,6 +31,34 @@ export async function readAllOrgs<T = OrgRow>(supabase: Client, columns = "id, s
   // used to read "[object Object]" here.
   if (error) throw new Error(`organizations could not be read: ${errorMessage(error)}`);
   return rows;
+}
+
+/** The select list with the billing columns added once each (projection law: the filter below
+ *  reads them, so the read must carry them whatever the caller asked for). */
+export function withBillingColumns(columns: string): string {
+  const have = new Set(columns.split(",").map((c) => c.trim()).filter(Boolean));
+  const missing = ["id", ...BILLING_COLUMNS].filter((c) => !have.has(c));
+  return missing.length ? `${columns}, ${missing.join(", ")}` : columns;
+}
+
+/**
+ * THE LAPSE POLICY'S READ (cn-v1137, decision 3): a company whose plan has ended gets no texts, no
+ * reminders, no nightly review, no digest — the crons that spend or reach on a company's behalf read
+ * the companies through THIS and skip the lapsed ones, counting them so the run says so. The billing
+ * notices themselves, the error sweep and the housekeeping sweeps still use readAllOrgs: they are
+ * North's own work, not the company's. A comped company (column or env) is never lapsed.
+ * BILLING OFF (no Stripe key) = nobody is lapsed, the rule orgAccess holds: there is nothing to
+ * lapse from, so every company is read and none is skipped.
+ */
+export async function readActiveOrgs<T extends { id: string } = OrgRow & { id: string }>(
+  supabase: Client,
+  columns = "id, settings",
+  nowMs = Date.now(),
+): Promise<{ rows: T[]; lapsedSkipped: number }> {
+  if (!billingEnabled) return { rows: await readAllOrgs<T>(supabase, columns), lapsedSkipped: 0 };
+  const all = await readAllOrgs<T>(supabase, withBillingColumns(columns));
+  const rows = all.filter((o) => accessState(o as any, { nowMs }).active);
+  return { rows, lapsedSkipped: all.length - rows.length };
 }
 
 /**

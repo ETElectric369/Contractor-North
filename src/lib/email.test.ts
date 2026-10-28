@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { composeFrom, sendEmail } from "@/lib/email";
+import { composeFrom, renderPlatformNoticeEmail, sendEmail } from "@/lib/email";
 import { reportError } from "@/lib/observe";
 import { reportBlocker } from "@/lib/observe-blocker";
 
@@ -122,5 +122,55 @@ describe("sendEmail: a refused key is a blocker", () => {
     await sendEmail({ to: "larkspur@example.com", subject: "s", html: "h" });
     expect(reportError).toHaveBeenCalledTimes(1);
     expect(reportBlocker).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A NOTE FROM NORTH ITSELF (cn-v1137): the billing notices are North writing to the contractor, not
+ * the contractor writing to a customer — North's header, no "Hi <name>", signed "— Contractor North",
+ * and no company's name anywhere in it. The words go through the same escape as every other email.
+ */
+describe("renderPlatformNoticeEmail — a note from North itself", () => {
+  const html = renderPlatformNoticeEmail({
+    heading: "Your Free Trial Ends In 5 Days",
+    message: "Pick a plan in Settings › Getting Paid to keep the crew working.",
+    cta: { label: "Open Settings", href: "https://app.contractornorth.com/settings?tab=getpaid" },
+  });
+
+  it("North's header, the heading and the message, signed — Contractor North, and no Hi <name>", () => {
+    expect(html).toContain('<div style="font-size:20px;font-weight:700">Contractor North</div>');
+    expect(html).toContain("Your Free Trial Ends In 5 Days");
+    expect(html).toContain("Pick a plan in Settings › Getting Paid to keep the crew working.");
+    expect(html).toContain("— Contractor North");
+    expect(html).not.toMatch(/\bHi\b/);
+    expect(html).not.toContain("Thank you");
+  });
+
+  it("the button carries its words and its address; without a cta there is no button", () => {
+    expect(html).toContain('<a href="https://app.contractornorth.com/settings?tab=getpaid"');
+    expect(html).toContain(">Open Settings</a>");
+    const plain = renderPlatformNoticeEmail({ heading: "Your Subscription Has Ended", message: "Pick a plan to continue." });
+    expect(plain).not.toContain("<a ");
+    expect(plain).toContain("Your Subscription Has Ended");
+  });
+
+  it("escapes the heading, the message and the button's words, and a quote in the address cannot open a second attribute", () => {
+    const hostile = renderPlatformNoticeEmail({
+      heading: "<script>alert(1)</script> & co",
+      message: "a < b > c",
+      cta: { label: "<b>Open</b>", href: 'https://x.test/?a="onmouseover="alert(1)' },
+    });
+    expect(hostile).not.toContain("<script>");
+    expect(hostile).toContain("&lt;script&gt;alert(1)&lt;/script&gt; &amp; co");
+    expect(hostile).toContain("a &lt; b &gt; c");
+    expect(hostile).toContain("&lt;b&gt;Open&lt;/b&gt;");
+    expect(hostile).toContain('href="https://x.test/?a=&quot;onmouseover=&quot;alert(1)"');
+    expect(hostile).not.toContain('"onmouseover="');
+  });
+
+  it("takes no company, so no company's name can leak into another's mail: the only name in it is North's", () => {
+    const names = [...html.matchAll(/font-weight:700">([^<]+)</g)].map((m) => m[1]);
+    expect(names).toEqual(["Contractor North"]);
+    expect(html).not.toContain("Larkspur");
   });
 });

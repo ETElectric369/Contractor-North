@@ -15,6 +15,9 @@ type DockProps = {
   /** The shell's switch map (lib/feature-doors shellDoors): a switched-off feature's rows aren't
    *  drawn. Left out = everything on. */
   features?: FeatureMap;
+  /** The company has lapsed and this person is on an open door (the layout's red bar): the dock
+   *  draws the lapsed section alone (lib/dock LAPSED_DOCK), never a map of closed doors. */
+  lapsed?: boolean;
   /** Counts per href. Accepts a PROMISE (2026-09-08): the app shell hands the Needs-action
    *  fan-out over unresolved so a cosmetic dot never delays the page behind it — see the note in
    *  (app)/layout.tsx. Server render and first paint show no dots; they arrive a beat later. */
@@ -86,7 +89,7 @@ export function Dock(props: DockProps) {
   );
 }
 
-function DockInner({ branding, role, badges: badgesProp, features }: DockProps) {
+function DockInner({ branding, role, badges: badgesProp, features, lapsed = false }: DockProps) {
   const badges = useBadges(badgesProp);
   const pathname = usePathname();
   const search = useSearchParams();
@@ -98,7 +101,7 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
   // THE ONE DOCK FILTER (lib/dock visibleDock): role (staffOnly/techOnly) and the switches, on
   // tiles and rows alike, so every renderer below — rail tiles, the page column, the phone
   // bottom bar — sees the same list. The badge sum below only counts rows that are drawn.
-  const sections = visibleDock({ isStaff, features });
+  const sections = visibleDock({ isStaff, features, lapsed });
   // THE TILES: every visible section but Office and Tools, which live behind the initials
   // (inMenu, W1-07): five for staff, four for a tech. They stay SECTIONS — below, the active match
   // and the page column still see them, so /team or /tools keeps its page list.
@@ -117,7 +120,8 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
       {/* ── DESKTOP (shell:): the left icon rail + an inside-left nav column for the section's pages ── */}
       <div className="hidden h-full shell:flex">
         <aside data-tour="dock" className="glass relative z-[70] flex h-full w-[84px] flex-col items-center gap-1 border-r border-white/40 py-3">
-          <Link href="/planner" className="mb-1 flex h-11 w-11 items-center justify-center rounded-2xl" aria-label={branding?.name ?? "Home"} title={branding?.name ?? "Contractor North"}>
+          {/* The logo is a door too: home, or the plan page while the company is lapsed (S1). */}
+          <Link href={lapsed ? "/subscribe" : "/planner"} className="mb-1 flex h-11 w-11 items-center justify-center rounded-2xl" aria-label={branding?.name ?? "Home"} title={branding?.name ?? "Contractor North"}>
             {logo ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logo} alt="" className="h-10 w-10 rounded-xl object-contain" />

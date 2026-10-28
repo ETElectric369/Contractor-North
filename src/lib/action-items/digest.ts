@@ -7,7 +7,7 @@ import { notifyPeople } from "@/lib/notifications";
 import { sixForPerson, type DigestTask } from "./digest-six";
 import { PUSH_POOL_LIMIT, RANK_POOL_SELECT, rankPoolQuery } from "@/lib/six-rank";
 import { inquiryDueFilter } from "./due-filters";
-import { readAllOrgs } from "@/lib/cron-orgs";
+import { readActiveOrgs } from "@/lib/cron-orgs";
 import { reportError } from "@/lib/observe";
 
 /**
@@ -49,14 +49,18 @@ import { reportError } from "@/lib/observe";
  * (a failed read was "no six, no push"), and a throw anywhere ended the loop for every company after
  * it. Now a failed read throws, the company's whole body sits in a try, and the failure is counted in
  * `failed` and filed as cron-day-ahead with the orgId; the next company still gets its morning.
+ *
+ * A COMPANY WHOSE PLAN HAS ENDED gets no morning push (cn-v1137, decision 3: readActiveOrgs drops
+ * it) and is counted in `lapsed_skipped`.
  */
-export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number; pushed: number; failed: number }> {
-  const counts = { orgs: 0, pushed: 0, failed: 0 };
+export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number; pushed: number; failed: number; lapsed_skipped: number }> {
+  const counts = { orgs: 0, pushed: 0, failed: 0, lapsed_skipped: 0 };
   if (!pushConfigured()) return counts; // no VAPID keys → nothing to send
 
   // Every company, whole, or a throw the daily cron files as cron-day-ahead (cn-v1130): a failed
   // read used to be "0 orgs, 0 pushed" — a morning with no digest and no word why.
-  const orgs = await readAllOrgs(supabase);
+  const { rows: orgs, lapsedSkipped } = await readActiveOrgs(supabase);
+  counts.lapsed_skipped = lapsedSkipped;
 
   for (const org of orgs) {
     counts.orgs++;

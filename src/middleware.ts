@@ -4,6 +4,7 @@ import { CONTENT_ROOTS } from "@/lib/site-content-roots";
 import { pageSlugFromPath, isLegacyCmsPath, legacyAliasTarget } from "@/lib/site-reserved";
 import { isDeadReservedHost } from "@/lib/public-host";
 import { shellFromUserAgent } from "@/lib/native-shell";
+import { PATHNAME_HEADER, SEARCH_HEADER } from "@/lib/lapse-doors";
 import { PORTAL_COOKIE, portalCookieOptions, portalTokenFromPath } from "@/lib/portal/session-cookie";
 import {
   PLATFORM_ROBOTS_TXT,
@@ -273,6 +274,29 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // THE WALL NEEDS TO KNOW THE DOOR (cn-v1137). A layout cannot read its own URL, so the request's
+  // path and query ride into the app on two request headers (lib/lapse-doors): the (app) layout
+  // keeps a lapsed owner on Settings and /subscribe and sends everyone else to /subscribe, carrying
+  // a billing_error through. Set on the request ITSELF, which updateSession forwards whole
+  // (NextResponse.next({ request })) and rebuilds from on a cookie refresh — so the headers reach the
+  // layout on every path that continues into the app, and a browser's own copy is overwritten,
+  // never trusted. Every org-site rewrite and redirect returned above; none of them needs these.
+  // A runtime whose request headers refuse a write must not leave a BROWSER'S copy standing (a
+  // forged x-cn-pathname: /settings would open the wall's door), so both are deleted in that case
+  // and the layout's safe default for a missing header — the wall — holds; a runtime that refuses
+  // the delete too is one whose headers never took the browser's copy either. Never a 500 on every
+  // page (skeptic #43, N3).
+  try {
+    request.headers.set(PATHNAME_HEADER, request.nextUrl.pathname);
+    request.headers.set(SEARCH_HEADER, request.nextUrl.search);
+  } catch {
+    try {
+      request.headers.delete(PATHNAME_HEADER);
+      request.headers.delete(SEARCH_HEADER);
+    } catch {
+      /* the layout treats a missing header as "not an open door" */
+    }
+  }
   return slidePortalCookie(request, await updateSession(request, !!onOrgSite));
 }
 

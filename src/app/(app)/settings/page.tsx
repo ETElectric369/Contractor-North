@@ -74,7 +74,9 @@ import QRCode from "qrcode";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
-import { trialDaysLeft } from "@/lib/subscription";
+import { accessState, type BillingOrg } from "@/lib/subscription";
+import { planStateLine, stripeSubscriptionLive } from "@/lib/lapse-doors";
+import { ownerFirstName } from "@/lib/lapse-words";
 import { startCheckout, openPortal, connectPayments, refreshConnectStatus, refreshConnectStatusForm } from "./billing-actions";
 import { PayoutsLinkButton } from "./payouts-link-button";
 import { connectStateFromOrg, connectStatusLabel, canAcceptPayments } from "@/lib/stripe-connect";
@@ -261,6 +263,11 @@ export default async function SettingsPage({
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
     : { data: null };
+  // WHO HOLDS THE KEY (skeptic #43, S12): the plan card for office and crew names the owner instead
+  // of offering Subscribe and Manage Billing (startCheckout and openPortal refuse them anyway). THE
+  // one owner read every paused door uses (lib/lapse-words), made only for someone who cannot pick
+  // a plan; a failed read is filed there and reads "the owner".
+  const planOwnerFirst = !isAdmin && billingEnabled ? ((await ownerFirstName(profile?.org_id)) ?? "the owner") : null;
   // isStaff, not isAdmin (audit 6). The Connections cluster is gated on isStaff — which includes
   // office — so Alexa SEES the Google Calendar pane, but this read was admin-only, so `gcalConn`
   // came back null and the pane told her the org had no calendar connected and invited her to
@@ -715,26 +722,49 @@ export default async function SettingsPage({
                 {billing_error && (
                   <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{billing_error}</div>
                 )}
-                <div className="flex flex-wrap items-center gap-3">
-                  <Badge tone={(org as Organization).subscription_status === "active" ? "green" : "amber"}>
-                    {(org as Organization).subscription_status}
-                  </Badge>
-                  <span className="text-sm text-slate-600">Plan: {(org as Organization).plan}</span>
-                  {(org as Organization).subscription_status === "trialing" && (
-                    <span className="text-sm text-slate-500">· {trialDaysLeft(org as Organization)} days left in trial</span>
-                  )}
-                </div>
-                {billingEnabled ? (
-                  <div className="mt-4 flex gap-2">
-                    {(org as Organization).subscription_status === "active" ? (
-                      <form action={openPortal}><FormSubmit variant="outline">Manage Billing</FormSubmit></form>
-                    ) : (
-                      <form action={startCheckout}><FormSubmit>Subscribe</FormSubmit></form>
-                    )}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t turned on yet.</p>
-                )}
+                {(() => {
+                  // THE ONE ACCESS RULE, read here too (cn-v1137): the standing line is accessState's
+                  // reason and days (the company's own calendar for the trial), never a third count.
+                  // comped_until rides in select("*") above (0400). Owner/admin see the line.
+                  const o = org as Organization & { comped_until?: string | null };
+                  const access = billingEnabled ? accessState(o as BillingOrg, { tz: settings.timezone }) : null;
+                  const stateLine =
+                    access && isAdmin ? planStateLine(access, { compedUntil: o.comped_until ?? null, tz: settings.timezone }) : null;
+                  // MANAGE BILLING whenever Stripe knows the customer (the card, the invoices, a live
+                  // subscription); SUBSCRIBE whenever no subscription is live — a canceled one cannot be
+                  // restarted from the portal, so both doors stand then (lib/lapse-doors, one rule).
+                  const portal = !!o.stripe_customer_id;
+                  const canSubscribe = !stripeSubscriptionLive(o);
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Badge tone={o.subscription_status === "active" || access?.reason === "comped" ? "green" : "amber"}>
+                          {o.subscription_status}
+                        </Badge>
+                        <span className="text-sm text-slate-600">Plan: {o.plan}</span>
+                        {stateLine && <span className="text-sm text-slate-500">· {stateLine}</span>}
+                      </div>
+                      {billingEnabled ? (
+                        isAdmin ? (
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {portal && (
+                              <form action={openPortal}><FormSubmit variant="outline">Manage Billing</FormSubmit></form>
+                            )}
+                            {canSubscribe && (
+                              <form action={startCheckout}><FormSubmit>Subscribe</FormSubmit></form>
+                            )}
+                          </div>
+                        ) : (
+                          // Not a door for the office or the crew: the two actions above refuse them,
+                          // so the card says who can, by name (S12).
+                          <p className="mt-3 text-sm text-slate-600">Ask {planOwnerFirst ?? "the owner"} to pick a plan.</p>
+                        )
+                      ) : (
+                        <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t turned on yet.</p>
+                      )}
+                    </>
+                  );
+                })()}
               </Section>
             </div>
           ),

@@ -37,7 +37,7 @@ import { PHOTO_MAX_BYTES, PHOTO_READS_PER_JOB_PER_DAY, photoMime, readPanelPhoto
 import { PLAN_MAX_BYTES, PLAN_READS_PER_JOB_PER_DAY, planMedia, readPlanWithModel } from "@/lib/panel/read-plan-circuits";
 import { writeSuggestions } from "@/lib/panel/suggest-write";
 import { getAnthropic } from "@/lib/anthropic";
-import { aiSpendExceeded, modelFor } from "@/lib/ai-cost";
+import { aiAllowed, modelFor } from "@/lib/ai-cost";
 import { rateLimitGiveBack, rateLimitLeft, rateLimited } from "@/lib/rate-limit";
 import { CIRCUIT_MAP_FILE_SUFFIX } from "@/lib/panel/directory";
 import { boughtLines, lineKey, type BreakerLine, type ListLine, type ShelfLine } from "@/lib/panel/breakers";
@@ -1246,7 +1246,8 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
   if (blob.size > PHOTO_MAX_BYTES) return { ok: false, error: "That photo is too big to read (over 5 MB). Take it again with the camera; the app shrinks new photos." };
 
   const capKey = `panel-photo:${jobId}`;
-  if (await aiSpendExceeded(m.orgId)) return { ok: false, error: SPENT };
+  const gate = await aiAllowed(m.orgId, undefined, { ceilingWords: SPENT });
+  if (!gate.ok) return { ok: false, error: gate.why };
   if (await rateLimited(capKey, PHOTO_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
     return {
       ok: false,
@@ -1324,7 +1325,8 @@ export async function readPlanCircuits(jobId: string, documentId: string): Promi
   if (blob.size > PLAN_MAX_BYTES) return { ok: false, error: "Those plans are over 20 MB, the reader's ceiling. Upload the panel schedule and electrical sheets on their own and read those." };
 
   const capKey = `panel-plans:${jobId}`;
-  if (await aiSpendExceeded(m.orgId)) return { ok: false, error: SPENT };
+  const gate = await aiAllowed(m.orgId, undefined, { ceilingWords: SPENT });
+  if (!gate.ok) return { ok: false, error: gate.why };
   if (await rateLimited(capKey, PLAN_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
     return { ok: false, error: `The plans have been read ${PLAN_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow.`, readsLeft: 0 };
   }

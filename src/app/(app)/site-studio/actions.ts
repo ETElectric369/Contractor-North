@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { DEFAULT_MODEL, getAnthropic } from "@/lib/anthropic";
-import { aiSpendExceeded, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -196,9 +196,8 @@ export async function designSitePass(instruction: string, baseVersionId: string 
   if (!ask) return { ok: false, error: "Tell it what to change first." };
   if (await rateLimited(`site-designer:${ctx.userId}`, 15, 900, { failClosed: true }))
     return { ok: false, error: "A lot of design passes in a row — give it a minute." };
-  if (await aiSpendExceeded(ctx.orgId)) {
-    return { ok: false, error: "Your company has reached this month's AI ceiling — it resets at the start of the month." };
-  }
+  const gate = await aiAllowed(ctx.orgId, undefined, { ceilingWords: "Your company has reached this month's AI ceiling — it resets at the start of the month." });
+  if (!gate.ok) return { ok: false, error: gate.why };
 
   const { data: org } = await ctx.supabase
     .from("organizations")
@@ -256,9 +255,8 @@ export async function designSiteOptions(baseVersionId: string | null, instructio
   // One batch = four model calls: its own tighter limiter, fail-closed like the rest.
   if (await rateLimited(`site-designer-options:${ctx.userId}`, 4, 900, { failClosed: true }))
     return { ok: false, error: "A lot of option batches in a row — give it a few minutes." };
-  if (await aiSpendExceeded(ctx.orgId)) {
-    return { ok: false, error: "Your company has reached this month's AI ceiling — it resets at the start of the month." };
-  }
+  const gate = await aiAllowed(ctx.orgId, undefined, { ceilingWords: "Your company has reached this month's AI ceiling — it resets at the start of the month." });
+  if (!gate.ok) return { ok: false, error: gate.why };
 
   const { data: org } = await ctx.supabase
     .from("organizations")

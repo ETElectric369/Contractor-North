@@ -3,6 +3,7 @@ import { requireCron } from "@/lib/cron-guard";
 import { syncOrgCalendars } from "@/lib/calendar-sync";
 import { reportError } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
+import { readActiveOrgs } from "@/lib/cron-orgs";
 
 export const runtime = "nodejs";
 // Many calendars × paginated pulls can outlive the default 10s.
@@ -15,7 +16,9 @@ export const maxDuration = 300;
  * sweep of CN items changed since last_synced_at — the safety net for the
  * SQL-side schedule writes (customer pick-a-time confirm) and any live push
  * that failed transiently. Per-org failures are isolated: one org's expired
- * grant never blocks another's sync.
+ * grant never blocks another's sync. A connection whose company's plan has ended is passed over
+ * (cn-v1137, decision 3: readActiveOrgs names the companies still standing; a failed companies
+ * read is the same filed 500 as a failed connections read) and counted in `lapsed_skipped`.
  *
  * Protected by CRON_SECRET (Vercel sends it automatically):
  *   GET /api/google/sync   Authorization: Bearer <CRON_SECRET>
@@ -32,9 +35,15 @@ export async function GET(request: Request) {
       .select("*")
       .eq("provider", "google");
     if (error) throw new Error(error.message);
+    const standing = new Set((await readActiveOrgs<{ id: string }>(supabase, "id")).rows.map((o) => o.id));
 
     const orgs: unknown[] = [];
+    let lapsedSkipped = 0;
     for (const conn of conns ?? []) {
+      if (!standing.has(String(conn.org_id))) {
+        lapsedSkipped += 1;
+        continue;
+      }
       try {
         orgs.push(await syncOrgCalendars(supabase, conn));
       } catch (e) {
@@ -44,6 +53,7 @@ export async function GET(request: Request) {
       }
     }
     result.orgs = orgs;
+    result.lapsed_skipped = lapsedSkipped;
   } catch (e: any) {
     result.ok = false;
     result.error = e?.message ?? "failed";

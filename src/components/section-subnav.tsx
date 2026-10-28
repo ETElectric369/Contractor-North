@@ -22,14 +22,14 @@ import { SectionSheet } from "./section-sheet";
  *  pages, so either shape would just double it. On phones (no left rail) it's the only
  *  sibling nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id],
  *  /forms/[id], /purchasing/[id]…), not just on a section's exact landing pages. */
-export function SectionSubnav({ isStaff, features }: { isStaff?: boolean; features?: FeatureMap }) {
+export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?: boolean; features?: FeatureMap; lapsed?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
 
   // THE ONE DOCK FILTER (lib/dock visibleDock): the same tiles and rows the dock draws, role and
-  // switches both, so the strip can never offer a page the dock has put away.
-  const sections = visibleDock({ isStaff: !!isStaff, features });
+  // switches both (and the lapsed mode), so the strip can never offer a page the dock has put away.
+  const sections = visibleDock({ isStaff: !!isStaff, features, lapsed });
   // THE shared matcher — the same section the dock tiles light, so the strip can never
   // vanish-by-accident on detail routes again (it did on /quotes/[id] but not /billing/[id]).
   const group = activeSection(pathname, sections);

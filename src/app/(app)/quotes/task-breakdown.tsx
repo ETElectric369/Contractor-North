@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { joinLineNote, splitLineNote } from "@/lib/estimate/line-note";
 import { X } from "lucide-react";
-import { Input, Select } from "@/components/ui/input";
+import { Input, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import { describeChoice, priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
@@ -41,11 +42,20 @@ export interface PersonOption {
   billRate: number | null;
 }
 
+/** A NOTE UNDER A LINE (cn-v1137): the rule lives in lib/estimate/line-note, where the server reads
+ *  it too (the task's title, the kit's name, the count on the name); this screen re-exports it for
+ *  the builder's own callers. */
+export { joinLineNote, splitLineNote };
+
 /** SWAP A LINE AGAINST THE BOOK (Andrew, live-testing the plan take-off: "we ended up going
  *  with a metal roof ... had that been a drop down, I would have just dropped it in there —
  *  or at the very least an autocomplete"): the description input of every line autocompletes
  *  against the org's price book; picking a match RE-PRICES the line in place — description,
- *  unit, and unit $ at this customer's markup, the same math as the Add picker. */
+ *  unit, and unit $ at this customer's markup, the same math as the Add picker.
+ *
+ *  THE BOX HOLDS THE HEAD ONLY (splitLineNote): a line's note — its description's lines after the
+ *  first — lives under it behind Add A Note / Edit Note, and every keystroke in either goes back
+ *  out through onText as the one joined description (joinLineNote). A part has no note door. */
 export function LineDescInput({
   value,
   onText,
@@ -58,10 +68,13 @@ export function LineDescInput({
   pricing,
   placeholder = "Description",
   className,
+  noteDoor = true,
 }: {
   value: string;
   onText: (v: string) => void;
   onPick: (p: PriceItemLite) => void;
+  /** Add A Note / Edit Note under the box. On by default (a line); a task's part passes false. */
+  noteDoor?: boolean;
   /** After the box loses focus (the dropdown's own close still runs). The editor commits the line
    *  here; a task's part drops a row he left nameless. */
   onBlur?: () => void;
@@ -80,28 +93,33 @@ export function LineDescInput({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // The head is what the box shows and the book matches; the note rides along in `value`.
+  const { head, note } = splitLineNote(value);
+  const hasNote = note.trim().length > 0;
+  // The note's box is open while he is in it; closed, the note's lines read under the head.
+  const [noteOpen, setNoteOpen] = useState(false);
   // BROWSE, DON'T GUESS — the same rule the Add picker above it runs on (add-line-items.tsx).
   // This sibling still demanded two typed characters before it would show anything, so tapping a
   // Description box to see what's in the book gave you an empty screen: "no drop down menu with
   // line items". You cannot search a catalog you have never seen. Empty box → the book; typing
   // narrows it.
   const matches = useMemo(() => {
-    const q = value.trim().toLowerCase();
+    const q = head.trim().toLowerCase();
     const pool = q
       ? priceItems.filter((p) => [p.code, p.description, p.category].some((v) => (v ?? "").toLowerCase().includes(q)))
       : priceItems;
     return pool.slice(0, q ? 25 : 200);
-  }, [value, priceItems]);
+  }, [head, priceItems]);
   return (
     <div className="relative">
       <Input
         placeholder={placeholder}
         className={className}
-        value={value}
+        value={head}
         autoFocus={autoFocus}
         disabled={disabled}
         onChange={(e) => {
-          onText(e.target.value);
+          onText(joinLineNote(e.target.value, note));
           setOpen(true);
         }}
         // Open on focus only when the box is EMPTY — that's the "I want to see what's in the
@@ -110,7 +128,7 @@ export function LineDescInput({
         // be the MATCHES for what's already typed, not the whole book — `matches` is derived from
         // `value` — so this is about not covering the page mid-edit, not about size.)
         onFocus={() => {
-          if (!value.trim()) setOpen(true);
+          if (!head.trim()) setOpen(true);
           onFocus?.();
         }}
         // Escape closes it without touching the line — a list you can't get out of is a trap
@@ -172,12 +190,57 @@ export function LineDescInput({
             <li className="px-3 py-2 text-sm text-slate-400">Nothing in your price list matches that.</li>
           )}
           {/* A silent slice reads as "that's everything". */}
-          {!value.trim() && priceItems.length > matches.length && (
+          {!head.trim() && priceItems.length > matches.length && (
             <li className="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
               Showing {matches.length} of {priceItems.length} — type to narrow it down.
             </li>
           )}
         </ul>
+      )}
+      {/* THE NOTE: the description's lines after the head, printed under it on the paper as bullets.
+          Closed, its lines read here in the paper's own shape; open, one small box. Leaving the box
+          commits the line (onBlur, the one save model) and closes it; a note left empty is gone and
+          the description is one line again. */}
+      {noteDoor && (
+        <div className="mt-1 text-xs">
+          {noteOpen ? (
+            <Textarea
+              aria-label="Note"
+              placeholder="A note under this line — it prints on the estimate."
+              className="min-h-[3.5rem] px-2 py-1 text-xs"
+              value={note}
+              autoFocus
+              disabled={disabled}
+              onChange={(e) => onText(joinLineNote(head, e.target.value))}
+              onBlur={() => {
+                setNoteOpen(false);
+                onBlur?.();
+              }}
+            />
+          ) : (
+            <>
+              {hasNote && (
+                <ul className="ml-3 list-disc text-slate-500 marker:text-slate-300">
+                  {note
+                    .split(/\r?\n/)
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                    .map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                </ul>
+              )}
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setNoteOpen(true)}
+                className="font-medium text-brand hover:underline disabled:opacity-50"
+              >
+                {hasNote ? "Edit Note" : "Add A Note"}
+              </button>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
@@ -484,6 +547,7 @@ export function TaskBreakdown({
               placeholder="Part"
               className={box}
               value={m.name}
+              noteDoor={false}
               disabled={disabled}
               onText={(v) => setPart(i, { name: v })}
               onBlur={leave}

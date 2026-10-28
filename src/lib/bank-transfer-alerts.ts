@@ -3,6 +3,7 @@ import { notifyPeople } from "@/lib/notifications";
 import { reportError } from "@/lib/observe";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { STALE_TRANSFER_DAYS, staleTransfers } from "@/lib/bank-transfer";
+import { readActiveOrgs } from "@/lib/cron-orgs";
 
 /**
  * THE DAILY CRON'S HALF OF 0338 (audit v994 BK3): every bank debit that has been "on its way" for
@@ -13,12 +14,22 @@ import { STALE_TRANSFER_DAYS, staleTransfers } from "@/lib/bank-transfer";
  * NEVER RESOLVES ANYTHING. Whether the money landed is Stripe's to say (the async events) or a
  * person's to check in the Stripe dashboard; a machine guessing "it must have cleared" would book
  * money nobody saw.
+ *
+ * A COMPANY WHOSE PLAN HAS ENDED is not told (cn-v1137, decision 3): its rows wait, unstamped, and
+ * are said the first morning after a plan is picked. The companies come through readActiveOrgs —
+ * whole, or a throw the daily cron files as cron-stale-bank-transfers.
  */
-export async function tellStaleBankTransfers(supabase: any, now: Date = new Date()): Promise<{ told: number } | { skipped: string }> {
+export async function tellStaleBankTransfers(supabase: any, now: Date = new Date()): Promise<{ told: number; lapsed_skipped: number } | { skipped: string }> {
   const { rows, problem } = await staleTransfers(supabase, now);
   if (problem) return { skipped: problem };
   let told = 0;
+  let lapsed_skipped = 0;
+  const active = rows.length ? new Set((await readActiveOrgs<{ id: string }>(supabase, "id", now.getTime())).rows.map((o) => o.id)) : null;
   for (const t of rows) {
+    if (active && !active.has(t.orgId)) {
+      lapsed_skipped += 1;
+      continue;
+    }
     const { data: inv } = await supabase
       .from("invoices")
       .select("invoice_number")
@@ -48,5 +59,5 @@ export async function tellStaleBankTransfers(supabase: any, now: Date = new Date
     if (error || !stamped?.length) reportError("bank-transfer-stale-stamp", error ?? new Error("zero-row stamp"), { transferId: t.id });
     told += 1;
   }
-  return { told };
+  return { told, lapsed_skipped };
 }

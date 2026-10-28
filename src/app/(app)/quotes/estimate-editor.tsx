@@ -62,6 +62,7 @@ import { DuplicateQuoteButton } from "./[id]/duplicate-quote-button";
 import { CircuitScheduleCard } from "./[id]/circuit-schedule-card";
 import { IntakeFiles } from "../leads/intake-files";
 import { LineDescInput, TaskBreakdown, type PersonOption, type PriceItemLite } from "./task-breakdown";
+import { joinLineNote, splitLineNote } from "@/lib/estimate/line-note";
 import { createQuoteSession, isQuiet, useQuoteSession, type EditorLine, type EstimateHeader, type HeaderField, type Mode, type SessionState } from "./use-quote-writes";
 import { browserStash, stashHandoff, takeHandoff, type HandoffProposal } from "./handoff";
 
@@ -1320,7 +1321,14 @@ export function EstimateEditor(props: EstimateEditorProps) {
                                           // default when there is one, named in the description, else
                                           // the item's own. A pick is a decision: written at once.
                                           const line = priceBookLine(pi, pricing);
-                                          void session.commitLine(it.key, { ...it, description: line.description, unit: line.unit, unit_price: line.unitPrice });
+                                          // THE NOTE STAYS (skeptic #43, S6): the book's words replace
+                                          // the head; the note he typed under the line is still his.
+                                          void session.commitLine(it.key, {
+                                            ...it,
+                                            description: joinLineNote(line.description, splitLineNote(it.description).note),
+                                            unit: line.unit,
+                                            unit_price: line.unitPrice,
+                                          });
                                         }}
                                         priceItems={priceItems}
                                         pricing={pricing}

@@ -105,3 +105,131 @@ describe("costOf — web searches are billed per search (vendor import, Phase 2)
     expect(costOf("claude-sonnet-5", { server_tool_use: { web_search_requests: Number.NaN } })).toBe(0);
   });
 });
+
+/**
+ * THE ONE AI GATE (cn-v1137, decision 3): aiAllowed asks the company's standing first (orgAccess),
+ * then the ceiling, and answers `why` in words — the owner is told the door, everyone else who
+ * holds the key. Both halves fail OPEN. Pinned against a routed fake of the two clients: the
+ * standing read, the ceiling RPC, the caller's role and the owner's name are the only reads.
+ */
+const gateDb = vi.hoisted(() => ({
+  org: null as Record<string, unknown> | null,
+  orgFails: false,
+  spend: 0,
+  role: "office",
+  owner: "Larkspur Owner",
+  reads: [] as string[],
+}));
+vi.mock("@/lib/stripe", async (orig) => ({ ...(await orig<typeof import("@/lib/stripe")>()), billingEnabled: true }));
+vi.mock("@/lib/observe", async (orig) => ({ ...(await orig<typeof import("@/lib/observe")>()), reportError: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => {
+  const chain = (table: string, byId: boolean) => {
+    const q: any = {};
+    for (const m of ["select", "order", "limit", "in", "is", "gte", "lte"]) q[m] = () => q;
+    q.eq = (col: string) => (col === "id" ? chain(table, true) : q);
+    q.maybeSingle = async () => {
+      gateDb.reads.push(table);
+      if (table === "organizations") {
+        if (gateDb.orgFails) throw new Error("connection reset");
+        return { data: gateDb.org, error: null };
+      }
+      if (table === "profiles") return { data: byId ? { role: gateDb.role } : { full_name: gateDb.owner }, error: null };
+      return { data: null, error: null };
+    };
+    return q;
+  };
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
+    from: (table: string) => chain(table, false),
+    rpc: async (fn: string) => {
+      gateDb.reads.push(`rpc:${fn}`);
+      return fn === "ai_spend_since" ? { data: gateDb.spend, error: null } : { data: null, error: null };
+    },
+  };
+  return { createClient: async () => client, createServiceClient: () => client };
+});
+
+import { vi, beforeEach } from "vitest";
+import { AI_CEILING_WORDS, aiAllowed } from "./ai-cost";
+import { reportError } from "@/lib/observe";
+
+const CANCELED = { id: "org-1", subscription_status: "canceled", trial_ends_at: null, current_period_end: null, comped_until: null };
+const LIVE = { ...CANCELED, subscription_status: "active" };
+
+beforeEach(() => {
+  gateDb.org = LIVE;
+  gateDb.orgFails = false;
+  gateDb.spend = 0;
+  gateDb.role = "office";
+  gateDb.owner = "Larkspur Owner";
+  gateDb.reads = [];
+  vi.mocked(reportError).mockClear();
+});
+
+describe("aiAllowed — the plan that has ended comes before the ceiling, in the asker's words", () => {
+  it("a standing company under the ceiling is allowed", async () => {
+    expect(await aiAllowed("org-1", "owner")).toEqual({ ok: true });
+    expect(gateDb.reads).toEqual(["organizations", "rpc:ai_spend_since"]);
+  });
+
+  it("a canceled plan is refused BEFORE the ceiling is even asked, and the owner is told the door", async () => {
+    gateDb.org = CANCELED;
+    gateDb.spend = 10_000;
+    expect(await aiAllowed("org-1", "owner")).toEqual({
+      ok: false,
+      reason: "lapsed",
+      why: "This company's plan has ended, so Nort is paused. Pick a plan in Settings › Getting Paid.",
+    });
+    expect(gateDb.reads).not.toContain("rpc:ai_spend_since");
+  });
+
+  it("an admin is told the door too; everyone else is told who holds the key, by first name", async () => {
+    gateDb.org = CANCELED;
+    expect((await aiAllowed("org-1", "admin")) as { why: string }).toMatchObject({ why: expect.stringContaining("Pick a plan in Settings › Getting Paid.") });
+    expect((await aiAllowed("org-1", "tech")) as { why: string }).toMatchObject({ why: "This company's plan has ended, so Nort is paused. Ask Larkspur to pick a plan." });
+    gateDb.owner = "";
+    expect((await aiAllowed("org-1", "office")) as { why: string }).toMatchObject({ why: expect.stringContaining("Ask the owner to pick a plan.") });
+  });
+
+  it("a role the caller did not pass is read from the signed-in profile, on the refusal path only", async () => {
+    gateDb.role = "owner";
+    expect(await aiAllowed("org-1")).toEqual({ ok: true });
+    expect(gateDb.reads).not.toContain("profiles");
+    gateDb.org = CANCELED;
+    gateDb.reads = [];
+    expect((await aiAllowed("org-1")) as { why: string }).toMatchObject({ why: expect.stringContaining("Pick a plan in Settings › Getting Paid.") });
+    expect(gateDb.reads).toEqual(["organizations", "profiles"]);
+  });
+
+  it("the words follow the reason: an expired trial, a grace window spent", async () => {
+    gateDb.org = { ...CANCELED, subscription_status: "trialing", trial_ends_at: "2020-01-01T00:00:00Z" };
+    expect((await aiAllowed("org-1", "owner")) as { why: string }).toMatchObject({ why: expect.stringMatching(/^This company's free trial has ended, so Nort is paused\./) });
+    gateDb.org = { ...CANCELED, subscription_status: "past_due", current_period_end: "2020-01-01T00:00:00Z" };
+    expect((await aiAllowed("org-1", "owner")) as { why: string }).toMatchObject({ why: expect.stringMatching(/^This company's card was not updated in time, so Nort is paused\./) });
+  });
+
+  it("over the ceiling, a standing company is refused with the ceiling's words — the door's own when it has them", async () => {
+    gateDb.spend = MONTHLY_AI_CEILING_USD;
+    expect(await aiAllowed("org-1", "owner")).toEqual({ ok: false, reason: "ceiling", why: AI_CEILING_WORDS });
+    expect(await aiAllowed("org-1", "owner", { ceilingWords: "Add the circuits by hand." })).toEqual({ ok: false, reason: "ceiling", why: "Add the circuits by hand." });
+  });
+
+  it("a door speaking to a stranger passes its own lapse line, and no profile is read for it", async () => {
+    gateDb.org = CANCELED;
+    expect(await aiAllowed("org-1", null, { lapsedWords: "This company's assistant is paused." })).toEqual({ ok: false, reason: "lapsed", why: "This company's assistant is paused." });
+    expect(gateDb.reads).toEqual(["organizations"]);
+  });
+
+  it("a standing the caller already read is taken as given: no second trip to the company row", async () => {
+    gateDb.org = CANCELED; // would refuse if read
+    expect(await aiAllowed("org-1", "owner", { state: { active: true, reason: "active", daysLeft: null, compedBy: null } })).toEqual({ ok: true });
+    expect(gateDb.reads).toEqual(["rpc:ai_spend_since"]);
+  });
+
+  it("FAILS OPEN: a company read that fails is filed and allowed; no company id is allowed", async () => {
+    gateDb.orgFails = true;
+    expect(await aiAllowed("org-1", "owner")).toEqual({ ok: true });
+    expect(reportError).toHaveBeenCalledWith("org-access:read", expect.any(Error), { orgId: "org-1" });
+    expect(await aiAllowed(null)).toEqual({ ok: true });
+  });
+});

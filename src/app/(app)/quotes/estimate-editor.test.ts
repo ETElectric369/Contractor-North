@@ -239,6 +239,12 @@ describe("the one save model, on the screen", () => {
     expect(editorSrc).toContain("onChange={(next) => session.typeLine(it.key, next)}");
     expect(editorSrc).toContain("onCommit={(next) => void session.commitLine(it.key, next)}");
   });
+  it("a pick from the price book replaces the head and keeps the note he typed under the line (skeptic #43, S6)", () => {
+    expect(editorSrc).toContain('import { joinLineNote, splitLineNote } from "@/lib/estimate/line-note";');
+    expect(editorSrc).toContain("description: joinLineNote(line.description, splitLineNote(it.description).note),");
+    // Never the bare book words over the whole description.
+    expect(editorSrc).not.toContain("description: line.description,\n                                            unit: line.unit,");
+  });
   it("the picker's box and kit chips wait while a write runs", () => {
     const picker = read("src/components/add-line-items.tsx");
     expect(picker).toMatch(/value=\{query\}\s*disabled=\{disabled\}/);

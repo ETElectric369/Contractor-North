@@ -46,6 +46,7 @@ vi.mock("@/lib/site-read/extract", async (importOriginal) => {
 vi.mock("@/lib/ai-cost", () => ({
   modelFor: () => "claude-haiku-4-5",
   aiSpendExceeded: vi.fn(async () => state.over),
+  aiAllowed: vi.fn(async () => (state.over ? { ok: false, reason: "ceiling", why: "the ceiling" } : { ok: true })),
   recordAiUsage: vi.fn(async (a: unknown) => {
     state.metered.push(a);
   }),

@@ -24,6 +24,8 @@ import { billItemisation, editedRemainderDrift, editedRemainderSentence } from "
 import { isReturnBill, returnCreditRows, returnLinesAgainstPurchases, returnsSummaryParts, returnsThatFit, type ReturnOutcome } from "@/lib/supplier-returns";
 import { sendSms, smsReadiness } from "@/lib/sms";
 import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
+import { orgAccess } from "@/lib/org-access";
+import { textingPausedWordsFor } from "@/lib/lapse-words";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings, orgDocUrl, orgPublicBaseUrl } from "@/lib/org-settings";
 import { rowPlace } from "@/lib/doc-place";
@@ -603,10 +605,15 @@ export async function textInvoice(
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
-  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("id, name, settings").maybeSingle();
   // TEXTING NOT SET UP (lib/sms-readiness): said where he tapped, before the invoice is stamped
   // sent or anything is promised. The receipt row reads `notReady` and opens Text From This Phone.
   if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL };
+  // THE PLAN HAS ENDED (cn-v1137, decision 3): a lapsed company sends no texts. Said where he
+  // tapped, in his role (the owner is told the door, everyone else the owner); nothing is sent.
+  const invoiceOrgId = (org as { id?: string } | null)?.id;
+  const access = await orgAccess(invoiceOrgId);
+  if (!access.state.active) return { ok: false, error: await textingPausedWordsFor(invoiceOrgId) };
   const customer = (invoice as any).customers;
   if (!customer?.phone)
     return { ok: false, error: "This customer has no phone number." };

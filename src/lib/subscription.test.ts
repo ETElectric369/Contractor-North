@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { hasActiveAccess, graceDaysLeft, PAST_DUE_GRACE_DAYS } from "./subscription";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  hasActiveAccess,
+  graceDaysLeft,
+  PAST_DUE_GRACE_DAYS,
+  TRIAL_DAYS,
+  BILLING_COLUMNS,
+  accessState,
+  compedUntilLive,
+  isCompedOrg,
+  trialDaysLeftAt,
+  trialDaysLeftLocal,
+} from "./subscription";
 import { tierForPriceId, planByTier, PLANS, INCLUDED_EVERYWHERE, overFullEstimateAllowance } from "./plans";
 
 const daysFromNow = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString();
@@ -147,5 +158,188 @@ describe("the plan ladder", () => {
   it("planByTier rejects junk", () => {
     expect(planByTier("enterprise")).toBeNull();
     expect(planByTier(undefined)).toBeNull();
+  });
+});
+
+/**
+ * THE ONE ACCESS RULE (cn-v1137): accessState is what every door reads — the layout's wall, the
+ * trial notices, the lapse refusals, the crons' skip, the Companies rows on Bug Watch — so each
+ * branch is pinned here with `nowMs` injected. A comp is a column now (0400, comped_until) and the
+ * env list stays the belt; the trial's days are counted on the company's own calendar.
+ */
+describe("accessState: the comp column", () => {
+  const NOW = Date.parse("2026-10-28T17:00:00Z");
+  const at = (iso: string) => Date.parse(iso);
+
+  it("a comped_until in the future is access, reason comped, by the column — whatever Stripe says", () => {
+    const org = { subscription_status: "canceled", trial_ends_at: "2026-01-01T00:00:00Z", comped_until: "2026-12-31T00:00:00Z" };
+    expect(accessState(org, { nowMs: NOW })).toEqual({ active: true, reason: "comped", daysLeft: 64, compedBy: "column" });
+    expect(compedUntilLive(org, NOW)).toBe(true);
+    expect(hasActiveAccess({ ...org, comped_until: new Date(Date.now() + 86_400_000).toISOString() })).toBe(true);
+  });
+
+  it("a comped_until in the past is ignored: the row falls through to its Stripe standing", () => {
+    const org = { subscription_status: "canceled", comped_until: "2026-10-01T00:00:00Z" };
+    expect(compedUntilLive(org, NOW)).toBe(false);
+    expect(accessState(org, { nowMs: NOW })).toEqual({ active: false, reason: "canceled", daysLeft: null, compedBy: null });
+    expect(accessState({ subscription_status: "active", comped_until: "2026-10-01T00:00:00Z" }, { nowMs: NOW }).reason).toBe("active");
+    // Exactly now is not the future; a date nothing can parse is no comp.
+    expect(compedUntilLive({ comped_until: new Date(NOW).toISOString() }, NOW)).toBe(false);
+    expect(compedUntilLive({ comped_until: "not a date" }, NOW)).toBe(false);
+    expect(compedUntilLive({ comped_until: null }, NOW)).toBe(false);
+  });
+
+  it("the days until the comp ends are a ceiling: an hour left reads as 1, and never below 0", () => {
+    expect(accessState({ comped_until: new Date(NOW + 3_600_000).toISOString() }, { nowMs: NOW }).daysLeft).toBe(1);
+    expect(accessState({ comped_until: new Date(NOW + 10 * 86_400_000).toISOString() }, { nowMs: NOW }).daysLeft).toBe(10);
+    expect(accessState({ comped_until: new Date(at("2026-11-02T17:00:00Z")).toISOString() }, { nowMs: NOW }).daysLeft).toBe(5);
+  });
+
+  it("the billing columns every access decision reads name the comp", () => {
+    expect([...BILLING_COLUMNS]).toEqual(["subscription_status", "trial_ends_at", "current_period_end", "comped_until"]);
+    expect(TRIAL_DAYS).toBe(14);
+  });
+});
+
+describe("accessState: every reason, with nowMs injected", () => {
+  const NOW = Date.parse("2026-10-28T17:00:00Z");
+  const days = (n: number) => new Date(NOW + n * 86_400_000).toISOString();
+  const state = (org: Parameters<typeof accessState>[0]) => accessState(org, { nowMs: NOW });
+
+  it("active: a live subscription", () => {
+    expect(state({ subscription_status: "active" })).toEqual({ active: true, reason: "active", daysLeft: null, compedBy: null });
+    // An expired trial date beside an active subscription is Stripe's leftover, not a lapse.
+    expect(state({ subscription_status: "active", trial_ends_at: days(-30) }).reason).toBe("active");
+  });
+
+  it("trial: trialing with an end in the future carries the days left (UTC ceiling without a tz)", () => {
+    expect(state({ subscription_status: "trialing", trial_ends_at: days(3) })).toEqual({ active: true, reason: "trial", daysLeft: 3, compedBy: null });
+    expect(state({ subscription_status: "trialing", trial_ends_at: new Date(NOW + 3_600_000).toISOString() }).daysLeft).toBe(1);
+    // No end date recorded, or one nothing can parse: still trialing, days unknown — never a lockout over a missing date.
+    expect(state({ subscription_status: "trialing", trial_ends_at: null })).toEqual({ active: true, reason: "trial", daysLeft: null, compedBy: null });
+    expect(state({ subscription_status: "trialing", trial_ends_at: "garbage" })).toMatchObject({ active: true, reason: "trial" });
+  });
+
+  it("trial_ended: trialing with the end behind us", () => {
+    expect(state({ subscription_status: "trialing", trial_ends_at: days(-1) })).toEqual({ active: false, reason: "trial_ended", daysLeft: 0, compedBy: null });
+    expect(state({ subscription_status: "trialing", trial_ends_at: new Date(NOW).toISOString() }).reason).toBe("trial_ended");
+  });
+
+  it("grace and grace_spent: past_due, unpaid and incomplete inside and past the window", () => {
+    for (const status of ["past_due", "unpaid", "incomplete"]) {
+      expect(state({ subscription_status: status, current_period_end: days(-2) })).toEqual({ active: true, reason: "grace", daysLeft: PAST_DUE_GRACE_DAYS - 2, compedBy: null });
+      expect(state({ subscription_status: status, current_period_end: days(-(PAST_DUE_GRACE_DAYS + 1)) })).toEqual({ active: false, reason: "grace_spent", daysLeft: 0, compedBy: null });
+    }
+    // No period end recorded: the whole window, not a lockout.
+    expect(state({ subscription_status: "past_due", current_period_end: null })).toEqual({ active: true, reason: "grace", daysLeft: PAST_DUE_GRACE_DAYS, compedBy: null });
+  });
+
+  it("canceled: a deliberate end, and any status the rule does not know", () => {
+    expect(state({ subscription_status: "canceled" })).toEqual({ active: false, reason: "canceled", daysLeft: null, compedBy: null });
+    expect(state({ subscription_status: "incomplete_expired" }).reason).toBe("canceled");
+    expect(state({ subscription_status: "paused" }).reason).toBe("canceled");
+  });
+
+  it("unknown: no status at all", () => {
+    expect(state({ subscription_status: null })).toEqual({ active: false, reason: "unknown", daysLeft: null, compedBy: null });
+    expect(state({ subscription_status: "" }).reason).toBe("unknown");
+    expect(state({}).reason).toBe("unknown");
+  });
+
+  it("the comp wins over every other branch, the column before the env list", () => {
+    const comped = { comped_until: days(30) };
+    for (const status of ["active", "trialing", "past_due", "canceled", null]) {
+      expect(state({ ...comped, subscription_status: status }).reason).toBe("comped");
+    }
+    expect(state({ ...comped, id: "house" }).compedBy).toBe("column");
+  });
+});
+
+describe("isCompedOrg: the env list (COMPED_ORG_IDS), the belt beside the column", () => {
+  const before = process.env.COMPED_ORG_IDS;
+  afterEach(() => {
+    if (before === undefined) delete process.env.COMPED_ORG_IDS;
+    else process.env.COMPED_ORG_IDS = before;
+  });
+
+  it("a listed id is comped, whatever its case or spacing; an unlisted or blank id is not", () => {
+    process.env.COMPED_ORG_IDS = " 60195593-2E18-4230-BC8E-7A32D36D038D , b4854fcd-50de-46de-a0cb-dff642b4b97b ,, ";
+    expect(isCompedOrg("60195593-2e18-4230-bc8e-7a32d36d038d")).toBe(true);
+    expect(isCompedOrg("B4854FCD-50DE-46DE-A0CB-DFF642B4B97B")).toBe(true);
+    expect(isCompedOrg("7d6da1e2-c9a0-47d8-bcc1-5b4c3e412fed")).toBe(false);
+    expect(isCompedOrg("")).toBe(false);
+    expect(isCompedOrg(null)).toBe(false);
+    expect(isCompedOrg(undefined)).toBe(false);
+  });
+
+  it("an empty list comps nobody", () => {
+    process.env.COMPED_ORG_IDS = "";
+    expect(isCompedOrg("60195593-2e18-4230-bc8e-7a32d36d038d")).toBe(false);
+    delete process.env.COMPED_ORG_IDS;
+    expect(isCompedOrg("60195593-2e18-4230-bc8e-7a32d36d038d")).toBe(false);
+  });
+
+  it("accessState reads it when the row carries its id: active, comped, by env, no days", () => {
+    process.env.COMPED_ORG_IDS = "house-org";
+    const NOW = Date.parse("2026-10-28T17:00:00Z");
+    expect(accessState({ id: "house-org", subscription_status: "canceled" }, { nowMs: NOW })).toEqual({ active: true, reason: "comped", daysLeft: null, compedBy: "env" });
+    expect(accessState({ id: "other-org", subscription_status: "canceled" }, { nowMs: NOW }).reason).toBe("canceled");
+    // The column still comes first when both hold.
+    expect(accessState({ id: "house-org", comped_until: new Date(NOW + 86_400_000).toISOString() }, { nowMs: NOW }).compedBy).toBe("column");
+    // A row with no id cannot be env-comped.
+    expect(accessState({ subscription_status: "canceled" }, { nowMs: NOW }).reason).toBe("canceled");
+  });
+});
+
+/**
+ * THE COMPANY'S OWN CALENDAR. "Ends tomorrow" and "ends today" are calendar words in the company's
+ * zone — never the UTC ceiling, which says "1 day" at 11 PM and flips at a UTC midnight nobody in
+ * Truckee is awake for. Pinned across the fall-back weekend (2026-11-01, Pacific).
+ */
+describe("trialDaysLeftLocal: the company's own calendar across a DST day", () => {
+  const PACIFIC = "America/Los_Angeles";
+  // The trial ends Monday 2026-11-02 at 10:00 AM Pacific — standard time by then (UTC-8), so 18:00Z.
+  const org = { subscription_status: "trialing", trial_ends_at: "2026-11-02T18:00:00Z" };
+
+  it("Saturday 2026-10-31 3:00 PM PDT (22:00Z): 2 days — the calendar's answer, across the 25-hour Sunday", () => {
+    const now = Date.parse("2026-10-31T22:00:00Z");
+    expect(trialDaysLeftLocal(org, PACIFIC, now)).toBe(2);
+    expect(accessState(org, { nowMs: now, tz: PACIFIC })).toEqual({ active: true, reason: "trial", daysLeft: 2, compedBy: null });
+  });
+
+  it("Monday 2026-11-02 8:00 AM PST (16:00Z): 0 — ends today, and the trial is still live", () => {
+    const now = Date.parse("2026-11-02T16:00:00Z");
+    expect(trialDaysLeftLocal(org, PACIFIC, now)).toBe(0);
+    expect(accessState(org, { nowMs: now, tz: PACIFIC })).toEqual({ active: true, reason: "trial", daysLeft: 0, compedBy: null });
+    // The UTC ceiling would have said 1 here (two hours left): the calendar says today.
+    expect(trialDaysLeftAt(org, now)).toBe(1);
+    expect(accessState(org, { nowMs: now }).daysLeft).toBe(1);
+  });
+
+  it("Tuesday 2026-11-03: 0, and accessState says trial_ended", () => {
+    const now = Date.parse("2026-11-03T17:00:00Z"); // 9:00 AM PST
+    expect(trialDaysLeftLocal(org, PACIFIC, now)).toBe(0);
+    expect(accessState(org, { nowMs: now, tz: PACIFIC })).toEqual({ active: false, reason: "trial_ended", daysLeft: 0, compedBy: null });
+  });
+
+  it("Sunday 2026-11-01 (the fall-back day itself), any hour: 1 — ends tomorrow", () => {
+    for (const utc of ["2026-11-01T08:00:00Z", "2026-11-01T09:30:00Z", "2026-11-01T20:00:00Z", "2026-11-02T07:59:00Z"]) {
+      expect(trialDaysLeftLocal(org, PACIFIC, Date.parse(utc)), utc).toBe(1);
+    }
+    // Monday 12:30 AM PST (08:30Z): the UTC ceiling says 1 (9½ hours left); the calendar says today.
+    expect(trialDaysLeftLocal(org, PACIFIC, Date.parse("2026-11-02T08:30:00Z"))).toBe(0);
+    expect(trialDaysLeftAt(org, Date.parse("2026-11-02T08:30:00Z"))).toBe(1);
+  });
+
+  it("another company in another zone counts its own calendar", () => {
+    // 2026-11-02 18:00Z is 1:00 PM in New York; Saturday 10-31 at 11:30 PM Eastern (11-01 03:30Z) is 2 days off.
+    expect(trialDaysLeftLocal(org, "America/New_York", Date.parse("2026-11-01T03:30:00Z"))).toBe(2);
+    // The same instant is Saturday 8:30 PM Pacific: also 2 days.
+    expect(trialDaysLeftLocal(org, PACIFIC, Date.parse("2026-11-01T03:30:00Z"))).toBe(2);
+  });
+
+  it("no end date, or one nothing can parse: 0", () => {
+    expect(trialDaysLeftLocal({ trial_ends_at: null }, PACIFIC, Date.now())).toBe(0);
+    expect(trialDaysLeftLocal({ trial_ends_at: "garbage" }, PACIFIC, Date.now())).toBe(0);
   });
 });

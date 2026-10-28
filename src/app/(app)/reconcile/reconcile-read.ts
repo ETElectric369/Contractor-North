@@ -130,7 +130,7 @@ const EMPTY: ReconcileWork = {
 function isMissingColumn(err: unknown): boolean {
   const code = String((err as { code?: string })?.code ?? "");
   const message = String((err as { message?: string })?.message ?? "");
-  return code === "42703" || /does not exist/i.test(message) || /\b(superseded_by_bill_id|pricing_provisional)\b/i.test(message);
+  return code === "42703" || /does not exist/i.test(message) || /\b(superseded_by_bill_id|pricing_provisional|both_real_at)\b/i.test(message);
 }
 
 /**
@@ -146,13 +146,20 @@ function isMissingColumn(err: unknown): boolean {
  * the picker does not render, which is the no-dead-ends rule.
  */
 async function readBillsWithLines(supabase: any, orgId: string) {
-  const columns = (supersede: boolean) =>
-    `id, supplier, supplier_account_id, bill_number, amount, amount_paid, status, bill_date, job_id, category, notes, supplier_invoice_number${supersede ? ", superseded_by_bill_id" : ""}, jobs(job_number, name, customers(name)), bill_line_items(description)`;
-  const read = (supersede: boolean) =>
-    supabase.from("bills").select(columns(supersede)).eq("org_id", orgId).order("created_at", { ascending: false }).limit(5000);
-  const first = await read(true);
-  if (!first?.error || !isMissingColumn(first.error)) return first;
-  return read(false);
+  // THE NEWEST COLUMNS FALL OFF FIRST, one at a time: both_real_at (0400, Both Are Real) goes before
+  // superseded_by_bill_id (0271), so a database between the two still draws the picker — a stamp it
+  // cannot read is a pair that asks again, never a page without its card.
+  const newest = ["both_real_at", "superseded_by_bill_id"] as const;
+  const columns = (drop: number) =>
+    `id, supplier, supplier_account_id, bill_number, amount, amount_paid, status, bill_date, job_id, category, notes, supplier_invoice_number${newest
+      .slice(drop)
+      .map((c) => `, ${c}`)
+      .join("")}, jobs(job_number, name, customers(name)), bill_line_items(description)`;
+  const read = (drop: number) =>
+    supabase.from("bills").select(columns(drop)).eq("org_id", orgId).order("created_at", { ascending: false }).limit(5000);
+  let res = await read(0);
+  for (let drop = 1; drop <= newest.length && res?.error && isMissingColumn(res.error); drop++) res = await read(drop);
+  return res;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { recordAiUsage, aiSpendExceeded } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed } from "@/lib/ai-cost";
 import { coerceByPlaybook } from "./answers";
 import { applyHeard, hearRequest, parseHeard, HEAR_SYSTEM } from "./hear";
 import { clearInapplicable } from "./resolve";
@@ -52,8 +52,8 @@ export async function runHear(
   // and no rate limit — on the flagship model, reachable from a field surface anybody on the crew
   // can hold. 0162 exists to make "what did this org spend" answerable and 0163 to stop it running
   // away; neither reached the surface that runs on EVERY site visit.
-  if (await aiSpendExceeded(ctx.orgId))
-    return { ok: false, error: "Nort's monthly limit for this company is used up — ask the owner to raise it." };
+  const gate = await aiAllowed(ctx.orgId, undefined, { ceilingWords: "Nort's monthly limit for this company is used up — ask the owner to raise it." });
+  if (!gate.ok) return { ok: false, error: gate.why };
 
   // Coerce what the caller thinks it has BEFORE reasoning about it, so a tampered payload can't
   // pass off an unanswered need as answered (suppressing a question) or the reverse.

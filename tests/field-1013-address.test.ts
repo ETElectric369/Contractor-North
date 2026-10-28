@@ -121,7 +121,7 @@ describe("the doors carry the rules (source pins)", () => {
   });
   it("the app shell hands every box the company's ground, streamed behind the shell", () => {
     const s = read("src/app/(app)/layout.tsx");
-    expect(s).toContain("settings, address_line1, city, state, zip\")");
+    expect(s).toContain("settings, address_line1, city, state, zip`)");
     expect(s).toMatch(/<Suspense fallback=\{null\}>\s*<OrgPlaceBiasSlot org=\{org\} \/>/);
     expect(s).toContain("const b = await orgPlaceBias(org);");
   });

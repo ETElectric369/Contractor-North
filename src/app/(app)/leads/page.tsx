@@ -12,6 +12,7 @@ import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
 import type { Inquiry } from "@/lib/types";
 import { readLeadVisits } from "@/lib/leads/visit-read";
+import { orderLeadBoard } from "@/lib/leads/board-order";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
@@ -26,22 +27,18 @@ export default async function InquiriesPage({
   const supabase = await createClient();
 
   const [{ data: inqData }, { data: custData }, sw] = await Promise.all([
-    supabase
-      .from("inquiries")
-      .select("*, referrer:profiles!inquiries_referred_by_fkey(full_name)")
-      .is("converted_at", null)
-      .neq("status", "lost")
-      // Hottest qualified leads first (priority = size × readiness × reachability). Legacy /
-      // manually-added leads are all priority 0, so they tie here and keep the original
-      // follow-up-due → newest ordering below — an org with no triaged leads is unaffected.
-      .order("priority", { ascending: false })
-      /* nullsFirst — a lead with NO follow-up date is an UNTOUCHED lead, and hiding it at the
-         bottom of the pile is how "the new lead i just added isnt showing up" happened: he added
-         it, scrolled the top, and concluded the save failed. Fresh and untouched belongs at the
-         top ("new leads should be listed at the top of the page"); dated follow-ups sort below,
-         soonest first, and the Due-today tile carries the due story. */
-      .order("next_follow_up_at", { ascending: true, nullsFirst: true })
-      .order("created_at", { ascending: false }),
+    // NEWEST FIRST (lib/leads/board-order, cn-v1137). The board used to sort the triage's priority
+    // first, so a lead typed by hand (always priority 0) landed UNDER every scored web lead and
+    // read as "the lead i just added isnt showing up". The score is a chip on the row now
+    // (inquiry-row.tsx), never a silent order; the follow-up order (undated first, then soonest)
+    // and the score remain as tie-breaks in the one rule.
+    orderLeadBoard(
+      supabase
+        .from("inquiries")
+        .select("*, referrer:profiles!inquiries_referred_by_fkey(full_name)")
+        .is("converted_at", null)
+        .neq("status", "lost"),
+    ),
     listCustomerOptions(supabase),
     // THE SWITCH BOARD (0352). Leads off: this page still opens from a link (a Needs You card, an
     // estimate's "from lead"), with the shell's Off line on top, and New Lead goes. Website requests

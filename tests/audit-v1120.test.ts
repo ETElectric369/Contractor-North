@@ -144,7 +144,11 @@ describe("class 6: the site fence has one lifecycle", () => {
     expect(g).toContain("notify = true,");
     expect(g).toContain("void armFence({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }).then(dark);");
     expect(g).toContain("void fenceReadiness().then(dark);");
-    expect(g).toContain(') : fenceDark ? (');
+    // cn-v1137 (Bug Watch #14): the idle banners moved into GeofenceIdleLine, where a dark fence is
+    // still said (denied > the location ask > fenceDark > anchor lost).
+    expect(g).toContain("export function GeofenceIdleLine({");
+    expect(g).toContain("if (fenceDark)");
+    expect(g).toContain("fenceDark={fenceDark}");
     expect(g).toContain("Set it to Always in Settings, under Location Services, North.");
     const n = read("src/lib/native-geofence.ts");
     expect(n).toContain("label: string; notify: boolean }): Promise<FenceReadiness | null>");

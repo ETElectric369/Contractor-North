@@ -549,6 +549,16 @@ describe("reexpandTaskDetail — the builder's units box on a kit-built line (W4
     expect(lineNameWithUnits("Install 4×4", null, 8)).toBe("Install 4×4 ×8");
     expect(lineNameWithUnits("Footings ×7 (north)", 7, 8)).toBe("Footings ×7 (north) ×8");
   });
+
+  it("a note under the line (the description's lines after the first) is never part of the name, and rides along untouched (skeptic #43, S6)", () => {
+    expect(stripUnits("Footings ×7\nUse the 10-inch tubes")).toBe("Footings");
+    expect(stripUnits("Footings\nUse the 10-inch tubes\nNorth side first")).toBe("Footings");
+    expect(lineNameWithUnits("Footings ×7\nUse the 10-inch tubes", 7, 8)).toBe("Footings ×8\nUse the 10-inch tubes");
+    expect(lineNameWithUnits("Footings\nUse the 10-inch tubes", null, 3)).toBe("Footings ×3\nUse the 10-inch tubes");
+    expect(lineNameWithUnits("Footings ×7\nUse the 10-inch tubes", 7, 1)).toBe("Footings\nUse the 10-inch tubes");
+    // The note's own "×7" is the note's, not a count the line wrote.
+    expect(lineNameWithUnits("Footings\nTubes ×7", null, 2)).toBe("Footings ×2\nTubes ×7");
+  });
 });
 
 describe("a part's money is the figure the paper prints (item 4): rounded per part, then summed", () => {

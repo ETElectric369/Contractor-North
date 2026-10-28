@@ -73,6 +73,17 @@ describe("the Office and Tools rows follow the role and the Calculators switch",
   it("Calculators off: no Tools row, for anyone", () => {
     for (const role of ["owner", "tech"]) expect(links(render(off("calculators"), role)).some((l) => l.startsWith("/tools"))).toBe(false);
   });
+
+  it("lapsed (skeptic #43, S1): Settings is the one row — no Office, Tools, Estimate QR or Help; Language and Sign Out stay", () => {
+    for (const role of ["owner", "tech"]) {
+      const html = render(off("nort"), role, { lapsed: true, onboarded: false, setup: {} });
+      expect(links(html), role).toEqual(["/settings:Settings"]);
+      expect(html).not.toContain("Estimate QR");
+      expect(html).not.toContain(">Help</div>");
+      expect(html).toContain("Language");
+      expect(html).toContain("Sign Out");
+    }
+  });
 });
 
 /**

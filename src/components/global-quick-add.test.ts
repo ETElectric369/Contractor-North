@@ -62,6 +62,14 @@ describe("the + on screen", () => {
     for (const html of [tech, office]) expect(html).toMatch(/<button[^>]*class="[^"]*\bh-11 w-11\b/);
   });
 
+  it("lapsed (skeptic #43, S1): the + is not drawn at all — every verb of it is a closed door", () => {
+    expect(renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: true, placement: "topbar", lapsed: true }))).toBe("");
+    expect(renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: false, lapsed: true }))).toBe("");
+    // The hooks run before the early return, so the mount is one shape either way.
+    const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
+    expect(src.indexOf("if (lapsed) return null;")).toBeGreaterThan(src.lastIndexOf("useEffect("));
+  });
+
   it("the floating button is gone: no drag, no saved position", () => {
     const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
     for (const gone of ["cn_quickadd_pos", "localStorage", "onPointerDown", "setPointerCapture", '"fab"']) expect(src).not.toContain(gone);

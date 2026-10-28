@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({ client: null as any }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => state.client) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+import { reportError } from "@/lib/observe";
 
 import {
   linkBillsBySupplierText,
@@ -26,6 +27,7 @@ import {
   setSupplierInvoiceJob,
   tieSupplierInvoiceToBill,
 } from "./supplier-actions";
+import * as actions from "./supplier-actions";
 
 type Call = { table: string; verb: string; payload?: any };
 
@@ -576,5 +578,151 @@ describe("recordSupplierInvoiceAsBill refuses a paper a person set aside for a c
     const res = await recordSupplierInvoiceAsBill({ invoiceId: INVOICE_ID });
     expect(res.error ?? null).toBeNull();
     expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(true);
+  });
+});
+
+/**
+ * BOTH ARE REAL (0400 bills.both_real_at; cn-v1137). The card's own words admitted two identical runs
+ * a month apart are normal and offered no way to say so. The write is pinned here with its filters:
+ * the pair, THIS company, the rows back (the silent-write law), and the way back.
+ */
+type ScopedCall = { table: string; verb: string; payload?: any; filters: unknown[][] };
+
+/** The same fake, with every filter recorded, so org scope is proven and not assumed. */
+function scopedFake(script: Record<string, any[]>, calls: ScopedCall[]) {
+  const next = (key: string) => {
+    const q = script[key];
+    if (!q || q.length === 0) throw new Error(`unscripted call: ${key}`);
+    return q.shift();
+  };
+  return {
+    auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
+    from(table: string) {
+      let verb = "select";
+      const current: ScopedCall = { table, verb, filters: [] };
+      const chain: any = {
+        insert(payload: any) { verb = "insert"; current.verb = verb; current.payload = payload; calls.push(current); return chain; },
+        update(payload: any) { verb = "update"; current.verb = verb; current.payload = payload; calls.push(current); return chain; },
+        select(cols?: string) { current.filters.push(["select", cols]); if (verb === "select") calls.push(current); return chain; },
+        eq(...a: unknown[]) { current.filters.push(["eq", ...a]); return chain; },
+        in(...a: unknown[]) { current.filters.push(["in", ...a]); return chain; },
+        is(...a: unknown[]) { current.filters.push(["is", ...a]); return chain; },
+        not(...a: unknown[]) { current.filters.push(["not", ...a]); return chain; },
+        order() { return chain; },
+        limit() { return chain; },
+        single: () => Promise.resolve(next(`${table}.${verb}`)),
+        maybeSingle: () => Promise.resolve(next(`${table}.${verb}`)),
+        then(resolve: any, reject: any) {
+          try { resolve(next(`${table}.${verb}`)); } catch (e) { reject?.(e); }
+        },
+      };
+      return chain;
+    },
+  };
+}
+
+describe("markBothReal - both costs stay where they are, and the pair stops being asked about", () => {
+  const { markBothReal, unmarkBothReal } = actions;
+  let scoped: ScopedCall[];
+  beforeEach(() => { scoped = []; vi.mocked(reportError).mockClear(); });
+
+  it("stamps both copies of THIS company's pair with the moment, reads the rows back, and says what it did", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "bills.update": [{ data: [{ id: NIGHTSHADE_COPY, job_id: "job-nightshade" }, { id: LARKSPUR_COPY, job_id: "job-larkspur" }], error: null }] },
+      scoped,
+    );
+    const res = await markBothReal([NIGHTSHADE_COPY, LARKSPUR_COPY]);
+    expect(res).toEqual({ ok: true, message: "Both are real. Both copies keep counting where they are, and this pair won't be asked about again." });
+    const write = scoped.find((c) => c.table === "bills" && c.verb === "update")!;
+    expect(Object.keys(write.payload)).toEqual(["both_real_at"]);
+    expect(Date.now() - Date.parse(write.payload.both_real_at)).toBeLessThan(10_000);
+    expect(write.filters).toEqual([
+      ["in", "id", [NIGHTSHADE_COPY, LARKSPUR_COPY]],
+      ["eq", "org_id", "org-1"],
+      ["select", "id, job_id"],
+    ]);
+    // Nothing else moves: no supersede, no claim, no second statement against his books.
+    expect(scoped.filter((c) => c.table !== "profiles")).toHaveLength(1);
+  });
+
+  it("zero rows is a refusal said in words, never a success (the silent-write law)", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF], "bills.update": [{ data: [], error: null }] }, scoped);
+    expect(await markBothReal([NIGHTSHADE_COPY, LARKSPUR_COPY])).toEqual({ ok: false, error: "Those bills aren't there any more." });
+  });
+
+  it("half a pair landing: the stamp that landed comes back off BEFORE the refusal, and he is told to reload (skeptic #43, N6)", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "bills.update": [{ data: [{ id: NIGHTSHADE_COPY, job_id: null }], error: null }, { data: [{ id: NIGHTSHADE_COPY }], error: null }] },
+      scoped,
+    );
+    const res = await markBothReal([NIGHTSHADE_COPY, LARKSPUR_COPY]);
+    expect(res).toEqual({ ok: false, error: "Those bills changed under you — reload and try again." });
+    const writes = scoped.filter((c) => c.table === "bills" && c.verb === "update");
+    expect(writes).toHaveLength(2);
+    expect(writes[1].payload).toEqual({ both_real_at: null });
+    expect(writes[1].filters).toEqual([
+      ["in", "id", [NIGHTSHADE_COPY]],
+      ["eq", "org_id", "org-1"],
+      ["select", "id"],
+    ]);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("a rollback that did not land is filed under its own key — nothing more can be said from there", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF, STAFF], "bills.update": [
+        { data: [{ id: NIGHTSHADE_COPY, job_id: null }], error: null }, { data: [], error: null },
+        { data: [{ id: NIGHTSHADE_COPY, job_id: null }], error: null }, { data: null, error: { message: "statement timeout", code: "57014" } },
+      ] },
+      scoped,
+    );
+    expect(await markBothReal([NIGHTSHADE_COPY, LARKSPUR_COPY])).toEqual({ ok: false, error: "Those bills changed under you — reload and try again." });
+    expect(await markBothReal([NIGHTSHADE_COPY, LARKSPUR_COPY])).toEqual({ ok: false, error: "Those bills changed under you — reload and try again." });
+    expect(vi.mocked(reportError).mock.calls.map((c) => c[0])).toEqual(["markBothReal:rollback", "markBothReal:rollback"]);
+    expect(vi.mocked(reportError).mock.calls[0][2]).toEqual({ orgId: "org-1", landed: [NIGHTSHADE_COPY], back: 0 });
+  });
+
+  it("more ids than one pair's worth (the wire, not the page) is refused before anything is written", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF] }, scoped);
+    const eleven = Array.from({ length: 11 }, (_, i) => `00000000-0000-4000-8000-0000000000${String(i).padStart(2, "0")}`);
+    expect(await markBothReal(eleven)).toEqual({ ok: false, error: "That's more than one pair's worth of bills. Reload the page and answer one pair at a time." });
+    expect(scoped.filter((c) => c.table === "bills")).toHaveLength(0);
+  });
+
+  it("one id, a blank, or a stranger's ids on the wire: nothing is written", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF, STAFF] }, scoped);
+    expect((await markBothReal([NIGHTSHADE_COPY])).ok).toBe(false);
+    expect((await markBothReal([" ", NIGHTSHADE_COPY, NIGHTSHADE_COPY])).ok).toBe(false);
+    expect(scoped.filter((c) => c.table === "bills")).toHaveLength(0);
+  });
+
+  it("a database refusal is the sentence, with the pair still waiting", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF], "bills.update": [{ data: null, error: { message: "column both_real_at does not exist", code: "42703" } }] }, scoped);
+    const res = await markBothReal([NIGHTSHADE_COPY, LARKSPUR_COPY]);
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("That didn't save, so the pair is still waiting on you.");
+  });
+
+  it("Undo takes the stamp off the pair the group id names, org-scoped, and only where it is set", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "bills.update": [{ data: [{ id: NIGHTSHADE_COPY, job_id: "job-nightshade" }, { id: LARKSPUR_COPY, job_id: "job-larkspur" }], error: null }] },
+      scoped,
+    );
+    expect(await unmarkBothReal(GROUP)).toEqual({ ok: true, message: "Put back. The pair will be asked about again." });
+    const write = scoped.find((c) => c.table === "bills" && c.verb === "update")!;
+    expect(write.payload).toEqual({ both_real_at: null });
+    expect(write.filters).toEqual([
+      ["in", "id", [NIGHTSHADE_COPY, LARKSPUR_COPY]],
+      ["eq", "org_id", "org-1"],
+      ["not", "both_real_at", "is", null],
+      ["select", "id, job_id"],
+    ]);
+  });
+
+  it("Undo with nothing stamped says so; a group id that names no pair writes nothing", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF, STAFF], "bills.update": [{ data: [], error: null }] }, scoped);
+    expect(await unmarkBothReal(GROUP)).toEqual({ ok: false, error: "That pair is already back the way it was. Reload the page." });
+    expect((await unmarkBothReal("not-a-group")).ok).toBe(false);
+    expect(scoped.filter((c) => c.table === "bills")).toHaveLength(1);
   });
 });

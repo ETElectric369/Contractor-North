@@ -143,10 +143,12 @@ describe("the page is built from the Record", () => {
       if (k === "same-ticket-two-jobs") continue; // its own rows are its gate, see below
       expect(page, k).toContain(`has("${k}")`);
     }
-    // The duplicate picker draws while it has ROWS, not only while one is open: a pick he already
-    // made keeps its row so he can change his mind. Its COUNT is still open-only, which is the law —
-    // badges show open, sections do not hide an undo.
-    expect(page).toContain("work.supersedeReady && work.duplicates.length > 0");
+    // The duplicate picker is mounted whenever its door exists, not only while it has rows: the
+    // card itself draws nothing with no groups and nothing just done, and stays for the Undo of the
+    // last pair (skeptic #43, S3). Its COUNT is still open-only, which is the law — badges show open,
+    // sections do not hide an undo.
+    expect(page).toContain("{work.supersedeReady && (");
+    expect(page).not.toContain("work.supersedeReady && work.duplicates.length > 0");
   });
 
   it("the anchors are the Record's, including the one the owning component renders itself", () => {

@@ -122,11 +122,15 @@ export function QuickAddMenu({
 export function GlobalQuickAdd({
   isStaff = false,
   features,
+  lapsed = false,
 }: {
   placement?: "topbar";
   isStaff?: boolean;
   /** The shell's switch map: a switched-off feature's "New …" verb isn't offered. */
   features?: FeatureMap;
+  /** The company has lapsed and this person is on an open door (the layout's red bar): every verb
+   *  of the + is a closed door, so the + is not drawn at all (skeptic #43, S1). */
+  lapsed?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -185,6 +189,8 @@ export function GlobalQuickAdd({
   }
 
   const crew = plusOpens(isStaff) === "snap-or-note";
+  // After the hooks, so the mount is the same shape whatever the standing says.
+  if (lapsed) return null;
   return (
     <div className="relative">
       <button

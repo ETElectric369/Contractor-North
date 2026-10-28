@@ -74,7 +74,11 @@ export type PushKind =
   // North's own team (cn-v1136): a blocker page the moment something platform-wide breaks, and the
   // Monday Bug Watch digest. Its own kind, so muting a company alert never mutes it, and muting it
   // never mutes a company alert. Only a platform admin is ever addressed under it.
-  | "bug_watch";
+  | "bug_watch"
+  // The company's own standing with North (cn-v1137): the trial's last days, a declined card and
+  // its grace window, and the day a plan ends. Addressed to the company's owner and admins only —
+  // the people who can pick a plan or update the card — never the office or the crew.
+  | "billing";
 
 // What each trigger defaults to when a user hasn't set an explicit toggle.
 const DEFAULTS: Record<PushKind, boolean> = {
@@ -100,6 +104,9 @@ const DEFAULTS: Record<PushKind, boolean> = {
   long_shift: true,
   // A page about the platform is the reason the team carries a phone; off is each person's to choose.
   bug_watch: true,
+  // The crew's access rides on it: a declined card nobody heard about is a work stoppage. On until
+  // the owner or admin switches it off by name.
+  billing: true,
 };
 
 /** An OPT-IN kind: off until a person switches it on (day_ahead: the morning digest and the 6 PM

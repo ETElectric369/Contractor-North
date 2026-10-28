@@ -7,6 +7,7 @@ import { getStripe, STRIPE_PRICE_ID } from "@/lib/stripe";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { planByTier, priceIdFor, type PlanTier } from "@/lib/plans";
 import { reportError } from "@/lib/observe";
+import { stripeSubscriptionLive, SECOND_SUBSCRIPTION_REFUSAL, NO_BILLING_ACCOUNT_REFUSAL } from "@/lib/lapse-doors";
 
 function siteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
@@ -41,6 +42,13 @@ async function loadOwnerOrg() {
 
 export async function startCheckout(formData?: FormData) {
   const { supabase, org } = await loadOwnerOrg();
+  // NEVER A SECOND SUBSCRIPTION ON THE SAME CUSTOMER (cn-v1137). A subscription that is live (or
+  // past due, or waiting on a card) is managed in the portal; a Checkout beside it would bill the
+  // company twice. A canceled one cannot be restarted from the portal, so Checkout is its door and
+  // reuses the customer below. One rule, lib/lapse-doors, shared with the doors that offer it.
+  if (stripeSubscriptionLive(org)) {
+    redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(SECOND_SUBSCRIPTION_REFUSAL)}`);
+  }
   let url: string | null = null;
   let errMsg: string | null = null;
 
@@ -113,7 +121,7 @@ export async function openPortal() {
   let errMsg: string | null = null;
 
   if (!org.stripe_customer_id) {
-    errMsg = "No billing account yet — subscribe first.";
+    errMsg = NO_BILLING_ACCOUNT_REFUSAL;
   } else {
     try {
       const stripe = getStripe();

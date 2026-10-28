@@ -1,6 +1,6 @@
 "use server";
 
-import { aiSpendExceeded, modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { getAnthropic } from "@/lib/anthropic";
 import { isPdfBytes } from "@/lib/pdf-text";
@@ -94,7 +94,8 @@ export async function lookUpVendors(input: {
   const tooLong = list.find((n) => n.name.length > 120);
   if (tooLong) return { ok: false, error: `${tooLong.name.slice(0, 40)}… is over 120 characters. Shorten it, then look it up.` };
 
-  if (await aiSpendExceeded(orgId)) return { ok: false, error: ALLOWANCE };
+  const gate = await aiAllowed(orgId, undefined, { ceilingWords: ALLOWANCE });
+  if (!gate.ok) return { ok: false, error: gate.why };
 
   const used = await lookupsToday(orgId);
   if (used === null) return { ok: false, error: "Couldn't check today's lookup count, so nothing was looked up and nothing was charged. Try again." };
@@ -226,7 +227,8 @@ export async function readVendorList(form: FormData): Promise<{ ok: true; table:
     return { ok: false, error: `${name} isn't a photo or a PDF. Save the list as Excel or CSV and drop that.` };
   }
 
-  if (await aiSpendExceeded(orgId)) return { ok: false, error: ALLOWANCE.replace("looked up", "read") };
+  const gate = await aiAllowed(orgId, undefined, { ceilingWords: ALLOWANCE.replace("looked up", "read") });
+  if (!gate.ok) return { ok: false, error: gate.why };
   // A per-company ceiling on paid reads, atomic, before the spend.
   if (await rateLimited(`vendor-list-read:${orgId}`, READS_PER_HOUR, 3600, { failClosed: true })) {
     return {

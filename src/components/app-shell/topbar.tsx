@@ -47,6 +47,7 @@ export function Topbar({
   platformAdmin = false,
   features,
   bugCount,
+  lapsed = false,
 }: {
   profile: Profile | null;
   lang?: string;
@@ -63,6 +64,9 @@ export function Topbar({
   /** Bug Watch's open count, for a platform admin only (null for everyone else, or when the count
    *  failed). May arrive as a promise so it never holds up the shell. */
   bugCount?: number | null | Promise<number | null>;
+  /** The company has lapsed and this person is on an open door (the layout's red bar): the + is not
+   *  drawn (every verb of it is a closed door) and the avatar menu keeps only its open doors. */
+  lapsed?: boolean;
 }) {
   const router = useRouter();
   // Staff = owner/admin/office — the same rule the layout uses (it already
@@ -193,7 +197,7 @@ export function Topbar({
             </button>
           ))}
         {/* The + tour anchor is this wrapper span (lane 3 rewrites the component inside it). */}
-        <span data-tour="quickadd" className="inline-flex"><GlobalQuickAdd placement="topbar" isStaff={isStaff} features={features} /></span>
+        <span data-tour="quickadd" className="inline-flex"><GlobalQuickAdd placement="topbar" isStaff={isStaff} features={features} lapsed={lapsed} /></span>
         {/* The in-app bell — the always-works notification channel (push-independent). */}
         <span data-tour="bell" className="inline-flex"><NotificationBell /></span>
         {/* The account seek door — always visible, far right: Settings, Office, Tools, Sign out,
@@ -208,6 +212,7 @@ export function Topbar({
             onboarded={!!onboarded}
             setupDot={!nortOn && waiting}
             bugCount={bugCount}
+            lapsed={lapsed}
           />
         </span>
       </div>

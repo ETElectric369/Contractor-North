@@ -123,3 +123,28 @@ describe("QuoteDocument prints the breakdown the format asks for", () => {
     expect(render([plain], "detailed")).toBe(render([plain], "tasks"));
   });
 });
+
+describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head print as bullets", () => {
+  it("'Head\\nNote line' prints the head and the note as one bullet under it, under either format", () => {
+    const noted: QuoteDocItem = { id: "q2", description: "Panel upgrade, 200A\nIncludes the permit\nTwo-day job", quantity: 1, unit: "ea", unit_price: 2400, line_total: 2400 };
+    for (const format of ["tasks", "detailed"] as EstimateFormat[]) {
+      const html = renderToStaticMarkup(
+        createElement(QuoteDocument, {
+          co: { name: "Main Street Builders", brand: "#0f766e" },
+          template: "classic",
+          docLabel: "Estimate",
+          number: "E-002",
+          createdAt: "2026-10-28",
+          customer: { name: "Sample Customer" },
+          items: [noted],
+          subtotal: 2400,
+          tax: 0,
+          total: 2400,
+          estimateFormat: format,
+        }),
+      );
+      expect(html).toContain("<div>Panel upgrade, 200A</div>");
+      expect(html).toContain("<li>Includes the permit</li><li>Two-day job</li>");
+    }
+  });
+});

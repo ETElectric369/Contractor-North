@@ -19,6 +19,7 @@ vi.mock("@/lib/rate-limit", () => ({ rateLimited: vi.fn(async () => false) }));
 vi.mock("@/lib/ai-cost", () => ({
   recordAiUsage: vi.fn(async () => {}),
   aiSpendExceeded: vi.fn(async () => false),
+  aiAllowed: vi.fn(async () => ({ ok: true })),
   currentOrgId: vi.fn(async () => ORG),
   modelFor: () => "claude-haiku-4-5",
   // The allowance gate (cn-v1128): never over, no plan, the run tick a no-op.

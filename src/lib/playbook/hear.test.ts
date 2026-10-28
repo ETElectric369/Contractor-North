@@ -253,12 +253,12 @@ describe("nothing he said is thrown away", () => {
 describe("runHear is metered and capped", () => {
   const src = readFileSync(join(process.cwd(), "src/lib/playbook/hear-run.ts"), "utf8");
 
-  it("checks the org's spend ceiling", () => {
-    expect(src).toContain("aiSpendExceeded");
+  it("checks the org's standing and spend ceiling through the one gate (aiAllowed, cn-v1137)", () => {
+    expect(src).toContain("aiAllowed(");
   });
 
   it("checks it BEFORE spending money, not after", () => {
-    expect(src.indexOf("aiSpendExceeded")).toBeLessThan(src.indexOf("messages.create"));
+    expect(src.indexOf("aiAllowed(")).toBeLessThan(src.indexOf("messages.create"));
   });
 
   it("records the call against the org's ledger", () => {

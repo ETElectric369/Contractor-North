@@ -37,7 +37,7 @@ vi.mock("@/lib/public-org", async (orig) => ({
 const rateLimited = vi.fn(async () => false);
 vi.mock("@/lib/rate-limit", () => ({ rateLimited: (...a: unknown[]) => (rateLimited as any)(...a), clientIp: () => "203.0.113.9" }));
 const aiSpendExceeded = vi.fn(async () => false);
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(), aiSpendExceeded: (...a: unknown[]) => (aiSpendExceeded as any)(...a) }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(), aiSpendExceeded: (...a: unknown[]) => (aiSpendExceeded as any)(...a), aiAllowed: async () => ({ ok: true }) }));
 const getAnthropic = vi.fn(() => {
   throw new Error("the model must not be reached in this test");
 });

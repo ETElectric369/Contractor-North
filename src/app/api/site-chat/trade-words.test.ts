@@ -34,7 +34,7 @@ vi.mock("@/lib/public-org", async (orig) => ({
   getPublicOrgByHandle: async (h: string) => (h === "fixture" ? org() : null),
 }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimited: async () => false, clientIp: () => "203.0.113.9" }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(), aiSpendExceeded: async () => false }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(), aiSpendExceeded: async () => false, aiAllowed: async () => ({ ok: true }) }));
 const create = vi.fn(async (_args: unknown) => ({ content: [{ type: "text", text: "Hello." }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } }));
 vi.mock("@/lib/anthropic", () => ({ getAnthropic: () => ({ messages: { create } }) }));
 vi.mock("@/lib/supabase/server", () => ({

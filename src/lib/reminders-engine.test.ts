@@ -24,6 +24,9 @@ vi.mock("@/lib/email", () => ({
 // The real errorMessage stays (readAllOrgs words a failed read with it); only the filer is a spy.
 vi.mock("@/lib/observe", async (orig) => ({ ...(await orig<typeof import("@/lib/observe")>()), reportError: spies.reportError }));
 vi.mock("@/lib/bank-transfer", () => ({ pendingTransfers: vi.fn(async () => ({ problem: null, byInvoice: new Map() })) }));
+// BILLING ON (cn-v1137): a company whose plan has ended is read and passed over (readActiveOrgs);
+// with billing off nothing lapses, so the fixtures carry a live status to be read at all.
+vi.mock("@/lib/stripe", async (orig) => ({ ...(await orig<typeof import("@/lib/stripe")>()), billingEnabled: true }));
 
 import { sendDueReminders } from "./reminders-engine";
 
@@ -68,8 +71,8 @@ const orgOf = (q: Q) => q.filters.find((f) => f[0] === "eq" && f[1] === "org_id"
 const orgPage = (q: Q, rows: unknown[]): Reply => ({ data: q.filters.some((f) => f[0] === "range" && Number(f[1]) > 0) ? [] : rows });
 
 const ALL_ON = { timezone: "America/Los_Angeles", remind_invoice_due: true, remind_quote_followup: true, remind_appointments: true };
-const ORG_A = { id: "org-a", name: "Larkspur Electric", phone: null, email: null, settings: ALL_ON };
-const ORG_B = { id: "org-b", name: "Snowbell Electric", phone: null, email: null, settings: { timezone: "America/Los_Angeles", remind_invoice_due: true } };
+const ORG_A = { id: "org-a", name: "Larkspur Electric", phone: null, email: null, settings: ALL_ON, subscription_status: "active" };
+const ORG_B = { id: "org-b", name: "Snowbell Electric", phone: null, email: null, settings: { timezone: "America/Los_Angeles", remind_invoice_due: true }, subscription_status: "active" };
 
 const OVERDUE = {
   id: "inv-b1",
@@ -102,10 +105,22 @@ beforeEach(() => {
 describe("sendDueReminders and a failed read", () => {
   it("the clean run reminds the second company's customer and fails nothing", async () => {
     const counts = await sendDueReminders(fake(routes()));
-    expect(counts).toEqual({ invoice_due: 1, quote_followup: 0, appointment: 0, skipped_no_email: 0, failed: 0 });
+    expect(counts).toEqual({ invoice_due: 1, quote_followup: 0, appointment: 0, skipped_no_email: 0, lapsed_skipped: 0, failed: 0 });
     expect(spies.sendEmail).toHaveBeenCalledTimes(1);
     expect(spies.sendEmail.mock.calls[0][0]).toMatchObject({ to: "bayberry@example.com" });
     expect(spies.reportError).not.toHaveBeenCalled();
+  });
+
+  it("a company whose plan has ended gets no reminder emails and is counted; a comped one still does (cn-v1137)", async () => {
+    // Company B holds the overdue invoice: lapsed, its customer hears nothing; comped, the email goes.
+    const lapsedB = { ...ORG_B, subscription_status: "canceled" };
+    const db = fake((q) => (q.table === "organizations" ? orgPage(q, [ORG_A, lapsedB]) : routes()(q)));
+    expect(await sendDueReminders(db)).toEqual({ invoice_due: 0, quote_followup: 0, appointment: 0, skipped_no_email: 0, lapsed_skipped: 1, failed: 0 });
+    expect(spies.sendEmail).not.toHaveBeenCalled();
+    const compedB = { ...lapsedB, comped_until: "2099-01-01T00:00:00.000Z" };
+    const db2 = fake((q) => (q.table === "organizations" ? orgPage(q, [ORG_A, compedB]) : routes()(q)));
+    expect(await sendDueReminders(db2)).toMatchObject({ invoice_due: 1, lapsed_skipped: 0 });
+    expect(spies.sendEmail).toHaveBeenCalledTimes(1);
   });
 
   it("a failed companies read REJECTS, naming the table: never an empty run", async () => {

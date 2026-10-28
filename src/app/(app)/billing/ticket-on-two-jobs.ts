@@ -55,6 +55,13 @@ export type TwoJobTickets = {
 
 const cents = (v: unknown) => Math.round((Number(v) || 0) * 100);
 
+/** The one error shape a column the database hasn't got yet makes (bills/page.tsx's own rule). */
+const isMissingColumn = (err: unknown): boolean => {
+  const code = String((err as { code?: string })?.code ?? "");
+  const message = String((err as { message?: string })?.message ?? "");
+  return code === "42703" || /does not exist/i.test(message) || /\bboth_real_at\b/i.test(message);
+};
+
 /**
  * Which of the bills this invoice is charging are also filed on another job. `billedIds` is what
  * actually landed on the invoice, so a receipt held back behind a line the office edited by hand is
@@ -79,18 +86,27 @@ export async function ticketsAlsoOnAnotherJob(
   // A WHOLE LIST OR A FAILURE (read-all-pages.ts). An unordered `.limit(500)` answered 200 with the
   // rest simply missing, so WHICH copies came back was whatever the query plan yielded: the partner of
   // the $95.27 ticket could sit outside the cut and the invoice went out with nothing said.
-  const { rows: paged, error } = await readAllPages<any>((from, to) =>
-    supabase
-      .from("bills")
-      // THE SUPERSEDED ROWS COME TOO: the copy he already set aside is what makes a group read as
-      // ANSWERED, and a group he has answered must not be warned about again (isOpenDuplicateGroup).
-      // `jobs(job_number, name, customers(name))` is what lets the sentence name the other job in full.
-      .select("id, supplier, amount, bill_date, job_id, notes, supplier_invoice_number, superseded_by_bill_id, jobs(job_number, name, customers(name)), bill_line_items(description)")
-      .eq("org_id", orgId)
-      .in("amount", amounts)
-      .order("id")
-      .range(from, to),
-  );
+  // BOTH ARE REAL RIDES ALONG (0400 both_real_at; skeptic #43, S2): a pair he said is two purchases
+  // is a pair duplicateTicketGroups drops, so it must not be warned about on the invoice either. The
+  // newest column falls off first, the way the bills page and Reconcile read: a database without it
+  // is read again without it, and a stamp it cannot read is a pair that asks again.
+  const read = (bothReal: boolean) =>
+    readAllPages<any>((from, to) =>
+      supabase
+        .from("bills")
+        // THE SUPERSEDED ROWS COME TOO: the copy he already set aside is what makes a group read as
+        // ANSWERED, and a group he has answered must not be warned about again (isOpenDuplicateGroup).
+        // `jobs(job_number, name, customers(name))` is what lets the sentence name the other job in full.
+        .select(
+          `id, supplier, amount, bill_date, job_id, notes, supplier_invoice_number, superseded_by_bill_id${bothReal ? ", both_real_at" : ""}, jobs(job_number, name, customers(name)), bill_line_items(description)`,
+        )
+        .eq("org_id", orgId)
+        .in("amount", amounts)
+        .order("id")
+        .range(from, to),
+    );
+  let { rows: paged, error } = await read(true);
+  if (error && isMissingColumn(error)) ({ rows: paged, error } = await read(false));
   if (error) {
     reportError("importCosts.ticketOnTwoJobs", error, { invoiceJob: jobId, amounts: amounts.length });
     return { said: [] };
