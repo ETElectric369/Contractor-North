@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1136", date: "2026-10-28", line: "Bug Watch lists every caught error with its first sighting and count, with Triaged, Fixed and Ignore doors; a platform-wide blocker pages North's team; a Monday digest; closed rows retire at 90 days." },
   { version: "cn-v1135", date: "2026-10-27", line: "Every trade gets one package: job codes, switches, sheet, calculators and Nort's words from one registry; Change My Trade and How You Price in Settings; nothing is electrician-first." },
   { version: "cn-v1134", date: "2026-10-27", line: "Every button and menu is Title Case, checked by a test; Who's On The Clock lives on Time Clock; Won · Pick The Job carries the visit's tasks and parts; crew imports hand out one-time links." },
   { version: "cn-v1133", date: "2026-10-27", line: "A task line's Qty now reaches the job (hours and parts × the count); the customer's Accept makes the whole job before it answers; part counts follow an edit; the editor cannot lose or double a line." },

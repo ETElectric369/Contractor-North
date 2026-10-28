@@ -2,6 +2,7 @@
 import { dbError } from "@/lib/db-error";
 
 import { reportError } from "@/lib/observe";
+import { isPlatformAdmin } from "@/lib/platform-admin";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 
 /** Save (or refresh) the current user's push subscription for this device. */
@@ -222,16 +223,23 @@ export async function releaseDeviceTokenOnSignOut(deviceToken: string) {
  * which has no role in hand, and a switch for an alert a role can never receive is a control that
  * does nothing: a tech turning "Invoices paid" on waits for a buzz that is only ever sent to
  * office staff. One read of the caller's OWN row, so it can't be used to ask about anyone else.
+ *
+ * AND WHETHER THEY ARE NORTH'S OWN (cn-v1136): the Bug Watch switch is for platform admins only, and
+ * is_platform_admin() answers for the caller alone (0176) — a company role is not this, since every
+ * company sets its own roles. A failed or missing answer reads false: the switch stays unlisted.
  */
-export async function myNotificationRole(): Promise<{ ok: boolean; role?: string }> {
+export async function myNotificationRole(): Promise<{ ok: boolean; role?: string; platformAdmin?: boolean }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false };
-  const { data } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const [{ data }, platformAdmin] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+    isPlatformAdmin(supabase),
+  ]);
   const role = (data as { role?: string | null } | null)?.role;
-  return role ? { ok: true, role } : { ok: false };
+  return role ? { ok: true, role, platformAdmin } : { ok: false, platformAdmin };
 }
 
 /** Save the current user's per-trigger notification toggles. */

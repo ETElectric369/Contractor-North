@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { sendDueReminders } from "@/lib/reminders-engine";
-import { reportErrorAwaited } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 
 export const runtime = "nodejs";
 // One email per due reminder across every company, in series (cn-v1130): Vercel's default minute
@@ -30,8 +30,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, reminders });
   } catch (e: unknown) {
     // Waited for (cn-v1130, skeptic #34): the 500 below is answered on the tick it files, and a
-    // fire-and-forget write can freeze with it.
-    await reportErrorAwaited("cron-reminders-frequent", e);
+    // fire-and-forget write can freeze with it. A BLOCKER (cn-v1136): the whole run fell over, every
+    // company's reminders with it, so the first such run pages North's own team.
+    await reportBlockerAwaited("cron-reminders-frequent", e);
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, { status: 500 });
   }
 }

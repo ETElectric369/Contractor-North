@@ -7,6 +7,8 @@ import { markCacheTail, runReplayRound } from "@/lib/nort/replay";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import {
   getAnthropic,
+  isModelDead,
+  modelDeadError,
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -16,7 +18,8 @@ import { quoteDraftShown, quoteDraftToolFor } from "@/lib/nort/quote-draft-tax";
 import { NORT_EXAMPLES_RULE, calcToolsFor, engineeringLine, tradeRuleWords, voiceEstimateRule } from "@/lib/nort/trade-prompt";
 import { recordAiUsage, aiSpendExceeded, modelFor, type TokenUsage } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
-import { reportError } from "@/lib/observe";
+import { errorMessage, reportError } from "@/lib/observe";
+import { reportBlocker } from "@/lib/observe-blocker";
 import { after } from "next/server";
 import { todayStrInTz } from "@/lib/tz";
 import { clockStateLine, type OpenClockRow } from "@/lib/nort/clock-state";
@@ -1178,7 +1181,14 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
         // cancelled stream throws. That is a hang-up with no one left to tell, and reporting it
         // would bury the real failures under the shell's everyday disconnects.
         if (!clientGone && !req.signal?.aborted) {
-          reportError("chat.stream", e, { userId: user.id, orgId, model });
+          // THE KEY, NOT THE TURN (cn-v1136): a 401/403 from the vendor is every company's Nort dead
+          // at once — a blocker that pages North's own team on its first sighting. Anything else is
+          // this turn's failure, filed as before.
+          // A CONSTANT message per status (modelDeadError) and NO company in the extras (skeptic
+          // #42, B1 + S9): the SDK's words carry a per-request id, which gave every turn its own row
+          // and page; and a dead key is the platform's failure, never this company's for life.
+          if (isModelDead(e)) reportBlocker("nort:model-dead", modelDeadError(e), { reason: errorMessage(e).slice(0, 200) });
+          else reportError("chat.stream", e, { userId: user.id, orgId, model });
           try {
             emit("\n\n[Something went wrong on my end. Ask me again.]");
           } catch {

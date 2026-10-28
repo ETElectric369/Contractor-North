@@ -37,10 +37,12 @@ vi.mock("@/lib/invoice-recalc", () => ({ recalcInvoice: vi.fn(async () => true) 
 vi.mock("@/lib/revalidate-money", () => ({ revalidateMoney: vi.fn() }));
 vi.mock("@/lib/processor-fee-capture", () => ({ captureProcessorFee: vi.fn(async () => undefined) }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn(), reportErrorAwaited: vi.fn(async () => {}) }));
+vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: vi.fn(), reportBlockerAwaited: vi.fn(async () => {}) }));
 
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
 import { POST } from "./route";
 import { reportError, reportErrorAwaited } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 
 const ORG = "org-et";
 const ACCT = "acct_et";
@@ -246,19 +248,31 @@ describe("the webhook and a bank transfer", () => {
  * response and files one row, waited for — counts, the header's own timestamp and Stripe's reason
  * words; never the secret, the body or the signature. A POST with no signature header is not
  * Stripe: answered, not filed.
+ *
+ * AND ONLY STRIPE'S SHAPE PAGES (skeptic #42, S1): a refusal is a blocker when the header carries a
+ * numeric t= and a v1= part and the body is a JSON event (object "event", an id starting "evt_");
+ * anything else is a plain error under its own words ("malformed signature or body", its own dedup
+ * key), so a stranger with a stripe-signature header cannot buzz the team and cannot bury a real
+ * dead secret under a triaged noise row. The two 503 config refusals stay blockers.
  */
 describe("a refused webhook is filed, never only answered", () => {
-  const BODY = '{"id":"evt_x"}';
-  const call = (headers: Record<string, string>) =>
-    POST(new Request("https://app.example.com/api/stripe/webhook", { method: "POST", body: BODY, headers }));
-  const filed = () => vi.mocked(reportErrorAwaited).mock.calls.filter((c) => c[0] === "stripe:webhook:refused");
-  const filedLoose = () => vi.mocked(reportError).mock.calls.filter((c) => c[0] === "stripe:webhook:refused");
+  const BODY = '{"id":"evt_x","object":"event","type":"charge.refunded"}';
+  const call = (headers: Record<string, string>, body: string = BODY) =>
+    POST(new Request("https://app.example.com/api/stripe/webhook", { method: "POST", body, headers }));
+  // A BLOCKER (cn-v1136): every refusal is every company's card payment refused, so it goes through
+  // the waited-for blocker door, which pages North's own team on the first one; the plain error
+  // doors, waited for or not, must not carry it.
+  const filed = () => vi.mocked(reportBlockerAwaited).mock.calls.filter((c) => c[0] === "stripe:webhook:refused");
+  const filedLoose = () => [...vi.mocked(reportError).mock.calls, ...vi.mocked(reportErrorAwaited).mock.calls].filter((c) => c[0] === "stripe:webhook:refused");
+  /** The malformed branch: a plain error, WAITED FOR (the function answers on the same tick), never the fire-and-forget door. */
+  const filedMalformed = () => vi.mocked(reportErrorAwaited).mock.calls.filter((c) => c[0] === "stripe:webhook:refused");
 
   beforeEach(() => {
     state.sigError = null;
     state.noKey = false;
     vi.mocked(reportError).mockClear();
     vi.mocked(reportErrorAwaited).mockClear();
+    vi.mocked(reportBlockerAwaited).mockClear();
     vi.unstubAllEnvs();
   });
 
@@ -268,7 +282,7 @@ describe("a refused webhook is filed, never only answered", () => {
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("Webhook signature failed");
     expect(filed()).toHaveLength(1);
-    expect(filedLoose()).toHaveLength(0); // waited for, never fire-and-forget on a path that returns at once
+    expect(filedLoose()).toHaveLength(0); // waited for and a blocker, never a plain row on a path that returns at once
     const [, err, extra] = filed()[0];
     expect((err as Error).message).toBe("signature matched no secret");
     expect(extra).toEqual({ secretsTried: 1, bodyChars: BODY.length, sigTimestamp: "1700000000", reason: state.sigError });
@@ -278,10 +292,61 @@ describe("a refused webhook is filed, never only answered", () => {
     expect(words).not.toContain("evt_x");
   });
 
-  it("a header whose t= is absurdly long is not read as a timestamp", async () => {
+  it("a header whose t= is absurdly long is not a timestamp — and so not Stripe's shape: a plain error saying 'no t', no page", async () => {
     state.sigError = "bad";
-    await call({ "stripe-signature": "t=" + "9".repeat(40) + ",v1=x" });
-    expect((filed()[0][2] as any).sigTimestamp).toBeNull();
+    const res = await call({ "stripe-signature": "t=" + "9".repeat(40) + ",v1=x" });
+    expect(res.status).toBe(400);
+    expect(filed()).toHaveLength(0);
+    expect(filedMalformed()).toHaveLength(1);
+    const [, err, extra] = filedMalformed()[0];
+    expect((err as Error).message).toBe("malformed signature or body");
+    expect(extra).toEqual({ secretsTried: 1, bodyChars: BODY.length, sigShape: "no t" });
+  });
+
+  describe("not Stripe's shape: a plain error under its own words, its own key, never a page (skeptic #42, S1)", () => {
+    beforeEach(() => {
+      state.sigError = "No signatures found matching the expected signature for payload";
+    });
+
+    it("a header with no v1= part: 400, sigShape 'no v1'", async () => {
+      const res = await call({ "stripe-signature": "t=1700000000,v0=deadbeef" });
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain("Webhook signature failed");
+      expect(filed()).toHaveLength(0);
+      expect(vi.mocked(reportError).mock.calls.filter((c) => c[0] === "stripe:webhook:refused")).toHaveLength(0);
+      expect(filedMalformed()).toHaveLength(1);
+      expect((filedMalformed()[0][1] as Error).message).toBe("malformed signature or body");
+      expect(filedMalformed()[0][2]).toEqual({ secretsTried: 1, bodyChars: BODY.length, sigShape: "no v1" });
+    });
+
+    it("a body that is not a Stripe event — not JSON, no object 'event', or no evt_ id: sigShape 'not an event'", async () => {
+      for (const body of ["<html>scanner</html>", '{"id":"evt_x"}', '{"id":"x","object":"event"}', '{"object":"event"}', "[]", "null"]) {
+        vi.mocked(reportErrorAwaited).mockClear();
+        vi.mocked(reportBlockerAwaited).mockClear();
+        const res = await call({ "stripe-signature": "t=1700000000,v1=deadbeef" }, body);
+        expect(res.status, body).toBe(400);
+        expect(filed(), body).toHaveLength(0);
+        expect(filedMalformed(), body).toHaveLength(1);
+        expect(filedMalformed()[0][2], body).toEqual({ secretsTried: 1, bodyChars: body.length, sigShape: "not an event" });
+      }
+    });
+
+    it("the malformed row never carries the body, the signature or the secret", async () => {
+      await call({ "stripe-signature": "t=1700000000,v1=deadbeef" }, '{"id":"evt_secret","object":"thing"}');
+      const words = JSON.stringify(filedMalformed()[0]);
+      expect(words).not.toContain("whsec_test");
+      expect(words).not.toContain("deadbeef");
+      expect(words).not.toContain("evt_secret");
+    });
+
+    it("the 503 config refusals stay blockers whatever the request's shape", async () => {
+      vi.stubEnv("STRIPE_WEBHOOK_SECRET", "");
+      vi.stubEnv("STRIPE_CONNECT_WEBHOOK_SECRET", "");
+      const res = await call({ "stripe-signature": "garbage" }, "<html>");
+      expect(res.status).toBe(503);
+      expect(filed()).toHaveLength(1);
+      expect(filedMalformed()).toHaveLength(0);
+    });
   });
 
   it("no stripe-signature header at all: 400 and NOT filed (not Stripe; scanner noise)", async () => {

@@ -37,6 +37,7 @@ import { LogoUpload } from "./logo-upload";
 import { LanguageToggle } from "./language-toggle";
 import { MapsProviderToggle } from "./maps-provider-toggle";
 import { PushSettings } from "./push-settings";
+import { isPlatformAdmin } from "@/lib/platform-admin";
 import { DocumentSettings } from "./document-settings";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
@@ -130,6 +131,9 @@ export default async function SettingsPage({
 
   const { data: me } = await supabase.from("profiles").select(PROFILE_SAFE_COLS).eq("id", user?.id ?? "").single();
   const profile = me as Profile | null;
+  // Whether the viewer is one of North's own (cn-v1136), answered HERE so the push switches never ask
+  // the server again from every company member's browser (skeptic #42, S8).
+  const platformAdmin = await isPlatformAdmin(supabase);
   const isAdmin = profile?.role === "owner" || profile?.role === "admin";
   // Office (Alexa's control plane: Numbering, Scheduling & timesheets, Automation)
   // keeps the org-settings cluster; only techs are gated out of it. Who is office is
@@ -402,6 +406,7 @@ export default async function SettingsPage({
                silently lost the role-gated toggles whenever the network hiccuped. */
             role={(profile as any)?.role ?? null}
             features={settings.features}
+            platformAdmin={platformAdmin}
           />
         </Section>
       </div>

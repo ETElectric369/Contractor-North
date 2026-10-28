@@ -34,7 +34,9 @@ const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
  * KEEP THIS HONEST — when a sender's audience changes, change the audience here in the same
  * breath, or the switch starts lying again.
  */
-type Audience = "all" | "staff" | "tech";
+// "platform" (cn-v1136): North's own team, never a company role — is_platform_admin() answers it
+// (0176), and nobody else is ever addressed under its kind, so nobody else sees its switch.
+type Audience = "all" | "staff" | "tech" | "platform";
 
 /**
  * AND THE SWITCH BOARD (0352). `feature`: an alert only a switched-on feature sends, so its switch
@@ -80,6 +82,15 @@ const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; aud
     help: "A card declined on Tap to Pay on iPhone (it buzzes even if you saw it on screen), and the one-time launch announcement.",
     audience: "staff",
   },
+  // North's own team only (cn-v1136): the blocker page (observe-blocker → platform-alert) and the
+  // Monday digest (bug-watch-digest) ride the bug_watch kind. A company member never receives it,
+  // so a company member never sees the switch.
+  {
+    key: "bug_watch",
+    label: "Bug Watch: Blockers And The Monday Digest",
+    help: "North's own team only: a page the moment something platform-wide breaks, and the Monday morning digest.",
+    audience: "platform",
+  },
 ];
 const DEFAULTS: Record<string, boolean> = {
   assigned: true,
@@ -91,13 +102,16 @@ const DEFAULTS: Record<string, boolean> = {
   daily_report: true,
   tap_to_pay: true,
   long_shift: true,
+  bug_watch: true,
 };
 
 /** The alert switches this person sees: by role (until the role is known, only the alerts every
- *  role receives — never a switch that can't work), then by the company's feature switches. */
-export function pushTriggersFor(role: string | null, features?: FeatureMap | null) {
+ *  role receives — never a switch that can't work), then by the company's feature switches; the
+ *  platform row only for a platform admin, whatever their company role. */
+export function pushTriggersFor(role: string | null, features?: FeatureMap | null, platformAdmin = false) {
   return TRIGGERS.filter((t) => {
     if (t.feature && !featureOn(features, t.feature)) return false;
+    if (t.audience === "platform") return platformAdmin;
     if (t.audience === "all") return true;
     if (!role) return false;
     return t.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);
@@ -117,12 +131,16 @@ export function PushSettings({
   initialPrefs,
   role: initialRole,
   features,
+  platformAdmin: initialPlatformAdmin,
 }: {
   initialPrefs: Record<string, boolean>;
   /** The company's switches (0352): an alert that only a switched-off feature sends isn't offered. */
   features?: FeatureMap;
   /** The viewer's role, when the server already has it. Left out, this asks for it once. */
   role?: string | null;
+  /** Whether the viewer is one of North's own (cn-v1136), when the server already knows. Left out,
+   *  the same one ask that fetches the role answers it; until it lands, the platform row is not drawn. */
+  platformAdmin?: boolean;
   /** Alerts whose feature is switched off (0352): not drawn. The stored choice is kept. */
   hiddenKeys?: string[];
 }) {
@@ -147,13 +165,22 @@ export function PushSettings({
   // The viewer's role decides which toggles are real for them (see TRIGGERS above).
   const [role, setRole] = useState<string | null>(initialRole ?? null);
   const [roleUnknown, setRoleUnknown] = useState(false);
+  // North's own team sees one more row (cn-v1136). Known from the server when the page passed it;
+  // otherwise learned by the same ask as the role. A company member is never one, so for them a
+  // lost answer changes nothing on the screen.
+  const [platformAdmin, setPlatformAdmin] = useState<boolean>(initialPlatformAdmin ?? false);
 
   useEffect(() => {
-    if (initialRole) return;
+    // Nothing left to ask: the server handed over both the role and the platform answer. The page
+    // passes both (skeptic #42, S8), so the action is never called from a settings visit; a mount
+    // that leaves either out — and only such a mount — asks once.
+    if (initialRole && typeof initialPlatformAdmin === "boolean") return;
     let live = true;
     myNotificationRole().then(
       (r) => {
         if (!live) return;
+        if (typeof initialPlatformAdmin !== "boolean") setPlatformAdmin(r.platformAdmin === true);
+        if (initialRole) return;
         if (r.ok && r.role) setRole(r.role);
         // NOT A DEAD END: we fall back to the alerts everyone gets and say why the rest are missing,
         // rather than guessing a role and rendering switches that do nothing.
@@ -164,13 +191,13 @@ export function PushSettings({
       // null, roleUnknown stayed false, and the role-gated toggles simply were not there, with
       // no sentence saying why. On a jobsite that is the common case, not the rare one.
       () => {
-        if (live) setRoleUnknown(true);
+        if (live && !initialRole) setRoleUnknown(true);
       },
     );
     return () => {
       live = false;
     };
-  }, [initialRole]);
+  }, [initialRole, initialPlatformAdmin]);
 
   useEffect(() => {
     const inShell = isNativeShell();
@@ -309,7 +336,7 @@ export function PushSettings({
       </p>
     );
 
-  const visibleTriggers = pushTriggersFor(role, features);
+  const visibleTriggers = pushTriggersFor(role, features, platformAdmin);
 
   return (
     <div className="space-y-4">

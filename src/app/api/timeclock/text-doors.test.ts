@@ -42,6 +42,8 @@ vi.mock("@/lib/observe", async (orig) => ({
   reportError: vi.fn(),
   reportErrorAwaited: vi.fn(async () => {}),
 }));
+// A failed company read is a BLOCKER (cn-v1136): no company was reached, so it pages North's own team.
+vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: vi.fn(), reportBlockerAwaited: vi.fn(async () => {}) }));
 vi.mock("@/lib/cron-orgs", async (orig) => {
   const real = await orig<typeof import("@/lib/cron-orgs")>();
   return {
@@ -83,6 +85,7 @@ import { textInvoice } from "@/app/(app)/billing/actions";
 import { textQuote } from "@/app/(app)/quotes/actions";
 import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
 import { reportError, reportErrorAwaited } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 
 // ── a routed PostgREST fake: an unrouted statement throws by name ────────────────────────────
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete"; cols: string; payload?: any; filters: any[] };
@@ -164,6 +167,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchSpy);
   vi.mocked(reportError).mockClear();
   vi.mocked(reportErrorAwaited).mockClear();
+  vi.mocked(reportBlockerAwaited).mockClear();
   gate.throwNext = false;
   spies.closeOutFails = false;
   spies.push = [];
@@ -249,9 +253,11 @@ describe("the morning nudge: no clock-in yet", () => {
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ failed: 1, checked: 0, texted: 0 });
     expect(fetchSpy).not.toHaveBeenCalled();
-    // Filed through the WAITED-for door: this function answers on the tick it files (skeptic #34).
-    expect(reportErrorAwaited).toHaveBeenCalledWith("cron-nudge", expect.objectContaining({ message: "organizations could not be read: boom" }));
+    // Filed through the WAITED-for BLOCKER door: this function answers on the tick it files (skeptic #34), and
+    // no company was reached, so it pages (cn-v1136).
+    expect(reportBlockerAwaited).toHaveBeenCalledWith("cron-nudge", expect.objectContaining({ message: "organizations could not be read: boom" }));
     expect(reportError).not.toHaveBeenCalled();
+    expect(reportErrorAwaited).not.toHaveBeenCalled(); // a blocker, never a plain row (cn-v1136)
   });
 
   it("a company whose timezone THROWS in the hour gate is counted failed and filed; the next company is still texted", async () => {
@@ -333,8 +339,9 @@ describe("the evening reminder: still clocked in", () => {
     expect(await res.json()).toMatchObject({ failed: 1, checked: 0, reminded: 0 });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(spies.closeOut).toBe(0);
-    expect(reportErrorAwaited).toHaveBeenCalledWith("cron-eod", expect.objectContaining({ message: "organizations could not be read: boom" }));
+    expect(reportBlockerAwaited).toHaveBeenCalledWith("cron-eod", expect.objectContaining({ message: "organizations could not be read: boom" }));
     expect(reportError).not.toHaveBeenCalled();
+    expect(reportErrorAwaited).not.toHaveBeenCalled(); // a blocker, never a plain row (cn-v1136)
   });
 
   it("a company whose timezone THROWS in the hour gate is counted failed and filed; the next company is still reminded and gets the debrief", async () => {
@@ -436,8 +443,9 @@ describe("the 12-hour question, as a text too", () => {
     const res = await longShift(req());
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ failed: 1, orgs: 0, asked: 0 });
-    expect(reportErrorAwaited).toHaveBeenCalledWith("cron-long-shift", expect.objectContaining({ message: "organizations could not be read: boom" }));
+    expect(reportBlockerAwaited).toHaveBeenCalledWith("cron-long-shift", expect.objectContaining({ message: "organizations could not be read: boom" }));
     expect(reportError).not.toHaveBeenCalled();
+    expect(reportErrorAwaited).not.toHaveBeenCalled(); // a blocker, never a plain row (cn-v1136)
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { syncOrgCalendars } from "@/lib/calendar-sync";
 import { reportError } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 
 export const runtime = "nodejs";
 // Many calendars × paginated pulls can outlive the default 10s.
@@ -46,7 +47,12 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.ok = false;
     result.error = e?.message ?? "failed";
-    reportError("cron-gcal-sync", e);
+    // A blocker (cn-v1136): the connections could not be read, so no company synced; a per-company
+    // failure above stays an error. WAITED FOR, and a 500 (skeptic #42 S6, skeptic #34's rule for
+    // the other crons): this function answers on the tick it files, so a fire-and-forget write can
+    // freeze with the response, and Vercel's cron log reads only the status.
+    await reportBlockerAwaited("cron-gcal-sync", e);
+    return NextResponse.json(result, { status: 500 });
   }
 
   return NextResponse.json(result);

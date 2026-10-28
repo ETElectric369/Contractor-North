@@ -1,8 +1,9 @@
 import { recordAiUsage } from "@/lib/ai-cost";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { getAnthropic, DEFAULT_MODEL, isModelDead, modelDeadError } from "@/lib/anthropic";
 import { readAllOrgs } from "@/lib/cron-orgs";
 import { errorMessage, reportError } from "@/lib/observe";
+import { reportBlocker } from "@/lib/observe-blocker";
 
 /**
  * NORT'S SELF-REVIEW — "the logic center gets a pulse."
@@ -176,6 +177,12 @@ export async function generateNortReview(
     void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "nort:review", usage: resp.usage as never });
     text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch (e) {
+    // A refused credential is not this company's failure (cn-v1136): the key is dead for everyone,
+    // and that pages North's own team once. The throw stands either way; the runner counts it.
+    // A CONSTANT message per status and NO orgId in the extras (skeptic #42, B1 + S9): the SDK's
+    // words carry a per-request id (a row and a page per company), and a platform-wide failure
+    // must not be stamped as one company's for life.
+    if (isModelDead(e)) reportBlocker("nort:model-dead", modelDeadError(e), { reason: errorMessage(e).slice(0, 200) });
     throw new Error(`model call failed: ${errorMessage(e)}`);
   }
 

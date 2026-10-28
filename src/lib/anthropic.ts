@@ -1,13 +1,58 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { reportBlocker } from "@/lib/observe-blocker";
 
 export const DEFAULT_MODEL =
   process.env.ANTHROPIC_MODEL || "claude-opus-5-5"; // the 5.5 line since cn-v1128 (Opus 5.5 reasons; 20% under Opus 4.8)
 
 let _client: Anthropic | null = null;
 
+let alarmed = false;
+/**
+ * NORT IS DEAD AND SOMEBODY SAYS SO (cn-v1136): a missing ANTHROPIC_API_KEY in production is every
+ * company's Nort silent at once, and every caller only ever saw its own 503. ONE blocker row per
+ * server instance (the flag, as stripeConfigAlarm's), which pages North's own team on its first
+ * sighting; dev, CI and previews (no production VERCEL_ENV) stay quiet. Never throws here — the
+ * throw below is the caller's, as it always was.
+ */
+function modelDeadAlarm(): void {
+  if (alarmed || process.env.VERCEL_ENV !== "production") return;
+  alarmed = true;
+  reportBlocker("nort:model-dead", new Error("ANTHROPIC_API_KEY is not set: Nort cannot answer anyone"));
+}
+
+/**
+ * A MODEL ERROR THAT MEANS THE KEY, NOT THE CALL: the vendor refusing the credential (401), or the
+ * credential refused the resource (403), or an error body typed authentication_error. Every other
+ * failure — a timeout, a 429, a 529, a bad request — is that one call's. The chat route and the
+ * nightly review file this one as a blocker (nort:model-dead) and the rest as they always did.
+ */
+export function isModelDead(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const o = e as { status?: unknown; type?: unknown; error?: unknown };
+  if (o.status === 401 || o.status === 403) return true;
+  if (o.type === "authentication_error") return true;
+  const body = o.error && typeof o.error === "object" ? (o.error as { type?: unknown; error?: unknown }) : null;
+  if (body?.type === "authentication_error") return true;
+  const inner = body?.error && typeof body.error === "object" ? (body.error as { type?: unknown }) : null;
+  return inner?.type === "authentication_error";
+}
+
+/**
+ * THE BLOCKER'S WORDS ARE CONSTANT PER STATUS (skeptic #42, B1). The SDK's error message is
+ * `${status} ${JSON.stringify(body)}`, and the body carries a per-request request_id — so filing the
+ * raw error gave every chat turn under a revoked key its own dedup key, its own row and its own
+ * PAGE. The sink dedupes on where::message: this message names only the status, so a dead key is
+ * ONE row whose count climbs and one page. The raw words ride in the extras, trimmed, at the sites.
+ */
+export function modelDeadError(e: unknown): Error {
+  const status = e && typeof e === "object" ? (e as { status?: unknown }).status : undefined;
+  return new Error(`Anthropic refused the API key (HTTP ${typeof status === "number" ? status : "?"})`);
+}
+
 /** Lazily-constructed Anthropic client (server only). */
 export function getAnthropic() {
   if (!process.env.ANTHROPIC_API_KEY) {
+    modelDeadAlarm();
     throw new Error(
       "ANTHROPIC_API_KEY is not set. Add it to .env.local / Vercel env vars.",
     );

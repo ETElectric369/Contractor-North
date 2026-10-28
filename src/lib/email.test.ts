@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { composeFrom, sendEmail } from "@/lib/email";
 import { reportError } from "@/lib/observe";
+import { reportBlocker } from "@/lib/observe-blocker";
 
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: vi.fn() }));
 
 const BASE = "ET Electric <noreply@etelectric369.com>";
 
@@ -75,5 +77,50 @@ describe("sendEmail files its failures", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response('{"id":"em_1"}', { status: 200 })));
     expect(await sendEmail({ to: "larkspur@example.com", subject: "s", html: "h" })).toEqual({ ok: true });
     expect(filed()).toHaveLength(0);
+  });
+});
+
+/**
+ * THE KEY IS DEAD (cn-v1136): a 401 or 403 from Resend refuses every company's mail until the key
+ * is replaced — a BLOCKER, which pages North's own team on its first sighting. Every other refusal
+ * is one email's trouble and stays an error.
+ */
+describe("sendEmail: a refused key is a blocker", () => {
+  beforeEach(() => {
+    vi.mocked(reportError).mockClear();
+    vi.mocked(reportBlocker).mockClear();
+    vi.stubEnv("RESEND_API_KEY", "re_test_key_for_this_test_only");
+    vi.stubEnv("EMAIL_FROM", "Contractor North <noreply@example.com>");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([401, 403])("Resend %s: ok false as before, one blocker row with the status and the domain, no plain error row", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response('{"message":"API key is invalid"}', { status })));
+    const out = await sendEmail({ to: "larkspur@example.com", subject: "Your estimate", html: "<p>hi</p>" });
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain(String(status));
+    expect(reportBlocker).toHaveBeenCalledTimes(1);
+    const [where, err, extra] = vi.mocked(reportBlocker).mock.calls[0];
+    expect(where).toBe("email:send");
+    expect((err as Error).message).toBe(`Resend ${status}: {"message":"API key is invalid"}`);
+    expect(extra).toEqual({ toDomain: "example.com", status });
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 422, 429, 500])("Resend %s stays an error, never a blocker", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status })));
+    await sendEmail({ to: "larkspur@example.com", subject: "s", html: "h" });
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportBlocker).not.toHaveBeenCalled();
+  });
+
+  it("a dropped connection stays an error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+    await sendEmail({ to: "larkspur@example.com", subject: "s", html: "h" });
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportBlocker).not.toHaveBeenCalled();
   });
 });

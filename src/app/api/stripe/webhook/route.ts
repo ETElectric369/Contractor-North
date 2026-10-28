@@ -8,6 +8,7 @@ import { declineReason } from "@/lib/stripe-decline-words";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { tierForPriceId } from "@/lib/plans";
 import { reportError, reportErrorAwaited } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { checkoutPaymentMethod, isBankCheckout, noteTransferStarted, resolveTransfer } from "@/lib/bank-transfer";
 import type Stripe from "stripe";
 
@@ -49,6 +50,31 @@ function invoiceCredit(charged: number, metadata: Record<string, string> | null 
   return Math.round((Number(charged) || 0) * 100) / 100;
 }
 
+/** The header's own timestamp, when it reads as one (twelve digits at most: a forty-digit t= is not a clock). */
+const SIG_TIMESTAMP = /(?:^|,)t=(\d{1,12})(?:,|$)/;
+
+/**
+ * DOES THIS REFUSAL LOOK LIKE STRIPE'S? (skeptic #42, S1). A refused signature used to page North's
+ * own team whatever the POST was — any stranger with a stripe-signature header could buzz the team,
+ * and once that noise row was triaged a REAL dead secret was only a count bump on the same key. So
+ * a refusal is a blocker only when the request has Stripe's shape: a numeric t= and a v1= part in
+ * the header, and a body that is a JSON event (object "event", an id starting "evt_"). Anything
+ * else is a plain error under its own words, never a page. Never the body or the signature: the
+ * shape only.
+ */
+function stripeShape(sig: string, body: string): { looksLikeStripe: true } | { looksLikeStripe: false; sigShape: "no t" | "no v1" | "not an event" } {
+  if (!SIG_TIMESTAMP.test(sig)) return { looksLikeStripe: false, sigShape: "no t" };
+  if (!/(?:^|,)v1=[^,]+/.test(sig)) return { looksLikeStripe: false, sigShape: "no v1" };
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    const o = parsed && typeof parsed === "object" ? (parsed as { object?: unknown; id?: unknown }) : null;
+    if (o && o.object === "event" && typeof o.id === "string" && o.id.startsWith("evt_")) return { looksLikeStripe: true };
+  } catch {
+    /* not JSON: not an event */
+  }
+  return { looksLikeStripe: false, sigShape: "not an event" };
+}
+
 export async function POST(req: Request) {
   // TWO SIGNING SECRETS. Stripe issues one per endpoint, and Connect needs two endpoints at this
   // same URL: one for OUR account's events (subscriptions, our checkout) and one that "listens to
@@ -64,10 +90,13 @@ export async function POST(req: Request) {
   // function answers on the same tick and a fire-and-forget write can freeze with it. The row
   // holds counts, the header's own timestamp and Stripe's reason words — never the secret, the
   // body or the signature. The sink dedups by where::message, so a storm is one row whose count
-  // climbs. A POST with no signature header at all is not Stripe (Stripe always signs): scanner
-  // noise, answered 400 and not filed, so the real rows stay readable.
+  // climbs. A BLOCKER (cn-v1136): a refused webhook is every company's card payment refused, so the
+  // first refusal pages North's own team; the storm behind it is the count — when the request has
+  // Stripe's shape (stripeShape, skeptic #42 S1); a malformed header or body is a plain error under
+  // its own words, never a page. A POST with no signature header at all is not Stripe (Stripe
+  // always signs): scanner noise, answered 400 and not filed, so the real rows stay readable.
   if (secrets.length === 0) {
-    await reportErrorAwaited("stripe:webhook:refused", new Error("no webhook secret configured"), { secretsTried: 0 });
+    await reportBlockerAwaited("stripe:webhook:refused", new Error("no webhook secret configured"), { secretsTried: 0 });
     return new Response("STRIPE_WEBHOOK_SECRET not configured", { status: 503 });
   }
 
@@ -78,7 +107,7 @@ export async function POST(req: Request) {
   try {
     stripe = getStripe();
   } catch {
-    await reportErrorAwaited("stripe:webhook:refused", new Error("no Stripe secret key configured"), { secretsTried: secrets.length });
+    await reportBlockerAwaited("stripe:webhook:refused", new Error("no Stripe secret key configured"), { secretsTried: secrets.length });
     return new Response("STRIPE_SECRET_KEY not configured", { status: 503 });
   }
 
@@ -94,12 +123,22 @@ export async function POST(req: Request) {
     }
   }
   if (!event) {
-    await reportErrorAwaited("stripe:webhook:refused", new Error("signature matched no secret"), {
-      secretsTried: secrets.length,
-      bodyChars: body.length,
-      sigTimestamp: /(?:^|,)t=(\d{1,12})(?:,|$)/.exec(sig)?.[1] ?? null,
-      reason: lastErr.slice(0, 120),
-    });
+    const shape = stripeShape(sig, body);
+    if (shape.looksLikeStripe) {
+      await reportBlockerAwaited("stripe:webhook:refused", new Error("signature matched no secret"), {
+        secretsTried: secrets.length,
+        bodyChars: body.length,
+        sigTimestamp: SIG_TIMESTAMP.exec(sig)?.[1] ?? null,
+        reason: lastErr.slice(0, 120),
+      });
+    } else {
+      // Not Stripe's shape: a plain error, its own dedup key (its own words), never a page.
+      await reportErrorAwaited("stripe:webhook:refused", new Error("malformed signature or body"), {
+        secretsTried: secrets.length,
+        bodyChars: body.length,
+        sigShape: shape.sigShape,
+      });
+    }
     return new Response(`Webhook signature failed: ${lastErr}`, { status: 400 });
   }
 

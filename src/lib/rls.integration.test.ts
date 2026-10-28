@@ -93,8 +93,10 @@ d("RLS multi-tenant isolation invariant", () => {
   // Tables whose ONLY reader is North's own team, across tenants, and no tenant at all: their one
   // policy is exactly is_platform_admin() (0176's helper, backed by the server-only platform_admins
   // table). page_opens (0353) — the page-open counts, no user id; a company can't read its own.
+  // error_events (0399) — the ops error sink; org_id says WHOSE error it was, but only North's team
+  // reads (across tenants, to tell a product bug from one company's workflow); writes stay RPC-only.
   // Exempt only when the WHOLE expression is that one call, so an org rule can't hide behind it.
-  const PLATFORM_ONLY = new Set(["page_opens"]);
+  const PLATFORM_ONLY = new Set(["page_opens", "error_events"]);
   const PLATFORM_ADMIN_EXPR = /^\(*\s*(public\.)?is_platform_admin\(\)\s*\)*$/;
 
   it("every non-deny policy on an org-scoped table scopes by org", async () => {
@@ -147,7 +149,6 @@ d("RLS multi-tenant isolation invariant", () => {
     // user, so ONLY the service role (which bypasses RLS) can touch them. That's the CORRECT,
     // secure config for these — written by the server, never read by a client:
     //   rate_limits      — the Postgres rate-limit counters (rate_limit_hit/gc RPCs only)
-    //   error_events     — the ops error sink (reportError → record_app_error RPC only; Claude queries it)
     //   signup_allowlist — the invite-only gate (migration 0125): read ONLY by the SECURITY
     //                      DEFINER signup trigger + signup_allowed(); written only by the
     //                      service role (Erik's approvals, createEmployee/importCrew pre-approve).
@@ -162,7 +163,9 @@ d("RLS multi-tenant isolation invariant", () => {
     //                      DESIGN — a table that grants cross-tenant reach must not be
     //                      enumerable by the tenants it reaches across.
     // The invariant catches a table ACCIDENTALLY left policy-less; these are deliberate.
-    const SERVER_ONLY = new Set(["rate_limits", "error_events", "signup_allowlist", "platform_admins"]);
+    // error_events left this list in 0399: it carries ONE platform-admin SELECT policy
+    // (error_events_platform_read) so Bug Watch can read it; writes remain RPC-only.
+    const SERVER_ONLY = new Set(["rate_limits", "signup_allowlist", "platform_admins"]);
     const { rows } = await client.query(`
       select c.relname as tbl
       from pg_class c join pg_namespace n on n.oid=c.relnamespace

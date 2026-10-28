@@ -75,7 +75,7 @@ export function flushTrace(why: string) {
   hiddenSeen = false;
   if (!wasHidden || !isNativeShell()) return;
   try {
-    void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\n") }).catch(() => {});
+    void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\n") }, "trace").catch(() => {});
   } catch {
     /* reporting must never break the loop */
   }

@@ -128,7 +128,7 @@ describe("the page's door (native-audio.ts)", () => {
     const tr = read("src/lib/nort/trace.ts");
     expect(tr).toContain('if (visible) flushTrace("screen back");');
     expect(tr).toContain("if (!wasHidden || !isNativeShell()) return;");
-    expect(tr).toContain('void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\\n") })'); // every row its own title (carried-1123-voice.test.ts)
+    expect(tr).toContain('void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\\n") }, "trace")'); // every row its own title (carried-1123-voice.test.ts); level trace since cn-v1136 (the sink retires it after 14 days)
     expect(read("src/lib/voice-stream.ts")).toContain('if (nativeOn) flushTrace("stop");');
     // The unlock-stop hunt: the panel's unmount, the assistant's mount/unmount and the screen's state are in the trace.
     expect(read("src/app/(app)/assistant/assistant-chat.tsx")).toContain('trace("panel unmounted"');

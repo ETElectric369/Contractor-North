@@ -68,6 +68,10 @@ const ALLOWED: { file: string; why: string }[] = [
     why: "A visit's span was sized in working days, so expanding it back to days skips Sat/Sun too.",
   },
   {
+    file: "src/lib/bug-watch-digest.ts",
+    why: "isoWeekKey: the ISO-8601 week number (Monday-start by the standard, Thursday names the year) that keys the Monday digest's once-a-week claim. A calendar standard, not a company's week start.",
+  },
+  {
     file: "src/lib/come-back-days.ts",
     why: "nextMonday: the literal 'Monday' come-back chip. The day Erik named, not the week's first day — it stays Monday on a Sunday-start company.",
   },

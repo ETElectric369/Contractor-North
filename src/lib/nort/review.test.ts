@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * retries (skeptic #34), so a hung call cannot outlive the run.
  */
 const model = vi.hoisted(() => ({ create: vi.fn(), keyUnset: false }));
-const spies = vi.hoisted(() => ({ reportError: vi.fn(), readAllOrgs: vi.fn(), recordAiUsage: vi.fn() }));
+const spies = vi.hoisted(() => ({ reportError: vi.fn(), reportBlocker: vi.fn(), readAllOrgs: vi.fn(), recordAiUsage: vi.fn() }));
 
 vi.mock("@/lib/anthropic", () => ({
   DEFAULT_MODEL: "claude-test-model",
@@ -20,7 +20,12 @@ vi.mock("@/lib/anthropic", () => ({
     if (model.keyUnset) throw new Error("ANTHROPIC_API_KEY is not set. Add it to .env.local / Vercel env vars.");
     return { messages: { create: model.create } };
   },
+  // The real rule (a 401/403 or an authentication_error body) is pinned in lib/anthropic.test.ts.
+  isModelDead: (e: unknown) => [401, 403].includes((e as { status?: number } | null)?.status ?? 0),
+  // The real words (constant per status) are pinned there too; this is their shape.
+  modelDeadError: (e: unknown) => new Error(`Anthropic refused the API key (HTTP ${(e as { status?: number } | null)?.status ?? "?"})`),
 }));
+vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: spies.reportBlocker }));
 vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: spies.recordAiUsage }));
 vi.mock("@/lib/observe", () => ({
   reportError: spies.reportError,
@@ -119,6 +124,29 @@ describe("generateNortReview", () => {
     const { client, writes } = fake(BUSY);
     await expect(generateNortReview(client, "org-a")).rejects.toThrow(/the vendor is busy/);
     expect(writes).toEqual([]);
+  });
+
+  it("a refused credential (401 / 403) is a BLOCKER — nort:model-dead, under CONSTANT words, with no company — and the throw stands (cn-v1136; skeptic #42 B1 + S9)", async () => {
+    spies.reportBlocker.mockClear();
+    const dead = Object.assign(new Error('401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_abc"}'), { status: 401 });
+    model.create.mockRejectedValue(dead);
+    const { client, writes } = fake(BUSY);
+    await expect(generateNortReview(client, "org-a")).rejects.toThrow(/invalid x-api-key/);
+    expect(writes).toEqual([]);
+    expect(spies.reportBlocker).toHaveBeenCalledTimes(1);
+    // The row's words name the status only (the SDK's carry a per-request id: a row per turn), the raw
+    // words ride trimmed in the extras, and the company is NOT in them: the key is dead for everyone.
+    const [where, filed, extra] = spies.reportBlocker.mock.calls[0] as unknown as [string, Error, Record<string, unknown>];
+    expect(where).toBe("nort:model-dead");
+    expect(filed.message).toBe("Anthropic refused the API key (HTTP 401)");
+    expect(extra).toEqual({ reason: dead.message.slice(0, 200) });
+    expect(Object.keys(extra)).not.toContain("orgId");
+    expect(Object.keys(extra)).not.toContain("org_id");
+    // A 529 is the vendor busy, not the key dead: no blocker.
+    spies.reportBlocker.mockClear();
+    model.create.mockRejectedValue(Object.assign(new Error("overloaded"), { status: 529 }));
+    await expect(generateNortReview(client, "org-a")).rejects.toThrow(/overloaded/);
+    expect(spies.reportBlocker).not.toHaveBeenCalled();
   });
 
   it("the insert refused THROWS with PostgREST's words (a plain object, not an Error)", async () => {

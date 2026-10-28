@@ -18,6 +18,21 @@ function dedupKey(s: string): string {
 }
 
 /**
+ * THE THREE LEVELS (cn-v1136, migration 0399). `error` is the everyday row: filed, counted, read at
+ * the morning sweep. `blocker` is platform-wide — a dead key, every webhook refused, the whole cron
+ * fallen over — and its first sighting (or its return after a fix) pages North's own team (see
+ * observe-blocker.ts). `trace` is a diagnostic the client ships (Nort's voice loop): kept a week by
+ * the sweep, never paged, never counted as an error.
+ */
+export type ErrorLevel = "error" | "blocker" | "trace";
+
+/** What record_app_error answers (0399): whether this call made the row, whether it reopened a fixed
+ *  one, whether it ESCALATED a known error to a blocker for the first time (skeptic #42 S2 — false
+ *  when the database does not say), the count so far, and the level the row now holds (upgraded to
+ *  blocker, never downgraded). */
+export type RecordedError = { id: string; inserted: boolean; reopened: boolean; escalated: boolean; event_count: number; level: string };
+
+/**
  * Report a background / best-effort failure that must NOT surface to the user but
  * also must not vanish silently. Sends it to (1) the server console and (2) our OWN
  * error_events table so the errors are a queryable ops log the operator + Claude triage
@@ -25,8 +40,7 @@ function dedupKey(s: string): string {
  */
 export function reportError(where: string, e: unknown, extra?: Record<string, unknown>): void {
   try {
-    console.error(`[${where}]`, errorMessage(e), extra ?? "");
-    void logToDb(where, e, extra);
+    void recordAppError(where, e, extra, "error");
   } catch {
     /* never let reporting throw */
   }
@@ -41,8 +55,7 @@ export function reportError(where: string, e: unknown, extra?: Record<string, un
 export async function reportErrorAwaited(where: string, e: unknown, extra?: Record<string, unknown>): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    console.error(`[${where}]`, errorMessage(e), extra ?? "");
-    await Promise.race([logToDb(where, e, extra), new Promise<void>((r) => { timer = setTimeout(r, 2000); })]);
+    await Promise.race([recordAppError(where, e, extra, "error"), new Promise<void>((r) => { timer = setTimeout(r, 2000); })]);
   } catch {
     /* never let reporting throw */
   } finally {
@@ -69,22 +82,67 @@ export function errorMessage(e: unknown): string {
   return String(e ?? "");
 }
 
-/** Fire-and-forget upsert into error_events, deduped by a hash of where+message. */
-function logToDb(where: string, e: unknown, extra?: Record<string, unknown>): Promise<void> {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** THE TENANT, FOR FREE (0399 error_events.org_id): 68 call sites already pass `orgId` (a few
+ *  `org_id`) in the extras. It is lifted onto the row's own column only when it is UUID-shaped —
+ *  a job id, a number, "unknown" or nothing stays in the payload and the column stays null, so a
+ *  Bug Watch filter by company never joins on a word. */
+function orgOf(extra?: Record<string, unknown>): string | null {
+  const v = extra?.orgId ?? extra?.org_id;
+  return typeof v === "string" && UUID_RE.test(v) ? v : null;
+}
+
+function parseRecorded(data: unknown): RecordedError | null {
+  if (!data || typeof data !== "object") return null;
+  const o = data as Record<string, unknown>;
+  if (typeof o.id !== "string") return null;
+  return {
+    id: o.id,
+    inserted: o.inserted === true,
+    reopened: o.reopened === true,
+    escalated: o.escalated === true,
+    event_count: Number(o.event_count ?? 0),
+    level: typeof o.level === "string" ? o.level : "error",
+  };
+}
+
+/**
+ * THE ONE WRITE INTO THE SINK (cn-v1136): the console line, then record_app_error, AWAITED, with
+ * the level and the tenant. Deduped by a hash of where+message (the level is not in the key: a
+ * repeat at a higher level upgrades the row, 0399). Answers what the database said — inserted,
+ * reopened, the count — or null when the write failed or could not be read, and NEVER throws:
+ * observability must never break the caller. reportError / reportErrorAwaited are this at
+ * "error"; the blocker doors (observe-blocker.ts) read the answer to decide whether to page.
+ */
+export async function recordAppError(
+  where: string,
+  e: unknown,
+  extra: Record<string, unknown> | undefined,
+  level: ErrorLevel,
+): Promise<RecordedError | null> {
   try {
+    console.error(`[${where}]`, errorMessage(e), extra ?? "");
     const message = errorMessage(e).slice(0, 500);
     const key = dedupKey(`${where}::${message}`);
     const sb = createServiceClient();
-    return sb
-      .rpc("record_app_error", {
-        p_key: key,
-        p_title: message || where,
-        p_where: where,
-        p_level: "error",
-        p_payload: { where, message, extra: extra ?? null } as Record<string, unknown>,
-      })
-      .then(() => {}, () => {}); // swallow — logging must never throw or block
+    const { data, error } = await sb.rpc("record_app_error", {
+      p_key: key,
+      p_title: message || where,
+      p_where: where,
+      p_level: level,
+      p_payload: { where, message, extra: extra ?? null } as Record<string, unknown>,
+      p_org: orgOf(extra),
+    });
+    if (error) {
+      // THE SINK'S OWN FAILURE IS SAID ON THE CONSOLE, AND NOWHERE ELSE (skeptic #42, N5): a broken
+      // sink — or new code against an old function signature — used to be a silent null. Never a
+      // second write: a sink that cannot write would file about itself forever.
+      console.error("[error-sink] write failed", errorMessage(error));
+      return null;
+    }
+    return parseRecorded(data);
   } catch {
-    return Promise.resolve(); // never let reporting throw
+    return null; // never let reporting throw
   }
 }

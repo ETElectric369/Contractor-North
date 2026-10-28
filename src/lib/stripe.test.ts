@@ -4,16 +4,17 @@ import { readFileSync } from "node:fs";
 /**
  * THE ONE SWITCH, SAID OUT LOUD (cn-v1129, the review's integrations-01): billingEnabled is both
  * the paywall switch and the card-payments switch, and an empty STRIPE_SECRET_KEY in production
- * used to open the wall silently. Now the layout's gate files one row per server instance.
+ * used to open the wall silently. Now the layout's gate files one row per server instance — a
+ * BLOCKER (cn-v1136): platform-wide, so its first sighting pages North's own team.
  */
-vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: vi.fn() }));
 
 async function fresh() {
   vi.resetModules();
-  const observe = await import("@/lib/observe");
-  vi.mocked(observe.reportError).mockClear();
+  const blocker = await import("@/lib/observe-blocker");
+  vi.mocked(blocker.reportBlocker).mockClear();
   const stripe = await import("@/lib/stripe");
-  return { stripe, reportError: vi.mocked(observe.reportError) };
+  return { stripe, reportBlocker: vi.mocked(blocker.reportBlocker) };
 }
 
 describe("stripeConfigAlarm", () => {
@@ -23,32 +24,32 @@ describe("stripeConfigAlarm", () => {
   it("no key in production: one row, and only one however often the gate runs", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("STRIPE_SECRET_KEY", "");
-    const { stripe, reportError } = await fresh();
+    const { stripe, reportBlocker } = await fresh();
     stripe.stripeConfigAlarm();
     stripe.stripeConfigAlarm();
     stripe.stripeConfigAlarm();
-    expect(reportError).toHaveBeenCalledTimes(1);
-    expect(reportError.mock.calls[0][0]).toBe("stripe:config");
-    expect((reportError.mock.calls[0][1] as Error).message).toContain("STRIPE_SECRET_KEY is missing");
-    expect((reportError.mock.calls[0][1] as Error).message).toContain("paywall is off");
+    expect(reportBlocker).toHaveBeenCalledTimes(1);
+    expect(reportBlocker.mock.calls[0][0]).toBe("stripe:config");
+    expect((reportBlocker.mock.calls[0][1] as Error).message).toContain("STRIPE_SECRET_KEY is missing");
+    expect((reportBlocker.mock.calls[0][1] as Error).message).toContain("paywall is off");
   });
 
   it("a key present in production: silent", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_present_for_this_test");
-    const { stripe, reportError } = await fresh();
+    const { stripe, reportBlocker } = await fresh();
     stripe.stripeConfigAlarm();
-    expect(reportError).not.toHaveBeenCalled();
+    expect(reportBlocker).not.toHaveBeenCalled();
   });
 
   it("no key outside production (dev, CI, preview): silent", async () => {
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("STRIPE_SECRET_KEY", "");
-    const { stripe, reportError } = await fresh();
+    const { stripe, reportBlocker } = await fresh();
     stripe.stripeConfigAlarm();
     vi.stubEnv("VERCEL_ENV", "preview");
     stripe.stripeConfigAlarm();
-    expect(reportError).not.toHaveBeenCalled();
+    expect(reportBlocker).not.toHaveBeenCalled();
   });
 });
 

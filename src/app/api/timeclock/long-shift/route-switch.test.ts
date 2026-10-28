@@ -13,6 +13,7 @@ const spies = vi.hoisted(() => ({ notify: [] as any[], push: [] as any[] }));
 
 vi.mock("@/lib/cron-guard", () => ({ requireCron: vi.fn(() => ({ supabase: state.client })) }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn(), reportErrorAwaited: vi.fn(async () => {}) }));
+vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: vi.fn(), reportBlockerAwaited: vi.fn(async () => {}) }));
 vi.mock("@/lib/notifications", () => ({
   createNotifications: vi.fn(async (...a: any[]) => {
     spies.notify.push(a);

@@ -1,6 +1,6 @@
 import "server-only";
 import Stripe from "stripe";
-import { reportError } from "@/lib/observe";
+import { reportBlocker } from "@/lib/observe-blocker";
 
 /** True when Stripe is configured. When false, the app skips all billing gates
  *  so it stays fully usable without Stripe set up.
@@ -29,13 +29,14 @@ let alarmed = false;
 /**
  * THE PAYWALL IS OFF AND NOBODY SAID SO (cn-v1129): an empty STRIPE_SECRET_KEY in production
  * lets every lapsed company in free and turns card payments off, with no word anywhere. Called
- * where the wall is decided (the app layout's gate), it files ONE row per server instance in the
- * error sink; dev and CI (no VERCEL_ENV) stay quiet. Never throws.
+ * where the wall is decided (the app layout's gate), it files ONE blocker row per server instance
+ * in the error sink; dev and CI (no VERCEL_ENV) stay quiet. Never throws.
  */
 export function stripeConfigAlarm(): void {
   if (alarmed || process.env.STRIPE_SECRET_KEY || process.env.VERCEL_ENV !== "production") return;
   alarmed = true;
-  reportError("stripe:config", new Error("STRIPE_SECRET_KEY is missing: the paywall is off and card payments are down"));
+  // A blocker (cn-v1136): platform-wide, so the first row pages North's own team.
+  reportBlocker("stripe:config", new Error("STRIPE_SECRET_KEY is missing: the paywall is off and card payments are down"));
 }
 
 let _stripe: Stripe | null = null;

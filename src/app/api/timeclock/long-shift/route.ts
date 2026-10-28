@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { getOrgSettings } from "@/lib/org-settings";
-import { reportError, reportErrorAwaited } from "@/lib/observe";
+import { reportError } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { createNotifications } from "@/lib/notifications";
 import { orgStaffIdsOrThrow, sendPushToProfiles } from "@/lib/push";
 import { sendSms, smsReadiness } from "@/lib/sms";
@@ -85,8 +86,9 @@ export async function GET(request: Request) {
     orgs = await readAllOrgs<{ id: string; name: string | null; settings: unknown }>(supabase, "id, name, settings");
   } catch (e) {
     // Waited for (cn-v1130, skeptic #34): this function answers on the tick it files, and a
-    // fire-and-forget write can freeze with it.
-    await reportErrorAwaited("cron-long-shift", e);
+    // fire-and-forget write can freeze with it. A BLOCKER (cn-v1136): no company was reached, so
+    // the first such night pages North's own team.
+    await reportBlockerAwaited("cron-long-shift", e);
     return NextResponse.json({ ...counts, failed: 1 }, { status: 500 });
   }
 

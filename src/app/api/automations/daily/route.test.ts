@@ -9,6 +9,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * failed step files its row and names itself in the body, a database error the rpc HANDS BACK (it
  * never throws) is a failed step, a Nort review that made nothing or was cut short is a failed step,
  * and the review is handed a deadline in milliseconds inside the function's own 300 s.
+ *
+ * TEN STEPS NOW (cn-v1136): the error sweep and the Monday Bug Watch digest join the night, each its
+ * own try — BEFORE the Nort review (skeptic #42, N2: behind its 200 s budget they were the first to be
+ * cut when the night ran long); and a night where EVERY step failed is one BLOCKER (cron-daily,
+ * waited for) that pages North's own team, while one failed step is that step's row and no page.
  */
 const state = vi.hoisted(() => ({ client: null as any }));
 const steps = vi.hoisted(() => ({
@@ -19,11 +24,17 @@ const steps = vi.hoisted(() => ({
   review: vi.fn(),
   shelf: vi.fn(),
   sweep: vi.fn(),
+  errorSweep: vi.fn(),
+  digest: vi.fn(),
   reportError: vi.fn(),
+  reportBlockerAwaited: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/cron-guard", () => ({ requireCron: vi.fn(() => ({ supabase: state.client })) }));
 vi.mock("@/lib/observe", () => ({ reportError: steps.reportError }));
+vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: vi.fn(), reportBlockerAwaited: steps.reportBlockerAwaited }));
+vi.mock("@/lib/error-retention", () => ({ sweepErrorEvents: steps.errorSweep }));
+vi.mock("@/lib/bug-watch-digest", () => ({ sendBugWatchDigest: steps.digest }));
 vi.mock("@/lib/recurring-engine", () => ({ generateDueTemplates: steps.recurring }));
 vi.mock("@/lib/action-items/digest", () => ({ sendDayAheadDigests: steps.dayAhead }));
 vi.mock("@/lib/nort/review", () => ({ generateNortReviewsForAllOrgs: steps.review }));
@@ -42,6 +53,8 @@ const STEP_ROWS: [string, string][] = [
   ["processor_fees_error", "cron-processor-fees"],
   ["stale_bank_transfers_error", "cron-stale-bank-transfers"],
   ["day_ahead_error", "cron-day-ahead"],
+  ["error_sweep_error", "cron-error-sweep"],
+  ["bug_watch_digest_error", "cron-bug-watch-digest"],
   ["nort_reviews_error", "cron-nort-review"],
   ["stock_reconcile_error", "cron-stock-reconcile"],
   ["rate_limit_gc_error", "cron-rate-limit-gc"],
@@ -56,6 +69,8 @@ function everyStepWorks() {
   steps.review.mockResolvedValue({ made: 1, failed: 0, left: 0 });
   steps.shelf.mockResolvedValue({ problems: [], skipped: null });
   steps.sweep.mockResolvedValue({ removed: 0 });
+  steps.errorSweep.mockResolvedValue({ closed_deleted: 2, trace_deleted: 9 });
+  steps.digest.mockResolvedValue({ sent: 0, skipped: "not Monday" });
   state.client = { rpc: vi.fn(async () => ({ data: null, error: null })) };
 }
 
@@ -68,6 +83,8 @@ function everyStepFails() {
   steps.review.mockRejectedValue(fell("review"));
   steps.shelf.mockRejectedValue(fell("shelf"));
   steps.sweep.mockRejectedValue(fell("sweep"));
+  steps.errorSweep.mockRejectedValue(fell("error sweep"));
+  steps.digest.mockRejectedValue(fell("digest"));
   state.client = {
     rpc: vi.fn(async () => {
       throw fell("gc");
@@ -79,6 +96,7 @@ const errorKeys = (body: Record<string, unknown>) => Object.keys(body).filter((k
 
 beforeEach(() => {
   for (const fn of Object.values(steps)) fn.mockReset();
+  steps.reportBlockerAwaited.mockResolvedValue(undefined);
 });
 
 describe("GET /api/automations/daily", () => {
@@ -95,6 +113,14 @@ describe("GET /api/automations/daily", () => {
     for (const [, where] of STEP_ROWS) {
       expect(steps.reportError).toHaveBeenCalledWith(where, expect.any(Error));
     }
+    // IN THAT ORDER (N2): the sink's two steps run right after day_ahead and before the Nort review.
+    expect(steps.reportError.mock.calls.map((c) => c[0])).toEqual(STEP_ROWS.map(([, where]) => where));
+    expect(Object.keys(body).filter((k) => k.endsWith("_error"))).toEqual(STEP_ROWS.map(([k]) => k));
+    // AND ONE BLOCKER, waited for: a night where nothing ran is platform-wide, and pages (cn-v1136).
+    expect(steps.reportBlockerAwaited).toHaveBeenCalledTimes(1);
+    const [where, err] = steps.reportBlockerAwaited.mock.calls[0] as unknown as [string, Error];
+    expect(where).toBe("cron-daily");
+    expect(err.message).toBe(`every step failed: ${STEP_ROWS.map(([k]) => k).join(", ")}`);
   });
 
   it("one step failed: 500 (Vercel's log goes red), ok false, only that step's key and row", async () => {
@@ -110,6 +136,62 @@ describe("GET /api/automations/daily", () => {
     expect(body.storage_sweep).toEqual({ removed: 0 });
     expect(steps.reportError).toHaveBeenCalledTimes(1);
     expect(steps.reportError).toHaveBeenCalledWith("cron-nort-review", expect.any(Error));
+    expect(steps.reportBlockerAwaited).not.toHaveBeenCalled(); // one failed step is not a blocker
+  });
+
+  it("all steps but one failed: still no blocker — the page is for a night where nothing ran", async () => {
+    everyStepFails();
+    steps.recurring.mockResolvedValue(0);
+    const res = await GET(req());
+    expect(res.status).toBe(500);
+    expect(errorKeys(await res.json())).toHaveLength(STEP_ROWS.length - 1);
+    expect(steps.reportBlockerAwaited).not.toHaveBeenCalled();
+  });
+
+  it("a failed error sweep reddens the night and files its row; a failed digest the same", async () => {
+    everyStepWorks();
+    steps.errorSweep.mockRejectedValue(new Error("permission denied for function sweep_error_events"));
+    let res = await GET(req());
+    let body = await res.json();
+    expect(res.status).toBe(500);
+    expect(errorKeys(body)).toEqual(["error_sweep_error"]);
+    expect(body.error_sweep_error).toBe("permission denied for function sweep_error_events");
+    expect(steps.reportError).toHaveBeenCalledWith("cron-error-sweep", expect.any(Error));
+    expect(body.bug_watch_digest).toEqual({ sent: 0, skipped: "not Monday" }); // the step after it still ran
+
+    for (const fn of Object.values(steps)) fn.mockReset();
+    everyStepWorks();
+    steps.digest.mockRejectedValue(new Error("platform_admins unreachable"));
+    res = await GET(req());
+    body = await res.json();
+    expect(res.status).toBe(500);
+    expect(errorKeys(body)).toEqual(["bug_watch_digest_error"]);
+    expect(steps.reportError).toHaveBeenCalledWith("cron-bug-watch-digest", expect.any(Error));
+    expect(body.error_sweep).toEqual({ closed_deleted: 2, trace_deleted: 9 });
+  });
+
+  it("the digest is handed the cron's client and the run's own start", async () => {
+    everyStepWorks();
+    const before = Date.now();
+    await GET(req());
+    expect(steps.digest).toHaveBeenCalledTimes(1);
+    const [client, nowMs] = steps.digest.mock.calls[0];
+    expect(client).toBe(state.client);
+    expect(nowMs).toBeGreaterThanOrEqual(before);
+    expect(nowMs).toBeLessThanOrEqual(Date.now());
+    expect(steps.errorSweep).toHaveBeenCalledWith(state.client);
+  });
+
+  it("the sweep and the digest run BEFORE the Nort review (N2), and the review still gets its budget from the run's start", async () => {
+    everyStepWorks();
+    const order: string[] = [];
+    steps.dayAhead.mockImplementation(async () => (order.push("day_ahead"), { orgs: 1, pushed: 1 }));
+    steps.errorSweep.mockImplementation(async () => (order.push("error_sweep"), { closed_deleted: 0, trace_deleted: 0 }));
+    steps.digest.mockImplementation(async () => (order.push("bug_watch_digest"), { sent: 0, skipped: "not Monday" }));
+    steps.review.mockImplementation(async () => (order.push("nort_review"), { made: 1, failed: 0, left: 0 }));
+    steps.shelf.mockImplementation(async () => (order.push("stock_reconcile"), { problems: [], skipped: null }));
+    await GET(req());
+    expect(order).toEqual(["day_ahead", "error_sweep", "bug_watch_digest", "nort_review", "stock_reconcile"]);
   });
 
   it("the rate-limit step's database error is HANDED BACK, not thrown: still a failed step, filed", async () => {
@@ -176,8 +258,11 @@ describe("GET /api/automations/daily", () => {
       stock_reconcile: { problems: 0 },
       rate_limit_gc: true,
       storage_sweep: { removed: 0 },
+      error_sweep: { closed_deleted: 2, trace_deleted: 9 },
+      bug_watch_digest: { sent: 0, skipped: "not Monday" },
     });
     expect(steps.reportError).not.toHaveBeenCalled();
+    expect(steps.reportBlockerAwaited).not.toHaveBeenCalled();
   });
 
   it("the Nort review is handed a deadline: a number inside the function's own 300 s", async () => {

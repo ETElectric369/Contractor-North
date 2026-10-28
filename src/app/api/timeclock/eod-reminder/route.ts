@@ -4,7 +4,8 @@ import { sendSms, smsReadiness } from "@/lib/sms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { todayBoundsInTz } from "@/lib/tz";
-import { reportError, reportErrorAwaited } from "@/lib/observe";
+import { reportError } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { withoutHeldCrumb } from "@/lib/held-crumb";
 import { EOD_LOCAL_HOUR, atLocalHour, readAllOrgs } from "@/lib/cron-orgs";
 
@@ -51,8 +52,9 @@ export async function GET(request: Request) {
     orgs = await readAllOrgs<Org>(supabase, "id, name, settings");
   } catch (e) {
     // Waited for (cn-v1130, skeptic #34): this function answers on the tick it files, and a
-    // fire-and-forget write can freeze with it.
-    await reportErrorAwaited("cron-eod", e);
+    // fire-and-forget write can freeze with it. A BLOCKER (cn-v1136): no company was reached, so
+    // the first such night pages North's own team.
+    await reportBlockerAwaited("cron-eod", e);
     return NextResponse.json({ ...counts, failed: 1 }, { status: 500 });
   }
   // The companies whose own 6 PM this run is. The texts and the night debrief both ride this list.

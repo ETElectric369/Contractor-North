@@ -1,5 +1,6 @@
 import "server-only";
 import { reportError } from "@/lib/observe";
+import { reportBlocker } from "@/lib/observe-blocker";
 
 /**
  * Send a transactional email via Resend. Returns { ok, error }.
@@ -85,7 +86,12 @@ export async function sendEmail(input: {
     const text = await res.text().catch(() => "");
     // The sink carries the status and the recipient's DOMAIN: a subject names a person and an
     // address names a customer, and neither belongs in an ops log or the console.
-    reportError("email:send", new Error(`Resend ${res.status}: ${text.slice(0, 300)}`), { toDomain: domainOf(input.to), status: res.status });
+    const err = new Error(`Resend ${res.status}: ${text.slice(0, 300)}`);
+    const extra = { toDomain: domainOf(input.to), status: res.status };
+    // THE KEY IS DEAD (cn-v1136): a 401 or 403 from Resend refuses every company's mail until the key
+    // is replaced — a blocker, paged. Any other refusal is one email's trouble, filed as an error.
+    if (res.status === 401 || res.status === 403) reportBlocker("email:send", err, extra);
+    else reportError("email:send", err, extra);
     return { ok: false, error: `Email failed: ${res.status} ${text}`.slice(0, 200) };
   }
   return { ok: true };

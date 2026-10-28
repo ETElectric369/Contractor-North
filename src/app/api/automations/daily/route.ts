@@ -6,8 +6,11 @@ import { generateNortReviewsForAllOrgs } from "@/lib/nort/review";
 import { sweepOrphanedUploads } from "@/lib/storage-sweep";
 import { backfillProcessorFees } from "@/lib/processor-fee-capture";
 import { reportError } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { findShelfProblems } from "@/lib/stock-reconcile-check";
 import { tellStaleBankTransfers } from "@/lib/bank-transfer-alerts";
+import { sweepErrorEvents } from "@/lib/error-retention";
+import { sendBugWatchDigest } from "@/lib/bug-watch-digest";
 
 export const runtime = "nodejs";
 // The steps run one after another and the Nort review is a model call per company (cn-v1130):
@@ -17,6 +20,10 @@ export const maxDuration = 300;
 /** The Nort review's share of the run, measured from the run's own start (the clock Vercel's 300 s
  *  runs on): it is the slow step, and the three after it still need their turn. */
 const NORT_REVIEW_BUDGET_MS = 200_000;
+
+/** The try blocks below, counted: when EVERY one of them failed the night is a blocker, not ten
+ *  errors (cn-v1136). Keep this the number of steps, or the page never comes. */
+const STEP_COUNT = 10;
 
 /**
  * The daily automation runner (Vercel Cron). One scheduled endpoint that does the
@@ -77,6 +84,28 @@ export async function GET(request: Request) {
   }
   // The "Close out your day" nudge moved to the EVENING cron (eod-reminder, 6pm local-ish) —
   // Erik: the debrief is a NIGHT ritual; mornings keep the day-ahead digest only.
+
+  // THE SINK'S TWO STEPS RUN BEFORE THE NORT REVIEW (skeptic #42, N2): they are cheap, and behind the
+  // review's 200 s budget they were the first to be cut when the night ran long.
+  try {
+    // THE SINK KEEPS ONLY WHAT IS STILL NEWS (cn-v1136, 0399): fixed and ignored rows go after
+    // their time, traces after a week. The rule is the database's; this is the nightly knock.
+    result.error_sweep = await sweepErrorEvents(supabase);
+  } catch (e: any) {
+    result.error_sweep_error = e?.message ?? "failed";
+    reportError("cron-error-sweep", e);
+  }
+
+  try {
+    // THE MONDAY DIGEST (cn-v1136): on North's own Monday (or the first of Tuesday and Wednesday to
+    // get through, N1), every platform admin gets the week's numbers once — open reports, new
+    // errors, the blockers, the loudest culprits, what has sat open past thirty days. Every other
+    // day it says "not Monday" and does nothing.
+    result.bug_watch_digest = await sendBugWatchDigest(supabase, startedAt);
+  } catch (e: any) {
+    result.bug_watch_digest_error = e?.message ?? "failed";
+    reportError("cron-bug-watch-digest", e);
+  }
 
   try {
     // Nort's self-review — read the crew's recent Nort conversations + bug reports and cluster them
@@ -142,5 +171,11 @@ export async function GET(request: Request) {
   // without throwing, so "all eight" was unreachable and a failed step stayed green.
   const errors = Object.keys(result).filter((k) => k.endsWith("_error"));
   result.ok = errors.length === 0;
+  // EVERY STEP FAILED IS A BLOCKER (cn-v1136): ten rows in the sink read as ten troubles; one night
+  // where nothing ran is the database or the service key gone, platform-wide, and pages North's own
+  // team. Waited for: this function answers on the tick it files.
+  if (errors.length === STEP_COUNT) {
+    await reportBlockerAwaited("cron-daily", new Error(`every step failed: ${errors.join(", ")}`));
+  }
   return NextResponse.json(result, { status: errors.length > 0 ? 500 : 200 });
 }

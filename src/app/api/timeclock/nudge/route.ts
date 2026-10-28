@@ -3,7 +3,8 @@ import { requireCron } from "@/lib/cron-guard";
 import { sendSms, smsReadiness } from "@/lib/sms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayBoundsInTz } from "@/lib/tz";
-import { reportError, reportErrorAwaited } from "@/lib/observe";
+import { reportError } from "@/lib/observe";
+import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { NUDGE_LOCAL_HOUR, atLocalHour, readAllOrgs } from "@/lib/cron-orgs";
 
 // Every company in one run, one after another: the budget every cron carries now (cn-v1130).
@@ -46,8 +47,9 @@ export async function GET(request: Request) {
     orgs = await readAllOrgs<Org>(supabase, "id, name, settings");
   } catch (e) {
     // Waited for (cn-v1130, skeptic #34): this function answers on the tick it files, and a
-    // fire-and-forget write can freeze with it.
-    await reportErrorAwaited("cron-nudge", e);
+    // fire-and-forget write can freeze with it. A BLOCKER (cn-v1136): no company was reached, so
+    // the first such night pages North's own team.
+    await reportBlockerAwaited("cron-nudge", e);
     return NextResponse.json({ ...counts, failed: 1 }, { status: 500 });
   }
 

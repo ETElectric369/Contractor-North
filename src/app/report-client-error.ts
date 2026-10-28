@@ -1,6 +1,6 @@
 "use server";
 
-import { reportError } from "@/lib/observe";
+import { recordAppError, type ErrorLevel } from "@/lib/observe";
 import { rateLimited } from "@/lib/rate-limit";
 
 /**
@@ -61,23 +61,41 @@ const CLIENT_SOURCES = new Set([
 /** Well above a real crash loop on a bad deploy, well below "the log is now useless". */
 const CLIENT_REPORTS_PER_HOUR = 500;
 
+/** THE LEVELS A CLIENT MAY NAME (cn-v1136): an error, or a trace (Nort's voice loop shipping its
+ *  lines — kept a week, never paged). "blocker" is NOT one of them: a blocker pages North's own
+ *  team, and this is a public POST endpoint, so anything else named here is written as an error. */
+const CLIENT_LEVELS = new Set<ErrorLevel>(["error", "trace"]);
+
 export async function reportClientError(
   where: string,
   message: string,
   extra?: Record<string, unknown>,
+  level?: "error" | "trace",
 ): Promise<void> {
   try {
     const source = CLIENT_SOURCES.has(where) ? where : "unknown";
+    const lvl: ErrorLevel = CLIENT_LEVELS.has(level as ErrorLevel) ? (level as ErrorLevel) : "error";
     if (await rateLimited("client-error:hour", CLIENT_REPORTS_PER_HOUR, 3600, { failClosed: true })) return;
-    reportError(`client:${source}`, new Error(String(message || "client error").slice(0, 500)), {
-      ...safeExtra(extra),
-      // Keep what was CLAIMED when it wasn't one of ours — an unknown source is itself a finding.
-      ...(source === "unknown" ? { claimed_where: String(where).slice(0, 120) } : {}),
-    });
+    // Fire-and-forget through the one write (recordAppError never throws): the client is not waiting.
+    void recordAppError(
+      `client:${source}`,
+      new Error(String(message || "client error").slice(0, 500)),
+      {
+        ...safeExtra(extra),
+        // Keep what was CLAIMED when it wasn't one of ours — an unknown source is itself a finding.
+        ...(source === "unknown" ? { claimed_where: String(where).slice(0, 120) } : {}),
+      },
+      lvl,
+    );
   } catch {
     /* never let reporting throw */
   }
 }
+
+/** The keys the sink lifts onto the row's own org_id column (observe.ts orgOf). A client's word about
+ *  its company is NEVER trusted (skeptic #42, S5): this is a public POST endpoint, so a stranger could
+ *  label a client:* row with any company for life (the sink keeps org_id once known). Dropped here. */
+const UNTRUSTED_KEYS = new Set(["orgId", "org_id"]);
 
 /** A crash report is a handful of short strings (digest, componentStack, url). Anything longer,
  *  deeper or wider than that is not debugging information — it's payload. */
@@ -87,6 +105,7 @@ function safeExtra(extra?: Record<string, unknown>): Record<string, string> {
   for (const [k, v] of Object.entries(extra)) {
     if (Object.keys(out).length >= 8) break;
     if (!/^[a-z0-9_]{1,40}$/i.test(k)) continue;
+    if (UNTRUSTED_KEYS.has(k)) continue;
     if (v === null || v === undefined) continue;
     out[k] = (typeof v === "string" ? v : JSON.stringify(v) ?? "").slice(0, 2000);
   }
