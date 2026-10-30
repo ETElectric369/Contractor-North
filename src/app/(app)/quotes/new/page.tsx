@@ -10,6 +10,8 @@ import { kitsReadWords, partsKitsOnly, readTaskKits } from "@/lib/estimate/task-
 import { reportError } from "@/lib/observe";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
@@ -40,6 +42,7 @@ export default async function NewQuotePage({
 }) {
   const { customer, job, inquiry, capture } = await searchParams;
   const supabase = await createClient();
+  const t = translator(await currentLang());
   // For the editor's storage-first uploads (#116) — RLS returns only the caller's own org.
   const { data: ownOrg } = await supabase.from("organizations").select("id").limit(1).maybeSingle();
   const orgId = String((ownOrg as { id?: string } | null)?.id ?? "");
@@ -449,10 +452,7 @@ export default async function NewQuotePage({
   return (
     <div>
       <BackLink fallback="/quotes" fallbackLabel="Back to Estimates" />
-      <PageHeader
-        title="New Estimate"
-        description="Build line items by hand, or let the estimator draft them from a scope of work or an uploaded plan."
-      >
+      <PageHeader title={t("nv_page_quotesNew")} description={t("nv_desc_quotesNew")}>
         {/* Onsite with no capture yet? Start the inspection from where you'll end up — one
             tap creates it (threaded to the lead when this builder came from one) and lands
             on the capture page; Start estimate there routes back here prefilled. */}

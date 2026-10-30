@@ -331,7 +331,7 @@ export const words: WordCatalog = {
     tc_fieldTime: "Hora de {field}",
     tc_startingAtAbove: "El turno empieza a la hora de arriba: úsalo si olvidaste marcar entrada.",
 
-    tc_newJob: "Trabajo Nuevo",
+    tc_newJob: "Nuevo Trabajo",
     tc_giveItAName: "Ponle un nombre primero: la dirección de la calle funciona bien.",
     tc_tagOnlyName: "\"{name}\" dice qué tipo de visita es, no de qué trabajo se trata. Pon la calle o el cliente.",
     tc_couldNotCreateJob: "No se pudo crear el trabajo.",

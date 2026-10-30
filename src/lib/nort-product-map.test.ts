@@ -12,6 +12,7 @@ import { ALL_ON } from "./features";
 import { translator } from "./i18n";
 import { appointmentTypeLabel } from "./statuses";
 import { RECONCILE_KINDS } from "./reconcile-kinds";
+import { words as nav } from "./words/nav";
 
 /**
  * WHERE NORT SAYS THINGS LIVE, HELD TO WHERE THEY DO (W1-09 / W1-07 / W1-08). A map that lags the
@@ -202,7 +203,8 @@ describe("Nort's product map after the shell wave", () => {
     // True in code: the ghost's own door, the rail's heading, and the past-only read behind it.
     const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
     expect(src("src/app/(app)/schedule/ghost-sheet.tsx")).toContain("Book This Day");
-    expect(src("src/app/(app)/schedule/page.tsx")).toContain("Waiting For A Day");
+    expect(src("src/app/(app)/schedule/page.tsx")).toContain('t("nv_sched_waitingForADay")');
+    expect(nav.en.nv_sched_waitingForADay).toBe("Waiting For A Day");
     expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/export async function bookWorkedDay/);
     // bookWorkedDay never promotes: that is the whole difference from addJobDay.
     expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/promote: false/);
@@ -278,8 +280,10 @@ describe("Nort's product map after the shell wave", () => {
     const money = DOCK.find((s) => s.key === "invoices")!;
     expect(money.children.find((c) => c.href === "/reconcile")).toMatchObject({ label: "Reconcile", staffOnly: true });
     expect(readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8")).toContain(
-      '<PageHeader title="Reconcile" description="Two records that should agree, and do not." />',
+      '<PageHeader title={t("nv_page_reconcile")} description={t("nv_desc_reconcile")} />',
     );
+    expect(nav.en.nv_page_reconcile).toBe("Reconcile");
+    expect(nav.en.nv_desc_reconcile).toBe("Two records that should agree, and do not.");
   });
 
   it("Nort can set every customer type the app offers, Contractor included (W2-13 Part A)", () => {

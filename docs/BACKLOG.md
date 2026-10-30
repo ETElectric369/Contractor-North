@@ -53,7 +53,8 @@ Size: XS (<1h) · S (≈half day) · M (≈1–2 days) · L (multi-day).
 ## 5. Spanish for employees
 - 🟡 **L — Spanish interface (i18n)**: today Spanish = the Time Clock's keys (`src/lib/i18n.ts` over the
   catalogs in `src/lib/words/`, the toggle on the profile); cn-v1138 widens it to the tech's side —
-  My Day, jobs, tasks, materials, sign-in, the texts and pushes they get. Office screens stay English.
+  My Day, jobs, tasks, materials, sign-in, the texts and pushes they get; cn-v1139 adds the office's map —
+  every menu, the + menu, each page's title, and Nort's screen names. The office pages' contents stay English.
 - 🟡 **S — Nort in Spanish**: cn-v1138 — Nort reads `profiles.language` and answers in it.
 
 ## Dependencies / decisions needed

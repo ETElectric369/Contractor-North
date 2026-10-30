@@ -1,6 +1,8 @@
 import { Users, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
@@ -25,6 +27,7 @@ export default async function CrmPage({
 }) {
   const { q, sort } = await searchParams;
   const supabase = await createClient();
+  const t = translator(await currentLang());
 
   // Andrew: "Sorting ABCD or otherwise." ?sort= drives the query (A→Z by name when absent); the
   // bar next to the search box writes it. Name is the tie-break under any other column so a
@@ -63,7 +66,7 @@ export default async function CrmPage({
       {/* CUSTOMERS, UNDER SALES (W1-07): the Contacts tile folded into Sales as its Customers row,
           so the page wears the row's name. The description names no Leads tab: that tab is hidden
           with Leads off, and a customer is a customer whichever switches are on. */}
-      <PageHeader title="Customers" description="Everyone you work for, linked to their jobs, estimates and invoices.">
+      <PageHeader title={t("nv_page_crm")} description={t("nv_desc_crm")}>
         <div className="flex flex-wrap items-center gap-2">
           <NewCustomerButton />
           {/* Bulk import (CSV/vCard) — the deliberate, infrequent SEEK door for the whole

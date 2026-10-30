@@ -20,6 +20,7 @@ import { featureOn, type FeatureMap } from "@/lib/features";
 import { menuSections, visibleDock } from "@/lib/dock";
 import { dockTileLabel } from "@/lib/dock-words";
 import { asLang, translator } from "@/lib/i18n";
+import { roleLabel } from "@/lib/settings-words";
 import { isStaffRole } from "@/lib/actions/perms";
 import { helpRows, openSetup } from "@/lib/onboarding/help-rows";
 import type { Answers } from "@/lib/playbook/types";
@@ -132,7 +133,7 @@ export function AccountMenu({
   const inMenu = menuSections(visibleDock({ isStaff, features, lapsed }));
   // Nort on, these rows live under Search Or Ask instead (command-bar.tsx); techs have none. A
   // lapsed company's Nort is paused, so its lessons are not offered either.
-  const help = featureOn(features, "nort") || lapsed ? [] : helpRows({ isStaff, onboarded, setup, nortOn: false, features });
+  const help = featureOn(features, "nort") || lapsed ? [] : helpRows({ isStaff, onboarded, setup, nortOn: false, features, t });
   const bugs = useCount(platformAdmin ? bugCount : null);
 
   // Nort drives this menu during the guided tour — see TourStep.opens. A plain window event so no
@@ -233,7 +234,9 @@ export function AccountMenu({
             <div className="truncate text-sm font-medium text-slate-900">
               {profile?.full_name ?? "—"}
             </div>
-            <div className="text-xs capitalize text-slate-400">{profile?.role ?? "user"}</div>
+            {/* The role's word in the person's language (cn-v1139, nv_role_ through lib/settings-words); a
+                role the catalog does not name reads as its raw value, as before. */}
+            <div className="text-xs capitalize text-slate-400">{roleLabel(profile?.role, t) ?? profile?.role ?? "user"}</div>
           </div>
           {/* Every employee's personal estimate link/QR — leads through it are
               credited to them. The control keeps its known face from the bar. It goes with

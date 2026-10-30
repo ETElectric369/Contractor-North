@@ -3,6 +3,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { featureOn } from "@/lib/features";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { AuditsManager } from "./audits-manager";
 import { AUDIT_TYPES } from "@/lib/compliance-types";
 
@@ -26,12 +28,12 @@ export default async function AuditsPage() {
     .in("type", AUDIT_TYPES)
     .order("expires_date", { ascending: true, nullsFirst: false });
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div>
-      <PageHeader
-        title="Audits"
-        description="Safety, OSHA, insurance & financial audits — findings, follow-up dates, nothing missed."
-      />
+      <PageHeader title={t("nv_page_audits")} description={t("nv_desc_audits")} />
       <AuditsManager items={(items ?? []) as any} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );

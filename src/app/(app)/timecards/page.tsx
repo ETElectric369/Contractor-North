@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SegmentedControl } from "@/components/ui/segmented";
@@ -132,6 +134,7 @@ export default async function TimecardsPage({
   if (!me || !isStaffRole(me.role)) {
     redirect("/timeclock");
   }
+  const t = translator(await currentLangFor(user?.id));
 
   /** Add Time Entry's Job list reaches back this far for a FINISHED job (the one read Needs You uses
    *  for "done lately": complete, touched in the last 30 days). Older: the job's own Time tab. */
@@ -735,7 +738,7 @@ export default async function TimecardsPage({
     <div>
       {/* No approver here any more (Wave 2): the header named one, and nothing ever asked anybody to
           approve anything. The setting behind it left Settings too. */}
-      <PageHeader title="Timecards" description="Review your crew's hours by week.">
+      <PageHeader title={t("nv_page_timecards")} description={t("nv_desc_timecards")}>
         <div className="flex flex-wrap items-center gap-2">
           {/* THE ONE ADD-HOURS FORM (Wave 2): six fields, the Job started where the schedule put
               the person that day, never on "No job" (add-time-entry.tsx). Never switched off. */}

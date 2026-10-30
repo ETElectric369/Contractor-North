@@ -1,11 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { PettyCashManager } from "./petty-cash-manager";
 
 export const dynamic = "force-dynamic";
 
 export default async function PettyCashPage() {
   const supabase = await createClient();
+  const t = translator(await currentLang());
   const { data: items } = await supabase
     .from("petty_cash")
     .select("id, tx_date, kind, amount, category, description")
@@ -24,7 +27,7 @@ export default async function PettyCashPage() {
   // entries finds this page in Search Or Ask; a job's Petty Cash figure links here.
   return (
     <div>
-      <PageHeader title="Petty Cash" description="Cash you took out, and older cash entries. A new cash purchase goes in through Snap Or Note or Add By Hand." />
+      <PageHeader title={t("nv_page_pettyCash")} description={t("nv_desc_pettyCash")} />
       <PettyCashManager items={rows as any} balance={balance} />
     </div>
   );

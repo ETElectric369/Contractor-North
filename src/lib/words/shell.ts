@@ -1,13 +1,17 @@
 import type { WordCatalog } from "./types";
 
 /**
- * THE SHELL'S WORDS (sh_): everything a tech reads around the page — the dock's tiles and rows
+ * THE SHELL'S WORDS (sh_): everything a person reads around the page — the dock's tiles and rows
  * (sh_dock_<row id>, read through lib/dock-words dockLabel so lib/dock.ts keeps its English data for
- * the office and the title-case test), Search Or Ask, the + , the Bell, the top bar, the account
- * menu, the language door itself (Settings › You and the account menu) and what Spanish covers
- * today, the phone setup checklist, the two error pages, and Settings › You (Nort's tone and
+ * the office and the title-case test; since cn-v1139 EVERY tile and row is keyed, the office's
+ * included, plus a row's whenOff words as sh_dock_<id>_off and a tile's whenOnly words as
+ * sh_dock_<tile>_only, and sh_dock_settings for the Settings page's own side-tab group), Search Or
+ * Ask and its help rows (sh_help_, lib/onboarding/help-rows), the + , the Bell, the top bar, the
+ * account menu, the language door itself (Settings › You and the account menu) and what Spanish
+ * covers today, the phone setup checklist, the two error pages, and Settings › You (Nort's tone and
  * greeting, the push switches, Face ID, the photo). Was s_language / s_languageDesc in lib/i18n.ts
- * until cn-v1138.
+ * until cn-v1138. The office's map (each page's title and line, the + menu's verbs, the Settings
+ * clusters, the roles) is the nav catalog (lib/words/nav.ts, nv_).
  *
  * The English is byte for byte what each screen said before the catalog (the tests that read a
  * rendered English screen still pass). Clickables are Title Case in both languages (Erik's law;
@@ -40,22 +44,35 @@ export const words: WordCatalog = {
     sh_language: "Language",
     sh_languageDesc: "Your preferred language for the app and the AI assistant.",
     sh_spanishCovers:
-      "Spanish covers the crew's side today — Time Clock, My Day, jobs, materials, the texts and pushes you get, and Nort. Office screens stay in English for now.",
+      "Spanish covers the crew's side and the office's map today — the dock, the + menu, search, the account menu, the Settings sections and each page's title. The office pages' contents stay in English for now.",
     // The switcher's title names the OTHER language, in that language (an English reader is invited
     // in Spanish): language-switcher.tsx asks the target language's translator for it on purpose.
     sh_switchToEnglish: "Switch to English",
     sh_switchToSpanish: "Switch to Spanish",
 
-    // ── The dock (lib/dock.ts rows and tiles a tech can see, keyed sh_dock_<id>; the office's rows have no key) ──
+    // ── The dock (lib/dock.ts, every tile and row keyed sh_dock_<id>; the English is the dock's own label, byte for byte) ──
     sh_dock_today: "Today",
+    sh_dock_schedule: "Schedule",
     sh_dock_clock: "Clock",
+    sh_dock_sales: "Sales",
+    // The Sales tile reduced to its one Customers row (dock.ts whenOnly): sh_dock_<tile>_only.
+    sh_dock_sales_only: "Customers",
     sh_dock_jobs: "Jobs",
+    sh_dock_invoices: "Money",
     sh_dock_office: "Office",
     sh_dock_you: "You",
     sh_dock_tools: "Tools",
     sh_dock_plan: "Plan",
+    // Not a dock tile: the Settings page's own side-tab group (settings-subnav.tsx), drawn by the
+    // same SectionSheet as a tile, so it reads its words from the same shelf.
+    sh_dock_settings: "Settings",
     "sh_dock_t-day": "My Day",
+    "sh_dock_s-week": "Schedule",
     "sh_dock_ck-clock": "Time Clock",
+    "sh_dock_sl-leads": "Leads",
+    "sh_dock_sl-inspections": "Inspections",
+    "sh_dock_sl-quotes": "Estimates",
+    "sh_dock_sl-customers": "Customers",
     "sh_dock_j-all": "All",
     "sh_dock_j-to_be_scheduled": "To Be Scheduled",
     "sh_dock_j-scheduled": "Scheduled",
@@ -63,14 +80,36 @@ export const words: WordCatalog = {
     "sh_dock_j-on_hold": "On Hold",
     "sh_dock_j-complete": "Complete",
     "sh_dock_j-cancelled": "Cancelled",
+    "sh_dock_m-billing-h": "Billing",
+    "sh_dock_m-inv": "Invoices",
+    "sh_dock_m-clock": "Time Clock",
+    "sh_dock_ck-cards": "Timecards",
+    "sh_dock_m-bills": "Bills & POs",
+    // The row's words with Purchase Orders off (dock.ts whenOff): sh_dock_<id>_off.
+    "sh_dock_m-bills_off": "Bills",
+    "sh_dock_m-recon": "Reconcile",
+    "sh_dock_m-price": "Price List",
+    "sh_dock_m-ma-h": "Money Admin",
+    "sh_dock_ma-payroll": "Payroll",
+    "sh_dock_ma-tax": "Tax Report",
+    "sh_dock_ma-analytics": "Analytics",
+    "sh_dock_ma-recur": "Recurring",
     "sh_dock_o-liab-h": "Liabilities",
     "sh_dock_o-comply": "Compliance",
     "sh_dock_o-insurance": "Insurance",
     "sh_dock_o-safety": "Safety",
     "sh_dock_o-audits": "Audits",
     "sh_dock_o-hr-h": "HR",
+    "sh_dock_o-team": "Team",
+    "sh_dock_o-docs": "Employee Docs",
     "sh_dock_o-forms": "Forms",
     "sh_dock_o-resources": "Resources",
+    "sh_dock_o-handbook": "Handbook",
+    "sh_dock_o-stock-h": "Stock",
+    "sh_dock_ma-stock": "Shop Stock",
+    "sh_dock_o-diag-h": "History",
+    "sh_dock_o-activity": "Activity",
+    "sh_dock_o-audit": "Activity Audit",
     "sh_dock_y-settings": "Your Settings",
     "sh_dock_y-handbook": "Handbook",
     "sh_dock_tl-all": "Calculators & Tools",
@@ -106,7 +145,18 @@ export const words: WordCatalog = {
     sh_kind_invoice: "Invoice",
     sh_kind_appointment: "Appointment",
 
-    // ── The + (global-quick-add.tsx: a tech's + is the paper door itself) ──
+    // ── The help rows (lib/onboarding/help-rows: under Search Or Ask with Nort on, under Help in the account menu with Nort off) ──
+    sh_help_startHere: "Start Here",
+    sh_help_startHereNort: "Nort shows you around, out loud, and asks what he needs.",
+    sh_help_startHereQuiet: "A few questions about the business, and where everything lives.",
+    sh_help_finish: "Finish Setting Up · {n} Left",
+    sh_help_finishSub: "Still missing: {list}.",
+    sh_help_showMeHow: "Show Me How",
+    sh_help_again: "Take The Setup Again",
+    sh_help_againNort: "Setup from the top. Change anything you told Nort.",
+    sh_help_againQuiet: "The setup questions from the top. Change any answer.",
+
+    // ── The + (global-quick-add.tsx: a tech's + is the paper door itself; the office's verbs are nv_add_ in lib/words/nav.ts) ──
     sh_snapOrNote: "Snap Or Note",
     sh_quickAdd: "Quick Add",
 
@@ -280,19 +330,29 @@ export const words: WordCatalog = {
     sh_language: "Idioma",
     sh_languageDesc: "Tu idioma preferido para la app y el asistente de IA.",
     sh_spanishCovers:
-      "El español cubre el lado de la cuadrilla por ahora: Reloj, Mi Día, trabajos, materiales, los textos y avisos que recibes, y Nort. Las pantallas de la oficina siguen en inglés.",
+      "El español cubre hoy el lado de la cuadrilla y el mapa de la oficina: la barra, el menú +, la búsqueda, el menú de la cuenta, las secciones de Ajustes y el título de cada página. Los contenidos de las páginas de oficina siguen en inglés por ahora.",
     sh_switchToEnglish: "Cambiar a inglés",
     sh_switchToSpanish: "Cambiar a Español",
 
     sh_dock_today: "Hoy",
+    sh_dock_schedule: "Agenda",
     sh_dock_clock: "Reloj",
+    sh_dock_sales: "Ventas",
+    sh_dock_sales_only: "Clientes",
     sh_dock_jobs: "Trabajos",
+    sh_dock_invoices: "Dinero",
     sh_dock_office: "Oficina",
     sh_dock_you: "Tú",
     sh_dock_tools: "Herramientas",
     sh_dock_plan: "Plan",
+    sh_dock_settings: "Ajustes",
     "sh_dock_t-day": "Mi Día",
+    "sh_dock_s-week": "Agenda",
     "sh_dock_ck-clock": "Reloj",
+    "sh_dock_sl-leads": "Prospectos",
+    "sh_dock_sl-inspections": "Inspecciones",
+    "sh_dock_sl-quotes": "Presupuestos",
+    "sh_dock_sl-customers": "Clientes",
     "sh_dock_j-all": "Todos",
     "sh_dock_j-to_be_scheduled": "Por Programar",
     "sh_dock_j-scheduled": "Programados",
@@ -300,14 +360,35 @@ export const words: WordCatalog = {
     "sh_dock_j-on_hold": "En Pausa",
     "sh_dock_j-complete": "Terminados",
     "sh_dock_j-cancelled": "Cancelados",
+    "sh_dock_m-billing-h": "Facturación",
+    "sh_dock_m-inv": "Facturas",
+    "sh_dock_m-clock": "Reloj",
+    "sh_dock_ck-cards": "Tarjetas De Tiempo",
+    "sh_dock_m-bills": "Cuentas Y Órdenes",
+    "sh_dock_m-bills_off": "Cuentas",
+    "sh_dock_m-recon": "Conciliar",
+    "sh_dock_m-price": "Lista De Precios",
+    "sh_dock_m-ma-h": "Administración",
+    "sh_dock_ma-payroll": "Nómina",
+    "sh_dock_ma-tax": "Reporte De Impuestos",
+    "sh_dock_ma-analytics": "Análisis",
+    "sh_dock_ma-recur": "Recurrentes",
     "sh_dock_o-liab-h": "Obligaciones",
     "sh_dock_o-comply": "Cumplimiento",
     "sh_dock_o-insurance": "Seguros",
     "sh_dock_o-safety": "Seguridad",
     "sh_dock_o-audits": "Auditorías",
     "sh_dock_o-hr-h": "Recursos Humanos",
+    "sh_dock_o-team": "Equipo",
+    "sh_dock_o-docs": "Documentos Del Empleado",
     "sh_dock_o-forms": "Formularios",
     "sh_dock_o-resources": "Recursos",
+    "sh_dock_o-handbook": "Manual",
+    "sh_dock_o-stock-h": "Inventario",
+    "sh_dock_ma-stock": "Inventario",
+    "sh_dock_o-diag-h": "Historial",
+    "sh_dock_o-activity": "Actividad",
+    "sh_dock_o-audit": "Auditoría De Actividad",
     "sh_dock_y-settings": "Tus Ajustes",
     "sh_dock_y-handbook": "Manual",
     "sh_dock_tl-all": "Calculadoras Y Herramientas",
@@ -338,9 +419,19 @@ export const words: WordCatalog = {
     sh_kind_create: "Crear",
     sh_kind_job: "Trabajo",
     sh_kind_customer: "Cliente",
-    sh_kind_quote: "Presupuesto",
+    sh_kind_quote: "Cotización",
     sh_kind_invoice: "Factura",
     sh_kind_appointment: "Cita",
+
+    sh_help_startHere: "Empieza Aquí",
+    sh_help_startHereNort: "Nort te muestra todo, en voz alta, y te pregunta lo que necesita.",
+    sh_help_startHereQuiet: "Unas preguntas sobre el negocio y dónde está cada cosa.",
+    sh_help_finish: "Terminar La Configuración · Pendiente: {n}",
+    sh_help_finishSub: "Todavía falta: {list}.",
+    sh_help_showMeHow: "Muéstrame Cómo",
+    sh_help_again: "Repetir La Configuración",
+    sh_help_againNort: "La configuración desde el principio. Cambia lo que le dijiste a Nort.",
+    sh_help_againQuiet: "Las preguntas de configuración desde el principio. Cambia cualquier respuesta.",
 
     sh_snapOrNote: "Foto O Nota",
     sh_quickAdd: "Agregar Rápido",
@@ -409,7 +500,7 @@ export const words: WordCatalog = {
     sh_push_assigned: "Trabajos y citas asignados a mí",
     sh_push_inquiry: "Nuevas consultas / prospectos",
     sh_pushOff_inquiry: "Nuevas solicitudes de clientes",
-    sh_push_quote_accepted: "Presupuestos aceptados por un cliente",
+    sh_push_quote_accepted: "Cotizaciones aceptadas por un cliente",
     sh_push_invoice_paid: "Facturas pagadas",
     sh_push_day_ahead: "Mi día por delante (resumen de la mañana)",
     sh_push_clock_out: "Recordatorios para marcar salida",

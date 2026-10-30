@@ -1,4 +1,5 @@
 import { unlockAudio } from "@/lib/tts";
+import { fillText, translator } from "@/lib/i18n";
 import { LESSONS, lessonBlurb, lessonOn } from "@/lib/onboarding/tour";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { missingNeeds } from "@/lib/playbook/resolve";
@@ -18,6 +19,11 @@ import type { Answers } from "@/lib/playbook/types";
  *   Take The Setup Again       always: the replay, and how an answer changes
  *
  * Staff only, as the cap was: techs have no setup to run.
+ *
+ * THE WORDS (cn-v1139): the four rows and their lines are the shell catalog's sh_help_ keys; the
+ * caller hands in its translator (`t`, the person's language) and the English default is byte for
+ * byte what the rows said before. The lessons' own titles and blurbs (lib/onboarding/tour) and the
+ * open questions' names (the setup playbook) are the office's and stay English.
  */
 
 /** What SetupHost opens: the tour, the setup questions, the finish questions, or one lesson. */
@@ -32,7 +38,7 @@ export const NORT_TALK_EVENT = "cn:nort-talk";
 export type LessonRow = { key: string; label: string; sub: string; request: SetupRequest };
 export type HelpRow =
   | { key: "start" | "finish" | "again"; label: string; sub: string; request: SetupRequest }
-  | { key: "lessons"; label: "Show Me How"; sub: string; lessons: LessonRow[] };
+  | { key: "lessons"; label: string; sub: string; lessons: LessonRow[] };
 
 /** The company's setup questions still unanswered, from the answers the layout already read. */
 export const openSetupNeeds = (setup: Answers | null | undefined) => missingNeeds(SETUP_PLAYBOOK, setup ?? {});
@@ -58,6 +64,7 @@ export function helpRows({
   setup,
   nortOn,
   features,
+  t = translator("en"),
 }: {
   isStaff: boolean;
   /** profiles.onboarded_at (0180): has THIS PERSON been walked through. */
@@ -65,6 +72,8 @@ export function helpRows({
   setup?: Answers | null;
   nortOn: boolean;
   features?: FeatureMap | null;
+  /** The caller's translator (cn-v1139): the rows in the person's language. English when not handed one. */
+  t?: (key: string) => string;
 }): HelpRow[] {
   if (!isStaff) return [];
   const rows: HelpRow[] = [];
@@ -75,26 +84,26 @@ export function helpRows({
   if (!onboarded) {
     rows.push({
       key: "start",
-      label: "Start Here",
-      sub: nortOn ? "Nort shows you around, out loud, and asks what he needs." : "A few questions about the business, and where everything lives.",
+      label: t("sh_help_startHere"),
+      sub: nortOn ? t("sh_help_startHereNort") : t("sh_help_startHereQuiet"),
       request: nortOn ? "tour" : "questions",
     });
   } else if (open.length) {
     rows.push({
       key: "finish",
-      label: `Finish Setting Up · ${open.length} Left`,
-      sub: `Still missing: ${open.map((n) => (n.label ?? n.key).toLowerCase()).join(", ")}.`,
+      label: fillText(t("sh_help_finish"), { n: String(open.length) }),
+      sub: fillText(t("sh_help_finishSub"), { list: open.map((n) => (n.label ?? n.key).toLowerCase()).join(", ") }),
       request: "finish",
     });
   }
   const lessons = lessonRows(features, nortOn);
   if (lessons.length) {
-    rows.push({ key: "lessons", label: "Show Me How", sub: `${lessons.map((l) => l.label).join(", ")}.`, lessons });
+    rows.push({ key: "lessons", label: t("sh_help_showMeHow"), sub: `${lessons.map((l) => l.label).join(", ")}.`, lessons });
   }
   rows.push({
     key: "again",
-    label: "Take The Setup Again",
-    sub: nortOn ? "Setup from the top. Change anything you told Nort." : "The setup questions from the top. Change any answer.",
+    label: t("sh_help_again"),
+    sub: nortOn ? t("sh_help_againNort") : t("sh_help_againQuiet"),
     request: nortOn ? "tour" : "questions",
   });
   return rows;

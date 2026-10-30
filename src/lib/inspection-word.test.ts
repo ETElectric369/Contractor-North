@@ -9,6 +9,7 @@ import { DOCK } from "@/lib/dock";
 import { FEATURES } from "@/lib/features";
 import { PILE_DEFS } from "@/lib/action-items/piles";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
+import { words as nav } from "@/lib/words/nav";
 
 /**
  * ONE WORD FOR THE SITE VISIT, AND IT IS THE STORED ONE: INSPECTION.
@@ -59,7 +60,8 @@ describe("the site visit is an Inspection", () => {
   it("the bucket on the page, the switch and the pile all read Inspection too", () => {
     // The exact pairing Erik reported: a page called Inspections with a bucket called Walk-Throughs.
     const page = read("src/app/(app)/inspections/page.tsx");
-    expect(page).toContain('title="Inspections"');
+    expect(page).toContain('title={t("nv_page_inspections")}');
+    expect(nav.en.nv_page_inspections).toBe("Inspections");
     expect(page).toContain('buttonLabel="Book An Inspection"');
     expect(FEATURES.find((f) => f.key === "leads")?.label).toBe("Leads & Inspections");
     expect(PILE_DEFS.inspections_to_write_up).toMatchObject({ label: "Inspections To Write Up", listLabel: "See All Inspections" });
@@ -132,7 +134,9 @@ describe("the site visit is an Inspection", () => {
   });
 
   it("the setup interview is setup, so the one word means only the site visit", () => {
-    expect(read("src/lib/onboarding/help-rows.ts")).toContain('"Setup from the top. Change anything you told Nort."');
+    // The help rows' words live in the shell catalog since cn-v1139 (sh_help_againNort), English byte for byte.
+    expect(read("src/lib/words/shell.ts")).toContain('sh_help_againNort: "Setup from the top. Change anything you told Nort."');
+    expect(read("src/lib/onboarding/help-rows.ts")).toContain('t("sh_help_againNort")');
     const s = read("src/components/setup-interview.tsx");
     expect(s).toContain("Take setup again from Search Or Ask and tell me your trade");
     expect(s).toContain(">This setup</strong>");

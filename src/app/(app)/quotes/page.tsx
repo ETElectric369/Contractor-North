@@ -3,6 +3,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { FileText, Plus, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Button } from "@/components/ui/button";
 import { QUOTE_STATUSES, QUOTE_STATUS_PRIORITY, type QuoteStatus } from "@/lib/statuses";
 import { QuotesList } from "./quotes-list";
@@ -36,6 +38,7 @@ export default async function QuotesPage({
   const isStaff = !!me && isStaffRole((me as { role?: string }).role ?? "");
   const sw = switchesFromRow(me);
   const estimatesOn = featureOn(sw.features, "estimates");
+  const t = translator(await currentLangFor(user?.id));
 
   // inquiry:inquiry_id — so a deferred-customer estimate (customer_id null until accepted) still
   // shows WHO it's for (the lead's name) instead of a blank dash.
@@ -56,7 +59,7 @@ export default async function QuotesPage({
         (QUOTE_STATUS_PRIORITY[b.status as QuoteStatus] ?? 9),
     );
   }
-  const heading = filter === "quote" ? "Quotes" : "Estimates";
+  const heading = filter === "quote" ? t("nv_page_quotes") : t("nv_page_estimates");
 
   // Duplicate detector: 2+ DRAFT quotes sharing customer_id AND rounded total is
   // a strong "saved twice" signal (the E-009/E-010/E-011 400A case). Cluster
@@ -66,7 +69,7 @@ export default async function QuotesPage({
 
   return (
     <div>
-      <PageHeader title={heading} description="Estimates are time-&-materials by default — switch any one to a fixed-price quote.">
+      <PageHeader title={heading} description={filter === "quote" ? t("nv_desc_quotes") : t("nv_desc_estimates")}>
         {estimatesOn && (
           <Link href="/quotes/new" data-tour="new-estimate">
             <Button>

@@ -209,7 +209,7 @@ describe("a rail card: one ⋯, no status dropdown", () => {
 describe("the heading counts what waits, and says when a list is capped", () => {
   it("'Waiting For A Day (n)', '(n+)' and one line when any rail read hits its cap", () => {
     const page = read("src/app/(app)/schedule/page.tsx");
-    expect(page).toContain("Waiting For A Day <span");
+    expect(page).toContain('{t("nv_sched_waitingForADay")} <span');
     expect(page).toContain('({waiting.length}{railCapped ? "+" : ""})');
     expect(page).toContain("More is waiting than this list shows. Find the rest on Jobs and Leads.");
     expect(page).toContain("const RAIL_LIMITS = { leads: 500, jobs: 200, visits: 200 } as const;");

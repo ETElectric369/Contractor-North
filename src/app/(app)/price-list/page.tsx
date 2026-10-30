@@ -1,6 +1,8 @@
 import { reportError } from "@/lib/observe";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { Tabs } from "@/components/tabs";
 import { getOrgSettings } from "@/lib/org-settings";
 import { measurementOptions } from "@/lib/playbook/measurements";
@@ -14,7 +16,7 @@ import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
 import { VendorsManager } from "./vendors-manager";
 import { knownVendorNames, linkOf, summarizeVendors, vendorKey, type ItemOption, type VendorCard } from "./item-options-math";
-import { VENDOR_MEANS, vendorKindOf } from "@/lib/vendor-words";
+import { vendorKindOf } from "@/lib/vendor-words";
 import type { ExistingVendor } from "./vendor-import-math";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { featureOn } from "@/lib/features";
@@ -59,6 +61,7 @@ const CARD_SELECT_0341 = `${CARD_SELECT}, kind, trade, is_person, source_url, ma
 
 export default async function PriceListPage() {
   const supabase = await createClient();
+  const t = translator(await currentLang());
   const [itemsRes, kitsRes, { data: org }, optionsRes, cardsRes] = await Promise.all([
     (async () => {
       // Active rows first so the cap trims archived ones, never live ones.
@@ -208,11 +211,13 @@ export default async function PriceListPage() {
   return (
     <div>
       <PageHeader
-        title="Price List"
+        title={t("nv_page_priceList")}
         description={
-          "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier's list via CSV." +
+          t("nv_desc_priceList") +
           // Only said when the tab is actually there — copy never names a control that doesn't exist.
-          (optionsAvailable ? ` Click any item to give it vendors, each with its own cost and sell. ${VENDOR_MEANS}` : "")
+          // (nv_desc_priceListVendorsMeans is lib/vendor-words' VENDOR_MEANS in the person's language: the
+          // catalog's English is pinned byte for byte to it, so a Spanish line no longer ends in English.)
+          (optionsAvailable ? ` ${t("nv_desc_priceListVendors")} ${t("nv_desc_priceListVendorsMeans")}` : "")
         }
       />
       {/* ONE unit vocabulary, one list: every unit input on the page points at this datalist. */}

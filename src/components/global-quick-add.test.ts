@@ -7,9 +7,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => "/planner" }));
 vi.mock("@/components/snap-or-note", () => ({ SnapOrNoteProvider: () => null, openSnapOrNote: vi.fn(), snapStillSending: () => 0 }));
 
-import { GlobalQuickAdd, QuickAddMenu, STUCK_MS, plusOpens, quickAddActions, quickAddGo } from "./global-quick-add";
+import { ACTIONS, GlobalQuickAdd, QuickAddMenu, STUCK_MS, plusOpens, quickAddActions, quickAddGo } from "./global-quick-add";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { LangProvider } from "@/components/lang-provider";
+import { dict, translator } from "@/lib/i18n";
 
 /**
  * THE + (W1-11: eight rows to six) AND THE SWITCH BOARD (0352). The office: Snap Or Note first, then
@@ -64,14 +65,48 @@ describe("the + on screen", () => {
   });
 
   it("a Spanish-speaking tech (cn-v1138): his + is Foto O Nota; the office's menu keeps Snap Or Note in its words; English byte for byte as before", () => {
-    const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es", children: el }));
+    const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es" } as Parameters<typeof LangProvider>[0], el));
     const tech = es(createElement(GlobalQuickAdd, { isStaff: false }));
     expect(tech).toMatch(/<button[^>]*aria-label="Foto O Nota"[^>]*title="Foto O Nota"/);
     expect(tech).not.toContain("Snap Or Note");
     expect(rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })))[0]).toBe("Foto O Nota");
     expect(es(createElement(GlobalQuickAdd, { isStaff: true, placement: "topbar" }))).toMatch(/<button[^>]*aria-label="Agregar Rápido"/);
-    const en = renderToStaticMarkup(createElement(LangProvider, { lang: "en", children: createElement(GlobalQuickAdd, { isStaff: false }) }));
+    const en = renderToStaticMarkup(createElement(LangProvider, { lang: "en" } as Parameters<typeof LangProvider>[0], createElement(GlobalQuickAdd, { isStaff: false })));
     expect(en).toBe(renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: false })));
+  });
+
+  it("the office's verbs in Spanish (cn-v1139): every row Title Case, through the nav catalog by key; English byte for byte", () => {
+    const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es" } as Parameters<typeof LangProvider>[0], el));
+    const menu = rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })));
+    expect(menu).toEqual(["Foto O Nota", "Nuevo Prospecto", "Nuevo Trabajo", "Nueva Cita", "Nueva Inspección", "Nuevo Presupuesto", "Nueva Factura"]);
+    for (const r of menu) for (const w of r.split(" ")) expect(w, r).toMatch(/^[A-ZÁÉÍÓÚÑ]/);
+    expect(quickAddActions(true, ALL_ON, translator("es")).map((a) => a.label)).toEqual(menu.slice(1));
+    expect(quickAddActions(true, ALL_ON, translator("en")).map((a) => a.label)).toEqual(quickAddActions(true, ALL_ON).map((a) => a.label));
+    // Each row carries its key, and the key's English is the row's old literal.
+    expect(ACTIONS.map((a) => a.key)).toEqual(["nv_add_newLead", "nv_add_newJob", "nv_add_newAppointment", "nv_add_newInspection", "nv_add_newEstimate", "nv_add_newInvoice"]);
+    expect(ACTIONS.map((a) => dict("en")[a.key])).toEqual(["New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
+    // No English literal is left in the file: the leak scan reads it (tests/tech-words-in-the-catalog.test.ts).
+    const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
+    expect(src).not.toContain('label: "New');
+  });
+
+  it("the two sentences a tap says carry the row's own Spanish word (cn-v1139)", () => {
+    const t = translator("es");
+    expect(quickAddGo({ online: false, lastFailed: false, stuck: false, label: "Nuevo Trabajo" }, t)).toEqual({
+      way: "offline",
+      said: "No hay señal ahora, así que Nuevo Trabajo no puede abrir. Vuelve a tocar Nuevo Trabajo cuando tengas una o dos barras.",
+    });
+    expect(quickAddGo({ online: true, lastFailed: true, stuck: false, label: "Nuevo Trabajo", sending: 6 }, t)).toEqual({
+      way: "wait",
+      said: "Foto O Nota todavía está enviando 6 archivos, y recargar ahora los detendría. Toca Nuevo Trabajo de nuevo cuando ya estén.",
+    });
+    expect(quickAddGo({ online: true, lastFailed: false, stuck: true, label: "Nuevo Trabajo", sending: 1 }, t)).toEqual({
+      way: "wait",
+      said: "Foto O Nota todavía está enviando 1 archivo, y recargar ahora lo detendría. Toca Nuevo Trabajo de nuevo cuando ya esté.",
+    });
+    // The component hands its own translator in, with the row's translated label.
+    const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
+    expect(src).toMatch(/const next = quickAddGo\(\s*\{[\s\S]*?label: a\.label,[\s\S]*?\},\s*t,\s*\);/);
   });
 
   it("lapsed (skeptic #43, S1): the + is not drawn at all — every verb of it is a closed door", () => {

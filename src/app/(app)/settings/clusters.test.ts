@@ -76,7 +76,7 @@ describe("settings clusters", () => {
     const used = [...new Set(src.split("\n").filter(Boolean).map((m) => m.split("=")[1]))].filter(Boolean);
     expect(used.length).toBeGreaterThan(3); // the grep works
     for (const tab of used) expect(clusters, `?tab=${tab} names no cluster`).toContain(tab);
-  });
+  }, 20_000); // a recursive grep of src/ under a loaded suite can pass five seconds; the clock is the file system's, not the rule's
 
   it("aliases the one id the split retired, so old bookmarks still land", () => {
     expect(page).toMatch(/TAB_ALIASES[^\n]*=\s*\{\s*scheduling: "crew"/);

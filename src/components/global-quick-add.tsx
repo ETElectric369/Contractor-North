@@ -6,7 +6,7 @@ import { Plus, Camera, Briefcase, CalendarPlus, ClipboardCheck, FileText, Receip
 import { SnapOrNoteProvider, openSnapOrNote, snapStillSending } from "@/components/snap-or-note";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { useLang } from "@/components/lang-provider";
-import { translator } from "@/lib/i18n";
+import { fillText, translator } from "@/lib/i18n";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 /**
@@ -27,21 +27,30 @@ import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
  *
  * Papers waiting to be filed show up as Needs You rows on My Day; Add Cost stays on My Day's Now
  * card and the job's own page (job-scoped).
+ *
+ * THE WORDS (cn-v1139): each verb is a key in the nav catalog (lib/words/nav.ts nv_add_), read
+ * through the person's translator when the rows are built (quickAddActions), so the English is
+ * byte for byte what the row said and a Spanish reader sees Nuevo Trabajo. No English literal
+ * lives here: this file is one the leak scan reads (tests/tech-words-in-the-catalog.test.ts).
  */
-export const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean; feature?: FeatureKey }[] = [
-  { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true, feature: "leads" },
-  { label: "New Job", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },
-  { label: "New Appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
+export const ACTIONS: { key: string; href: string; icon: LucideIcon; staffOnly?: boolean; feature?: FeatureKey }[] = [
+  { key: "nv_add_newLead", href: "/leads?new=1", icon: UserSearch, staffOnly: true, feature: "leads" },
+  { key: "nv_add_newJob", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },
+  { key: "nv_add_newAppointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
   // The Inspector's visit (Erik, 2026-10-15: "Add new inspection to plus menu"): the schedule's one
   // create form, opened on the inspection type. Leads off = no inspections = no door.
-  { label: "New Inspection", href: "/schedule?new=inspection", icon: ClipboardCheck, staffOnly: true, feature: "leads" },
-  { label: "New Estimate", href: "/quotes/new", icon: FileText, staffOnly: true, feature: "estimates" },
-  { label: "New Invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
+  { key: "nv_add_newInspection", href: "/schedule?new=inspection", icon: ClipboardCheck, staffOnly: true, feature: "leads" },
+  { key: "nv_add_newEstimate", href: "/quotes/new", icon: FileText, staffOnly: true, feature: "estimates" },
+  { key: "nv_add_newInvoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
 ];
 
-/** The + menu's typed verbs for this person: role first, then the switches. No map = everything on. */
-export function quickAddActions(isStaff: boolean, features?: FeatureMap | null) {
-  return ACTIONS.filter((a) => (isStaff || !a.staffOnly) && (!a.feature || featureOn(features, a.feature)));
+/** A verb as the menu draws it: the row's data with its words in the person's language. */
+export type QuickAddAction = (typeof ACTIONS)[number] & { label: string };
+
+/** The + menu's typed verbs for this person: role first, then the switches, each with its words in
+ *  the translator's language (English when not handed one). No map = everything on. */
+export function quickAddActions(isStaff: boolean, features?: FeatureMap | null, t: (key: string) => string = translator("en")): QuickAddAction[] {
+  return ACTIONS.filter((a) => (isStaff || !a.staffOnly) && (!a.feature || featureOn(features, a.feature))).map((a) => ({ ...a, label: t(a.key) }));
 }
 
 /** What a tap on the + does: the office's menu, or (the crew) Snap Or Note itself. */
@@ -67,15 +76,21 @@ export type QuickAddGo = { way: "soft" } | { way: "full" } | { way: "offline"; s
  *   · but never a full load while Snap Or Note is still sending files: its queue lives in this
  *     page's memory and a reload would drop them without a word. That tap says so and waits;
  *   · otherwise the ordinary soft navigation.
+ *
+ * What it says comes from the nav catalog in the translator's language (cn-v1139), with the row's
+ * own word in the {label} slot; English when not handed a translator.
  */
-export function quickAddGo(o: { online: boolean; lastFailed: boolean; stuck: boolean; label: string; sending?: number }): QuickAddGo {
-  if (!o.online) return { way: "offline", said: `No signal right now, so ${o.label} can't open. Tap it again once you have a bar or two.` };
+export function quickAddGo(
+  o: { online: boolean; lastFailed: boolean; stuck: boolean; label: string; sending?: number },
+  t: (key: string) => string = translator("en"),
+): QuickAddGo {
+  if (!o.online) return { way: "offline", said: fillText(t("nv_add_noSignal"), { label: o.label }) };
   if (o.lastFailed || o.stuck) {
     const n = o.sending ?? 0;
     if (n > 0)
       return {
         way: "wait",
-        said: `Snap Or Note is still sending ${n === 1 ? "1 file" : `${n} files`}, and reloading now would stop ${n === 1 ? "it" : "them"}. Tap ${o.label} again once ${n === 1 ? "it's" : "they're"} in.`,
+        said: n === 1 ? fillText(t("nv_add_stillSendingOne"), { label: o.label }) : fillText(t("nv_add_stillSendingMany"), { n: String(n), label: o.label }),
       };
     return { way: "full" };
   }
@@ -96,18 +111,18 @@ export function QuickAddMenu({
   isStaff: boolean;
   features?: FeatureMap | null;
   onSnap: () => void;
-  onGo: (a: (typeof ACTIONS)[number]) => void;
+  onGo: (a: QuickAddAction) => void;
   /** A tap that couldn't go (no signal), said under the rows. */
   said?: string | null;
 }) {
-  // The paper door's name in the person's language (cn-v1138); the typed verbs are the office's.
+  // The paper door's name (cn-v1138) and the typed verbs (cn-v1139) in the person's language.
   const t = translator(useLang());
   return (
     <>
       <button type="button" onClick={onSnap} className={ROW}>
         <Camera className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {t("sh_snapOrNote")}
       </button>
-      {quickAddActions(isStaff, features).map((a) => (
+      {quickAddActions(isStaff, features, t).map((a) => (
         <button type="button" key={a.href} onClick={() => onGo(a)} className={ROW}>
           <a.icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {a.label}
         </button>
@@ -163,19 +178,22 @@ export function GlobalQuickAdd({
     failed.current = false;
   }, [pathname]);
 
-  function go(a: (typeof ACTIONS)[number]) {
+  function go(a: QuickAddAction) {
     const here = window.location.href;
     const p = pending.current;
     // Landed: the address moved since that tap.
     if (p && p.from !== here) pending.current = null;
     const stuck = !!p && p.from === here && p.href === a.href && Date.now() - p.at > STUCK_MS;
-    const next = quickAddGo({
-      online: typeof navigator === "undefined" || navigator.onLine !== false,
-      lastFailed: failed.current,
-      stuck,
-      label: a.label,
-      sending: snapStillSending(),
-    });
+    const next = quickAddGo(
+      {
+        online: typeof navigator === "undefined" || navigator.onLine !== false,
+        lastFailed: failed.current,
+        stuck,
+        label: a.label,
+        sending: snapStillSending(),
+      },
+      t,
+    );
     if (next.way === "offline" || next.way === "wait") {
       // Said right where the tap was: the menu stays open with the sentence under the rows.
       setSaid(next.said);

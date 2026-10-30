@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Calculator } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { Card, CardContent } from "@/components/ui/card";
 import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { DataTable } from "@/components/ui/data-table";
@@ -49,6 +51,7 @@ export default async function TaxReportPage({
   const { period: pRaw } = await searchParams;
   const period: Period = (["month", "quarter", "ytd", "year"].includes(pRaw ?? "") ? pRaw : "ytd") as Period;
   const supabase = await createClient();
+  const t = translator(await currentLang());
   // Load the org tz first so the period window + the per-day mileage grouping agree.
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const settings = getOrgSettings((org as any)?.settings);
@@ -104,7 +107,7 @@ export default async function TaxReportPage({
 
   return (
     <div>
-      <PageHeader title="Tax report" description="Sales tax collected by rate / jurisdiction — for filing & remittance." />
+      <PageHeader title={t("nv_page_taxReport")} description={t("nv_desc_taxReport")} />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {(Object.keys(LABELS) as Period[]).map((p) => (

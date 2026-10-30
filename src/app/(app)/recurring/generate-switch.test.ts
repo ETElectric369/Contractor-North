@@ -79,7 +79,9 @@ describe("the toast says what was made", () => {
     const dir = join(process.cwd(), "src/app/(app)/recurring");
     const page = readFileSync(join(dir, "page.tsx"), "utf8");
     expect(page).toContain("<RecurringRowActions id={t.id} active={t.active} kind={t.kind}");
-    expect(page).toContain('description="Jobs, invoices, and expenses that repeat. Each one is made on its day, automatically."');
+    expect(page).toContain('description={t("nv_desc_recurring")}');
+    const { words: nav } = await import("@/lib/words/nav");
+    expect(nav.en.nv_desc_recurring).toBe("Jobs, invoices, and expenses that repeat. Each one is made on its day, automatically.");
     expect(page).not.toMatch(/Generate \$\{count\} Due|GenerateDueButton/);
     const src = readFileSync(join(dir, "recurring-actions-ui.tsx"), "utf8");
     expect(src).not.toContain("`Generated ${n} recurring items`");

@@ -3,6 +3,8 @@ import { FileSpreadsheet, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { viewerSwitches } from "@/lib/viewer-switches";
@@ -40,16 +42,16 @@ export default async function FormsPage() {
   const safetyOn = featureOn(sw.features, "safety_log");
   const list = (forms ?? []).filter((f) => safetyOn || !isChecklist(f));
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div>
       {/* THE SHEET GETS ITS OWN NAME. This list really does hold the inspection sheet
           (is_inspection) next to the crew's checklists, so a bare "inspections" in the description
           read as the site visit — the second word for the one thing (04a9369a). Nothing is lost: a
           safety inspection is already a safety checklist. */}
-      <PageHeader
-        title="Forms"
-        description="Field forms — safety checklists, sign-offs, and your inspection sheet."
-      >
+      <PageHeader title={t("nv_page_forms")} description={t("nv_desc_forms")}>
         {isStaff && safetyOn && <NewFormButton />}
       </PageHeader>
 

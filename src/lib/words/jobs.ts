@@ -696,7 +696,7 @@ export const words: WordCatalog = {
     jb_buildInvoiceFrom: "Armar la factura con",
     jb_estimateCopies: "✓ El presupuesto del trabajo (las partidas se copian solas)",
     jb_addLaborFromTimecards: "Agregar mano de obra de las tarjetas de tiempo (horas × la tarifa de cada persona)",
-    jb_addMaterialsFromPos: "Agregar materiales de órdenes de compra y cuentas (con el margen del trabajo — ajusta después)",
+    jb_addMaterialsFromPos: "Agregar materiales de órdenes de compra y cuentas (con el sobreprecio del trabajo — ajusta después)",
     jb_whenDone: "Al terminar",
     jb_emailInvoiceNow: "Enviar la factura al cliente por correo ahora",
     jb_sendsOnFinish: "Se envía en cuanto termines — revisa bien los montos primero.",

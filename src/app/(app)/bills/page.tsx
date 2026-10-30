@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { paidByOfBills } from "@/lib/supplier-pay-words";
 import { readClaimsOnCosts } from "@/lib/claims-on-costs";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
@@ -212,6 +214,7 @@ export default async function BillsPage({
   const orgId = profile?.org_id ?? "";
   // Company settings (books_begin among them) are owner/admin writes (organizations_update).
   const canChangeSettings = profile?.role === "owner" || profile?.role === "admin";
+  const t = translator(await currentLangFor(user?.id));
 
   // EVERYTHING THIS PAGE NEEDS, IN ONE BREATH. The supplier reads (0270) join the existing five
   // rather than hanging off them, because a serial hop added to a page read is the phone-lag class
@@ -1247,7 +1250,7 @@ export default async function BillsPage({
     // page had keeps exactly one home (bills-page-doors.test.ts finds each one).
     <PaperworkDropZone>
       <FoldOpener />
-      <PageHeader title="Bills" description="Drop a receipt or bill anywhere on this page.">
+      <PageHeader title={t("nv_page_bills")} description={t("nv_desc_bills")}>
         <div className="flex flex-wrap items-center gap-2">
           <SnapOrNoteButton />
           {/* The one typed door (W1-32): a job's cost, a business cost in its bucket, or stock, with

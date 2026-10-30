@@ -12,7 +12,7 @@ import type { WordCatalog } from "./types";
  * NOT here, on purpose: the lines Nort sends BACK TO THE SERVER as context for the model
  * (refuseStaleFill's "NOT filled — …", the seen list, "Selected contact: … customer_id …") — the
  * model reads those, not the person; and the office-only verbs in time.ts (addEntry, fixEntry,
- * listEntries, splitEntry), which stay English with the office side (sh_spanishCovers).
+ * listEntries, splitEntry), which stay English with the office pages' contents (sh_spanishCovers).
  */
 export const words: WordCatalog = {
   prefix: "nt_",
@@ -149,7 +149,7 @@ export const words: WordCatalog = {
   es: {
     nt_estimator: "Estimador",
     nt_estimatorCaps: "ESTIMADOR",
-    nt_newEstimate: "Presupuesto nuevo",
+    nt_newEstimate: "Nuevo Presupuesto",
     nt_estimate: "Presupuesto",
     nt_clearPreviewAria: "Quitar la vista previa del presupuesto",
     nt_clearPreviewTitle: "Quitar este presupuesto de la pantalla",
@@ -161,7 +161,7 @@ export const words: WordCatalog = {
     nt_saveEstimate: "Guardar Presupuesto →",
     nt_saveDraft: "Guardar Borrador →",
     nt_couldntSaveWhy: "No se pudo guardar: {why}",
-    nt_couldntSaveQuote: "No se pudo guardar el presupuesto.",
+    nt_couldntSaveQuote: "No se pudo guardar la cotización.",
     nt_view: "Ver →",
     nt_dropped: "Se cortó la conexión antes de que llegara la respuesta de Nort. Recarga para buscarla, o pregunta de nuevo.",
     nt_offline: "Estás sin conexión. Puede que Nort ya haya contestado. Recarga cuando tengas señal para revisar, o pregunta de nuevo.",
@@ -211,7 +211,7 @@ export const words: WordCatalog = {
     nt_send: "Enviar",
     nt_newChat: "+ Chat Nuevo",
     nt_howCanIHelp: "¿Cómo te ayudo?",
-    nt_introOffice: "Puedo abrir tus trabajos, presupuestos, facturas y calendario, ver quién está en el reloj, armar presupuestos y cuantificaciones de materiales, y ayudarte con alcances y el código.",
+    nt_introOffice: "Puedo abrir tus trabajos, cotizaciones, facturas y calendario, ver quién está en el reloj, armar cotizaciones y cuantificaciones de materiales, y ayudarte con alcances y el código.",
     nt_introTech: "Puedo marcar tu entrada y salida, abrir tus trabajos y sus listas de materiales, y leerte tu día.",
     nt_introVoice: " Toca el micrófono y habla; yo te leo las respuestas.",
     nt_askPlaceholder: "Pregunta, o toca Hablar para dictar…",

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll, beforeAll } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { sectionOf, textOf } from "@/test/rendered-page";
 import { RECONCILE_KINDS } from "@/lib/reconcile-kinds";
@@ -163,10 +163,16 @@ vi.mock("@/lib/supplier-owed-read", async (importOriginal) => {
   };
 });
 
-const render = async () => {
-  const { default: ReconcilePage } = await import("./page");
-  return renderToStaticMarkup((await ReconcilePage()) as React.ReactElement);
-};
+/**
+ * The page module is loaded ONCE, outside any test's timer: since cn-v1139 the page imports the
+ * twelve word catalogs for its title, and that cold import pushed the first render past vitest's
+ * five-second clock on a loaded machine. The import is a cost of the file, not of the first case.
+ */
+let ReconcilePage: () => Promise<React.ReactElement>;
+beforeAll(async () => {
+  ReconcilePage = (await import("./page")).default as unknown as () => Promise<React.ReactElement>;
+});
+const render = async () => renderToStaticMarkup(await ReconcilePage());
 
 /** The first card: the one number and the sentence under it. Everything in this file is about it. */
 const lead = (html: string) => textOf(sectionOf(html, "reconcile-lead"));

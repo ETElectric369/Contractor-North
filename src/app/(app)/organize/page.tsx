@@ -1,6 +1,8 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
 import { SnapOrNoteButton } from "@/components/snap-or-note";
 import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
@@ -17,6 +19,7 @@ export const maxDuration = 60;
 
 export default async function OrganizePage() {
   const supabase = await createClient();
+  const t = translator(await currentLang());
 
   // The org row feeds the "already on the books" read, which rides in the same breath as the rest
   // (a serial hop on a page read is the phone-lag class, audit v921).
@@ -66,7 +69,7 @@ export default async function OrganizePage() {
   return (
     <div className="mx-auto max-w-3xl">
       {/* ONE PAPER DOOR (W1-30): papers come in through Snap Or Note, this button or + anywhere. */}
-      <PageHeader title="Organize My…" description="Papers you snapped wait here until you file them.">
+      <PageHeader title={t("nv_page_organize")} description={t("nv_desc_organize")}>
         <SnapOrNoteButton />
       </PageHeader>
       <OrganizeManager

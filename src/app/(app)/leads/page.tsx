@@ -5,6 +5,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { InquiryModal } from "./inquiry-modal";
@@ -25,6 +27,7 @@ export default async function InquiriesPage({
 }) {
   const { focus, due } = await searchParams;
   const supabase = await createClient();
+  const t = translator(await currentLang());
 
   const [{ data: inqData }, { data: custData }, sw] = await Promise.all([
     // NEWEST FIRST (lib/leads/board-order, cn-v1137). The board used to sort the triage's priority
@@ -116,7 +119,7 @@ export default async function InquiriesPage({
 
   return (
     <div>
-      <PageHeader title="Leads" description="New requests to follow up and convert — nothing converts automatically.">
+      <PageHeader title={t("nv_page_leads")} description={t("nv_desc_leads")}>
         {leadsOn && <InquiryModal />}
       </PageHeader>
 

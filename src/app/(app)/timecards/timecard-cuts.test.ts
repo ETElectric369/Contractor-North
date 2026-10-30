@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { dict } from "@/lib/i18n";
+import { words as nav } from "@/lib/words/nav";
 
 /**
  * TIMECARDS, CUT DOWN (Wave 2, W2-02). No approver nobody asks, no approval settings nothing reads,
@@ -127,7 +128,9 @@ describe("no approver, and no approval settings", () => {
 
   it("the Timecards header says what the page is for, and names no approver", () => {
     const page = src("./page.tsx");
-    expect(page).toContain('<PageHeader title="Timecards" description="Review your crew\'s hours by week.">');
+    expect(page).toContain('<PageHeader title={t("nv_page_timecards")} description={t("nv_desc_timecards")}>');
+    expect(nav.en.nv_page_timecards).toBe("Timecards");
+    expect(nav.en.nv_desc_timecards).toBe("Review your crew's hours by week.");
     expect(page).not.toMatch(/Approver|timecard_supervisor_id|supId/);
   });
 });

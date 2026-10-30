@@ -73,6 +73,7 @@ import { gcalConfigured, connectionNeedsReauth } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
 import QRCode from "qrcode";
 import { translator } from "@/lib/i18n";
+import { settingsClusterLabel } from "@/lib/settings-words";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { accessState, type BillingOrg } from "@/lib/subscription";
@@ -1076,7 +1077,10 @@ export default async function SettingsPage({
   // The nav needs only id/label per cluster — the icon is resolved client-side by id in
   // SettingsSubnav. (Passing c.icon, a lucide component/function, across the server→client
   // boundary threw "Functions cannot be passed to Client Components" and crashed /settings.)
-  const navClusters = clusters.filter((c) => !clusterOff(c.id)).map((c) => ({ id: c.id, label: c.label }));
+  // Each cluster's name in the person's language (cn-v1139), through the ONE map the side-tab reads
+  // (lib/settings-words, by id): the word this page hands over and the word the row draws cannot
+  // differ. The literal on the cluster is the English fallback for an id the map does not name.
+  const navClusters = clusters.filter((c) => !clusterOff(c.id)).map((c) => ({ id: c.id, label: settingsClusterLabel(c.id, t) ?? c.label }));
   const activeOff = clusterOff(active.id) ? CLUSTER_FEATURE[active.id] : undefined;
 
   return (
@@ -1093,7 +1097,7 @@ export default async function SettingsPage({
     // for. The nav goes back where every other nav in the app lives, and a 900px window is
     // unaffected because the subnav is still lg-only (see dock.tsx:104 for why that matters).
     <div>
-      <PageHeader title="Settings" description="Configure every part of your business." />
+      <PageHeader title={t("nv_page_settings")} description={t("nv_desc_settings")} />
       {/* Two columns on desktop, stacked on a phone (the subnav renders its own slide-over
           there). `items-start` so the sticky sidebar can actually stick instead of being
           stretched to the content's full height by the default `stretch`. */}

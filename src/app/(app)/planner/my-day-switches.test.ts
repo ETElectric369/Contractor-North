@@ -425,7 +425,9 @@ describe("My Day's cards (structural: the page is a server component over the da
     // The office still reaches both: THE week redirect stays, New Appointment stays on the + menu
     // (lane 3's file) and the Schedule tile stays on the dock (lane 1b's file).
     expect(page).toContain('if (view === "week" && isStaff) redirect("/schedule?view=week");');
-    expect(readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8")).toContain('"New Appointment"');
+    // The + menu's rows are keys since cn-v1139 (nv_add_newAppointment); the words live in lib/words/nav.ts.
+    expect(readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8")).toContain('key: "nv_add_newAppointment"');
+    expect(dict("en").nv_add_newAppointment).toBe("New Appointment");
     const dock = readFileSync(join(process.cwd(), "src/lib/dock.ts"), "utf8");
     expect(dock).toContain('key: "schedule"');
     expect(dock).toContain('label: "Schedule"');

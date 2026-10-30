@@ -14,16 +14,34 @@ import type { WordCatalog } from "@/lib/words/types";
  * keep the scan honest.
  */
 
-/** The eleven catalogs (lib/words). */
-export const CATALOG_FLOOR = 11;
-/** The keys across every catalog at cn-v1138 (1,562 when the floor was set); raise it as keys land. */
-export const KEYS_FLOOR = 1562;
+/** The twelve catalogs (lib/words; nv_ the office's map since cn-v1139). */
+export const CATALOG_FLOOR = 12;
+/** The keys across every catalog at cn-v1139 (1,694 when the floor was set; 1,562 at cn-v1138); raise it as keys land. */
+export const KEYS_FLOOR = 1694;
+
+/**
+ * THE KEY FAMILIES THAT ARE CLICKABLES (Erik's law: Title Case in BOTH languages, every word
+ * capitalized — "Lista De Precios", "Cuentas Y Órdenes"). A sentence under one of these prefixes
+ * (a help row's line, ending in a period) keeps sentence case and is not judged. The page titles
+ * (nv_page_) are judged in SPANISH only: their English is byte for byte what each page says today,
+ * and four of them ("Tax report", "Activity audit", "Employee documents", "Employee handbook") are
+ * not Title Case — the pages' own words, not the catalog's to change.
+ */
+const TITLE_CASE_FAMILIES = ["sh_dock_", "sh_help_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_"];
+const TITLE_CASE_ES_ONLY = ["nv_page_"];
+/** Every word begins with a capital, a digit or a symbol; a {slot} is a hole, not a word; "/", "&", "+" and "·" pass. */
+const titleCase = (s: string) =>
+  s
+    .replace(/\{\w+\}/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((w) => /^[\p{Lu}\p{N}&\/+·(]/u.test(w));
 
 const ROOT = process.cwd();
 const keysOf = (c: WordCatalog) => Object.keys(c.en);
 
 describe("the catalogs", () => {
-  it("there are eleven, each with a prefix of its own, and together they hold at least the floor's keys", () => {
+  it("there are twelve, each with a prefix of its own, and together they hold at least the floor's keys", () => {
     expect(CATALOGS.length).toBeGreaterThanOrEqual(CATALOG_FLOOR);
     const prefixes = CATALOGS.map((c) => c.prefix);
     expect(new Set(prefixes).size).toBe(prefixes.length);
@@ -85,9 +103,52 @@ describe("the catalogs", () => {
     expect(dict("es").tc_clockIn).toBe("Marcar Entrada");
     expect(dict("en").sh_language).toBe("Language");
     expect(dict("es").sh_language).toBe("Idioma");
-    expect(dict("en").sh_spanishCovers).toMatch(/^Spanish covers the crew's side today/);
-    expect(dict("es").sh_spanishCovers).toMatch(/^El español cubre el lado de la cuadrilla por ahora/);
+    // The honesty line (cn-v1139): the crew's side and the office's MAP, named door by door — the dock, the + menu,
+    // search, the account menu, the Settings sections, each page's title — never "every menu" (a page's own ⋯ menu
+    // and tab strip stay English with its contents); the office pages' contents stay English.
+    expect(dict("en").sh_spanishCovers).toMatch(/^Spanish covers the crew's side and the office's map today/);
+    expect(dict("en").sh_spanishCovers).toContain("the dock, the + menu, search, the account menu, the Settings sections and each page's title");
+    expect(dict("en").sh_spanishCovers).not.toContain("every menu");
+    expect(dict("en").sh_spanishCovers).toMatch(/The office pages' contents stay in English for now\.$/);
+    expect(dict("es").sh_spanishCovers).toMatch(/^El español cubre hoy el lado de la cuadrilla y el mapa de la oficina/);
+    expect(dict("es").sh_spanishCovers).toContain("la barra, el menú +, la búsqueda, el menú de la cuenta, las secciones de Ajustes y el título de cada página");
+    expect(dict("es").sh_spanishCovers).not.toContain("cada menú");
+    expect(dict("es").sh_spanishCovers).toMatch(/siguen en inglés por ahora\.$/);
     expect(dict("en")).not.toHaveProperty("s_language");
+  });
+
+  it("the office's map is in (cn-v1139): the nav catalog, the dock's office rows, the help rows", () => {
+    expect(CATALOGS.some((c) => c.prefix === "nv_")).toBe(true);
+    expect(dict("es")["sh_dock_ma-payroll"]).toBe("Nómina");
+    expect(dict("es").sh_help_startHere).toBe("Empieza Aquí");
+    expect(dict("en").nv_page_leads).toBe("Leads");
+    expect(dict("es").nv_page_leads).toBe("Prospectos");
+  });
+
+  it("every clickable or title key family is Title Case in both languages — every word, De / Y / Del included", () => {
+    const offenders: string[] = [];
+    let judged = 0;
+    for (const c of CATALOGS) {
+      for (const k of keysOf(c)) {
+        const both = TITLE_CASE_FAMILIES.some((p) => k.startsWith(p));
+        const esOnly = TITLE_CASE_ES_ONLY.some((p) => k.startsWith(p));
+        if (!both && !esOnly) continue;
+        for (const lang of both ? (["en", "es"] as const) : (["es"] as const)) {
+          const text = c[lang][k];
+          if (/[.]$/.test(text)) continue; // a sentence beside the door, not its words
+          judged++;
+          if (!titleCase(text)) offenders.push(`${lang}:${k} "${text}"`);
+        }
+      }
+    }
+    expect(judged).toBeGreaterThanOrEqual(200);
+    expect(offenders).toEqual([]);
+    // The rule itself: an article or a preposition is a word and starts with a capital.
+    expect(titleCase("Lista De Precios")).toBe(true);
+    expect(titleCase("Cuentas Y Órdenes")).toBe(true);
+    expect(titleCase("Finish Setting Up · {n} Left")).toBe(true);
+    expect(titleCase("Lista de Precios")).toBe(false);
+    expect(titleCase("Cuentas y Órdenes")).toBe(false);
   });
 });
 

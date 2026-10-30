@@ -5,6 +5,8 @@ import Link from "next/link";
 import { TrendingUp, Receipt, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
@@ -39,6 +41,7 @@ export default async function AnalyticsPage({
   } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   if (!me || !isStaffRole(me.role)) redirect("/planner");
+  const t = translator(await currentLangFor(user?.id));
 
   // The ORG's clock, not the server's UTC: month buckets, the 12-month fetch window,
   // and the overdue rule all derive from the org timezone (the /payments-page + billing-
@@ -200,7 +203,7 @@ export default async function AnalyticsPage({
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="Analytics" description="How the business is actually doing — money in, money owed, win rate, job profit.">
+      <PageHeader title={t("nv_page_analytics")} description={t("nv_desc_analytics")}>
         <Link
           href="/analytics/accountant"
           className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"

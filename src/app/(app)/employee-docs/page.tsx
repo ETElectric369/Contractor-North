@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { EmployeeDocsManager } from "./employee-docs-manager";
 
 export const dynamic = "force-dynamic";
@@ -34,12 +36,12 @@ export default async function EmployeeDocsPage() {
     signedUrl: (d.file_url && urls.get(d.file_url)) || null,
   }));
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div>
-      <PageHeader
-        title="Employee documents"
-        description="Driver's licenses, I-9, W-2, and certifications — stored securely (staff only)."
-      />
+      <PageHeader title={t("nv_page_employeeDocs")} description={t("nv_desc_employeeDocs")} />
       <EmployeeDocsManager orgId={me.org_id} employees={employees ?? []} docs={docs as any} />
     </div>
   );

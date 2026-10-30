@@ -1,6 +1,6 @@
 "use server";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { dbError } from "@/lib/db-error";
+import { heldSealOk, sealHeld } from "@/lib/held-seal";
 import { reportError } from "@/lib/observe";
 import { HELD_CRUMB, withoutHeldCrumb } from "@/lib/held-crumb";
 
@@ -172,23 +172,18 @@ async function resolveTechJobToday(
  *
  * SEALED, because the notes are a column a tech can type into and the take-back writes the job on
  * the service client: an unsealed line would let a typed note put any job in the company on hold.
- * The seal is an HMAC of THIS punch's id and the line's own JSON, keyed with the service key, so a
- * line cannot be made by hand or copied from another punch. No key, no line, no restore: today's
+ * The seal is an HMAC of THIS punch's id and the line's own JSON, keyed with the seal's own key
+ * (lib/held-seal: HELD_SEAL_SECRET, else the service key; a seal is checked against the current
+ * key, the previous one and the service key, so a key rotation never strands a line), so a line
+ * cannot be made by hand or copied from another punch. No key, no line, no restore: today's
  * behaviour, never a guess.
  */
 type HeldBefore = { j: string; r: string | null; d: string | null; b: string | null };
 
-function heldSeal(entryId: string, json: string): string | null {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) return null;
-  return createHmac("sha256", key).update(`${entryId}|${json}`).digest("hex").slice(0, 16);
-}
-
 /** The sealed line, read back: null unless it is whole, sealed for THIS punch, and shaped exactly as it is written. */
 function heldBefore(notes: string | null | undefined, entryId: string): HeldBefore | null {
   const m = HELD_CRUMB.exec(notes ?? "");
-  const want = m ? heldSeal(entryId, m[1]) : null;
-  if (!m || !want || m[2].length !== want.length || !timingSafeEqual(Buffer.from(m[2]), Buffer.from(want))) return null;
+  if (!m || !heldSealOk(entryId, m[1], m[2])) return null;
   try {
     const v = JSON.parse(m[1]) as Partial<HeldBefore>;
     const id = (x: unknown) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x);
@@ -217,9 +212,9 @@ async function heldJobBefore(supabase: Pick<SupabaseClient, "from">, jobId: stri
 /** Write the sealed line onto the punch the clock-in just made (its own, still open, still without a note). */
 async function noteHeldBefore(supabase: Pick<SupabaseClient, "from">, userId: string, entryId: string, was: HeldBefore): Promise<void> {
   const json = JSON.stringify({ j: was.j, r: was.r, d: was.d, b: was.b });
-  const seal = heldSeal(entryId, json);
+  const seal = sealHeld(entryId, json);
   if (!seal) {
-    reportError("timeclock.clockIn.heldNote", new Error("no service key to seal the line with"), { entryId });
+    reportError("timeclock.clockIn.heldNote", new Error("no key to seal the line with (HELD_SEAL_SECRET or the service key)"), { entryId });
     return;
   }
   const { data, error } = await supabase

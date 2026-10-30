@@ -4,6 +4,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { featureOn } from "@/lib/features";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { ComplianceManager } from "./compliance-manager";
 import { EXCLUDED_FROM_COMPLIANCE } from "@/lib/compliance-types";
 
@@ -42,12 +44,12 @@ export default async function CompliancePage() {
     signedUrl: ((i.file_url && urls.get(i.file_url)) || null) as string | null,
   }));
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div>
-      <PageHeader
-        title="Compliance"
-        description="Licenses, certifications & permits, with their renewal dates. (Policies live in Insurance; reviews in Audits.)"
-      />
+      <PageHeader title={t("nv_page_compliance")} description={t("nv_desc_compliance")} />
       <ComplianceManager items={items as any} orgId={me?.org_id ?? ""} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );

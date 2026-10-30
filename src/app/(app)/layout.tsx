@@ -1,4 +1,4 @@
-import { PROFILE_SAFE_COLS } from "@/lib/profile-columns";
+import { signedInProfile } from "@/lib/current-lang";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import Link from "next/link";
@@ -81,11 +81,9 @@ export default async function AppLayout({
   const user = check.user;
   if (!user) redirect("/login");
 
-  const { data: profile, error: profileErr } = await supabase
-    .from("profiles")
-    .select(PROFILE_SAFE_COLS)
-    .eq("id", user.id)
-    .single();
+  // ONE PROFILE READ PER REQUEST (cn-v1139, lib/current-lang): the same cached read an office page
+  // asks through currentLang() for its title's language, so the page costs no second query.
+  const { data: profile, error: profileErr } = await signedInProfile(user.id);
   // A profile read that FAILED is not a profile that is missing: the onboarding wall is for a
   // person with no company, never for a blip (skeptic #15, 2026-10-16). PGRST116 = no row.
   if (profileErr && profileErr.code !== "PGRST116") {

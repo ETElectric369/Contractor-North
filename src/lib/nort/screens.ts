@@ -1,4 +1,6 @@
 import { DOCK } from "@/lib/dock";
+import { dockTileLabel } from "@/lib/dock-words";
+import { dict, type Lang } from "@/lib/i18n";
 
 /**
  * THE SCREENS NORT CAN DRIVE TO, AND THE SPOTS HE CAN POINT AT (field feedback 10-13, item 6).
@@ -11,12 +13,20 @@ import { DOCK } from "@/lib/dock";
  *
  * It names; it never gates. A path a role cannot see redirects where the page says (a tech sent
  * to /schedule lands on My Day), and the data behind every screen is RLS's to show or hide.
+ *
+ * THE SPANISH NAMES (cn-v1139): a Spanish reader's dock says Ventas, Dinero, Presupuestos, so each
+ * screen names the CATALOG KEY its Spanish is read from (`word`) — the dock row's own sh_dock_<id>,
+ * a page title's nv_page_<slug>, or, for a record's own sheet, the word the app shows that record
+ * by. Never a Spanish string typed here: the dock, the page title and Nort read ONE key, so "abre
+ * Ventas" can only ever mean the door the dock calls Ventas (lib/nort/screens-es.test.ts).
  */
 export type ScreenSpot = { name: string; say: string };
 
 export type Screen = {
   /** The screen's name, as the dock or the page says it. */
   name: string;
+  /** The catalog key (lib/i18n dict) the screen's name in another language is read from. */
+  word: string;
   /** The path, with its query contract when one exists (angle brackets are placeholders). */
   path: string;
   /** One clause on the query the page reads, or what the page is. */
@@ -30,6 +40,7 @@ export type Screen = {
 export const SCREENS: Screen[] = [
   {
     name: "My Day",
+    word: "sh_dock_t-day",
     path: "/planner",
     say: "a tech's week is ?view=week&week=1 (next week; the office's week is Schedule)",
     spots: [
@@ -41,6 +52,7 @@ export const SCREENS: Screen[] = [
   },
   {
     name: "Schedule",
+    word: "sh_dock_s-week",
     path: "/schedule",
     say: "?view=week|day&date=YYYY-MM-DD (next week = today + 7 days, view=week)",
     staffOnly: true,
@@ -49,11 +61,14 @@ export const SCREENS: Screen[] = [
       { name: "schedule-calendar", say: "the calendar" },
     ],
   },
-  { name: "Clock", path: "/timeclock", say: "a tech's clock tile (the two-button clock and Switch Job)" },
-  { name: "Reminders", path: "/tasks", say: "the full Reminders list (Overdue, Today, This Week, Later, Someday); everyone sees their own" },
-  { name: "Jobs", path: "/jobs", say: "?status=<status>", spots: [{ name: "new-job", say: "New Job (office)" }] },
+  { name: "Clock", word: "sh_dock_clock", path: "/timeclock", say: "a tech's clock tile (the two-button clock and Switch Job)" },
+  // Reminders has no dock row (it rides Today's owns): its word is Search Or Ask's row for it.
+  { name: "Reminders", word: "sh_reminders", path: "/tasks", say: "the full Reminders list (Overdue, Today, This Week, Later, Someday); everyone sees their own" },
+  { name: "Jobs", word: "sh_dock_jobs", path: "/jobs", say: "?status=<status>", spots: [{ name: "new-job", say: "New Job (office)" }] },
   {
     name: "A job",
+    // One record's sheet: the word Search Or Ask files a job under (Job / Trabajo).
+    word: "sh_kind_job",
     path: "/jobs/<id>",
     say: "?tab=job|tasks|photos|time|materials|permits|panel|appointments|wos opens that tab; costs|quotes|invoices|change-orders are the office's tabs (a tech has none)",
     spots: [
@@ -63,9 +78,10 @@ export const SCREENS: Screen[] = [
       { name: "job-manage", say: "Manage ⋯ (office: Edit, Finish, Delete)" },
     ],
   },
-  { name: "Estimates", path: "/quotes", say: "?status=; the builder is /quotes/new; one estimate is /quotes/<id>", staffOnly: true, spots: [{ name: "new-estimate", say: "New Estimate" }] },
+  { name: "Estimates", word: "sh_dock_sl-quotes", path: "/quotes", say: "?status=; the builder is /quotes/new; one estimate is /quotes/<id>", staffOnly: true, spots: [{ name: "new-estimate", say: "New Estimate" }] },
   {
     name: "Invoices",
+    word: "sh_dock_m-inv",
     path: "/billing",
     say: "one invoice is /billing/<id>",
     staffOnly: true,
@@ -78,6 +94,8 @@ export const SCREENS: Screen[] = [
   },
   {
     name: "Bills",
+    // The page's title (the dock row reads "Bills & POs", or "Bills" with Purchase Orders off).
+    word: "nv_page_bills",
     path: "/bills",
     say: "?q=<search>",
     staffOnly: true,
@@ -88,11 +106,13 @@ export const SCREENS: Screen[] = [
       { name: "all-bills", say: "All Bills" },
     ],
   },
-  { name: "Customers", path: "/crm", say: "?q=<search>; one customer is /crm/<id>", staffOnly: true },
-  { name: "Leads", path: "/leads", staffOnly: true },
-  { name: "Inspections", path: "/inspections", staffOnly: true },
+  { name: "Customers", word: "sh_dock_sl-customers", path: "/crm", say: "?q=<search>; one customer is /crm/<id>", staffOnly: true },
+  { name: "Leads", word: "sh_dock_sl-leads", path: "/leads", staffOnly: true },
+  { name: "Inspections", word: "sh_dock_sl-inspections", path: "/inspections", staffOnly: true },
   {
     name: "An inspection (the visit sheet)",
+    // One visit's sheet: the visit-type badge's word (Inspection / Inspección).
+    word: "jb_apptInspection",
     path: "/appointments/<id>",
     say: "?task=<task id> opens one task",
     spots: [
@@ -108,6 +128,7 @@ export const SCREENS: Screen[] = [
   },
   {
     name: "Settings",
+    word: "nv_page_settings",
     path: "/settings",
     say: "?tab=<cluster> opens a cluster",
     spots: [
@@ -116,12 +137,21 @@ export const SCREENS: Screen[] = [
       { name: "settings-<cluster>", say: "a cluster's link on a computer (company, playbook, features, money, docs, getpaid, crew, customers, website, content, integrations); on a phone the links are hidden, so use ?tab= instead" },
     ],
   },
-  { name: "Timecards", path: "/timecards", staffOnly: true },
-  { name: "Price List", path: "/price-list", staffOnly: true },
-  { name: "Analytics", path: "/analytics", staffOnly: true },
-  { name: "Reconcile", path: "/reconcile", staffOnly: true },
-  { name: "Team", path: "/team", staffOnly: true },
+  { name: "Timecards", word: "sh_dock_ck-cards", path: "/timecards", staffOnly: true },
+  { name: "Price List", word: "sh_dock_m-price", path: "/price-list", staffOnly: true },
+  { name: "Analytics", word: "sh_dock_ma-analytics", path: "/analytics", staffOnly: true },
+  { name: "Reconcile", word: "sh_dock_m-recon", path: "/reconcile", staffOnly: true },
+  { name: "Team", word: "sh_dock_o-team", path: "/team", staffOnly: true },
 ];
+
+/**
+ * THE TILES WHOSE SPANISH IS NOT A SCREEN'S OWN (cn-v1139). A Spanish reader taps Ventas, Dinero
+ * and Hoy, and no screen above is called that (Sales lands on Leads, Money on Invoices, Today on My
+ * Day); Agenda is both the tile and its screen, named here so the tile and the page read as one
+ * door. Under es the prompt block carries one line for them, built from lib/dock (the tile's label
+ * and where it lands) and the dock's own words (dockTileLabel), in this order.
+ */
+export const TILE_WORD_KEYS = ["sales", "invoices", "schedule", "today"] as const;
 
 /** The shell's own spots, on every screen. */
 export const SHELL_SPOTS: ScreenSpot[] = [
@@ -151,18 +181,32 @@ const spotsLine = (spots: ScreenSpot[] | undefined) => (spots?.length ? ` — sp
 
 /**
  * THE PROMPT BLOCK — per-org-stable text for the CACHED system block, built from the registry so
- * the words and the anchors are one thing.
+ * the words and the anchors are one thing. Per person-stable too since cn-v1139: under es each
+ * `- name path` line keeps its place and gains the screen's Spanish name after the path, "(es:
+ * Presupuestos)", and one line names the tiles (TILE_WORD_KEYS) — the words this person's dock and
+ * page titles show, read from the same catalog keys. Under en the block is byte for byte what it was.
  */
-export function screenPromptBlock(isStaff = true): string {
+export function screenPromptBlock(isStaff = true, lang: Lang = "en"): string {
+  const other = lang !== "en";
+  const inLang = (s: Screen) => (other ? ` (${lang}: ${dict(lang)[s.word] ?? s.name})` : "");
   // A tech's list is a tech's app: the office's screens are not named, and a drive there is refused.
   const lines = SCREENS.filter((s) => isStaff || !s.staffOnly).map(
-    (s) => `- ${s.name} ${s.path}${s.staffOnly ? " (office only)" : ""}${s.say ? ` — ${s.say}` : ""}${spotsLine(s.spots)}`,
+    (s) => `- ${s.name} ${s.path}${inLang(s)}${s.staffOnly ? " (office only)" : ""}${s.say ? ` — ${s.say}` : ""}${spotsLine(s.spots)}`,
   );
+  // The tiles, in the person's words: the same role rule, so a tech's block names no office tile.
+  const tiles = other
+    ? TILE_WORD_KEYS.map((k) => DOCK.find((s) => s.key === k)!)
+        .filter((s) => isStaff || !s.staffOnly)
+        .map((s) => `${dockTileLabel(s, lang)} = ${s.label} → ${s.href}`)
+    : [];
   return [
     "DRIVING THE SCREEN (show_screen) — you can TAKE the person to a screen and POINT at a spot on it, hands-free; you still never press a button for them. Call show_screen with `path` (a path below, with its query), and/or `anchor` (a spot's name: it scrolls there and rings it for a few seconds), `menu: \"account\"` to open the avatar menu, `box: \"bar\"` to park your own box as a slim bar so the screen is theirs while you keep talking (`box: \"open\"` brings it back), and `label` (3–6 words: what you're showing). It only moves and points — it saves nothing, and it is not show_card (the card is for reading a record on the glass). Use it when they say show me / take me to / where is / open the… / pull up the schedule, and whenever you explain where a button is: go there and ring it instead of describing the route. By voice, park your box (box: \"bar\") in the same call whenever you send them to a screen. Then say ONE short line about what they're looking at — once; never a second 'there you go' after the first, and no narration of your lookups in between. Two moves are two calls, in order (the job, then its Costs tab). A job's permits, inspections, panel and work orders are TABS on the job (`/jobs/<id>?tab=permits`), never screens of their own — there is no /permits path, so a permit's date is reached through its job. Dates in a path come from Today. A record's id in a path is its real id from a tool result, never a job number. The result names what could not be used (not_used) — then say where it is in words instead of claiming you showed it; a spot that is not on the screen right now (an empty Needs You, a tab a tech has not got) cannot be rung.",
     "TYPING FOR THEM (fill_screen) — on a screen with boxes, the latest app context lists BOXES ON THE SCREEN RIGHT NOW by door name ([task-note-<id>] Note on 'Panel swap'; [need-<key>] a question; [insp-notes] the visit's notes; [task-measure-<id>] / [insp-measures] add a measurement with fields label, value, unit). Call fill_screen with that door and the value AS THEY SAID IT — a number only if they gave one, a pick only from the listed choices — and the page saves it like a keystroke while they watch it land. One line about what you put where, then listen; the next turn's context says what landed or why a box refused it. If the box they mean is not in the list, take them to its screen first (show_screen; the visit sheet is /appointments/<id>) and type on the next turn. Never fill_screen on money, a customer's paper, or anything you'd confirm first — those stay a yes-or-no card.",
-    "SCREENS AND THEIR SPOTS (anchor names in [brackets]; <…> is a placeholder you fill):",
+    other
+      ? `SCREENS AND THEIR SPOTS (anchor names in [brackets]; <…> is a placeholder you fill; "(${lang}: …)" is the screen's name in this person's language — the word their dock and page titles show, so say that word and drive by the path):`
+      : "SCREENS AND THEIR SPOTS (anchor names in [brackets]; <…> is a placeholder you fill):",
     ...lines,
+    ...(tiles.length ? [`- The dock's tiles in this person's language: ${tiles.join(" · ")}`] : []),
     `- On every screen: ${SHELL_SPOTS.map((sp) => `[${sp.name}] ${sp.say}`).join("; ")}.`,
   ].join("\n");
 }

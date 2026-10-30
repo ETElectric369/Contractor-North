@@ -40,7 +40,8 @@ import { DailyReportDebrief } from "./daily-report-debrief";
 const ROOT = process.cwd();
 const src = (f: string) => readFileSync(join(ROOT, f), "utf8");
 const TZ = "America/Los_Angeles";
-const inLang = (lang: Lang, el: ReactElement) => renderToStaticMarkup(createElement(LangProvider, { lang, children: el }));
+// Children go in createElement's third argument (react/no-children-prop); the props cast the way row-more-sheet.test.ts does.
+const inLang = (lang: Lang, el: ReactElement) => renderToStaticMarkup(createElement(LangProvider, { lang } as Parameters<typeof LangProvider>[0], el));
 const en = dict("en");
 const es = dict("es");
 
@@ -212,7 +213,7 @@ describe("the start-time picker", () => {
 
 describe("New Job, from the clock", () => {
   it("the trigger reads in the person's language; a caller's own label still wins", () => {
-    expect(inLang("es", createElement(NewJobInline, { onCreated: () => {} }))).toContain("Trabajo Nuevo");
+    expect(inLang("es", createElement(NewJobInline, { onCreated: () => {} }))).toContain("Nuevo Trabajo");
     expect(inLang("en", createElement(NewJobInline, { onCreated: () => {} }))).toContain("New Job");
     expect(inLang("es", createElement(NewJobInline, { onCreated: () => {}, label: "Open One Here" }))).toContain("Open One Here");
   });

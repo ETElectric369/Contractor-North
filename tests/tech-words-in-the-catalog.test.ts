@@ -32,8 +32,8 @@ import { CATALOGS } from "@/lib/i18n";
  */
 const ROOT = process.cwd();
 
-/** The screens the catalogs name at cn-v1138 (90 when the floor was set); raise it as screens move over. */
-export const FILES_FLOOR = 90;
+/** The screens the catalogs name at cn-v1139 (93 when the floor was set: the nav catalog's three; 90 at cn-v1138); raise it as screens move over. */
+export const FILES_FLOOR = 93;
 
 /** English that stands on a named screen on purpose: the exact words, the file, and why. */
 const ALLOW: { file: string; text: string; why: string }[] = [
@@ -296,7 +296,7 @@ describe("every named screen's words come through the catalog", () => {
   const leaks = files.flatMap((f) => collectLeaks(readFileSync(join(ROOT, f), "utf8"), f).map((l) => ({ ...l, file: f })));
 
   it("the catalogs loaded and the scan read every screen they name", () => {
-    expect(CATALOGS.length).toBe(11);
+    expect(CATALOGS.length).toBe(12);
     expect(files.length).toBeGreaterThanOrEqual(FILES_FLOOR);
   });
 

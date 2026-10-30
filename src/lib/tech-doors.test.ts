@@ -153,7 +153,8 @@ describe("the job's side doors", () => {
 
 describe("pure rules", () => {
   it("the + gives a tech no typed verb: his + is Snap Or Note (W1-11)", () => {
-    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.label)).toEqual([]);
+    // The rows carry their words as keys since cn-v1139 (nv_add_, lib/words/nav.ts).
+    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.key)).toEqual([]);
   });
 
   it("a tech's appointment row only opens", () => {

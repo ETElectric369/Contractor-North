@@ -5,6 +5,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { viewerSeesOwnerMoney } from "@/lib/bank-viewer";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
@@ -109,6 +111,7 @@ export default async function ReconcilePage() {
   const { data: me } = await supabase.from("profiles").select("org_id, role").eq("id", user?.id ?? "").maybeSingle();
   if (!me || !isStaffRole(me.role)) redirect("/timeclock");
   const orgId = String((me as { org_id?: string }).org_id ?? "");
+  const t = translator(await currentLangFor(user?.id));
 
   // ── WHO MAY BRING A BANK DOWNLOAD IN, ASKED OF THE ONE RULE ──────────────────────────────────
   // A bank download is the owner's draw and personal spending line by line, so the drop door below
@@ -214,7 +217,7 @@ export default async function ReconcilePage() {
 
   return (
     <div>
-      <PageHeader title="Reconcile" description="Two records that should agree, and do not." />
+      <PageHeader title={t("nv_page_reconcile")} description={t("nv_desc_reconcile")} />
 
       {/* ── THE ONE NUMBER ───────────────────────────────────────────────────────────────────────
           Erik leads with a figure, not a tally: "$5,600 of what you bought is not on your suppliers'

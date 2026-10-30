@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { getOrgSettings } from "@/lib/org-settings";
 import { payPeriodBounds, payPeriodForOffset, payPeriodOffsetOf, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
@@ -111,6 +113,7 @@ export default async function PayrollPage({
   // A tech must never see another person's pay. This redirect is the boundary for the WHOLE
   // page — nothing below it serializes one man's figures into another man's props.
   if (!me || !isStaffRole(me.role)) redirect("/timeclock");
+  const t = translator(await currentLangFor(user?.id));
 
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const settings = getOrgSettings((org as any)?.settings);
@@ -220,7 +223,7 @@ export default async function PayrollPage({
     const said = uniqueProblems.join(" and ");
     return (
       <div className="mx-auto max-w-4xl">
-        <PageHeader title="Pay" description="What you owe each person, and what you have paid them." />
+        <PageHeader title={t("nv_page_pay")} description={t("nv_desc_pay")} />
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50">
           <div className="px-4 py-3 text-sm text-red-800">
             <div className="font-semibold text-red-900">No amounts are shown right now.</div>
@@ -446,7 +449,7 @@ export default async function PayrollPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader title="Pay" description="What you owe each person, and what you have paid them." />
+      <PageHeader title={t("nv_page_pay")} description={t("nv_desc_pay")} />
       {/* The auto-closed guard, kept word for word (audit v921) apart from the button it used to
           name: a 0193 auto-close closes a forgotten shift at clock_out = clock_in when the next
           punch lands, so the row IS closed, passes every filter, and adds ZERO hours. The

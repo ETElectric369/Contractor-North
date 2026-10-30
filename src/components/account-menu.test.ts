@@ -165,3 +165,35 @@ describe("Bug Watch · N", () => {
     expect(links(render(ALL_ON, "owner", { platformAdmin: true, bugCount: new Promise(() => {}) }))).toContain("/bugs:Bug Watch");
   });
 });
+
+/**
+ * THE ROLE UNDER THE NAME (cn-v1139, the map in Spanish): profiles.role reads through lib/settings-words
+ * roleLabel (nv_role_<role>), so a Spanish speaker reads Dueño / Administrador / Oficina / Técnico. In
+ * English the catalog's word is the one the `capitalize` class drew from the raw role before (Owner,
+ * Admin, Office, Tech), so the screen is unchanged. A role the catalog does not name falls through as
+ * its raw value, as before, and no profile at all reads "user".
+ */
+describe("the role under the name", () => {
+  const roleLine = (html: string) => /text-xs capitalize text-slate-400">([^<]*)</.exec(html)?.[1];
+
+  it("Spanish: Dueño, Administrador, Oficina, Técnico", () => {
+    expect(roleLine(render(ALL_ON, "owner", { lang: "es" }))).toBe("Dueño");
+    expect(roleLine(render(ALL_ON, "admin", { lang: "es" }))).toBe("Administrador");
+    expect(roleLine(render(ALL_ON, "office", { lang: "es" }))).toBe("Oficina");
+    expect(roleLine(render(ALL_ON, "tech", { lang: "es" }))).toBe("Técnico");
+  });
+
+  it("English: Owner, Admin, Office, Tech — the word the screen showed before", () => {
+    expect(roleLine(render(ALL_ON, "owner"))).toBe("Owner");
+    expect(roleLine(render(ALL_ON, "admin"))).toBe("Admin");
+    expect(roleLine(render(ALL_ON, "office"))).toBe("Office");
+    expect(roleLine(render(ALL_ON, "tech"))).toBe("Tech");
+    expect(roleLine(render(ALL_ON, "tech", { lang: "en" }))).toBe(roleLine(render(ALL_ON, "tech")));
+  });
+
+  it("a role the catalog does not name falls through raw in both languages; no profile reads user", () => {
+    expect(roleLine(render(ALL_ON, "viewer"))).toBe("viewer");
+    expect(roleLine(render(ALL_ON, "viewer", { lang: "es" }))).toBe("viewer");
+    expect(roleLine(renderToStaticMarkup(createElement(AccountMenu, { profile: null as never, features: ALL_ON })))).toBe("user");
+  });
+});

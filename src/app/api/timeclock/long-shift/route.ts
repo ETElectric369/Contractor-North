@@ -180,7 +180,7 @@ export async function GET(request: Request) {
         if (relErr) reportError("cron-long-shift", relErr, { orgId: org.id, entryId: id, release: column });
       };
 
-      // The office reads English today (sh_spanishCovers: office screens stay in English for now);
+      // The office reads English today (sh_spanishCovers: the office pages' contents stay in English for now);
       // its words come from the same catalog so this file keeps no literal, and the day the office
       // reads Spanish this one line becomes the reader's language.
       const office_t = translator("en");

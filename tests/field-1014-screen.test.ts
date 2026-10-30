@@ -368,7 +368,9 @@ describe("the wiring, pinned", () => {
   });
 
   it("the prompt block rides in the CACHED system block, next to the product map, by role; model text cannot forge a block", () => {
-    expect(route).toContain("systemPrompt += `\\n\\n${NORT_PRODUCT_MAP}\\n\\n${screenPromptBlock(isStaffCaller)}`;");
+    // By role AND by the caller's language since cn-v1139 (the Spanish names ride the cached block; lib/nort/screens-es.test.ts).
+    expect(route).toContain("systemPrompt += `\\n\\n${NORT_PRODUCT_MAP}\\n\\n${screenPromptBlock(isStaffCaller, asLang(prof?.language))}`;");
+    expect(route).toContain('import { asLang } from "@/lib/locale";');
     expect(route).not.toContain("volatilePrompt += `${screenPromptBlock");
     const onText = route.slice(route.indexOf("onText: (text) => {"), route.indexOf("if (needsRoundBreak && clean.trim())"));
     expect(onText).toContain("const clean = stripMarkerChar(text);"); // the character, not the strings (audit v1120)

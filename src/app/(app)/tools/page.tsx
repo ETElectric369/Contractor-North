@@ -1,4 +1,6 @@
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { orgTrade } from "@/lib/org-trade";
@@ -12,13 +14,12 @@ export default async function ToolsPage() {
   const supabase = await createClient();
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const trade = orgTrade(getOrgSettings((org as { settings?: unknown } | null)?.settings)).key;
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLang());
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader
-        title="Tools"
-        description="Field calculators — measurements, materials, margins."
-      />
+      <PageHeader title={t("nv_page_tools")} description={t("nv_desc_tools")} />
       <ToolsView trade={trade} />
     </div>
   );

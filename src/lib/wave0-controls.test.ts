@@ -78,8 +78,10 @@ describe("Title Case on the clickables Wave 0 re-wrapped", () => {
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(inspector).toContain('<Button type="button">Start The Estimate</Button>');
     expect(inspector).toContain('label="Drop Photos, PDFs Or 3D Files"');
-    // The cap is gone (W1-09): its rows are built once, for Search Or Ask and for Help.
-    expect(src("src/lib/onboarding/help-rows.ts")).toContain('label: "Take The Setup Again"');
+    // The cap is gone (W1-09): its rows are built once, for Search Or Ask and for Help; their words are
+    // the shell catalog's since cn-v1139 (sh_help_again), English byte for byte.
+    expect(src("src/lib/onboarding/help-rows.ts")).toContain('label: t("sh_help_again")');
+    expect(src("src/lib/words/shell.ts")).toContain('sh_help_again: "Take The Setup Again"');
     const appt = src("src/app/(app)/appointments/[id]/page.tsx");
     expect(appt).toContain('fallbackLabel="Back To Schedule"');
     expect(appt).toContain('fallbackLabel="Back To My Day"');

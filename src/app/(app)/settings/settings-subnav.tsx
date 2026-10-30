@@ -20,6 +20,9 @@ import {
 } from "lucide-react";
 import type { DockNode, DockSection } from "@/lib/dock";
 import { SectionSheet } from "@/components/section-sheet";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
+import { settingsClusterLabel } from "@/lib/settings-words";
 
 /** One settings cluster. Only serializable data (id/label) crosses the server→client
  *  boundary — the icon is resolved HERE by id (see CLUSTER_ICONS). Passing the lucide
@@ -66,6 +69,12 @@ const CLUSTER_ICONS: Record<string, LucideIcon> = {
  *     in a ~900px window is what left the content at phone width.
  *
  * Route-driven (usePathname/useSearchParams), so it stays lit through reloads and deep links.
+ *
+ * THE WORDS IN THE PERSON'S LANGUAGE (cn-v1139): the group is "Settings", keyed sh_dock_settings so
+ * the SectionSheet's dockTileLabel finds it like a tile's; each cluster's name comes through
+ * lib/settings-words by its id (one explicit map, shared with settings/page.tsx), never by the
+ * accident of a cluster id matching a dock row's key. A cluster the map does not name keeps the
+ * label the server handed over.
  */
 export function SettingsSubnav({
   clusters,
@@ -76,6 +85,8 @@ export function SettingsSubnav({
 }) {
   const pathname = usePathname();
   const search = useSearchParams();
+  const t = translator(useLang());
+  const name = (c: SettingsCluster) => settingsClusterLabel(c.id, t) ?? c.label;
   // Prefer the live ?tab= (instant on client nav); fall back to the server-resolved default.
   // A ?tab= that names no cluster — a retired id off an old bookmark, which the server aliases
   // for us — must NOT win, or the nav lights nothing while the panel shows something.
@@ -95,7 +106,7 @@ export function SettingsSubnav({
   };
   const items: DockNode[] = clusters.map((c) => ({
     id: c.id,
-    label: c.label,
+    label: name(c),
     icon: CLUSTER_ICONS[c.id] ?? Settings,
     href: href(c.id),
   }));
@@ -137,7 +148,7 @@ export function SettingsSubnav({
               }`}
             >
               <Icon className="relative z-10 h-4 w-4" />
-              <span className="relative z-10">{c.label}</span>
+              <span className="relative z-10">{name(c)}</span>
             </Link>
           );
         })}

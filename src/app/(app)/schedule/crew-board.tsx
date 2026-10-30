@@ -12,6 +12,8 @@ import { Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { setCrewDayAssignment, setCrewOffRange, clearCrewOffRange } from "../timeclock/crew-actions";
 import { TimeOffButton } from "./time-off-button";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 export type CrewJob = { id: string; label: string; status: string; customer: string | null; assigned: string[] };
 export type CrewAppt = { id: string; title: string; type: string; time: string; jobId: string | null; who: string | null; assigned: string | null };
@@ -77,6 +79,7 @@ export function CrewBoard({
   const columns = [...lanes, unassigned].filter((l) => l.id === "__unassigned__" ? l.jobs.length + l.appts.length > 0 : true);
 
   const router = useRouter();
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   // The decide sheet. `aimJobId` is set when it was opened by tapping a specific chip, which turns
@@ -148,9 +151,9 @@ export function CrewBoard({
             href="/schedule"
             className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900"
           >
-            <ChevronLeft className="h-4 w-4 shrink-0" /> Calendar
+            <ChevronLeft className="h-4 w-4 shrink-0" /> {t("nv_sched_calendar")}
           </Link>
-          <h1 className="text-lg font-bold tracking-tight text-slate-900">Everyone&apos;s Day</h1>
+          <h1 className="text-lg font-bold tracking-tight text-slate-900">{t("nv_sched_everyonesDay")}</h1>
         </div>
         {/* flex-wrap, and every control shrink-0: at 375px the pager plus Time Off runs about
             30px wider than the content box, and without wrapping that deficit comes out of the

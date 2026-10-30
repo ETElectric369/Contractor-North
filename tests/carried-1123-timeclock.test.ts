@@ -163,15 +163,21 @@ const jobWrites = () => state.calls.filter((c) => c.table === "jobs" && c.verb =
 const takeBack = (entry_id: string, over: Record<string, unknown> = {}) =>
   clockOut({ entry_id, lunch_minutes: 0, notes: "", gps: null, ...over });
 
-let savedKey: string | undefined;
+// The seal's own key (lib/held-seal, cn-v1139) is cleared here so the seal is keyed as it was: with
+// the service key alone. The rotation case below sets the new names itself.
+const SEAL_ENV = ["SUPABASE_SERVICE_ROLE_KEY", "HELD_SEAL_SECRET", "HELD_SEAL_SECRET_PREVIOUS"] as const;
+let savedEnv: Record<string, string | undefined> = {};
 beforeEach(() => {
-  savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  savedEnv = Object.fromEntries(SEAL_ENV.map((k) => [k, process.env[k]]));
+  for (const k of SEAL_ENV) delete process.env[k];
   process.env.SUPABASE_SERVICE_ROLE_KEY = SERVICE_KEY;
   seed();
 });
 afterEach(() => {
-  if (savedKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-  else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
+  for (const k of SEAL_ENV) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
 });
 
 // ── 15 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -294,6 +300,36 @@ describe("Taking back a punch deletes the row but leaves the job promoted and of
     expect(spies.reported.some((a) => a[0] === "timeclock.clockIn.heldNote")).toBe(true);
     const out = await takeBack(id!);
     expect(out).toMatchObject({ undone: true, warning: UNDO_PUNCH_SENTENCE });
+  });
+
+  it("a key rotation never strands a take-back (cn-v1139, lib/held-seal): a line sealed under the old key, now _PREVIOUS, is still put back; under a key nobody holds any more, the job is left alone", async () => {
+    // Sealed today: under the service key alone (HELD_SEAL_SECRET not pasted in yet).
+    const { id } = await clockIn({ job_id: SNOWBELL, job_code: null, gps: null });
+    expect(punches()[0].notes).toContain("This punch took the job off hold");
+    // The rotation lands between the clock-in and the take-back: a seal key of its own, the old key
+    // kept under _PREVIOUS, and the service key rotated away.
+    process.env.HELD_SEAL_SECRET = "a-new-held-seal-key-for-this-test";
+    process.env.HELD_SEAL_SECRET_PREVIOUS = SERVICE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "a-rotated-service-key-for-this-test";
+    const out = await takeBack(id!);
+    expect(out.undone).toBe(true);
+    expect(job(SNOWBELL)).toMatchObject({ status: "on_hold", hold_reason: "waiting on the permit.", hold_until: "2026-10-24", hold_by: OFFICE });
+    expect(out.warning).toBe(`${UNDO_PUNCH_SENTENCE} Snowbell Panel Swap is back on hold (waiting on the permit).`);
+
+    // The same line after the week is over (_PREVIOUS dropped, the service key rotated): no key
+    // honours the seal, so the line is a forged line's equal and nothing is put back.
+    seed();
+    delete process.env.HELD_SEAL_SECRET;
+    delete process.env.HELD_SEAL_SECRET_PREVIOUS;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = SERVICE_KEY;
+    const second = await clockIn({ job_id: SNOWBELL, job_code: null, gps: null });
+    process.env.HELD_SEAL_SECRET = "a-new-held-seal-key-for-this-test";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "a-rotated-service-key-for-this-test";
+    state.calls = [];
+    const later = await takeBack(second.id!);
+    expect(later).toMatchObject({ undone: true, warning: UNDO_PUNCH_SENTENCE });
+    expect(jobWrites()).toEqual([]);
+    expect(job(SNOWBELL).status).toBe("in_progress");
   });
 });
 

@@ -3,6 +3,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { featureOn } from "@/lib/features";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { SafetyManager } from "./safety-manager";
 
 export const dynamic = "force-dynamic";
@@ -28,9 +30,12 @@ export default async function SafetyPage() {
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
   ]);
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div>
-      <PageHeader title="Safety / OSHA" description="Log incidents (OSHA recordables) and toolbox-talk safety meetings." />
+      <PageHeader title={t("nv_page_safety")} description={t("nv_desc_safety")} />
       <SafetyManager employees={employees ?? []} jobs={jobs ?? []} records={(records ?? []) as any} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );

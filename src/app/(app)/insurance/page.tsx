@@ -4,6 +4,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { featureOn } from "@/lib/features";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { InsuranceManager } from "./insurance-manager";
 import { INSURANCE_FILTER } from "@/lib/compliance-types";
 
@@ -41,12 +43,12 @@ export default async function InsurancePage() {
     signedUrl: ((i.file_url && urls.get(i.file_url)) || null) as string | null,
   }));
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div>
-      <PageHeader
-        title="Insurance"
-        description="Policies & coverage — workers' comp, general liability, auto — with their renewal dates."
-      />
+      <PageHeader title={t("nv_page_insurance")} description={t("nv_desc_insurance")} />
       <InsuranceManager items={withDocs as any} orgId={me?.org_id ?? ""} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );

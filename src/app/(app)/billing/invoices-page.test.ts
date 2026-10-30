@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
   tables: {} as Record<string, unknown[]>,
   selects: [] as { table: string; cols: string }[],
   role: "owner" as string,
+  language: undefined as string | undefined,
   redirected: null as string | null,
 }));
 
@@ -43,7 +44,7 @@ function chain(table: string) {
 const fake = {
   auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
   from: (t: string) => {
-    if (t === "profiles") state.tables.profiles = [{ role: state.role, org_id: "org-1", active: true, organizations: { settings: { timezone: "America/Los_Angeles" } } }];
+    if (t === "profiles") state.tables.profiles = [{ role: state.role, language: state.language, org_id: "org-1", active: true, organizations: { settings: { timezone: "America/Los_Angeles" } } }];
     return chain(t);
   },
   rpc: async () => ({ data: null, error: null }),
@@ -321,5 +322,30 @@ describe("the pure roll-ups add up to the one figure", () => {
     const pipelineSrc = readFileSync(join(process.cwd(), "src/lib/billing-pipeline.ts"), "utf8");
     expect(pipelineSrc).toContain("computeArByCustomer({ invoices: unpaid })");
     expect(pipelineSrc).toContain("arBucketOf(i.daysLate)");
+  });
+});
+
+/**
+ * THE MAP IN SPANISH (cn-v1139, E1): the page reads its title and line through t(nv_page_billing /
+ * nv_desc_billing) with the signed-in person's language — lib/current-lang's cached profile read,
+ * the one the (app) layout already made. A person whose profile says es sees Facturas over the SAME
+ * page (its contents stay English for now); with no language the header is byte for byte what it was.
+ */
+describe("the header in the viewer's language", () => {
+  it("es: Facturas and its line over the same page; en: Invoices, as before", async () => {
+    const enHtml = await render();
+    expect(enHtml).toMatch(/<h1[^>]*>Invoices<\/h1>/);
+    expect(text(enHtml)).toContain("Who owes you, what's late, and what came in.");
+    state.language = "es";
+    try {
+      const esHtml = await render();
+      expect(esHtml).toMatch(/<h1[^>]*>Facturas<\/h1>/);
+      expect(esHtml).not.toMatch(/<h1[^>]*>Invoices<\/h1>/);
+      expect(text(esHtml)).toContain("Quién te debe, qué está atrasado y qué entró.");
+      // Only the map moved: the page's own words are still English.
+      expect(text(esHtml)).toContain("Owed To You $1,550.00");
+    } finally {
+      state.language = undefined;
+    }
   });
 });

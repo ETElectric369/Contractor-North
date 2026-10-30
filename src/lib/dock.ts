@@ -212,7 +212,6 @@ export const DOCK: DockSection[] = [
     // out of Office's 3rd-level bucket so it's one reach from the billing hub.
     key: "invoices",
     label: "Money",
-    short: "Money",
     icon: Receipt,
     href: "/billing",
     staffOnly: true,

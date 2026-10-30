@@ -6,7 +6,7 @@ const calls = vi.hoisted(() => ({ order: [] as string[] }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/tts", () => ({ unlockAudio: vi.fn(() => calls.order.push("unlockAudio")) }));
 
-import { commandNavItems, idleRows, kindWords, matchNavItems } from "./command-bar";
+import { commandNavItems, foldSearch, idleRows, kindWords, matchNavItems } from "./command-bar";
 import { translator } from "@/lib/i18n";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
@@ -29,7 +29,8 @@ describe("commandNavItems", () => {
     expect(hrefs(staff)).toEqual(expect.arrayContaining(["/leads", "/quotes", "/quotes/new", "/payroll", "/inventory", "/tools"]));
     expect(find(staff, "/bills")?.aliases).toEqual(expect.arrayContaining(["purchase order", "po", "vendor"]));
     expect(find(staff, "/price-list")?.aliases).toEqual(expect.arrayContaining(["kit", "kits", "pricing"]));
-    expect(find(staff, "/recurring")?.aliases).toEqual(["subscription", "repeat invoice", "auto invoice"]);
+    // The page's own words first, then the switch's, in both languages (cn-v1139).
+    expect(find(staff, "/recurring")?.aliases).toEqual(["recurrentes", "recurrente", "repetir", "subscription", "repeat invoice", "auto invoice", "suscripción", "factura repetida"]);
     expect(find(staff, "/bills")?.label).toBe("Bills & POs");
   });
 
@@ -378,6 +379,194 @@ describe("the palette in Spanish", () => {
     const rows = labelsOf(commandNavItems(false, ALL_ON, false, true, "es"));
     expect(rows).toEqual(["Elegir Un Plan", "Ajustes", "Descargar Para Tu Contador"]);
     for (const r of rows) for (const w of r.split(" ")) expect(w).toMatch(/^[A-ZÁÉÍÓÚÑ]/);
+  });
+});
+
+/**
+ * THE OFFICE'S MAP IN SPANISH (cn-v1139): every office row and its section through the dock's keys,
+ * the two hand-written subs through the same keys (sh_dock_invoices, sh_dock_sales) instead of the
+ * English literals they were, a Spanish alias on every row, and a search that folds accents.
+ */
+describe("the palette in Spanish: the office's rows (cn-v1139)", () => {
+  const byHref = (items: ReturnType<typeof commandNavItems>, href: string) => items.find((i) => i.href === href)!;
+  const es = commandNavItems(true, ALL_ON, true, false, "es");
+  const en = commandNavItems(true, ALL_ON, true, false, "en");
+
+  it("every office row reads the dock's Spanish under its tile's Spanish; the hrefs and aliases are the English list's", () => {
+    expect(hrefs(es)).toEqual(hrefs(en));
+    expect(es.map((i) => i.aliases)).toEqual(en.map((i) => i.aliases));
+    expect(byHref(es, "/schedule")).toMatchObject({ label: "Agenda", sub: "Agenda" });
+    expect(byHref(es, "/leads")).toMatchObject({ label: "Prospectos", sub: "Ventas" });
+    expect(byHref(es, "/quotes")).toMatchObject({ label: "Presupuestos", sub: "Ventas" });
+    expect(byHref(es, "/crm")).toMatchObject({ label: "Clientes", sub: "Ventas" });
+    expect(byHref(es, "/billing")).toMatchObject({ label: "Facturas", sub: "Dinero" });
+    expect(byHref(es, "/timecards")).toMatchObject({ label: "Tarjetas De Tiempo", sub: "Dinero" });
+    expect(byHref(es, "/bills")).toMatchObject({ label: "Cuentas Y Órdenes", sub: "Dinero" });
+    expect(byHref(es, "/payroll")).toMatchObject({ label: "Nómina", sub: "Dinero" });
+    expect(byHref(es, "/team")).toMatchObject({ label: "Equipo", sub: "Oficina" });
+    expect(byHref(es, "/inventory")).toMatchObject({ label: "Inventario", sub: "Oficina" });
+    expect(byHref(es, "/tools")).toMatchObject({ label: "Calculadoras Y Herramientas", sub: "Herramientas" });
+    // No English label is left on a Spanish screen.
+    expect(es.map((i) => i.label).filter((l) => en.some((e) => e.label === l))).toEqual([]);
+  });
+
+  it("the two hand-written subs come through the dock's keys: New Estimate under Ventas, Petty Cash under Dinero (English byte for byte)", () => {
+    expect(byHref(es, "/quotes/new")).toMatchObject({ label: "Nuevo Presupuesto", sub: "Ventas" });
+    expect(byHref(es, "/petty-cash")).toMatchObject({ label: "Caja Chica", sub: "Dinero" });
+    expect(byHref(en, "/quotes/new")).toMatchObject({ label: "New Estimate", sub: "Sales" });
+    expect(byHref(en, "/petty-cash")).toMatchObject({ label: "Petty Cash", sub: "Money" });
+    expect(barSrc).not.toContain('sub: "Money"');
+    expect(barSrc).not.toContain('sub: "Sales"');
+  });
+
+  it("a row wearing its whenOff words and a tile reduced to one row read their variants: Cuentas; Clientes", () => {
+    expect(byHref(commandNavItems(true, off("purchase_orders"), false, false, "es"), "/bills")).toMatchObject({ label: "Cuentas", sub: "Dinero" });
+    expect(byHref(commandNavItems(true, off("leads", "estimates"), false, false, "es"), "/crm")).toMatchObject({ label: "Clientes", sub: "Clientes" });
+  });
+
+  it("a Spanish alias lands on every row, on an English screen too, and the search folds accents both ways", () => {
+    const lands = (items: ReturnType<typeof commandNavItems>, term: string, href: string) =>
+      expect(hrefs(matchNavItems(items, term)).map((h) => h.split("?")[0]), `"${term}" should find ${href}`).toContain(href);
+    // PINNED LIKE TYPED_WORDS: every page the palette offers has its Spanish words here, and a new
+    // row has to be given its own before the table balances.
+    const SPANISH_WORDS: Record<string, readonly string[]> = {
+      "/planner": ["mi día", "hoy"],
+      "/schedule": ["agenda", "calendario"],
+      "/timeclock": ["reloj", "checar"],
+      "/leads": ["prospectos", "ventas"],
+      "/inspections": ["inspecciones", "visita"],
+      "/quotes": ["presupuestos", "cotización"],
+      "/crm": ["clientes", "contactos"],
+      "/jobs": ["trabajos", "proyectos"],
+      "/billing": ["facturas", "dinero"],
+      "/timecards": ["tarjetas de tiempo", "horas"],
+      "/bills": ["cuentas", "proveedor"],
+      "/reconcile": ["conciliar", "estado de cuenta"],
+      "/price-list": ["lista de precios", "precios"],
+      "/payroll": ["nómina", "sueldos"],
+      "/tax-report": ["impuestos", "reporte de impuestos"],
+      "/analytics": ["análisis", "reportes"],
+      "/recurring": ["recurrentes", "repetir"],
+      "/compliance": ["cumplimiento", "licencias"],
+      "/insurance": ["seguros", "pólizas"],
+      "/safety": ["seguridad", "incidente"],
+      "/audits": ["auditorías"],
+      "/team": ["equipo", "cuadrilla", "oficina"],
+      "/employee-docs": ["documentos del personal", "documentos"],
+      "/forms": ["formularios"],
+      "/resources": ["recursos", "inspectores"],
+      "/handbook": ["manual"],
+      "/inventory": ["inventario", "bodega"],
+      "/activity": ["actividad"],
+      "/audit": ["auditoría de actividad", "historial"],
+      "/tools": ["herramientas", "calculadoras"],
+      "/tasks": ["recordatorios", "tareas"],
+      "/organize": ["organizar", "papeles"],
+      "/quotes/new": ["nuevo presupuesto", "planos"],
+      "/petty-cash": ["caja chica", "efectivo"],
+    };
+    const offered = [...new Set([...en, ...commandNavItems(false, ALL_ON, true)].map((i) => i.href.split("?")[0]))].sort();
+    expect(Object.keys(SPANISH_WORDS).sort()).toEqual(offered);
+    for (const [href, terms] of Object.entries(SPANISH_WORDS)) {
+      const enItems = en.some((i) => i.href.split("?")[0] === href) ? en : commandNavItems(false, ALL_ON, true, false, "en");
+      const esItems = es.some((i) => i.href.split("?")[0] === href) ? es : commandNavItems(false, ALL_ON, true, false, "es");
+      for (const term of terms) {
+        lands(enItems, term, href);
+        lands(esItems, term, href);
+      }
+    }
+    // The accountant's door is a lapsed row (LAPSED_DOCK), found by its Spanish there.
+    lands(commandNavItems(true, ALL_ON, false, true, "en"), "contador", "/analytics/accountant");
+    lands(commandNavItems(true, ALL_ON, false, true, "es"), "ajustes", "/settings");
+    // Without the accent, and with one the word does not carry: the same page.
+    for (const [term, href] of [["nomina", "/payroll"], ["analisis", "/analytics"], ["mi dia", "/planner"], ["auditoria", "/audits"], ["Nómina", "/payroll"]] as const) {
+      lands(en, term, href);
+      lands(es, term, href);
+    }
+    expect(foldSearch("Nómina")).toBe("nomina");
+    expect(foldSearch("Mi Día")).toBe("mi dia");
+    expect(foldSearch("Cuentas Y Órdenes")).toBe("cuentas y ordenes");
+    // A switch's Spanish words leave with it: Purchase Orders off, "orden de compra" finds nothing.
+    lands(en, "orden de compra", "/bills");
+    expect(hrefs(matchNavItems(commandNavItems(true, off("purchase_orders")), "orden de compra"))).not.toContain("/bills");
+    lands(en, "suscripción", "/recurring");
+    expect(hrefs(matchNavItems(commandNavItems(true, off("recurring_billing")), "suscripcion"))).not.toContain("/recurring");
+    // A short Spanish word still never hijacks a typed name (the cn-v1128 rule holds for the new aliases).
+    expect(matchNavItems(en, "Thistlewood")).toEqual([]);
+    expect(matchNavItems(es, "Catbird Bayberry")).toEqual([]);
+  });
+
+  it("the help rows in Spanish, Title Case: Empieza Aquí, Muéstrame Cómo, Repetir La Configuración; Terminar La Configuración · Pendiente: 2", () => {
+    const labels = (rows: ReturnType<typeof idleRows>) => rows.map((r) => r.label);
+    expect(labels(idleRows({ isStaff: true, features: ALL_ON, setup: {}, onboarded: false, lang: "es" }))).toEqual([
+      "Hablar Con Nort", "Empieza Aquí", "Muéstrame Cómo", "Repetir La Configuración",
+    ]);
+    const DONE = { full_name: "Pat Lee", trade: "Electrical", city: "Truckee", service_area: "Tahoe", labor_rate: 120 };
+    const rows = idleRows({ isStaff: true, features: ALL_ON, setup: { ...DONE, service_area: null, labor_rate: null }, onboarded: true, lang: "es" });
+    expect(labels(rows)).toEqual(["Hablar Con Nort", "Terminar La Configuración · Pendiente: 2", "Muéstrame Cómo", "Repetir La Configuración"]);
+    expect(rows[1].sub).toMatch(/^Todavía falta: /);
+    expect(rows[0].sub).toBe("Dilo en voz alta");
+    expect(rows[3].sub).toBe("La configuración desde el principio. Cambia lo que le dijiste a Nort.");
+    // The rows still DO what they did: the same requests, inside the tap.
+    expect(rows.filter((r) => r.kind === "Help" && !r.keepOpen).map((r) => r.href)).toEqual(["#finish", "#tour"]);
+  });
+});
+
+/**
+ * THE PALETTE'S SPANISH, END TO END (cn-v1139, E3): what a staff seat and a tech actually see under
+ * es, section by section, and what typing a Spanish word — with or without its accent — brings up.
+ * The SPANISH_WORDS table above stays the rule for a new row (it has to be given its words there);
+ * this pins the sections' words and the search as a person meets them.
+ */
+describe("the palette's Spanish is proven end to end", () => {
+  const SECTION_WORDS_EN = ["Today", "Schedule", "Clock", "Sales", "Jobs", "Money", "Office", "You", "Tools", "Customers"];
+  const staffEs = commandNavItems(true, ALL_ON, true, false, "es");
+  const staffEn = commandNavItems(true, ALL_ON, true, false, "en");
+  const under = (items: ReturnType<typeof commandNavItems>, sub: string) => hrefs(items.filter((i) => i.sub === sub)).sort();
+
+  it("a staff seat under es: the Schedule, Sales and Money sections carry Agenda, Ventas and Dinero as their sub words, and no English section word is left", () => {
+    expect(under(staffEs, "Agenda")).toEqual(["/schedule"]);
+    expect(under(staffEs, "Ventas")).toEqual(["/crm", "/inspections", "/leads", "/quotes", "/quotes/new"]);
+    expect(under(staffEs, "Dinero")).toEqual([
+      "/analytics", "/billing", "/bills", "/payroll", "/petty-cash", "/price-list", "/reconcile", "/recurring", "/tax-report", "/timecards", "/timeclock",
+    ]);
+    // The same rows the English seat has under Schedule, Sales and Money: only the words moved.
+    expect(under(staffEs, "Agenda")).toEqual(under(staffEn, "Schedule"));
+    expect(under(staffEs, "Ventas")).toEqual(under(staffEn, "Sales"));
+    expect(under(staffEs, "Dinero")).toEqual(under(staffEn, "Money"));
+    for (const w of SECTION_WORDS_EN) expect(staffEs.some((i) => i.sub === w), `an English section word "${w}" on a Spanish palette`).toBe(false);
+    expect(staffEs.map((i) => i.label).filter((l) => staffEn.some((e) => e.label === l))).toEqual([]);
+  });
+
+  it('typing "nomina" (no accent) finds Nómina first; typing "dinero" finds the Money rows, every one of them under Dinero', () => {
+    expect(matchNavItems(staffEs, "nomina")[0]).toMatchObject({ label: "Nómina", sub: "Dinero", href: "/payroll" });
+    expect(matchNavItems(staffEs, "Nómina")[0]).toMatchObject({ href: "/payroll" });
+    expect(matchNavItems(staffEs, "NOMINA")[0]).toMatchObject({ href: "/payroll" });
+    const dinero = matchNavItems(staffEs, "dinero");
+    expect(dinero.length).toBeGreaterThan(0);
+    expect(dinero.map((i) => i.sub)).toEqual(dinero.map(() => "Dinero"));
+    expect(hrefs(dinero)).toContain("/billing");
+    // The palette shows six rows at most; each one shown is a Money row, in the Money section's own order.
+    const money = under(staffEs, "Dinero");
+    for (const h of hrefs(dinero)) expect(money, h).toContain(h);
+    expect(hrefs(dinero)).toEqual(hrefs(staffEs.filter((i) => i.sub === "Dinero")).slice(0, dinero.length));
+    // On the office's English screen the same word still lands on Invoices (the alias): a Spanish speaker is never lost there either.
+    expect(hrefs(matchNavItems(staffEn, "dinero"))).toContain("/billing");
+  });
+
+  it("a tech's palette under es: Spanish rows under Spanish sections, and no English section word or label anywhere", () => {
+    const techEs = commandNavItems(false, ALL_ON, true, false, "es");
+    const techEn = commandNavItems(false, ALL_ON, true, false, "en");
+    expect(hrefs(techEs)).toEqual(hrefs(techEn));
+    expect([...new Set(techEs.map((i) => i.sub))].sort()).toEqual(["Herramientas", "Hoy", "Oficina", "Reloj", "Trabajos", "Tú"]);
+    for (const i of techEs) {
+      expect(SECTION_WORDS_EN, `${i.href}: the sub "${i.sub}"`).not.toContain(i.sub);
+      expect(techEn.map((e) => e.label), `${i.href}: the label "${i.label}" is still English`).not.toContain(i.label);
+    }
+    // Typed in Spanish, found in Spanish: his clock, his jobs, his handbook.
+    expect(matchNavItems(techEs, "reloj")[0]).toMatchObject({ label: "Reloj", href: "/timeclock" });
+    expect(matchNavItems(techEs, "trabajos")[0]).toMatchObject({ label: "Todos", sub: "Trabajos", href: "/jobs" });
+    expect(hrefs(matchNavItems(techEs, "manual"))).toContain("/handbook");
   });
 });
 

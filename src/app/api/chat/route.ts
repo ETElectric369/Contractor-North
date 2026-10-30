@@ -38,6 +38,7 @@ import { versionNumber } from "@/lib/release-notes";
 import { envelope, stripMarkerChar, HOLDING_OPEN, HOLDING_CLOSE, WROTE_OPEN, WROTE_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
 import { screenPromptBlock } from "@/lib/nort/screens";
 import { doorContextLines, seenLines } from "@/lib/nort/door-context";
+import { asLang } from "@/lib/locale";
 
 // A client-intent tool: show/refresh the LIVE quote preview as the agent builds it. Not a
 // DB write — the route streams it to the client's preview pane; saving is a separate step.
@@ -360,7 +361,10 @@ export async function POST(req: Request) {
   // cached block. The trade line kills a bias that has now bitten twice (Nort pitched electrical
   // fields to a general contractor); the map kills "I can't do that" about features that shipped
   // — on 8/7 Nort declared the embed snippet impossible two days after it went live.
-  systemPrompt += `\n\n${NORT_PRODUCT_MAP}\n\n${screenPromptBlock(isStaffCaller)}`;
+  // THE SCREENS IN THE CALLER'S LANGUAGE (cn-v1139): a Spanish reader's dock says Ventas, Dinero,
+  // Presupuestos, so the block names each screen in that word too (lib/nort/screens). The language
+  // is on the profile, per person-stable, so the block stays in the cached prefix.
+  systemPrompt += `\n\n${NORT_PRODUCT_MAP}\n\n${screenPromptBlock(isStaffCaller, asLang(prof?.language))}`;
   // SUB-CACHING SPLIT: `systemPrompt` accumulates only the STABLE core (frozen instructions +
   // org-config estimating method + playbook + write-tool rules) — byte-identical per org/role, so
   // it becomes a CACHED system block (tools cache with it, since tools render before system). Every

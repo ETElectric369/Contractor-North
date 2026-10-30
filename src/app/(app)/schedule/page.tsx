@@ -3,6 +3,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { CalendarPanel } from "./calendar-panel";
@@ -55,6 +57,7 @@ export default async function SchedulePage({
   if (!me || !isStaffRole(me.role)) {
     redirect("/planner");
   }
+  const t = translator(await currentLangFor(user?.id));
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date : undefined;
 
@@ -90,7 +93,7 @@ export default async function SchedulePage({
             href="/schedule"
             className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900"
           >
-            <ChevronLeft className="h-4 w-4 shrink-0" /> Calendar
+            <ChevronLeft className="h-4 w-4 shrink-0" /> {t("nv_sched_calendar")}
           </Link>
           <span className="text-sm font-semibold text-slate-900">Job map</span>
         </div>
@@ -326,7 +329,7 @@ export default async function SchedulePage({
               have left some out, so the count says "n+" and one line says where the rest are
               (nothing silent: a capped list never passes for the whole of it). */}
           <h2 className="mb-2 text-sm font-semibold text-slate-900">
-            Waiting For A Day <span className="font-normal text-slate-400">({waiting.length}{railCapped ? "+" : ""})</span>
+            {t("nv_sched_waitingForADay")} <span className="font-normal text-slate-400">({waiting.length}{railCapped ? "+" : ""})</span>
           </h2>
           {railCapped && <p className="-mt-1 mb-2 text-xs text-slate-500">More is waiting than this list shows. Find the rest on Jobs and Leads.</p>}
           <PlaceRail items={waiting} todayStr={today} />

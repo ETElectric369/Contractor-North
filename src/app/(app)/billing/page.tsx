@@ -4,6 +4,8 @@ import { Receipt, Send, FileText, CheckCircle2, ChevronRight, ChevronDown } from
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
@@ -59,6 +61,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
   const paymentsOpen = open === "payments";
   const waitingOpen = open === "waiting";
   const supabase = await createClient();
+  const t = translator(await currentLang());
 
   // THE ORG, READ ONCE HERE: its timezone dates "This Month", and its card, texting and Venmo facts
   // go to Get Paid… exactly as the invoice page hands them to its own Get Paid.
@@ -205,7 +208,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
 
   return (
     <div>
-      <PageHeader title="Invoices" description="Who owes you, what's late, and what came in.">
+      <PageHeader title={t("nv_page_billing")} description={t("nv_desc_billing")}>
         <NewInvoiceButton customers={customers ?? []} jobs={jobs} salesTax={salesTax} />
       </PageHeader>
 

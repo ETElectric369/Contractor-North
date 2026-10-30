@@ -7,6 +7,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { formatDateTimeTz } from "@/lib/tz";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -47,6 +49,7 @@ export default async function InspectionsPage({
     .eq("id", user?.id ?? "")
     .maybeSingle();
   if (!me || !isStaffRole(me.role)) redirect("/planner");
+  const t = translator(await currentLangFor(user?.id));
 
   const [{ data: apptData }, { data: quoteLinks }, { data: org }, pickers] = await Promise.all([
     supabase
@@ -121,10 +124,7 @@ export default async function InspectionsPage({
 
   return (
     <div>
-      <PageHeader
-        title="Inspections"
-        description="Site visits before you price the work — fill in the inspection, then write it up into an estimate."
-      >
+      <PageHeader title={t("nv_page_inspections")} description={t("nv_desc_inspections")}>
         {/* The shared two-mode affordance: Start An Inspection (one tap → capture) or the EXISTING
             appointment flow (Set a Time | Propose Times), preset to the inspection type. */}
         {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}

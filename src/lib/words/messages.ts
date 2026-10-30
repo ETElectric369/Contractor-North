@@ -10,9 +10,9 @@ import type { WordCatalog } from "./types";
  * carries its accents, which a carrier sends as UCS-2 (70 characters a segment instead of 160), so
  * every Spanish text is kept to the English's length or under.
  *
- * The office's long-shift words (nb_office…) are read in ENGLISH today (sh_spanishCovers: office
- * screens stay in English for now); they live here so the route keeps no literal, and the day the
- * office reads Spanish the route swaps "en" for the reader's language and nothing else moves.
+ * The office's long-shift words (nb_office…) are read in ENGLISH today (sh_spanishCovers: the
+ * office pages' contents stay in English for now); they live here so the route keeps no literal, and
+ * the day the office reads Spanish the route swaps "en" for the reader's language and nothing else moves.
  */
 export const words: WordCatalog = {
   prefix: "nb_",

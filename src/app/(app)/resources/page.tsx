@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { ResourcesManager } from "./resources-manager";
 
 export const dynamic = "force-dynamic";
@@ -21,14 +23,14 @@ export default async function ResourcesPage() {
     .select("id, name, category, contact_name, phone, email, website, address, notes")
     .order("name");
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div>
       {/* THE ONE HOME FOR THE PEOPLE A JOB ANSWERS TO (W2-13): suppliers and subcontractors are the
           company's vendors and live in Price List › Vendors (the form says so, office only). */}
-      <PageHeader
-        title="Resources"
-        description="Building departments, inspectors, utilities, engineers and permit portals: the numbers and links the crew needs."
-      />
+      <PageHeader title={t("nv_page_resources")} description={t("nv_desc_resources")} />
       <ResourcesManager resources={(resources ?? []) as any} canEdit={canEdit} />
     </div>
   );

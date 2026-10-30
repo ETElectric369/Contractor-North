@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { Briefcase, FileText, Receipt, CalendarCheck, CheckCircle2, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { hoursBetween, formatDuration, formatDateShort, DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
@@ -68,7 +70,7 @@ export default async function ActivityPage() {
   // visitTitle for the same reason: a row stamped "Walk-Through: Tom Goodman" during the three days
   // the visit wore that word made this one line say both words at once.
   for (const a of appts.data ?? []) items.push({ when: a.created_at as string, icon: "appt", text: `${a.type === "inspection" ? "Inspection" : "Appointment"} booked — ${visitTitle(a.title as string | null)}`, href: a.starts_at ? `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at as string))}` : "/schedule" });
-  for (const t of (tasks.data ?? []) as any[]) if (t.completed_at) items.push({ when: t.completed_at, icon: "task", text: `Task done — ${t.title}` });
+  for (const task of (tasks.data ?? []) as any[]) if (task.completed_at) items.push({ when: task.completed_at, icon: "task", text: `Task done — ${task.title}` });
   for (const e of (times.data ?? []) as any[]) {
     if (!e.clock_out) continue;
     const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
@@ -79,9 +81,12 @@ export default async function ActivityPage() {
   items.sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime());
   const feed = items.slice(0, 60);
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title="Activity" description="Recent business activity across the shop — last 30 days." />
+      <PageHeader title={t("nv_page_activity")} description={t("nv_desc_activity")} />
 
       {feed.length === 0 ? (
         <EmptyState icon={Clock} title="No recent activity" description="Jobs, invoices, and payments across the shop will show up here as they happen." />

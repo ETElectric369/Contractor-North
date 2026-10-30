@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users } from "lucide-react";
@@ -81,9 +83,12 @@ export default async function TeamPage() {
   const members = ((team ?? []) as Profile[]).map((m) => ({ ...m, ...(payRows.get(String(m.id)) ?? {}) })) as Profile[];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(user?.id));
+
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title="Team" description="Your crew — invite people, set pay & charge rates, change roles, and deactivate anyone who's moved on." />
+      <PageHeader title={t("nv_page_team")} description={t("nv_desc_team")} />
 
       <div className="space-y-6">
         {isAdmin && (

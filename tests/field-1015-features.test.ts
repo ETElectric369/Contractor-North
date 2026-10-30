@@ -12,7 +12,9 @@ const read = (f: string) => readFileSync(path.join(ROOT, f), "utf8");
 describe("New Inspection in the + menu (33b28e4b)", () => {
   it("is the schedule's one create form, opened on the inspection type; Leads off = no door", () => {
     const menu = read("src/components/global-quick-add.tsx");
-    expect(menu).toContain('{ label: "New Inspection", href: "/schedule?new=inspection", icon: ClipboardCheck, staffOnly: true, feature: "leads" }');
+    // The row's words are the nav catalog's since cn-v1139 (nv_add_newInspection, lib/words/nav.ts), English byte for byte.
+    expect(menu).toContain('{ key: "nv_add_newInspection", href: "/schedule?new=inspection", icon: ClipboardCheck, staffOnly: true, feature: "leads" }');
+    expect(read("src/lib/words/nav.ts")).toContain('nv_add_newInspection: "New Inspection"');
     const page = read("src/app/(app)/schedule/page.tsx");
     expect(page).toContain('if (sp.new === "appointment" || sp.new === "inspection" || (sp.new === "1" && (sp.view !== "day" || !date))) {');
     expect(page).toContain("redirect(`/schedule?view=day&date=${date ?? todayStrInTz(tz)}&new=1${type ? `&type=${type}` : \"\"}${time ? `&time=${time}` : \"\"}`);");

@@ -31,24 +31,35 @@ type Item = {
 // Synonyms so search finds a page by what the owner CALLS it, not just its label. Keyed by the
 // page's href (the stable id) so it survives label/section renames. Lowercase; matched as
 // substrings, same as the label. Extend freely — this is the one place aliases live.
+// IN BOTH LANGUAGES (cn-v1139): the Spanish words a person types sit beside the English on every
+// row, whatever language the screen is in — the dock's own Spanish (Agenda, Nómina, Reloj…) and
+// the words the office's map does not wear (calendario, sueldos, checar). Accents are optional
+// on both sides: the matcher folds them (foldSearch), so "nomina" finds Nómina.
 const NAV_ALIASES: Record<string, string[]> = {
+  "/planner": ["mi día", "hoy"],
   // ONE INVOICES PAGE (W1-29): who owes (Accounts Receivable's words) and what came in (Payments')
   // both land here now; /billing/ar and /payments are redirects with no row of their own.
   "/billing": [
     "money", "billing", "invoice",
     "ar", "owed", "receivables", "accounts receivable", "who owes", "aging",
     "payments", "paid", "received", "deposit", "collections",
+    "dinero", "facturas", "factura", "facturación", "cobros", "pagos", "deben",
   ],
-  "/bills": ["ap", "accounts payable", "vendor", "expense"],
+  "/bills": ["ap", "accounts payable", "vendor", "expense", "cuentas", "cuenta", "gastos", "proveedor", "recibos"],
   // RECONCILE (cn-v1037) shipped findable only by its own exact name. Its rows are what a person
   // actually types: a supplier's statement against our tickets, one supplier spelled five ways, the
   // same ticket on two jobs (lib/reconcile-kinds carries the headings these words come from).
-  "/reconcile": ["reconcile", "statement", "statements", "supplier statement", "spelling", "spellings", "duplicate", "duplicates", "same ticket"],
-  "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay"],
-  "/tax-report": ["taxes", "1099", "irs", "tax"],
-  "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
-  "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items"],
-  "/leads": ["prospects", "inquiries", "pipeline"],
+  "/reconcile": [
+    "reconcile", "statement", "statements", "supplier statement", "spelling", "spellings", "duplicate", "duplicates", "same ticket",
+    "conciliar", "conciliación", "estado de cuenta", "duplicados",
+  ],
+  "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay", "nómina", "sueldos", "salarios", "pago"],
+  "/tax-report": ["taxes", "1099", "irs", "tax", "reporte de impuestos", "impuestos", "impuesto"],
+  "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit", "análisis", "reportes", "informes", "ganancias", "números"],
+  "/analytics/accountant": ["contador", "contabilidad"],
+  "/recurring": ["recurrentes", "recurrente", "repetir"],
+  "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items", "lista de precios", "precios", "catálogo", "tarifas"],
+  "/leads": ["prospects", "inquiries", "pipeline", "ventas", "prospectos", "prospecto", "consultas", "solicitudes"],
   // EVERY WORD THIS PAGE HAS EVER WORN STILL FINDS IT. cn-v1034 (2026-09-30) renamed the dock row
   // from Inspections to Walk-Throughs and added no aliases here, so "inspection" stopped matching
   // the LABEL and found NOTHING — while the route, the stored type and Nort's own description all
@@ -56,33 +67,46 @@ const NAV_ALIASES: Record<string, string[]> = {
   // (2026-10-03, the owner's word), and the Walk-Through spellings stay for the people who learned
   // them in between. Each spelling is written out because a search matches the label or an alias,
   // never a word's other shapes: "walk-through" and "walkthrough" and "walk through" are three strings.
-  "/inspections": ["inspection", "inspections", "walk-through", "walk-throughs", "walkthrough", "walk through", "site visit", "visit"],
-  "/quotes": ["estimate", "proposal", "bid", "quote", "quotes"],
-  "/crm": ["customers", "clients", "people", "contact", "contacts"],
+  "/inspections": [
+    "inspection", "inspections", "walk-through", "walk-throughs", "walkthrough", "walk through", "site visit", "visit",
+    "inspecciones", "inspección", "visita",
+  ],
+  "/quotes": ["estimate", "proposal", "bid", "quote", "quotes", "presupuestos", "presupuesto", "cotización", "cotizaciones", "propuesta"],
+  "/crm": ["customers", "clients", "people", "contact", "contacts", "clientes", "cliente", "contactos"],
   // The Reminders page was "Tasks" until 0358, and people still type the old word.
-  "/tasks": ["tasks", "to-do", "todo"],
-  "/timeclock": ["clock in", "punch", "clock", "timeclock"], // the one word, since the label reads Time Clock (cn-v1128)
-  "/timecards": ["hours", "timesheet"],
-  "/schedule": ["calendar", "dispatch", "appointments"],
+  "/tasks": ["tasks", "to-do", "todo", "recordatorios", "tareas", "pendientes"],
+  "/organize": ["organizar", "papeles"],
+  "/timeclock": ["clock in", "punch", "clock", "timeclock", "reloj", "marcar entrada", "checar"], // the one word, since the label reads Time Clock (cn-v1128)
+  "/timecards": ["hours", "timesheet", "tarjetas de tiempo", "tarjetas", "horas"],
+  "/schedule": ["calendar", "dispatch", "appointments", "agenda", "calendario", "citas", "programar"],
   // "All", the Jobs sub-nav's first row (b94497dd): the unfiltered page, which is what a person
   // means by "jobs" or "work". The ?status= rows stay out of the palette (see the collision note).
-  "/jobs": ["jobs", "projects", "work", "all jobs"],
-  "/inventory": ["stock", "shop stock", "shelf", "inventory", "warehouse", "parts"],
-  "/compliance": ["osha", "liability", "regulations"],
-  "/insurance": ["workers comp", "coverage", "liability"],
-  "/safety": ["osha", "incident", "hazard"],
-  "/tools": ["calculator", "calculators", "nec", "wire size"],
+  "/jobs": ["jobs", "projects", "work", "all jobs", "trabajos", "trabajo", "proyectos", "todos"],
+  "/inventory": ["stock", "shop stock", "shelf", "inventory", "warehouse", "parts", "inventario", "bodega", "existencias", "almacén", "refacciones"],
+  "/compliance": ["osha", "liability", "regulations", "cumplimiento", "licencias", "permisos", "certificaciones"],
+  "/insurance": ["workers comp", "coverage", "liability", "seguros", "seguro", "pólizas", "cobertura"],
+  "/safety": ["osha", "incident", "hazard", "seguridad", "incidente", "accidente"],
+  "/audits": ["auditorías", "auditoría"],
+  "/team": ["oficina", "equipo", "cuadrilla", "personal"],
+  "/employee-docs": ["documentos del personal", "documentos", "licencia de conducir"],
+  "/forms": ["formularios", "formulario", "formas"],
+  "/resources": ["recursos", "inspectores", "permisos"],
+  "/handbook": ["manual", "reglas", "políticas"],
+  "/activity": ["actividad"],
+  "/audit": ["auditoría de actividad", "registro", "historial"],
+  "/tools": ["calculator", "calculators", "nec", "wire size", "herramientas", "calculadoras", "calculadora"],
+  "/settings": ["ajustes", "configuración"],
   // Plans live with the estimator now (Erik 2026-07-14) — typing plan/blueprint/take-off
   // lands on New Estimate, where the Upload Plans take-off actually is.
-  "/quotes/new": ["plan", "plans", "blueprint", "drawing", "take-off", "takeoff", "upload plans"],
+  "/quotes/new": ["plan", "plans", "blueprint", "drawing", "take-off", "takeoff", "upload plans", "nuevo presupuesto", "planos", "plano"],
 };
 // Words that belong to a SWITCH, not to the page they land on (the switch board, 0352): they
 // leave the palette with their feature, so "po" can't find Bills while Purchase Orders is off.
 // (Words that ride on a page, like "/leads" or "/inventory" above, go with the page's dock row.)
 const SWITCH_ALIASES: { href: string; feature: FeatureKey; words: string[] }[] = [
-  { href: "/bills", feature: "purchase_orders", words: ["purchase order", "po"] },
+  { href: "/bills", feature: "purchase_orders", words: ["purchase order", "po", "orden de compra", "órdenes de compra", "órdenes"] },
   { href: "/price-list", feature: "kits", words: ["kit", "kits"] },
-  { href: "/recurring", feature: "recurring_billing", words: ["subscription", "repeat invoice", "auto invoice"] },
+  { href: "/recurring", feature: "recurring_billing", words: ["subscription", "repeat invoice", "auto invoice", "suscripción", "factura repetida"] },
 ];
 function aliasesFor(href: string, features: FeatureMap | null | undefined): string[] | undefined {
   const extra = SWITCH_ALIASES.filter((a) => a.href === href && featureOn(features, a.feature)).flatMap((a) => a.words);
@@ -99,8 +123,9 @@ function aliasesFor(href: string, features: FeatureMap | null | undefined): stri
 // THE SWITCH BOARD (0352) rides on the same list: it is built from visibleDock (role AND
 // switches), so a page whose dock row is switched off is not offered here either.
 // THE WORDS IN THE PERSON'S LANGUAGE (cn-v1138): a row's label and its section's name come through
-// lib/dock-words (the dock's data stays English); the aliases stay English words beside them, so
-// "clock in" still finds Reloj. `kind` is an id the icon and the chip read, never shown raw.
+// lib/dock-words (the dock's data stays English); the aliases carry both languages beside them, so
+// "clock in" still finds Reloj and "reloj" finds Time Clock. `kind` is an id the icon and the chip
+// read, never shown raw.
 type DockLeaf = { id: string; label: string; href?: string; children?: DockLeaf[]; staffOnly?: boolean };
 function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null | undefined, lang: Lang, sectionStaff?: boolean): Item[] {
   return nodes.flatMap((n) =>
@@ -122,10 +147,10 @@ function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null |
 const pettyCashRow = (t: (key: string) => string): Item => ({
   kind: "Go to",
   label: t("sh_pettyCash"),
-  sub: "Money",
+  sub: t("sh_dock_invoices"),
   href: "/petty-cash",
   staffOnly: true,
-  aliases: ["petty cash", "cash box", "cash", "atm"],
+  aliases: ["petty cash", "cash box", "cash", "atm", "caja chica", "efectivo", "cajero"],
 });
 
 /** The palette's "go to" list for this person: exported so the switch rule is pinned in a test.
@@ -140,29 +165,35 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, 
     // Today is My Day alone on the dock (W1-03), so its two old pills are found here by name:
     // Reminders for everyone, Organize for the office (every save on it is requireStaff).
     { kind: "Go to", label: t("sh_reminders"), sub: t("sh_dock_today"), href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
-    { kind: "Go to", label: t("sh_organize"), sub: t("sh_dock_today"), href: "/organize", staffOnly: true },
+    { kind: "Go to", label: t("sh_organize"), sub: t("sh_dock_today"), href: "/organize", staffOnly: true, aliases: NAV_ALIASES["/organize"] },
     // The Time Clock is a Money row of its own since cn-v1128 (dock.ts m-clock), so the dock feeds
     // the palette and its words (NAV_ALIASES["/timeclock"]) ride on that leaf; a tech has his Clock tile.
     // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
-    // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates.
+    // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates, under
+    // the Sales tile's own word (sh_dock_sales, cn-v1139).
     ...(featureOn(features, "estimates")
-      ? [{ kind: "Go to", label: t("sh_newEstimate"), sub: "Sales", href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] }]
+      ? [{ kind: "Go to", label: t("sh_newEstimate"), sub: t("sh_dock_sales"), href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] }]
       : []),
     ...(hasPettyCash ? [pettyCashRow(t)] : []),
   ];
   return isStaff ? items : items.filter((i) => !i.staffOnly);
 }
 
+/** What a search compares (cn-v1139): lowercase, with the accents folded off both the typed text and
+ *  the words it is held against (NFD, then the combining marks dropped), so "nomina" finds Nómina and
+ *  "dia" finds Mi Día, and a person who typed the accent is matched just the same. */
+export const foldSearch = (s: string) => s.normalize("NFD").replace(/\p{M}+/gu, "").toLowerCase();
+
 /** The pages that answer what was typed. Match the label, the parent section, OR any synonym — so
  *  "owed"/"AR" finds Invoices and "wages" finds Payroll. Label hits rank above alias-only hits.
  *  Exported so a page's words are pinned in a test (staff typing "clock in" find the Timeclock). */
 export function matchNavItems(navItems: Item[], q: string): Item[] {
-  const term = q.trim().toLowerCase();
+  const term = foldSearch(q.trim());
   if (!term) return [];
   const scored = navItems
     .map((i) => {
-      const label = i.label.toLowerCase().includes(term);
-      const sub = i.sub?.toLowerCase().includes(term) ?? false;
+      const label = foldSearch(i.label).includes(term);
+      const sub = i.sub ? foldSearch(i.sub).includes(term) : false;
       // An alias matches when it contains the typed text, or when the typed text holds the alias as
       // a whole WORD (its plural too: "bids", "pos"), or holds a multi-word alias ("who owes"):
       // "ar" and "ap" typed alone still open Invoices and Bills, but a customer name holding "ar"
@@ -170,7 +201,10 @@ export function matchNavItems(navItems: Item[], q: string): Item[] {
       // the deep review's search-01 and the skeptic's nit on 4+ letter aliases).
       const words = term.split(/\s+/);
       const alias =
-        i.aliases?.some((a) => a.includes(term) || words.includes(a) || words.includes(a + "s") || (a.includes(" ") && term.includes(a))) ?? false;
+        i.aliases?.some((raw) => {
+          const a = foldSearch(raw);
+          return a.includes(term) || words.includes(a) || words.includes(a + "s") || (a.includes(" ") && term.includes(a));
+        }) ?? false;
       return { i, hit: label || sub || alias, rank: label ? 0 : sub ? 1 : 2 };
     })
     .filter((s) => s.hit)
@@ -201,13 +235,13 @@ export function idleRows({
   onboarded: boolean;
   lessonsOpen?: boolean;
   toggleLessons?: () => void;
-  /** The person's language (cn-v1138): Talk To Nort in it; the help rows are the office's and stay English. */
+  /** The person's language (cn-v1138): Talk To Nort and the help rows in it (cn-v1139; the lessons' own titles stay English). */
   lang?: Lang;
 }): Item[] {
   if (!featureOn(features, "nort")) return [];
   const t = translator(lang);
   const rows: Item[] = [{ kind: "Nort", label: t("sh_talkToNort"), sub: t("sh_sayItOutLoud"), href: "#talk-to-nort", run: talkToNort }];
-  for (const r of helpRows({ isStaff, onboarded, setup, nortOn: true, features })) {
+  for (const r of helpRows({ isStaff, onboarded, setup, nortOn: true, features, t })) {
     if (r.key === "lessons") {
       rows.push({ kind: "Help", label: r.label, sub: r.sub, href: "#show-me-how", run: toggleLessons, keepOpen: true, expanded: lessonsOpen });
       if (lessonsOpen) {

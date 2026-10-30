@@ -5,6 +5,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { InfoPopup } from "@/components/info-popup";
 import { computeOwnerMoney, notCountedLine, readOwnerMoneyInputs, type OwnerMoney } from "@/lib/analytics/owner-money";
@@ -73,6 +75,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
   const { supabase, orgId, userId } = ctx;
   if (!orgId) redirect("/planner");
   const { period: periodRaw, kind: kindRaw } = await searchParams;
+  const t = translator(await currentLangFor(userId));
 
   const [orgRead, meRead] = await Promise.all([
     supabase.from("organizations").select("name, settings").eq("id", orgId).maybeSingle(),
@@ -117,7 +120,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
   return (
     <AccountantPeriodScope>
       <div className="mx-auto max-w-3xl">
-        <PageHeader title="For Your Accountant" description="One spreadsheet for a month, a quarter or a year: what came in, what went out, who was paid, what's still open and what's in stock.">
+        <PageHeader title={t("nv_page_accountant")} description={t("nv_desc_accountant")}>
           <Link
             href="/analytics"
             className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"

@@ -5,6 +5,8 @@ import { Boxes, Search } from "lucide-react";
 import { requireStaff } from "@/lib/staff-guard";
 import { isMissingShelf } from "@/lib/job-cost";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatCurrency, sanitizeSearch } from "@/lib/utils";
@@ -120,9 +122,9 @@ export default async function ShopStockPage({
   const exportRows = ((exportsRead.error ? [] : exportsRead.data) ?? []) as { list: string; from_at: string | null; to_at: string; created_at: string }[];
   /** The download that carried a move made at `at`, in words, or null (mirrors 0350's guard). */
   const carriedBy = (at: string): string | null => {
-    const t = Date.parse(at);
+    const when = Date.parse(at);
     const hit = exportRows.find(
-      (e) => Date.parse(e.created_at) > t && Date.parse(e.to_at) > t && (!e.from_at || Date.parse(e.from_at) <= t),
+      (e) => Date.parse(e.created_at) > when && Date.parse(e.to_at) > when && (!e.from_at || Date.parse(e.from_at) <= when),
     );
     return hit ? `the ${hit.list === "stock_used" ? "Stock Used" : "On Hand"} list, ${day(todayStrInTz(orgTz, new Date(hit.created_at)))}` : null;
   };
@@ -316,11 +318,14 @@ export default async function ShopStockPage({
 
   const linkClass = "inline-flex min-h-[44px] items-center rounded-lg border px-4 text-sm font-medium transition-colors";
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
+  const t = translator(await currentLangFor(ctx.userId));
+
   // SHOP STOCK OFF (0352): the shelf still opens from a link (and from Needs You's short-stock
   // card), with the shell's Off line on top. Nothing here is hidden or changed: it is the record.
   return (
     <div>
-      <PageHeader title="Shop Stock" description="What's in stock, what it cost, where every roll came from and where every piece went.">
+      <PageHeader title={t("nv_page_inventory")} description={t("nv_desc_inventory")}>
         <Link
           href="/analytics/accountant"
           className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"

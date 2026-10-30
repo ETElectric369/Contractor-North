@@ -1,6 +1,8 @@
 import { Repeat, Briefcase, Wallet, Receipt } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -21,6 +23,7 @@ const FREQ_LABEL: Record<string, string> = {
 
 export default async function RecurringPage() {
   const supabase = await createClient();
+  const t = translator(await currentLang());
 
   const [{ data: templates }, { data: customers }, { data: orgRow }, sw] = await Promise.all([
     supabase.from("recurring_templates").select("*, customers(name)").order("next_date"),
@@ -51,7 +54,7 @@ export default async function RecurringPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title="Recurring" description="Jobs, invoices, and expenses that repeat. Each one is made on its day, automatically.">
+      <PageHeader title={t("nv_page_recurring")} description={t("nv_desc_recurring")}>
         <RecurringButton customers={custOpts} salesTax={salesTax} invoiceKind={recurringOn} />
       </PageHeader>
 
