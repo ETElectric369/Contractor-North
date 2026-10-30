@@ -1,13 +1,16 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { NO_INDEX } from "@/lib/no-index";
+import { shellFromUserAgent } from "@/lib/native-shell";
+import { PICK_PLAN_WEB_ONLY } from "@/app/(app)/settings/billing-doors";
 import { Zap, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { billingEnabled } from "@/lib/stripe";
-import { accessState, hasActiveAccess, isCompedOrg, type BillingOrg } from "@/lib/subscription";
+import { accessState, isCompedOrg, type AccessState, type BillingOrg } from "@/lib/subscription";
 import { canPickPlan, stripeSubscriptionLive, subscribeHeadline } from "@/lib/lapse-doors";
 import { ownerFirstName } from "@/lib/lapse-words";
 import { startCheckout, openPortal } from "@/app/(app)/settings/billing-actions";
-import { PLANS, INCLUDED_EVERYWHERE, plansConfigured } from "@/lib/plans";
+import { PLANS, INCLUDED_EVERYWHERE, plansConfigured, priceIdFor } from "@/lib/plans";
 import { signOut } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import { reportError } from "@/lib/observe";
@@ -21,11 +24,24 @@ type SubscribeOrg = BillingOrg & {
 };
 
 /**
- * THE WALL'S OWN PAGE (cn-v1137). The headline comes from the one access rule (accessState → the
- * reason), never re-derived from the columns. An owner/admin gets ONE door: Manage Billing when a
- * Stripe subscription is live (update the card, change the plan — Checkout beside it would bill
- * twice), the plan cards otherwise (a canceled subscription cannot be restarted from the portal; a
- * customer Stripe knows is reused by Checkout). Everyone else is told who holds the key, by name.
+ * THE WALL'S OWN PAGE (cn-v1137), AND PICK A PLAN (cn-v1140). The headline comes from the one
+ * access rule (accessState → the reason), never re-derived from the columns. An owner/admin gets
+ * ONE door: Manage Billing when a Stripe subscription is live (update the card, change the plan —
+ * Checkout beside it would bill twice), the plan cards otherwise (a canceled subscription cannot be
+ * restarted from the portal; a customer Stripe knows is reused by Checkout). Everyone else is told
+ * who holds the key, by name.
+ *
+ * WHO LANDS HERE (cn-v1140): the plan card's Upgrade door sends a trial or a lapsed company here, so
+ * a standing company is no longer bounced to /planner — a trial reads "Pick A Plan", a lapsed
+ * company its reason, and an ACTIVE live subscriber the one door that switches a plan (the portal).
+ * Only a comped company (the column or the env list) and an install with billing off have nothing
+ * to pick, and go home. Each plan card posts its tier AND its cadence: monthly, or yearly at the
+ * monthly-equivalent price PLANS carries — and only the cadences the install has a price for.
+ *
+ * INSIDE THE APP STORE APP (Apple 3.1.1) the page sells nothing: no plan cards, no Subscribe Now —
+ * one line, "Pick a plan on the web at app.contractornorth.com." Manage Billing (the portal) stands
+ * there as it does on the plan card; startCheckout refuses a form posted from the shell in the same
+ * words.
  */
 export default async function SubscribePage({
   searchParams,
@@ -55,18 +71,20 @@ export default async function SubscribePage({
   if (orgErr) reportError("subscribe:org-read", orgErr, { orgId: profile.org_id });
   const org = (orgRow as SubscribeOrg | null) ?? null;
 
-  // If billing is off, the org is comped (the env list, or comped_until through hasActiveAccess),
-  // or access is fine, no need to be here.
-  if (!billingEnabled || isCompedOrg(profile.org_id) || (org && hasActiveAccess(org))) {
+  const state = org ? accessState(org) : null;
+  // If billing is off or the company is comped (the env list, or comped_until through the one
+  // access rule), there is nothing to pick: home. A trial, a lapsed company and a live subscriber
+  // all have a door here (cn-v1140).
+  if (!billingEnabled || isCompedOrg(profile.org_id) || state?.reason === "comped") {
     redirect("/planner");
   }
 
   const isAdmin = canPickPlan(profile.role);
-  const state = org ? accessState(org) : null;
-  const headline = state ? subscribeHeadline(state.reason) : "Your Plan Needs Attention";
+  const inShell = shellFromUserAgent((await headers()).get("user-agent")).native;
   // The portal is the door only while a subscription is live; otherwise Checkout (one rule,
   // lib/lapse-doors, the same one startCheckout refuses on).
   const portal = !!org && stripeSubscriptionLive(org);
+  const headline = state ? headlineFor(state, portal) : "Your Plan Needs Attention";
 
   // WHO HOLDS THE KEY, for everyone who cannot pick a plan: the company's active owner, by first
   // name, through THE one owner read every paused door uses (lib/lapse-words ownerFirstName — the
@@ -79,8 +97,12 @@ export default async function SubscribePage({
     : !isAdmin
       ? `Ask ${ownerFirst} to pick a plan.`
       : portal
-        ? "Your card or plan needs a look."
-        : "Pick a plan to keep using Contractor North.";
+        ? state?.active && state.reason === "active"
+          ? "Switch plans or update the card there."
+          : "Your card or plan needs a look."
+        : inShell
+          ? PICK_PLAN_WEB_ONLY
+          : "Pick a plan to keep using Contractor North.";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
@@ -113,30 +135,53 @@ export default async function SubscribePage({
                 </form>
                 <p className="mt-3 text-sm text-slate-600">Update the card or pick a plan there.</p>
               </>
+            ) : inShell ? (
+              // The App Store app sells nothing (Apple 3.1.1): the one line, and no form at all.
+              <p className="text-sm text-slate-600">{PICK_PLAN_WEB_ONLY}</p>
             ) : plansConfigured() ? (
               <>
                 {/* GATE ON COST, NEVER ON LEVERAGE. Every tier ships the whole product to the
-                    whole crew. What changes is how much genuinely expensive work is included —
-                    plan reading and researched estimates — because that's the only thing that
-                    actually costs more to serve. Never a feature, never a head count. */}
+                    whole crew. What changes is the month's Usage — the model spend a plan includes
+                    (1× / 3× / 8×, lib/plans) — because that's the only thing that actually costs
+                    more to serve. Never a feature, never a head count. */}
                 <div className="grid gap-4 text-left sm:grid-cols-3">
-                  {PLANS.map((plan) => (
-                    <form key={plan.tier} action={startCheckout} className="flex flex-col rounded-xl border border-slate-200 p-5">
-                      <input type="hidden" name="tier" value={plan.tier} />
-                      <input type="hidden" name="cadence" value="monthly" />
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{plan.name}</div>
-                      <div className="mt-1 text-3xl font-bold tabular-nums text-slate-900">
-                        ${plan.monthly}
-                        <span className="text-sm font-medium text-slate-400">/mo</span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">{plan.blurb}</p>
-                      <p className="mt-3 text-sm text-slate-600">{plan.included}</p>
-                      {/* The second axis, and the honest one: our TIME. It scales with a
-                          customer's size without ever counting their people. */}
-                      <p className="mt-2 flex-1 text-sm text-slate-500">{plan.support}</p>
-                      <Button type="submit" className="mt-4 w-full">Choose {plan.name}</Button>
-                    </form>
-                  ))}
+                  {PLANS.map((plan) => {
+                    // ONE FORM, TWO CADENCES: the tier rides hidden; the button pressed posts its
+                    // cadence (a submit button's name=value is part of the form data). A cadence the
+                    // install has no price for draws no door — never a button that leads to a refusal.
+                    const monthly = !!priceIdFor(plan.tier, "monthly");
+                    const annual = !!priceIdFor(plan.tier, "annual");
+                    return (
+                      <form key={plan.tier} action={startCheckout} className="flex flex-col rounded-xl border border-slate-200 p-5">
+                        <input type="hidden" name="tier" value={plan.tier} />
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{plan.name}</div>
+                        <div className="mt-1 text-3xl font-bold tabular-nums text-slate-900">
+                          ${plan.monthly}
+                          <span className="text-sm font-medium text-slate-400">/mo</span>
+                        </div>
+                        {annual && (
+                          <p className="text-xs tabular-nums text-slate-500">
+                            ${plan.annual}/mo billed yearly
+                          </p>
+                        )}
+                        <p className="mt-1 text-xs text-slate-500">{plan.blurb}</p>
+                        <p className="mt-3 text-sm text-slate-600">{plan.included}</p>
+                        {/* The second axis, and the honest one: our TIME. It scales with a
+                            customer's size without ever counting their people. */}
+                        <p className="mt-2 flex-1 text-sm text-slate-500">{plan.support}</p>
+                        {monthly && (
+                          <Button type="submit" name="cadence" value="monthly" className="mt-4 w-full">
+                            Choose {plan.name}
+                          </Button>
+                        )}
+                        {annual && (
+                          <Button type="submit" name="cadence" value="annual" variant="outline" className="mt-2 w-full">
+                            Yearly At ${plan.annual}/mo
+                          </Button>
+                        )}
+                      </form>
+                    );
+                  })}
                 </div>
                 <div className="mt-5 text-xs text-slate-400">
                   <p className="font-medium text-slate-500">On every plan, at every price:</p>
@@ -146,12 +191,8 @@ export default async function SubscribePage({
                     ))}
                   </ul>
                   {/* Say the honest thing about the metered part rather than letting someone
-                      discover it. Running out never stops work — it gets simpler, not gone. */}
-                  <p className="mt-2">
-                    Reading plans and researching live prices costs us real money each time, so that&rsquo;s the
-                    one thing the plans count. Go past it and estimates keep working — they just get simpler
-                    until the month turns. Nothing locks, and your crew never stops.
-                  </p>
+                      discover it. Running out never stops work — it runs lighter, not gone. */}
+                  <p className="mt-2">Usage resets on the 1st. Past it, things run lighter — nothing stops.</p>
                 </div>
               </>
             ) : (
@@ -184,6 +225,18 @@ export default async function SubscribePage({
       </div>
     </div>
   );
+}
+
+/**
+ * The headline: a lapsed company's reason (cn-v1137 subscribeHeadline); a standing company's door —
+ * "Pick A Plan" for a trial (or any standing company with no live Stripe subscription), "Change Your
+ * Plan" for an active live subscriber (the portal is the door), and the reason's own words for a
+ * card in its grace window ("Your Plan Needs Attention": the portal, to update the card).
+ */
+function headlineFor(state: AccessState, portal: boolean): string {
+  if (!state.active) return subscribeHeadline(state.reason);
+  if (state.reason === "grace") return subscribeHeadline(state.reason);
+  return portal ? "Change Your Plan" : "Pick A Plan";
 }
 
 // Never index auth/utility chrome — on a tenant's custom domain this page previously leaked a

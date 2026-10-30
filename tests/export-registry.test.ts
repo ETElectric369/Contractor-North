@@ -166,9 +166,9 @@ describe("the export registry is the whole census of what a company owns", () =>
     expect(census.has("archive.time_allocations")).toBe(true); // another schema is seen
   });
 
-  it("the census is exact: 87 exported tables and 27 skipped, none twice (a new table moves the number here, on purpose)", () => {
+  it("the census is exact: 87 exported tables and 28 skipped, none twice (a new table moves the number here, on purpose)", () => {
     expect(EXPORT_TABLES.length).toBe(87);
-    expect(SKIPPED_TABLES.length).toBe(27);
+    expect(SKIPPED_TABLES.length).toBe(28);
     expect(new Set(exportNames).size).toBe(exportNames.length);
     expect(new Set(skippedNames).size).toBe(skippedNames.length);
     expect(exportNames.filter((n) => skippedNames.includes(n))).toEqual([]);

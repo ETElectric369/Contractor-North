@@ -205,12 +205,13 @@ describe("Look Up: refused before any money is spent", () => {
     expect(db.calls).toEqual([]);
   });
 
-  it("a company past the month's $150 AI allowance is refused, and nothing is charged", async () => {
+  it("a company past the 30-day $150 AI ceiling is refused in the ceiling's own words (never 'this month's allowance'), and nothing is charged", async () => {
     db.ledger.push({ org_id: "org-1", usage_date: today(), model: "claude-opus-4-8", surface: "chat", cost_usd: 150, calls: 400 });
     db.respond = () => reply({ json: { candidates: [] } });
     const res = await lookUpVendors({ names: [{ name: "Granite Peak Plumbing" }] });
     expect(res.ok).toBe(false);
-    expect(!res.ok && res.error).toMatch(/used this month's AI allowance, so nothing was looked up and nothing was charged/);
+    expect(!res.ok && res.error).toBe("Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it. Nothing was looked up and nothing was charged; add the details yourself meanwhile.");
+    expect(!res.ok && res.error).not.toMatch(/allowance|this month/i);
     expect(db.calls).toEqual([]);
   });
 

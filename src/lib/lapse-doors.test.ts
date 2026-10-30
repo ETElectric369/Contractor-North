@@ -103,7 +103,7 @@ describe("the words", () => {
 
   it("each refusal names ONE action", () => {
     expect(SECOND_SUBSCRIPTION_REFUSAL).toBe("A subscription already exists — use Manage Billing.");
-    expect(NO_BILLING_ACCOUNT_REFUSAL).toBe("There's no billing account yet — Subscribe first.");
+    expect(NO_BILLING_ACCOUNT_REFUSAL).toBe("There's no billing account yet — Upgrade first."); // the plan card's door word (cn-v1140)
   });
 });
 

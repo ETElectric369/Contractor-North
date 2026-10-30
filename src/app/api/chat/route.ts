@@ -16,7 +16,9 @@ import { orgTrade } from "@/lib/org-trade";
 import { featureOn } from "@/lib/features";
 import { quoteDraftShown, quoteDraftToolFor } from "@/lib/nort/quote-draft-tax";
 import { NORT_EXAMPLES_RULE, calcToolsFor, engineeringLine, tradeRuleWords, voiceEstimateRule } from "@/lib/nort/trade-prompt";
-import { recordAiUsage, aiAllowed, modelFor, type TokenUsage } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, modelFor, tierOfUsage, type TokenUsage } from "@/lib/ai-cost";
+import { usageFor, type UsageOrg } from "@/lib/usage-meter";
+import { shortDate } from "@/lib/usage-window";
 import { accessOfRow, nortPausedWords } from "@/lib/lapse-words";
 import { BILLING_COLUMNS, type BillingOrg } from "@/lib/subscription";
 import { rateLimited } from "@/lib/rate-limit";
@@ -259,10 +261,11 @@ export async function POST(req: Request) {
 
   // Respond in the user's preferred language + follow the org's quoting playbook. THE BILLING
   // COLUMNS RIDE THE SAME READ (cn-v1137, projection law): the standing check below reads them, so
-  // the select names them — one trip, never a second read of the same row.
+  // the select names them — one trip, never a second read of the same row. THE PLAN RIDES TOO
+  // (cn-v1140): the usage meter's budget is the plan's, and usageFor takes this row as read.
   const [{ data: prof }, { data: org }] = await Promise.all([
     supabase.from("profiles").select("language, role, nort_humor, nort_register, nort_notes").eq("id", user.id).maybeSingle(),
-    supabase.from("organizations").select(`id, settings, ${BILLING_COLUMNS.join(", ")}`).limit(1).maybeSingle(),
+    supabase.from("organizations").select(`id, settings, plan, ${BILLING_COLUMNS.join(", ")}`).limit(1).maybeSingle(),
   ]);
   const orgId = (org as { id?: string } | null)?.id ?? null;
   const role = (prof as { role?: string } | null)?.role;
@@ -350,8 +353,16 @@ export async function POST(req: Request) {
    *
    * Both are env-overridable (ANTHROPIC_MODEL / ANTHROPIC_MODEL_ROUTINE) so the mix can be tuned
    * without a deploy.
+   *
+   * THE MONTH'S USAGE (cn-v1140): past 100% of the plan's usage, EVERY conversation runs on the
+   * routine model — the one the field chat already runs on, so nothing here is new — until the
+   * month turns or usage is added. One meter (lib/usage-meter), the same read the ring on the plan
+   * card shows, on the row read above (no second trip); a failed read is "full". Said once in the
+   * volatile block below, so Nort can say why if asked. Nothing is paused.
    */
-  const model = isStaffCaller ? modelFor("reasoning") : modelFor("routine");
+  const usage = await usageFor(orgId, org as UsageOrg | null);
+  const lighter = tierOfUsage(usage) === "lighter";
+  const model = lighter ? modelFor("routine") : isStaffCaller ? modelFor("reasoning") : modelFor("routine");
   const orgS = getOrgSettings((org as any)?.settings);
   const salesTax = featureOn(orgS.features, "sales_tax");
   const playbook = orgS.quote_playbook?.trim();
@@ -399,6 +410,14 @@ export async function POST(req: Request) {
       .limit(1)
       .maybeSingle();
     volatilePrompt += clockStateLine(openErr ? undefined : (openRow as OpenClockRow), orgS.timezone, !!openErr);
+  }
+  // THE LIGHTER MONTH, SAID ONCE (cn-v1140): one plain line so Nort can answer "why do you feel
+  // slower?" honestly, with the day it resets. No purchase door is named: the App Store app reaches
+  // this too and sells nothing (Apple 3.1.1); the plan card carries the doors where they exist.
+  // Volatile: it changes with the month and the meter, and must never key the cached prefix.
+  if (lighter) {
+    const resets = shortDate(usage.resetOn, "en");
+    volatilePrompt += `\n\nUSAGE: this company's usage for the month is used up, so you are running on the lighter model until ${resets}. Nothing is paused and every tool works. If asked why answers feel lighter, say so plainly in one line: the month's usage is used up and it resets ${resets}. Do not name a way to buy more.`;
   }
   // HOW THIS PERSON WANTS TO BE TALKED TO (0183). PER-PERSON, so it belongs in the VOLATILE block —
   // putting it in the cached prefix would key the cache per user instead of per org/role and throw

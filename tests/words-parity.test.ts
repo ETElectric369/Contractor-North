@@ -14,10 +14,10 @@ import type { WordCatalog } from "@/lib/words/types";
  * keep the scan honest.
  */
 
-/** The twelve catalogs (lib/words; nv_ the office's map since cn-v1139). */
-export const CATALOG_FLOOR = 12;
-/** The keys across every catalog at cn-v1139 (1,694 when the floor was set; 1,562 at cn-v1138); raise it as keys land. */
-export const KEYS_FLOOR = 1694;
+/** The thirteen catalogs (lib/words; nv_ the office's map since cn-v1139, us_ the usage meter since cn-v1140). */
+export const CATALOG_FLOOR = 13;
+/** The keys across every catalog at cn-v1140 (1,729 with the fixer's four — the shell's used-up line, the estimator's lighter line, the notice button, Ask The Owner — less the owner slot word; 1,726 with the plan card's words; 1,711 when the floor was set; 1,694 at cn-v1139; 1,562 at cn-v1138); raise it as keys land. */
+export const KEYS_FLOOR = 1729;
 
 /**
  * THE KEY FAMILIES THAT ARE CLICKABLES (Erik's law: Title Case in BOTH languages, every word
@@ -27,7 +27,7 @@ export const KEYS_FLOOR = 1694;
  * and four of them ("Tax report", "Activity audit", "Employee documents", "Employee handbook") are
  * not Title Case — the pages' own words, not the catalog's to change.
  */
-const TITLE_CASE_FAMILIES = ["sh_dock_", "sh_help_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_"];
+const TITLE_CASE_FAMILIES = ["sh_dock_", "sh_help_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_", "us_door_"];
 const TITLE_CASE_ES_ONLY = ["nv_page_"];
 /** Every word begins with a capital, a digit or a symbol; a {slot} is a hole, not a word; "/", "&", "+" and "·" pass. */
 const titleCase = (s: string) =>
@@ -41,7 +41,7 @@ const ROOT = process.cwd();
 const keysOf = (c: WordCatalog) => Object.keys(c.en);
 
 describe("the catalogs", () => {
-  it("there are twelve, each with a prefix of its own, and together they hold at least the floor's keys", () => {
+  it("there are thirteen, each with a prefix of its own, and together they hold at least the floor's keys", () => {
     expect(CATALOGS.length).toBeGreaterThanOrEqual(CATALOG_FLOOR);
     const prefixes = CATALOGS.map((c) => c.prefix);
     expect(new Set(prefixes).size).toBe(prefixes.length);
@@ -123,6 +123,23 @@ describe("the catalogs", () => {
     expect(dict("es").sh_help_startHere).toBe("Empieza Aquí");
     expect(dict("en").nv_page_leads).toBe("Leads");
     expect(dict("es").nv_page_leads).toBe("Prospectos");
+  });
+
+  it("the usage meter is in (cn-v1140): Usage = Uso, the two doors Title Case, no dollar and no estimate as a unit anywhere in it", () => {
+    const us = CATALOGS.find((c) => c.prefix === "us_")!;
+    expect(us).toBeTruthy();
+    expect(us.files).toEqual(["src/components/usage-ring.tsx", "src/lib/usage-words.ts", "src/app/(app)/settings/plan-card.tsx"]);
+    expect(dict("en").us_usage).toBe("Usage");
+    expect(dict("es").us_usage).toBe("Uso");
+    expect(dict("en").us_door_addUsage).toBe("Add Usage");
+    expect(dict("es").us_door_addUsage).toBe("Agregar Uso");
+    expect(dict("en").us_door_upgrade).toBe("Upgrade");
+    expect(dict("es").us_door_upgrade).toBe("Mejorar Plan");
+    for (const lang of ["en", "es"] as const) {
+      for (const [k, v] of Object.entries(us[lang])) {
+        expect(v, `${lang}:${k}`).not.toMatch(/\$|\d+ (full )?(estimates|presupuestos)|token|crédito|credit/i);
+      }
+    }
   });
 
   it("every clickable or title key family is Title Case in both languages — every word, De / Y / Del included", () => {

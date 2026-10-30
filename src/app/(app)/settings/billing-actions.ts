@@ -2,12 +2,27 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getStripe, STRIPE_PRICE_ID } from "@/lib/stripe";
 import { accountUpdateFields } from "@/lib/stripe-connect";
-import { planByTier, priceIdFor, type PlanTier } from "@/lib/plans";
+import { planByTier, priceIdFor } from "@/lib/plans";
 import { reportError } from "@/lib/observe";
 import { stripeSubscriptionLive, SECOND_SUBSCRIPTION_REFUSAL, NO_BILLING_ACCOUNT_REFUSAL } from "@/lib/lapse-doors";
+import { shellFromUserAgent } from "@/lib/native-shell";
+import { getOrgSettings } from "@/lib/org-settings";
+import { monthKeyFor } from "@/lib/usage-window";
+import {
+  ADD_USAGE_NOT_CONFIGURED,
+  ADD_USAGE_NOT_PRICED,
+  ADD_USAGE_WEB_ONLY,
+  NO_PLAN_CONFIGURED,
+  NO_SUCH_PLAN,
+  PICK_PLAN_WEB_ONLY,
+  extraUsagePriceId,
+  extraUsageUsdOf,
+  planNotConfiguredWords,
+} from "./billing-doors";
 
 function siteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
@@ -41,7 +56,12 @@ async function loadOwnerOrg() {
 }
 
 export async function startCheckout(formData?: FormData) {
-  const { supabase, org } = await loadOwnerOrg();
+  const { org } = await loadOwnerOrg();
+  // THE APP STORE APP SELLS NOTHING (Apple 3.1.1): /subscribe hides the plan cards there, and a form
+  // posted from the shell is refused in words — exactly as buyExtraUsage is.
+  if (shellFromUserAgent((await headers()).get("user-agent")).native) {
+    redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(PICK_PLAN_WEB_ONLY)}`);
+  }
   // NEVER A SECOND SUBSCRIPTION ON THE SAME CUSTOMER (cn-v1137). A subscription that is live (or
   // past due, or waiting on a card) is managed in the portal; a Checkout beside it would bill the
   // company twice. A canceled one cannot be restarted from the portal, so Checkout is its door and
@@ -52,14 +72,24 @@ export async function startCheckout(formData?: FormData) {
   let url: string | null = null;
   let errMsg: string | null = null;
 
-  // Which tier + cadence did they pick? Falls back to the legacy single price so an
-  // install configured the old way keeps working.
-  const tier = String(formData?.get("tier") ?? "") as PlanTier;
+  // WHICH TIER + CADENCE (cn-v1140): /subscribe's cards post both (monthly or annual, lib/plans
+  // priceIdFor). A tier that was posted is honored or refused in words — never quietly swapped for
+  // the legacy price under a plan the person did not choose. No tier at all is the legacy Subscribe
+  // Now door: the one price an install configured the old way (STRIPE_PRICE_ID) keeps working.
+  const tier = String(formData?.get("tier") ?? "");
   const cadence = String(formData?.get("cadence") ?? "monthly") === "annual" ? "annual" : "monthly";
-  const priceId = (planByTier(tier) && priceIdFor(tier, cadence)) || STRIPE_PRICE_ID;
+  let priceId: string | null = null;
+  if (tier) {
+    const plan = planByTier(tier);
+    priceId = plan ? priceIdFor(plan.tier, cadence) : null;
+    if (!priceId) errMsg = plan ? planNotConfiguredWords(plan.name, cadence) : NO_SUCH_PLAN;
+  } else {
+    priceId = STRIPE_PRICE_ID || null;
+    if (!priceId) errMsg = NO_PLAN_CONFIGURED;
+  }
 
   if (!priceId) {
-    errMsg = "No plan is configured yet.";
+    errMsg = errMsg ?? NO_PLAN_CONFIGURED;
   } else {
     try {
       const stripe = getStripe();
@@ -138,6 +168,73 @@ export async function openPortal() {
 
   if (errMsg) redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(errMsg)}`);
   redirect(url ?? "/settings");
+}
+
+/**
+ * ADD USAGE (cn-v1140): a one-time payment that raises this month's usage cap. The plan card's
+ * second door (Erik's design: Upgrade and Add Usage, nothing to explain).
+ *
+ * WHO AND WHERE: the owner or an admin (loadOwnerOrg refuses the rest in words), on the WEB — the
+ * App Store app sells nothing (Apple 3.1.1): the card hides the door there, and a form posted from
+ * the shell is refused in words. WHAT: STRIPE_PRICE_EXTRA_USAGE (billing-doors; the door is hidden
+ * when it is unset), retrieved with its product expanded so product.metadata.usage_usd — the
+ * internal dollars the purchase adds — is read ONCE here and written into the session's metadata as
+ * a string; the webhook (checkout.session.completed, kind "extra_usage") lands that figure as a
+ * usage_topups row (0401) for the month named here, keyed on the company's own calendar. ON OUR
+ * ACCOUNT: the same client startCheckout uses, never a connected account — this is the company's
+ * bill from us. The customer is the company's Stripe customer when it has one (so the receipt
+ * lands beside the subscription's), else Checkout collects the email.
+ *
+ * The way home: success lands on the card with ?usage=added ("Added — it shows on the ring within
+ * a minute": the webhook writes, the page only reads), cancel on the card as it was.
+ */
+export async function buyExtraUsage() {
+  const { org } = await loadOwnerOrg();
+  if (shellFromUserAgent((await headers()).get("user-agent")).native) {
+    redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(ADD_USAGE_WEB_ONLY)}`);
+  }
+  const priceId = extraUsagePriceId();
+  if (!priceId) {
+    redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(ADD_USAGE_NOT_CONFIGURED)}`);
+  }
+  let url: string | null = null;
+  let errMsg: string | null = null;
+
+  try {
+    const stripe = getStripe();
+    const price = await stripe.prices.retrieve(priceId, { expand: ["product"] });
+    const usageUsd = extraUsageUsdOf(price);
+    if (!usageUsd) {
+      // A price with no usage behind it would sell nothing the ring could show: refused, and filed
+      // where North's own team reads it (the product's metadata is the fix).
+      reportError("stripe:extra-usage:unpriced", new Error("the extra-usage price's product has no positive metadata.usage_usd"), {
+        orgId: org.id,
+        priceId,
+      });
+      errMsg = ADD_USAGE_NOT_PRICED;
+    } else {
+      const month = monthKeyFor(new Date(), getOrgSettings(org.settings).timezone);
+      const customerId = (org.stripe_customer_id as string | null) ?? null;
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        ...(customerId ? { customer: customerId } : { customer_email: (org.email as string | null) ?? undefined }),
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${siteUrl()}/settings?tab=getpaid&usage=added`,
+        cancel_url: `${siteUrl()}/settings?tab=getpaid`,
+        // THE SHAPE THE WEBHOOK READS, verbatim (api/stripe/webhook): kind, the company, the month
+        // the top-up belongs to, and the usage it adds.
+        metadata: { kind: "extra_usage", org_id: org.id, month, usage_usd: String(usageUsd) },
+      });
+      url = session.url;
+    }
+  } catch (e: any) {
+    reportError("stripe:extra-usage:create", e, { orgId: org.id, priceId });
+    errMsg = e?.message ?? "Stripe error";
+  }
+
+  // Redirects live OUTSIDE the try so they aren't swallowed by the catch.
+  if (errMsg) redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(errMsg)}`);
+  redirect(url ?? "/settings?tab=getpaid&billing_error=Could not start checkout.");
 }
 
 /**

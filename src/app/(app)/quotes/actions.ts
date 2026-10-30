@@ -30,8 +30,11 @@ import {
 import { reviewAgainstBook, type BookReview } from "@/lib/pricing/book-review";
 import { runCalc } from "@/lib/electrical-calc";
 import { estimatorCalcTools, estimatorQuantitiesLine } from "@/lib/nort/trade-prompt";
-import { recordAiUsage, aiAllowed, currentOrgId, fullEstimatesThisMonth, orgPlanTier, noteEstimateRun, modelFor } from "@/lib/ai-cost";
-import { estimateTierFor, overFullEstimateAllowance, planByTier } from "@/lib/plans";
+import { recordAiUsage, aiAllowed, currentOrgId, modelFor, tierOfUsage } from "@/lib/ai-cost";
+import { usageFor } from "@/lib/usage-meter";
+import { shortDate } from "@/lib/usage-window";
+import { callerLang } from "@/lib/lang-of";
+import { fillText, translator } from "@/lib/i18n";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
@@ -2263,9 +2266,8 @@ async function runEstimator(
       .eq("archived", false)
       .eq("price_list_item_options.archived", false),
   ]);
-  // ONE RUN, ONE TICK (cn-v1128): counted here, past the gate and the input checks, so an empty
-  // scope or a refused upload never burns the month's allowance. Best-effort, never awaited.
-  void noteEstimateRun((org as { id?: string } | null)?.id);
+  // No run tick any more (cn-v1140): the month's meter is the ledger's own dollars, which every
+  // model round below records through recordAiUsage — nothing is counted twice, nothing by hand.
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
   const rate = laborRateFor({ levelRate: laborRate, orgDefault: orgS.default_labor_rate }).rate; // THE one rule (lib/pricing/labor-rate)
@@ -2584,24 +2586,23 @@ async function guardEstimator(): Promise<
   // asker's role — and then the ceiling, in its own words.
   const gate = await aiAllowed(orgId, undefined, { ceilingWords: "Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it." });
   if (!gate.ok) return { ok: false, error: gate.why };
-  // THE PLAN'S ALLOWANCE, ENFORCED (cn-v1128). plans.ts has promised "40 / 120 / unlimited full
-  // estimates a month" since July and nothing ever read it (the deep review's pricing-01). Past the
-  // month's line the run moves to the routine model and the draft SAYS so, as the first line of
-  // its questions — it never refuses (overFullEstimateAllowance's contract: degrade, don't block).
-  // One run = one 'estimator:run' tick on the ledger (left by runEstimator, after the input checks),
-  // so the count is runs, never model rounds, and a refused input never burns the month.
-  const [used, plan] = await Promise.all([fullEstimatesThisMonth(orgId), orgPlanTier(orgId)]);
-  const tier = estimateTierFor(plan);
-  const over = overFullEstimateAllowance(tier, used);
+  // THE MONTH'S USAGE, ONE METER (cn-v1140; the estimate allowance of cn-v1128 is gone). The
+  // company's model spend this month against its plan's budget (lib/usage-meter, the same read the
+  // ring on the plan card shows): past 100% the run moves to the lighter model and the draft SAYS
+  // so, as the first line of its questions, with the day it resets — in the CALLER's language (the
+  // us_ catalog; lib/lang-of callerLang on the session the guard already has) and naming no
+  // purchase door, because the App Store app reaches this too and sells nothing (Apple 3.1.1). It
+  // never refuses (nothing stops; a failed read is "full"). The ledger's own dollars are the count,
+  // recorded by every model round through recordAiUsage, so no tick is left by hand and a refused
+  // input costs nothing.
+  const usage = await usageFor(orgId);
+  const tier = tierOfUsage(usage);
   const notes: string[] = [];
-  if (over) {
-    const p = planByTier(tier);
-    const now = new Date();
-    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-    const planWord = plan === "trial" ? "your trial" : `the ${p?.name} plan`;
-    notes.push(`Past this month's ${p?.fullEstimatesPerMonth} full estimates on ${planWord}, so this one ran on the lighter model. Full estimates come back ${next}.`);
+  if (tier === "lighter") {
+    const lang = await callerLang(ctx.supabase, ctx.userId);
+    notes.push(fillText(translator(lang)("us_estimatorLighter"), { date: shortDate(usage.resetOn, lang) }));
   }
-  return { ok: true, orgId, model: over ? modelFor("routine") : modelFor("reasoning"), notes };
+  return { ok: true, orgId, model: tier === "lighter" ? modelFor("routine") : modelFor("reasoning"), notes };
 }
 
 export async function generateQuoteDraft(

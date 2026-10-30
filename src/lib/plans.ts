@@ -12,12 +12,23 @@
  *     goes up because you're locked in, not because serving you got more expensive. That is the
  *     extraction pattern this product exists as an alternative to, and it is the single
  *     most-documented churn driver in the category. So: **included at every tier, permanently.**
- *   - Things that cost REAL money every time they run — reading a plan set, a researched estimate,
- *     a deep analysis. Those have a per-use bill attached, and pretending otherwise means either
- *     eating a loss on heavy users or quietly rationing them. **These are what the tiers meter,
- *     and we say so.**
+ *   - Things that cost REAL money every time they run — a model call: Nort's answer, a researched
+ *     estimate, a plan read, a receipt read. Those have a per-use bill attached, and pretending
+ *     otherwise means either eating a loss on heavy users or quietly rationing them. **This is
+ *     what the tiers meter, and we say so — as ONE meter called Usage.**
  *
  * The test suite enforces the first half: no tier may describe itself by what it withholds.
+ *
+ * ── ONE METER, LIKE THE CLAUDE USAGE WINDOW (cn-v1140) ──────────────────────────────────────
+ *
+ * Erik, 2026-10-30: "stick to KISS — look at how Anthropic pulls tokens; adding estimates doesn't
+ * make sense; usage is understandable to anyone; I don't want to have to explain all that to
+ * people." So the tiers no longer count estimates (cn-v1128's 40 / 120 / unlimited went with this
+ * wave). What a tier includes is a monthly USAGE BUDGET — internal dollars of model spend, the
+ * ledger's own unit (ai_usage.cost_usd), which the ring shows as a PERCENT and never as a figure —
+ * and the pricing words say it as a multiple: Handyman is the unit, Crew 3×, Company 8×. A trial
+ * runs on Handyman's budget, a comped company on Company's (lib/usage-meter). Extra usage can be
+ * bought for the month (0401 usage_topups) and raises the cap.
  *
  * ── TWO THINGS THIS DELIBERATELY DOES NOT DO ────────────────────────────────────────────────
  *
@@ -30,16 +41,15 @@
  *
  * 2. NO WAGE METAPHOR. It also said "Nort part-time" / "Nort works mornings" / "Nort full-time".
  *    That sells a unit we cannot honour: nobody can check whether an assistant "worked a morning",
- *    and the moment a customer tries, the claim falls apart. The unit here is one a contractor
- *    already counts — a full estimate — so "20 a month" means something he can verify against his
- *    own week.
+ *    and the moment a customer tries, the claim falls apart. The unit here is one everyone already
+ *    understands from every other subscription: a usage meter with a percent in it.
  *
  * ── NEVER CUT OFF OPERATIONS ────────────────────────────────────────────────────────────────
  *
- * Running out of the allowance does NOT lock the app, stop the crew, or disable a feature. The
- * heavy work drops to a cheaper model and says so plainly. It gets simpler; it never disappears.
- * Same shape as the past-due grace window in subscription.ts — a billing state must never become
- * a work stoppage.
+ * Running out of usage does NOT lock the app, stop the crew, or disable a feature. Nort and the
+ * estimator drop to the lighter model and say so plainly, until the month turns or usage is
+ * added. It gets simpler; it never disappears. Same shape as the past-due grace window in
+ * subscription.ts — a billing state must never become a work stoppage.
  *
  * ── THE PRICE ID IS AUTHORITATIVE, NOT THE NICKNAME ─────────────────────────────────────────
  *
@@ -61,18 +71,13 @@ export type PlanDef = {
   /** Who this fits, described by WORKLOAD — never by headcount. */
   blurb: string;
   /**
-   * AXIS 1 — COMPUTE. How much genuinely expensive work is included, in full estimates (plan
-   * take-offs and researched pricing), because that's a unit a contractor already counts.
-   * `null` means "more than anyone reaches in practice".
-   *
-   * These caps are set near the REAL economics, not where segmentation would like them. Measured:
-   * a full estimate costs ~$0.55, so a $59 plan breaks even around 89 of them. An earlier version
-   * of this file capped that tier at 20 — which is not cost recovery, it's segmentation wearing a
-   * cost costume, and it fails the principle at the top of this file. 40/month is two full
-   * researched estimates every working day: a genuine fair-use line almost nobody touches, with
-   * ~46% margin even for the person who does.
+   * AXIS 1 — USAGE. The month's model-spend budget in internal dollars (the ledger's unit,
+   * ai_usage.cost_usd). NEVER shown to a customer as a figure: the ring shows the percent of it
+   * used, the pricing words say the multiple of Handyman's (the `included` line). Set near the real
+   * economics: a $59 plan has room for about $10 of model spend and a healthy margin; the budgets
+   * rise faster than the prices so the bigger plans are the better deal on usage.
    */
-  fullEstimatesPerMonth: number | null;
+  usageUsdPerMonth: number;
   /**
    * AXIS 2 — OUR TIME. Support and setup are real cost that scales with a customer's size and has
    * NOTHING to do with leverage: a twenty-person company genuinely needs more of us than a solo
@@ -80,7 +85,7 @@ export type PlanDef = {
    * for their fourth employee never is.
    */
   support: string;
-  /** How the compute allowance reads on the pricing page. */
+  /** How the usage reads on the pricing page: a plain line, never a number with a unit to explain. */
   included: string;
 };
 
@@ -91,8 +96,8 @@ export const PLANS: PlanDef[] = [
     monthly: 59,
     annual: 47,
     blurb: "You quote a few jobs a month and want the paperwork to stop eating your evenings.",
-    fullEstimatesPerMonth: 40,
-    included: "40 full estimates a month — plan take-offs and researched pricing. Everything else, unlimited.",
+    usageUsdPerMonth: 10,
+    included: "Plenty of usage for a few jobs a month — Nort, the estimator and plan reading included. Everything else, unlimited.",
     support: "Help by email, and the app set up to run itself.",
   },
   {
@@ -101,8 +106,8 @@ export const PLANS: PlanDef[] = [
     monthly: 129,
     annual: 103,
     blurb: "You're quoting constantly and the office work has turned into a second job.",
-    fullEstimatesPerMonth: 120,
-    included: "120 full estimates a month, so bidding is a daily habit rather than a budget. Everything else, unlimited.",
+    usageUsdPerMonth: 30,
+    included: "3× the usage of Handyman, so bidding is a daily habit rather than a budget. Everything else, unlimited.",
     support: "We set it up with you — your price book imported, your inspection sheet written — and answer the same day.",
   },
   {
@@ -111,8 +116,8 @@ export const PLANS: PlanDef[] = [
     monthly: 299,
     annual: 239,
     blurb: "Estimating and paperwork are somebody's whole job — or should be.",
-    fullEstimatesPerMonth: null,
-    included: "Estimates and plan reading without a number on them. Everything else, unlimited.",
+    usageUsdPerMonth: 80,
+    included: "8× the usage of Handyman. Everything else, unlimited.",
     support: "Someone who knows your business: templates built for your trade, and a review of the numbers every quarter.",
   },
 ];
@@ -160,23 +165,4 @@ export function tierForPriceId(priceId: string | null | undefined): PlanTier | n
 /** True once at least one tier is configured — otherwise the picker has nothing to show. */
 export function plansConfigured(): boolean {
   return PLANS.some((p) => priceIdFor(p.tier, "monthly") || priceIdFor(p.tier, "annual"));
-}
-
-/**
- * Has this org used up the month's heavy work? Used to decide whether to route an estimate to the
- * cheaper model — NEVER to block one. Callers must degrade, not refuse.
- */
-export function overFullEstimateAllowance(tier: string | null | undefined, usedThisMonth: number): boolean {
-  const plan = planByTier(tier);
-  if (!plan || plan.fullEstimatesPerMonth === null) return false;
-  return usedThisMonth >= plan.fullEstimatesPerMonth;
-}
-
-/**
- * The tier whose estimate allowance applies to a stored plan value (cn-v1128): a trial runs on
- * Handyman's line, a real tier on its own, anything unknown on none (no cap — never a surprise).
- */
-export function estimateTierFor(plan: string | null | undefined): PlanTier | null {
-  if (plan === "trial") return "handyman";
-  return planByTier(plan)?.tier ?? null;
 }

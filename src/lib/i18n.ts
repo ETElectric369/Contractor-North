@@ -1,7 +1,8 @@
-// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in twelve catalogs,
+// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in thirteen catalogs,
 // one per side of the app (lib/words/*: tc_ the Time Clock, cs_ its server, gf_ the geofence, nb_
 // the texts and pushes, au_ sign-in, md_ My Day, tk_ tasks, jb_ jobs, mt_ materials, sh_ the shell,
-// nt_ Nort, nv_ the office's map — cn-v1139), each English beside Spanish under its own prefix. This file merges them: dict("en") is
+// nt_ Nort, nv_ the office's map — cn-v1139, us_ the usage meter — cn-v1140), each English beside
+// Spanish under its own prefix. This file merges them: dict("en") is
 // every catalog's English; dict("es") is every catalog's Spanish laid over the English, so a key
 // missing from a catalog's Spanish still reads in English at runtime and a person never sees a raw
 // key (tests/words-parity.test.ts is what refuses the gap before it ships). profiles.language is
@@ -35,14 +36,15 @@ import { words as materials } from "@/lib/words/materials";
 import { words as shell } from "@/lib/words/shell";
 import { words as nort } from "@/lib/words/nort";
 import { words as nav } from "@/lib/words/nav";
+import { words as usage } from "@/lib/words/usage";
 
 export const LANGUAGES: { code: Lang; label: string }[] = [
   { code: "en", label: "English" },
   { code: "es", label: "Español" },
 ];
 
-/** The twelve catalogs, by name, in the order they are merged. */
-export const CATALOGS: readonly WordCatalog[] = [timeclock, clockserver, geofence, messages, auth, myday, tasks, jobs, materials, shell, nort, nav];
+/** The thirteen catalogs, by name, in the order they are merged. */
+export const CATALOGS: readonly WordCatalog[] = [timeclock, clockserver, geofence, messages, auth, myday, tasks, jobs, materials, shell, nort, nav, usage];
 
 type Dict = Record<string, string>;
 

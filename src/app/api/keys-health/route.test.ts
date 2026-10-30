@@ -80,7 +80,7 @@ const get = async (live: boolean | string = false) => {
 describe("the keys-health door", () => {
   beforeEach(() => {
     for (const [k, v] of Object.entries(SECRETS)) vi.stubEnv(k, v);
-    for (const k of ["TWILIO_AUTH_TOKEN", "TWILIO_MESSAGING_SERVICE_SID", "TWILIO_FROM_NUMBER", "SUPABASE_SECRET_KEY", "SUPABASE_URL", "GOOGLE_MAPS_API_KEY"]) vi.stubEnv(k, "");
+    for (const k of ["TWILIO_AUTH_TOKEN", "TWILIO_MESSAGING_SERVICE_SID", "TWILIO_FROM_NUMBER", "SUPABASE_SECRET_KEY", "SUPABASE_URL", "GOOGLE_MAPS_API_KEY", "STRIPE_PRICE_EXTRA_USAGE"]) vi.stubEnv(k, "");
     vi.stubGlobal("fetch", vi.fn(async () => state.resend()));
     state.ctx = { userId: "admin-1" };
     state.limited = false;
@@ -121,7 +121,8 @@ describe("the keys-health door", () => {
     expect(body.probes).toBeUndefined();
     expect(body.configured.stripe).toEqual({
       secretKey: true, mode: "test", webhookSecret: true, connectWebhookSecret: true,
-      prices: { handyman: true, crew: true, company: true },
+      prices: { handyman: true, crew: true, company: true, extraUsage: false },
+      optionalPrices: ["extraUsage"],
     });
     expect(body.configured.resend).toEqual({ apiKey: true, from: true });
     expect(body.configured.twilio).toEqual({ accountSid: true, apiKeyPair: true, authToken: false, messagingService: false, fromNumber: false });
@@ -165,7 +166,12 @@ describe("the keys-health door", () => {
     const { body } = await get(true);
     expect(body.live).toBe(true);
     expect(body.probes.stripe.balance).toEqual({ ok: true });
-    expect(body.probes.stripe.prices).toEqual({ handyman: { ok: true }, crew: { ok: true }, company: { ok: true } });
+    expect(body.probes.stripe.prices).toEqual({
+      handyman: { ok: true },
+      crew: { ok: true },
+      company: { ok: true },
+      extraUsage: { ok: true, note: "STRIPE_PRICE_EXTRA_USAGE is not set (optional): the Add Usage door is hidden" },
+    });
     expect(state.price).toHaveBeenCalledTimes(3);
     expect(state.price.mock.calls.map((c: any[]) => c[0])).toEqual(["price_h", "price_c", "price_k"]);
     expect(body.probes.resend).toEqual({ ok: true, status: 200 });
@@ -178,6 +184,21 @@ describe("the keys-health door", () => {
     const again = await get(true);
     expect(again.body.probes.googleMaps.ok).toBe(true);
     expect(vi.mocked(geocodeAddress).mock.calls[1][0]).not.toBe(asked);
+  });
+
+  it("the optional Extra usage price (cn-v1140): blank is a note, never a failure; set, it is read like a tier's price and an inactive one is said the same way", async () => {
+    expect((await get()).body.configured.stripe.prices.extraUsage).toBe(false);
+    vi.stubEnv("STRIPE_PRICE_EXTRA_USAGE", "price-larkspur-1");
+    const { body } = await get(true);
+    expect(body.configured.stripe.prices.extraUsage).toBe(true);
+    expect(body.configured.stripe.optionalPrices).toEqual(["extraUsage"]);
+    expect(body.probes.stripe.prices.extraUsage).toEqual({ ok: true });
+    expect(state.price).toHaveBeenCalledTimes(4);
+    expect(state.price.mock.calls.map((c: any[]) => c[0])).toEqual(["price_h", "price_c", "price_k", "price-larkspur-1"]);
+    state.price = vi.fn(async (id?: string) => ({ active: id !== "price-larkspur-1" })) as any;
+    const again = await get(true);
+    expect(again.body.probes.stripe.prices.extraUsage).toEqual({ ok: false, error: "the price exists but is not active" });
+    expect(again.body.probes.stripe.prices.crew).toEqual({ ok: true });
   });
 
   it("a rejected Stripe key: the balance says 401 with the key scrubbed even when Stripe echoes it, and the prices are still read (a restricted key may lack balance rights yet charge fine)", async () => {

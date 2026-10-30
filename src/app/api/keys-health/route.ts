@@ -22,9 +22,10 @@ import { scrubSecrets } from "@/lib/scrub-secrets";
  * cannot hold the page and nothing throws out of the route.
  *
  * Live probes are each vendor's cheapest authenticated read: Stripe's balance AND the three plan
- * prices (free; the prices are read whatever the balance said, since a restricted key may lack
- * balance rights yet charge fine, and a key from the wrong Stripe account fails on the prices,
- * not at a checkout), Resend's domain list (free; a sending-only key is refused there and read as
+ * prices plus the optional Extra usage price (free; the prices are read whatever the balance said,
+ * since a restricted key may lack balance rights yet charge fine, and a key from the wrong Stripe
+ * account fails on the prices, not at a checkout; a blank optional price is a note, never a
+ * failure), Resend's domain list (free; a sending-only key is refused there and read as
  * working), Twilio's newest message, one page of one (free), one APNs provider token signed and
  * sent nowhere (proves the .p8 parses, not that Apple accepts the ids), one Google geocode (a
  * fresh address each look so a cached answer cannot stand in for the key; about half a cent),
@@ -43,7 +44,13 @@ const PRICE_NAMES = {
   handyman: "STRIPE_PRICE_HANDYMAN_MONTHLY",
   crew: "STRIPE_PRICE_CREW_MONTHLY",
   company: "STRIPE_PRICE_COMPANY_MONTHLY",
+  // The one-time "Extra usage" product (cn-v1140): OPTIONAL — blank hides the Add Usage door, so
+  // its absence is a note, never a failure; set, it is probed like a tier's price.
+  extraUsage: "STRIPE_PRICE_EXTRA_USAGE",
 } as const;
+type PriceKey = keyof typeof PRICE_NAMES;
+/** The prices whose absence is not a failure, named in the answer so a reader never counts them against a deploy. */
+const OPTIONAL_PRICES: readonly PriceKey[] = ["extraUsage"];
 
 const set = (name: string) => Boolean(process.env[name]);
 
@@ -54,7 +61,8 @@ function configured() {
       mode: set("STRIPE_SECRET_KEY") ? (stripeLivemode() ? "live" : "test") : null,
       webhookSecret: set("STRIPE_WEBHOOK_SECRET"),
       connectWebhookSecret: set("STRIPE_CONNECT_WEBHOOK_SECRET"),
-      prices: { handyman: set(PRICE_NAMES.handyman), crew: set(PRICE_NAMES.crew), company: set(PRICE_NAMES.company) },
+      prices: { handyman: set(PRICE_NAMES.handyman), crew: set(PRICE_NAMES.crew), company: set(PRICE_NAMES.company), extraUsage: set(PRICE_NAMES.extraUsage) },
+      optionalPrices: [...OPTIONAL_PRICES],
     },
     resend: { apiKey: set("RESEND_API_KEY"), from: set("EMAIL_FROM") },
     twilio: {
@@ -107,8 +115,8 @@ async function boxed(run: () => Promise<Probe>, ms = PROBE_TIMEOUT_MS): Promise<
   return out.error ? { ...out, error: scrubSecrets(out.error).slice(0, 200) } : out;
 }
 
-async function stripeProbe(): Promise<{ balance: Probe; prices: Record<keyof typeof PRICE_NAMES, Probe> }> {
-  const tiers = Object.keys(PRICE_NAMES) as (keyof typeof PRICE_NAMES)[];
+async function stripeProbe(): Promise<{ balance: Probe; prices: Record<PriceKey, Probe> }> {
+  const tiers = Object.keys(PRICE_NAMES) as PriceKey[];
   const [balance, ...priceList] = await Promise.all([
     boxed(async () => {
       await getStripe().balance.retrieve({}, { timeout: PROBE_TIMEOUT_MS, maxNetworkRetries: 0 });
@@ -116,14 +124,21 @@ async function stripeProbe(): Promise<{ balance: Probe; prices: Record<keyof typ
     }),
     ...tiers.map((tier) => {
       const id = process.env[PRICE_NAMES[tier]];
-      if (!id) return Promise.resolve<Probe>({ ok: false, error: `${PRICE_NAMES[tier]} is not set` });
+      if (!id) {
+        // An optional price that is blank is a door that is hidden, not a key that is missing.
+        return Promise.resolve<Probe>(
+          OPTIONAL_PRICES.includes(tier)
+            ? { ok: true, note: `${PRICE_NAMES[tier]} is not set (optional): the Add Usage door is hidden` }
+            : { ok: false, error: `${PRICE_NAMES[tier]} is not set` },
+        );
+      }
       return boxed(async () => {
         const price = await getStripe().prices.retrieve(id, {}, { timeout: PROBE_TIMEOUT_MS, maxNetworkRetries: 0 });
         return price.active ? { ok: true } : { ok: false, error: "the price exists but is not active" };
       });
     }),
   ]);
-  const prices = {} as Record<keyof typeof PRICE_NAMES, Probe>;
+  const prices = {} as Record<PriceKey, Probe>;
   tiers.forEach((tier, i) => { prices[tier] = priceList[i]; });
   return { balance, prices };
 }

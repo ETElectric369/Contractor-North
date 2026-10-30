@@ -121,8 +121,9 @@ export function stripeSubscriptionLive(org: {
 
 /** startCheckout's refusal when a subscription is already live (names ONE action). */
 export const SECOND_SUBSCRIPTION_REFUSAL = "A subscription already exists — use Manage Billing.";
-/** openPortal's refusal when Stripe has no customer for this company yet (names ONE action). */
-export const NO_BILLING_ACCOUNT_REFUSAL = "There's no billing account yet — Subscribe first.";
+/** openPortal's refusal when Stripe has no customer for this company yet (names ONE action: the
+ *  plan card's Upgrade door, which is where a company with no billing account picks a plan). */
+export const NO_BILLING_ACCOUNT_REFUSAL = "There's no billing account yet — Upgrade first.";
 
 /**
  * The one-line standing on Settings › Plan & subscription, for the owner/admin: how long the trial

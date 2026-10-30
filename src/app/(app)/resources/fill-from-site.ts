@@ -1,6 +1,6 @@
 "use server";
 
-import { aiAllowed } from "@/lib/ai-cost";
+import { aiAllowed, AI_CEILING_WORDS } from "@/lib/ai-cost";
 import { getAnthropic } from "@/lib/anthropic";
 import { featureOn, normalizeFeatures } from "@/lib/features";
 import { reportError } from "@/lib/observe";
@@ -18,9 +18,9 @@ import { RESOURCE_CATEGORIES } from "./categories";
  *
  * Reads the page (lib/site-read/fetch-page: public addresses only, pinned, capped, 8 seconds), then
  * its own card (extract.ts). Only when that leaves a box the person wants empty, AND Nort is switched
- * on for the company, AND the company is under its month's AI allowance, one small model call reads
- * the rest (ai-read.ts). At the allowance it degrades softly: what the site lists plainly is still
- * filled, and a line says so.
+ * on for the company, AND the company is under the 30-day AI ceiling (lib/ai-cost aiAllowed — the
+ * abuse belt, not the month's Usage ring), one small model call reads the rest (ai-read.ts). At the
+ * ceiling it degrades softly: what the site lists plainly is still filled, and a line says so.
  *
  * WRITES NOTHING. It hands back suggestions; the form fills its empty boxes and the person saves.
  * 20 reads an hour per company, so a pasted list or a script can't turn this into a crawler.
@@ -60,9 +60,9 @@ function failureWords(why: ReadFailure, status?: number): string {
   }
 }
 
-/** May the model read the rest? "off" = Nort is switched off (say nothing), "allowance" = the month's
- *  AI allowance is used (say so, softly), a refusal = the company's plan has ended (say why,
- *  cn-v1137), "on" = go. */
+/** May the model read the rest? "off" = Nort is switched off (say nothing), "allowance" = the 30-day
+ *  AI ceiling is hit (say so, softly, in the ceiling's own words so it never contradicts a 30% ring),
+ *  a refusal = the company's plan has ended (say why, cn-v1137), "on" = go. */
 type Db = Extract<Awaited<ReturnType<typeof requireStaff>>, { supabase: unknown }>["supabase"];
 async function modelMayRead(supabase: Db, orgId: string): Promise<"on" | "off" | "allowance" | { paused: string }> {
   const { data } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
@@ -105,7 +105,7 @@ export async function fillFromSite(input: { url: string; need?: string[] }): Pro
 
   const gate = await modelMayRead(ctx.supabase, orgId);
   if (gate === "allowance") {
-    return { ok: true, fields, note: "This month's AI allowance is used up, so only what the site lists plainly was filled." };
+    return { ok: true, fields, note: `${AI_CEILING_WORDS} Only what the site lists plainly was filled.` };
   }
   if (gate === "off") return { ok: true, fields };
   // The plan has ended: the page's own details still land, and the line says the one action.

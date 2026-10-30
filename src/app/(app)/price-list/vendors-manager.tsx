@@ -895,7 +895,7 @@ function CardLookup({
           <Button variant="outline" onClick={() => void run()} disabled={busy}>
             <Search className="h-4 w-4" /> {busy ? "Looking Up…" : "Look Up Contact Info"}
           </Button>
-          <span className="text-xs text-slate-500">{lookupPrice(1)}. Counts toward your monthly AI allowance. Nothing is saved until you press Save.</span>
+          <span className="text-xs text-slate-500">{lookupPrice(1)}. Counts toward your Usage. Nothing is saved until you press Save.</span>
         </div>
       ) : look.hidden ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">

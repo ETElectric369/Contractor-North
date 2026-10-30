@@ -12,6 +12,7 @@ import { tellStaleBankTransfers } from "@/lib/bank-transfer-alerts";
 import { sweepErrorEvents } from "@/lib/error-retention";
 import { sendBugWatchDigest } from "@/lib/bug-watch-digest";
 import { sendBillingNotices } from "@/lib/billing-notices";
+import { sendUsageNotices } from "@/lib/usage-notice-run";
 
 export const runtime = "nodejs";
 // The steps run one after another and the Nort review is a model call per company (cn-v1130):
@@ -22,9 +23,9 @@ export const maxDuration = 300;
  *  runs on): it is the slow step, and the three after it still need their turn. */
 const NORT_REVIEW_BUDGET_MS = 200_000;
 
-/** The try blocks below, counted: when EVERY one of them failed the night is a blocker, not eleven
+/** The try blocks below, counted: when EVERY one of them failed the night is a blocker, not twelve
  *  errors (cn-v1136). Keep this the number of steps, or the page never comes. */
-const STEP_COUNT = 11;
+const STEP_COUNT = 12;
 
 /**
  * The daily automation runner (Vercel Cron). One scheduled endpoint that does the
@@ -86,6 +87,16 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.billing_notices_error = e?.message ?? "failed";
     reportError("cron-billing-notices", e);
+  }
+  try {
+    // THE USAGE NOTICES (cn-v1140): one meter, Usage — at 80% of the month's budget the owner and
+    // admins are told once, at 100% once more, behind the same stamp (claim_billing_notice); past
+    // 100% nothing stops, Nort and the estimator run lighter until the 1st. Every company that is
+    // not lapsed, comped ones included; a meter that could not be read tells nobody.
+    result.usage_notices = await sendUsageNotices(supabase, startedAt);
+  } catch (e: any) {
+    result.usage_notices_error = e?.message ?? "failed";
+    reportError("cron-usage-notices", e);
   }
   // Customer reminders (quote follow-up / invoice due / appts) moved to their OWN cron
   // /api/automations/reminders (a few times a day, not just here) — see that route.
@@ -186,7 +197,7 @@ export async function GET(request: Request) {
   // without throwing, so "all eight" was unreachable and a failed step stayed green.
   const errors = Object.keys(result).filter((k) => k.endsWith("_error"));
   result.ok = errors.length === 0;
-  // EVERY STEP FAILED IS A BLOCKER (cn-v1136): eleven rows in the sink read as eleven troubles; one night
+  // EVERY STEP FAILED IS A BLOCKER (cn-v1136): twelve rows in the sink read as twelve troubles; one night
   // where nothing ran is the database or the service key gone, platform-wide, and pages North's own
   // team. Waited for: this function answers on the tick it files.
   if (errors.length === STEP_COUNT) {

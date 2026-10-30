@@ -521,6 +521,7 @@ export const SKIPPED_TABLES: readonly { table: string; why: string }[] = [
   // North's own bookkeeping
   { table: "error_events", why: "North's error sink: stack traces and payloads North's team triages, not the company's records" },
   { table: "ai_usage", why: "North's metering of model spend by day; a platform meter, not the company's books" },
+  { table: "usage_topups", why: "North's record of extra usage bought for a month (0401): a Stripe session and an internal amount; the receipt is Stripe's, the meter is North's" },
   { table: "page_opens", why: "North's page-open counts; a platform meter" },
   { table: "rate_limits", why: "North's request counters; no company in them" },
   { table: "platform_admins", why: "who is on North's own team; no company in it" },

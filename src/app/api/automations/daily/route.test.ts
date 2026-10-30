@@ -18,6 +18,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * ELEVEN STEPS NOW (cn-v1137): the billing notices (the trial's last days, a declined card, a plan
  * that ended) run right after the stale bank transfers and before the day-ahead digest, handed the
  * cron's client and the run's own start, their own try and their own row (cron-billing-notices).
+ *
+ * TWELVE STEPS NOW (cn-v1140): the usage notices (80% of the month's usage once, used up once) run
+ * right after the billing notices and before the day-ahead digest and the error sweep, handed the
+ * same client and start, their own try and their own row (cron-usage-notices).
  */
 const state = vi.hoisted(() => ({ client: null as any }));
 const steps = vi.hoisted(() => ({
@@ -25,6 +29,7 @@ const steps = vi.hoisted(() => ({
   fees: vi.fn(),
   stale: vi.fn(),
   billing: vi.fn(),
+  usage: vi.fn(),
   dayAhead: vi.fn(),
   review: vi.fn(),
   shelf: vi.fn(),
@@ -48,6 +53,7 @@ vi.mock("@/lib/processor-fee-capture", () => ({ backfillProcessorFees: steps.fee
 vi.mock("@/lib/stock-reconcile-check", () => ({ findShelfProblems: steps.shelf }));
 vi.mock("@/lib/bank-transfer-alerts", () => ({ tellStaleBankTransfers: steps.stale }));
 vi.mock("@/lib/billing-notices", () => ({ sendBillingNotices: steps.billing }));
+vi.mock("@/lib/usage-notice-run", () => ({ sendUsageNotices: steps.usage }));
 
 import { GET } from "./route";
 
@@ -59,6 +65,7 @@ const STEP_ROWS: [string, string][] = [
   ["processor_fees_error", "cron-processor-fees"],
   ["stale_bank_transfers_error", "cron-stale-bank-transfers"],
   ["billing_notices_error", "cron-billing-notices"],
+  ["usage_notices_error", "cron-usage-notices"],
   ["day_ahead_error", "cron-day-ahead"],
   ["error_sweep_error", "cron-error-sweep"],
   ["bug_watch_digest_error", "cron-bug-watch-digest"],
@@ -73,6 +80,7 @@ function everyStepWorks() {
   steps.fees.mockResolvedValue({ filled: 0 });
   steps.stale.mockResolvedValue({ told: 0 });
   steps.billing.mockResolvedValue({ orgs: 3, due: 1, sent: 1, skipped: { comped: 1 }, failed: 0 });
+  steps.usage.mockResolvedValue(USAGE_RUN);
   steps.dayAhead.mockResolvedValue({ orgs: 1, pushed: 1 });
   steps.review.mockResolvedValue({ made: 1, failed: 0, left: 0 });
   steps.shelf.mockResolvedValue({ problems: [], skipped: null });
@@ -88,6 +96,7 @@ function everyStepFails() {
   steps.fees.mockRejectedValue(fell("fees"));
   steps.stale.mockRejectedValue(fell("stale"));
   steps.billing.mockRejectedValue(fell("billing"));
+  steps.usage.mockRejectedValue(fell("usage"));
   steps.dayAhead.mockRejectedValue(fell("day ahead"));
   steps.review.mockRejectedValue(fell("review"));
   steps.shelf.mockRejectedValue(fell("shelf"));
@@ -100,6 +109,9 @@ function everyStepFails() {
     }),
   };
 }
+
+/** The usage step's answer (cn-v1140): companies read, told, the four skips, failed. */
+const USAGE_RUN = { orgs: 3, told: 1, skipped: { fine: 1, lapsed: 1, degraded: 0, already: 0 }, failed: 0 };
 
 const errorKeys = (body: Record<string, unknown>) => Object.keys(body).filter((k) => k.endsWith("_error"));
 
@@ -196,13 +208,49 @@ describe("GET /api/automations/daily", () => {
     everyStepWorks();
     const order: string[] = [];
     steps.billing.mockImplementation(async () => (order.push("billing_notices"), { orgs: 0, due: 0, sent: 0, skipped: { comped: 0 }, failed: 0 }));
+    steps.usage.mockImplementation(async () => (order.push("usage_notices"), USAGE_RUN));
     steps.dayAhead.mockImplementation(async () => (order.push("day_ahead"), { orgs: 1, pushed: 1 }));
     steps.errorSweep.mockImplementation(async () => (order.push("error_sweep"), { closed_deleted: 0, trace_deleted: 0 }));
     steps.digest.mockImplementation(async () => (order.push("bug_watch_digest"), { sent: 0, skipped: "not Monday" }));
     steps.review.mockImplementation(async () => (order.push("nort_review"), { made: 1, failed: 0, left: 0 }));
     steps.shelf.mockImplementation(async () => (order.push("stock_reconcile"), { problems: [], skipped: null }));
     await GET(req());
-    expect(order).toEqual(["billing_notices", "day_ahead", "error_sweep", "bug_watch_digest", "nort_review", "stock_reconcile"]);
+    expect(order).toEqual(["billing_notices", "usage_notices", "day_ahead", "error_sweep", "bug_watch_digest", "nort_review", "stock_reconcile"]);
+  });
+
+  it("the usage notices (cn-v1140) run right AFTER the billing notices and before the error sweep, handed the cron's client and the run's own start; a failed step is its own row and the steps after it still run", async () => {
+    everyStepWorks();
+    const before = Date.now();
+    let res = await GET(req());
+    expect(steps.usage).toHaveBeenCalledTimes(1);
+    const [client, nowMs] = steps.usage.mock.calls[0];
+    expect(client).toBe(state.client);
+    expect(nowMs).toBeGreaterThanOrEqual(before);
+    expect(nowMs).toBeLessThanOrEqual(Date.now());
+    expect(nowMs).toBe(steps.billing.mock.calls[0][1]); // the one start, shared with the billing notices
+    expect(steps.usage.mock.invocationCallOrder[0]).toBeGreaterThan(steps.billing.mock.invocationCallOrder[0]);
+    expect(steps.usage.mock.invocationCallOrder[0]).toBeLessThan(steps.errorSweep.mock.invocationCallOrder[0]);
+    let body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.usage_notices).toEqual(USAGE_RUN);
+    expect(body.usage_notices_error).toBeUndefined();
+
+    for (const fn of Object.values(steps)) fn.mockReset();
+    everyStepWorks();
+    steps.usage.mockRejectedValue(new Error("organizations could not be read: timeout"));
+    res = await GET(req());
+    body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.ok).toBe(false);
+    expect(errorKeys(body)).toEqual(["usage_notices_error"]);
+    expect(body.usage_notices_error).toBe("organizations could not be read: timeout");
+    expect(body.usage_notices).toBeUndefined();
+    expect(steps.reportError).toHaveBeenCalledTimes(1);
+    expect(steps.reportError).toHaveBeenCalledWith("cron-usage-notices", expect.any(Error));
+    expect(body.billing_notices).toEqual({ orgs: 3, due: 1, sent: 1, skipped: { comped: 1 }, failed: 0 }); // the step before it is untouched
+    expect(body.day_ahead).toEqual({ orgs: 1, pushed: 1 }); // the step after it still ran
+    expect(body.error_sweep).toEqual({ closed_deleted: 2, trace_deleted: 9 });
+    expect(steps.reportBlockerAwaited).not.toHaveBeenCalled();
   });
 
   it("the billing notices are handed the cron's client and the run's own start, and a failed step is its own row", async () => {
@@ -291,6 +339,7 @@ describe("GET /api/automations/daily", () => {
       processor_fees: { filled: 0 },
       stale_bank_transfers: { told: 0 },
       billing_notices: { orgs: 3, due: 1, sent: 1, skipped: { comped: 1 }, failed: 0 },
+      usage_notices: { orgs: 3, told: 1, skipped: { fine: 1, lapsed: 1, degraded: 0, already: 0 }, failed: 0 },
       day_ahead: { orgs: 1, pushed: 1 },
       nort_reviews: { made: 1, failed: 0, left: 0 },
       stock_reconcile: { problems: 0 },

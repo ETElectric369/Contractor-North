@@ -2,14 +2,16 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
 import { orgAccess } from "@/lib/org-access";
 import { callerRole, nortPausedWords } from "@/lib/lapse-words";
+import type { UsageMeter } from "@/lib/usage-meter";
 import type { AccessState } from "@/lib/subscription";
 
 /**
  * THE AI COST LAYER — what a call costs, which model to use, and whether this org
  * has spent too much (0162).
  *
- * The pricing promise is "AI included, never metered." The customer never sees a
- * meter; we absolutely need one. Two jobs live here:
+ * The pricing promise is "AI included, never cut off." The owner sees ONE meter — the Usage
+ * ring in Settings › Getting Paid (cn-v1140, lib/usage-meter: a percent and a reset day, never
+ * a dollar) — and past 100% nothing stops: the month runs lighter. Two jobs live here:
  *
  *   1. RECORD what every Anthropic call cost, per org, so "is this customer
  *      profitable?" has an answer before we ever charge anyone.
@@ -207,60 +209,23 @@ export async function aiAllowed(
 }
 
 /**
- * THE ESTIMATE ALLOWANCE'S COUNT (cn-v1128). Full estimates run this calendar month (UTC), read from
- * the ledger as the 'estimator:run' ticks noteEstimateRun leaves — one per run of the estimator's
- * gate, never per model round (a plan take-off is up to three rounds and still one estimate).
- * Fails OPEN to 0: a metering outage must never make an estimate simpler.
+ * WHICH MODEL TIER A COMPANY RUNS ON THIS MONTH (cn-v1140): "full" until the month's usage is used
+ * up, "lighter" past 100% — the routine model, until the month turns or usage is added. ONE RULE
+ * on the one meter (lib/usage-meter usageFor, read once by the caller): the estimator's gate and
+ * Nort's chat route both ask it on the meter they already hold, so the ring on the plan card and
+ * the model a call runs on can never disagree. NOTHING STOPS: a
+ * lighter tier is a model pick, never a refusal (aiAllowed above is the only door that refuses, and
+ * only for a plan that has ended or the abuse ceiling). Fails OPEN the way the meter does: a read
+ * that failed is "full" — a company never loses its model to an outage of ours.
+ *
+ * The estimate allowance this replaces (cn-v1128: fullEstimatesThisMonth, noteEstimateRun and the
+ * 'estimator:run' ticks; plans.ts fullEstimatesPerMonth) is gone — Erik, 2026-10-30: "adding
+ * estimates doesn't make sense; usage is understandable to anyone."
  */
-export async function fullEstimatesThisMonth(orgId: string | null | undefined): Promise<number> {
-  if (!orgId) return 0;
-  try {
-    const sb = createServiceClient();
-    const now = new Date();
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
-    const { data, error } = await sb
-      .from("ai_usage")
-      .select("calls")
-      .eq("org_id", orgId)
-      .eq("surface", "estimator:run")
-      .gte("usage_date", monthStart);
-    if (error || !data) return 0;
-    return (data as { calls?: number | null }[]).reduce((n: number, r) => n + Number(r.calls ?? 0), 0);
-  } catch {
-    return 0;
-  }
+export type AiTier = "full" | "lighter";
+
+/** The rule itself, on a meter already read: out = lighter. */
+export function tierOfUsage(meter: Pick<UsageMeter, "state">): AiTier {
+  return meter.state === "out" ? "lighter" : "full";
 }
 
-/** One tick on the ledger per estimator run: zero tokens, zero dollars, calls + 1. Best-effort. */
-export async function noteEstimateRun(orgId: string | null | undefined): Promise<void> {
-  if (!orgId) return;
-  try {
-    const sb = createServiceClient();
-    const { error } = await sb.rpc("record_ai_usage", {
-      p_org_id: orgId,
-      p_model: "none",
-      p_surface: "estimator:run",
-      p_input: 0,
-      p_cache_read: 0,
-      p_cache_write: 0,
-      p_output: 0,
-      p_cost_usd: 0,
-    });
-    // NOTHING SILENT: a refused tick means the cap never bites — said in the sink, not swallowed.
-    if (error) reportError("noteEstimateRun", error, { orgId });
-  } catch (e) {
-    reportError("noteEstimateRun", e, { orgId });
-  }
-}
-
-/** The org's plan as stored (trial, handyman, crew, company); null on any failure. */
-export async function orgPlanTier(orgId: string | null | undefined): Promise<string | null> {
-  if (!orgId) return null;
-  try {
-    const sb = createServiceClient();
-    const { data } = await sb.from("organizations").select("plan").eq("id", orgId).maybeSingle();
-    return (data as { plan?: string | null } | null)?.plan ?? null;
-  } catch {
-    return null;
-  }
-}

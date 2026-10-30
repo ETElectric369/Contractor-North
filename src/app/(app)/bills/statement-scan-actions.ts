@@ -3,7 +3,7 @@
 import { requireStaff } from "@/lib/staff-guard";
 import { reportError } from "@/lib/observe";
 import { getAnthropic } from "@/lib/anthropic";
-import { aiAllowed, modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, modelFor, recordAiUsage, AI_CEILING_WORDS } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { isSha256 } from "@/lib/content-hash";
 import { isPdfBytes } from "@/lib/pdf-text";
@@ -98,7 +98,8 @@ export async function readStatementScan(input: {
    */
   if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: `${name}: ${OWNER_SORTS_BANK}` };
   const gate = await aiAllowed(ctx.orgId, undefined, {
-    ceilingWords: `${name} wasn't read: this month's AI allowance is used up, and it resets with the month. Add it with the + button at the top and it is kept as a paper until then.`,
+    // The 30-day ceiling's own words (lib/ai-cost), so this never contradicts a 30% Usage ring.
+    ceilingWords: `${name} wasn't read: ${AI_CEILING_WORDS} Add it with the + button at the top and it is kept as a paper until then.`,
   });
   if (!gate.ok) return { ok: false, error: gate.why };
 

@@ -220,7 +220,7 @@ export function VendorImport({ existing, disabled, nortOn = true }: { existing: 
             {offer.kind === "photo"
               ? `${offer.file.name} is a photo. ${nortOn ? "Nort can read the names off it" : "The names can be read off it"} for about $${READ_EACH_USD.toFixed(2)}.`
               : `${offer.file.name} has no text in it, so it's probably a scan. ${nortOn ? "Nort can read it" : "It can be read"} for about $${READ_EACH_USD.toFixed(2)} a page.`}{" "}
-            It counts toward your monthly AI allowance, and nothing is saved until you press Add.
+            It counts toward your Usage, and nothing is saved until you press Add.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => void readWithNort()} disabled={reading}>
@@ -500,7 +500,7 @@ function ImportPreview({
               </Button>
               <p className="text-xs text-slate-500">
                 {nextBatch > 0
-                  ? `${nortOn ? "Nort searches" : "Searches"} the web for each name: ${lookupPrice(nextBatch)}. Counts toward your monthly AI allowance.${waiting.length > LOOKUP_PER_TAP ? ` ${LOOKUP_PER_TAP} at a time; press again for the rest.` : ""} Picking one only fills the row.`
+                  ? `${nortOn ? "Nort searches" : "Searches"} the web for each name: ${lookupPrice(nextBatch)}. Counts toward your Usage.${waiting.length > LOOKUP_PER_TAP ? ` ${LOOKUP_PER_TAP} at a time; press again for the rest.` : ""} Picking one only fills the row.`
                   : "Every ticked name has been looked up, or none is ticked."}
               </p>
             </>

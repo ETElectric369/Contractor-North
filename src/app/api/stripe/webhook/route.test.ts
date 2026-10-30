@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fakeDb } from "@/lib/bank-transfer-fake.test-util";
 
 /**
@@ -18,6 +18,10 @@ const state = vi.hoisted(() => ({
   noKey: false,
   /** What subscriptions.retrieve answers (the declined-card branch asks Stripe for the subscription). */
   subscription: null as any,
+  /** The Checkout sessions Stripe would list by PaymentIntent (the refund branch's way back to a top-up). */
+  sessions: [] as any[],
+  sessionLookups: [] as any[],
+  sessionListError: null as string | null,
 }));
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
@@ -29,6 +33,15 @@ vi.mock("@/lib/stripe", () => ({
       },
     },
     subscriptions: { retrieve: async () => state.subscription },
+    checkout: {
+      sessions: {
+        list: async (params: { payment_intent: string; limit: number }) => {
+          state.sessionLookups.push(params);
+          if (state.sessionListError) throw new Error(state.sessionListError);
+          return { data: state.sessions.filter((s) => s.payment_intent === params.payment_intent).slice(0, params.limit) };
+        },
+      },
+    },
   }),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => state.db }));
@@ -658,6 +671,242 @@ describe("the company's own billing (cn-v1137)", () => {
       await ourEvent("customer.subscription.updated", subscription({ status: "active", customer: "cus_stranger" }), "evt_up");
       expect(rpcs).toEqual([]);
       expect(reportError).toHaveBeenCalledWith("stripe:webhook:subscription-no-org", expect.any(Error), expect.objectContaining({ subscriptionId: "sub_1" }));
+    });
+  });
+});
+
+/**
+ * EXTRA USAGE BOUGHT THROUGH CHECKOUT (cn-v1140, 0401). "Add Usage" sells the one-time Extra usage
+ * product on OUR account in payment mode, and the webhook turns the paid session into the month's
+ * top-up through add_usage_topup, once per session. The rules, pinned: unpaid writes nothing and the
+ * async event lands it; a credit is 200 with nothing filed; a replay is 200 with nothing filed; a
+ * throw after payment is a BLOCKER with the company and the session and a 500 so Stripe retries; a
+ * payment-mode session of another kind, a connected account's session and a subscription-mode session
+ * are exactly what they were. charge.refunded on our account files a refunded top-up by its session;
+ * the top-up stays. The month it lands in is the LATER of the month it was sold for and the company's
+ * current month on its own calendar (the row's settings.timezone, read through the service client).
+ */
+describe("extra usage bought through Checkout (cn-v1140, 0401)", () => {
+  const ORG_ID = "0b0c0d0e-1111-4222-8333-444455556666";
+  const topupSession = (over: Record<string, unknown> = {}) => ({
+    id: "sess-larkspur-1",
+    mode: "payment",
+    payment_status: "paid",
+    payment_intent: "pi-larkspur-1",
+    amount_total: 1500,
+    metadata: { kind: "extra_usage", org_id: ORG_ID, month: "2026-10", usage_usd: "10" },
+    ...over,
+  });
+  const topupTables = () => ({
+    organizations: [{ id: ORG_ID, stripe_account_id: ACCT, stripe_customer_id: "cus_1", stripe_subscription_id: null, subscription_status: "trialing", settings: { timezone: "America/Los_Angeles" } }],
+    profiles: [] as any[],
+    notifications: [] as any[],
+    payments: [] as any[],
+  });
+  /** The webhook landing in the month the session was sold for: 8 PM Pacific, Oct 15 (only Date is faked). */
+  const landOn = (iso: string) => vi.setSystemTime(new Date(iso));
+  /** The sessions whose top-up has landed (0401's unique on the session): a second delivery answers inserted false. */
+  let landed: Set<string>;
+  let rpcs: [string, any][];
+  let rpcError: { message: string } | null;
+  const org = () => state.db.tables.organizations[0];
+  const ourEvent = (type: string, obj: any, id: string) => deliver(type, obj, id, null as any);
+  const topupRpcs = () => rpcs.filter(([fn]) => fn === "add_usage_topup");
+  const nothingFiled = () => {
+    expect(reportError).not.toHaveBeenCalled();
+    expect(reportErrorAwaited).not.toHaveBeenCalled();
+    expect(reportBlockerAwaited).not.toHaveBeenCalled();
+  };
+  /** The rpc fake: add_usage_topup lands once per session (a replay answers inserted false). */
+  const rpcOf = () =>
+    vi.fn(async (fn: string, args: any) => {
+      rpcs.push([fn, args]);
+      if (fn === "add_usage_topup") {
+        if (rpcError) return { data: null, error: rpcError };
+        if (landed.has(args.p_session)) return { data: { id: `topup-${args.p_session}`, inserted: false }, error: null };
+        landed.add(args.p_session);
+        return { data: { id: `topup-${args.p_session}`, inserted: true }, error: null };
+      }
+      if (fn === "release_billing_notice") return { data: false, error: null };
+      return { data: null, error: { message: `unknown function ${fn}` } };
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    landOn("2026-10-16T03:00:00Z");
+    state.db = fakeDb(topupTables());
+    state.pushes = [];
+    state.sessions = [];
+    state.sessionLookups = [];
+    state.sessionListError = null;
+    state.subscription = null;
+    landed = new Set();
+    rpcs = [];
+    rpcError = null;
+    state.db.rpc = rpcOf();
+    vi.mocked(reportError).mockClear();
+    vi.mocked(reportErrorAwaited).mockClear();
+    vi.mocked(reportBlockerAwaited).mockClear();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("sold in October, landing in November (opened at 11 PM Pacific on Oct 31, paid Nov 1): credited to NOVEMBER, where the person can use it", async () => {
+    landOn("2026-11-01T09:00:00Z"); // 1 AM Pacific, Nov 1
+    expect((await ourEvent("checkout.session.completed", topupSession(), "evt_topup_nov")).status).toBe(200);
+    expect(topupRpcs()).toEqual([["add_usage_topup", { p_org: ORG_ID, p_month: "2026-11", p_usd: 10, p_session: "sess-larkspur-1" }]]);
+    nothingFiled();
+  });
+
+  it("sold in October, paid the same evening (11 PM Pacific on Oct 31 is Nov 1 in UTC): OCTOBER — the company's calendar, read from its row", async () => {
+    landOn("2026-11-01T06:00:00Z");
+    expect((await ourEvent("checkout.session.completed", topupSession(), "evt_topup_oct")).status).toBe(200);
+    expect(topupRpcs()).toEqual([["add_usage_topup", { p_org: ORG_ID, p_month: "2026-10", p_usd: 10, p_session: "sess-larkspur-1" }]]);
+    // The same instant for a company on UTC is November.
+    state.db = fakeDb({ ...topupTables(), organizations: [{ ...org(), settings: { timezone: "UTC" } }] });
+    state.db.rpc = rpcOf();
+    expect((await ourEvent("checkout.session.completed", topupSession(), "evt_topup_utc")).status).toBe(200);
+    expect(topupRpcs().at(-1)).toEqual(["add_usage_topup", { p_org: ORG_ID, p_month: "2026-11", p_usd: 10, p_session: "sess-larkspur-1" }]);
+  });
+
+  it("a paid session: credited once through add_usage_topup with the exact arguments, 200, nothing filed, no subscription sync", async () => {
+    expect((await ourEvent("checkout.session.completed", topupSession(), "evt_topup_1")).status).toBe(200);
+    expect(rpcs).toEqual([["add_usage_topup", { p_org: ORG_ID, p_month: "2026-10", p_usd: 10, p_session: "sess-larkspur-1" }]]);
+    expect(landed).toEqual(new Set(["sess-larkspur-1"]));
+    nothingFiled();
+    expect(state.pushes).toHaveLength(0);
+    expect(org()).toMatchObject({ subscription_status: "trialing", stripe_subscription_id: null });
+  });
+
+  it("Stripe's second delivery of the same checkout (a replay): 200, the rpc answers inserted false, nothing filed", async () => {
+    await ourEvent("checkout.session.completed", topupSession(), "evt_topup_1");
+    expect((await ourEvent("checkout.session.completed", topupSession(), "evt_topup_1_again")).status).toBe(200);
+    expect(topupRpcs()).toHaveLength(2);
+    expect(landed.size).toBe(1);
+    nothingFiled();
+  });
+
+  it("completed(unpaid) — a delayed method still moving: nothing written, 200, nothing filed; the later async_payment_succeeded credits it", async () => {
+    expect((await ourEvent("checkout.session.completed", topupSession({ payment_status: "unpaid" }), "evt_topup_unpaid")).status).toBe(200);
+    expect(rpcs).toEqual([]);
+    nothingFiled();
+    expect((await ourEvent("checkout.session.async_payment_succeeded", topupSession({ payment_status: "paid" }), "evt_topup_async")).status).toBe(200);
+    expect(rpcs).toEqual([["add_usage_topup", { p_org: ORG_ID, p_month: "2026-10", p_usd: 10, p_session: "sess-larkspur-1" }]]);
+    nothingFiled();
+  });
+
+  it("paid but uncredited (the rpc refused): a BLOCKER with the company and the session, waited for, and 500 so Stripe retries — the retry that finds it fixed lands it once", async () => {
+    rpcError = { message: "A usage top-up must add something." };
+    const res = await ourEvent("checkout.session.completed", topupSession(), "evt_topup_1");
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("Extra usage was paid but not credited: add_usage_topup refused: A usage top-up must add something.");
+    expect(reportBlockerAwaited).toHaveBeenCalledTimes(1);
+    expect(reportBlockerAwaited).toHaveBeenCalledWith(
+      "stripe:webhook:topup-uncredited",
+      expect.objectContaining({ message: "add_usage_topup refused: A usage top-up must add something." }),
+      { orgId: ORG_ID, sessionId: "sess-larkspur-1", month: "2026-10", eventId: "evt_topup_1" },
+    );
+    expect(reportError).not.toHaveBeenCalled();
+    expect(landed.size).toBe(0);
+    // A read that failed is the same door.
+    rpcError = { message: "canceling statement due to statement timeout" };
+    expect((await ourEvent("checkout.session.completed", topupSession(), "evt_topup_1")).status).toBe(500);
+    expect(reportBlockerAwaited).toHaveBeenCalledTimes(2);
+    // Stripe's retry, with the fault fixed: credited once, 200, nothing more filed.
+    rpcError = null;
+    expect((await ourEvent("checkout.session.completed", topupSession(), "evt_topup_1")).status).toBe(200);
+    expect(landed).toEqual(new Set(["sess-larkspur-1"]));
+    expect(reportBlockerAwaited).toHaveBeenCalledTimes(2);
+  });
+
+  it("paid with a bad shape (the door stamped usage_usd 0, or a month that is not one): the same blocker and 500, the database never asked", async () => {
+    const res = await ourEvent("checkout.session.completed", topupSession({ metadata: { kind: "extra_usage", org_id: ORG_ID, month: "2026-10", usage_usd: "0" } }), "evt_topup_bad");
+    expect(res.status).toBe(500);
+    expect(reportBlockerAwaited).toHaveBeenCalledWith(
+      "stripe:webhook:topup-uncredited",
+      expect.objectContaining({ message: "the paid session cannot be credited: usage_usd is not a positive number" }),
+      expect.objectContaining({ orgId: ORG_ID, sessionId: "sess-larkspur-1" }),
+    );
+    expect((await ourEvent("checkout.session.completed", topupSession({ metadata: { kind: "extra_usage", org_id: ORG_ID, month: "2026-13", usage_usd: "10" } }), "evt_topup_bad2")).status).toBe(500);
+    expect(reportBlockerAwaited).toHaveBeenCalledTimes(2);
+    expect(rpcs).toEqual([]);
+  });
+
+  it("a payment-mode session of another kind, or none: untouched — no credit, no sync, nothing filed, 200", async () => {
+    expect((await ourEvent("checkout.session.completed", topupSession({ metadata: { kind: "something_else", org_id: ORG_ID } }), "evt_other")).status).toBe(200);
+    expect((await ourEvent("checkout.session.completed", topupSession({ metadata: null }), "evt_none")).status).toBe(200);
+    expect((await ourEvent("checkout.session.completed", topupSession({ metadata: {} }), "evt_empty")).status).toBe(200);
+    expect(rpcs).toEqual([]);
+    nothingFiled();
+    expect(org()).toMatchObject({ subscription_status: "trialing", stripe_subscription_id: null });
+  });
+
+  it("a session on a connected account that claims extra_usage is a contractor's own checkout: it never credits a company here", async () => {
+    expect((await deliver("checkout.session.completed", topupSession({ metadata: { kind: "extra_usage", org_id: ORG_ID, month: "2026-10", usage_usd: "999" } }), "evt_theirs")).status).toBe(200);
+    expect(rpcs).toEqual([]);
+    nothingFiled();
+  });
+
+  it("a subscription-mode session still syncs the subscription exactly as before, and never touches the meter", async () => {
+    state.subscription = {
+      id: "sub_1",
+      status: "active",
+      customer: "cus_1",
+      metadata: { org_id: ORG_ID },
+      items: { data: [{ price: { id: "price-larkspur-crew", nickname: "crew" }, current_period_end: 1_800_000_000 }] },
+    };
+    const session = { id: "sess-larkspur-sub", mode: "subscription", subscription: "sub_1", payment_status: "paid", metadata: { org_id: ORG_ID } };
+    expect((await ourEvent("checkout.session.completed", session, "evt_sub")).status).toBe(200);
+    expect(org()).toMatchObject({ subscription_status: "active", stripe_subscription_id: "sub_1", plan: "crew", current_period_end: new Date(1_800_000_000 * 1000).toISOString() });
+    expect(topupRpcs()).toEqual([]);
+    expect(rpcs).toEqual([["release_billing_notice", { p_org: ORG_ID, p_key: "lapsed" }]]);
+    nothingFiled();
+  });
+
+  describe("charge.refunded for a top-up", () => {
+    const charge = (over: Record<string, unknown> = {}) => ({ id: "ch-larkspur-1", payment_intent: "pi-larkspur-1", amount: 1500, amount_refunded: 1500, ...over });
+
+    it("on our account: the session is found by the charge's PaymentIntent, one error row names the company and the session, the top-up stays, 200", async () => {
+      await ourEvent("checkout.session.completed", topupSession(), "evt_topup_1");
+      state.sessions = [topupSession()];
+      expect((await ourEvent("charge.refunded", charge(), "evt_refund_1")).status).toBe(200);
+      expect(state.sessionLookups).toEqual([{ payment_intent: "pi-larkspur-1", limit: 1 }]);
+      expect(reportError).toHaveBeenCalledTimes(1);
+      expect(reportError).toHaveBeenCalledWith(
+        "stripe:webhook:topup-refunded",
+        expect.objectContaining({ message: "extra usage bought by checkout session sess-larkspur-1 was refunded; the usage stays" }),
+        { orgId: ORG_ID, sessionId: "sess-larkspur-1", month: "2026-10", usageUsd: "10", chargeId: "ch-larkspur-1", amountRefunded: 15 },
+      );
+      expect(reportBlockerAwaited).not.toHaveBeenCalled();
+      // The top-up stays: nothing was asked of the database but the one credit, and nothing pushed.
+      expect(rpcs).toEqual([["add_usage_topup", { p_org: ORG_ID, p_month: "2026-10", p_usd: 10, p_session: "sess-larkspur-1" }]]);
+      expect(landed).toEqual(new Set(["sess-larkspur-1"]));
+      expect(state.pushes).toHaveLength(0);
+    });
+
+    it("a charge of ours that was not a top-up (a subscription's, or one with no PaymentIntent): nothing filed, as before", async () => {
+      state.sessions = [topupSession({ id: "sess-larkspur-sub", mode: "subscription", payment_intent: "pi-larkspur-1", metadata: {} })];
+      expect((await ourEvent("charge.refunded", charge(), "evt_refund_sub")).status).toBe(200);
+      expect(state.sessionLookups).toHaveLength(1);
+      expect((await ourEvent("charge.refunded", charge({ payment_intent: null }), "evt_refund_nopi")).status).toBe(200);
+      expect(state.sessionLookups).toHaveLength(1);
+      nothingFiled();
+    });
+
+    it("a look at Stripe that failed is filed under its own words and never fails the webhook", async () => {
+      state.sessionListError = "Stripe timed out";
+      expect((await ourEvent("charge.refunded", charge(), "evt_refund_err")).status).toBe(200);
+      expect(reportError).toHaveBeenCalledTimes(1);
+      expect(reportError).toHaveBeenCalledWith("stripe:webhook:topup-refund-lookup", expect.objectContaining({ message: "Stripe timed out" }), { chargeId: "ch-larkspur-1", paymentIntentId: "pi-larkspur-1" });
+      expect(reportBlockerAwaited).not.toHaveBeenCalled();
+    });
+
+    it("a refund on a connected account (a contractor's customer) never asks Stripe for a session; a dispute of ours neither", async () => {
+      state.sessions = [topupSession()];
+      expect((await deliver("charge.refunded", charge(), "evt_refund_theirs")).status).toBe(200);
+      expect((await ourEvent("charge.dispute.created", charge(), "evt_dispute_ours")).status).toBe(200);
+      expect(state.sessionLookups).toEqual([]);
+      expect(reportError).not.toHaveBeenCalled();
     });
   });
 });

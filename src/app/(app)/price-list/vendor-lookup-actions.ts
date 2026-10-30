@@ -1,6 +1,6 @@
 "use server";
 
-import { aiAllowed, modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, modelFor, recordAiUsage, AI_CEILING_WORDS } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { getAnthropic } from "@/lib/anthropic";
 import { isPdfBytes } from "@/lib/pdf-text";
@@ -16,16 +16,17 @@ import { LOOKUP_CHUNK, LOOKUP_PER_DAY, lookupPlace, type LookupAnswer } from "./
  * Photo Or Scan (a picture or a scanned PDF of a list). Everything else about a list is read in the
  * browser for nothing.
  *
- * Both are staff only and this org only. Both check the month's AI allowance (aiSpendExceeded, the
- * $150 per 30 days every model call counts toward) BEFORE they spend, and write every call to the
+ * Both are staff only and this org only. Both check the 30-day AI ceiling (aiSpendExceeded, the
+ * $150 per 30 days every model call counts toward — the abuse belt, not the month's Usage ring)
+ * BEFORE they spend, and write every call to the
  * org's ai_usage ledger. Look Up also holds a daily cap of 100 lookups per company, counted from that
  * same ledger. NEITHER WRITES A VENDOR: what comes back fills the preview or the card's boxes, and a
  * person saves it with Add or Save (addVendorsBatch, saveLookedUp).
  */
 
 const NO_ORG = "Your account isn't attached to a company yet, so there's nothing to look up for.";
-const ALLOWANCE =
-  "Your company has used this month's AI allowance, so nothing was looked up and nothing was charged. It resets over the next few days; add the details yourself meanwhile.";
+/** The 30-day ceiling's own words (lib/ai-cost), so this never contradicts a 30% Usage ring, then what was (not) done. */
+const ALLOWANCE = `${AI_CEILING_WORDS} Nothing was looked up and nothing was charged; add the details yourself meanwhile.`;
 const NOT_ON = "Looking vendors up isn't switched on for your account yet. Add the details yourself for now.";
 
 export type LookupResult = { name: string; answer: LookupAnswer };

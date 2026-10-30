@@ -233,3 +233,20 @@ describe("aiAllowed — the plan that has ended comes before the ceiling, in the
     expect(await aiAllowed(null)).toEqual({ ok: true });
   });
 });
+
+/**
+ * THE MODEL TIER FOR THE MONTH (cn-v1140): tierOfUsage is the rule itself on a meter the caller
+ * already read (lib/usage-meter usageFor) — "lighter" only past 100%, never a refusal; the meter's
+ * open answer for a failed read is "fine", so it is "full". The estimator's gate and Nort's route
+ * read once and decide the same way.
+ */
+import { tierOfUsage } from "./ai-cost";
+
+describe("tierOfUsage — full until the month's usage is used up, lighter past it, never a refusal", () => {
+  it("the rule on a meter already read: out is lighter, everything else is full", () => {
+    expect(tierOfUsage({ state: "out" })).toBe("lighter");
+    expect(tierOfUsage({ state: "almost" })).toBe("full");
+    expect(tierOfUsage({ state: "watch" })).toBe("full");
+    expect(tierOfUsage({ state: "fine" })).toBe("full");
+  });
+});

@@ -81,11 +81,11 @@ beforeEach(() => {
 });
 
 describe("POST /api/chat and a plan that has ended", () => {
-  it("reads the billing columns on the same trip as the settings (projection law)", async () => {
+  it("reads the billing columns, and the plan the usage meter budgets by, on the same trip as the settings (projection law)", async () => {
     db.limited = true; // the door right after the gate
     await ask();
     expect(db.selects).toHaveLength(1);
-    expect(db.selects[0]).toBe(`id, settings, ${BILLING}`);
+    expect(db.selects[0]).toBe(`id, settings, plan, ${BILLING}`);
   });
 
   it("a standing company passes the gate and reaches the limiters as before", async () => {

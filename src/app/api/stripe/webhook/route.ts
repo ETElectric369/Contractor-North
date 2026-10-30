@@ -10,6 +10,7 @@ import { tierForPriceId } from "@/lib/plans";
 import { reportError, reportErrorAwaited } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { checkoutPaymentMethod, isBankCheckout, noteTransferStarted, resolveTransfer } from "@/lib/bank-transfer";
+import { creditExtraUsage, findTopupSession } from "@/lib/stripe-topup";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -40,6 +41,10 @@ function subscriptionMayReplace(held: { stripe_subscription_id: string | null; s
  * method 'ach') and checkout.session.async_payment_failed (the debit bounced; nothing was booked,
  * the office is told). Without them a debit is marked on its way (0338) and never ends; the daily
  * cron tells the office about any that outlive a week.
+ *
+ * EXTRA USAGE (cn-v1140, 0401) rides OUR endpoint: a payment-mode checkout.session.completed (or
+ * async_payment_succeeded) whose metadata kind is extra_usage credits the month's top-up through
+ * lib/stripe-topup, and charge.refunded on our account files a refunded top-up by its session.
  */
 /**
  * WHAT GOES ON THE INVOICE, WHICH IS NOT ALWAYS WHAT STRIPE CHARGED.
@@ -425,7 +430,46 @@ export async function POST(req: Request) {
     case "checkout.session.async_payment_succeeded":
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      if (session.metadata?.kind === "invoice_payment") {
+      if (session.mode === "payment" && session.metadata?.kind === "extra_usage" && !fromConnectedAccount) {
+        /**
+         * EXTRA USAGE BOUGHT (cn-v1140, 0401). "Add Usage" sells the one-time "Extra usage" product
+         * through a payment-mode Checkout on OUR account (settings/billing-actions buyExtraUsage),
+         * and this is where the purchase becomes the month's top-up: creditExtraUsage lands it once
+         * per session through add_usage_topup, in the LATER of the month it was sold for and the
+         * company's current month (it reads the company's timezone through this client — a Checkout
+         * opened at 11 PM Pacific on Oct 31 and paid Nov 1 lands in November). The rules, in order:
+         *
+         *   unpaid     completed(unpaid) is a delayed method still moving — nothing is written, 200;
+         *              the later async_payment_succeeded carries the same session, paid, and lands it;
+         *   credited   inserted: true — the row in usage_topups IS the record; nothing is filed;
+         *   replay     inserted: false — Stripe delivered the same checkout again; 200, nothing filed;
+         *   a throw    money was taken and nothing was given — the ONE thing here that must never be
+         *              quiet. A BLOCKER (stripe:webhook:topup-uncredited) with the company and the
+         *              session, waited for, so North's own team is paged (lib/observe-blocker), and a
+         *              500 so Stripe retries the event: the rpc is idempotent, so the retry that
+         *              finds the fault fixed lands it once. Keyed on the fault's words, not the
+         *              session: one storm is one page, and the retries heal every session behind it.
+         *
+         * OUR ACCOUNT ONLY. A session on a connected account is a contractor's own checkout with
+         * whatever metadata they gave it; it never credits a company here (the invoice branch
+         * below stands behind its own org<->account claim for the same reason) and falls through
+         * untouched, as any other kind of theirs always has. A payment-mode session of another
+         * kind, or none, is untouched too: the subscription sync below runs only for a session that
+         * carries a subscription, exactly as before.
+         */
+        const orgId = session.metadata.org_id ?? null;
+        try {
+          await creditExtraUsage(supabase, session);
+        } catch (e) {
+          await reportBlockerAwaited("stripe:webhook:topup-uncredited", e, {
+            orgId,
+            sessionId: session.id,
+            month: session.metadata.month ?? null,
+            eventId: event.id,
+          });
+          return new Response(`Extra usage was paid but not credited: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
+        }
+      } else if (session.metadata?.kind === "invoice_payment") {
         /**
          * MONEY IS RECORDED WHEN IT SETTLES, NOT WHEN THE PAGE FINISHES (audit 8).
          *
@@ -598,6 +642,36 @@ export async function POST(req: Request) {
     case "charge.refunded":
     case "charge.dispute.created": {
       const charge = event.data.object as Stripe.Charge & { payment_intent?: string | null };
+      if (event.type === "charge.refunded" && !fromConnectedAccount) {
+        /**
+         * A TOP-UP REFUNDED (cn-v1140). A refund of an "Extra usage" purchase is made by hand in
+         * OUR Stripe dashboard — it is Erik's manual call, never the app's — and the top-up STAYS:
+         * nothing here takes usage back from a company that may already have spent it, and 0401
+         * has no door for that on purpose. What this does is make sure it is not quiet: one error
+         * row per refunded session (the session is in the words, so two refunds are two rows, and
+         * Stripe's second delivery of the same one is a count), with the company, the session and
+         * what Stripe gave back. A charge carries no session; its PaymentIntent is the way back
+         * (findTopupSession), and a charge that was not a top-up — a subscription's — answers
+         * nothing and the branch below runs exactly as before. A look that failed is filed under
+         * its own words and never fails the webhook: a refund is Stripe's fact already.
+         */
+        try {
+          const pi = typeof charge.payment_intent === "string" ? charge.payment_intent : "";
+          const topup = pi ? await findTopupSession(stripe, pi) : null;
+          if (topup) {
+            reportError("stripe:webhook:topup-refunded", new Error(`extra usage bought by checkout session ${topup.id} was refunded; the usage stays`), {
+              orgId: topup.metadata?.org_id ?? null,
+              sessionId: topup.id,
+              month: topup.metadata?.month ?? null,
+              usageUsd: topup.metadata?.usage_usd ?? null,
+              chargeId: charge.id,
+              amountRefunded: Number((charge as { amount_refunded?: number }).amount_refunded ?? 0) / 100,
+            });
+          }
+        } catch (e) {
+          reportError("stripe:webhook:topup-refund-lookup", e, { chargeId: charge.id, paymentIntentId: charge.payment_intent ?? null });
+        }
+      }
       try {
         /**
          * THIS ALERT HAD NEVER FIRED, AND COULD NOT (audit v800 wave B).

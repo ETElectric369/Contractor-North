@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   hasActiveAccess,
   graceDaysLeft,
@@ -11,7 +13,7 @@ import {
   trialDaysLeftAt,
   trialDaysLeftLocal,
 } from "./subscription";
-import { tierForPriceId, planByTier, PLANS, INCLUDED_EVERYWHERE, overFullEstimateAllowance } from "./plans";
+import { tierForPriceId, planByTier, PLANS, INCLUDED_EVERYWHERE } from "./plans";
 
 const daysFromNow = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString();
 
@@ -109,34 +111,45 @@ describe("the plan ladder", () => {
     }
   });
 
-  it("the metered unit is something a contractor already counts", () => {
-    // Tokens, credits and minutes are OUR units. Estimates are his.
+  it("the metered unit is ONE meter called usage — never tokens, credits, minutes or a count of estimates (cn-v1140)", () => {
+    // Tokens, credits and minutes are OUR units; a count of estimates was a unit Erik would have
+    // had to explain. Usage, as a percent of the month, is understandable to anyone.
     for (const p of PLANS) {
-      if (p.fullEstimatesPerMonth !== null) expect(p.fullEstimatesPerMonth).toBeGreaterThan(0);
+      expect(p.usageUsdPerMonth).toBeGreaterThan(0);
       expect(p.included.toLowerCase()).not.toMatch(/token|credit|minute/);
+      expect(p.included).not.toMatch(/\d+ (full )?estimates/);
+      expect(p.included).not.toMatch(/\$/); // the budget is internal; the words say a multiple
+      expect(p.included.toLowerCase()).toContain("usage");
+      expect(p).not.toHaveProperty("fullEstimatesPerMonth");
     }
-    // The allowance must actually rise with the price, or the ladder means nothing.
-    const caps = PLANS.map((p) => p.fullEstimatesPerMonth ?? Infinity);
-    expect(caps).toEqual([...caps].sort((a, b) => a - b));
+    // The budget must actually rise with the price, or the ladder means nothing.
+    const budgets = PLANS.map((p) => p.usageUsdPerMonth);
+    expect(budgets).toEqual([...budgets].sort((a, b) => a - b));
+    expect(new Set(budgets).size).toBe(budgets.length);
   });
 
-  it("running out NEVER blocks — the allowance only routes to a cheaper model", () => {
+  it("the pricing words say the multiple of Handyman, and the multiple IS the budgets' ratio (the 3× / 8× are literals in `included`)", () => {
+    const handyman = planByTier("handyman")!.usageUsdPerMonth;
+    expect(planByTier("crew")!.usageUsdPerMonth / handyman).toBe(3);
+    expect(planByTier("company")!.usageUsdPerMonth / handyman).toBe(8);
+    expect(planByTier("crew")!.included).toMatch(/^3× the usage of Handyman/);
+    expect(planByTier("company")!.included).toMatch(/^8× the usage of Handyman/);
+    expect(planByTier("handyman")!.included).toBe("Plenty of usage for a few jobs a month — Nort, the estimator and plan reading included. Everything else, unlimited.");
+    for (const p of PLANS) expect(p.included).toMatch(/Everything else, unlimited\.$/);
+  });
+
+  it("running out NEVER blocks — the file says so, and the budgets sit near real economics, not near segmentation", () => {
     // A billing state must never become a work stoppage; same law as the past-due grace window.
-    // Derived from the plan, not hardcoded — the cap moved from 20 to 40 and a literal here went
-    // stale silently, which is the same class of bug as pricing copy drifting.
-    const cap = PLANS[0].fullEstimatesPerMonth!;
-    expect(overFullEstimateAllowance("handyman", cap - 1)).toBe(false);
-    expect(overFullEstimateAllowance("handyman", cap)).toBe(true); // "degrade now", not "refuse"
-    expect(overFullEstimateAllowance("company", 100_000)).toBe(false); // no cap to exceed
-    expect(overFullEstimateAllowance(null, 999)).toBe(false); // unknown plan never gets throttled
-  });
-
-  it("the caps sit near real economics, not near segmentation", () => {
-    // A full estimate costs ~$0.55; a $59 plan has ~$55 of room, so break-even is ~89. A cap far
-    // below that is segmentation wearing a cost costume — the exact thing the file forbids.
-    const entry = PLANS[0];
-    expect(entry.fullEstimatesPerMonth).not.toBeNull();
-    expect(entry.fullEstimatesPerMonth!).toBeGreaterThanOrEqual(35);
+    // The rule itself lives in lib/ai-cost tierOfUsage (full | lighter, never a refusal) and is
+    // pinned there; this is the ladder's own promise.
+    const source = readFileSync(join(process.cwd(), "src/lib/plans.ts"), "utf8");
+    expect(source).toContain("NEVER CUT OFF OPERATIONS");
+    expect(source).toMatch(/drop to the lighter model and say so plainly/);
+    // Every budget is a fraction of its price with a healthy margin, and the bigger plans are the
+    // better deal on usage: the budget rises faster than the price.
+    for (const p of PLANS) expect(p.usageUsdPerMonth).toBeLessThan(p.monthly * 0.3);
+    const perDollar = PLANS.map((p) => p.usageUsdPerMonth / p.monthly);
+    expect(perDollar).toEqual([...perDollar].sort((a, b) => a - b));
   });
 
   it("every tier states what OUR time buys, the one honest size-linked cost", () => {

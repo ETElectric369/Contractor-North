@@ -3,6 +3,8 @@ import { readAllOrgs, withBillingColumns } from "@/lib/cron-orgs";
 import { renderPlatformNoticeEmail, sendEmail } from "@/lib/email";
 import { notifyPeople } from "@/lib/notifications";
 import { errorMessage, reportError } from "@/lib/observe";
+import { langOf } from "@/lib/lang-of";
+import type { Lang } from "@/lib/locale";
 import { getOrgSettings } from "@/lib/org-settings";
 import { billingEnabled } from "@/lib/stripe";
 import { accessState, type AccessState } from "@/lib/subscription";
@@ -144,12 +146,23 @@ export type BillingNoticeRun = {
 
 /** The service client, typed as loosely as the other crons type it: every read and the claim are
  *  checked for their error below. */
-type NoticeClient = {
+export type NoticeClient = {
   from: (table: string) => any;
   rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
 };
 
-type Due = { key: string; words: NoticeWords };
+/** The words a notice is told in: one set for everyone (the billing notices, English today), or a
+ *  FUNCTION of the language (the usage notices, cn-v1140, lib/usage-notice-run) — notifyPeople groups
+ *  the owner and admins by their language and each group gets its own line; the email reads in the
+ *  owner's. */
+export type NoticeWordsByLang = NoticeWords | ((lang: Lang) => NoticeWords);
+
+export type Due = {
+  key: string;
+  words: NoticeWordsByLang;
+  /** The email button's words by language, for a notice told by language; "Open Settings" when absent. */
+  cta?: (lang: Lang) => string;
+};
 
 /** What, if anything, this company is told today. */
 export function dueNotice(st: AccessState, org: Pick<NoticeOrg, "billing_notices" | "current_period_end">): Due | null {
@@ -182,9 +195,11 @@ type Recipient = { id: string; email: string | null; role: string | null };
  * THE SEND, after the claim held: the bell line and the push to every active owner and admin (the
  * service client bypasses RLS, so `active` and the company are filtered by hand), then ONE email —
  * to the company's address, else the owner's, else nobody. Throws when any part did not go, so the
- * caller counts it; the stamp stands either way (see the file's head).
+ * caller counts it; the stamp stands either way (see the file's head). Exported for the usage
+ * notices (cn-v1140, lib/usage-notice-run), which are told through this one door with their words
+ * as a function of the language: the plain-words path is byte for byte the billing notices' own.
  */
-async function tell(supabase: NoticeClient, org: NoticeOrg, due: Due): Promise<void> {
+export async function tell(supabase: NoticeClient, org: NoticeOrg, due: Due): Promise<void> {
   const { data: people, error } = await supabase
     .from("profiles")
     .select("id, email, role")
@@ -194,18 +209,32 @@ async function tell(supabase: NoticeClient, org: NoticeOrg, due: Due): Promise<v
   if (error) throw new Error(`the owner and admins could not be read: ${errorMessage(error)}`);
   const recipients = (people ?? []) as Recipient[];
   const ids = recipients.map((p) => p.id);
-  const { title, body } = due.words;
+  const words = due.words;
   // notifyPeople never throws: a line that was not written comes back as bell false, and is counted
   // below AFTER the email has had its turn — one failed channel must not silence the other.
-  const { bell } = await notifyPeople(org.id, ids, "billing", { title, body, url: NOTICE_URL });
+  const { bell } = await notifyPeople(
+    org.id,
+    ids,
+    "billing",
+    typeof words === "function" ? (lang: Lang) => ({ ...words(lang), url: NOTICE_URL }) : { title: words.title, body: words.body, url: NOTICE_URL },
+  );
 
   const to = org.email?.trim() || recipients.find((p) => p.role === "owner" && p.email?.trim())?.email?.trim() || null;
   let emailProblem: string | null = null;
   if (to) {
+    // THE EMAIL'S LANGUAGE (cn-v1140): a notice told by language reads in the owner's — the first
+    // active owner, else the first admin — one small read, English when nobody or when the read
+    // fails (langOf never throws). Plain words are English and read nothing.
+    let lang: Lang = "en";
+    if (typeof words === "function") {
+      const reader = recipients.find((p) => p.role === "owner") ?? recipients[0];
+      if (reader) lang = (await langOf(supabase, [reader.id], org.id)).get(reader.id) ?? "en";
+    }
+    const { title, body } = typeof words === "function" ? words(lang) : words;
     const sent = await sendEmail({
       to,
       subject: title,
-      html: renderPlatformNoticeEmail({ heading: title, message: body, cta: { label: "Open Settings", href: `${appBaseUrl()}${NOTICE_URL}` } }),
+      html: renderPlatformNoticeEmail({ heading: title, message: body, cta: { label: due.cta?.(lang) ?? "Open Settings", href: `${appBaseUrl()}${NOTICE_URL}` } }),
       // North itself writes (no fromName); a reply goes to the support box when there is one.
       replyTo: process.env.SUPPORT_EMAIL || undefined,
     });

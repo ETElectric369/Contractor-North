@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { FormSubmit } from "@/components/form-submit";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import Link from "next/link";
 import {
   User,
@@ -73,13 +74,18 @@ import { gcalConfigured, connectionNeedsReauth } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
 import QRCode from "qrcode";
 import { translator } from "@/lib/i18n";
+import { asLang } from "@/lib/locale";
 import { settingsClusterLabel } from "@/lib/settings-words";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { accessState, type BillingOrg } from "@/lib/subscription";
 import { planStateLine, stripeSubscriptionLive } from "@/lib/lapse-doors";
 import { ownerFirstName } from "@/lib/lapse-words";
-import { startCheckout, openPortal, connectPayments, refreshConnectStatus, refreshConnectStatusForm } from "./billing-actions";
+import { shellFromUserAgent } from "@/lib/native-shell";
+import { usageFor, type UsageOrg } from "@/lib/usage-meter";
+import { PlanCard } from "./plan-card";
+import { extraUsageConfigured } from "./billing-doors";
+import { connectPayments, refreshConnectStatus, refreshConnectStatusForm } from "./billing-actions";
 import { PayoutsLinkButton } from "./payouts-link-button";
 import { connectStateFromOrg, connectStatusLabel, canAcceptPayments } from "@/lib/stripe-connect";
 import { disconnectQuickbooks, getDocCounters } from "./actions";
@@ -125,9 +131,10 @@ export default async function SettingsPage({
     gcal?: string;
     tab?: string;
     form?: string;
+    usage?: string;
   }>;
 }) {
-  const { billing, billing_error, connect, connect_error, qbo, qbo_error, gcal, tab, form: linkedForm } = await searchParams;
+  const { billing, billing_error, connect, connect_error, qbo, qbo_error, gcal, tab, form: linkedForm, usage } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -266,10 +273,19 @@ export default async function SettingsPage({
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
     : { data: null };
   // WHO HOLDS THE KEY (skeptic #43, S12): the plan card for office and crew names the owner instead
-  // of offering Subscribe and Manage Billing (startCheckout and openPortal refuse them anyway). THE
-  // one owner read every paused door uses (lib/lapse-words), made only for someone who cannot pick
-  // a plan; a failed read is filed there and reads "the owner".
-  const planOwnerFirst = !isAdmin && billingEnabled ? ((await ownerFirstName(profile?.org_id)) ?? "the owner") : null;
+  // of offering Upgrade, Add Usage and Manage Billing (the actions refuse them anyway). THE one owner
+  // read every paused door uses (lib/lapse-words), made only for someone who cannot pick a plan; a
+  // failed read is filed there and reads "the owner" (the card says it in the person's language).
+  // Null when there is no owner name on file: the card says "Ask the owner…" in the person's own
+  // language (us_askTheOwner) — never an English "the owner" dropped into a Spanish sentence.
+  const planOwnerFirst = !isAdmin && billingEnabled ? await ownerFirstName(profile?.org_id) : null;
+  // THE ONE USAGE METER (cn-v1140, lib/usage-meter): read on the row this page already holds —
+  // select("*") above carries every column USAGE_ORG_COLUMNS names (projection law) — never a second
+  // trip to the same table. A failed read answers 0% and fine inside it (degraded), never a throw.
+  const meter = await usageFor(profile?.org_id, (org as UsageOrg | null) ?? undefined);
+  // INSIDE THE APP STORE APP the plan card sells nothing (Apple 3.1.1): the ring and the words draw,
+  // Subscribe, Upgrade and Add Usage do not. One detector (lib/native-shell), read off the request.
+  const inShell = shellFromUserAgent((await headers()).get("user-agent")).native;
   // isStaff, not isAdmin (audit 6). The Connections cluster is gated on isStaff — which includes
   // office — so Alexa SEES the Google Calendar pane, but this read was admin-only, so `gcalConn`
   // came back null and the pane told her the org had no calendar connected and invited her to
@@ -717,54 +733,34 @@ export default async function SettingsPage({
                   canAccept={billingEnabled && canAcceptPayments(connectStateFromOrg(connectOrg))}
                 />
               </Section>
-              <Section title="Plan & subscription">
-                {billing === "success" && (
-                  <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Subscription active — thank you!</div>
-                )}
-                {billing_error && (
-                  <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{billing_error}</div>
-                )}
+              <Section title={t("us_cardTitle")}>
                 {(() => {
-                  // THE ONE ACCESS RULE, read here too (cn-v1137): the standing line is accessState's
-                  // reason and days (the company's own calendar for the trial), never a third count.
-                  // comped_until rides in select("*") above (0400). Owner/admin see the line.
-                  const o = org as Organization & { comped_until?: string | null };
-                  const access = billingEnabled ? accessState(o as BillingOrg, { tz: settings.timezone }) : null;
+                  // THE ONE METER (cn-v1140): the plan's name by THE one access rule's reason (cn-v1137;
+                  // comped_until rides in select("*") above, 0400), the ring and its words, the doors by
+                  // role, shell and standing — all drawn by plan-card.tsx from what this page read. The
+                  // standing line stays for grace and comped only; the trial's last day is the meter's own.
+                  const o = (org ?? {}) as Organization & { comped_until?: string | null };
+                  const access = accessState(o as BillingOrg, { tz: settings.timezone });
                   const stateLine =
-                    access && isAdmin ? planStateLine(access, { compedUntil: o.comped_until ?? null, tz: settings.timezone }) : null;
-                  // MANAGE BILLING whenever Stripe knows the customer (the card, the invoices, a live
-                  // subscription); SUBSCRIBE whenever no subscription is live — a canceled one cannot be
-                  // restarted from the portal, so both doors stand then (lib/lapse-doors, one rule).
-                  const portal = !!o.stripe_customer_id;
-                  const canSubscribe = !stripeSubscriptionLive(o);
+                    billingEnabled && isAdmin && (access.reason === "grace" || access.reason === "comped")
+                      ? planStateLine(access, { compedUntil: o.comped_until ?? null, tz: settings.timezone })
+                      : null;
                   return (
-                    <>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <Badge tone={o.subscription_status === "active" || access?.reason === "comped" ? "green" : "amber"}>
-                          {o.subscription_status}
-                        </Badge>
-                        <span className="text-sm text-slate-600">Plan: {o.plan}</span>
-                        {stateLine && <span className="text-sm text-slate-500">· {stateLine}</span>}
-                      </div>
-                      {billingEnabled ? (
-                        isAdmin ? (
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {portal && (
-                              <form action={openPortal}><FormSubmit variant="outline">Manage Billing</FormSubmit></form>
-                            )}
-                            {canSubscribe && (
-                              <form action={startCheckout}><FormSubmit>Subscribe</FormSubmit></form>
-                            )}
-                          </div>
-                        ) : (
-                          // Not a door for the office or the crew: the two actions above refuse them,
-                          // so the card says who can, by name (S12).
-                          <p className="mt-3 text-sm text-slate-600">Ask {planOwnerFirst ?? "the owner"} to pick a plan.</p>
-                        )
-                      ) : (
-                        <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t turned on yet.</p>
-                      )}
-                    </>
+                    <PlanCard
+                      lang={asLang(profile?.language)}
+                      access={access}
+                      plan={o.plan}
+                      meter={meter}
+                      isAdmin={isAdmin}
+                      inShell={inShell}
+                      billingEnabled={billingEnabled}
+                      hasCustomer={!!o.stripe_customer_id}
+                      liveSubscription={stripeSubscriptionLive(o)}
+                      addUsageOn={extraUsageConfigured()}
+                      ownerFirst={planOwnerFirst}
+                      stateLine={stateLine}
+                      notice={{ billing, usage, billingError: billing_error }}
+                    />
                   );
                 })()}
               </Section>

@@ -22,10 +22,9 @@ vi.mock("@/lib/ai-cost", () => ({
   aiAllowed: vi.fn(async () => ({ ok: true })),
   currentOrgId: vi.fn(async () => ORG),
   modelFor: () => "claude-haiku-4-5",
-  // The allowance gate (cn-v1128): never over, no plan, the run tick a no-op.
-  fullEstimatesThisMonth: vi.fn(async () => 0),
-  orgPlanTier: vi.fn(async () => null),
-  noteEstimateRun: vi.fn(async () => {}),
+  // The usage meter's rule (cn-v1140): the fake company below has no row, so the meter answers
+  // its open "fine" and the tier is full; the rule itself is the real one.
+  tierOfUsage: (m: { state: string }) => (m.state === "out" ? "lighter" : "full"),
 }));
 vi.mock("@/lib/anthropic", () => ({ getAnthropic: () => s.model, DEFAULT_MODEL: "claude-opus-4-8" }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));

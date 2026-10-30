@@ -99,8 +99,8 @@ export const looksLikeASecret = (v: string) =>
   /^[A-Za-z0-9+/_-]{32,}={0,2}$/.test(v) ||
   /:\/\/[^/\s]*:[^@\s]+@/.test(v);
 
-/** The real count of names the app's code reads and the file lists at cn-v1139 (the six tier prices and the six platform-set names in); raise it as names land. */
-export const NAMES_FLOOR = 82;
+/** The real count of names the app's code reads and the file lists at cn-v1140 (the six tier prices, the optional Extra usage price and the six platform-set names in); raise it as names land. */
+export const NAMES_FLOOR = 83;
 
 describe(".env.example", () => {
   const read = envNamesRead(false);

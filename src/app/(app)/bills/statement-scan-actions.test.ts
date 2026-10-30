@@ -591,11 +591,12 @@ describe("nothing is read twice, and nothing is read for free", () => {
     expect(state.calls).toEqual([]);
   });
 
-  it("a month's allowance used up says so, and names the door that keeps the paper", async () => {
+  it("the 30-day AI ceiling says so in the ceiling's own words (never 'this month's allowance'), and names the door that keeps the paper", async () => {
     state.over = true;
     const got = await drop();
     expect(got.ok).toBe(false);
-    expect(got.error).toContain("AI allowance");
+    expect(got.error).toContain("hit its AI ceiling for the last 30 days");
+    expect(got.error).not.toMatch(/allowance|this month/i);
     expect(got.error).toContain("+ button");
     expect(state.calls).toEqual([]);
   });

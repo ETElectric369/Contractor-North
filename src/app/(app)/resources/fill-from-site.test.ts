@@ -43,7 +43,8 @@ vi.mock("@/lib/site-read/extract", async (importOriginal) => {
     }),
   };
 });
-vi.mock("@/lib/ai-cost", () => ({
+vi.mock("@/lib/ai-cost", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()), // AI_CEILING_WORDS: the real words, so the note is judged against them
   modelFor: () => "claude-haiku-4-5",
   aiSpendExceeded: vi.fn(async () => state.over),
   aiAllowed: vi.fn(async () => (state.over ? { ok: false, reason: "ceiling", why: "the ceiling" } : { ok: true })),
@@ -248,12 +249,13 @@ describe("fillFromSite: the model only when needed, allowed and affordable", () 
     expect(r).toEqual({ ok: true, fields: { name: "Acme Electric Supply", phones: ["(530) 555-0150"], email: "sales@acme-supply.example", street: "9 Oak Ave", city: "Portola", state: "CA", zip: "96122", hours: "Mon–Fri 7 AM–4 PM" } });
   });
 
-  it("at the month's AI allowance, degrades softly: the page's own details, and a line saying why", async () => {
+  it("at the 30-day AI ceiling, degrades softly: the page's own details, and the ceiling's own line (never 'this month's allowance' — the Usage ring may read 30%)", async () => {
     state.over = true;
     const r = await fillFromSite({ url: "acme-supply.example" });
     expect(state.calls).toEqual([]);
     expect(r).toMatchObject({ ok: true, fields: { phones: ["(530) 555-0150"] } });
-    expect(r.ok && r.note).toMatch(/AI allowance is used up/);
+    expect(r.ok && r.note).toBe("Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it. Only what the site lists plainly was filled.");
+    expect(r.ok && r.note).not.toMatch(/allowance|this month/i);
   });
 
   it("a company with no switch map stored counts Nort as on", async () => {

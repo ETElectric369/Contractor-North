@@ -139,9 +139,9 @@ describe("the layout's wiring (source pins)", () => {
     expect(layout).toContain('import { hasActiveAccess, isCompedOrg, accessState, BILLING_COLUMNS } from "@/lib/subscription";');
     expect(layout).toContain('.select(`name, logo_url, ${BILLING_COLUMNS.join(", ")}, settings, address_line1, city, state, zip`)');
     for (const col of ["subscription_status", "trial_ends_at", "current_period_end", "comped_until"]) expect(BILLING_COLUMNS).toContain(col);
-    // Nort's chat route reads the same way.
+    // Nort's chat route reads the same way (the plan rides along since cn-v1140: the usage meter budgets by it).
     const chat = readFileSync("src/app/api/chat/route.ts", "utf8");
-    expect(chat).toContain('.select(`id, settings, ${BILLING_COLUMNS.join(", ")}`)');
+    expect(chat).toContain('.select(`id, settings, plan, ${BILLING_COLUMNS.join(", ")}`)');
   });
 
   it("the allowlist is nested INSIDE the pinned gate, after the alarm and before the grace banner", () => {
