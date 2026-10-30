@@ -47,6 +47,7 @@ import { boughtLines, breakerCard, groupLabel } from "@/lib/panel/breakers";
 import { jobLabel } from "@/lib/schedule-options";
 import { quoteFollowUpState } from "@/lib/action-items/due-filters";
 import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, sizeWords, sourceWords, spaceMap, titleWords } from "@/lib/panel/model";
+import { spaceWords } from "@/lib/panel/directory";
 import type { JobCircuit, JobPanel } from "@/lib/types";
 
 /**
@@ -2969,8 +2970,9 @@ async function readJobPanel(supabase: any, jobRef: unknown): Promise<Record<stri
   const circuits = (cRes.data ?? []) as JobCircuit[];
   const kept = circuits.filter((c) => c.state === "kept");
   const suggested = circuits.filter((c) => c.state === "suggested");
-  const where = (c: JobCircuit) =>
-    c.space == null ? null : `${c.space}${c.half ?? ""}${c.poles > 1 ? `-${c.space + 2 * (c.poles - 1)}${c.half ?? ""}` : ""}`;
+  // Where it sits, in the directory's words (spaceWords: the model's slots, so a quad's centre on
+  // 25B reads "25B/27A", never "25B-27B").
+  const where = (c: JobCircuit) => (c.space == null ? null : spaceWords(c));
   const panelName = new Map(panels.map((p) => [p.id, p.name]));
 
   const doors = panels.map((p) => {

@@ -61,7 +61,7 @@ async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, d
   if (doc === "panel") {
     const { data: j } = await supabase.from("jobs").select("name").eq("id", id).maybeSingle();
     const jobName = String((j as { name?: string | null } | null)?.name ?? "").trim();
-    filename = `Panel Directory${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
+    filename = `Circuit Map${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
   }
   return filename;
 }

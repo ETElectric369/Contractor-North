@@ -168,8 +168,9 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
     table: "job_panels",
     order: "id",
     columns: [
-      "id", "job_id", "name", "brand", "bus_amps", "main_amps", "spaces", "numbering", "dead_spaces", "twin_spaces", "photo_document_id",
-      "notes", "shown_on_portal", "created_by", "created_at", "updated_by", "updated_at", "removed_at", "removed_by",
+      "id", "job_id", "name", "brand", "bus_amps", "main_amps", "spaces", "numbering", "dead_spaces", "twin_spaces", "space_pitch_in",
+      "label_width_in", "label_width_in_right", "photo_document_id", "notes", "shown_on_portal", "created_by", "created_at", "updated_by",
+      "updated_at", "removed_at", "removed_by",
     ],
   },
   {

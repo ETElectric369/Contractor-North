@@ -18,6 +18,8 @@ import {
   breakerNeed,
   countWord,
   needSentence,
+  quadCentreHalf,
+  quadOuterSlots,
   quadSpaceFree,
   sizeWords,
   spaceMap,
@@ -228,18 +230,157 @@ export function lineKey(...texts: (string | null | undefined)[]): string | null 
   return r.kind === "breaker" ? sig(r.form, r.slots) : null;
 }
 
+// ── THE ONE LINE (the panel-first wave) ─────────────────────────────────────────────────────────
+
+/** How many breakers that came on this job's tickets aren't in a space yet, and the first group one
+ *  of them is in (the one Place Them opens). */
+export type Unplaced = { count: number; first: HaveGroup | null };
+
+type Counted = Pick<JobCircuit, "state" | "removed_at" | "work" | "space" | "poles" | "amps" | "kind">;
+
+const sizeKey = (poles: number, amps: number | null, kind: CircuitKind | null | undefined) =>
+  `${poles}|${amps ?? ""}|${kind && kind !== "standard" ? kind : ""}`;
+
+/**
+ * THE BOUGHT BREAKERS NOT IN A SPACE YET. A breaker that came is in when the kept NEW circuits it
+ * makes have spaces. Each one that came (in the card's order) first takes placed new circuits of its
+ * sizes; one that can't, but whose sizes match a kept new circuit with no space yet, is waiting to
+ * go in. One that matches neither is a spare, which the count already says; it is never counted
+ * here, so the line can't ask for a breaker to be placed that has no circuit to be.
+ */
+export function unplacedBought(bought: HaveGroup[], circuits: Counted[]): Unplaced {
+  const pool = (placed: boolean) => {
+    const m = new Map<string, number>();
+    for (const c of circuits) {
+      if (c.state !== "kept" || c.removed_at || c.work !== "new" || c.amps == null) continue;
+      if ((c.space != null) !== placed) continue;
+      const k = sizeKey(c.poles, c.amps, c.kind);
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  };
+  const placed = pool(true);
+  const waiting = pool(false);
+  const take = (m: Map<string, number>, k: string) => {
+    const n = m.get(k) ?? 0;
+    if (n < 1) return false;
+    m.set(k, n - 1);
+    return true;
+  };
+  let count = 0;
+  let first: HaveGroup | null = null;
+  for (const g of bought) {
+    for (let i = 0; i < Math.floor(g.qty); i++) {
+      const left = g.slots.filter((s) => !take(placed, sizeKey(s.poles, s.amps, s.kind)));
+      if (!left.length) continue;
+      if (left.filter((s) => take(waiting, sizeKey(s.poles, s.amps, s.kind))).length) {
+        count++;
+        first ??= g;
+      }
+    }
+  }
+  return { count, first };
+}
+
+/** "a, b and c". */
+const andWords = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+
+/** What the Breakers card says, in at most two lines with one door each, the same for the crew and
+ *  the office. Everything else (the tickets, the book, the swaps, the list and the shelf) is the
+ *  office's, behind Details. */
+export type BreakerSay = {
+  /** No kept new circuit yet: what to do first. Nothing else is said then. */
+  nothing: string | null;
+  /** "Short one 2P 20A (Bath Floor Heat)", and what Add To Materials writes for it: the orders the
+   *  materials list doesn't already carry. No orders = every one of them is on the list already. */
+  short: { text: string; orders: Order[] } | null;
+  /** "2 bought breakers not placed yet", and the group Place Them opens first. */
+  unplaced: { text: string; count: number; group: HaveGroup } | null;
+  /** "All breakers accounted for." when nothing is short, nothing waits, every new circuit is sized,
+   *  AND every ticket line could be read. */
+  ok: string | null;
+  /** Everything it could read is accounted for, but a ticket line couldn't be read (or is a credit
+   *  nobody can read), so it can't say "all": "Counted what I could read — one ticket line is
+   *  unreadable." Never beside `ok`. */
+  partial: string | null;
+  /** Said beside the line, never silent: a new circuit with no amps, a ticket line nobody can read. */
+  notes: string[];
+};
+
+export function breakerSay(card: BreakerCard, circuits: (Counted & Pick<JobCircuit, "source_row">)[]): BreakerSay {
+  const notes: string[] = [];
+  const { unsized } = card.need;
+  if (unsized.length) {
+    const one = unsized.length === 1;
+    notes.push(
+      `${unsized.length} new ${one ? "circuit has" : "circuits have"} no amps yet (${unsized.map((u) => u.name).join(", ")}), so ${one ? "it isn't" : "they aren't"} counted.`,
+    );
+  }
+  for (const u of card.unreadable) {
+    notes.push(
+      u.credit
+        ? `A credit on a ticket for ${u.description} (${qtyWords(u.qty)}) isn't counted either way.`
+        : `Can't read ${u.description} (${qtyWords(u.qty)}) on a ticket, so it isn't counted.`,
+    );
+  }
+
+  if (card.need.lines.length === 0 && unsized.length === 0) {
+    const waiting = circuits.filter((x) => x.state === "suggested" && !x.removed_at && !x.source_row?.flag_for && x.work === "new").length;
+    const keptOld = circuits.some((x) => x.state === "kept" && !x.removed_at);
+    const nothing =
+      waiting > 0
+        ? `Nothing counted yet. Keep the new circuits to count what they need: ${waiting} ${waiting === 1 ? "suggestion is" : "suggestions are"} waiting above.`
+        : keptOld
+          ? "No new circuits on the list yet. Add the new work to count its breakers."
+          : "Nothing counted yet. Add the new circuits to count what they need.";
+    return { nothing, short: null, unplaced: null, ok: null, partial: null, notes };
+  }
+
+  const onList = (o: Order) => o.alsoOn.some((w) => w.startsWith("On The List"));
+  let short: BreakerSay["short"] = null;
+  if (card.check.short.length) {
+    const items = card.check.short.map((s) => {
+      const names = s.circuits.map((x) => x.name).filter(Boolean);
+      return `${countWord(s.count).toLowerCase()} ${sizeWords(s.poles, s.amps, s.kind)}${names.length ? ` (${names.join(", ")})` : ""}`;
+    });
+    const listed = card.orders.filter(onList);
+    const orders = card.orders.filter((o) => !onList(o));
+    if (listed.length && orders.length) {
+      notes.push(`${andWords(listed.map((o) => sizeWords(o.short.poles, o.short.amps, o.short.kind)))} ${listed.length === 1 ? "is" : "are"} on the materials list already, not bought yet.`);
+    }
+    short = { text: `Short ${andWords(items)}`, orders };
+  }
+
+  const u = unplacedBought(card.bought, circuits);
+  const unplaced = u.count > 0 && u.first ? { text: `${u.count} bought ${u.count === 1 ? "breaker" : "breakers"} not placed yet`, count: u.count, group: u.first } : null;
+  // "All" only when every line was read: an unreadable ticket line (or a credit nobody can read) may
+  // be a breaker this job needs or has, so the most the line can say is what it could count.
+  const clear = !short && !unplaced && unsized.length === 0;
+  const unread = card.unreadable.length;
+  const ok = clear && unread === 0 ? "All breakers accounted for." : null;
+  const partial =
+    clear && unread > 0
+      ? `Counted what I could read — ${countWord(unread).toLowerCase()} ticket ${unread === 1 ? "line is" : "lines are"} unreadable.`
+      : null;
+  return { nothing: null, short, unplaced, ok, partial, notes };
+}
+
 // ── PLACE FROM WHAT WAS BOUGHT ──────────────────────────────────────────────────────────────────
 
 /** One circuit a bought breaker makes when it goes in at a space. */
 export type PlacedPart = { space: number; half: SpaceHalf | null; poles: number; amps: number; kind: CircuitKind | null; label: string };
 
 /**
- * Where each pole group of a breaker sits when it goes in at `space` (the top of the part): a
- * single or a 2P at the space itself; a twin's halves at A and B; a quad's two 1P outside on the A
- * halves of the space and the one below it, and its 2P inside on the B halves (J-011's Q21530CT at
- * 25: 25A, 27A, and 25B-27B); a quad of two 2P on the A and B halves.
+ * Where each pole group of a breaker sits when it goes in at `space` (its lower-numbered space): a
+ * single or a 2P at the space itself; a twin's halves at A and B; a quad the way its four handles
+ * hang on THIS panel (model quadCentreHalf / quadOuterSlots, the one rule): space 1 at the top, the
+ * outside 1P at the top of the space (A) and at the bottom of the next one on that side (B), the
+ * inside 2P kept at the space's B half, which covers that half and the next space's A — the middle
+ * two handles (J-011's Q21530CT at 25: 25A, 27B, and 25B/27A); space 1 at the bottom, where the
+ * next space hangs above, the outside 1P at 27A (top) and 25B (bottom) and the inside 2P at 25A
+ * (25A/27B). A quad of two 2P: the first at the outer half, the second at the centre's.
  */
-export function placementOf(g: Pick<HaveGroup, "form" | "slots">, space: number): PlacedPart[] {
+export function placementOf(g: Pick<HaveGroup, "form" | "slots">, space: number, numbering: JobPanel["numbering"] | null = "top_down"): PlacedPart[] {
   const s = g.slots;
   const part = (sp: number, half: SpaceHalf | null, x: BreakerSlot, label: string): PlacedPart => ({
     space: sp,
@@ -250,12 +391,14 @@ export function placementOf(g: Pick<HaveGroup, "form" | "slots">, space: number)
     label,
   });
   if (g.form === "twin" && s.length === 2) return [part(space, "A", s[0], "Top Half"), part(space, "B", s[1], "Bottom Half")];
+  const centre = quadCentreHalf(numbering);
   if (g.form === "quad" && s.length === 3) {
     const outer = s.filter((x) => x.poles === 1);
     const inner = s.find((x) => x.poles === 2)!;
-    return [part(space, "A", outer[0], "Outside, Top"), part(space + 2, "A", outer[1], "Outside, Bottom"), part(space, "B", inner, "Inside 2-Pole")];
+    const [top, bottom] = quadOuterSlots(space, numbering);
+    return [part(top.space, top.half, outer[0], "Outside, Top"), part(bottom.space, bottom.half, outer[1], "Outside, Bottom"), part(space, centre, inner, "Inside 2-Pole")];
   }
-  if (g.form === "quad" && s.length === 2) return [part(space, "A", s[0], "First 2-Pole"), part(space, "B", s[1], "Second 2-Pole")];
+  if (g.form === "quad" && s.length === 2) return [part(space, centre === "A" ? "B" : "A", s[0], "First 2-Pole"), part(space, centre, s[1], "Second 2-Pole")];
   return [part(space, null, s[0], s[0].poles > 1 ? `The ${s[0].poles}-Pole` : "The Breaker")];
 }
 

@@ -218,7 +218,7 @@ describe("Save As Circuit Map", () => {
     if (!r.ok) return;
     expect(r.message).toBe(`Saved as the circuit map on Andrew Crake's page. It replaces "Final Circuit Map", so Andrew Crake sees only the new one.`);
 
-    // The same print page as Print Panel Directory, through the PDF engine, as the office.
+    // The same print page as Print Circuit Map, through the PDF engine, as the office.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`https://app.example.com/api/pdf/panel/${JOB}?m=0.5`);

@@ -125,9 +125,124 @@ describe("panel.suggest: the registry's only panel verb, a suggestion", () => {
     );
     expect(r).toEqual({ ok: false, error: "Circuit 1: 17 amps isn't a breaker size. Pick 15, 20, 30…" });
   });
+
+  it("learns the lines: a tandem 20/20 on 17 is two suggestions, 17A and 17B; a 2-pole 30 on 9 and 11 is one, on 9 with two poles", async () => {
+    const back = (id: string, description: string, space: number, half: "A" | "B" | null, poles: number, amps: number) => ({
+      id, room: null, description, panel_label: null, amps, poles, kind: null, space, half, state: "suggested", source: "nort", source_row: { key: id },
+    });
+    s.client = fakeSupabase(
+      {
+        "jobs.select": [{ data: { id: JOB, job_number: "J-101", name: "Larkspur" }, error: null }],
+        "job_circuits.select": [{ data: [], error: null }, { data: null, error: null }],
+        "job_panels.select": [{ data: [{ id: PANEL_ID }], error: null }],
+        "job_circuits.insert": [
+          { data: [back("n1", "Bar", 17, "A", 1, 20), back("n2", "Mini Fridge", 17, "B", 1, 20), back("n3", "Mini Split", 9, null, 2, 30)], error: null },
+        ],
+      },
+      calls,
+    );
+    const def = REGISTRY["panel.suggest"];
+    const r = await def.handler(
+      def.input.parse({
+        job_id: JOB,
+        circuits: [
+          { description: "Bar", space: 17, form: "tandem", amps: 20 },
+          { description: "Mini Fridge", space: 17, form: "tandem", amps: 20 },
+          { description: "Mini Split", spaces: [9, 11], form: "2-pole", amps: 30 },
+        ],
+      }),
+      { userId: "u1", orgId: ORG, role: "tech" },
+    );
+    expect(r.ok).toBe(true);
+    const ins = calls.find((c) => c.verb === "insert")!;
+    expect(ins.payload).toEqual([
+      expect.objectContaining({ description: "Bar", space: 17, half: "A", poles: 1, amps: 20, state: "suggested", source: "nort", panel_id: PANEL_ID }),
+      expect.objectContaining({ description: "Mini Fridge", space: 17, half: "B", poles: 1, amps: 20, state: "suggested", source: "nort" }),
+      expect.objectContaining({ description: "Mini Split", space: 9, half: null, poles: 2, amps: 30, state: "suggested", source: "nort" }),
+    ]);
+    expect(r.recorded).toBe(
+      "Suggested on Larkspur: 20A · 1P · Bar on 17A; 20A · 1P · Mini Fridge on 17B; 30A · 2P · Mini Split on 9/11. Nothing counts until someone taps Keep on the job's Panel tab.",
+    );
+    // Still a suggestion a person keeps: no confirm card, no keep verb (the frozen agent-write set).
+    expect(needsConsent(def, "agent", false)).toBe(false);
+    expect(listActions({ group: "panel" }).map((a) => a.name)).toEqual(["panel.suggest"]);
+  });
+
+  it("a lone tandem with no half comes back as the question to ask, and nothing is read or written", async () => {
+    s.client = fakeSupabase({ "jobs.select": [{ data: { id: JOB, job_number: "J-101", name: "Larkspur" }, error: null }] }, calls);
+    const def = REGISTRY["panel.suggest"];
+    const r = await def.handler(def.input.parse({ job_id: JOB, circuits: [{ description: "Bar", space: 17, form: "tandem", amps: 20 }] }), {
+      userId: "u1",
+      orgId: ORG,
+      role: "owner",
+    });
+    expect(r).toEqual({ ok: false, error: "Circuit 1: which half of space 17 is it, A (the top) or B (below)?" });
+    expect(calls.map((c) => c.table)).toEqual(["jobs"]);
+  });
+
+  it("a quad heard on a panel numbered bottom up hangs that panel's way: the centre at 1A, the singles 3A then 1B (model quadCentreHalf)", async () => {
+    const back = (id: string, description: string, space: number, half: "A" | "B", poles: number) => ({
+      id, room: null, description, panel_label: null, amps: 20, poles, kind: null, space, half, state: "suggested", source: "nort", source_row: { key: id },
+    });
+    s.client = fakeSupabase(
+      {
+        "jobs.select": [{ data: { id: JOB, job_number: "J-101", name: "Larkspur" }, error: null }],
+        // Read ONCE, before the words are placed (a quad needs the numbering), and used again for the landing.
+        "job_panels.select": [{ data: [{ id: PANEL_ID, numbering: "bottom_up" }], error: null }],
+        "job_circuits.select": [{ data: [], error: null }, { data: null, error: null }],
+        "job_circuits.insert": [{ data: [back("q1", "Garage", 3, "A", 1), back("q2", "Floor Heat", 1, "A", 2), back("q3", "Porch", 1, "B", 1)], error: null }],
+      },
+      calls,
+    );
+    const def = REGISTRY["panel.suggest"];
+    const r = await def.handler(
+      def.input.parse({
+        job_id: JOB,
+        circuits: [
+          { description: "Garage", space: 1, form: "quad", poles: 1, amps: 20 },
+          { description: "Floor Heat", space: 1, form: "quad", poles: 2, amps: 20 },
+          { description: "Porch", space: 1, form: "quad", poles: 1, amps: 20 },
+        ],
+      }),
+      { userId: "u1", orgId: ORG, role: "tech" },
+    );
+    expect(r.ok).toBe(true);
+    const ins = calls.find((c) => c.verb === "insert")!;
+    expect(ins.payload.map((p: any) => [p.description, p.space, p.half, p.poles])).toEqual([
+      ["Garage", 3, "A", 1],
+      ["Floor Heat", 1, "A", 2],
+      ["Porch", 1, "B", 1],
+    ]);
+    expect(calls.filter((c) => c.table === "job_panels")).toHaveLength(1);
+  });
+
+  it("the agent's tool offers the form and the spaces words", () => {
+    const tool = agentWriteToolsForRole("tech").tools.find((t) => t.name === "panel__suggest")!;
+    const item = (tool.input_schema.properties as any).circuits.items.properties;
+    expect(item.form.enum).toEqual(["single", "tandem", "2-pole", "3-pole", "quad"]);
+    expect(item.spaces.type).toBe("array");
+    expect(item.half.enum).toEqual(["A", "B"]);
+    expect(tool.description).toMatch(/TANDEM is two circuits sharing one space/);
+  });
 });
 
 describe("get_job_panel: Nort reads the panel", () => {
+  it("a quad's centre 2-pole kept on 25B reads 25B/27A — the handles it truly holds — never 25B-27B", async () => {
+    const centre = { ...FINAL_MAP[0], id: "centre", description: "Floor Heat", poles: 2, amps: 20, space: 25, half: "B" };
+    s.client = fakeSupabase(
+      {
+        "jobs.select": [{ data: { id: JOB, job_number: "J-011", name: "13897 Honeysuckle" }, error: null }],
+        "job_panels.select": [{ data: [PANEL], error: null }],
+        "job_circuits.select": [{ data: [centre], error: null }],
+        "rpc.breakers_bought_for_job": [{ data: [], error: null }],
+      },
+      calls,
+    );
+    const out = JSON.parse(await runDataTool("get_job_panel", { job_id: JOB }, s.client));
+    expect(out.circuits.find((c: { id: string }) => c.id === "centre").space).toBe("25B/27A");
+    expect(JSON.stringify(out)).not.toContain("25B-27B");
+  });
+
   it("is offered to the crew as well as the office (it is not a staff-only tool)", () => {
     expect(DATA_TOOLS.some((t) => t.name === "get_job_panel")).toBe(true);
     expect(STAFF_ONLY_DATA_TOOLS.has("get_job_panel")).toBe(false);
@@ -148,6 +263,9 @@ describe("get_job_panel: Nort reads the panel", () => {
     const out = JSON.parse(await runDataTool("get_job_panel", { job_id: JOB }, s.client));
     expect(out.found).toBe(true);
     expect(out.panels[0].by_space["7"]).toEqual(["Kitchen Fridge (1P 20A)"]);
+    // Where each sits in the directory's words (spaceWords): a single "7", a full 2-pole "9/11".
+    expect(out.circuits.find((c: { space: string | null }) => c.space === "7")).toBeTruthy();
+    expect(out.circuits.every((c: { space: string | null }) => c.space == null || /^\d+[AB]?(\/\d+[AB]?)*$/.test(c.space))).toBe(true);
     expect(out.suggestions_waiting).toEqual([{ id: "sug", circuit: "Smokes", size: "1P ? AFCI", space: null, from: "From The Panel Photo", check: null }]);
     expect(out.breakers.verdict).toBe("Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare.");
     expect(out.breakers.to_order).toEqual(["1 x Q220 2P 20A Breaker"]);

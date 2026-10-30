@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
 import { candidatesFor, firstPicks, groupLabel, placementOf, type HaveGroup } from "@/lib/panel/breakers";
 import { WORK_WORDS, circuitName, countWord, sizeWords, spaceMap } from "@/lib/panel/model";
+import { spaceWords } from "@/lib/panel/directory";
 import type { JobCircuit, JobPanel } from "@/lib/types";
 import { placeBoughtBreaker, type PlaceResult } from "../panel-actions";
 
@@ -37,8 +38,9 @@ export function PlaceBreakerSheet({
   const toast = useToast();
   const [spaceText, setSpaceText] = useState("");
   const space = /^\d{1,2}$/.test(spaceText.trim()) ? Number(spaceText.trim()) : null;
-  const parts = useMemo(() => (space && space >= 1 ? placementOf(group, space) : placementOf(group, 1)), [group, space]);
-  const [picks, setPicks] = useState<(string | null)[]>(() => firstPicks(placementOf(group, 1), circuits, panel.id));
+  // A quad's halves follow which way this panel's numbers run (model quadCentreHalf).
+  const parts = useMemo(() => placementOf(group, space && space >= 1 ? space : 1, panel.numbering), [group, space, panel.numbering]);
+  const [picks, setPicks] = useState<(string | null)[]>(() => firstPicks(placementOf(group, 1, panel.numbering), circuits, panel.id));
   const [fresh, setFresh] = useState<{ room: string; description: string }[]>(() => parts.map(() => ({ room: "", description: "" })));
   const [saving, setSaving] = useState(false);
   const once = useRef(false);
@@ -139,7 +141,7 @@ export function PlaceBreakerSheet({
             return (
               <li key={i} className="rounded-lg border border-slate-200 p-3">
                 <div className="text-sm font-semibold text-slate-900">
-                  {space ? `Space ${p.space}${p.half ?? ""}${p.poles > 1 ? `-${p.space + 2 * (p.poles - 1)}${p.half ?? ""}` : ""} · ` : ""}
+                  {space ? `Space ${spaceWords(p)} · ` : ""}
                   {p.label} · {sizeWords(p.poles, p.amps, p.kind)}
                 </div>
                 <label className="mt-2 block">

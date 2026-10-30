@@ -9,7 +9,6 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
-import { readViaView } from "@/lib/inspection/inspection-access";
 import {
   circuitName,
   countWord,
@@ -22,20 +21,22 @@ import {
 import { CIRCUIT_FIELDS, PANEL_FIELDS, isUuid, normalizeCircuitPatch, normalizePanelPatch, type CircuitPatch } from "@/lib/panel/input";
 import { decodeBreaker, decodeCode } from "@/lib/panel/breaker-catalog";
 import {
-  PANEL_SAYS,
+  PHOTO_CAP_WORDS,
+  PLAN_CAP_WORDS,
   PLANS_SAY,
-  headerSuggestions,
   labelCheckApplied,
+  landRead,
+  landedWords,
   readerSummary,
   readerSuggestions,
   readsLeftWords,
-  inspectionSaid,
   type HeaderSaid,
-  type HeaderSuggestion,
 } from "@/lib/panel/readers";
 import { PHOTO_MAX_BYTES, PHOTO_READS_PER_JOB_PER_DAY, photoMime, readPanelPhotoWithModel } from "@/lib/panel/read-panel-photo";
 import { PLAN_MAX_BYTES, PLAN_READS_PER_JOB_PER_DAY, planMedia, readPlanWithModel } from "@/lib/panel/read-plan-circuits";
 import { writeSuggestions } from "@/lib/panel/suggest-write";
+import { PANEL_COLUMNS, ensurePanelFor } from "@/lib/panel/ensure-panel";
+import { belongsToPanel, heldBy, suggestedWordsField } from "@/lib/panel/held";
 import { getAnthropic } from "@/lib/anthropic";
 import { aiAllowed, modelFor } from "@/lib/ai-cost";
 import { rateLimitGiveBack, rateLimitLeft, rateLimited } from "@/lib/rate-limit";
@@ -69,8 +70,8 @@ import type { CircuitKind, CircuitProgress, CircuitReadPatch, JobCircuit, JobPan
  * the man at the panel a round trip, and it can never unsave the change.
  */
 
-const PANEL_COLS =
-  "id, org_id, job_id, name, brand, bus_amps, main_amps, spaces, numbering, dead_spaces, twin_spaces, photo_document_id, notes, shown_on_portal, created_by, created_at, updated_by, updated_at, removed_at, removed_by";
+/** The panel's columns: ONE list (lib/panel/ensure-panel), 0402's three measurements included. */
+const PANEL_COLS = PANEL_COLUMNS;
 const CIRCUIT_COLS =
   "id, org_id, job_id, panel_id, room, description, panel_label, amps, poles, kind, wire, wire_tag, space, half, work, progress, state, source, source_quote_id, source_document_id, source_row, verified, verified_by, verified_at, sort_order, created_by, created_at, updated_by, updated_at, removed_at, removed_by";
 
@@ -132,12 +133,54 @@ async function circuitOf(m: Member, id: string): Promise<JobCircuit | null> {
 
 const touched = (jobId: string) => revalidatePath(`/jobs/${jobId}`);
 
+/** The job's live panels' ids, at most two: enough to tell none, one, or several. */
+async function livePanelIds(m: Member, jobId: string): Promise<string[]> {
+  const { data } = await m.supabase.from("job_panels").select("id").eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).limit(2);
+  return ((data ?? []) as { id: string }[]).map((r) => r.id);
+}
+
 /** The job's one live panel, or null when it has none or several (then a person picks). */
 async function onlyPanelOf(m: Member, jobId: string): Promise<string | null> {
-  const { data } = await m.supabase.from("job_panels").select("id").eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).limit(2);
-  const ids = ((data ?? []) as { id: string }[]).map((r) => r.id);
+  const ids = await livePanelIds(m, jobId);
   return ids.length === 1 ? ids[0] : null;
 }
+
+type PanelFor = { panelId: string | null; made: JobPanel | null; adoptedIds: string[]; livePanels: number | null };
+
+/**
+ * PANEL 1 EXISTS THE MOMENT A JOB HAS A CIRCUIT (the panel-first wave). The panel a new or newly
+ * kept circuit lands on when the caller names none: the job's first live panel, or Panel 1 made now,
+ * with the job's loose circuits moved onto it (lib/panel/ensure-panel). `made` is the panel when this
+ * call made it, and `adoptedIds` the loose circuits it moved, for the tab to show both without a
+ * reload. A failure here never costs the person their circuit: it is filed, and the write goes
+ * ahead the way it did before (the job's only panel, or none).
+ */
+async function panelFor(m: Member, jobId: string): Promise<PanelFor> {
+  try {
+    const e = await ensurePanelFor(m.supabase, { orgId: m.orgId, jobId });
+    return { panelId: e.panelId, made: e.created ? e.panel : null, adoptedIds: e.adoptedIds, livePanels: e.livePanels };
+  } catch (err) {
+    reportError("panel.ensurePanelFor", err, { jobId });
+    return { panelId: await onlyPanelOf(m, jobId), made: null, adoptedIds: [], livePanels: null };
+  }
+}
+
+/**
+ * What a write did to the job's panels on the way: Panel 1 when it made one (the tab adds it), and
+ * the loose circuits it moved onto the panel (`adoptedIds`, onto `adoptedOnto`): the tab sets their
+ * panel too, so its rows say what the database says (they are drawn there either way; with a second
+ * panel added later they would otherwise fall off the door until a reload).
+ */
+type MadePanel = { panel?: JobPanel; adoptedIds?: string[]; adoptedOnto?: string };
+const madeOf = (p: Pick<PanelFor, "panelId" | "made" | "adoptedIds"> | null): MadePanel => {
+  if (!p) return {};
+  const out: MadePanel = p.made ? { panel: p.made } : {};
+  if (p.panelId && p.adoptedIds.length) {
+    out.adoptedIds = p.adoptedIds;
+    out.adoptedOnto = p.panelId;
+  }
+  return out;
+};
 
 /**
  * WHAT THE EDITOR SAW, AS A CONDITION ON THE WRITE. Each field the edit changes must still hold the
@@ -211,20 +254,47 @@ async function ringPanelChange(m: Member, jobId: string): Promise<void> {
 // ── reading ─────────────────────────────────────────────────────────────────────────────────────
 
 export type PanelEstimate = EstimateOffer;
-export type PanelPhoto = { id: string; name: string | null; created_at: string; url: string | null };
+/** A job photo for Read A Photo. `path` is where it is filed (the job's own folder), so a photo just
+ *  taken on the card is found by the path its upload returned, never by "the newest one". */
+export type PanelPhoto = { id: string; name: string | null; created_at: string; url: string | null; path?: string | null };
 
-/** The job's photos for the readers, newest first, with thumbnail links (an hour). */
+type PhotoDoc = { id: string; name: string | null; created_at: string; file_url: string | null };
+
+/**
+ * The job's photos for Read A Photo, newest first, each with a short-lived link (an hour). Every
+ * live panel's own photo (job_panels.photo_document_id) is always among them, however old, so the
+ * card can offer it first; the card shows them one at a time.
+ */
 async function photosOf(m: Member, jobId: string): Promise<PanelPhoto[] | Fail> {
-  const { data, error } = await m.supabase
-    .from("documents")
-    .select("id, name, created_at, file_url")
-    .eq("job_id", jobId)
-    .eq("org_id", m.orgId)
-    .eq("category", "Photo")
-    .order("created_at", { ascending: false })
-    .limit(60);
+  const [{ data, error }, panelPhotos] = await Promise.all([
+    m.supabase
+      .from("documents")
+      .select("id, name, created_at, file_url")
+      .eq("job_id", jobId)
+      .eq("org_id", m.orgId)
+      .eq("category", "Photo")
+      .order("created_at", { ascending: false })
+      .limit(60),
+    m.supabase.from("job_panels").select("photo_document_id").eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).not("photo_document_id", "is", null),
+  ]);
   if (error) return fail(error, "The job's photos couldn't load.");
-  const rows = (data ?? []) as { id: string; name: string | null; created_at: string; file_url: string | null }[];
+  const rows = (data ?? []) as PhotoDoc[];
+  if (panelPhotos.error) reportError("panel.photosOf.panels", panelPhotos.error, { jobId });
+  const have = new Set(rows.map((r) => r.id));
+  const missing = [
+    ...new Set(((panelPhotos.data ?? []) as { photo_document_id: string | null }[]).map((p) => p.photo_document_id).filter((id): id is string => !!id && !have.has(id))),
+  ];
+  if (missing.length) {
+    const { data: older, error: oErr } = await m.supabase
+      .from("documents")
+      .select("id, name, created_at, file_url")
+      .in("id", missing)
+      .eq("job_id", jobId)
+      .eq("org_id", m.orgId)
+      .eq("category", "Photo");
+    if (oErr) reportError("panel.photosOf.panelPhoto", oErr, { jobId });
+    rows.push(...((older ?? []) as PhotoDoc[]));
+  }
   const paths = rows.map((r) => r.file_url).filter(Boolean) as string[];
   const urls = new Map<string, string>();
   if (paths.length) {
@@ -232,10 +302,10 @@ async function photosOf(m: Member, jobId: string): Promise<PanelPhoto[] | Fail> 
     if (sErr) reportError("panel.photosOf.sign", sErr, { jobId });
     for (const x of signed ?? []) if (x.path && x.signedUrl) urls.set(x.path, x.signedUrl);
   }
-  return rows.map((r) => ({ id: r.id, name: r.name, created_at: r.created_at, url: r.file_url ? (urls.get(r.file_url) ?? null) : null }));
+  return rows.map((r) => ({ id: r.id, name: r.name, created_at: r.created_at, url: r.file_url ? (urls.get(r.file_url) ?? null) : null, path: r.file_url }));
 }
 
-/** The photos again, after Take A Photo on the Panel tab filed a new one. */
+/** The photos again, after Take A New One on the Panel tab's Read A Photo filed a new one. */
 export async function loadPanelPhotos(jobId: string): Promise<{ ok: true; photos: PanelPhoto[] } | Fail> {
   const m = await member();
   if ("error" in m) return m;
@@ -263,8 +333,6 @@ export type PanelLoad =
       /** The office only: the Plan papers Read Circuits From The Plans can read (this job's, and
        *  its customer's that aren't on another job yet). Never sent to a tech. */
       plans: { id: string; name: string | null; created_at: string; onCustomer: boolean }[];
-      /** What the inspection said about the panel, for header suggestions (null when nothing). */
-      inspectionSays: { said: HeaderSaid; words: string | null } | null;
       people: Record<string, string>;
     }
   | Fail;
@@ -285,15 +353,30 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
   ]);
   if (pRes.error) return fail(pRes.error, "The panel couldn't load.");
   if (cRes.error) return fail(cRes.error, "The circuits couldn't load.");
-  const panels = (pRes.data ?? []) as JobPanel[];
-  const circuits = (cRes.data ?? []) as JobCircuit[];
+  let panels = (pRes.data ?? []) as JobPanel[];
+  let circuits = (cRes.data ?? []) as JobCircuit[];
+
+  // A JOB WITH CIRCUITS HAS A PANEL (the panel-first wave): a job whose circuits were listed before
+  // the wave, with no panel, gets Panel 1 the first time its tab opens, its circuits on it. Twice-safe
+  // (ensurePanelFor finds it the next time); a failure is filed and the tab opens as it was.
+  if (!panels.length && circuits.some((c) => !c.removed_at)) {
+    try {
+      const e = await ensurePanelFor(m.supabase, { orgId: m.orgId, jobId });
+      panels = [e.panel];
+      if (e.adopted) {
+        const again = await m.supabase.from("job_circuits").select(CIRCUIT_COLS).eq("job_id", jobId).eq("org_id", m.orgId).order("sort_order").order("created_at");
+        if (!again.error) circuits = (again.data ?? []) as JobCircuit[];
+      }
+    } catch (err) {
+      reportError("panel.loadJobPanel.ensure", err, { jobId });
+    }
+  }
 
   // THE ESTIMATE FINDER RUNS IN AN OFFICE SESSION ONLY: a tech's page never carries it (an estimate
   // is the office's paper), and the door it feeds is the office's.
-  const [estimates, plans, inspectionSays] = await Promise.all([
+  const [estimates, plans] = await Promise.all([
     m.staff ? findEstimates(m, job, circuits) : Promise.resolve([] as PanelEstimate[]),
     m.staff ? findPlans(m, job) : Promise.resolve([] as { id: string; name: string | null; created_at: string; onCustomer: boolean }[]),
-    inspectionOf(m, job),
   ]);
 
   const ids = [...new Set(circuits.flatMap((c) => [c.verified_by, c.updated_by]).filter(Boolean))] as string[];
@@ -314,7 +397,6 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
     photoReadsLeft,
     planReadsLeft,
     plans,
-    inspectionSays,
     people,
   };
 }
@@ -340,33 +422,6 @@ async function findPlans(m: Member, job: JobRow): Promise<{ id: string; name: st
     created_at: d.created_at,
     onCustomer: d.job_id == null,
   }));
-}
-
-/** What the inspection's inspector said about the panel (panel_brand, panel_amps, the one-box
- *  panel_condition), from this job's visits, newest first. Shown as suggestions; never written.
- *  THROUGH appointment_answers (0366, LEAK-0227): a tech reads the answers without a price (and only
- *  his own visits, 0227's rule), the office as stored; and only the three answers inspectionSaid
- *  reads leave this function's read, whoever asks. */
-async function inspectionOf(m: Member, job: JobRow): Promise<{ said: HeaderSaid; words: string | null } | null> {
-  const { data, error } = await readViaView<{ inspection_answers: Record<string, unknown> | null }[]>(m.supabase, "answers", (from) =>
-    from
-      .select("inspection_answers, starts_at")
-      .eq("org_id", m.orgId)
-      .eq("job_id", job.id)
-      .not("inspection_answers", "is", null)
-      .order("starts_at", { ascending: false })
-      .limit(5),
-  );
-  if (error) {
-    reportError("panel.inspectionOf", error, { jobId: job.id });
-    return null;
-  }
-  const answers = (data ?? []).map((a) => {
-    const all = a.inspection_answers ?? {};
-    return { panel_brand: all.panel_brand, panel_amps: all.panel_amps, panel_condition: all.panel_condition };
-  });
-  const w = inspectionSaid(answers);
-  return w.words || w.said.brand || w.said.main_amps ? w : null;
 }
 
 /** The office's bar: this job's own estimates, then the same customer's with no job yet (never a
@@ -397,11 +452,11 @@ export type PanelSaveResult =
   | (Fail & { current?: JobPanel });
 
 /**
- * Add The Panel (panelId null) or change one of its fields. The crew and the office alike. `seen`
+ * Add New Panel (panelId null) or change one of its fields. The crew and the office alike. `seen`
  * is what the editor was looking at for the fields it changes (see matchSeen).
  *
  * THE FIRST PANEL TAKES THE CIRCUITS ALREADY ON THE LIST. Circuits listed before anyone looked in
- * the box (Bring In, Keep All, Add A Circuit, then Add The Panel: J-011's planned order) have no
+ * the box (Bring In, Keep All, Add A Circuit, then a panel added: J-011's planned order) have no
  * panel. With one panel on the job there is no picker to attach them, so the job's only panel
  * adopts them here, and from then on the door shows them and the No Stab refusal covers them. One
  * the database won't place (a kept circuit on a space this panel marks No Stab) stays panel-less,
@@ -472,14 +527,18 @@ export async function savePanel(
 // ── circuits ────────────────────────────────────────────────────────────────────────────────────
 
 /** Add A Circuit: a person typed it, so it counts at once (kept, source hand). */
-export async function addCircuit(jobId: string, input: Record<string, unknown>): Promise<RowResult<JobCircuit>> {
+export async function addCircuit(jobId: string, input: Record<string, unknown>): Promise<RowResult<JobCircuit> & MadePanel> {
   const m = await member();
   if ("error" in m) return m;
   const v = normalizeCircuitPatch(input);
   if (!v.ok) return v;
   if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
-  // No panel named and the job has exactly one: it goes on that one (nothing else would attach it).
-  if (v.value.panel_id == null) v.value.panel_id = await onlyPanelOf(m, jobId);
+  // No panel named: it goes on the job's panel, Panel 1 made now when the job has none.
+  let placed: PanelFor | null = null;
+  if (v.value.panel_id == null) {
+    placed = await panelFor(m, jobId);
+    v.value.panel_id = placed.panelId;
+  }
   const { data: last } = await m.supabase
     .from("job_circuits")
     .select("sort_order")
@@ -503,7 +562,7 @@ export async function addCircuit(jobId: string, input: Record<string, unknown>):
   if (!data) return { ok: false, error: "The circuit didn't save. Try again." };
   touched(jobId);
   ringIfCrew(m, jobId);
-  return { ok: true, row: data as JobCircuit };
+  return { ok: true, row: data as JobCircuit, ...madeOf(placed) };
 }
 
 async function writeCircuit(
@@ -638,7 +697,104 @@ export async function setAsideSuggestions(jobId: string, ids: string[], aside = 
   return { ok: true, rows };
 }
 
-export type KeepResult = { ok: true; rows: JobCircuit[]; skipped: { id: string; error: string }[] } | Fail;
+export type UseWordsResult =
+  | {
+      ok: true;
+      /** The kept circuit, now with the suggestion's words. */
+      circuit: JobCircuit;
+      /** The suggestion, set aside (Undo puts it back with undoTakeOff). */
+      suggestion: JobCircuit;
+      /** The field the words went into, and what it said before (for the Undo). */
+      field: "panel_label" | "description";
+      was: string | null;
+      words: string;
+    }
+  | (Fail & { current?: JobCircuit });
+
+/** Use It names the line the person tapped: the read, the kept circuit it was drawn under, and the
+ *  words that line showed for the field being replaced (null when it showed none). */
+export type UseWordsInput = { suggestedId: string; targetId: string; seen: string | null };
+
+/**
+ * USE IT, ON THE PANEL (the panel-first wave): a suggestion that sits on a space a kept circuit
+ * already holds is the photo (or the plans) reading a different name for the breaker that is there
+ * ("Photo says: Wine Cooler" under the kept "Bar"). Use It writes the suggestion's words onto THE
+ * kept circuit the person saw it under (`targetId`) — the door's words onto its door label,
+ * what-it-feeds words onto what it feeds (lib/panel/held suggestedWordsField) — and sets the
+ * suggestion aside.
+ *
+ * NEVER OVER A CREWMATE'S NEWER WORDS: `seen` is what the tapped line showed for that field. If the
+ * kept circuit says anything else now (a crewmate relabelled it, or moved it off that space), the
+ * tap was stale: nothing is written, the answer names who changed it and carries the circuit as it
+ * is now. The write itself is conditioned on the value read here, so a change in between is caught
+ * too (the `seen` pattern savePanel and writeCircuit use). The holder is never recomputed: the
+ * server only checks, by lib/panel/held's rules, that the circuit named still holds the read's space
+ * on the read's panel. Every write is org-scoped and read back; nothing is half done without saying
+ * so. The crew and the office alike: no price.
+ */
+export async function useSuggestedWords(jobId: string, input: UseWordsInput): Promise<UseWordsResult> {
+  const m = await member();
+  if ("error" in m) return m;
+  if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  const s = await circuitOf(m, String(input?.suggestedId ?? ""));
+  if (!s || s.job_id !== jobId) return { ok: false, error: "That suggestion isn't on this job. Reload the Panel tab." };
+  if (s.state !== "suggested" || s.removed_at) return { ok: false, error: "That suggestion was already kept or set aside.", current: s };
+  if (s.source_row?.flag_for) return { ok: false, error: "That one is a label check. Tap Use It on the check." };
+  const tidy = (v: string | null | undefined) => String(v ?? "").replace(/\s+/g, " ").trim();
+  const field = suggestedWordsField(s);
+  if (!field) return { ok: false, error: "That suggestion has no words to use. Tap Skip." };
+  const words = tidy(s[field]);
+  if (s.space == null) return { ok: false, error: "That suggestion has no space on the panel. Keep it as a circuit of its own." };
+
+  const target = await circuitOf(m, String(input?.targetId ?? ""));
+  if (!target || target.job_id !== jobId || target.state !== "kept" || target.removed_at || target.work === "removed") {
+    return { ok: false, error: "The circuit it was drawn under isn't on the panel any more. Reload the Panel tab." };
+  }
+  const now = target[field] ?? null;
+  const said = tidy(typeof input?.seen === "string" ? input.seen : null);
+  // On the read's panel (a loose one belongs to the job's only panel: lib/panel/held belongsToPanel)
+  // and still on the read's space (heldBy, the rule the tab drew the line by).
+  let samePanel = (s.panel_id ?? null) === (target.panel_id ?? null);
+  if (!samePanel) {
+    const ids = await livePanelIds(m, jobId);
+    const panelId = target.panel_id ?? s.panel_id!;
+    samePanel = ids.includes(panelId) && belongsToPanel(s, { id: panelId }, ids.length) && belongsToPanel(target, { id: panelId }, ids.length);
+  }
+  const stillThere = samePanel && !!heldBy(s, [target]);
+  if (!stillThere || tidy(now) !== said) {
+    const who = await nameOf(m, target.updated_by);
+    return {
+      ok: false,
+      error: stillThere
+        ? `${who} just changed ${circuitName(target)}. It shows what's there now; change it again if it still needs it.`
+        : `${who} just moved ${circuitName(target)}: it isn't on space ${s.space} now. It shows where it is; tap Keep to keep the read as its own circuit.`,
+      current: target,
+    };
+  }
+  const was = now;
+  if (tidy(was) === words) {
+    // It already says this: nothing to write, the suggestion only goes aside.
+    const aside = await writeCircuit(m, s.id, { removed_at: new Date().toISOString() }, (g) => g.eq("job_id", jobId).eq("state", "suggested").is("removed_at", null));
+    if (!aside.ok) return aside;
+    return { ok: true, circuit: target, suggestion: aside.row, field, was, words: `${circuitName(target)} already says ${words}.` };
+  }
+
+  const changed = await writeCircuit(
+    m,
+    target.id,
+    { [field]: words },
+    (g) => g.eq("job_id", jobId).eq("state", "kept").is("removed_at", null),
+    { [field]: was },
+  );
+  if (!changed.ok) return changed;
+  const aside = await writeCircuit(m, s.id, { removed_at: new Date().toISOString() }, (g) => g.eq("job_id", jobId).eq("state", "suggested").is("removed_at", null));
+  if (!aside.ok) {
+    return { ok: false, error: `${circuitName(changed.row)} now says ${words}, but the suggestion couldn't be set aside: ${aside.error} Tap Skip on it.`, current: changed.row };
+  }
+  return { ok: true, circuit: changed.row, suggestion: aside.row, field, was, words: `${circuitName(changed.row)} now says ${words}.` };
+}
+
+export type KeepResult = ({ ok: true; rows: JobCircuit[]; skipped: { id: string; error: string }[] } & MadePanel) | Fail;
 
 /**
  * Keep (one) or Keep All: suggestions become the job's circuits and start to count. keep=false is
@@ -668,6 +824,10 @@ export async function keepSuggestions(jobId: string, ids: string[], keep = true)
     want = want.filter((id) => !flagIds.has(id));
     if (!want.length) return { ok: true, rows: [], skipped };
   }
+  // What is kept lands on the job's panel: Panel 1 made now when it has none, and the loose circuits
+  // (these suggestions among them) moved onto it FIRST, so each is checked against that panel's
+  // spaces as it is kept (a No Stab one is named below, never dropped). The Undo moves nothing.
+  const placed = keep ? await panelFor(m, jobId) : null;
   const from = keep ? "suggested" : "kept";
   const to = keep ? "kept" : "suggested";
   const batch = await m.supabase
@@ -705,15 +865,15 @@ export async function keepSuggestions(jobId: string, ids: string[], keep = true)
       skipped.push({ id, error: keep ? "It was already kept or set aside." : "It was already a suggestion or taken off." });
     }
   }
-  if (rows.length) {
+  if (rows.length || placed?.made || placed?.adoptedIds.length) {
     touched(jobId);
     ringIfCrew(m, jobId);
   }
-  return { ok: true, rows, skipped };
+  return { ok: true, rows, skipped, ...madeOf(placed) };
 }
 
 export type BringInResult =
-  | { ok: true; rows: JobCircuit[]; added: number; already: number; setAside: number; message: string; estimates: PanelEstimate[] }
+  | ({ ok: true; rows: JobCircuit[]; added: number; already: number; setAside: number; message: string; estimates: PanelEstimate[] } & MadePanel)
   | Fail;
 
 /**
@@ -765,8 +925,9 @@ export async function bringInEstimateCircuits(jobId: string, quoteId: string): P
       estimates: await findEstimates(m, job, existing),
     };
   }
-  // With one panel on the job, the suggestions land on it (nothing else would attach them).
-  const panelId = await onlyPanelOf(m, jobId);
+  // The suggestions land on the job's panel: Panel 1 made now when the job has none.
+  const placed = await panelFor(m, jobId);
+  const panelId = placed.panelId;
   const { data, error } = await m.supabase
     .from("job_circuits")
     .insert(fresh.map((d) => ({ ...d, job_id: jobId, panel_id: panelId })))
@@ -792,6 +953,7 @@ export async function bringInEstimateCircuits(jobId: string, quoteId: string): P
     setAside,
     message: `Brought in ${rows.length} from ${label} as suggestions. Nothing counts until you keep it.${more}${fromElsewhere}`,
     estimates: await findEstimates(m, job, [...existing, ...rows]),
+    ...madeOf(placed),
   };
 }
 
@@ -1146,21 +1308,23 @@ export async function placeBoughtBreaker(jobId: string, panelId: string, parts: 
   return { ok: true, rows, moved, added, problems };
 }
 
-// ── the readers (phase 4): the panel photo, the plans, and the label checks they raise ───────────
+// ── the readers (phase 4, honed in the panel-first wave): a photo, and the plans ─────────────────
 
 export type ReadResult =
-  | {
+  | ({
       ok: true;
+      /** The suggestions written: the photo's in their spaces, the plans' with no space. */
       rows: JobCircuit[];
-      /** "Read 9 circuits off the photo: 6 New Suggestions, 1 Label Check, 2 Already On Your List." */
+      /** The one sentence of state: "Read 34 lines, 18 new — Keep All or tap each one." */
       message: string;
       /** What the reader couldn't read or count, in plain words: said, never dropped. */
       notes: string[];
-      /** What it said about the panel itself, each with its own Use (nothing is written by a read). */
-      header: HeaderSuggestion[];
-      /** How many reads of this kind are left on this job today (null when it can't be said). */
+      /** What the photo said about the panel itself (brand, spaces, main, No Stab spaces), for the
+       *  card's one "The photo says … — Use It" line (lib/panel/readers panelFacts). Null for the plans. */
+      panelSays: HeaderSaid | null;
+      /** How many reads of this kind are left on this job today (null when it isn't counted). */
       readsLeft: number | null;
-    }
+    } & MadePanel)
   | (Fail & { readsLeft?: number | null });
 
 const AI_NOT_SET_UP = "Reading isn't available right now. Add the circuits by hand with Add A Circuit.";
@@ -1198,16 +1362,22 @@ async function allCircuits(m: Member, jobId: string): Promise<JobCircuit[] | Fai
 }
 
 /**
- * READ THE PANEL PHOTO (the crew and the office; Erik's decision 1). One photo from this job's
- * Photos goes to the model; what it reads comes back as SUGGESTIONS on the list (new circuits it saw
- * that the list doesn't have), LABEL CHECKS (a circuit on the list whose door words, space or amps
- * the photo says differently: "Panel Says Mini Fridge, Your List Says Fridge"), and header
- * suggestions for the panel itself. Nothing kept is ever changed by a read.
+ * READ A PHOTO (the crew and the office; Erik's decision 1, honed in the panel-first wave). One
+ * photo from this job's Photos goes to the model, and what it read LANDS ON THE PANEL: every line
+ * a suggestion in its own space and half (lib/panel/readers landRead), dimmed until a person keeps
+ * it. A line the panel already says (a kept circuit there with the same words) is not written; one
+ * whose words differ waits in the same space, beside the kept line ("Photo says …", Use It). The
+ * same photo read again writes nothing new. Nothing kept is ever changed by a read, and what the
+ * photo said about the panel itself comes back as words for the card to offer, never written.
  *
- * THE CAP AND THE COST: three reads per job per day (a few cents each), counted before the model is
- * called and only after the photo has been found and opened, so a photo that can't be read never
- * uses one up. The org's monthly AI ceiling is checked first. Both are said in plain words, with the
- * way forward (add them by hand).
+ * WHERE: the panel the card names, else the job's panel — Panel 1 made now when the job has none,
+ * and only when there is something to land.
+ *
+ * THE CAP AND THE COST: the crew get three reads per job per day (a few cents each), counted before
+ * the model is called and only after the photo has been found and opened, so a photo that can't be
+ * read never uses one up, and a read the model fails is given back. The office isn't held to the
+ * count (the cap's sentence sends a tech to the office). The org's monthly AI ceiling is checked
+ * first, for everyone. Each refusal is one plain sentence.
  */
 export async function readPanelPhoto(jobId: string, documentId: string, panelId: string | null = null): Promise<ReadResult> {
   const m = await member();
@@ -1227,18 +1397,12 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
   const mime = photoMime(d.name, d.file_url);
   if (!mime) return { ok: false, error: "Only a JPG, PNG, WebP or GIF photo can be read. Take the photo again with the camera." };
 
-  let panel: JobPanel | null = null;
+  let landOn: string | null = null;
   if (panelId) {
     if (!isUuid(panelId)) return { ok: false, error: "That panel isn't on this job." };
-    const { data: p } = await m.supabase.from("job_panels").select(PANEL_COLS).eq("id", panelId).eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).maybeSingle();
+    const { data: p } = await m.supabase.from("job_panels").select("id").eq("id", panelId).eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).maybeSingle();
     if (!p) return { ok: false, error: "That panel isn't on this job." };
-    panel = p as JobPanel;
-  } else {
-    const only = await onlyPanelOf(m, jobId);
-    if (only) {
-      const { data: p } = await m.supabase.from("job_panels").select(PANEL_COLS).eq("id", only).eq("org_id", m.orgId).maybeSingle();
-      panel = (p as JobPanel | null) ?? null;
-    }
+    landOn = (p as { id: string }).id;
   }
 
   const { data: blob, error: dlErr } = await m.supabase.storage.from("documents").download(d.file_url);
@@ -1246,15 +1410,14 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
   if (blob.size > PHOTO_MAX_BYTES) return { ok: false, error: "That photo is too big to read (over 5 MB). Take it again with the camera; the app shrinks new photos." };
 
   const capKey = `panel-photo:${jobId}`;
+  const counted = !m.staff;
   const gate = await aiAllowed(m.orgId, undefined, { ceilingWords: SPENT });
   if (!gate.ok) return { ok: false, error: gate.why };
-  if (await rateLimited(capKey, PHOTO_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
-    return {
-      ok: false,
-      error: `The panel photo has been read ${PHOTO_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow; add the rest by hand with Add A Circuit.`,
-      readsLeft: 0,
-    };
+  if (counted && (await rateLimited(capKey, PHOTO_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true }))) {
+    return { ok: false, error: PHOTO_CAP_WORDS, readsLeft: 0 };
   }
+  // A failed read goes back on the crew's count; the office's was never counted.
+  const failed = (f: Fail) => (counted ? failedRead(capKey, PHOTO_READS_PER_JOB_PER_DAY, f) : { ...f, readsLeft: null });
 
   let reading;
   try {
@@ -1265,34 +1428,39 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
       base64: Buffer.from(await blob.arrayBuffer()).toString("base64"),
       orgId: m.orgId,
     });
-    if (!r.ok) return failedRead(capKey, PHOTO_READS_PER_JOB_PER_DAY, r);
+    if (!r.ok) return failed(r);
     reading = r.reading;
   } catch (e) {
     reportError("panel.readPanelPhoto", e, { jobId, documentId });
-    return failedRead(capKey, PHOTO_READS_PER_JOB_PER_DAY, readFailure(e, "The photo"));
+    return failed(readFailure(e, "The photo"));
+  }
+
+  // WHERE IT LANDS: the panel named, else the job's panel (Panel 1 made now when it has none).
+  let placed: PanelFor | null = null;
+  if (!landOn && reading.rows.length) {
+    placed = await panelFor(m, jobId);
+    landOn = placed.panelId;
   }
 
   const circuits = await allCircuits(m, jobId);
   if (!Array.isArray(circuits)) return circuits;
-  const outcome = readerSuggestions({
-    source: "photo",
-    rows: reading.rows,
-    circuits,
-    panelId: panel?.id ?? null,
-    says: PANEL_SAYS,
-    startSort: 0,
-    stamp: { document_name: d.name },
-  });
-  const wrote = await writeSuggestions(m.supabase, { orgId: m.orgId, jobId, panelId: panel?.id ?? null, documentId: d.id, drafts: outcome.drafts, cols: CIRCUIT_COLS });
+  // A circuit on no panel belongs to the panel read when it is the job's only one (lib/panel/held):
+  // counted only when there is a loose one to decide about.
+  const livePanels = landOn && circuits.some((c) => c.panel_id == null) ? (placed?.livePanels ?? (await livePanelIds(m, jobId)).length) : null;
+  const landing = landRead(reading.rows, circuits, { panelId: landOn, livePanels, stamp: { document_name: d.name } });
+  const wrote = await writeSuggestions(m.supabase, { orgId: m.orgId, jobId, panelId: landOn, documentId: d.id, drafts: landing.toWrite, cols: CIRCUIT_COLS });
   if (!wrote.ok) return fail({ code: wrote.code, message: wrote.error }, "The suggestions didn't save.");
-  if (wrote.rows.length) touched(jobId);
+  if (wrote.rows.length || placed?.made || placed?.adoptedIds.length) touched(jobId);
+  // A line with no space can't land: said, never dropped (the parser names its own; this is the rest).
+  const placeless = landing.skipped.filter((x) => x.why === "no-space").map((x) => `"${x.row.said ?? "A breaker"}" had no space number, so it wasn't added.`);
   return {
     ok: true,
     rows: wrote.rows,
-    message: readerSummary("the photo", reading.rows.length, outcome) + (reading.rows.length ? "" : " Try a closer, straighter photo of the door's list."),
-    notes: reading.unreadable,
-    header: headerSuggestions(panel, reading.header, "The Panel Photo"),
-    readsLeft: await rateLimitLeft(capKey, PHOTO_READS_PER_JOB_PER_DAY, 86_400),
+    message: landedWords(reading.rows.length, landing),
+    notes: [...reading.unreadable, ...placeless],
+    panelSays: reading.header,
+    readsLeft: counted ? await rateLimitLeft(capKey, PHOTO_READS_PER_JOB_PER_DAY, 86_400) : null,
+    ...madeOf(placed),
   };
 }
 
@@ -1328,7 +1496,7 @@ export async function readPlanCircuits(jobId: string, documentId: string): Promi
   const gate = await aiAllowed(m.orgId, undefined, { ceilingWords: SPENT });
   if (!gate.ok) return { ok: false, error: gate.why };
   if (await rateLimited(capKey, PLAN_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
-    return { ok: false, error: `The plans have been read ${PLAN_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow.`, readsLeft: 0 };
+    return { ok: false, error: PLAN_CAP_WORDS, readsLeft: 0 };
   }
 
   let reading;
@@ -1369,7 +1537,7 @@ export async function readPlanCircuits(jobId: string, documentId: string): Promi
     rows: wrote.rows,
     message: readerSummary(d.name ?? "the plans", reading.rows.length, outcome) + sheets,
     notes: reading.notCounted,
-    header: [],
+    panelSays: null,
     readsLeft: await rateLimitLeft(capKey, PLAN_READS_PER_JOB_PER_DAY, 86_400),
   };
 }

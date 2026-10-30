@@ -68,9 +68,10 @@ d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
       expect(drafts.every((x) => x.state === "suggested" && x.source === "estimate" && x.source_quote_id === E017)).toBe(true);
 
       // THE DEAD-DOOR COUNT ON J-011's LIVE STATE (the dead-door law: run the screen against live
-      // data and count the buttons). Before Bring In the office sees exactly three doors and the
-      // crew two, each wired in job-panel.tsx: Bring Them In → bringInEstimateCircuits, Add The
-      // Panel → the panel sheet, Add Circuit → the form's submit (addCircuit).
+      // data and count the buttons). Before Bring In, on a job with no panel yet (the panel-first
+      // wave): the office has Bring Them In (→ bringInEstimateCircuits) and the crew doesn't; both
+      // have Add Circuit (→ addCircuit) and Add New Panel, last (→ the panel sheet); Panel 1 waits
+      // on the door, and nobody is offered the old Add The Panel.
       const panelData = {
         ok: true as const,
         panels: [],
@@ -80,16 +81,20 @@ d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
         photoReadsLeft: null,
         planReadsLeft: null,
         plans: [],
-        inspectionSays: null,
         people: {},
         estimates: offerEstimates(J011, job.customer_id, quotes, []),
       };
-      const labels = (html: string) => [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
+      const labels = (html: string) =>
+        [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim()).filter(Boolean);
       const office = renderToStaticMarkup(createElement(JobPanel, { jobId: J011, initial: { ...panelData, staff: true } }));
-      expect(labels(office)).toEqual(["Bring Them In", "Add The Panel", "Add Circuit"]);
+      expect(labels(office)).toContain("Bring Them In");
+      expect(labels(office)).toContain("Add Circuit");
+      expect(labels(office)).not.toContain("Add The Panel");
+      expect(labels(office).at(-1)).toBe("Add New Panel");
       expect(office).toContain("E-017 Has 12 Circuits");
       const crew = renderToStaticMarkup(createElement(JobPanel, { jobId: J011, initial: { ...panelData, staff: false, estimates: [] } }));
-      expect(labels(crew)).toEqual(["Add The Panel", "Add Circuit"]);
+      expect(labels(crew)).not.toContain("Bring Them In");
+      expect(labels(crew).at(-1)).toBe("Add New Panel");
       expect(office).not.toMatch(/<button[^>]* disabled=""/);
       // Nothing was written: the transaction is read only and is rolled back below.
       console.log(

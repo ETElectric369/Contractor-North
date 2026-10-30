@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
 import { cn, formatDate } from "@/lib/utils";
+// A default in inches as a field's placeholder (1, 0.75, 1.125): the ONE way the app says inches.
+import { brandDefaults, inchWords } from "@/lib/panel/geometry";
 import type { JobCircuit, JobPanel } from "@/lib/types";
 import { savePanel } from "../panel-actions";
 
@@ -15,14 +17,15 @@ import { savePanel } from "../panel-actions";
  * amps, how many spaces, which way the numbers run (a person reads it off the label; the app never
  * guesses), the tandem spaces, the No Stab spaces, and the photo of it from the job's Photos.
  *
- * Adding is the one tap that makes a row (Add The Panel). After that every field saves as it
+ * Adding is the one tap that makes a row (Add New Panel, the tab's last door: a job's Panel 1 is
+ * made by the server with its first circuit, never here beside it). After that every field saves as it
  * changes, with the last change undoable here. Every way out (X, backdrop, back, Done) first writes
  * whatever is still typed, and a refused write keeps the sheet open with the reason. Each write
  * names what the editor saw, so a crewmate's newer value is shown, not overwritten. Taking a panel
  * off a job has no door yet (the database keeps it the office's for when it does).
  */
 
-type Draft = {
+export type Draft = {
   name: string;
   brand: string;
   main_amps: string;
@@ -33,17 +36,26 @@ type Draft = {
   dead_spaces: string;
   photo_document_id: string;
   notes: string;
+  /** The door, measured (0402): blank is "the make's default". */
+  space_pitch_in: string;
+  label_width_in: string;
+  label_width_in_right: string;
 };
 
-/** A new panel's name: Main Panel, or the first free one when the job already has it (the job's
- *  panel names are unique, so a second "Main Panel" would only be refused). */
+/** A new panel's name, numbered the way Panel 1 is (the panel-first wave): the job's first panel is
+ *  Panel 1, the next Panel 2, and so on, the first free number from the count up (the job's panel
+ *  names are unique, so a name already there would only be refused). A person renames it at will. */
 export function freePanelName(taken: string[]): string {
   const have = new Set(taken.map((n) => n.trim().toLowerCase()));
-  for (const n of ["Main Panel", "Sub Panel"]) if (!have.has(n.toLowerCase())) return n;
-  for (let i = 2; ; i++) if (!have.has(`panel ${i}`)) return `Panel ${i}`;
+  for (let i = Math.max(1, taken.length + 1); ; i++) if (!have.has(`panel ${i}`)) return `Panel ${i}`;
 }
 
-const draftOf = (p: JobPanel | null, taken: string[] = []): Draft => ({
+/** The sizes most panels come in: a chip each, the field still takes any number. */
+export const SPACE_PRESETS = [12, 20, 24, 30, 40, 42] as const;
+/** The makes the door table knows (lib/panel/geometry), as they are said. Any other is typed. */
+export const BRAND_CHOICES = ["Siemens", "Square D QO", "Square D Homeline", "Eaton BR", "Eaton CH", "Murray", "GE"] as const;
+
+export const draftOf = (p: JobPanel | null, taken: string[] = []): Draft => ({
   name: p?.name ?? freePanelName(taken),
   brand: p?.brand ?? "",
   main_amps: p?.main_amps == null ? "" : String(p.main_amps),
@@ -54,10 +66,14 @@ const draftOf = (p: JobPanel | null, taken: string[] = []): Draft => ({
   dead_spaces: (p?.dead_spaces ?? []).join(", "),
   photo_document_id: p?.photo_document_id ?? "",
   notes: p?.notes ?? "",
+  space_pitch_in: p?.space_pitch_in == null ? "" : String(p.space_pitch_in),
+  label_width_in: p?.label_width_in == null ? "" : String(p.label_width_in),
+  label_width_in_right: p?.label_width_in_right == null ? "" : String(p.label_width_in_right),
 });
 
-/** The draft as a write: empty strings are "not said". */
-function patchOf(d: Draft, keys: (keyof Draft)[]): Record<string, unknown> {
+/** The draft as a write: empty strings are "not said" (a blank measurement is the make's default
+ *  again: normalizePanelPatch clears it). */
+export function patchOf(d: Draft, keys: (keyof Draft)[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const k of keys) {
     const v = d[k];
@@ -80,6 +96,9 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 const selectCls =
   "h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand";
+const chipCls = "min-h-[44px] min-w-[44px] rounded-lg border px-3 text-sm font-medium disabled:opacity-50";
+const chipOn = "border-[rgb(var(--glass-ink))] bg-[rgb(var(--glass-tint))]/20 text-[rgb(var(--glass-ink))]";
+const chipOff = "border-slate-300 bg-white text-slate-700 hover:bg-slate-50";
 
 export function PanelSetupSheet({
   jobId,
@@ -94,7 +113,7 @@ export function PanelSetupSheet({
   photos: { id: string; name: string | null; created_at: string }[];
   /** The job's other panels' names, so a new one starts with a free name. */
   takenNames?: string[];
-  /** placed: on Add The Panel, the circuits already on the list that the job's first panel took. */
+  /** placed: on Add New Panel, the circuits already on the list that the job's first panel took. */
   onSaved: (row: JobPanel, placed?: { adopted: JobCircuit[]; notAdopted: string[] }) => void;
   onClose: () => void;
 }) {
@@ -158,7 +177,7 @@ export function PanelSetupSheet({
   function saveKeys(keys: (keyof Draft)[], label: string, next?: Draft, prev?: Draft): Promise<boolean> {
     return enqueue(async () => {
       const r = rowRef.current;
-      if (!r) return true; // not added yet: the Add The Panel tap writes everything at once
+      if (!r) return true; // not added yet: the Add New Panel tap writes everything at once
       const want = next ?? dRef.current;
       const before = prev ?? draftOf(r);
       if (keys.every((k) => want[k] === before[k])) return true;
@@ -240,6 +259,9 @@ export function PanelSetupSheet({
     ["spaces", "the spaces"],
     ["twin_spaces", "the tandem spaces"],
     ["dead_spaces", "the No Stab spaces"],
+    ["space_pitch_in", "the space pitch"],
+    ["label_width_in", "the label width"],
+    ["label_width_in_right", "the right side width"],
     ["notes", "the notes"],
   ];
   /** Every way out of an added panel: write what is still typed, then go. Refused: stay and say why. */
@@ -249,6 +271,17 @@ export function PanelSetupSheet({
     }
     onClose();
   }
+
+  /** A chip (a brand, a size): the field takes it at once and saves it, with the Undo. */
+  const choose = (k: keyof Draft, value: string, label: string) => {
+    const next: Draft = { ...dRef.current, [k]: value };
+    const prev = rowRef.current ? draftOf(rowRef.current) : dRef.current;
+    setD(next);
+    void saveKeys([k], label, next, prev);
+  };
+  const [rightOwn, setRightOwn] = useState(() => d.label_width_in_right.trim() !== "");
+  // The make's door, from the brand as typed: the measurements' placeholders follow it.
+  const door = brandDefaults(d.brand);
 
   const text = (k: keyof Draft, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <Input
@@ -264,14 +297,14 @@ export function PanelSetupSheet({
     <Modal
       open
       onClose={() => void leave()}
-      title={row ? row.name : "Add The Panel"}
+      title={row ? row.name : "New Panel"}
       size="md"
       dirty={!row && (d.brand !== "" || d.spaces !== "" || d.main_amps !== "")}
       footer={
         row ? (
           <ModalActions onCancel={() => void leave()} hideCancel onSave={() => void leave()} saveLabel="Done" saving={saving} />
         ) : (
-          <ModalActions onCancel={onClose} onSave={add} saveLabel="Add The Panel" saving={saving} />
+          <ModalActions onCancel={onClose} onSave={add} saveLabel="Add New Panel" saving={saving} />
         )
       }
     >
@@ -286,12 +319,42 @@ export function PanelSetupSheet({
             )}
           </div>
         )}
-        <Field label="Name">{text("name", "the name", { placeholder: "Main Panel" })}</Field>
+        <Field label="Name">{text("name", "the name", { placeholder: "Panel 1" })}</Field>
         <Field label="Brand">{text("brand", "the brand", { placeholder: "Siemens" })}</Field>
+        <div role="radiogroup" aria-label="Brand" className="-mt-2 flex flex-wrap gap-1.5">
+          {BRAND_CHOICES.map((b) => (
+            <button
+              key={b}
+              type="button"
+              role="radio"
+              aria-checked={d.brand.trim().toLowerCase() === b.toLowerCase()}
+              disabled={saving}
+              onClick={() => choose("brand", b, "the brand")}
+              className={cn(chipCls, d.brand.trim().toLowerCase() === b.toLowerCase() ? chipOn : chipOff)}
+            >
+              {b}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Main">{text("main_amps", "the main", { inputMode: "numeric", placeholder: "125" })}</Field>
           <Field label="Bus">{text("bus_amps", "the bus", { inputMode: "numeric", placeholder: "125" })}</Field>
-          <Field label="Spaces">{text("spaces", "the spaces", { inputMode: "numeric", placeholder: "32" })}</Field>
+          <Field label="Spaces">{text("spaces", "the spaces", { inputMode: "numeric", placeholder: "24" })}</Field>
+        </div>
+        <div role="radiogroup" aria-label="Spaces" className="-mt-2 flex flex-wrap gap-1.5">
+          {SPACE_PRESETS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={d.spaces.trim() === String(n)}
+              disabled={saving}
+              onClick={() => choose("spaces", String(n), "the spaces")}
+              className={cn(chipCls, d.spaces.trim() === String(n) ? chipOn : chipOff)}
+            >
+              {n}
+            </button>
+          ))}
         </div>
         <label className="flex min-h-[44px] items-center gap-3 rounded-lg border border-slate-300 px-3 text-sm text-slate-800">
           <input
@@ -314,6 +377,42 @@ export function PanelSetupSheet({
         <Field label="No Stab Spaces" hint="A crimped spot with no stab. Nothing can be kept there, so a space with a circuit on it is refused until the circuit moves.">
           {text("dead_spaces", "the No Stab spaces", { inputMode: "numeric", placeholder: "31" })}
         </Field>
+        {/* THE DOOR, MEASURED (0402): once, with a tape; the printed label strips are cut to it. A
+            blank field is the make's size (the placeholder), and nothing writes a default back. */}
+        <section aria-label="Door Labels" className="space-y-3 rounded-lg border border-slate-200 p-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Door Labels</h4>
+            <p className="mt-0.5 text-xs text-slate-500">Measure the label area beside the breakers once; the printed strips use it.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Space Pitch" hint="Inches, one space tall.">
+              {text("space_pitch_in", "the space pitch", { inputMode: "decimal", placeholder: inchWords(door.pitchIn) })}
+            </Field>
+            <Field label="Label Width" hint="Inches, beside the breakers.">
+              {text("label_width_in", "the label width", { inputMode: "decimal", placeholder: inchWords(door.labelWidthIn) })}
+            </Field>
+          </div>
+          <label className="flex min-h-[44px] items-center gap-3 rounded-lg border border-slate-300 px-3 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="h-5 w-5"
+              checked={rightOwn}
+              disabled={saving}
+              onChange={(e) => {
+                setRightOwn(e.target.checked);
+                // Back to the same on both sides: the right's own width is cleared (Undo puts it back).
+                if (!e.target.checked && d.label_width_in_right !== "") choose("label_width_in_right", "", "the right side width");
+              }}
+            />
+            Different On The Right
+          </label>
+          {rightOwn && (
+            <Field label="Right Side Width" hint="Inches, beside the right column.">
+              {text("label_width_in_right", "the right side width", { inputMode: "decimal", placeholder: d.label_width_in.trim() || inchWords(door.labelWidthIn) })}
+            </Field>
+          )}
+          <p className="text-xs text-slate-500">Leave a field blank to use the make&apos;s size.</p>
+        </section>
         <Field label="Panel Photo" hint={photos.length ? undefined : "Take one on the Photos tab and it shows up here."}>
           <select
             className={selectCls}

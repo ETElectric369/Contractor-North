@@ -13,6 +13,8 @@ import {
   nextProgress,
   offerEstimates,
   parseQuoteBreaker,
+  quadCentreHalf,
+  quadOuterSlots,
   quadSpaceFree,
   quoteCircuitsToSuggestions,
   rankEstimateCandidates,
@@ -195,30 +197,46 @@ describe("reading the estimate", () => {
 });
 
 describe("where circuits sit", () => {
-  it("a 2P covers s and s+2; a quad's inner 2P at 25B covers 25B and 27B", () => {
+  it("a 2P covers s and s+2; a quad's centre 2P at 25B covers 25B and 27A (the middle two handles)", () => {
     expect(slotsOf({ space: 25, half: null, poles: 2 })).toEqual([
       { space: 25, half: null },
       { space: 27, half: null },
     ]);
+    // The owner's sheet: space 1 "Garage / Floor Heat", space 3 "Floor Heat / Garage" — the centre
+    // 2-pole is the lower half of its first space and the UPPER half of the next one on that side.
     expect(slotsOf({ space: 25, half: "B", poles: 2 })).toEqual([
       { space: 25, half: "B" },
+      { space: 27, half: "A" },
+    ]);
+    // A 2-pole at A is the quad's outer pair: the top handle and the bottom one.
+    expect(slotsOf({ space: 25, half: "A", poles: 2 })).toEqual([
+      { space: 25, half: "A" },
       { space: 27, half: "B" },
     ]);
     expect(slotsOf({ space: null, half: null, poles: 1 })).toEqual([]);
   });
 
-  it("the Q21530CT quad at 25/27 sits clean: outer 15s on the A halves, inner 2P 30 on the B halves", () => {
+  it("the Q21530CT quad at 25/27 sits clean: outer 15s at 25A and 27B, the centre 2P 30 at 25B and 27A", () => {
     const panel = { ...PANEL, twin_spaces: [25, 27] };
     const quad = [
       circuit({ room: "Bath", description: "Bath Lights", amps: 15, space: 25, half: "A" }),
-      circuit({ room: "Bedroom", description: "Lights", amps: 15, space: 27, half: "A" }),
+      circuit({ room: "Bedroom", description: "Lights", amps: 15, space: 27, half: "B" }),
       circuit({ room: "Laundry", description: "Dryer", amps: 30, poles: 2, space: 25, half: "B" }),
     ];
     const map = spaceMap(panel, quad);
     expect(map.warnings).toEqual([]);
     expect(map.cells.get(25)).toEqual({ A: [quad[0].id], B: [quad[2].id], full: [] });
-    expect(map.cells.get(27)).toEqual({ A: [quad[1].id], B: [quad[2].id], full: [] });
+    expect(map.cells.get(27)).toEqual({ A: [quad[2].id], B: [quad[1].id], full: [] });
     expect(map.placed).toBe(3);
+  });
+
+  it("the old way of keeping a quad (both outer singles on A) now says what it is: the centre meets the lower outer on 27A", () => {
+    const panel = { ...PANEL, twin_spaces: [25, 27] };
+    const old = [
+      circuit({ room: "Bedroom", description: "Lights", amps: 15, space: 27, half: "A" }),
+      circuit({ room: "Laundry", description: "Dryer", amps: 30, poles: 2, space: 25, half: "B" }),
+    ];
+    expect(spaceMap(panel, old).warnings.map((w) => w.message)).toEqual(["Space 27 has Bedroom Lights and Laundry Dryer on it."]);
   });
 
   it("warns — never refuses — on two circuits in one space, a tandem the label doesn't allow, and No Stab", () => {
@@ -248,6 +266,40 @@ describe("where circuits sit", () => {
     expect(doorRows({ spaces: 4, numbering: "bottom_up" })).toEqual([
       { left: 3, right: 4 },
       { left: 1, right: 2 },
+    ]);
+  });
+
+  it("an odd count still draws its last row two wide, and says the cell beside its last space is not on the panel", () => {
+    expect(doorRows({ spaces: 23, numbering: "top_down" }).at(-1)).toEqual({ left: 23, right: 24, rightNone: true });
+    expect(doorRows({ spaces: 23, numbering: "top_down" }).filter((r) => r.rightNone)).toHaveLength(1);
+    // Bottom up, that row is the top one.
+    expect(doorRows({ spaces: 23, numbering: "bottom_up" })[0]).toEqual({ left: 23, right: 24, rightNone: true });
+    expect(doorRows({ spaces: 1, numbering: "top_down" })).toEqual([{ left: 1, right: 2, rightNone: true }]);
+    // An even panel has none; a panel whose size nobody said can't know, so it says none either.
+    expect(doorRows({ spaces: 24, numbering: "top_down" }).some((r) => r.rightNone)).toBe(false);
+    expect(doorRows({ spaces: null, numbering: "top_down" }, [9]).some((r) => r.rightNone)).toBe(false);
+  });
+
+  it("a quad's centre 2-pole: B top down, A bottom up — and the outer singles, top then bottom (the one rule)", () => {
+    expect(quadCentreHalf("top_down")).toBe("B");
+    expect(quadCentreHalf(null)).toBe("B");
+    expect(quadCentreHalf("bottom_up")).toBe("A");
+    expect(quadOuterSlots(25, "top_down")).toEqual([
+      { space: 25, half: "A" },
+      { space: 27, half: "B" },
+    ]);
+    expect(quadOuterSlots(25, "bottom_up")).toEqual([
+      { space: 27, half: "A" },
+      { space: 25, half: "B" },
+    ]);
+    // The centre's slots are slotsOf's: the middle two handles on either door.
+    expect(slotsOf({ space: 25, half: quadCentreHalf("top_down"), poles: 2 })).toEqual([
+      { space: 25, half: "B" },
+      { space: 27, half: "A" },
+    ]);
+    expect(slotsOf({ space: 25, half: quadCentreHalf("bottom_up"), poles: 2 })).toEqual([
+      { space: 25, half: "A" },
+      { space: 27, half: "B" },
     ]);
   });
 

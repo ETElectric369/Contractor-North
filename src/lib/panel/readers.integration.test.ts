@@ -2,16 +2,18 @@ import { describe, it as vitestIt, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
 import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
-import { PANEL_SAYS, NORT_SAYS, readerSuggestions, type ReadRow } from "./readers";
+import { NORT_SAYS, landRead, readerSuggestions, type ReadRow } from "./readers";
 
 /**
  * THE READERS' WRITES AGAINST 0333, where the boundary lives (Panel plan, phase 4; no migration of
- * its own). What the photo, the plans and Nort write is exactly what readerSuggestions drafts, so
- * this plants those drafts AS a tech and AS the office and reads back what the database kept:
+ * its own). What the photo writes is exactly what landRead drafts, and what the plans and Nort
+ * write is what readerSuggestions drafts, so this plants those drafts AS a tech and AS the office
+ * and reads back what the database kept:
  *
- *   - a tech's panel-photo read lands as suggestions carrying the photo (a document link rides on
- *     a photo's row), even when the request says 'kept';
- *   - a label check (source_row.flag_for) lands as a suggestion and is findable as one;
+ *   - a tech's photo read lands as suggestions IN THEIR SPACES carrying the photo (a document link
+ *     rides on a photo's row), even when the request says 'kept'; the line whose words differ from
+ *     the kept fridge on space 12 lands on space 12 as a suggestion, never as a label check, and
+ *     the kept fridge is not touched;
  *   - Use It changes the circuit only while it still says what the reader saw (a zero-row update
  *     otherwise, which the door reports as "someone just changed it");
  *   - a tech can't write source 'plan' (Read Circuits From The Plans is the office's); the office can;
@@ -61,7 +63,7 @@ d("the readers' writes (0333's guard, phase 4)", () => {
   };
   const one = async (sql: string, params: unknown[] = []) => (await client.query(sql, params)).rows[0];
   /** A reader's drafts, inserted the way lib/panel/suggest-write does. */
-  const plant = async (drafts: ReturnType<typeof readerSuggestions>["drafts"], extra: Record<string, unknown> = {}) => {
+  const plant = async (drafts: ReturnType<typeof readerSuggestions>["drafts"] | ReturnType<typeof landRead>["toWrite"], extra: Record<string, unknown> = {}) => {
     const out = [];
     for (const d of drafts) {
       const row = { ...d, job_id: jobId, ...extra };
@@ -120,34 +122,36 @@ d("the readers' writes (0333's guard, phase 4)", () => {
 
   const row = (over: Partial<ReadRow>): ReadRow => ({ space: null, half: null, said: null, room: null, amps: null, poles: 1, kind: null, wire: null, work: "existing", check: null, ...over });
 
-  it("a tech's panel-photo read lands as suggestions with the photo on them, even when the request says kept", async () => {
+  it("a tech's photo read lands in its spaces as suggestions with the photo on them, even when the request says kept", async () => {
     await asServer();
     const circuits = (await client.query("select * from job_circuits where job_id = $1", [jobId])).rows;
-    const out = readerSuggestions({
-      source: "photo",
-      rows: [row({ space: 1, said: "Garage", amps: 20 }), row({ space: 12, said: "Mini Fridge", amps: 20 })],
-      circuits,
+    const out = landRead([row({ space: 1, half: "A", said: "Garage", amps: 20 }), row({ space: 12, said: "Mini Fridge", amps: 20 })], circuits, {
       panelId: null,
-      says: PANEL_SAYS,
-      startSort: 0,
       stamp: { document_name: "panel.jpg" },
     });
-    expect(out.drafts).toHaveLength(2);
+    // The fridge is kept on space 12 as "Fridge": the photo's "Mini Fridge" is a suggestion beside it.
+    expect(out.toWrite).toHaveLength(2);
+    expect(out.skipped).toEqual([]);
     await as(techId);
     const rows = await plant(
-      out.drafts.map((d) => ({ ...d, state: "kept" as never })),
+      out.toWrite.map((d) => ({ ...d, state: "kept" as never })),
       { source_document_id: photoId },
     );
-    expect(rows.map((r: any) => [r.state, r.source, r.source_document_id, r.org_id, r.created_by])).toEqual([
-      ["suggested", "photo", photoId, orgId, techId],
-      ["suggested", "photo", photoId, orgId, techId],
+    expect(rows.map((r: any) => [r.state, r.source, r.source_document_id, r.org_id, r.created_by, r.space, r.half, r.panel_label])).toEqual([
+      ["suggested", "photo", photoId, orgId, techId, 1, "A", "Garage"],
+      ["suggested", "photo", photoId, orgId, techId, 12, null, "Mini Fridge"],
     ]);
-    expect(rows[1].source_row).toMatchObject({ flag_for: fridgeId, use: { panel_label: "Mini Fridge" }, was: { panel_label: null } });
-    // The keep door's filter finds the check and only the check.
+    // No label checks from a photo: nothing carries flag_for.
     const checks = (await client.query("select id from job_circuits where job_id = $1 and source_row->>'flag_for' is not null", [jobId])).rows;
-    expect(checks.map((c: any) => c.id)).toEqual([rows[1].id]);
+    expect(checks).toEqual([]);
     // Nothing kept was touched by the read.
     expect(await one("select panel_label, updated_by from job_circuits where id = $1", [fridgeId])).toEqual({ panel_label: null, updated_by: null });
+    // Read again, the same photo writes nothing: both lines are already waiting.
+    await asServer();
+    const now = (await client.query("select * from job_circuits where job_id = $1", [jobId])).rows;
+    const again = landRead([row({ space: 1, half: "A", said: "Garage", amps: 20 }), row({ space: 12, said: "Mini Fridge", amps: 20 })], now, { panelId: null });
+    expect(again.toWrite).toEqual([]);
+    expect(again.skipped.map((x) => x.why)).toEqual(["waiting", "waiting"]);
   });
 
   it("Use It changes the fridge only while it still says what the reader saw", async () => {

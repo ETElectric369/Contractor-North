@@ -4,13 +4,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { dbError } from "@/lib/db-error";
 import { jobLabel } from "@/lib/schedule-options";
-import { normalizeCircuitPatch } from "@/lib/panel/input";
+import { MAX_SPACES, normalizeCircuitPatch } from "@/lib/panel/input";
 import { circuitLine } from "@/lib/panel/model";
+import { spaceWords } from "@/lib/panel/directory";
 import { NORT_SAYS, readerSuggestions, type ReadRow } from "@/lib/panel/readers";
 import { writeSuggestions } from "@/lib/panel/suggest-write";
-import type { JobCircuit } from "@/lib/types";
+import type { JobCircuit, PanelNumbering } from "@/lib/types";
 import { isUuid, resolveJobId } from "../resolve-id";
 import type { ActionCtx, ActionDef, ActionResult } from "../types";
+import { CIRCUIT_FORMS, placeSaid } from "./panel-form";
 
 // NORT FILLS, A PERSON SAVES (the fill-vs-execute doctrine; Panel plan, phase 4).
 //
@@ -33,8 +35,12 @@ const CIRCUIT = z.object({
   poles: z.number().int().min(1).max(3).optional(),
   kind: z.enum(["standard", "afci", "gfci", "dual_function", "spd"]).nullable().optional(),
   wire: z.string().trim().max(40).nullable().optional(),
-  space: z.number().int().min(1).max(84).nullable().optional(),
+  space: z.number().int().min(1).max(MAX_SPACES).nullable().optional(),
+  /** A 2-pole or 3-pole said by its spaces ("on 9 and 11"): the top one is its space. */
+  spaces: z.array(z.number().int().min(1).max(MAX_SPACES)).min(1).max(3).nullable().optional(),
   half: z.enum(["A", "B"]).nullable().optional(),
+  /** single / tandem / 2-pole / 3-pole / quad, when said (lib/actions/entities/panel-form). */
+  form: z.enum(CIRCUIT_FORMS).nullable().optional(),
   work: z.enum(["new", "existing", "reused", "removed"]).optional(),
 });
 
@@ -51,6 +57,7 @@ export const panelActions: Record<string, ActionDef> = {
     description:
       "Put one or more circuits on a job's Panel tab as SUGGESTIONS ('add a 20 amp for the garage freezer on <job>', 'the dryer is a 2-pole 30 on space 21'). A suggestion counts for nothing until a person taps Keep on the Panel tab: say exactly that, and NEVER say the circuit is added, kept, placed or counted. " +
       "job_id is the job's id from list_jobs OR its name / number as spoken ('<job name>', '<job number>'). One object per circuit: description = what it feeds ('Freezer'), room ('Garage'), amps (15, 20, 30…), poles (1-3, default 1), kind (standard / afci / gfci / dual_function / spd, only when said), panel_label = the door's words only when said, space / half only when said, work = new (default) / existing / reused / removed. " +
+      "WHERE IT GOES, when said: form = single / tandem / 2-pole / 3-pole / quad. A TANDEM is two circuits sharing one space: one object EACH, the same space, form tandem; the first said is half A (the top) and the second half B unless a half was said ('put Bar and Mini Fridge on 17 as a tandem 20/20' = {description 'Bar', space 17, form 'tandem', amps 20} and {description 'Mini Fridge', space 17, form 'tandem', amps 20}). A 2-pole or 3-pole said by its spaces passes them as spaces ('Mini Split on 9 and 11, 2-pole 30' = {description 'Mini Split', spaces [9, 11], form '2-pole', amps 30}). A QUAD is four handles on two spaces: one object for each outer single (poles 1) and one for the centre 2-pole (poles 2), each form 'quad' with the quad's first space and no half; the first single said is the top one, and the app hangs them the way that panel's numbers run. Words that disagree, a tandem with no space or no half, or a quad on a job with several panels come back as a question: ask it. " +
       "Pass only what was said; never invent amps or a space. Read the panel first with get_job_panel when you need to know what is already there: a circuit already on the list is reported back, not added twice.",
     input: z.object({
       job_id: z.string().min(1),
@@ -69,19 +76,36 @@ export const panelActions: Record<string, ActionDef> = {
       if (!job) return { ok: false, error: "Job not found (or not one you can see)." };
       const label = jobLabel(job as { job_number: string | null; name: string | null });
 
+      // The job's live panels (two tell none, one, several): the one a suggestion lands on, and which
+      // way its numbers run. Only a QUAD needs the numbering before its words are placed (none yet =
+      // Panel 1, top down, the way ensure-panel makes it; several = unknown, and a quad asks which),
+      // so only a quad reads it first; everything else is checked before anything is read.
+      const livePanels = async () => {
+        const { data } = await supabase.from("job_panels").select("id, numbering").eq("job_id", r.id).eq("org_id", ctx.orgId).is("removed_at", null).limit(2);
+        return (data ?? []) as { id: string; numbering?: PanelNumbering | null }[];
+      };
+      const numberingOf = (live: { numbering?: PanelNumbering | null }[]): PanelNumbering | null =>
+        live.length === 0 ? "top_down" : live.length === 1 ? (live[0].numbering ?? "top_down") : null;
+      const early = (i.circuits as { form?: string | null }[]).some((c) => c.form === "quad") ? await livePanels() : null;
+
+      // Where each one goes, from the words said about it (a tandem's halves, a 2-pole's spaces, a quad).
+      const places = placeSaid(i.circuits, { numbering: early ? numberingOf(early) : null });
+      if (!places.ok) return { ok: false, error: places.error };
+
       // Each circuit through the same checks a person's edit goes through (sizes, spaces, words).
       const rows: ReadRow[] = [];
       for (const [n, c] of i.circuits.entries()) {
+        const at = places.value[n];
         const v = normalizeCircuitPatch({
           description: c.description ?? null,
           panel_label: c.panel_label ?? null,
           room: c.room ?? null,
           amps: c.amps ?? null,
-          poles: c.poles ?? 1,
+          poles: at.poles,
           kind: c.kind ?? null,
           wire: c.wire ?? null,
-          space: c.space ?? null,
-          half: c.half ?? null,
+          space: at.space,
+          half: at.half,
           work: c.work ?? "new",
         });
         if (!v.ok) return { ok: false, error: `Circuit ${n + 1}: ${v.error}` };
@@ -104,13 +128,12 @@ export const panelActions: Record<string, ActionDef> = {
         });
       }
 
-      const [{ data: all, error: aErr }, { data: panels }] = await Promise.all([
+      const [{ data: all, error: aErr }, live] = await Promise.all([
         supabase.from("job_circuits").select(COLS).eq("job_id", r.id).eq("org_id", ctx.orgId),
-        supabase.from("job_panels").select("id").eq("job_id", r.id).eq("org_id", ctx.orgId).is("removed_at", null).limit(2),
+        early ? Promise.resolve(early) : livePanels(),
       ]);
       if (aErr) return { ok: false, error: /job_circuits/.test(aErr.message ?? "") ? "The Panel tab isn't switched on for this database yet." : dbError(aErr) };
-      const panelIds = ((panels ?? []) as { id: string }[]).map((p) => p.id);
-      const panelId = panelIds.length === 1 ? panelIds[0] : null;
+      const panelId = live.length === 1 ? live[0].id : null;
       const outcome = readerSuggestions({
         source: "nort",
         rows,
@@ -126,7 +149,8 @@ export const panelActions: Record<string, ActionDef> = {
       const fresh = wrote.rows.filter((x) => !x.source_row?.flag_for);
       const checks = wrote.rows.filter((x) => x.source_row?.flag_for);
       const said = [
-        fresh.length ? `Suggested on ${label}: ${fresh.map((x) => circuitLine(x)).join("; ")}.` : null,
+        // Each with where it goes when that was said ("on 17A", "on 9/11"), so Nort reads it back.
+        fresh.length ? `Suggested on ${label}: ${fresh.map((x) => `${circuitLine(x)}${x.space != null ? ` on ${spaceWords(x)}` : ""}`).join("; ")}.` : null,
         checks.length ? `${checks.length === 1 ? "A label check" : `${checks.length} label checks`}: ${checks.map((x) => x.source_row?.check).join(" ")}` : null,
         outcome.same ? `${outcome.same} ${outcome.same === 1 ? "is" : "are"} already on the list.` : null,
         outcome.already ? `${outcome.already} ${outcome.already === 1 ? "was" : "were"} already suggested.` : null,

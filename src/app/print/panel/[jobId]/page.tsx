@@ -18,9 +18,10 @@ export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * THE PANEL DIRECTORY, PRINTED (Panel plan, phase 5): Print Panel Directory and Save As Circuit Map
- * both render this page (the PDF engine prints it; /api/pdf/panel/<job>). It replaces the map Erik
- * built by hand for J-011 on 2026-09-25:
+ * THE CIRCUIT MAP, PRINTED (Panel plan, phase 5; one name since the panel-first wave, when Erik
+ * molded the Panel Directory and the Circuit Map into one door): Print Circuit Map and Save As
+ * Circuit Map both render this page (the PDF engine prints it; /api/pdf/panel/<job>). It replaces
+ * the map Erik built by hand for J-011 on 2026-09-25:
  *
  *   1. THE DOOR CARD, one page per panel that has circuits in spaces: two columns in space order,
  *      the way the door hangs, to tape inside it.
@@ -40,13 +41,20 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export async function generateMetadata({ params }: { params: Promise<{ jobId: string }> }): Promise<Metadata> {
   const { jobId } = await params;
-  if (!UUID.test(jobId)) return { title: "Panel Directory" };
+  if (!UUID.test(jobId)) return { title: "Circuit Map" };
   const supabase = await createClient();
-  const { data } = await supabase.from("jobs").select("name").eq("id", jobId).maybeSingle();
-  return { title: docTitle("Panel Directory", (data as { name?: string | null } | null)?.name) };
+  // The tenant law: the query names the company as well as RLS holding it.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = user ? await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle() : { data: null };
+  const orgId = (me as { org_id?: string | null } | null)?.org_id;
+  if (!orgId) return { title: "Circuit Map" };
+  const { data } = await supabase.from("jobs").select("name").eq("id", jobId).eq("org_id", orgId).maybeSingle();
+  return { title: docTitle("Circuit Map", (data as { name?: string | null } | null)?.name) };
 }
 
-export default async function PanelDirectoryPrintPage({ params }: { params: Promise<{ jobId: string }> }) {
+export default async function CircuitMapPrintPage({ params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
   if (!UUID.test(jobId)) notFound();
   const supabase = await createClient();
@@ -128,7 +136,7 @@ export default async function PanelDirectoryPrintPage({ params }: { params: Prom
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
         <BackLink fallback={`/jobs/${jobId}?tab=panel`} fallbackLabel="Back" className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800" />
-        <PrintButton label="Print Panel Directory" />
+        <PrintButton label="Print Circuit Map" />
       </div>
 
       {doors.map((d, i) => (
@@ -136,7 +144,7 @@ export default async function PanelDirectoryPrintPage({ params }: { params: Prom
           <DocHeader
             co={company}
             template={template}
-            meta={{ docType: "Panel Directory", number: d.name, rows: [{ label: "Job", value: jobName }, { label: "Printed", value: printed }] }}
+            meta={{ docType: "Circuit Map", number: d.name, rows: [{ label: "Job", value: jobName }, { label: "Printed", value: printed }] }}
           />
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg font-bold text-slate-900">{panelHeading(d)}</h2>

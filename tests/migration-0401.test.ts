@@ -37,10 +37,10 @@ describe("migration 0401: one usage window, topped up", () => {
   const m0162 = migration("0162_");
   const m0400 = migration("0400_");
 
-  it("is the one 0401 and nothing sits past it", () => {
+  it("is the one 0401 (what sits past it is the newest migration's own test: migration-0402.test.ts)", () => {
     const names = readdirSync(migrations);
     expect(names.filter((n) => n.startsWith("0401_"))).toEqual(["0401_one_usage_window_topped_up.sql"]);
-    expect(names.some((n) => /^040[2-9]_|^04[1-9]\d_|^0[5-9]\d\d_/.test(n))).toBe(false);
+    expect(names.filter((n) => n.startsWith("0402_"))).toEqual(["0402_the_panel_door_is_measured.sql"]);
   });
 
   it("exists, names itself, and runs under the house timeouts", () => {

@@ -86,7 +86,7 @@ d("the Breakers card on J-011, replayed against ET's live tickets", () => {
     }
   });
 
-  it("says Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare., and offers the Q220 and the quad swap", async () => {
+  it("says Short one 2P 20A (Bath Floor Heat) — Add To Materials to everyone, and the office's Details the full count, the Q220 and the quad swap", async () => {
     const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
     await assertReadOnlyReplay(c);
@@ -164,15 +164,20 @@ d("the Breakers card on J-011, replayed against ET's live tickets", () => {
       const labels = (h: string) => [...h.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").trim());
       const crew = draw(crewData);
       const office = draw(officeData);
+      // ONE LINE for everyone (the panel-first wave); the full count, the swap and the book are the
+      // office's, behind Details.
       for (const h of [crew, office]) {
-        expect(text(h)).toContain("Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare.");
-        expect(text(h)).toContain("Not Q22020CT2, That Is Two 2-Pole 20s");
-        expect(labels(h)).toContain("Add Q220 To Materials");
-        expect(labels(h)).toContain("Add Q22020CT To Materials");
+        expect(text(h)).toContain("Short one 2P 20A (Bath Floor Heat) — Add To Materials");
+        expect(labels(h)).toContain("Add To Materials");
       }
+      expect(text(office)).toContain("Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare.");
+      expect(text(office)).toContain("Not Q22020CT2, That Is Two 2-Pole 20s");
+      expect(labels(office)).toContain("Add Q220 To Materials");
+      expect(labels(office)).toContain("Add Q22020CT To Materials");
       expect(text(office)).toContain("Q220 Is $18.76 In Your Price Book.");
       expect(text(office)).toContain("8802-SO-257555");
-      for (const secret of ["8802-SO-257555", "$", "Price Book"]) expect(text(crew)).not.toContain(secret);
+      expect(crew).not.toContain("<details");
+      for (const secret of ["8802-SO-257555", "$", "Price Book", "Not Q22020CT2"]) expect(text(crew)).not.toContain(secret);
 
       console.log(
         "[breakers replay] J-011:",

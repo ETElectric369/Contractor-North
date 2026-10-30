@@ -49,7 +49,7 @@ export function PanelDirectoryList({ panel, showNew = true }: { panel: Directory
         <ol className="mt-1.5 divide-y divide-slate-200/70" aria-label={`${panel.name} circuits`}>
           {panel.circuits.map((c, i) => (
             <li key={i} className="flex min-h-[44px] items-start gap-3 py-2" aria-label={directoryLine(c)} data-panel-line={directoryLine(c)}>
-              {/* At least 3rem, and as wide as its words: "25/27/29" or "25B/27B" grows the column
+              {/* At least 3rem, and as wide as its words: "25/27/29" or "25B/27A" grows the column
                   instead of running into the circuit's name at 375px. */}
               <span className="min-w-[3rem] shrink-0 whitespace-nowrap pt-0.5 text-right font-mono text-sm font-semibold text-slate-700">{spaceWords(c)}</span>
               <span className="min-w-0 flex-1">

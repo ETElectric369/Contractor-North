@@ -70,7 +70,8 @@ describe("directoryFromRows: what is on the directory", () => {
       "25/27 · Range · 2P 50A",
       "— · Floor Heat · 2P 20A",
     ]);
-    expect(spaceWords({ space: 25, half: "B", poles: 2 })).toBe("25B/27B");
+    // A quad's centre 2-pole is the middle two handles: the B half of 25 and the A half of 27.
+    expect(spaceWords({ space: 25, half: "B", poles: 2 })).toBe("25B/27A");
   });
 });
 

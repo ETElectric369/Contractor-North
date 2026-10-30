@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * THE READERS' DOORS, PINNED (Panel plan, phase 4). Read The Panel Photo is the crew's and the
- * office's, three reads per job per day; Read Circuits From The Plans is the office's; both only
- * ever write SUGGESTIONS, and a label check only ever changes the circuit it names while that
- * circuit still says what the reader saw. The model is a stub (never a paid call in a test), and
- * every database statement is scripted: an unscripted one throws, so each test accounts for all of
- * them.
+ * THE READERS' DOORS, PINNED (Panel plan, phase 4; honed in the panel-first wave). Read A Photo is
+ * the crew's and the office's — three reads per job per day for the crew, the office uncounted — and
+ * what it reads LANDS IN ITS SPACES as suggestions (a line the panel already says is skipped; one
+ * whose words differ is written in the same space; a re-read writes nothing). Read Circuits From
+ * The Plans is the office's. The card is ONE button with one sentence under it. The model is a stub
+ * (never a paid call in a test), and every database statement is scripted: an unscripted one
+ * throws, so each test accounts for all of them.
  */
 
 const s = vi.hoisted(() => ({
@@ -35,6 +36,8 @@ vi.mock("@/lib/ai-cost", () => ({
   modelFor: () => "claude-opus-4-8",
   recordAiUsage: vi.fn(async () => {}),
 }));
+vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
+vi.mock("./[id]/upload-job-photos", () => ({ uploadJobPhotos: vi.fn() }));
 vi.mock("@/lib/rate-limit", () => ({
   rateLimited: vi.fn(async (key: string) => {
     s.capKeys.push(key);
@@ -47,7 +50,11 @@ vi.mock("@/lib/rate-limit", () => ({
   }),
 }));
 
-import { applyLabelCheck, keepSuggestions, readPanelPhoto, readPlanCircuits, undoTakeOff } from "./panel-actions";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { applyLabelCheck, keepSuggestions, readPanelPhoto, readPlanCircuits, savePanel, undoTakeOff, type PanelPhoto } from "./panel-actions";
+import { PanelReaders, PhotoPicker, photoOrder } from "./[id]/job-panel-readers";
+import { PHOTO_CAP_WORDS, panelFacts } from "@/lib/panel/readers";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const JOB = "22222222-2222-4222-8222-222222222222";
@@ -137,25 +144,28 @@ beforeEach(() => {
 });
 
 describe("readPanelPhoto (the crew and the office)", () => {
-  it("a tech reads the panel photo: new circuits come in as suggestions, the fridge as a label check, nothing kept is touched", async () => {
+  const bath = { ...fridge, id: "99999999-9999-4999-8999-999999999990", room: "Bath", description: null, panel_label: "Snowbell Bath", space: 3, half: null, sort_order: 5 };
+
+  it("a tech reads a photo: each line lands in its space as a suggestion; the same words are skipped, different words are written beside the kept line", async () => {
     const create = stubModel({
-      panel: { brand: "Siemens", main_amps: 125, spaces: 40, no_stab_spaces: [] },
-      circuits: [
-        { space: 1, label: "Garage", amps: 20, poles: 1 },
-        { space: 12, label: "Mini Fridge", amps: 20, poles: 1 },
+      panel: { brand: "Siemens", main_amps: 125, spaces: 40, no_stab_spaces: [39, 40] },
+      lines: [
+        { space: 1, half: "A", label: "Garage", amps: 20, poles: 1 },
+        { space: 3, half: null, label: "snowbell  bath", amps: 20, poles: 1 },
+        { space: 12, half: null, label: "Mini Fridge", amps: 20, poles: 1 },
       ],
       unreadable: ["Space 9's label is torn off"],
     });
     as("tech", {
       "jobs.select": [job],
       "documents.select": [photo],
-      "job_panels.select": [{ data: panelRow, error: null }],
-      "job_circuits.select": [{ data: [fridge], error: null }, { data: { sort_order: 4 }, error: null }],
+      "job_panels.select": [{ data: { id: PANEL }, error: null }],
+      "job_circuits.select": [{ data: [fridge, bath], error: null }, { data: { sort_order: 5 }, error: null }],
       "job_circuits.insert": [
         {
           data: [
-            { id: "n1", state: "suggested", source: "photo", panel_label: "Garage" },
-            { id: "n2", state: "suggested", source: "photo", source_row: { flag_for: FRIDGE } },
+            { id: "n1", state: "suggested", source: "photo", panel_label: "Garage", space: 1, half: "A" },
+            { id: "n2", state: "suggested", source: "photo", panel_label: "Mini Fridge", space: 12, half: null },
           ],
           error: null,
         },
@@ -171,38 +181,95 @@ describe("readPanelPhoto (the crew and the office)", () => {
     expect(ins.table).toBe("job_circuits");
     expect(ins.payload).toHaveLength(2);
     for (const p of ins.payload) {
-      expect(p).toMatchObject({ job_id: JOB, panel_id: PANEL, source: "photo", source_document_id: PHOTO, state: "suggested" });
+      expect(p).toMatchObject({ job_id: JOB, panel_id: PANEL, source: "photo", source_document_id: PHOTO, state: "suggested", work: "existing" });
+      expect(p.source_row).not.toHaveProperty("flag_for");
+      expect(p.source_row).toMatchObject({ document_name: "panel.jpg" });
     }
-    expect(ins.payload[0]).toMatchObject({ panel_label: "Garage", space: 1, work: "existing", sort_order: 5 });
-    expect(ins.payload[1].source_row).toMatchObject({ flag_for: FRIDGE, check: "Panel Says Mini Fridge, Your List Says Fridge." });
-    // Nothing was written over the kept fridge: no update at all.
+    expect(ins.payload[0]).toMatchObject({ panel_label: "Garage", space: 1, half: "A", sort_order: 6 });
+    // The kept fridge says "Fridge" on 12: the photo's words wait on the same space, beside it.
+    expect(ins.payload[1]).toMatchObject({ panel_label: "Mini Fridge", space: 12, half: null, amps: 20 });
+    // Nothing was written over a kept circuit: no update at all.
     expect(calls.some((c) => c.verb === "update")).toBe(false);
-    expect(r.message).toBe("Read 2 circuits off the photo: 1 New Suggestion, 1 Label Check. Nothing counts until you keep it.");
+    expect(r.message).toBe("Read 3 lines, 2 new — Keep All or tap each one. 1 already matches the panel.");
     expect(r.notes).toEqual(["Space 9's label is torn off"]);
-    expect(r.header.map((h) => h.words)).toEqual(["Spaces: 40 (Yours Says 32)"]);
+    // What the photo said about the panel itself rides back for the card's one line, No Stab too.
+    expect(r.panelSays).toEqual({ brand: "Siemens", main_amps: 125, spaces: 40, dead_spaces: [39, 40] });
+    expect(r.rows.map((x) => x.id)).toEqual(["n1", "n2"]);
+    expect(r).not.toHaveProperty("panel");
     // A read that answered is counted, and the reads left ride with it.
     expect(r.readsLeft).toBe(2);
     expect(s.givenBack).toEqual([]);
   });
 
-  it("the fourth read of the day is refused in plain words, AFTER the photo is found and BEFORE the model", async () => {
-    const create = stubModel({ circuits: [] });
-    s.capped = true;
-    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: panelRow, error: null }] });
-    const r = await readPanelPhoto(JOB, PHOTO, PANEL);
-    expect(r).toEqual({
-      ok: false,
-      error: "The panel photo has been read 3 times on this job today. The next read opens tomorrow; add the rest by hand with Add A Circuit.",
-      readsLeft: 0,
+  it("the same photo read again writes nothing: every line is already waiting", async () => {
+    stubModel({ lines: [{ space: 1, half: "A", label: "Garage", amps: 20, poles: 1 }] });
+    const waiting = { ...fridge, id: "w1", state: "suggested", source: "photo", description: null, panel_label: "Garage", space: 1, half: "A" };
+    as("tech", {
+      "jobs.select": [job],
+      "documents.select": [photo],
+      "job_panels.select": [{ data: { id: PANEL }, error: null }],
+      "job_circuits.select": [{ data: [waiting], error: null }],
     });
+    const r = await readPanelPhoto(JOB, PHOTO, PANEL);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(calls.some((c) => c.verb === "insert")).toBe(false);
+    expect(r.rows).toEqual([]);
+    expect(r.message).toBe("Read 1 line — nothing new: 1 already waiting.");
+  });
+
+  it("no panel named and none on the job: Panel 1 is made, the read lands on it, and the card is handed it", async () => {
+    stubModel({ lines: [{ space: 2, half: null, label: "Larkspur Lights", amps: 15, poles: 1 }] });
+    as("office", {
+      "jobs.select": [job],
+      "documents.select": [photo],
+      // ensurePanelFor: no live panel, nothing loose, Panel 1 made.
+      "job_panels.select": [{ data: [], error: null }],
+      "job_panels.insert": [{ data: { ...panelRow, name: "Panel 1", brand: null }, error: null }],
+      "job_circuits.select": [{ data: [], error: null }, { data: [], error: null }, { data: null, error: null }],
+      "job_circuits.insert": [{ data: [{ id: "n1", state: "suggested", source: "photo", panel_id: PANEL, space: 2 }], error: null }],
+    });
+    const r = await readPanelPhoto(JOB, PHOTO, null);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.panel).toMatchObject({ id: PANEL, name: "Panel 1" });
+    const ins = calls.filter((c) => c.verb === "insert");
+    expect(ins.map((c) => c.table)).toEqual(["job_panels", "job_circuits"]);
+    expect(ins[1].payload[0]).toMatchObject({ panel_id: PANEL, space: 2, panel_label: "Larkspur Lights" });
+    // The office isn't counted.
+    expect(s.capKeys).toEqual([]);
+    expect(r.readsLeft).toBeNull();
+  });
+
+  it("the fourth read of the day is refused in ONE sentence, AFTER the photo is found and BEFORE the model", async () => {
+    const create = stubModel({ lines: [] });
+    s.capped = true;
+    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: { id: PANEL }, error: null }] });
+    const r = await readPanelPhoto(JOB, PHOTO, PANEL);
+    expect(r).toEqual({ ok: false, error: "3 photo reads a day on this job — ask the office for more.", readsLeft: 0 });
     expect(create).not.toHaveBeenCalled();
     expect(s.givenBack).toEqual([]);
   });
 
-  it("a read the model fails, or cuts off, is given back, and the answer says so with the reads left", async () => {
+  it("the office isn't held to the crew's count: the read goes ahead, uncounted", async () => {
+    const create = stubModel({ lines: [] });
+    s.capped = true;
+    as("office", {
+      "jobs.select": [job],
+      "documents.select": [photo],
+      "job_panels.select": [{ data: { id: PANEL }, error: null }],
+      "job_circuits.select": [{ data: [], error: null }],
+    });
+    const r = await readPanelPhoto(JOB, PHOTO, PANEL);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(s.capKeys).toEqual([]);
+    expect(r).toMatchObject({ ok: true, rows: [], readsLeft: null, message: "Nothing readable in that photo — try one straight on with the door open." });
+  });
+
+  it("a read the model fails, or cuts off, is given back to the crew, and the answer says so with the reads left", async () => {
     s.left = 3;
     s.model = { messages: { create: vi.fn(async () => { throw new Error("overloaded_error"); }) } };
-    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: panelRow, error: null }] });
+    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: { id: PANEL }, error: null }] });
     const r = await readPanelPhoto(JOB, PHOTO, PANEL);
     expect(r).toEqual({
       ok: false,
@@ -215,18 +282,26 @@ describe("readPanelPhoto (the crew and the office)", () => {
     s.model = {
       messages: { create: vi.fn(async () => ({ content: [{ type: "text", text: "{" }], stop_reason: "max_tokens", usage: { input_tokens: 10, output_tokens: 10 } })) },
     };
-    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: panelRow, error: null }] });
+    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: { id: PANEL }, error: null }] });
     const cut = await readPanelPhoto(JOB, PHOTO, PANEL);
     expect(cut.ok).toBe(false);
     if (cut.ok) return;
     expect(cut.error).toMatch(/^The photo had more on it than one read can hold\..* It didn't use up one of today's reads\. 3 Of 3 Reads Left Today\.$/);
     expect(s.givenBack).toEqual([`panel-photo:${JOB}`]);
+
+    // The office's failed read was never counted, so nothing is given back on its behalf.
+    s.givenBack = [];
+    s.model = { messages: { create: vi.fn(async () => { throw new Error("overloaded_error"); }) } };
+    as("office", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: { id: PANEL }, error: null }] });
+    const office = await readPanelPhoto(JOB, PHOTO, PANEL);
+    expect(office).toEqual({ ok: false, error: "The photo couldn't be read this time. Nothing was added. Try again in a minute.", readsLeft: null });
+    expect(s.givenBack).toEqual([]);
   });
 
   it("a used-up AI budget is said, and neither the cap nor the model is touched", async () => {
-    const create = stubModel({ circuits: [] });
+    const create = stubModel({ lines: [] });
     s.spent = true;
-    as("office", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: panelRow, error: null }] });
+    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: { id: PANEL }, error: null }] });
     const r = await readPanelPhoto(JOB, PHOTO, PANEL);
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -236,7 +311,7 @@ describe("readPanelPhoto (the crew and the office)", () => {
   });
 
   it("a paper that isn't one of this job's Photos is refused before anything is downloaded (and uses no read)", async () => {
-    const create = stubModel({ circuits: [] });
+    const create = stubModel({ lines: [] });
     as("tech", { "jobs.select": [job], "documents.select": [{ data: null, error: null }] });
     const r = await readPanelPhoto(JOB, PHOTO, PANEL);
     expect(r).toEqual({ ok: false, error: "Pick the photo from this job's Photos." });
@@ -248,13 +323,34 @@ describe("readPanelPhoto (the crew and the office)", () => {
   });
 
   it("a HEIC photo is said before the cap is spent", async () => {
-    stubModel({ circuits: [] });
+    stubModel({ lines: [] });
     as("tech", { "jobs.select": [job], "documents.select": [{ data: { ...photo.data, name: "IMG_1.HEIC", file_url: `${ORG}/${JOB}/1-IMG_1.HEIC` }, error: null }] });
     const r = await readPanelPhoto(JOB, PHOTO, PANEL);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toMatch(/JPG, PNG, WebP or GIF/);
     expect(s.capKeys).toEqual([]);
+  });
+});
+
+describe("the photo's No Stab spaces: the card's one line, and Use It", () => {
+  it("'The photo says … 2 No Stab spaces (31, 32).' and Use It writes dead_spaces through savePanel, only while the panel still says what it said", async () => {
+    const said = { brand: "Siemens", main_amps: 125, spaces: 32, dead_spaces: [31, 32] };
+    const facts = panelFacts({ ...panelRow, dead_spaces: [] }, said)!;
+    expect(facts.words).toBe("The photo says 2 No Stab spaces (31, 32).");
+    expect(facts.patch).toEqual({ dead_spaces: [31, 32] });
+    expect(facts.seen).toEqual({ dead_spaces: [] });
+    as("tech", {
+      "jobs.select": [job],
+      "job_panels.update": [{ data: { ...panelRow, dead_spaces: [31, 32] }, error: null }],
+    });
+    const r = await savePanel(JOB, PANEL, facts.patch, facts.seen);
+    expect(r).toMatchObject({ ok: true, row: { dead_spaces: [31, 32] } });
+    const up = calls.find((c) => c.verb === "update")!;
+    expect(up.table).toBe("job_panels");
+    expect(up.payload).toEqual({ dead_spaces: [31, 32] });
+    // Org-scoped, this job's live panel, and only while it still marks no No Stab spaces.
+    expect(up.filters).toEqual(expect.arrayContaining([`eq:id:${PANEL}`, `eq:job_id:${JOB}`, `eq:org_id:${ORG}`, "is:removed_at:null", "eq:dead_spaces:{}"]));
   });
 });
 
@@ -371,5 +467,89 @@ describe("label checks", () => {
     });
     const back = await undoTakeOff(CHECK);
     expect(back.ok).toBe(true);
+  });
+});
+
+describe("the card: ONE button, one sentence", () => {
+  const OWN = { id: "ph-own", name: "catbird-door.jpg", created_at: "2026-10-01T08:00:00Z", url: "https://example.test/catbird-door.jpg" };
+  const NEWER = { id: "ph-new", name: "bayberry-wide.jpg", created_at: "2026-10-29T08:00:00Z", url: "https://example.test/bayberry-wide.jpg" };
+  const NEWEST = { id: "ph-newest", name: "thistlewood.jpg", created_at: "2026-10-30T08:00:00Z", url: "https://example.test/thistlewood.jpg" };
+  const PLAN_PAPER = { id: "pl1", name: "Snowbell E-sheets.pdf", created_at: "2026-09-20T08:00:00Z", onCustomer: true };
+  const panel = { ...panelRow, space_pitch_in: null, label_width_in: null, label_width_in_right: null, created_by: null, created_at: "2026-09-25T08:00:00Z", updated_by: null, updated_at: "2026-09-25T08:00:00Z", removed_by: null, photo_document_id: OWN.id } as never;
+
+  const render = (over: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(
+      createElement(PanelReaders, {
+        jobId: JOB,
+        orgId: ORG,
+        staff: false,
+        photos: [NEWEST, NEWER, OWN],
+        plans: [PLAN_PAPER],
+        photoReadsLeft: 2,
+        planReadsLeft: 5,
+        panel,
+        onRows: () => {},
+        onPanel: () => {},
+        ...over,
+      }),
+    );
+  const buttons = (html: string) =>
+    [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map((m) => ({ markup: m[0], text: m[0].replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").trim() }));
+  const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
+  const titleCase = (label: string) => label.split(/\s+/).every((w) => !/^\p{L}/u.test(w) || /^\p{Lu}/u.test(w));
+
+  it("a tech sees one button, Read A Photo, and nothing else: no strip, no hints, no checks, no plans", () => {
+    const html = render();
+    expect(buttons(html).map((b) => b.text)).toEqual(["Read A Photo"]);
+    expect(html).not.toContain("<img");
+    const t = textOf(html);
+    for (const gone of ["About The Panel", "Label Check", "Reads Left", "The inspection said", "Read Circuits From The Plans", "Snowbell E-sheets.pdf"]) expect(t).not.toContain(gone);
+  });
+
+  it("the office has the plans link at the bottom of the same card", () => {
+    const html = render({ staff: true });
+    expect(buttons(html).map((b) => b.text)).toEqual(["Read A Photo", "Read Circuits From The Plans"]);
+    for (const b of buttons(html)) expect(titleCase(b.text), b.text).toBe(true);
+  });
+
+  it("the crew's cap is said in one sentence only when it is hit, and turns the button off", () => {
+    expect(textOf(render())).not.toContain(PHOTO_CAP_WORDS);
+    const html = render({ photoReadsLeft: 0 });
+    expect(textOf(html)).toContain("3 photo reads a day on this job — ask the office for more.");
+    expect(buttons(html).find((b) => b.text === "Read A Photo")!.markup).toContain('disabled=""');
+    // The office isn't counted: no cap, the button on.
+    const office = render({ staff: true, photoReadsLeft: 0 });
+    expect(textOf(office)).not.toContain(PHOTO_CAP_WORDS);
+    expect(buttons(office).find((b) => b.text === "Read A Photo")!.markup).not.toContain('disabled=""');
+  });
+
+  it("the picker offers the panel's own photo FIRST, then the job's newest first, ONE at a time", () => {
+    const ordered = photoOrder([NEWER, OWN, NEWEST] as PanelPhoto[], OWN.id);
+    expect(ordered.map((p) => p.id)).toEqual(["ph-own", "ph-newest", "ph-new"]);
+    expect(photoOrder([NEWER, NEWEST] as PanelPhoto[], null).map((p) => p.id)).toEqual(["ph-newest", "ph-new"]);
+    const html = renderToStaticMarkup(
+      createElement(PhotoPicker, { photos: ordered, at: 0, panelPhotoId: OWN.id, onNext: () => {}, onRead: () => {}, onTake: () => {}, onClose: () => {} }),
+    );
+    expect(html.match(/<img /g)).toHaveLength(1);
+    expect(html).toContain('src="https://example.test/catbird-door.jpg"');
+    expect(textOf(html)).toContain("The panel's photo · catbird-door.jpg");
+    expect(textOf(html)).toContain("1 of 3");
+    const labels = buttons(html).map((b) => b.text);
+    expect(labels).toEqual(["", "Read This Photo", "Next Photo", "Take A New One"]);
+    expect(buttons(html)[0].markup).toContain('aria-label="Close"');
+    for (const l of labels) expect(titleCase(l), l).toBe(true);
+    // The next one is the job's newest.
+    const next = renderToStaticMarkup(
+      createElement(PhotoPicker, { photos: ordered, at: 1, panelPhotoId: OWN.id, onNext: () => {}, onRead: () => {}, onTake: () => {}, onClose: () => {} }),
+    );
+    expect(next).toContain('src="https://example.test/thistlewood.jpg"');
+    expect(textOf(next)).not.toContain("The panel's photo");
+  });
+
+  it("one photo on the job: no Next Photo", () => {
+    const html = renderToStaticMarkup(
+      createElement(PhotoPicker, { photos: [OWN], at: 0, panelPhotoId: null, onNext: () => {}, onRead: () => {}, onTake: () => {}, onClose: () => {} }),
+    );
+    expect(buttons(html).map((b) => b.text)).toEqual(["", "Read This Photo", "Take A New One"]);
   });
 });

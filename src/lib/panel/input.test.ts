@@ -42,4 +42,17 @@ describe("panel writes", () => {
   it("a panel always has a name", () => {
     expect(normalizePanelPatch({ name: "  " })).toEqual({ ok: false, error: "Give the panel a name (Main Panel)." });
   });
+  it("keep the door's measurements in inches, the way a tape reads them, and refuse nothing-wide in words (0402)", () => {
+    expect(normalizePanelPatch({ space_pitch_in: "3/4", label_width_in: "1 1/8", label_width_in_right: 1.25 })).toEqual({
+      ok: true,
+      value: { space_pitch_in: 0.75, label_width_in: 1.125, label_width_in_right: 1.25 },
+    });
+    // Blank clears a measurement: the make's default stands in again.
+    expect(normalizePanelPatch({ label_width_in: "", label_width_in_right: null })).toEqual({ ok: true, value: { label_width_in: null, label_width_in_right: null } });
+    expect(normalizePanelPatch({ space_pitch_in: 0 })).toEqual({ ok: false, error: "The height of a space has to be more than 0 inches." });
+    expect(normalizePanelPatch({ label_width_in: -1 })).toEqual({ ok: false, error: "The label width has to be more than 0 inches." });
+    expect(normalizePanelPatch({ space_pitch_in: 4 })).toEqual({ ok: false, error: "The height of a space has to be 3 inches or less." });
+    expect(normalizePanelPatch({ label_width_in_right: "7" })).toEqual({ ok: false, error: "The right label width has to be 6 inches or less." });
+    expect(normalizePanelPatch({ label_width_in: "wide" })).toEqual({ ok: false, error: "The label width has to be a number of inches, like 1 or 1 1/8." });
+  });
 });

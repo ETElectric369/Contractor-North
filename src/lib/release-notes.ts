@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1141", date: "2026-10-30", line: "The Panel tab is the box: Panel 1 from the first circuit, two columns of breakers drawn to scale and filled by tapping, one Read A Photo button, Breakers in one line, Door Labels printed at true size." },
   { version: "cn-v1140", date: "2026-10-30", line: "One meter called Usage: a ring that fills with the month's AI use and changes color as it warns, told once at 80% and 100%; past 100% Nort runs lighter until the 1st; Add Usage and Upgrade doors." },
   { version: "cn-v1139", date: "2026-10-30", line: "The app's map speaks Spanish — the dock, every subnav, the + menu, search, the account menu, Settings, each page's title and Nort's screen names follow your language; the held seal has its own key." },
   { version: "cn-v1138", date: "2026-10-28", line: "The crew's side speaks Spanish — Time Clock, My Day, jobs, materials, texts, pushes and Nort; an owner downloads everything the company has from Settings › Getting Paid › Your Data." },

@@ -16,6 +16,7 @@
  */
 import type { CircuitKind, JobCircuit, JobPanel, PanelNumbering, SpaceHalf } from "@/lib/types";
 import { KIND_WORDS, countWord, doorRows, labelDiffers, slotsOf, titleWords } from "./model";
+import { MAX_SPACES } from "./input";
 
 export type DirectoryCircuit = {
   space: number | null;
@@ -144,7 +145,7 @@ export function normalizePortalPanels(raw: unknown): DirectoryPanel[] {
     for (const x of list) {
       if (!x || typeof x !== "object") continue;
       const c = x as Record<string, unknown>;
-      const space = int(c.space, 1, 84);
+      const space = int(c.space, 1, MAX_SPACES);
       const amps = int(c.amps, 1, 400);
       // The database's `label` is what the door says (else what it feeds); `feeds` rides only when
       // it differs. Read back through the office's own rule, so both roads say the same thing.
@@ -165,7 +166,7 @@ export function normalizePortalPanels(raw: unknown): DirectoryPanel[] {
     out.push({
       name: titleWords(text(r.name, 60)) || "Main Panel",
       mainAmps: int(r.main_amps, 30, 1200),
-      spaces: int(r.spaces, 1, 84),
+      spaces: int(r.spaces, 1, MAX_SPACES),
       brand: null,
       numbering: "top_down",
       deadSpaces: [],

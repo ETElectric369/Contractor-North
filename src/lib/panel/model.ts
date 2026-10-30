@@ -340,13 +340,47 @@ export function offerEstimates(
 
 export type Slot = { space: number; half: SpaceHalf | null };
 
-/** The spaces a circuit covers. A 1P covers its space; a 2P covers s and s+2 on the same side
- *  (odd left, even right, whichever way the numbers run), a 3P s, s+2, s+4. A half (A/B) stays in
- *  that half of each space: a quad's inner 2P at 25B covers 25B and 27B. */
+/** A tandem half's other half. */
+const otherHalf = (h: SpaceHalf): SpaceHalf => (h === "A" ? "B" : "A");
+
+/**
+ * The spaces a circuit covers. A 1P covers its space; a 2P covers s and s+2 on the same side (odd
+ * left, even right, whichever way the numbers run), a 3P s, s+2, s+4.
+ *
+ * A HALF IS WHERE THE HANDLE HANGS (A the upper, B the lower), and a multi-pole kept in a half
+ * changes half on each next space: a QUAD's centre 2-pole at 1B covers 1B and 3A — the lower half of
+ * its first space and the UPPER half of the next one on that side, the two handles side by side in
+ * the middle of the quad — with the outer singles at 1A and 3B (the owner's sheet: space 1 "Garage /
+ * Floor Heat", space 3 "Floor Heat / Garage"). A 2-pole at 1A is the quad's outer pair (1A and 3B).
+ * Bottom up, space 3 hangs ABOVE space 1, so there the rule reads the other way round: the centre
+ * is the 2-pole at 1A (3B and 1A side by side) and 1B with 3A is the outer pair (quadCentreHalf).
+ */
 export function slotsOf(c: Pick<JobCircuit, "space" | "half" | "poles">): Slot[] {
   if (c.space == null) return [];
   const poles = Math.max(1, Math.min(3, Number(c.poles) || 1));
-  return Array.from({ length: poles }, (_, i) => ({ space: c.space! + 2 * i, half: c.half ?? null }));
+  const half = c.half ?? null;
+  return Array.from({ length: poles }, (_, i) => ({ space: c.space! + 2 * i, half: half && i % 2 ? otherHalf(half) : half }));
+}
+
+/**
+ * THE HALF A QUAD'S CENTRE 2-POLE IS KEPT AT, on its first space s (the one rule; slotsOf above says
+ * why). Space 1 at the top: B — the centre covers sB and (s+2)A, the outer singles hang at sA (top)
+ * and (s+2)B (bottom). Space 1 at the bottom (s+2 hangs above s): A — the centre covers sA and
+ * (s+2)B, the outer singles hang at (s+2)A (top) and sB (bottom). Placing a bought quad, the photo's
+ * prompt and Nort's spoken quad all ask this.
+ */
+export function quadCentreHalf(numbering: JobPanel["numbering"] | null | undefined): SpaceHalf {
+  return numbering === "bottom_up" ? "A" : "B";
+}
+
+/** Where a quad's two outer singles hang, top then bottom, for a quad on spaces s and s+2. */
+export function quadOuterSlots(space: number, numbering: JobPanel["numbering"] | null | undefined): [Slot, Slot] {
+  const centre = quadCentreHalf(numbering);
+  const outer = otherHalf(centre);
+  // The outer handle on s is the centre's other half; the one on s+2 is the centre's own half letter.
+  const onS: Slot = { space, half: outer };
+  const onNext: Slot = { space: space + 2, half: centre };
+  return numbering === "bottom_up" ? [onNext, onS] : [onS, onNext];
 }
 
 export type PanelWarning = {
@@ -435,12 +469,17 @@ function dedupeWarnings(ws: PanelWarning[]): PanelWarning[] {
   });
 }
 
+/** One row of the door: a left (odd) space and the right (even) one beside it. `rightNone` is set
+ *  when the right number is NOT on this panel — a panel of an odd count (23, or 1) still draws its
+ *  last row two wide, and the cell beside its last space is nothing: never an open space to fill. */
+export type DoorRow = { left: number; right: number; rightNone?: true };
+
 /** The door as it hangs: odd spaces down the left, even down the right, row by row, top of the
  *  box first. Space 1 is at the top unless the panel says its numbers run bottom up. */
-export function doorRows(panel: Pick<JobPanel, "spaces" | "numbering">, extra: number[] = []): { left: number; right: number }[] {
+export function doorRows(panel: Pick<JobPanel, "spaces" | "numbering">, extra: number[] = []): DoorRow[] {
   const top = Math.max(panel.spaces ?? 0, ...extra.map((s) => (s % 2 ? s + 1 : s)), 2);
-  const rows: { left: number; right: number }[] = [];
-  for (let s = 1; s <= top; s += 2) rows.push({ left: s, right: s + 1 });
+  const rows: DoorRow[] = [];
+  for (let s = 1; s <= top; s += 2) rows.push(panel.spaces != null && s + 1 > panel.spaces ? { left: s, right: s + 1, rightNone: true } : { left: s, right: s + 1 });
   return panel.numbering === "bottom_up" ? rows.reverse() : rows;
 }
 

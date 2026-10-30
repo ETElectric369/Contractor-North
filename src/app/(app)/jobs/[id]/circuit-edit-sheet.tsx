@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, RotateCcw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Move as MoveIcon, RotateCcw, ShieldCheck } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,6 +101,7 @@ export function CircuitEditSheet({
   onKeep,
   onNotThis,
   onTakeOff,
+  onMove,
 }: {
   circuit: JobCircuit;
   panels: JobPanel[];
@@ -110,6 +111,9 @@ export function CircuitEditSheet({
   onKeep: (c: JobCircuit) => void;
   onNotThis: (c: JobCircuit) => void;
   onTakeOff: (c: JobCircuit) => void;
+  /** Move on the door (the panel-first wave): the sheet closes and the next tap on a line of the
+   *  panel is where the circuit goes. Offered for a kept circuit that has a space. */
+  onMove?: (c: JobCircuit) => void;
 }) {
   const toast = useToast();
   const [row, setRowState] = useState(circuit);
@@ -452,17 +456,27 @@ export function CircuitEditSheet({
           </Field>
         </div>
 
-        {/* With one panel the circuit is on it; the picker shows when there is a choice, or when this
-            circuit is on no panel yet (so it can always be put on one). */}
-        {(panels.length > 1 || (panels.length > 0 && row.panel_id == null)) && (
+        {/* THE PANEL. With one live panel the circuit is on it (a loose one too: the door draws it
+            there and the server puts it there), so it is said in one line, never picked. With
+            several, the picker lists the panels only: nothing here takes a circuit OFF the door. */}
+        {panels.length === 1 && (
+          <p className="text-sm text-slate-600" data-panel-line="">
+            On {panels[0].name}.
+          </p>
+        )}
+        {panels.length > 1 && (
           <Field label="Panel">
             <select
               className={selectCls}
               value={row.panel_id ?? ""}
-              onChange={(e) => apply({ panel_id: e.target.value || null }, "Panel")}
+              onChange={(e) => e.target.value && apply({ panel_id: e.target.value }, "Panel")}
               disabled={saving}
             >
-              <option value="">No Panel Yet</option>
+              {row.panel_id == null && (
+                <option value="" disabled>
+                  Pick The Panel
+                </option>
+              )}
               {panels.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -499,6 +513,14 @@ export function CircuitEditSheet({
             />
           </div>
         </div>
+        {onMove && !suggested && row.space != null && (
+          <div>
+            <Button type="button" variant="outline" className="w-full" onClick={() => void thenLeave((latest) => onMove(latest))} disabled={saving}>
+              <MoveIcon className="h-4 w-4" /> Move
+            </Button>
+            <span className="mt-1 block text-xs text-slate-500">Then tap the line on the panel where it goes.</span>
+          </div>
+        )}
 
         <div>
           <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Work</span>

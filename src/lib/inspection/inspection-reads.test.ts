@@ -98,8 +98,8 @@ describe("nobody reads appointments.inspection_answers from the table", () => {
     expect(bad).toEqual([]);
   });
 
-  it("the four readers go through appointment_answers", () => {
-    for (const f of ["app/(app)/appointments/[id]/page.tsx", "app/(app)/appointments/actions.ts", "app/(app)/quotes/new/page.tsx", "app/(app)/jobs/panel-actions.ts"]) {
+  it("the three readers go through appointment_answers (the panel tab stopped reading the inspection's panel answer in cn-v1141)", () => {
+    for (const f of ["app/(app)/appointments/[id]/page.tsx", "app/(app)/appointments/actions.ts", "app/(app)/quotes/new/page.tsx"]) {
       expect(read(f), f).toMatch(/readViaView(?:<[\s\S]*?>)?\(\s*[\w.]+,\s*"answers",/);
     }
   });

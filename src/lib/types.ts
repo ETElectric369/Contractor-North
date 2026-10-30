@@ -195,6 +195,13 @@ export interface JobPanel {
   dead_spaces: number[];
   /** Where the panel label allows tandems (twins / quads): a warning only. */
   twin_spaces: number[];
+  /** How tall one space is on the door, in inches, as a person measured it (0402). Null = the
+   *  make's default (lib/panel/geometry brandDefaults). */
+  space_pitch_in: number | null;
+  /** How wide the label area beside the LEFT column is, in inches (0402). Null = the make's default. */
+  label_width_in: number | null;
+  /** The label area beside the RIGHT column, only when it differs from the left (0402). Null = the left's. */
+  label_width_in_right: number | null;
   photo_document_id: string | null;
   notes: string | null;
   shown_on_portal: boolean;

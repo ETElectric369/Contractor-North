@@ -5,8 +5,11 @@
  * (0333's checks and guard); this is where the sentence a person reads comes from.
  */
 import type { CircuitKind, CircuitProgress, CircuitWork, JobCircuit, JobPanel, PanelNumbering, SpaceHalf } from "@/lib/types";
+import { MAX_LABEL_WIDTH_IN, MAX_PITCH_IN, parseInches } from "./geometry";
 
 export const AMP_SIZES = [10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225] as const;
+/** 0333's ceiling on a panel's spaces (and so on any space number): ONE constant. */
+export const MAX_SPACES = 84;
 export const KINDS: CircuitKind[] = ["standard", "afci", "gfci", "dual_function", "spd"];
 export const WORKS: CircuitWork[] = ["new", "existing", "reused", "removed"];
 export const PROGRESSES: CircuitProgress[] = ["planned", "roughed", "done"];
@@ -20,7 +23,11 @@ export type CircuitPatch = Partial<Pick<JobCircuit, (typeof CIRCUIT_FIELDS)[numb
 
 /** The panel fields a person edits. shown_on_portal is NOT here: the office's switch is its own door
  *  (phase 5), and the database refuses it from anyone else. */
-export const PANEL_FIELDS = ["name", "brand", "bus_amps", "main_amps", "spaces", "numbering", "dead_spaces", "twin_spaces", "photo_document_id", "notes"] as const;
+export const PANEL_FIELDS = [
+  "name", "brand", "bus_amps", "main_amps", "spaces", "numbering", "dead_spaces", "twin_spaces", "photo_document_id", "notes",
+  // The door, measured once (0402): a space's height and each label area's width, in inches.
+  "space_pitch_in", "label_width_in", "label_width_in_right",
+] as const;
 export type PanelPatch = Partial<Pick<JobPanel, (typeof PANEL_FIELDS)[number]>>;
 
 type Ok<T> = { ok: true; value: T };
@@ -37,6 +44,17 @@ function text(v: unknown, max: number, what: string): Ok<string | null> | Err {
   return { ok: true, value: s || null };
 }
 
+/** A measurement in inches ("1.125", "1 1/8"), more than 0 and at most `max`; blank clears it (the
+ *  make's default stands in again). Kept to a thousandth of an inch. */
+function inches(v: unknown, max: number, what: string): Ok<number | null> | Err {
+  if (v == null || (typeof v === "string" && !v.trim())) return { ok: true, value: null };
+  const n = parseInches(v);
+  if (n == null) return { ok: false, error: `${what} has to be a number of inches, like 1 or 1 1/8.` };
+  if (!(n > 0)) return { ok: false, error: `${what} has to be more than 0 inches.` };
+  if (n > max) return { ok: false, error: `${what} has to be ${max} inches or less.` };
+  return { ok: true, value: Math.round(n * 10000) / 10000 };
+}
+
 function int(v: unknown, lo: number, hi: number, what: string): Ok<number | null> | Err {
   if (v == null || v === "") return { ok: true, value: null };
   const n = Number(v);
@@ -45,7 +63,7 @@ function int(v: unknown, lo: number, hi: number, what: string): Ok<number | null
 }
 
 /** "3, 5 7" or [3,5,7] → [3,5,7], sorted, once each. */
-export function parseSpaceList(v: unknown, max = 84): Ok<number[]> | Err {
+export function parseSpaceList(v: unknown, max = MAX_SPACES): Ok<number[]> | Err {
   const parts = Array.isArray(v) ? v : String(v ?? "").split(/[\s,;]+/);
   const out = new Set<number>();
   for (const p of parts) {
@@ -95,7 +113,7 @@ export function normalizeCircuitPatch(input: Record<string, unknown>): Ok<Circui
     else return { ok: false, error: "Pick the breaker type from the list." };
   }
   if (has("space")) {
-    const s = int(input.space, 1, 84, "The space");
+    const s = int(input.space, 1, MAX_SPACES, "The space");
     if (!s.ok) return s;
     out.space = s.value;
     if (s.value == null) out.half = null; // no space, no half
@@ -151,7 +169,7 @@ export function normalizePanelPatch(input: Record<string, unknown>): Ok<PanelPat
     out[k] = n.value;
   }
   if (has("spaces")) {
-    const n = int(input.spaces, 1, 84, "The number of spaces");
+    const n = int(input.spaces, 1, MAX_SPACES, "The number of spaces");
     if (!n.ok) return n;
     out.spaces = n.value;
   }
@@ -169,6 +187,16 @@ export function normalizePanelPatch(input: Record<string, unknown>): Ok<PanelPat
     if (input.photo_document_id == null || input.photo_document_id === "") out.photo_document_id = null;
     else if (isUuid(input.photo_document_id)) out.photo_document_id = input.photo_document_id;
     else return { ok: false, error: "Pick the photo from this job's Photos." };
+  }
+  for (const [k, max, what] of [
+    ["space_pitch_in", MAX_PITCH_IN, "The height of a space"],
+    ["label_width_in", MAX_LABEL_WIDTH_IN, "The label width"],
+    ["label_width_in_right", MAX_LABEL_WIDTH_IN, "The right label width"],
+  ] as const) {
+    if (!has(k)) continue;
+    const n = inches(input[k], max, what);
+    if (!n.ok) return n;
+    out[k] = n.value;
   }
   return { ok: true, value: out };
 }

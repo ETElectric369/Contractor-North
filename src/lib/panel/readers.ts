@@ -1,10 +1,20 @@
 /**
- * WHAT A READER SAW, AS SUGGESTIONS (Panel plan, phase 4). Pure: no database, no model.
+ * WHAT A READER SAW, AS SUGGESTIONS (Panel plan, phase 4; honed in the panel-first wave). Pure: no
+ * database, no model.
  *
- * Three things read circuits for a job and none of them decides anything: Read The Panel Photo
- * (the crew and the office), Read Circuits From The Plans (the office), and Nort ("add a 20 amp for
- * the garage freezer"). Each hands this file the rows it saw, and this file answers, row by row,
- * one of three ways against the job's list:
+ * Three things read circuits for a job and none of them decides anything: Read A Photo (the crew
+ * and the office), Read Circuits From The Plans (the office), and Nort ("add a 20 amp for the
+ * garage freezer").
+ *
+ * THE PHOTO READS SPACES, SO IT LANDS IN THEM (landRead, below). Every line it read becomes a
+ * suggestion in its own space and half, dimmed on the panel until a person keeps it; a line whose
+ * space already holds a kept circuit with the same words is nothing to do; one whose words differ
+ * waits in that same space beside the kept one ("Photo says …", Use It). No label checks, no
+ * matching by words across the panel: the space is the answer.
+ *
+ * The plans and Nort mostly name what a circuit FEEDS, with no space, so they keep the three-way
+ * match below. Each hands this file the rows it saw, and this file answers, row by row, one of
+ * three ways against the job's list:
  *
  *   SAME     the circuit is already on the list, the same words and the same size: nothing is
  *            written, and the count of them is said ("2 Already On Your List").
@@ -24,16 +34,22 @@
  * The app suggests, a person decides. Every sentence here is shown as-is, in plain words.
  */
 import type { CircuitKind, CircuitReadPatch, CircuitSourceRow, CircuitWork, JobCircuit, JobPanel, SpaceHalf } from "@/lib/types";
-import { AMP_SIZES, KINDS } from "./input";
+import { AMP_SIZES, KINDS, MAX_SPACES } from "./input";
 import { circuitName, labelKey, roomFromWords, sizeWords, slotsOf, titleWords } from "./model";
+import { belongsToPanel, slotsMeet } from "./held";
 
 export type ReaderSource = "photo" | "plan" | "nort";
 
-/** Erik's cap on Read The Panel Photo: three reads per job per day (a few cents each). Here, not in
- *  the reader, so the tab can say it before the tap without pulling the model code into a page. */
+/** Erik's cap on Read A Photo for the crew: three reads per job per day (a few cents each); the
+ *  office isn't held to it (the company's monthly AI budget still is). Here, not in the reader, so
+ *  the card can say it without pulling the model code into a page. */
 export const PHOTO_READS_PER_JOB_PER_DAY = 3;
+/** The one sentence a tech reads when the day's photo reads are used up. */
+export const PHOTO_CAP_WORDS = `${PHOTO_READS_PER_JOB_PER_DAY} photo reads a day on this job — ask the office for more.`;
 /** The office's cap on Read Circuits From The Plans: five per job per day. */
 export const PLAN_READS_PER_JOB_PER_DAY = 5;
+/** The one sentence when the day's plan reads are used up. */
+export const PLAN_CAP_WORDS = `${PLAN_READS_PER_JOB_PER_DAY} plan reads a day on this job — the next one opens tomorrow.`;
 
 /** "2 Of 3 Reads Left Today." */
 export function readsLeftWords(left: number, limit: number): string {
@@ -81,13 +97,12 @@ export type ReaderDraft = {
   sort_order: number;
 };
 
-/** How a reader's words are introduced in a label check, and which field its words are: the
- *  photo reads the DOOR's words; the plans and Nort say what a circuit FEEDS (Nort can also be told
- *  the door's words apart, ReadRow.door). A check only ever proposes the field the words are. */
-export type Says = { says: string; shows: string; field: "door" | "feeds" };
-export const PANEL_SAYS: Says = { says: "Panel Says", shows: "Panel Shows", field: "door" };
-export const PLANS_SAY: Says = { says: "Plans Say", shows: "Plans Show", field: "feeds" };
-export const NORT_SAYS: Says = { says: "Nort Heard", shows: "Nort Heard", field: "feeds" };
+/** How a reader's words are introduced in a label check. The plans and Nort say what a circuit
+ *  FEEDS (Nort can also be told the door's words apart, ReadRow.door); a check only ever proposes
+ *  the field the words are. (The photo raises no checks: it lands in its spaces, landRead.) */
+export type Says = { says: string; shows: string };
+export const PLANS_SAY: Says = { says: "Plans Say", shows: "Plans Show" };
+export const NORT_SAYS: Says = { says: "Nort Heard", shows: "Nort Heard" };
 
 // ── cleaning what a model or a person handed us ───────────────────────────────────────────────────
 
@@ -132,17 +147,13 @@ export function cleanKind(v: unknown): CircuitKind | null {
   return KIND_ALIASES[s] ?? null;
 }
 
-export function cleanSpace(v: unknown, max = 84): number | null {
+export function cleanSpace(v: unknown, max = MAX_SPACES): number | null {
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 && n <= max ? n : null;
 }
 
-export function cleanHalf(v: unknown): SpaceHalf | null {
-  const s = String(v ?? "").trim().toUpperCase();
-  return s === "A" || s === "B" ? s : null;
-}
-
-export function cleanSpaceList(v: unknown, max = 84): number[] {
+/** "23, 24" or [23, 24] → [23, 24]: the good space numbers, sorted, once each; the rest dropped. */
+export function cleanSpaceList(v: unknown, max = MAX_SPACES): number[] {
   const parts = Array.isArray(v) ? v : String(v ?? "").split(/[\s,;]+/);
   const out = new Set<number>();
   for (const p of parts) {
@@ -150,6 +161,11 @@ export function cleanSpaceList(v: unknown, max = 84): number[] {
     if (n != null) out.add(n);
   }
   return [...out].sort((a, b) => a - b);
+}
+
+export function cleanHalf(v: unknown): SpaceHalf | null {
+  const s = String(v ?? "").trim().toUpperCase();
+  return s === "A" || s === "B" ? s : null;
 }
 
 // ── matching one read row against the list ────────────────────────────────────────────────────────
@@ -206,9 +222,9 @@ export function matchRead(row: ReadRow, circuits: Existing[], panelId: string | 
 
   // 1. The space.
   if (row.space != null) {
-    const here = kept.filter((c) =>
-      slotsOf(c).some((s) => s.space === row.space && (s.half == null || row.half == null || s.half === row.half)),
-    );
+    // The panel's one rule for "the same handle position" (lib/panel/held slotsMeet).
+    const at = { space: row.space, half: row.half };
+    const here = kept.filter((c) => slotsOf(c).some((s) => slotsMeet(s, at)));
     const top = here.filter((x) => x.space === row.space);
     const pool = top.length ? top : here;
     if (pool.length === 1) return compare(row, pool[0], says, false);
@@ -249,33 +265,23 @@ function compare(row: ReadRow, c: Existing, says: Says, byWords: boolean): Match
   const use: CircuitReadPatch = {};
   const was: CircuitReadPatch = {};
   const matchesList = (v: string) => labelKey(c.panel_label) === v || labelKey(c.description) === v;
-  if (says.field === "door") {
-    // The photo reads the door: its words are the door label.
-    const said = labelKey(row.said);
-    if (said && !matchesList(said)) {
-      words.push(`${says.says} ${titleWords(row.said)}, Your List Says ${titleWords(listWords(c)) || circuitName(c)}.`);
-      use.panel_label = titleWords(row.said);
-      was.panel_label = c.panel_label ?? null;
-    }
-  } else {
-    // The plans and Nort say what a circuit FEEDS: a difference there is proposed for what it feeds,
-    // never written onto the door. The door label only when the words were the door's (Nort told
-    // "the door says Mini Fridge"), checked against the list's own door label.
-    const feedsText = row.feeds !== undefined ? row.feeds : row.door ? null : row.said;
-    const feeds = labelKey(feedsText);
-    if (feeds && !matchesList(feeds)) {
-      words.push(`${says.says} It Feeds ${titleWords(feedsText)}, Your List Says ${titleWords(c.description) || titleWords(c.panel_label) || circuitName(c)}.`);
-      use.description = titleWords(feedsText);
-      was.description = c.description ?? null;
-    }
-    const door = labelKey(row.door);
-    if (door && door !== labelKey(c.panel_label)) {
-      words.push(
-        `${says.says} The Door Says ${titleWords(row.door)}, ${c.panel_label?.trim() ? `Your List's Door Label Says ${titleWords(c.panel_label)}` : "Your List Has No Door Label"}.`,
-      );
-      use.panel_label = titleWords(row.door);
-      was.panel_label = c.panel_label ?? null;
-    }
+  // The plans and Nort say what a circuit FEEDS: a difference there is proposed for what it feeds,
+  // never written onto the door. The door label only when the words were the door's (Nort told
+  // "the door says Mini Fridge"), checked against the list's own door label.
+  const feedsText = row.feeds !== undefined ? row.feeds : row.door ? null : row.said;
+  const feeds = labelKey(feedsText);
+  if (feeds && !matchesList(feeds)) {
+    words.push(`${says.says} It Feeds ${titleWords(feedsText)}, Your List Says ${titleWords(c.description) || titleWords(c.panel_label) || circuitName(c)}.`);
+    use.description = titleWords(feedsText);
+    was.description = c.description ?? null;
+  }
+  const door = labelKey(row.door);
+  if (door && door !== labelKey(c.panel_label)) {
+    words.push(
+      `${says.says} The Door Says ${titleWords(row.door)}, ${c.panel_label?.trim() ? `Your List's Door Label Says ${titleWords(c.panel_label)}` : "Your List Has No Door Label"}.`,
+    );
+    use.panel_label = titleWords(row.door);
+    was.panel_label = c.panel_label ?? null;
   }
   if (row.poles !== c.poles) {
     // The same words on a different size are a different circuit, or nobody can tell: a new
@@ -335,9 +341,9 @@ export type ReaderOutcome = {
 };
 
 /**
- * The drafts a read writes, and what it counts. `circuits` is EVERY circuit on the job, set-aside
- * ones included (their keys keep a Not This from coming back). New rows from the photo are
- * 'existing' work (they are in the panel already); from the plans and Nort, what the row said.
+ * The drafts the plans or Nort write, and what they count. `circuits` is EVERY circuit on the job,
+ * set-aside ones included (their keys keep a Not This from coming back). New rows are the work the
+ * row said. (The photo doesn't come through here: landRead.)
  */
 export function readerSuggestions(input: {
   source: ReaderSource;
@@ -400,12 +406,11 @@ export function readerSuggestions(input: {
       times.set(base, n);
       key = n === 1 ? base : `${base}#${n}`;
       const words = titleWords(r.said) || null;
-      // The door's words are the door label; the plans' and Nort's are what it feeds.
-      const onDoor = input.source === "photo";
+      // The plans' and Nort's words are what it feeds; the door label only when told apart.
       draft = {
         room: titleWords(r.room) || roomFromWords(r.said),
-        description: onDoor ? null : r.feeds !== undefined ? titleWords(r.feeds) || null : words,
-        panel_label: onDoor ? words : titleWords(r.door) || null,
+        description: r.feeds !== undefined ? titleWords(r.feeds) || null : words,
+        panel_label: titleWords(r.door) || null,
         amps: r.amps,
         poles: r.poles,
         kind: r.kind,
@@ -445,87 +450,186 @@ export function readerSummary(what: string, read: number, o: ReaderOutcome): str
   return `Read ${read} circuit${read === 1 ? "" : "s"} off ${what}: ${bits.join(", ")}.${tail}`;
 }
 
-// ── the panel's own header ────────────────────────────────────────────────────────────────────────
+// ── the photo: a read lands in its spaces ────────────────────────────────────────────────────────
 
-export type HeaderField = "brand" | "main_amps" | "spaces" | "dead_spaces";
-export type HeaderSaid = { brand?: string | null; main_amps?: number | null; spaces?: number | null; dead_spaces?: number[] | null };
-export type HeaderSuggestion = {
-  field: HeaderField;
-  /** What Use would write: for No Stab, the panel's spaces plus the new ones. */
-  value: string | number | number[];
-  words: string;
-  from: string;
-};
+/** A circuit a photo's read is laid against: one on the panel read — kept, waiting, or set aside. */
+export type OnPanel = Pick<JobCircuit, "id" | "panel_id" | "space" | "half" | "poles" | "state" | "removed_at" | "panel_label" | "description">;
+
+/** Why a read line was not written: the panel already says it (same), a suggestion with those words
+ *  already waits there (waiting), a person set that one aside before (skipped-before), the read said
+ *  it twice (twice), or it had no space to land in (no-space). */
+export type LandSkipWhy = "same" | "waiting" | "skipped-before" | "twice" | "no-space";
+export type Landing = { toWrite: ReaderDraft[]; skipped: { row: ReadRow; why: LandSkipWhy }[] };
+
+/** The same words, by the label rule (case, spacing, punctuation and "and"/"+" never differ): the
+ *  door's words, else what it feeds. */
+const sameWordsAs = (key: string, c: Pick<JobCircuit, "panel_label" | "description">) => labelKey(c.panel_label) === key || labelKey(c.description) === key;
+
+/** Do the two meet on the door — any slot of one on any slot of the other (slotsOf: a 2-pole on 9
+ *  holds 11 too; a full-width handle, or a line read with no half, meets both halves)? The panel's
+ *  one rule for "held" (lib/panel/held slotsMeet), the same the tab draws "Photo says" by. */
+const meets = (a: Pick<JobCircuit, "space" | "half" | "poles">, b: Pick<JobCircuit, "space" | "half" | "poles">) =>
+  slotsOf(a).some((x) => slotsOf(b).some((y) => slotsMeet(x, y)));
 
 /**
- * What a reader said about the panel itself that the panel doesn't say yet (or says differently):
- * one line per field, each with its own Use. Nothing is written by being read. `panel` null means
- * the job has no panel yet: every field said is offered.
+ * WHERE A PHOTO'S READ LANDS — the one rule (pure; pinned in readers.test.ts). `circuits` is every
+ * circuit on the job (taken-off and set-aside ones too); only the ones that belong to `panelId`
+ * count — on it, or on no panel yet when the job has one live panel (`livePanels`; lib/panel/held
+ * belongsToPanel, the rule the tab draws by). With no panel at all (`panelId` null) the loose ones
+ * are the panel. Each line the photo read, by its space and half:
+ *
+ *   · a KEPT circuit it meets on the door (lib/panel/held's rule) with the same words → nothing to
+ *     do, not written (same);
+ *   · a suggestion with the same words already waiting on that exact space and half → not written
+ *     twice (waiting); one a person set aside there (Skip / Not This) stays aside (skipped-before);
+ *   · anything else is WRITTEN, a suggestion in that space and half: on an empty space a dimmed
+ *     line to keep; beside a kept circuit whose words differ, "Photo says …" with Use It.
+ *
+ * A line with no words says only that a breaker is there: written on an empty space, nothing to do
+ * where something already sits. A line with no space can't land and is named (no-space), never
+ * dropped quietly. Re-reading the same photo writes nothing new.
  */
-export function headerSuggestions(panel: Pick<JobPanel, "brand" | "main_amps" | "spaces" | "dead_spaces"> | null, said: HeaderSaid, from: string): HeaderSuggestion[] {
-  const out: HeaderSuggestion[] = [];
-  const brand = cleanText(said.brand, 60);
-  if (brand && brand.toLowerCase() !== (panel?.brand ?? "").trim().toLowerCase()) {
-    out.push({ field: "brand", value: brand, words: `Brand: ${brand}${panel?.brand ? ` (Yours Says ${panel.brand})` : ""}`, from });
-  }
-  const main = said.main_amps != null && Number.isInteger(Number(said.main_amps)) && Number(said.main_amps) >= 30 && Number(said.main_amps) <= 1200 ? Number(said.main_amps) : null;
-  if (main != null && main !== panel?.main_amps) {
-    out.push({ field: "main_amps", value: main, words: `Main: ${main}A${panel?.main_amps ? ` (Yours Says ${panel.main_amps}A)` : ""}`, from });
-  }
-  const spaces = cleanSpace(said.spaces);
-  if (spaces != null && spaces !== panel?.spaces) {
-    out.push({ field: "spaces", value: spaces, words: `Spaces: ${spaces}${panel?.spaces ? ` (Yours Says ${panel.spaces})` : ""}`, from });
-  }
-  const dead = cleanSpaceList(said.dead_spaces ?? []);
-  const have = new Set(panel?.dead_spaces ?? []);
-  const fresh = dead.filter((s) => !have.has(s) && (spaces == null || s <= spaces));
-  if (fresh.length) {
-    out.push({
-      field: "dead_spaces",
-      value: [...new Set([...(panel?.dead_spaces ?? []), ...fresh])].sort((a, b) => a - b),
-      words: `No Stab: Space${fresh.length === 1 ? "" : "s"} ${fresh.join(", ")}`,
-      from,
+export function landRead(
+  read: ReadRow[],
+  circuits: OnPanel[],
+  o: { panelId: string | null; livePanels?: number | null; stamp?: Partial<CircuitSourceRow> } = { panelId: null },
+): Landing {
+  const panelId = o.panelId;
+  const mine = circuits.filter((c) => (panelId == null ? c.panel_id == null : belongsToPanel(c, { id: panelId }, o.livePanels)));
+  const kept = mine.filter((c) => c.state === "kept" && !c.removed_at);
+  const pending = mine.filter((c) => c.state === "suggested");
+  const out: Landing = { toWrite: [], skipped: [] };
+  const seen = new Set<string>();
+  for (const r of read) {
+    if (r.space == null) {
+      out.skipped.push({ row: r, why: "no-space" });
+      continue;
+    }
+    const space = r.space;
+    const half = r.half ?? null;
+    const key = labelKey(r.said);
+    const once = `${space}${half ?? ""}:${key}`;
+    if (seen.has(once)) {
+      out.skipped.push({ row: r, why: "twice" });
+      continue;
+    }
+    seen.add(once);
+    const exact = (c: OnPanel) => c.space === space && (c.half ?? null) === half;
+    const there = kept.some((c) => meets(c, r) && (!key || sameWordsAs(key, c)));
+    if (there) {
+      out.skipped.push({ row: r, why: "same" });
+      continue;
+    }
+    const before = pending.filter((c) => exact(c) && (!key || sameWordsAs(key, c)));
+    if (before.length) {
+      out.skipped.push({ row: r, why: before.some((c) => !c.removed_at) ? "waiting" : "skipped-before" });
+      continue;
+    }
+    out.toWrite.push({
+      room: titleWords(r.room) || roomFromWords(r.said),
+      description: null,
+      // The photo reads the door: its words are the door label.
+      panel_label: titleWords(r.said) || null,
+      amps: r.amps,
+      poles: r.poles,
+      kind: r.kind,
+      wire: null,
+      space,
+      half,
+      work: r.work,
+      state: "suggested",
+      source: "photo",
+      source_row: { ...o.stamp, said: r.said, check: r.check, key: readKey("photo", r) },
+      sort_order: out.toWrite.length,
     });
   }
   return out;
 }
 
-const BRANDS: [RegExp, string][] = [
-  [/\bsiemens\b/i, "Siemens"],
-  // The family first: a Homeline and a QO are both Square D, and their breakers don't swap.
-  [/\bhomeline\b/i, "Square D Homeline"],
-  [/\bqo\b/i, "Square D QO"],
-  [/\bsquare\s*d\b/i, "Square D"],
-  [/\beaton\b|\bcutler[\s-]*hammer\b/i, "Eaton"],
-  [/\bge\b|\bgeneral electric\b/i, "GE"],
-  [/\bmurray\b/i, "Murray"],
-  [/\bzinsco\b/i, "Zinsco"],
-  [/\bfederal pacific\b|\bfpe\b/i, "Federal Pacific"],
-  [/\bchallenger\b/i, "Challenger"],
-  [/\bwestinghouse\b/i, "Westinghouse"],
-  [/\bleviton\b/i, "Leviton"],
-];
+/** "Read 34 lines, 18 new — Keep All or tap each one. 16 already match the panel." The one sentence
+ *  of state under Read A Photo. */
+export function landedWords(read: number, l: Landing): string {
+  if (read === 0) return "Nothing readable in that photo — try one straight on with the door open.";
+  const n = l.toWrite.length;
+  const count = (why: LandSkipWhy) => l.skipped.filter((s) => s.why === why).length;
+  const same = count("same");
+  const waiting = count("waiting");
+  const before = count("skipped-before");
+  const rest = [
+    same ? `${same} already ${same === 1 ? "matches" : "match"} the panel` : null,
+    waiting ? `${waiting} already waiting` : null,
+    before ? `${before} you skipped before` : null,
+  ].filter(Boolean) as string[];
+  const lines = `${read} line${read === 1 ? "" : "s"}`;
+  if (n === 0) return rest.length ? `Read ${lines} — nothing new: ${rest.join(", ")}.` : `Read ${lines} — none of them had a space to land in.`;
+  return `Read ${lines}${n === read ? "" : `, ${n} new`} — Keep All or tap each one.${rest.length ? ` ${rest.join(", ")}.` : ""}`;
+}
+
+// ── the panel itself ──────────────────────────────────────────────────────────────────────────────
+
+/** What a photo's read said about the panel itself: its brand, its main, how many spaces, and the
+ *  spaces where the bus has no stab (No Stab: the panel's dead_spaces). */
+export type HeaderSaid = { brand?: string | null; main_amps?: number | null; spaces?: number | null; dead_spaces?: number[] | null };
+
+/** What Use It writes on the panel, and what the panel said when the line was drawn (savePanel's
+ *  `seen`: a crewmate's newer value is never overwritten). */
+export type PanelFacts = {
+  words: string;
+  patch: { brand?: string; main_amps?: number; spaces?: number; dead_spaces?: number[] };
+  seen: { brand?: string | null; main_amps?: number | null; spaces?: number | null; dead_spaces?: number[] };
+};
+
+const mainAmps = (v: unknown): number | null => {
+  const n = Number(v);
+  return v != null && Number.isInteger(n) && n >= 30 && n <= 1200 ? n : null;
+};
 
 /**
- * THE INSPECTION'S ANSWERS (the inspector's panel_brand, panel_amps and the one-box
- * panel_condition, "Siemens, 200A, two slots open") as header suggestions. The one box is read for a
- * brand it names and an amps figure only; the words themselves are shown whole, never parsed further.
+ * "The photo says Siemens, 24 spaces, 200 A main, 2 No Stab spaces (23, 24)." — the read's facts
+ * about the panel, ONE line, only what differs from the panel (null when nothing does, or there is
+ * no panel to use it on). No Stab spaces the panel doesn't mark yet are ADDED to the ones it does
+ * (a read never takes one off), and only ones on the panel. Nothing is written by being read: Use It
+ * is savePanel with `patch` and `seen`.
  */
-export function inspectionSaid(answers: Record<string, unknown>[]): { said: HeaderSaid; words: string | null } {
-  const said: HeaderSaid = {};
-  let words: string | null = null;
-  for (const a of answers) {
-    const cond = cleanText(a?.panel_condition, 300);
-    const brand = cleanText(a?.panel_brand, 60);
-    const amps = Number(a?.panel_amps);
-    if (said.brand == null && brand) said.brand = brand;
-    if (said.main_amps == null && Number.isInteger(amps) && amps >= 30 && amps <= 1200) said.main_amps = amps;
-    if (cond && words == null) {
-      words = cond;
-      if (said.brand == null) said.brand = BRANDS.find(([re]) => re.test(cond))?.[1] ?? null;
-      const m = /\b(\d{2,4})\s*(?:a|amps?)\b/i.exec(cond);
-      if (said.main_amps == null && m && Number(m[1]) >= 30 && Number(m[1]) <= 1200) said.main_amps = Number(m[1]);
-    }
+export function panelFacts(
+  panel: (Pick<JobPanel, "brand" | "main_amps" | "spaces"> & Partial<Pick<JobPanel, "dead_spaces">>) | null,
+  said: HeaderSaid | null | undefined,
+): PanelFacts | null {
+  if (!panel || !said) return null;
+  const out: PanelFacts = { words: "", patch: {}, seen: {} };
+  const parts: string[] = [];
+  const brand = cleanText(said.brand, 60);
+  if (brand && brand.toLowerCase() !== (panel.brand ?? "").trim().toLowerCase()) {
+    out.patch.brand = brand;
+    out.seen.brand = panel.brand ?? null;
+    parts.push(brand);
   }
-  return { said, words };
+  const spaces = cleanSpace(said.spaces);
+  if (spaces != null && spaces !== panel.spaces) {
+    out.patch.spaces = spaces;
+    out.seen.spaces = panel.spaces ?? null;
+    parts.push(`${spaces} spaces`);
+  }
+  const main = mainAmps(said.main_amps);
+  if (main != null && main !== panel.main_amps) {
+    out.patch.main_amps = main;
+    out.seen.main_amps = panel.main_amps ?? null;
+    parts.push(`${main} A main`);
+  }
+  // NO STAB: only spaces the panel has (the spaces it will say, if this line changes them too).
+  const top = out.patch.spaces ?? panel.spaces ?? null;
+  const have = [...(panel.dead_spaces ?? [])].sort((a, b) => a - b);
+  const fresh = cleanSpaceList(said.dead_spaces ?? []).filter((s) => !have.includes(s) && (top == null || s <= top));
+  if (fresh.length) {
+    out.patch.dead_spaces = [...new Set([...have, ...fresh])].sort((a, b) => a - b);
+    out.seen.dead_spaces = have;
+    parts.push(`${fresh.length} No Stab space${fresh.length === 1 ? "" : "s"} (${fresh.join(", ")})`);
+  }
+  if (!parts.length) return null;
+  out.words = `The photo says ${parts.join(", ")}.`;
+  return out;
 }
+
+// The inspection's own panel answer (brand, amps, the one-box condition) is read on the inspection
+// itself since cn-v1141: the Panel tab's "About The Panel" hints that carried it were retired at
+// Erik's ask in the panel-first wave, and their reader (inspectionSaid) went with them.

@@ -22,7 +22,7 @@ import { filePlan, showPaper, takePaperOff } from "./portal-share-actions";
  *     until the office turns it on). It sets job_panels.shown_on_portal on the job's live panels;
  *     0333's guard refuses it from anyone but the office, and 0335's portal_job_view reads it.
  *   - saveCircuitMap: "Save As Circuit Map". Renders the printed directory (the same /print/panel
- *     page Print Panel Directory shows, through the PDF engine), files it on the job as a Plan
+ *     page Print Circuit Map shows, through the PDF engine), files it on the job as a Plan
  *     (filePlan: the plans door's own step), and shows it on the customer's Plans And Drawings as a
  *     Circuit Map that REPLACES the newest circuit map already there (showPaper with 0326's
  *     replaces chain), so the customer sees only the newest. The kind is this door's explicit
