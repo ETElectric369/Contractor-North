@@ -314,7 +314,7 @@ export function SupplierMergeReview({
 
             <div>
               <Label htmlFor="merge-name">What You Call Them</Label>
-              <Input
+              <Input autoComplete="off"
                 id="merge-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -328,7 +328,7 @@ export function SupplierMergeReview({
 
             <div>
               <Label htmlFor="merge-account">Account Number (optional)</Label>
-              <Input
+              <Input autoComplete="off"
                 id="merge-account"
                 value={accountNumber}
                 onChange={(e) => setAccountNumber(e.target.value)}
@@ -650,7 +650,7 @@ export function SupplierCandidateReview({
               <>
                 <div>
                   <Label htmlFor="candidate-name">What You Call Them</Label>
-                  <Input
+                  <Input autoComplete="off"
                     id="candidate-name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -664,7 +664,7 @@ export function SupplierCandidateReview({
 
                 <div>
                   <Label htmlFor="candidate-account">Account Number (optional)</Label>
-                  <Input
+                  <Input autoComplete="off"
                     id="candidate-account"
                     value={accountNumber}
                     onChange={(e) => setAccountNumber(e.target.value)}

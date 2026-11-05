@@ -8,6 +8,9 @@
  *   markAlreadyBilled      a line on a sent bill claims what it already charged for, by hand (a line
  *                           that names one person: only that person's shifts, 0361)
  *   unmarkAlreadyBilled     Not Billed After All: only what a person marked comes back off
+ *   alreadyInvoicedSheet    Needs You's Already Invoiced (2026-11-04): the customer's live invoices
+ *   markAlreadyInvoiced     ties the picked invoice to the estimate, the job or the visit
+ *                           (lib/action-items/already-invoiced: one fact, written while empty)
  *
  * Staff only here, and the functions run as the person (SECURITY INVOKER) so RLS refuses a tech in
  * the database too. Every write is read back from the function's own answer (the silent-write law)
@@ -29,6 +32,8 @@ import {
   type AlreadyBilledSheetData,
   type AlreadyBilledTarget,
 } from "@/lib/already-billed-read";
+import { loadAlreadyInvoiced, tieAlreadyInvoiced, type AlreadyInvoicedLoad, type AlreadyInvoicedTie } from "@/lib/action-items/already-invoiced";
+import type { AlreadyInvoicedTarget } from "@/lib/action-items/types";
 
 export type AlreadyBilledSheetResult = { ok: true; data: AlreadyBilledSheetData } | { ok: false; error: string; needsUpdate?: boolean };
 
@@ -185,4 +190,44 @@ export async function unmarkAlreadyBilled(input: { jobId?: string | null; lineId
     undo: { jobId, lineId, ids: removed, what: words },
     invoiceNumber: r.invoice_number ?? null,
   };
+}
+
+function cleanTarget(t: AlreadyInvoicedTarget | null | undefined): AlreadyInvoicedTarget | null {
+  const id = String(t?.id ?? "");
+  return id && (t?.kind === "quote" || t?.kind === "job" || t?.kind === "visit") ? { kind: t.kind, id } : null;
+}
+
+/** ALREADY INVOICED: what the sheet offers (the customer's live invoices). Staff only. */
+export async function alreadyInvoicedSheet(target: AlreadyInvoicedTarget): Promise<AlreadyInvoicedLoad> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const t = cleanTarget(target);
+  if (!t) return { ok: false, error: "Couldn't tell what you meant. Nothing was changed." };
+  try {
+    return await loadAlreadyInvoiced(ctx.supabase, ctx.orgId, t);
+  } catch (e) {
+    reportError("alreadyInvoiced.sheet", e, { kind: t.kind });
+    return { ok: false, error: "Couldn't open that just now. Nothing was changed - try again in a moment." };
+  }
+}
+
+/** ALREADY INVOICED: tie the picked invoice to the row's work, then refresh Needs You. */
+export async function markAlreadyInvoiced(target: AlreadyInvoicedTarget, invoiceId: string): Promise<AlreadyInvoicedTie> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const t = cleanTarget(target);
+  if (!t) return { ok: false, error: "Couldn't tell what you meant. Nothing was changed." };
+  try {
+    const r = await tieAlreadyInvoiced(ctx.supabase, ctx.orgId, t, String(invoiceId ?? ""));
+    if (r.ok) {
+      revalidatePath("/planner");
+      revalidatePath(`/billing/${String(invoiceId)}`);
+    }
+    return r;
+  } catch (e) {
+    reportError("alreadyInvoiced.mark", e, { kind: t.kind });
+    return { ok: false, error: "That didn't save. Nothing was changed - try again in a moment." };
+  }
 }

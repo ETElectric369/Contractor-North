@@ -1,5 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { recordAiUsage } from "@/lib/ai-cost";
+import { fallbacksFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor, effortFor } from "@/lib/ai-effort";
+import { refused, saidFailure } from "@/lib/ai-refusal";
+import type { Lang } from "@/lib/locale";
 import { parseAiJson } from "@/lib/ai-json";
 import { MAX_SPACES } from "./input";
 import { labelKey, quadCentreHalf, quadOuterSlots } from "./model";
@@ -32,7 +36,7 @@ export { PHOTO_READS_PER_JOB_PER_DAY } from "./readers";
 /** The model's own per-image ceiling. The app's uploads are prepared well under it. */
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 /** A panel photo is one image, a few hundred output rows at most: pennies, never dollars. */
-export const PHOTO_MAX_TOKENS = 3000;
+export const PHOTO_MAX_TOKENS = effortFor("panel-photo").maxTokens; // the effort table's (medium, 5000)
 
 const MEDIA: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
 /** The image type a photo can be read as, from its name, or null (HEIC, PDF, anything else). */
@@ -173,15 +177,18 @@ export function parsePanelPhoto(raw: unknown): PanelPhotoReading {
  * ceiling is said, never parsed as if whole.
  */
 export async function readPanelPhotoWithModel(o: {
-  client: Pick<Anthropic, "messages">;
+  client: Pick<Anthropic, "messages" | "beta">;
   model: string;
   mime: string;
   base64: string;
   orgId: string;
+  /** The asker's language, for a declined read's words (default English). */
+  lang?: Lang;
 }): Promise<{ ok: true; reading: PanelPhotoReading } | { ok: false; error: string }> {
-  const msg = await o.client.messages.create({
+  const msg = await aiCreate(o.client as Anthropic, {
     model: o.model,
-    max_tokens: PHOTO_MAX_TOKENS,
+    ...fallbacksFor(o.model),
+    ...aiRequestFor("panel-photo"),
     system: PHOTO_SYSTEM,
     messages: [
       {
@@ -193,7 +200,9 @@ export async function readPanelPhotoWithModel(o: {
       },
     ],
   });
-  void recordAiUsage({ orgId: o.orgId, model: o.model, surface: "panel-photo", usage: msg.usage as never });
+  void recordAiUsage({ orgId: o.orgId, model: msg.model, surface: "panel-photo", usage: msg.usage as never });
+  // A decline is said, never parsed as an empty door (ai-refusal).
+  if (refused(msg)) return saidFailure("refused", o.lang);
   if (msg.stop_reason === "max_tokens") {
     return { ok: false, error: "The photo had more on it than one read can hold. Take a closer photo of half the door and read that." };
   }

@@ -63,11 +63,11 @@ export function EditCustomerButton({
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <Label htmlFor="name">Name *</Label>
-              <Input id="name" name="name" required defaultValue={c.name} />
+              <Input id="name" name="name" autoComplete="name" required defaultValue={c.name} />
             </div>
             <div className="col-span-2">
               <Label htmlFor="company_name">Company</Label>
-              <Input id="company_name" name="company_name" defaultValue={c.company_name ?? ""} />
+              <Input id="company_name" name="company_name" autoComplete="organization" defaultValue={c.company_name ?? ""} />
             </div>
             <div>
               <Label htmlFor="type">Type</Label>
@@ -100,7 +100,7 @@ export function EditCustomerButton({
             )}
             <div>
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" defaultValue={c.email ?? ""} />
+              <Input id="email" name="email" type="email" autoComplete="email" defaultValue={c.email ?? ""} />
             </div>
             <div>
               <Label htmlFor="phone">Phone</Label>

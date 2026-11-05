@@ -23,7 +23,10 @@ import { doneRowItems, legacyDoneItems, type DoneRow, type DoneSeen } from "@/li
  *   · old = new: for the same fixtures, the function's rows as Needs You rows are exactly what
  *     today's two reads and today's loop (legacyDoneItems) made, row for row, including the two
  *     rules that stay in code;
- *   · total_count is the whole count whatever the limit, and the limit keeps the oldest.
+ *   · total_count is the whole count whatever the limit, and the limit keeps the oldest;
+ *   · 0403 (applied after 0371, the same way): a finished job whose estimate a real invoice on
+ *     ANOTHER job names is billed, a visit on a job billed that way is billed, a visit on a job of
+ *     the retired status invoiced is billed; a VOID invoice naming the estimate settles nothing.
  *
  * Two TEST companies minted inside the transaction (throwaway-org.db-fixture.ts), every fixture named
  * TEST and dated 2001. It speaks as each person exactly as PostgREST does (the shim).
@@ -75,12 +78,21 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     return ids[key];
   };
   let invSeq = 0;
-  const invoice = async (org: string, o: { status: string; paid?: number; appointmentId?: string | null; jobId?: string | null }) =>
+  const invoice = async (org: string, o: { status: string; paid?: number; appointmentId?: string | null; jobId?: string | null; quoteId?: string | null }) =>
     (
       await one(
-        `insert into public.invoices (org_id, job_id, appointment_id, invoice_number, status, invoice_kind, total, amount_paid)
-         values ($1, $2, $3, $4, $5, 'standard', 100, $6) returning id::text as id`,
-        [org, o.jobId ?? null, o.appointmentId ?? null, `TEST-DNB-INV-${++invSeq}`, o.status, o.paid ?? 0],
+        `insert into public.invoices (org_id, job_id, appointment_id, quote_id, invoice_number, status, invoice_kind, total, amount_paid)
+         values ($1, $2, $3, $4, $5, $6, 'standard', 100, $7) returning id::text as id`,
+        [org, o.jobId ?? null, o.appointmentId ?? null, o.quoteId ?? null, `TEST-DNB-INV-${++invSeq}`, o.status, o.paid ?? 0],
+      )
+    ).id as string;
+  let quoteSeq = 0;
+  /** An accepted estimate on a job (0403's fixtures). */
+  const estimate = async (org: string, jobId: string) =>
+    (
+      await one(
+        "insert into public.quotes (org_id, job_id, quote_number, status) values ($1, $2, $3, 'accepted') returning id::text as id",
+        [org, jobId, `TEST-DNB-Q-${++quoteSeq}`],
       )
     ).id as string;
 
@@ -90,7 +102,7 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     const [doneWork, doneJobs, billed] = await Promise.all([
       sb
         .from("appointments")
-        .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)")
+        .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name), jobs(status)")
         .eq("absorbed", false)
         .in("type", ["service_call", "job"])
         .eq("status", "completed")
@@ -107,6 +119,12 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
       sb.from("invoices").select("job_id").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000),
     ]);
     for (const r of [doneWork, doneJobs, billed]) expect(r.error).toBeNull();
+    // 0403's rule in code: the jobs one of whose estimates a real invoice names.
+    const named = await sb.from("invoices").select("quote_id").not("quote_id", "is", null).not("status", "in", "(draft,void)").limit(5000);
+    expect(named.error).toBeNull();
+    const namedQuotes = [...new Set(((named.data ?? []) as { quote_id: string }[]).map((r) => r.quote_id))];
+    const namedJobs = namedQuotes.length ? await sb.from("quotes").select("id, job_id").in("id", namedQuotes).limit(5000) : { data: [], error: null };
+    expect(namedJobs.error).toBeNull();
     const visitIds = ((doneWork.data ?? []) as { id: string }[]).map((a) => a.id);
     const settled = visitIds.length
       ? await sb.from("invoices").select("id, appointment_id, amount_paid").in("appointment_id", visitIds).neq("status", "void").limit(400)
@@ -117,6 +135,7 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
       doneJobs: doneJobs.data ?? [],
       settled: (settled.data ?? []) as any[],
       billedJobs: new Set(((billed.data ?? []) as { job_id: string }[]).map((r) => r.job_id)),
+      quoteBilledJobs: new Set(((namedJobs.data ?? []) as { job_id: string | null }[]).map((r) => r.job_id).filter((x): x is string => !!x)),
       seen,
     });
   };
@@ -140,6 +159,8 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     await c.query("set local statement_timeout = '15s'");
     // 0371 as it is on this branch (a new function: no lock on any table).
     await c.query(readFileSync(fileURLToPath(new URL("../../supabase/migrations/0371_done_work_is_read_whole.sql", import.meta.url)), "utf8"));
+    // 0403 on top (create or replace): an invoice naming the estimate, and the invoiced status.
+    await c.query(readFileSync(fileURLToPath(new URL("../../supabase/migrations/0403_a_bill_that_names_the_estimate_settles_the_work.sql", import.meta.url)), "utf8"));
     const fx = await mintOrgAndStranger(c, "done-not-billed");
     orgId = fx.orgId;
     staffId = fx.staffId;
@@ -183,6 +204,19 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     const doneBilled = await job(orgId, "done job, billed");
     await invoice(orgId, { status: "sent", jobId: doneBilled });
     await job(orgId, "job still going", "in_progress");
+    // 0403: billed on ANOTHER job's invoice that names this job's estimate (hidden), the same for a
+    // visit's job (an invoice on no job naming it: hidden), a visit on an invoiced job (hidden), and
+    // a VOID invoice naming a finished job's estimate (settles nothing: back).
+    const elsewhere = await job(orgId, "done job, billed on another job");
+    const otherJob = await job(orgId, "the other job", "in_progress");
+    await invoice(orgId, { status: "sent", jobId: otherJob, quoteId: await estimate(orgId, elsewhere) });
+    const viaEstimate = await job(orgId, "job billed through its estimate", "in_progress");
+    await invoice(orgId, { status: "paid", paid: 100, quoteId: await estimate(orgId, viaEstimate) });
+    await visit(orgId, "visit on a job billed through its estimate", { startsAt: "2001-02-11T18:00:00Z", jobId: viaEstimate });
+    const invoicedJob = await job(orgId, "invoiced job", "invoiced");
+    await visit(orgId, "visit on an invoiced job", { startsAt: "2001-02-12T18:00:00Z", jobId: invoicedJob });
+    const voidNamed = await job(orgId, "done job, estimate named by a void");
+    await invoice(orgId, { status: "void", jobId: otherJob, quoteId: await estimate(orgId, voidNamed) });
 
     // ── MANY BILLED, ONE OLD UNBILLED, in the second company ──
     await visit(otherOrgId, "old unbilled call", { startsAt: "2001-01-15T18:00:00Z" });
@@ -230,7 +264,9 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
       // the jobs, updated when they were written (this transaction's clock), after every 2001 visit
       ...rows.filter((r) => r.src === "job").map((r) => byKey[r.id]),
     ]);
-    expect(rows.filter((r) => r.src === "job").map((r) => byKey[r.id]).sort()).toEqual(["done job", "done job, draft only", "done job, void only"].sort());
+    expect(rows.filter((r) => r.src === "job").map((r) => byKey[r.id]).sort()).toEqual(
+      ["done job", "done job, draft only", "done job, void only", "done job, estimate named by a void"].sort(),
+    );
     expect(rows.every((r) => Number(r.total_count) === rows.length)).toBe(true);
     const row = (key: string) => rows.find((r) => r.id === ids[key])!;
     expect(row("free visit")).toMatchObject({ customer_name: "TEST Rita Moss", job_id: null, open_invoice_id: null });
@@ -240,7 +276,20 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     expect(row("owed visit").open_invoice_id).toBe(ids["owed invoice"]);
     expect(rows.some((r) => r.id === ids["paid visit"])).toBe(false);
     expect(row("void-anchor visit").open_invoice_id).toBeNull();
-    for (const hidden of ["visit on billed job", "absorbed visit", "scheduled visit", "inspection", "the night before the floor", "done job, billed", "job still going"]) {
+    for (const hidden of [
+      "visit on billed job",
+      "absorbed visit",
+      "scheduled visit",
+      "inspection",
+      "the night before the floor",
+      "done job, billed",
+      "job still going",
+      // 0403
+      "done job, billed on another job",
+      "visit on a job billed through its estimate",
+      "visit on an invoiced job",
+      "invoiced job",
+    ]) {
       expect(rows.some((r) => r.id === ids[hidden]), hidden).toBe(false);
     }
     // The floor is the org's midnight, an instant: a floor read as UTC midnight would take the night before.

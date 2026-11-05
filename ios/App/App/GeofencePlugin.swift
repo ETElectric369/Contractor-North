@@ -112,7 +112,56 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
         }
     }
 
+    // MARK: One position, read by the phone (2026-11-04)
+
+    /// The page's position reads, waiting on one requestLocation. Main queue only.
+    private var readers: [(CLLocation?, String?) -> Void] = []
+    private var readTimer: Timer?
+    static let readTimeout: TimeInterval = 10
+
+    /// ONE FIX, NOW, THROUGH CORELOCATION — so the page never goes through the WebView's own
+    /// per-site permission (which keeps saying "prompt" and can raise its own alert after the phone
+    /// is set to Always). It NEVER asks for authorization: not asked yet → "not-determined" (a tap
+    /// on the page asks), denied → "denied", nothing in 10 s → "timeout". No network, nothing kept.
+    func currentPosition(_ done: @escaping (CLLocation?, String?) -> Void) {
+        switch manager.authorizationStatus {
+        case .notDetermined: return done(nil, "not-determined")
+        case .denied, .restricted: return done(nil, "denied")
+        default: break
+        }
+        readers.append(done)
+        guard readers.count == 1 else { return } // one read in flight answers every caller
+        readTimer = Timer.scheduledTimer(withTimeInterval: GeofenceCore.readTimeout, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            // The requestLocation is still pending: stop it, so a late fix is never handed to the
+            // next reader as if it were theirs (that reader starts its own read).
+            self.manager.stopUpdatingLocation()
+            self.finishRead(nil, "timeout")
+        }
+        manager.requestLocation()
+    }
+
+    private func finishRead(_ location: CLLocation?, _ error: String?) {
+        readTimer?.invalidate()
+        readTimer = nil
+        let waiting = readers
+        readers = []
+        for r in waiting { r(location, error) }
+    }
+
     // MARK: CLLocationManagerDelegate
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard !readers.isEmpty, let last = locations.last else { return }
+        finishRead(last, nil)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        guard !readers.isEmpty else { return }
+        let code = (error as? CLError)?.code
+        if code == .locationUnknown { return } // CoreLocation keeps trying; the timeout ends it
+        finishRead(nil, code == .denied ? "denied" : "unavailable")
+    }
 
     func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         guard region.identifier == GeofenceCore.regionId else { return }
@@ -164,6 +213,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "disarm", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "readPendingExit", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "currentPosition", returnType: CAPPluginReturnPromise),
     ]
 
     public override func load() {
@@ -201,6 +251,26 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async {
             let p = GeofenceCore.shared.pending(clear: clear)
             call.resolve(["pending": p as Any])
+        }
+    }
+
+    /// One fix for the page (lib/geo.ts getPosition): { latitude, longitude, accuracy, timestamp }
+    /// (timestamp in ms since 1970), or a rejection whose code is "not-determined", "denied",
+    /// "timeout" or "unavailable". Never asks for permission (see GeofenceCore.currentPosition).
+    @objc func currentPosition(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            GeofenceCore.shared.currentPosition { location, error in
+                guard let location else {
+                    let code = error ?? "unavailable"
+                    return call.reject(code, code)
+                }
+                call.resolve([
+                    "latitude": location.coordinate.latitude,
+                    "longitude": location.coordinate.longitude,
+                    "accuracy": location.horizontalAccuracy,
+                    "timestamp": location.timestamp.timeIntervalSince1970 * 1000,
+                ])
+            }
         }
     }
 

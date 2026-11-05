@@ -10,6 +10,7 @@ async function tryModel(key: string, model: string) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    // A key-health probe, not a model call: max_tokens 4 and NO thinking / effort / fallbacks.
     body: JSON.stringify({ model, max_tokens: 4, messages: [{ role: "user", content: "hi" }] }),
   });
   if (r.ok) return { ok: true as const };

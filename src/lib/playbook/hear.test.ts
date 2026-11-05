@@ -258,7 +258,9 @@ describe("runHear is metered and capped", () => {
   });
 
   it("checks it BEFORE spending money, not after", () => {
-    expect(src.indexOf("aiAllowed(")).toBeLessThan(src.indexOf("messages.create"));
+    // The call rides the one helper since cn-v1142 (lib/ai-call aiCreate).
+    expect(src.indexOf("aiCreate(")).toBeGreaterThan(-1);
+    expect(src.indexOf("aiAllowed(")).toBeLessThan(src.indexOf("aiCreate("));
   });
 
   it("records the call against the org's ledger", () => {
@@ -284,9 +286,11 @@ describe("runHear is metered and capped", () => {
 });
 
 describe("every model call site is on the ledger", () => {
-  it("no messages.create without a recordAiUsage in the same file", () => {
+  it("no messages.create (or aiCreate) without a recordAiUsage in the same file", () => {
+    // lib/ai-call is the one helper every non-streaming call rides (cn-v1142); it holds no usage of
+    // its own to meter — each caller meters the message it gets back, which is what this checks.
     const files = execSync(
-      "grep -rl 'messages.create' src/ --include=*.ts | grep -v test || true",
+      "grep -rlE 'messages\\.create|aiCreate\\(' src/ --include=*.ts | grep -v test | grep -v '^src/lib/ai-call\\.ts$' || true",
       { cwd: process.cwd(), encoding: "utf8" },
     ).split("\n").filter(Boolean);
     expect(files.length).toBeGreaterThan(5); // the grep works

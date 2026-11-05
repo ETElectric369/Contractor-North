@@ -27,10 +27,11 @@ describe("migration 0402: the panel door is measured", () => {
   const sql = migration("0402_");
   const m0333 = migration("0333_");
 
-  it("is the one 0402 and nothing sits past it", () => {
+  it("is the one 0402 (what sits past it is the newest migration's own test: migration-0404.test.ts)", () => {
     const names = readdirSync(migrations);
     expect(names.filter((n) => n.startsWith("0402_"))).toEqual(["0402_the_panel_door_is_measured.sql"]);
-    expect(names.some((n) => /^040[3-9]_|^04[1-9]\d_|^0[5-9]\d\d_/.test(n))).toBe(false);
+    expect(names.filter((n) => n.startsWith("0403_"))).toEqual(["0403_a_bill_that_names_the_estimate_settles_the_work.sql"]);
+    expect(names.filter((n) => n.startsWith("0404_"))).toEqual(["0404_a_job_knows_where_it_is.sql"]);
   });
 
   it("exists, names itself, and runs under the house timeouts", () => {

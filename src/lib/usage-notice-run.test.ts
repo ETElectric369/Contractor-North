@@ -249,6 +249,15 @@ describe("80 once", () => {
     expect(spies.email.mock.calls[0][0].html).toContain("|Open Settings|https://app.contractornorth.com/settings?tab=getpaid</north>");
   });
 
+  it("on the hourly cron, handed the companies at their 8 AM: another company is not metered, claimed or told (2026-11-02)", async () => {
+    let c = fakeClient({ orgs: [org()], spend: AT_80 });
+    expect(await sendUsageNotices(c.client, NOW, { orgIds: new Set(["another-company"]) })).toEqual({ orgs: 0, told: 0, skipped: skipped(), failed: 0 });
+    expect(claims(c)).toEqual([]);
+    expect(spies.notify).not.toHaveBeenCalled();
+    c = fakeClient({ orgs: [org()], spend: AT_80 });
+    expect(await sendUsageNotices(c.client, NOW, { orgIds: new Set([ORG]) })).toEqual(told);
+  });
+
   it("the second run finds the stamp: already, nobody told again", async () => {
     const c = fakeClient({ orgs: [org()], spend: AT_80, claim: statefulClaim() });
     expect(await run(c)).toEqual(told);

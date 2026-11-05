@@ -20,7 +20,7 @@ const db = vi.hoisted(() => ({
   staff: true,
   orgId: "org-1",
   clock: 0,
-  calls: [] as { model: string; tools?: any[]; messages: any[] }[],
+  calls: [] as { model: string; tools?: any[]; messages: any[]; max_tokens?: number; thinking?: unknown; output_config?: any; betas?: string[]; fallbacks?: string }[],
   respond: null as null | ((p: any, n: number) => any),
   noKey: false,
   /** rate_limit_hit's counters, by key: incremented on every hit, as 0169's function does. */
@@ -128,19 +128,24 @@ vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => serviceClie
 vi.mock("@/lib/anthropic", () => ({
   getAnthropic: () => {
     if (db.noKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-    return {
-      messages: {
-        create: async (p: Params) => {
-          db.calls.push(JSON.parse(JSON.stringify({ model: p.model, tools: p.tools, messages: p.messages })));
-          if (!db.respond) throw new Error("no scripted response");
-          return db.respond(p, db.calls.length);
-        },
-      },
+    // ONE fake behind both surfaces: aiCreate rides client.beta.messages when the request carries
+    // the fallbacks beta (the middle model does), client.messages otherwise.
+    const create = async (p: Params & Record<string, unknown>) => {
+      db.calls.push(
+        JSON.parse(
+          JSON.stringify({ model: p.model, tools: p.tools, messages: p.messages, max_tokens: p.max_tokens, thinking: p.thinking, output_config: p.output_config, betas: p.betas, fallbacks: p.fallbacks }),
+        ),
+      );
+      if (!db.respond) throw new Error("no scripted response");
+      return db.respond(p, db.calls.length);
     };
+    return { messages: { create }, beta: { messages: { create } } };
   },
 }));
 
-import { costOf } from "@/lib/ai-cost";
+import { costOf, fallbacksFor } from "@/lib/ai-cost";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refusalWords } from "@/lib/ai-refusal";
 import { lookUpVendors, readVendorList } from "./vendor-lookup-actions";
 import { addVendorsBatch, saveLookedUp, saveVendorField, undoLookedUp } from "./vendor-actions";
 import { rowsFromTable } from "./vendor-import-math";
@@ -313,6 +318,17 @@ describe("Look Up: every field sourced, every lookup on the ledger, nothing save
     expect(JSON.stringify(db.tables.price_list_vendors)).toBe(before);
   });
 
+  it("asks with the table's row and the middle model's fallbacks; a refusal is its own answer, metered", async () => {
+    db.respond = () => ({ ...reply({ json: { candidates: [] } }), stop_reason: "refusal" });
+    const res = await lookUpVendors({ names: [{ name: "Granite Peak Plumbing" }] });
+    if (!res.ok) throw new Error(res.error);
+    expect(res.results[0].answer).toMatchObject({ found: false, why: "refused" });
+    const req = aiRequestFor("vendor-lookup");
+    expect(db.calls[0]).toMatchObject({ max_tokens: req.max_tokens, thinking: req.thinking, output_config: req.output_config, fallbacks: "default" });
+    expect(db.calls).toHaveLength(1);
+    expect(lookupRow()).toMatchObject({ surface: "vendor-lookup", calls: 1 });
+  });
+
   it("a multi-location answer comes back as choices, and none is picked for the person", async () => {
     const pages = ["https://sierralumberyard.example/truckee", "https://sierralumberyard.example/reno"];
     db.respond = () =>
@@ -391,7 +407,9 @@ describe("Read A Photo Or Scan: only a real picture or a real PDF is ever sent",
     fd.append("file", new File([bytes as unknown as BlobPart], name, { type }));
     return fd;
   };
-  const listJson = { rows: [{ name: "Granite Peak Plumbing", phone: "530-555-0142" }, { name: "Coldwater Drywall" }, { name: "" }] };
+  // Structured outputs hand back every key the schema names; a blank is "".
+  const row = (o: Record<string, string>) => ({ name: "", contact_name: "", phone: "", email: "", website: "", address: "", trade: "", ...o });
+  const listJson = { rows: [row({ name: "Granite Peak Plumbing", phone: "530-555-0142" }), row({ name: "Coldwater Drywall" }), row({ name: "" })] };
   const readReply = () => ({
     model: "claude-sonnet-5-5",
     stop_reason: "end_turn",
@@ -430,6 +448,20 @@ describe("Read A Photo Or Scan: only a real picture or a real PDF is ever sent",
     ]);
     // Reading saves nothing.
     expect(db.tables.price_list_vendors.length).toBe(2);
+  });
+
+  it("asks with the table's row, the middle model's fallbacks and the list's schema", async () => {
+    db.respond = readReply;
+    expect((await readVendorList(form(PNG, "list.png", "image/png"))).ok).toBe(true);
+    const req = aiRequestFor("vendor-list-read");
+    expect(db.calls[0]).toMatchObject({ max_tokens: req.max_tokens, thinking: req.thinking, betas: fallbacksFor("claude-sonnet-5-5").betas, fallbacks: "default" });
+    expect(db.calls[0].output_config).toMatchObject({ effort: req.output_config.effort, format: { type: "json_schema" } });
+  });
+
+  it("a refusal says the one sentence, and is metered", async () => {
+    db.respond = () => ({ model: "claude-sonnet-5-5", stop_reason: "refusal", usage: { input_tokens: 1_500, output_tokens: 0 }, content: [] });
+    expect(await readVendorList(form(PNG, "list.png", "image/png"))).toEqual({ ok: false, error: refusalWords() });
+    expect(db.ledger).toEqual([expect.objectContaining({ surface: "vendor-list-read", calls: 1 })]);
   });
 
   it("a real PDF goes as a document block", async () => {

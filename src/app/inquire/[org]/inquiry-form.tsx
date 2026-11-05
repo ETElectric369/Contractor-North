@@ -137,10 +137,10 @@ export function InquiryForm({
     <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white/70 p-6 shadow-xl backdrop-blur-md">
       <h2 className="text-lg font-bold text-slate-900">Request an estimate</h2>
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name *" className={field} style={{ ["--tw-ring-color" as any]: brandColor }} />
+      <input autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name *" className={field} style={{ ["--tw-ring-color" as any]: brandColor }} />
       <div className="grid grid-cols-2 gap-3">
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className={field} inputMode="tel" />
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className={field} inputMode="email" />
+        <input autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className={field} inputMode="tel" />
+        <input autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className={field} inputMode="email" />
       </div>
       <AddressAutocomplete
         placeholder="Job address"

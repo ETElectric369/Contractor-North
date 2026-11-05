@@ -1,7 +1,12 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { modelFor, recordAiUsage, type TokenUsage } from "@/lib/ai-cost";
-import { extractJsonObject } from "@/lib/ai-json";
+import { fallbacksFor, modelFor, recordAiUsage, type TokenUsage } from "@/lib/ai-cost";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { refusalWords } from "@/lib/ai-refusal";
+import { readStructured } from "@/lib/ai-structured";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import * as z from "zod/v4";
 import { formatPhone } from "@/lib/utils";
 import { cleanEmail, looksLikeHours, phoneDigits, stateCode, type SiteFields } from "./extract";
 
@@ -12,6 +17,9 @@ import { cleanEmail, looksLikeHours, phoneDigits, stateCode, type SiteFields } f
  *
  * The cheap model (modelFor("classify")), a capped slice of the page's words, ONE metered call on
  * surface "resource-from-link" (never a second: a reply that isn't JSON is not sent off for repair).
+ * Since cn-v1142 the reply's SHAPE is held by structured outputs (SITE_FILL_FORMAT), there is no
+ * thinking field (the small model's mechanics row) and no fallbacks (none exist for the small
+ * model), and a refusal comes back as `said` — the one sentence — rather than as an empty read.
  * THE PAGE IS UNTRUSTED: it goes in fenced as <page>…</page>, the system prompt says it is data to
  * extract from and never instructions, and the answer is then GUARDED: a phone, email, zip, street
  * number or city the page's own words don't show is dropped, and so are hours whose clock numbers it
@@ -34,6 +42,22 @@ function systemPrompt(categories: readonly string[]): string {
     "Leave a key empty when the page doesn't say.",
   ].join("\n");
 }
+
+/** The reply's shape, held by structured outputs. guardModelFields below still decides what lands. */
+const SITE_FILL_FORMAT = zodOutputFormat(
+  z.object({
+    name: z.string(),
+    phones: z.array(z.string()),
+    email: z.string(),
+    street: z.string(),
+    city: z.string(),
+    state: z.string(),
+    zip: z.string(),
+    hours: z.string(),
+    about: z.string(),
+    category: z.string(),
+  }),
+);
 
 const str = (v: unknown, max: number): string | undefined => {
   if (typeof v !== "string") return undefined;
@@ -115,35 +139,31 @@ export async function readWithModel(args: {
   orgId: string;
   pageText: string;
   categories: readonly string[];
-}): Promise<SiteFields> {
+}): Promise<{ fields: SiteFields; said?: string }> {
   const { client, orgId, categories } = args;
   // The fence can't be closed from inside: a page that writes "</page>" loses the tag.
   const pageText = args.pageText.replace(/<\/?\s*page\b[^>]*>/gi, " ");
   const model = modelFor("classify");
-  const resp = await client.messages.create(
+  const req = aiRequestFor(SITE_FILL_SURFACE);
+  const resp = await aiCreate(
+    client,
     {
       model,
-      max_tokens: 1500, // the 5.5 line may think inside the cap (cn-v1128)
+      ...fallbacksFor(model),
+      ...req,
+      output_config: { ...req.output_config, format: SITE_FILL_FORMAT },
       system: systemPrompt(categories),
       messages: [{ role: "user", content: `<page>\n${pageText}\n</page>\n\nReply with the JSON only.` }],
     },
     { timeout: 12_000, maxRetries: 0 },
   );
   // Meter the model that actually ran (ai-json's rule).
-  await recordAiUsage({ orgId, model: (resp as { model?: string }).model || model, surface: SITE_FILL_SURFACE, usage: resp.usage as unknown as TokenUsage });
-  if (resp.stop_reason === "max_tokens") return {};
-  const text = resp.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
+  await recordAiUsage({ orgId, model: resp.model || model, surface: SITE_FILL_SURFACE, usage: resp.usage as unknown as TokenUsage });
   // No repair round trip (parseAiJson's): that second call has no timeout or retry cap of its own,
-  // so a prose reply could run this past the action's 30 seconds, and the answer is small and
-  // guarded anyway. A reply that isn't JSON fills nothing; the page's own card still stands.
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(extractJsonObject(text));
-  } catch {
-    return {};
-  }
-  return guardModelFields(parsed, pageText, categories);
+  // so it could run this past the action's 30 seconds, and the answer is small and guarded anyway.
+  // A cut-off or unreadable reply fills nothing; the page's own card still stands. A refusal fills
+  // nothing either, and says so in the one sentence.
+  const read = readStructured(resp, SITE_FILL_FORMAT);
+  if (!read.ok) return read.reason === "refused" ? { fields: {}, said: refusalWords() } : { fields: {} };
+  return { fields: guardModelFields(read.value, pageText, categories) };
 }

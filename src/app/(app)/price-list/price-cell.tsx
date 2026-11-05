@@ -134,7 +134,7 @@ export function PriceCell({
 
   if (editing) {
     return (
-      <input
+      <input autoComplete="off"
         ref={inputRef}
         value={text}
         list={kind === "text" ? list : undefined}

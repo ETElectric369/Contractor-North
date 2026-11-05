@@ -7,7 +7,12 @@ import { createClient } from "@/lib/supabase/server";
 import { HOW_MANY, takeOffFromQuote, takeOffWords, isDuplicateKey } from "@/lib/estimate/take-off-from-quote";
 import { materialsWords, syncQuoteMaterials } from "@/lib/estimate/sync-job-materials";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { aiAllowed, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, fallbacksFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { answerText, readStructured } from "@/lib/ai-structured";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import * as z from "zod/v4";
 import { requireStaff } from "@/lib/staff-guard";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -626,9 +631,26 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   return { ok: false, ...(res.error ? { error: res.error } : {}), ...(res.id ? { id: res.id } : {}) };
 }
 
+/** THE TAKE-OFF'S ANSWER, AS A SCHEMA (cn-v1142): structured outputs hold the reply to it (the
+ *  root is an object: a schema's root cannot be a bare array). No price and no vendor in it. */
+const DRAFT_FORMAT = zodOutputFormat(
+  z.object({
+    items: z.array(
+      z.object({
+        description: z.string(),
+        part_number: z.string().nullable(),
+        quantity: z.number(),
+        unit: z.string(),
+      }),
+    ),
+  }),
+);
+
 /** Tolerant parse of a JSON array the model emitted: strips any code fences,
  *  isolates the outermost [...], and — if the model was cut off by the token
- *  limit mid-array — salvages the rows it did finish rather than failing whole. */
+ *  limit mid-array — salvages the rows it did finish rather than failing whole.
+ *  Since cn-v1142 it runs ONLY on a cut-off answer (a shopping list keeps the rows it finished);
+ *  a whole answer is read by its schema. */
 function parseDraftArray(raw: string): unknown[] {
   let s = raw.replace(/```(?:json)?/gi, "").trim();
   const start = s.indexOf("[");
@@ -666,14 +688,18 @@ export async function generateMaterialDraft(
 
   try {
     const client = getAnthropic();
-    const msg = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 2000,
+    const model = DEFAULT_MODEL;
+    const req = aiRequestFor("materials");
+    const msg = await aiCreate(client, {
+      model,
+      ...fallbacksFor(model),
+      ...req,
+      output_config: { ...req.output_config, format: DRAFT_FORMAT },
       system:
         // NO PRICE, NO VENDOR FROM THE MODEL (2026-10-15). It used to be asked for a "rough per-unit USD"
         // and a vendor on every line: a guess (the model only structures; it never prices — the
         // no-speculation law) into est_cost, a column the checklist stopped showing in cn-v1108.
-        'You are a material estimator for a trade contractor. Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot)}. No prices and no vendors: the list says what to buy and how many; the price book and the supplier\'s bill price it. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array — no prose, no code fences.',
+        'You are a material estimator for a trade contractor. Given a scope of work, output a JSON object {"items": [...]} of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot)}. No prices and no vendors: the list says what to buy and how many; the price book and the supplier\'s bill price it. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON object — no prose, no code fences.',
       // NO ASSISTANT PREFILL. This turn used to end with `{ role: "assistant", content: "[" }` to
       // force the model straight into a JSON array — a technique that stopped being supported on
       // the 4.6-and-later family. On claude-opus-4-8 the API rejects it outright, so EVERY call to
@@ -686,13 +712,15 @@ export async function generateMaterialDraft(
       // prepending "[" below would produce "[[{…}]" and fail both the parse and the salvage.
       messages: [{ role: "user", content: scope }],
     });
-    void recordAiUsage({ orgId: ctx.orgId, model: DEFAULT_MODEL, surface: "materials", usage: msg.usage as never });
+    void recordAiUsage({ orgId: ctx.orgId, model: msg.model || model, surface: "materials", usage: msg.usage as never });
 
-    const block = msg.content.find((b) => b.type === "text") as
-      | { text: string }
-      | undefined;
-    const raw = block?.text ?? "";
-    const items = (parseDraftArray(raw) as DraftMaterial[]).map(
+    // Refusal first (the one sentence, never a parse error); a cut-off keeps the rows it finished
+    // (parseDraftArray's salvage); an answer that doesn't match its schema is said as unreadable.
+    const read = readStructured(msg, DRAFT_FORMAT);
+    if (!read.ok && read.reason === "refused") return { ok: false, error: read.error };
+    if (!read.ok && read.reason === "unreadable") return { ok: false, error: "Couldn't read the material list — try again." };
+    const drafted = read.ok ? read.value.items : (parseDraftArray(answerText(msg.content)) as Partial<DraftMaterial>[]);
+    const items = (drafted as DraftMaterial[]).map(
       (i) => ({
         description: String(i.description ?? ""),
         part_number: i.part_number ? String(i.part_number) : null,

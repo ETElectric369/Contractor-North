@@ -834,7 +834,7 @@ export function AppointmentButton({
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-brand/30 bg-brand-light/30 p-3">
               <div>
                 <Label htmlFor="ap-newname">{newLead ? "New lead name" : "New customer name"}</Label>
-                <Input id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patchSuggesting({ new_customer_name: e.target.value })} placeholder="Name" required />
+                <Input autoComplete="name" id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patchSuggesting({ new_customer_name: e.target.value })} placeholder="Name" required />
               </div>
               <div>
                 <Label htmlFor="ap-newphone">Phone</Label>

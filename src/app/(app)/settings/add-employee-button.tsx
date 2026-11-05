@@ -107,17 +107,18 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Label htmlFor="emp-name">Full name *</Label>
-                <Input id="emp-name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Input id="emp-name" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <div className="col-span-2">
                 <Label htmlFor="emp-email">Email (their login) *</Label>
-                <Input id="emp-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <Input id="emp-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
               <div className="col-span-2">
                 <Label htmlFor="emp-pw">Password *</Label>
                 <div className="flex gap-2">
                   <Input
                     id="emp-pw"
+                    autoComplete="new-password"
                     type={showPw ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}

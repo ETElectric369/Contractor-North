@@ -176,7 +176,7 @@ export function TaxRatesManager({
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <Label htmlFor="tr-name">Name</Label>
-              <Input id="tr-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. City sales tax" />
+              <Input autoComplete="off" id="tr-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. City sales tax" />
             </div>
             <div className="w-28">
               <Label htmlFor="tr-rate">Rate %</Label>
@@ -294,7 +294,7 @@ export function TaxRatesManager({
           </ul>
         )}
         <div className="flex items-end gap-2">
-          <div className="flex-1"><Label htmlFor="pl-name">Name</Label><Input id="pl-name" value={levelName} onChange={(e) => setLevelName(e.target.value)} placeholder="e.g. Trade / Builder" /></div>
+          <div className="flex-1"><Label htmlFor="pl-name">Name</Label><Input autoComplete="off" id="pl-name" value={levelName} onChange={(e) => setLevelName(e.target.value)} placeholder="e.g. Trade / Builder" /></div>
           <div className="w-24"><Label htmlFor="pl-markup">Markup %</Label><NumberInput id="pl-markup" value={levelMarkup} onValueChange={setLevelMarkup} /></div>
           <div className="w-28"><Label htmlFor="pl-rate">Labor $/hr</Label><Input id="pl-rate" type="number" inputMode="decimal" value={levelRate} onChange={(e) => setLevelRate(e.target.value === "" ? "" : Number(e.target.value))} placeholder="default" /></div>
           <Button size="sm" onClick={addLevel} disabled={pending || !levelName.trim()}>{editingLevelId ? <><Check className="h-3.5 w-3.5" /> Save</> : <><Plus className="h-3.5 w-3.5" /> Add</>}</Button>

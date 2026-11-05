@@ -30,7 +30,13 @@ import {
 import { reviewAgainstBook, type BookReview } from "@/lib/pricing/book-review";
 import { runCalc } from "@/lib/electrical-calc";
 import { estimatorCalcTools, estimatorQuantitiesLine } from "@/lib/nort/trade-prompt";
-import { recordAiUsage, aiAllowed, currentOrgId, modelFor, tierOfUsage } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, currentOrgId, fallbacksFor, modelFor, tierOfUsage } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { isAiRefused, refused, saidFailure } from "@/lib/ai-refusal";
+import { replayContent, toolUsesToAnswer } from "@/lib/nort/replay";
+import { strictTools } from "@/lib/actions/strict-schema";
+import type { Lang } from "@/lib/locale";
 import { usageFor } from "@/lib/usage-meter";
 import { shortDate } from "@/lib/usage-window";
 import { callerLang } from "@/lib/lang-of";
@@ -2173,6 +2179,11 @@ export async function updateQuoteStatus(id: string, status: string) {
   return { ok: true as const, ...(said ? { said } : {}) };
 }
 
+/** What an estimator run hands back: the draft, or the model's decline (ai-refusal `refused`) — said
+ *  by the door in the caller's language (saidFailure), never parsed and never thrown. */
+type EstimatorDraft = { items: DraftLineItem[]; questions: string[]; description: string };
+type EstimatorOut = EstimatorDraft | { refused: true };
+
 /**
  * TASK MODE — his typed scope becomes a TASK LIST, never priced lines the model decided on.
  *
@@ -2209,17 +2220,22 @@ async function runEstimatorTasks(opts: {
   rateFrom: "rule" | "stated";
   levelPct: number | null;
   orgDefaultPct: number;
-}): Promise<{ items: DraftLineItem[]; questions: string[]; description: string }> {
+}): Promise<EstimatorOut> {
   const { client, orgId, model, scope, trade, playbook, rows } = opts;
-  const msg = await client.messages.create({
-    model: model,
-    max_tokens: 8192,
+  // THE SPLIT IS A SORT, NOT A PRICE (cn-v1142): its own effort row (ai-effort "estimator:tasks",
+  // medium), the server-side fallback on a declined request, and its own ledger name — it used to
+  // meter as "estimator", so the ledger could not tell the lighter work from the priced take-off.
+  const msg = await aiCreate(client, {
+    model,
+    ...fallbacksFor(model),
+    ...aiRequestFor("estimator:tasks"),
     system: taskModePrompt({ trade, playbook }),
     messages: [{ role: "user", content: scope }],
   });
-  // METERED (0162), into the same ledger and surface as the priced-lines path: one estimate is
-  // one estimate on the bill whichever prompt it ran.
-  void recordAiUsage({ orgId, model: model, surface: "estimator", usage: msg.usage as never });
+  // METERED (0162) as the model that ANSWERED (a fallback bills as the model that ran).
+  void recordAiUsage({ orgId, model: msg.model, surface: "estimator:tasks", usage: msg.usage as never });
+  // A DECLINE IS AN ANSWER, read before the content (ai-refusal): never parsed, never thrown.
+  if (refused(msg)) return { refused: true };
   const text = msg.content
     .filter((b) => b.type === "text")
     .map((b) => (b as { text: string }).text)
@@ -2254,7 +2270,7 @@ async function runEstimator(
   markupPct?: number,
   laborRate?: number,
   model: string = DEFAULT_MODEL,
-): Promise<{ items: DraftLineItem[]; questions: string[]; description: string }> {
+): Promise<EstimatorOut> {
   const supabase = await createClient();
   const [{ data: org }, { data: book }] = await Promise.all([
     supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
@@ -2391,7 +2407,13 @@ async function runEstimator(
         // A cache read is ~10% of input, so repeat estimates stop paying for the catalog.
         type: "text" as const,
         text: `PRICE BOOK (code | description | unit | cost${rows.some((b) => b.category) ? " | category" : ""}):\n${catalog || "(price book is empty — estimate retail prices and flag every material)"}`,
-        cache_control: { type: "ephemeral" as const },
+        //
+        // ONE HOUR, NOT FIVE MINUTES (cn-v1142). The book changes when the office edits it, not
+        // between two estimates; a contractor drafting a few estimates across a morning paid the
+        // catalog's write again every time a 5-minute entry lapsed. This is the request's ONLY
+        // cache marker (tools render first, so it caches tools + system together), which keeps
+        // it well under the 4-marker cap and trivially ahead of any 5-minute one.
+        cache_control: { type: "ephemeral" as const, ttl: "1h" as const },
       },
   ];
 
@@ -2408,42 +2430,54 @@ async function runEstimator(
    * trade and a research company of any other trade get none — an electrical tool array is noise
    * on a deck or a plumbing bid and costs tokens.
    */
-  const tools = estimatorCalcTools(tradeKey, catalogMode) as unknown as Anthropic.Tool[] | undefined;
+  //
+  // STRICT (cn-v1142, lib/actions/strict-schema): the API guarantees each calculator call's input
+  // validates against its schema, so runCalc never reads a made-up argument. strict-schema.test.ts
+  // runs every calculator through the strict rules and the per-request budget; a tool that could
+  // not be strict comes back unchanged, never thrown on.
+  const calcTools = estimatorCalcTools(tradeKey, catalogMode);
+  const tools = calcTools ? strictTools(calcTools).tools : undefined;
   const convo: Anthropic.MessageParam[] = [{ role: "user", content }];
   let msg!: Anthropic.Message;
   const LAST_ROUND = 2;
   for (let round = 0; round <= LAST_ROUND; round++) {
-    msg = await client.messages.create({
-      model: model,
-      max_tokens: 8192, // headroom: a dense plan take-off can run long — don't truncate mid-JSON
+    // THE EFFORT ROW (ai-effort "estimator": high, 16000 — thinking counts toward max_tokens, so the
+    // old 8192 would starve a dense take-off) and the server-side fallback, on the one call.
+    msg = await aiCreate(client, {
+      model,
+      ...fallbacksFor(model),
+      ...aiRequestFor("estimator"),
       system,
-      // On the FINAL round the tools come off, so the model has no choice but to answer. Otherwise
-      // an estimate that spends its whole budget calculating exits the loop mid-tool-call with no
-      // text to parse — the contractor gets an error instead of a draft, which is the worst
-      // outcome of the three.
+      // On the FINAL round the model may not call a tool (`tool_choice: none`), so it has no
+      // choice but to answer. Otherwise an estimate that spends its whole budget calculating exits
+      // the loop mid-tool-call with no text to parse — the contractor gets an error instead of a
+      // draft, which is the worst outcome of the three.
       //
-      // COSTS A CACHE MISS, knowingly. The tools block sits in front of the price-book cache
-      // breakpoint, so dropping it re-bills the whole catalog on the last round of any estimate
-      // that called a calculator. `tool_choice: {type: "none"}` would forbid tool use while
-      // leaving the prefix intact — the API takes it, but @anthropic-ai/sdk 0.36.3 does not type
-      // it, and casting past the SDK on the estimator is not a trade worth making for an
-      // optimisation that is invisible on a book this size. Revisit with the SDK bump, BEFORE the
-      // CED net pricing import multiplies the catalog.
-      ...(tools && round < LAST_ROUND ? { tools } : {}),
+      // THE TOOLS STAY ON THE REQUEST (cn-v1142, the SDK bump). The tools block sits in front of
+      // the price-book cache breakpoint, and dropping it on the last round re-billed the whole
+      // catalog on every estimate that called a calculator. A change of tool_choice alone keeps
+      // the tools + system cache intact — the API's caching rule — and the SDK now types
+      // `{ type: "none" }`.
+      ...(tools ? { tools, ...(round === LAST_ROUND ? { tool_choice: { type: "none" as const } } : {}) } : {}),
       messages: convo,
     });
     // METER EVERY ROUND (0162). This is the single most expensive operation in the product and it
     // was absent from the ledger — you cannot choose a price from a record that omits your biggest
     // cost. Metering only the last round would undercount an estimate that used its calculators.
+    // The ANSWERING model (msg.model): after a fallback the round bills as the model that ran.
     void recordAiUsage({
       orgId: (org as { id?: string } | null)?.id,
-      model: model,
+      model: msg.model,
       surface: "estimator",
       usage: msg.usage as never,
     });
-    const calls = msg.content.filter((b) => b.type === "tool_use") as Anthropic.ToolUseBlock[];
+    // A DECLINE IS AN ANSWER (ai-refusal): read before any content, never parsed or thrown.
+    if (refused(msg)) return { refused: true };
+    // ONLY THE CALLS THE REPLAY KEEPS (lib/nort/replay): after a server-side fallback the declined
+    // model's tool calls are left out of the echo, and a tool_result for one would be a 400.
+    const calls = toolUsesToAnswer(msg.content);
     if (!calls.length) break;
-    convo.push({ role: "assistant", content: msg.content });
+    convo.push({ role: "assistant", content: replayContent(msg.content) });
     convo.push({
       role: "user",
       content: calls.map((c) => ({
@@ -2544,7 +2578,9 @@ async function runEstimator(
   return { items, questions, description };
 }
 
-function estimatorError(e: any) {
+function estimatorError(e: any, lang?: Lang): { ok: false; error: string } {
+  // A refused JSON repair (parseAiJson) is the one sentence, said like any refusal — never "failed".
+  if (isAiRefused(e)) return saidFailure("refused", lang);
   return {
     ok: false as const,
     error: e?.message?.includes("ANTHROPIC_API_KEY")
@@ -2572,7 +2608,7 @@ function estimatorError(e: any) {
  * empty and the CED net pricing never reached him.
  */
 async function guardEstimator(): Promise<
-  | { ok: true; orgId: string | null; model: string; notes: string[] }
+  | { ok: true; orgId: string | null; model: string; notes: string[]; lang: Lang }
   | { ok: false; error: string }
 > {
   const ctx = await requireStaff();
@@ -2598,11 +2634,12 @@ async function guardEstimator(): Promise<
   const usage = await usageFor(orgId);
   const tier = tierOfUsage(usage);
   const notes: string[] = [];
+  // The caller's language, read once: the lighter note and a declined run (saidFailure) say it.
+  const lang = await callerLang(ctx.supabase, ctx.userId);
   if (tier === "lighter") {
-    const lang = await callerLang(ctx.supabase, ctx.userId);
     notes.push(fillText(translator(lang)("us_estimatorLighter"), { date: shortDate(usage.resetOn, lang) }));
   }
-  return { ok: true, orgId, model: tier === "lighter" ? modelFor("routine") : modelFor("reasoning"), notes };
+  return { ok: true, orgId, model: tier === "lighter" ? modelFor("routine") : modelFor("reasoning"), notes, lang };
 }
 
 export async function generateQuoteDraft(
@@ -2615,9 +2652,10 @@ export async function generateQuoteDraft(
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
   try {
     const out = await runEstimator(scope, markupPct, laborRate, gate.model);
+    if ("refused" in out) return saidFailure("refused", gate.lang);
     return { ok: true, ...out, questions: [...gate.notes, ...out.questions] };
   } catch (e) {
-    return estimatorError(e);
+    return estimatorError(e, gate.lang);
   }
 }
 
@@ -2776,12 +2814,16 @@ export async function generateQuoteDraftFromSupplier(
     // degraded (plans.ts counts plan take-offs and researched pricing, the skeptic's should-fix 3).
     const model = modelFor("reasoning");
     const client = getAnthropic();
-    const msg = await client.messages.create({
+    // A READ, NOT A TAKE-OFF (cn-v1142): its own effort row and ledger name
+    // ("estimator:supplier-quote", medium), plus the server-side fallback on a declined request.
+    const msg = await aiCreate(client, {
       model,
-      max_tokens: 8192,
+      ...fallbacksFor(model),
+      ...aiRequestFor("estimator:supplier-quote"),
       messages: [{ role: "user", content: content as never }],
     });
-    void recordAiUsage({ orgId: (org as { id?: string } | null)?.id, model, surface: "estimator", usage: msg.usage as never });
+    void recordAiUsage({ orgId: (org as { id?: string } | null)?.id, model: msg.model, surface: "estimator:supplier-quote", usage: msg.usage as never });
+    if (refused(msg)) return saidFailure("refused", gate.lang);
     if (msg.stop_reason === "max_tokens")
       return { ok: false, error: "That quote ran longer than one pass — split the file and try again." };
     const text = msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
@@ -2845,7 +2887,7 @@ export async function generateQuoteDraftFromSupplier(
     );
     return { ok: true, items, questions: [], description: "", bookReview };
   } catch (e) {
-    return estimatorError(e);
+    return estimatorError(e, gate.lang);
   }
 }
 
@@ -2893,9 +2935,10 @@ export async function generateQuoteDraftFromPlan(
       { type: "text", text: planTakeoffInstruction(note) },
     ];
     const out = await runEstimator(content, markupPct, laborRate, gate.model);
+    if ("refused" in out) return { ...saidFailure("refused", gate.lang), kept };
     return { ok: true, ...out, questions: [...gate.notes, ...out.questions], kept };
   } catch (e) {
-    return { ...estimatorError(e), kept };
+    return { ...estimatorError(e, gate.lang), kept };
   }
 }
 
@@ -2974,12 +3017,13 @@ export async function generateQuoteDraftFromLeadPlans(
 
     const content = [...docs, { type: "text", text: planTakeoffInstruction(scope.trim()) }];
     const out = await runEstimator(content, markupPct, laborRate, gate.model);
+    if ("refused" in out) return saidFailure("refused", gate.lang);
     // NO SILENT CAPS: what didn't ride is a review item, not a secret.
     if (skipped.length)
       out.questions = [`Not read: ${skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}`, ...out.questions];
     return { ok: true, ...out, questions: [...gate.notes, ...out.questions] };
   } catch (e) {
-    return estimatorError(e);
+    return estimatorError(e, gate.lang);
   }
 }
 
@@ -3012,9 +3056,10 @@ export async function generateCircuitSchedule(
 
   try {
     const client = getAnthropic();
-    const msg = await client.messages.create({
+    const msg = await aiCreate(client, {
       model: DEFAULT_MODEL,
-      max_tokens: 3000,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor("circuit-schedule"),
       system:
         "You are a master electrician laying out a residential branch-circuit (panel) schedule from an estimate's line items. " +
         "Use the BREAKER lines to determine how many circuits and their sizes, and the WIRE lines for conductor sizes. " +
@@ -3028,7 +3073,9 @@ export async function generateCircuitSchedule(
         'ckt = circuit position ("1","2"…). wire = e.g. "12/2","14/2","10/3","6/3". breaker = e.g. "20A","2P 30A","2P 50A". load = a short note (room/appliance or estimated VA). Number circuits sequentially, matching the breaker counts in the line items. No prose outside the JSON array.',
       messages: [{ role: "user", content: `Estimate: ${quote.title ?? ""}\n${(quote as any).description ?? ""}\n\nLine items:\n${lines}` }],
     });
-    void recordAiUsage({ orgId: (quote as { org_id?: string }).org_id, model: DEFAULT_MODEL, surface: "circuit-schedule", usage: msg.usage as never });
+    void recordAiUsage({ orgId: (quote as { org_id?: string }).org_id, model: msg.model, surface: "circuit-schedule", usage: msg.usage as never });
+    // A decline is said in the asker's language, never parsed as an empty schedule.
+    if (refused(msg)) return saidFailure("refused", await callerLang(supabase, ctx.userId));
     const text = msg.content
       .filter((b) => b.type === "text")
       .map((b) => (b as { text: string }).text)
@@ -3052,6 +3099,7 @@ export async function generateCircuitSchedule(
     revalidatePath(`/quotes/${quoteId}`);
     return { ok: true, circuits };
   } catch (e: any) {
+    if (isAiRefused(e)) return saidFailure("refused");
     return {
       ok: false,
       error: e?.message?.includes("ANTHROPIC_API_KEY")

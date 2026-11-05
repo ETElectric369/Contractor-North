@@ -45,6 +45,10 @@ export function resolveRowVerb(
     }
     // Finish: an honest ending for a job nothing is ahead of (job.finish drafts, never sends).
     if (kind === "job_to_schedule") return { name: "job.finish", input: { id } };
+    // Won It: the quote page's own Accepted (stamps the day, makes or catches up the job).
+    if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "accepted" } };
+    // Signed On Paper: recorded by the office, signed by the contract's customer, today.
+    if (kind === "contract_unsigned") return { name: "contract.recordPaperSignature", input: { id } };
     return null;
   }
 
@@ -99,6 +103,8 @@ export function resolveRowVerb(
     if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "cancelled" } };
     if (kind === "organize") return { name: "organize.archive", input: { id } };
     if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "declined" } };
+    // A win that went away after all (Lost): the estimate is declined; its job is left as it is.
+    if (kind === "quote_accepted") return { name: "quote.setStatus", input: { id, status: "declined" } };
     if (kind === "inspection_writeup") return { name: "appointment.setOutcome", input: { id, outcome: "lost" } };
     if (kind === "quote_draft") {
       const quote = recordId(id, "qdraft-");

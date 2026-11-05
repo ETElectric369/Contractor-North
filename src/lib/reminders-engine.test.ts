@@ -111,6 +111,13 @@ describe("sendDueReminders and a failed read", () => {
     expect(spies.reportError).not.toHaveBeenCalled();
   });
 
+  it("on the hourly cron, handed the companies at one of their hours: another company's customers hear nothing (2026-11-02)", async () => {
+    expect(await sendDueReminders(fake(routes()), { orgIds: new Set(["org-a"]) })).toMatchObject({ invoice_due: 0, failed: 0 });
+    expect(spies.sendEmail).not.toHaveBeenCalled(); // org-b holds the overdue invoice, and it is not its hour
+    expect(await sendDueReminders(fake(routes()), { orgIds: new Set(["org-b"]) })).toMatchObject({ invoice_due: 1, failed: 0 });
+    expect(spies.sendEmail).toHaveBeenCalledTimes(1);
+  });
+
   it("a company whose plan has ended gets no reminder emails and is counted; a comped one still does (cn-v1137)", async () => {
     // Company B holds the overdue invoice: lapsed, its customer hears nothing; comped, the email goes.
     const lapsedB = { ...ORG_B, subscription_status: "canceled" };

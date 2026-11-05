@@ -151,7 +151,7 @@ export function InsuranceManager({ items, orgId, canEdit, canAdd = canEdit }: { 
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div><Label htmlFor="i-type">Policy type</Label><Select id="i-type" value={type} onChange={(e) => setType(e.target.value)}>{INSURANCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-            <div className="col-span-2 sm:col-span-1"><Label htmlFor="i-name">Carrier / name</Label><Input id="i-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm (optional — file name used if blank)" /></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="i-name">Carrier / name</Label><Input autoComplete="off" id="i-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm (optional — file name used if blank)" /></div>
             <div><Label htmlFor="i-policy">Policy #</Label><Input id="i-policy" value={policy} onChange={(e) => setPolicy(e.target.value)} /></div>
             <div><Label htmlFor="i-amount">Annual premium</Label><NumberInput id="i-amount" value={amount} onValueChange={setAmount} /></div>
             <div><Label htmlFor="i-issued">Effective</Label><Input id="i-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
@@ -233,7 +233,7 @@ export function InsuranceManager({ items, orgId, canEdit, canAdd = canEdit }: { 
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><Label htmlFor="ie-type">Policy type</Label><Select id="ie-type" value={eType} onChange={(e) => setEType(e.target.value)}>{INSURANCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ie-name">Carrier / name</Label><Input id="ie-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm (optional)" /></div>
+          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ie-name">Carrier / name</Label><Input autoComplete="off" id="ie-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm (optional)" /></div>
           <div><Label htmlFor="ie-policy">Policy #</Label><Input id="ie-policy" value={ePolicy} onChange={(e) => setEPolicy(e.target.value)} /></div>
           <div><Label htmlFor="ie-amount">Annual premium</Label><NumberInput id="ie-amount" value={eAmount} onValueChange={setEAmount} /></div>
           <div><Label htmlFor="ie-issued">Effective</Label><Input id="ie-issued" type="date" value={eIssued} onChange={(e) => setEIssued(e.target.value)} /></div>

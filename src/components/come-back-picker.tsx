@@ -106,7 +106,7 @@ export function ComeBackPicker({
     <div className="w-full space-y-2" role="group" aria-label="When it comes back">
       {showWhy && (
         <div>
-          <input
+          <input autoComplete="off"
             id={`${id}-why`}
             autoFocus={autoFocus}
             value={why}

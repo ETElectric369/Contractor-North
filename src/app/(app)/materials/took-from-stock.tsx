@@ -144,7 +144,7 @@ export function TakeSheetView({
     <div className="space-y-3">
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <input
+        <input autoComplete="off"
           type="search"
           value={search}
           onChange={(e) => onSearch(e.target.value)}

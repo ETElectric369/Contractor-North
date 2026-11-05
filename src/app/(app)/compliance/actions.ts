@@ -3,8 +3,13 @@ import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
-import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { aiAllowed, modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { getAnthropic } from "@/lib/anthropic";
+import { aiAllowed, fallbacksFor, modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { readStructured } from "@/lib/ai-structured";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import * as z from "zod/v4";
 import { INSURANCE_TYPES, COMPLIANCE_TYPES, AUDIT_TYPES } from "@/lib/compliance-types";
 
 export type Result = { ok: boolean; error?: string };
@@ -98,16 +103,42 @@ export interface ImportPolicyResult {
 const IMPORT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const ALL_DOC_TYPES = [...INSURANCE_TYPES, ...COMPLIANCE_TYPES, ...AUDIT_TYPES];
 
-/** Pull a JSON object out of a Claude reply (tolerates ```json fences and a
- *  trailing comma before a closing bracket — same idiom as organize/actions). */
-function extractJsonObject(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = fenced ? fenced[1] : text;
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON in AI reply");
-  return body.slice(start, end + 1).replace(/,(\s*[}\]])/g, "$1");
-}
+/**
+ * THE TWO READS' ANSWERS, AS SCHEMAS (cn-v1142): structured outputs constrain each reply to its
+ * shape, so the hand parse (find the braces, JSON.parse) is gone. Every field is still validated
+ * and clamped below as before — the schema fixes the shape, never the trust.
+ */
+const DOC_TYPE_WORDS = [...new Set([...ALL_DOC_TYPES, "Other"])] as [string, ...string[]];
+const POLICY_DOC_FORMAT = zodOutputFormat(
+  z.object({
+    doc_type: z.enum(DOC_TYPE_WORDS),
+    name: z.string(),
+    policy_number: z.string().nullable(),
+    amount: z.number().nullable(),
+    issued_date: z.string().nullable(),
+    expires_date: z.string().nullable(),
+    notes: z.string().nullable(),
+  }),
+);
+const CSLB_FORMAT = zodOutputFormat(
+  z.object({
+    found: z.boolean(),
+    business_name: z.string().nullable(),
+    license_number: z.string().nullable(),
+    status: z.string().nullable(),
+    classifications: z.string().nullable(),
+    license_expires: z.string().nullable(),
+    bond: z
+      .object({ surety: z.string().nullable(), bond_number: z.string().nullable(), amount: z.number().nullable(), effective: z.string().nullable() })
+      .nullable(),
+    workers_comp: z
+      .union([
+        z.object({ carrier: z.string().nullable(), policy_number: z.string().nullable(), expires: z.string().nullable() }),
+        z.object({ exempt: z.boolean(), note: z.string().nullable() }),
+      ])
+      .nullable(),
+  }),
+);
 
 /**
  * Import an already-uploaded company document (policy, bond, license, audit letter):
@@ -175,11 +206,15 @@ export async function importPolicyDoc(input: {
   let parsed: any;
   try {
     const client = getAnthropic();
-    const msg = await client.messages.create({
-      // Structured extraction of dates/numbers from a document — no pricing judgment,
-      // and every field lands in a form the office reviews before it means anything.
-      model: modelFor("routine"),
-      max_tokens: 1024,
+    // Structured extraction of dates/numbers from a document — no pricing judgment,
+    // and every field lands in a form the office reviews before it means anything.
+    const model = modelFor("routine");
+    const req = aiRequestFor("compliance");
+    const msg = await aiCreate(client, {
+      model,
+      ...fallbacksFor(model),
+      ...req,
+      output_config: { ...req.output_config, format: POLICY_DOC_FORMAT },
       system: `You read a CONTRACTOR COMPANY DOCUMENT — an insurance policy or certificate, a bond, a contractor/business license, a certification, a permit, or an audit report — and extract its renewal-tracking details.
 
 Respond with ONLY a JSON object (no prose):
@@ -202,9 +237,13 @@ Rules: copy numbers and dates exactly as printed — never invent them. If the d
       ],
     });
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
-    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "compliance", usage: msg.usage as never });
-    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
+    void recordAiUsage({ orgId: ctx.orgId, model: msg.model || model, surface: "compliance", usage: msg.usage as never });
+    // A REFUSAL STILL FILES (the law above): the document is kept for review, and its note says
+    // the reader declined — never a parse error. A cut-off or an unreadable answer files the same
+    // way it always did.
+    const read = readStructured(msg, POLICY_DOC_FORMAT);
+    if (!read.ok) return read.reason === "refused" ? fileAnyway(read.error) : fileAnyway();
+    parsed = read.value;
   } catch {
     return fileAnyway();
   }
@@ -355,11 +394,15 @@ export async function importFromCslb(licenseNumber: string): Promise<CslbImportR
   let parsed: any;
   try {
     const client = getAnthropic();
-    const msg = await client.messages.create({
-      // Structured extraction of dates/numbers from a document — no pricing judgment,
-      // and every field lands in a form the office reviews before it means anything.
-      model: modelFor("routine"),
-      max_tokens: 1024,
+    // Structured extraction of dates/numbers from a document — no pricing judgment,
+    // and every field lands in a form the office reviews before it means anything.
+    const model = modelFor("routine");
+    const req = aiRequestFor("compliance");
+    const msg = await aiCreate(client, {
+      model,
+      ...fallbacksFor(model),
+      ...req,
+      output_config: { ...req.output_config, format: CSLB_FORMAT },
       system: `You read the plain text of a public CSLB (California Contractors State License Board) license-detail page and extract the record.
 
 Respond with ONLY a JSON object (no prose):
@@ -378,9 +421,12 @@ Rules: copy names, numbers, and dates EXACTLY as printed — never guess, estima
       messages: [{ role: "user", content: `CSLB page text for license #${licNum}:\n\n${pageText}` }],
     });
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
-    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "compliance", usage: msg.usage as never });
-    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
+    void recordAiUsage({ orgId: ctx.orgId, model: msg.model || model, surface: "compliance", usage: msg.usage as never });
+    const read = readStructured(msg, CSLB_FORMAT);
+    // A refusal says so in the one sentence every door uses; nothing is filed (this door never files on a failed read).
+    if (!read.ok && read.reason === "refused") return { ok: false, error: read.error };
+    if (!read.ok) return { ok: false, error: `Couldn't read the CSLB page for #${licNum} — try again in a minute.` };
+    parsed = read.value;
   } catch {
     return { ok: false, error: `Couldn't read the CSLB page for #${licNum} — try again in a minute.` };
   }

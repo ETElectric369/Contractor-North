@@ -102,7 +102,7 @@ export function AuditsManager({ items, canEdit, canAdd = canEdit }: { items: Com
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div><Label htmlFor="a-type">Audit type</Label><Select id="a-type" value={type} onChange={(e) => setType(e.target.value)}>{AUDIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-            <div className="col-span-2 sm:col-span-1"><Label htmlFor="a-name">Subject / auditor *</Label><Input id="a-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="a-name">Subject / auditor *</Label><Input autoComplete="off" id="a-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
             <div><Label htmlFor="a-ref">Report / ref #</Label><Input id="a-ref" value={ref} onChange={(e) => setRef(e.target.value)} /></div>
             <div><Label htmlFor="a-date">Audit date</Label><Input id="a-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
             <div><Label htmlFor="a-due">Next due / follow-up</Label><Input id="a-due" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} /></div>
@@ -163,7 +163,7 @@ export function AuditsManager({ items, canEdit, canAdd = canEdit }: { items: Com
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><Label htmlFor="ae-type">Audit type</Label><Select id="ae-type" value={eType} onChange={(e) => setEType(e.target.value)}>{AUDIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ae-name">Subject / auditor *</Label><Input id="ae-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
+          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ae-name">Subject / auditor *</Label><Input autoComplete="off" id="ae-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
           <div><Label htmlFor="ae-ref">Report / ref #</Label><Input id="ae-ref" value={eRef} onChange={(e) => setERef(e.target.value)} /></div>
           <div><Label htmlFor="ae-date">Audit date</Label><Input id="ae-date" type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} /></div>
           <div><Label htmlFor="ae-due">Next due / follow-up</Label><Input id="ae-due" type="date" value={eNextDue} onChange={(e) => setENextDue(e.target.value)} /></div>

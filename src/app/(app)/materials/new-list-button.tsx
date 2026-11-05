@@ -102,7 +102,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="ml-name">{t("mt_listName")}</Label>
-              <Input
+              <Input autoComplete="off"
                 id="ml-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}

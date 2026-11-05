@@ -130,7 +130,7 @@ export function ComplianceManager({ items, orgId, canEdit, canAdd = canEdit }: {
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div><Label htmlFor="c-type">Type</Label><Select id="c-type" value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-            <div className="col-span-2 sm:col-span-1"><Label htmlFor="c-name">Provider / name</Label><Input id="c-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="c-name">Provider / name</Label><Input autoComplete="off" id="c-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
             <div><Label htmlFor="c-policy">Policy / # </Label><Input id="c-policy" value={policy} onChange={(e) => setPolicy(e.target.value)} /></div>
             <div><Label htmlFor="c-amount">Annual cost</Label><NumberInput id="c-amount" value={amount} onValueChange={setAmount} /></div>
             <div><Label htmlFor="c-issued">Issued</Label><Input id="c-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
@@ -197,7 +197,7 @@ export function ComplianceManager({ items, orgId, canEdit, canAdd = canEdit }: {
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><Label htmlFor="ce-type">Type</Label><Select id="ce-type" value={eType} onChange={(e) => setEType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ce-name">Provider / name</Label><Input id="ce-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
+          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ce-name">Provider / name</Label><Input autoComplete="off" id="ce-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
           <div><Label htmlFor="ce-policy">Policy / # </Label><Input id="ce-policy" value={ePolicy} onChange={(e) => setEPolicy(e.target.value)} /></div>
           <div><Label htmlFor="ce-amount">Annual cost</Label><NumberInput id="ce-amount" value={eAmount} onValueChange={setEAmount} /></div>
           <div><Label htmlFor="ce-issued">Issued</Label><Input id="ce-issued" type="date" value={eIssued} onChange={(e) => setEIssued(e.target.value)} /></div>

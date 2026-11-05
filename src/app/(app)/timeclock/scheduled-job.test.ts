@@ -375,3 +375,92 @@ describe("the clock resolves exactly as before (resolveTechJobToday, through a j
     expect(jobId).toBe("today");
   });
 });
+
+describe("where he is standing: the nearest step (tier 2, after today's schedule, before the only job in progress)", () => {
+  // The owner, 2026-11-04: "location for clock-in defaults to the job picker and doesn't necessarily ask location".
+  beforeEach(() => {
+    vi.useFakeTimers({ now: Date.parse("2026-09-23T17:00:00Z"), toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const HERE = { lat: 39.3, lng: -120.2 };
+  /** A job `dLat` degrees north of the fix (0.001° ≈ 111 m). */
+  const at = (id: string, dLat: number) => ({ id, address: `${id} Rd`, city: null, state: null, zip: null, geo_lat: HERE.lat + dLat, geo_lng: HERE.lng, geocoded_at: "2026-09-01T00:00:00Z" });
+  const isNearList = (q: Q) => q.table === "jobs" && q.cols === "id" && has(q, "eq", "org_id", "org-1") && q.filters.some((f) => f[0] === "in" && f[1] === "status");
+  const isPlaces = (q: Q) => q.table === "jobs" && q.cols.startsWith("id, address, city");
+
+  async function punchAt(p: Plan, places: ReturnType<typeof at>[], gps: { lat: number; lng: number; accuracy?: number } | null = { ...HERE, accuracy: 15 }) {
+    const route = planRoutes(p);
+    state.client = fakeSupabase((q) => {
+      if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+      if (q.table === "profiles") return { data: { role: "tech" } };
+      if (q.table === "organizations") return { data: { settings: { timezone: TZ, geofence_radius_m: 300 } } };
+      if (q.table === "time_entries" && q.verb === "insert") return { data: { id: "new-punch" } };
+      if (q.table === "time_entries" && q.cols.startsWith("job_id, gps_in")) return { data: [] };
+      if (isNearList(q)) return { data: places.map((j) => ({ id: j.id })) };
+      if (isPlaces(q)) return { data: places };
+      if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: null };
+      if (q.table === "jobs" && q.cols.startsWith("id, job_number")) {
+        const id = q.filters.find((f: any[]) => f[0] === "eq" && f[1] === "id")?.[2] as string;
+        return { data: { id, job_number: "J-1", name: `${id} site`, address: null, customers: null } };
+      }
+      return route(q);
+    }, calls);
+    const result = await clockIn({ job_id: null, job_code: null, gps });
+    const ins = calls.find((c) => c.table === "time_entries" && c.verb === "insert");
+    return { jobId: ins?.payload?.job_id ?? null, result };
+  }
+
+  it("exactly one job inside the fence is the job, and the answer says he is there", async () => {
+    const { jobId, result } = await punchAt({ inProgress: ["catbird"] }, [at("larkspur", 0.0005), at("snowbell", 0.01)]);
+    expect(jobId).toBe("larkspur");
+    expect(result.jobPick).toEqual({ chosenBy: "app", id: "larkspur", from: "here", label: "larkspur site" });
+    // The only-job tier below it was never asked.
+    expect(calls.some(isInProgress)).toBe(false);
+    // Every read names the company.
+    expect(has(calls.find(isPlaces)!, "eq", "org_id", "org-1")).toBe(true);
+  });
+
+  it("several jobs inside the fence: no pick, the sheet asks — even with one job in progress", async () => {
+    const { jobId, result } = await punchAt({ inProgress: ["catbird"] }, [at("larkspur", 0.0005), at("snowbell", 0.001)]);
+    expect(jobId).toBeNull();
+    expect(result).toEqual({ ok: true, id: "new-punch", noJob: true });
+    expect(calls.some(isInProgress)).toBe(false);
+  });
+
+  it("none inside but several within 2 km: no pick, the sheet asks", async () => {
+    const { jobId } = await punchAt({ inProgress: ["catbird"] }, [at("larkspur", 0.005), at("snowbell", 0.01)]);
+    expect(jobId).toBeNull();
+  });
+
+  it("nothing near (or one job far off): today's rule, unchanged — the only job in progress", async () => {
+    expect((await punchAt({ inProgress: ["catbird"] }, [at("larkspur", 0.05)])).jobId).toBe("catbird");
+    expect((await punchAt({ inProgress: ["catbird"] }, [at("larkspur", 0.01)])).jobId).toBe("catbird");
+  });
+
+  it("a fix too blurry to say 'here' never picks; with one job near it falls to today's rule", async () => {
+    const { jobId } = await punchAt({ inProgress: ["catbird"] }, [at("larkspur", 0.0005)], { ...HERE, accuracy: 900 });
+    expect(jobId).toBe("catbird");
+  });
+
+  it("no fix: the step is never run", async () => {
+    const { jobId } = await punchAt({ inProgress: ["catbird"] }, [at("larkspur", 0.0005)], null);
+    expect(jobId).toBe("catbird");
+    expect(calls.some(isPlaces)).toBe(false);
+  });
+
+  it("today's schedule still wins over where he is standing", async () => {
+    const { jobId, result } = await punchAt({ day: { job_id: "thistlewood", kind: "job" }, active: ["thistlewood"] }, [at("larkspur", 0.0005)]);
+    expect(jobId).toBe("thistlewood");
+    expect(result.jobPick).toMatchObject({ chosenBy: "app", from: "schedule" });
+    expect(calls.some(isPlaces)).toBe(false);
+  });
+
+  it("marked off today: OFF still fails closed, the fix asks nothing", async () => {
+    const { jobId } = await punchAt({ day: { job_id: null, kind: "off" } }, [at("larkspur", 0.0005)]);
+    expect(jobId).toBeNull();
+    expect(calls.some(isPlaces)).toBe(false);
+  });
+});

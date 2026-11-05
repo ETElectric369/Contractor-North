@@ -349,3 +349,34 @@ describe("the header in the viewer's language", () => {
     }
   });
 });
+
+/**
+ * A FINISHED JOB'S OPEN MILESTONE, SETTLED (2026-11-04): a "Final payment — …" row on a job billed by
+ * ONE standard invoice instead of draws leaves; a deposit or progress draw never settles it.
+ */
+describe("milestoneSettled: Done - Not Invoiced's draw rows", () => {
+  it("a standard bill on or after the milestone settles it; a draw, a draft, a void or an older bill does not", async () => {
+    const { milestoneSettled } = await import("@/lib/billing-pipeline");
+    const at = "2026-06-12T17:00:00Z";
+    const inv = (o: Record<string, string | null>) => ({ status: "sent", invoice_kind: "standard", created_at: "2026-07-01T17:00:00Z", ...o });
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({})] })).toBe(true);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({ invoice_kind: null })] })).toBe(true);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({ created_at: "2026-06-12T08:00:00Z" })] })).toBe(true);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({ invoice_kind: "deposit" })] })).toBe(false);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({ invoice_kind: "progress" })] })).toBe(false);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({ status: "draft" })] })).toBe(false);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({ status: "void" })] })).toBe(false);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "complete", jobInvoices: [inv({ created_at: "2026-05-01T17:00:00Z" })] })).toBe(false);
+    // The retired status invoiced, with any live invoice (a deposit too): billed.
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "invoiced", jobInvoices: [inv({ invoice_kind: "deposit" })] })).toBe(true);
+    expect(milestoneSettled({ milestoneAt: at, jobStatus: "invoiced", jobInvoices: [] })).toBe(false);
+  });
+
+  it("the pipeline asks it for every draw row, and dates the row", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/billing-pipeline.ts"), "utf8");
+    expect(src).toContain(".filter((m) => !milestoneSettled({ milestoneAt: m.created_at, jobStatus: j.status, jobInvoices: invoicesByJob[j.id] ?? [] }))");
+    expect(src).toContain("since: pending.map((m) => m.created_at");
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/billing/page.tsx"), "utf8");
+    expect(page).toContain('datedWhen("Since", j.since, todayStrInTz(orgSettings.timezone), orgSettings.timezone)');
+  });
+});

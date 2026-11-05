@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getOrgSettings } from "@/lib/org-settings";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refusalWords } from "@/lib/ai-refusal";
 
 /**
  * THE SITE CHAT SPEAKS THE COMPANY'S TRADE (cn-v1135, lib/trade-nort tradeNort). Every company's
@@ -34,7 +36,7 @@ vi.mock("@/lib/public-org", async (orig) => ({
   getPublicOrgByHandle: async (h: string) => (h === "fixture" ? org() : null),
 }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimited: async () => false, clientIp: () => "203.0.113.9" }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(), aiSpendExceeded: async () => false, aiAllowed: async () => ({ ok: true }) }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(), aiSpendExceeded: async () => false, aiAllowed: async () => ({ ok: true }), fallbacksFor: () => ({}) }));
 const create = vi.fn(async (_args: unknown) => ({ content: [{ type: "text", text: "Hello." }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } }));
 vi.mock("@/lib/anthropic", () => ({ getAnthropic: () => ({ messages: { create } }) }));
 vi.mock("@/lib/supabase/server", () => ({
@@ -129,5 +131,32 @@ describe("the deck tool is behind the one gate", () => {
     stored = { trade: "deck", estimating_mode: "catalog" };
     deckRows = threeDeckCodes().slice(0, 2);
     expect((await ask()).tools).not.toContain("deck_estimate");
+  });
+});
+
+describe("the site chat's one request shape and its refusal (cn-v1142)", () => {
+  it("asks with the table's row, and the small model carries no fallbacks", async () => {
+    stored = { trade: "electrical", estimating_mode: "research" };
+    await ask();
+    const call = create.mock.calls[0]?.[0] as unknown as Record<string, unknown>;
+    const row = aiRequestFor("site-chat");
+    expect(call.max_tokens).toBe(row.max_tokens);
+    expect(call.thinking).toEqual(row.thinking);
+    expect(call.output_config).toEqual(row.output_config);
+    expect(call).not.toHaveProperty("betas");
+    expect(call).not.toHaveProperty("fallbacks");
+  });
+
+  it("a refusal says the one sentence and runs no tool", async () => {
+    stored = { trade: "electrical", estimating_mode: "research" };
+    create.mockImplementationOnce(async () => ({
+      content: [{ type: "tool_use", id: "t1", name: "capture_lead", input: {} }] as never,
+      stop_reason: "refusal",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }));
+    const res = await chat(new Request("https://x/api/site-chat", { method: "POST", body: JSON.stringify({ handle: "fixture", messages: [{ role: "user", content: "hi" }] }) }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ reply: refusalWords(), leadCaptured: false });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

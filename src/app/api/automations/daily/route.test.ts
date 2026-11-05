@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * THE NIGHT'S ANSWER IS HONEST (sink-07, cn-v1130). The daily cron used to answer 200 {ok:true}
@@ -22,6 +22,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * TWELVE STEPS NOW (cn-v1140): the usage notices (80% of the month's usage once, used up once) run
  * right after the billing notices and before the day-ahead digest and the error sweep, handed the
  * same client and start, their own try and their own row (cron-usage-notices).
+ *
+ * HOURLY, ON TWO CLOCKS (2026-11-02, the day after DST ended). The cron runs every hour: the COMPANY
+ * steps (recurring, stale bank transfers, billing, usage, day ahead, Nort's review, the shelf) run for
+ * each company on the run at ITS 8 AM and are handed only those companies; the GLOBAL steps (fees,
+ * the error sweep, the Bug Watch digest, the rate-limit and storage sweeps) run on the 15:00 UTC run
+ * only. The tests above the new block run at 15:00 UTC with one company in Phoenix (UTC-7 all year,
+ * so 15:00 UTC is its 8 AM): both sets run, and the twelve steps keep their order.
  */
 const state = vi.hoisted(() => ({ client: null as any }));
 const steps = vi.hoisted(() => ({
@@ -38,7 +45,10 @@ const steps = vi.hoisted(() => ({
   digest: vi.fn(),
   reportError: vi.fn(),
   reportBlockerAwaited: vi.fn(async () => {}),
+  readAllOrgs: vi.fn(),
 }));
+// The hour gate with one switch: a timezone Intl cannot read throws in atLocalHour (as text-doors pins).
+const gate = vi.hoisted(() => ({ throwFor: null as string | null }));
 
 vi.mock("@/lib/cron-guard", () => ({ requireCron: vi.fn(() => ({ supabase: state.client })) }));
 vi.mock("@/lib/observe", () => ({ reportError: steps.reportError }));
@@ -54,6 +64,17 @@ vi.mock("@/lib/stock-reconcile-check", () => ({ findShelfProblems: steps.shelf }
 vi.mock("@/lib/bank-transfer-alerts", () => ({ tellStaleBankTransfers: steps.stale }));
 vi.mock("@/lib/billing-notices", () => ({ sendBillingNotices: steps.billing }));
 vi.mock("@/lib/usage-notice-run", () => ({ sendUsageNotices: steps.usage }));
+vi.mock("@/lib/cron-orgs", async (orig) => {
+  const real = await orig<typeof import("@/lib/cron-orgs")>();
+  return {
+    ...real,
+    readAllOrgs: steps.readAllOrgs,
+    atLocalHour: vi.fn((...a: Parameters<typeof real.atLocalHour>) => {
+      if (gate.throwFor && a[0] === gate.throwFor) throw new RangeError(`Invalid time zone specified: ${a[0]}`);
+      return real.atLocalHour(...a);
+    }),
+  };
+});
 
 import { GET } from "./route";
 
@@ -76,6 +97,7 @@ const STEP_ROWS: [string, string][] = [
 ];
 
 function everyStepWorks() {
+  steps.readAllOrgs.mockResolvedValue([BAYBERRY]);
   steps.recurring.mockResolvedValue({ generated: 2, lapsed_skipped: 1 });
   steps.fees.mockResolvedValue({ filled: 0 });
   steps.stale.mockResolvedValue({ told: 0 });
@@ -91,6 +113,7 @@ function everyStepWorks() {
 }
 
 function everyStepFails() {
+  steps.readAllOrgs.mockResolvedValue([BAYBERRY]);
   const fell = (name: string) => new Error(`${name} fell over`);
   steps.recurring.mockRejectedValue(fell("recurring"));
   steps.fees.mockRejectedValue(fell("fees"));
@@ -115,10 +138,30 @@ const USAGE_RUN = { orgs: 3, told: 1, skipped: { fine: 1, lapsed: 1, degraded: 0
 
 const errorKeys = (body: Record<string, unknown>) => Object.keys(body).filter((k) => k.endsWith("_error"));
 
+/** Stand-in companies, one per zone. 2026-11-02 is the Monday after DST ended. */
+const BAYBERRY = { id: "bayberry", settings: { timezone: "America/Phoenix" } }; // 8 AM = 15:00 UTC all year
+const LARKSPUR = { id: "larkspur", settings: { timezone: "America/Los_Angeles" } }; // 8 AM PST = 16:00 UTC
+const SNOWBELL = { id: "snowbell", settings: { timezone: "America/New_York" } }; // 8 AM EST = 13:00 UTC
+const THISTLEWOOD = { id: "thistlewood", settings: { timezone: "America/Chicago" } }; // its gate is made to throw
+const at = (utc: string) => Date.parse(`2026-11-02T${utc}:00Z`);
+
+/** Every step's orgIds, as a sorted list (the route hands each company step the same set). */
+const companiesHanded = (fn: { mock: { calls: any[][] } }, argIndex: number) =>
+  [...(fn.mock.calls[0][argIndex].orgIds as Set<string>)].sort();
+
+const COMPANY_STEPS = ["recurring", "stale", "billing", "usage", "dayAhead", "review", "shelf"] as const;
+const GLOBAL_STEPS = ["fees", "errorSweep", "digest", "sweep"] as const;
+
 beforeEach(() => {
   for (const fn of Object.values(steps)) fn.mockReset();
   steps.reportBlockerAwaited.mockResolvedValue(undefined);
+  gate.throwFor = null;
+  // The default run: 15:00 UTC (the global hour) with one company at its own 8 AM, so both sets run.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(at("15:00"));
+  steps.readAllOrgs.mockResolvedValue([BAYBERRY]);
 });
+afterEach(() => vi.useRealTimers());
 
 describe("GET /api/automations/daily", () => {
   it("every step failed: 500, ok false, every *_error key, a row filed per step", async () => {
@@ -347,6 +390,8 @@ describe("GET /api/automations/daily", () => {
       storage_sweep: { removed: 0 },
       error_sweep: { closed_deleted: 2, trace_deleted: 9 },
       bug_watch_digest: { sent: 0, skipped: "not Monday" },
+      companies: { due: 1, not_due_yet: 0, failed: 0 },
+      global: "ran",
     });
     expect(steps.reportError).not.toHaveBeenCalled();
     expect(steps.reportBlockerAwaited).not.toHaveBeenCalled();
@@ -376,5 +421,120 @@ describe("GET /api/automations/daily", () => {
     expect(body.ok).toBe(true);
     expect(body.stock_reconcile).toEqual({ problems: 1 });
     expect(steps.reportError).toHaveBeenCalledWith("cron-stock-reconcile", expect.any(Error), { orgId: "org-1", lotId: "lot-1", billId: "bill-1" });
+  });
+
+  describe("hourly, on the company's own 8 AM and North's own 15:00 UTC (2026-11-02)", () => {
+    it("the run at Larkspur's 8 AM (16:00 UTC, PST) runs the company steps for Larkspur only, and no global step", async () => {
+      everyStepWorks();
+      steps.readAllOrgs.mockResolvedValue([LARKSPUR, SNOWBELL]);
+      vi.setSystemTime(at("16:00"));
+      const res = await GET(req());
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.companies).toEqual({ due: 1, not_due_yet: 1, failed: 0 });
+      expect(body.global).toBe("skipped");
+      for (const name of COMPANY_STEPS) expect(steps[name]).toHaveBeenCalledTimes(1);
+      for (const name of GLOBAL_STEPS) expect(steps[name]).not.toHaveBeenCalled();
+      expect(state.client.rpc).not.toHaveBeenCalled(); // the rate-limit sweep is global
+      // Each company step is handed Larkspur alone — never Snowbell, whose 8 AM is another run.
+      expect(steps.recurring.mock.calls[0].slice(0, 2)).toEqual([state.client, null]);
+      expect(companiesHanded(steps.recurring, 2)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.stale, 2)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.billing, 2)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.usage, 2)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.dayAhead, 1)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.review, 1)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.shelf, 1)).toEqual(["larkspur"]);
+      expect(body).not.toHaveProperty("processor_fees");
+      expect(body).not.toHaveProperty("storage_sweep");
+
+      // Three hours earlier is Snowbell's 8 AM (EST), and only Snowbell's.
+      for (const fn of Object.values(steps)) fn.mockReset();
+      everyStepWorks();
+      steps.readAllOrgs.mockResolvedValue([LARKSPUR, SNOWBELL]);
+      vi.setSystemTime(at("13:00"));
+      const early = await (await GET(req())).json();
+      expect(early.companies).toEqual({ due: 1, not_due_yet: 1, failed: 0 });
+      expect(companiesHanded(steps.recurring, 2)).toEqual(["snowbell"]);
+      expect(companiesHanded(steps.review, 1)).toEqual(["snowbell"]);
+    });
+
+    it("the 15:00 UTC run runs every global step once; a Pacific company (7 AM PST) is not due on it", async () => {
+      everyStepWorks();
+      steps.readAllOrgs.mockResolvedValue([LARKSPUR, SNOWBELL]);
+      const res = await GET(req());
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.global).toBe("ran");
+      expect(body.companies).toEqual({ due: 0, not_due_yet: 2, failed: 0 });
+      for (const name of GLOBAL_STEPS) expect(steps[name]).toHaveBeenCalledTimes(1);
+      expect(state.client.rpc).toHaveBeenCalledTimes(1);
+      expect(state.client.rpc).toHaveBeenCalledWith("rate_limit_gc");
+      for (const name of COMPANY_STEPS) expect(steps[name]).not.toHaveBeenCalled();
+      expect(body).toMatchObject({ processor_fees: { filled: 0 }, rate_limit_gc: true, storage_sweep: { removed: 0 } });
+    });
+
+    it("any other hour runs neither set for a Pacific company: 200, the counts, nothing else", async () => {
+      everyStepWorks();
+      steps.readAllOrgs.mockResolvedValue([LARKSPUR]);
+      for (const utc of ["14:00", "17:00", "20:00", "03:00"]) {
+        vi.setSystemTime(at(utc));
+        const res = await GET(req());
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ ok: true, companies: { due: 0, not_due_yet: 1, failed: 0 }, global: "skipped" });
+      }
+      for (const name of [...COMPANY_STEPS, ...GLOBAL_STEPS]) expect(steps[name]).not.toHaveBeenCalled();
+      expect(steps.reportBlockerAwaited).not.toHaveBeenCalled(); // no step attempted is not "every step failed"
+    });
+
+    it("a company whose timezone Intl cannot read is counted failed and filed; the others still run", async () => {
+      everyStepWorks();
+      gate.throwFor = "America/Chicago";
+      steps.readAllOrgs.mockResolvedValue([THISTLEWOOD, LARKSPUR]);
+      vi.setSystemTime(at("16:00"));
+      const res = await GET(req());
+      const body = await res.json();
+      expect(body.companies).toEqual({ due: 1, not_due_yet: 0, failed: 1 });
+      expect(steps.reportError).toHaveBeenCalledWith("cron-daily-hour", expect.any(RangeError), { orgId: "thistlewood" });
+      expect(companiesHanded(steps.recurring, 2)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.dayAhead, 1)).toEqual(["larkspur"]);
+      expect(res.status).toBe(200); // the company's row is in the sink; the run itself did its work
+    });
+
+    it("a failed company read runs no company step: its own *_error, a 500; alone on an off-hour run it pages", async () => {
+      everyStepWorks();
+      steps.readAllOrgs.mockRejectedValue(new Error("organizations could not be read: timeout"));
+      vi.setSystemTime(at("16:00"));
+      let res = await GET(req());
+      let body = await res.json();
+      expect(res.status).toBe(500);
+      expect(errorKeys(body)).toEqual(["companies_error"]);
+      expect(steps.reportError).toHaveBeenCalledWith("cron-daily-companies", expect.any(Error));
+      for (const name of COMPANY_STEPS) expect(steps[name]).not.toHaveBeenCalled();
+      expect(steps.reportBlockerAwaited).toHaveBeenCalledTimes(1); // the one step it tried failed
+
+      // On the 15:00 UTC run the global steps still run, so it is a red run but not a page.
+      for (const fn of Object.values(steps)) fn.mockReset();
+      everyStepWorks();
+      steps.readAllOrgs.mockRejectedValue(new Error("organizations could not be read: timeout"));
+      vi.setSystemTime(at("15:00"));
+      res = await GET(req());
+      body = await res.json();
+      expect(res.status).toBe(500);
+      expect(errorKeys(body)).toEqual(["companies_error"]);
+      for (const name of GLOBAL_STEPS) expect(steps[name]).toHaveBeenCalledTimes(1);
+      expect(steps.reportBlockerAwaited).not.toHaveBeenCalled();
+    });
+
+    it("every step a company-only run tried failed: one blocker, judged against the steps it tried", async () => {
+      everyStepFails();
+      steps.readAllOrgs.mockResolvedValue([LARKSPUR]);
+      vi.setSystemTime(at("16:00"));
+      const res = await GET(req());
+      const body = await res.json();
+      expect(res.status).toBe(500);
+      expect(errorKeys(body)).toEqual(["recurring_error", "stale_bank_transfers_error", "billing_notices_error", "usage_notices_error", "day_ahead_error", "nort_reviews_error", "stock_reconcile_error"]);
+      expect(steps.reportBlockerAwaited).toHaveBeenCalledTimes(1);
+    });
   });
 });

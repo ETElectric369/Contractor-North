@@ -60,7 +60,7 @@ export default async function ForgotPage({
             <form action={requestPasswordReset} className="space-y-4">
               <div>
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" placeholder="you@company.com" required />
+                <Input autoComplete="email" id="email" name="email" type="email" placeholder="you@company.com" required />
               </div>
               <Button type="submit" size="lg" className="w-full">
                 Send Reset Link

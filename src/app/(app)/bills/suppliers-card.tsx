@@ -1065,7 +1065,7 @@ export function SuppliersCard({
             {sheetError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{sheetError}</div>}
             <div>
               <Label htmlFor="acct-name">Name</Label>
-              <Input id="acct-name" value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus />
+              <Input autoComplete="off" id="acct-name" value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus />
               <p className="mt-1 text-xs text-slate-400">
                 What every receipt from them gets filed under. The spellings already filed here do not change.
               </p>

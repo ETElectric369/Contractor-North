@@ -281,6 +281,15 @@ describe("the trial notices", () => {
     expect(spies.email.mock.calls[0][0].replyTo).toBeUndefined();
   });
 
+  it("on the hourly cron, handed the companies at their 8 AM: another company is not read for, claimed or told (2026-11-02)", async () => {
+    let c = fakeClient({ orgs: [org({ trial_ends_at: noonIn(5) })] });
+    expect(await sendBillingNotices(c.client, NOW, { orgIds: new Set(["another-company"]) })).toEqual({ orgs: 0, due: 0, sent: 0, skipped: { comped: 0 }, failed: 0 });
+    expect(c.rpcs).toEqual([]);
+    expect(spies.notify).not.toHaveBeenCalled();
+    c = fakeClient({ orgs: [org({ trial_ends_at: noonIn(5) })] });
+    expect(await sendBillingNotices(c.client, NOW, { orgIds: new Set([ORG]) })).toEqual(told);
+  });
+
   it("day 5 with trial_7 stamped: nothing claimed, nobody told", async () => {
     const c = fakeClient({ orgs: [org({ billing_notices: { trial_7: "2026-10-31T15:00:00Z" } })] });
     expect(await run(c)).toEqual(quiet);

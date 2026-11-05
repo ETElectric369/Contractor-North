@@ -19,12 +19,19 @@ export type ShelfProblem = { orgId: string; problem: string; detail: string; lot
 
 type Client = { from: (t: string) => any };
 
-export async function findShelfProblems(supabase: Client): Promise<{ problems: ShelfProblem[]; skipped: string | null }> {
+export async function findShelfProblems(
+  supabase: Client,
+  // THE COMPANIES AT THEIR OWN 8 AM (the hourly daily cron, 2026-11-02): both reads are cut to them,
+  // so each company's shelf is checked once a day, on its own morning. Absent = every company.
+  opts: { orgIds?: ReadonlySet<string> } = {},
+): Promise<{ problems: ShelfProblem[]; skipped: string | null }> {
   const problems: ShelfProblem[] = [];
-  const { data: rows, error } = await supabase
-    .from("stock_reconcile_problems")
-    .select("org_id, problem, lot_id, item_id, move_id, bill_id, detail")
-    .limit(500);
+  const ids = opts.orgIds ? Array.from(opts.orgIds) : null;
+  if (ids && ids.length === 0) return { problems, skipped: null };
+  const scoped = (q: any) => (ids ? q.in("org_id", ids) : q);
+  const { data: rows, error } = await scoped(
+    supabase.from("stock_reconcile_problems").select("org_id, problem, lot_id, item_id, move_id, bill_id, detail"),
+  ).limit(500);
   if (error) {
     if (isMissingShelf(error)) return { problems: [], skipped: "the stock ledger (0303) is not on this database" };
     throw new Error(`stock_reconcile_problems could not be read: ${String((error as { message?: string }).message ?? error)}`);
@@ -34,9 +41,9 @@ export async function findShelfProblems(supabase: Client): Promise<{ problems: S
   }
 
   // The TypeScript half: every live roll off a receipt line, against its receipt as it stands.
-  const { data: lots, error: lotsErr } = await supabase
-    .from("stock_lot_balance")
-    .select("org_id, lot_id, bill_line_id, bill_id, cost, live, live_moves, kind")
+  const { data: lots, error: lotsErr } = await scoped(
+    supabase.from("stock_lot_balance").select("org_id, lot_id, bill_line_id, bill_id, cost, live, live_moves, kind"),
+  )
     .eq("live", true)
     .eq("kind", "line")
     .limit(10000);

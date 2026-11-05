@@ -74,7 +74,13 @@ export const USAGE_NOTICE_COLUMNS = Array.from(
 
 export type UsageNoticeOrg = NoticeOrg & UsageOrg & { plan: string | null };
 
-export async function sendUsageNotices(supabase: NoticeClient, nowMs: number): Promise<UsageNoticeRun> {
+export async function sendUsageNotices(
+  supabase: NoticeClient,
+  nowMs: number,
+  // THE COMPANIES AT THEIR OWN 8 AM (the hourly daily cron, 2026-11-02); absent = every company.
+  // Twice in a day is safe: claim_billing_notice writes the stamp first, and only a TRUE sends.
+  opts: { orgIds?: ReadonlySet<string> } = {},
+): Promise<UsageNoticeRun> {
   const run: UsageNoticeRun = { orgs: 0, told: 0, skipped: { fine: 0, lapsed: 0, degraded: 0, already: 0 }, failed: 0 };
 
   // Every company that is not lapsed, whole, or a throw the cron files.
@@ -82,6 +88,7 @@ export async function sendUsageNotices(supabase: NoticeClient, nowMs: number): P
   run.skipped.lapsed = lapsedSkipped;
 
   for (const org of rows) {
+    if (opts.orgIds && !opts.orgIds.has(org.id)) continue; // not this company's hour
     run.orgs++;
     try {
       const meter = await usageFor(org.id, org, { nowMs, client: supabase });

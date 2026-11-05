@@ -254,7 +254,13 @@ export async function tell(supabase: NoticeClient, org: NoticeOrg, due: Due): Pr
  * each company's turn in its own try, so one company's failure is its own row (cron-billing-notices,
  * with the orgId) and the next company is still told.
  */
-export async function sendBillingNotices(supabase: NoticeClient, nowMs: number): Promise<BillingNoticeRun> {
+export async function sendBillingNotices(
+  supabase: NoticeClient,
+  nowMs: number,
+  // THE COMPANIES AT THEIR OWN 8 AM (the hourly daily cron, 2026-11-02); absent = every company.
+  // Twice in a day is safe: claim_billing_notice writes the stamp first, and only a TRUE sends.
+  opts: { orgIds?: ReadonlySet<string> } = {},
+): Promise<BillingNoticeRun> {
   const run: BillingNoticeRun = { orgs: 0, due: 0, sent: 0, skipped: { comped: 0 }, failed: 0 };
   // BILLING OFF (no Stripe key): everyone is active and there is nothing to lapse from — nothing is
   // read, and the run says why.
@@ -262,6 +268,7 @@ export async function sendBillingNotices(supabase: NoticeClient, nowMs: number):
 
   const orgs = await readAllOrgs<NoticeOrg>(supabase, withBillingColumns(NOTICE_COLUMNS));
   for (const org of orgs) {
+    if (opts.orgIds && !opts.orgIds.has(org.id)) continue; // not this company's hour
     run.orgs++;
     try {
       const tz = getOrgSettings(org.settings).timezone;

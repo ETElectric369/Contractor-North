@@ -1,4 +1,8 @@
-import { recordAiUsage } from "@/lib/ai-cost";
+import { fallbacksFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refused, refusalWords } from "@/lib/ai-refusal";
+import { asLang, type Lang } from "@/lib/locale";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropic, DEFAULT_MODEL, isModelDead, modelDeadError } from "@/lib/anthropic";
 import { readActiveOrgs } from "@/lib/cron-orgs";
@@ -49,6 +53,21 @@ const ANALYST_SYSTEM =
   '"findings": [ { "title": "short imperative", "kind": "gap|bug|pain|win|other", "priority": 1, ' +
   '"evidence": "the specific ask/report this came from" } ] }. ' +
   "Cap findings at 8, most important first. If there is almost no signal, say so in the summary and return few or no findings.";
+
+/**
+ * The company's language for the review's own words: its owner's profiles.language (cn-v1138, the one
+ * source of truth), else English. Its own read, so a failure here can never blank the digest's
+ * profiles read (the 42703 lesson above); any failure answers "en" and never throws.
+ */
+async function ownerLang(supabase: SupabaseClient, orgId: string): Promise<Lang> {
+  try {
+    const { data, error } = await supabase.from("profiles").select("language").eq("org_id", orgId).eq("role", "owner").limit(1);
+    if (error) return "en";
+    return asLang((Array.isArray(data) ? data[0] : null)?.language);
+  } catch {
+    return "en";
+  }
+}
 
 /** Pull the org's operational signal and build a compact digest for the analyst. */
 async function buildDigest(supabase: SupabaseClient, orgId: string, sinceIso: string) {
@@ -165,17 +184,21 @@ export async function generateNortReview(
     // The SDK's per-request options ride as the SECOND argument (cn-v1130, skeptic #34): a clock on the
     // call and no retry, so a hung model cannot outlive the run — the deadline is checked BETWEEN
     // companies, and a call with no clock of its own would sail past it to Vercel's kill.
-    const resp = await client.messages.create(
+    const resp = await aiCreate(
+      client,
       {
         model: DEFAULT_MODEL,
-        max_tokens: 1500,
+        ...fallbacksFor(DEFAULT_MODEL),
+        ...aiRequestFor("nort:review"),
         system: [{ type: "text", text: ANALYST_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: `Review the last ${Math.round(hours)} hours for this contractor:\n\n${digest}` }],
       },
       { timeout: timeoutMs, maxRetries: 0 },
     );
-    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "nort:review", usage: resp.usage as never });
-    text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
+    void recordAiUsage({ orgId, model: resp.model, surface: "nort:review", usage: resp.usage as never });
+    // A DECLINE IS AN ANSWER (ai-refusal), not a failure and not a quiet night: the review row says
+    // so in Nort's words, with no findings, and nothing is parsed out of a partial.
+    text = refused(resp) ? refusalWords(await ownerLang(supabase, orgId)) : resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch (e) {
     // A refused credential is not this company's failure (cn-v1136): the key is dead for everyone,
     // and that pages North's own team once. The throw stands either way; the runner counts it.
@@ -200,6 +223,21 @@ export async function generateNortReview(
   return { id: (data as { id: string }).id, ...row };
 }
 
+/** Today's review is already made: one inside this window (shorter than the 23 hours of the
+ *  shortest day between two of a company's 8 AMs, longer than any retry). */
+const REVIEW_ONCE_WITHIN_MS = 20 * 3_600_000;
+
+async function reviewedRecently(supabase: SupabaseClient, orgId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("nort_reviews")
+    .select("id")
+    .eq("org_id", orgId)
+    .gte("created_at", new Date(Date.now() - REVIEW_ONCE_WITHIN_MS).toISOString())
+    .limit(1);
+  if (error) throw new Error(`nort_reviews could not be read: ${errorMessage(error)}`);
+  return Array.isArray(data) && data.length > 0;
+}
+
 /**
  * THE NIGHTLY RUN, EVERY COMPANY, SAID OUT LOUD (cn-v1130). The companies come through readAllOrgs
  * — whole, or a throw the daily cron files as cron-nort-review (a bare select used to make a failed
@@ -212,10 +250,12 @@ export async function generateNortReview(
  */
 export async function generateNortReviewsForAllOrgs(
   supabase: SupabaseClient,
-  opts: { deadlineMs?: number } = {},
-): Promise<{ made: number; failed: number; left: number; lapsed_skipped: number }> {
-  const { rows: orgs, lapsedSkipped } = await readActiveOrgs<{ id: string }>(supabase, "id");
-  const out = { made: 0, failed: 0, left: 0, lapsed_skipped: lapsedSkipped };
+  // orgIds: THE COMPANIES AT THEIR OWN 8 AM (the hourly daily cron, 2026-11-02); absent = every company.
+  opts: { deadlineMs?: number; orgIds?: ReadonlySet<string> } = {},
+): Promise<{ made: number; already: number; failed: number; left: number; lapsed_skipped: number }> {
+  const { rows: all, lapsedSkipped } = await readActiveOrgs<{ id: string }>(supabase, "id");
+  const orgs = opts.orgIds ? all.filter((o) => opts.orgIds!.has(o.id)) : all;
+  const out = { made: 0, already: 0, failed: 0, left: 0, lapsed_skipped: lapsedSkipped };
   for (let i = 0; i < orgs.length; i++) {
     if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
       out.left = orgs.length - i;
@@ -227,6 +267,14 @@ export async function generateNortReviewsForAllOrgs(
     try {
       // The call gets what is left of the run's share, between ten seconds and two minutes: a hung
       // model must not outlive the deadline by more than it, and a nearly spent run still gets a real try.
+      // ONCE A DAY PER COMPANY (the hourly cron, 2026-11-02): a review row made in the last
+      // REVIEW_ONCE_WITHIN_MS means today's is done, so a retried hour or a run that straddles it
+      // spends no second model call. A company's 8 AM comes back 23 to 25 hours later, never inside
+      // the window. A failed read is this company's failure (counted, filed), never "none yet".
+      if (await reviewedRecently(supabase, orgs[i].id)) {
+        out.already++;
+        continue;
+      }
       const timeoutMs = opts.deadlineMs === undefined ? undefined : Math.min(120_000, Math.max(10_000, opts.deadlineMs - Date.now()));
       const r = await generateNortReview(supabase, orgs[i].id, undefined, timeoutMs);
       if (r) out.made++;

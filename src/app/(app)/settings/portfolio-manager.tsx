@@ -119,7 +119,7 @@ export function PortfolioManager({ orgId, initial }: { orgId: string; initial: P
                 </div>
               </div>
               {/* Caption = the on-site label AND the image's alt text (SEO). Blur/Enter saves. */}
-              <input
+              <input autoComplete="off"
                 value={captionDraft[i] ?? p.caption ?? ""}
                 onChange={(e) => setCaptionDraft((d) => ({ ...d, [i]: e.target.value }))}
                 onBlur={() => commitCaption(i)}

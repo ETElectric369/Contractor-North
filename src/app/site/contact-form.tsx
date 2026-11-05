@@ -50,10 +50,10 @@ export function ContactForm({ orgId, brand, heading }: { orgId: string; brand: s
     <form onSubmit={submit} className="mx-auto max-w-lg space-y-3 rounded-2xl border border-slate-200 bg-white p-6">
       <h3 className="text-lg font-bold text-slate-900">{heading}</h3>
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      <input className={field} style={ring} placeholder="Your name *" value={name} onChange={(e) => setName(e.target.value)} />
+      <input autoComplete="name" className={field} style={ring} placeholder="Your name *" value={name} onChange={(e) => setName(e.target.value)} />
       <div className="grid grid-cols-2 gap-3">
-        <input className={field} style={ring} placeholder="Phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
-        <input className={field} style={ring} placeholder="Email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input autoComplete="tel" className={field} style={ring} placeholder="Phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        <input autoComplete="email" className={field} style={ring} placeholder="Email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       </div>
       <textarea className={field} style={ring} rows={4} placeholder="Tell us about your project…" value={message} onChange={(e) => setMessage(e.target.value)} />
       <input value={hp} onChange={(e) => setHp(e.target.value)} tabIndex={-1} autoComplete="off" className="hidden" aria-hidden />

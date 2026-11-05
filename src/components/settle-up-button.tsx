@@ -1496,7 +1496,7 @@ function useOtherWay(
         )}
         <div>
           <label htmlFor="rp-amount" className="mb-1 block text-xs font-medium text-slate-600">Amount</label>
-          <input
+          <input autoComplete="off"
             id="rp-amount"
             inputMode="decimal"
             value={amount}
@@ -1547,7 +1547,7 @@ function useOtherWay(
           )}
           <div className={props.source === "invoice" ? "" : "col-span-2"}>
             <label htmlFor="rp-note" className="mb-1 block text-xs font-medium text-slate-600">Note</label>
-            <input id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. check #1042" className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+            <input autoComplete="off" id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. check #1042" className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
           </div>
         </div>
         {/* RECORD IT — every method, whatever chip is picked (Venmo included, with its paid date). */}

@@ -119,7 +119,8 @@ export async function fillFromSite(input: { url: string; need?: string[] }): Pro
   }
   try {
     const model = await readWithModel({ client, orgId, pageText: pageTextForModel(page.html, page.finalUrl), categories: RESOURCE_CATEGORIES });
-    return { ok: true, fields: mergeModelFields(fields, weak, model, gaps) };
+    // A refusal: the page's own details still land, and the note is the one sentence (cn-v1142).
+    return { ok: true, fields: mergeModelFields(fields, weak, model.fields, gaps), ...(model.said ? { note: model.said } : {}) };
   } catch (e) {
     reportError("fillFromSite.model", e, { orgId });
     return { ok: true, fields, note: "Nort couldn't read the rest of the page this time." };

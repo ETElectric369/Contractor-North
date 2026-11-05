@@ -118,7 +118,7 @@ export function JobEditButton({
 
           <div>
             <Label htmlFor="ej-name">Job Name *</Label>
-            <Input id="ej-name" name="name" required defaultValue={job.name} />
+            <Input autoComplete="off" id="ej-name" name="name" required defaultValue={job.name} />
           </div>
 
           <CustomerPicker

@@ -9,19 +9,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const meter = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: meter, modelFor: () => "claude-haiku-4-5" }));
+// fallbacksFor stays the real one (cn-v1142): which surface a read rides is part of what is pinned.
+vi.mock("@/lib/ai-cost", async (orig) => ({ ...(await orig<typeof import("@/lib/ai-cost")>()), recordAiUsage: meter, modelFor: () => "claude-haiku-4-5" }));
 
 import { PHOTO_MAX_TOKENS, PHOTO_SYSTEM, parsePanelPhoto, photoMime, readPanelPhotoWithModel } from "./read-panel-photo";
 import { landRead } from "./readers";
+import { effortFor } from "@/lib/ai-effort";
+import { FALLBACK_BETA } from "@/lib/ai-cost";
 import { DOOR_24, DOOR_24_REPLY } from "./__fixtures__/door-24";
 
 function stubModel(reply: string, stop = "end_turn") {
-  const create = vi.fn(async () => ({
-    content: [{ type: "text", text: reply }],
+  // The answering model echoes the asked one (a fallback would name its own); both surfaces share
+  // the one stub, since ai-call routes a request with the fallback fields to client.beta.messages.
+  const create = vi.fn(async (p: { model: string }) => ({
+    model: p.model,
+    content: stop === "refusal" ? [] : [{ type: "text", text: reply }],
     stop_reason: stop,
     usage: { input_tokens: 1800, output_tokens: 900 },
   }));
-  return { client: { messages: { create } } as never, create };
+  return { client: { messages: { create }, beta: { messages: { create } } } as never, create };
 }
 
 beforeEach(() => meter.mockClear());
@@ -67,13 +73,21 @@ describe("the model call", () => {
     expect(sent[0].model).toBe("claude-opus-4-8");
     expect(sent[0].system).toBe(PHOTO_SYSTEM);
     expect(sent[0].max_tokens).toBe(PHOTO_MAX_TOKENS);
-    expect(PHOTO_MAX_TOKENS).toBe(3000);
+    expect(PHOTO_MAX_TOKENS).toBe(effortFor("panel-photo").maxTokens); // the effort table's floor (cn-v1142)
+    expect(sent[0]).toMatchObject({ thinking: { type: "adaptive" }, output_config: { effort: effortFor("panel-photo").effort }, betas: [FALLBACK_BETA], fallbacks: "default" });
     expect(sent[0].messages[0].content).toHaveLength(2);
     expect(sent[0].messages[0].content[0]).toMatchObject({ type: "image", source: { media_type: "image/jpeg" } });
     expect(meter).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", surface: "panel-photo", model: "claude-opus-4-8" }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.reading.rows).toHaveLength(34);
+  });
+
+  it("a declined read is said in the one envelope, never parsed as an empty door, and still metered", async () => {
+    const { client } = stubModel("", "refusal");
+    const r = await readPanelPhotoWithModel({ client, model: "claude-opus-5-5", mime: "image/png", base64: "AAAA", orgId: "org-1" });
+    expect(r).toEqual({ ok: false, error: "Nort can't help with that one.", reason: "refused" });
+    expect(meter).toHaveBeenCalledTimes(1);
   });
 
   it("a reply cut off by the token ceiling is said, never parsed as if whole", async () => {

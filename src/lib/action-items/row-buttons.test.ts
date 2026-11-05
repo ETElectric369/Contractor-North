@@ -68,13 +68,33 @@ describe("the table", () => {
   it("behind ⋯: Snooze, Assign, and the honest endings behind a confirm", () => {
     expect(labels(rowButtons(row("job_to_schedule"), staff).more)).toEqual(["Assign", "Finish", "Cancel"]);
     expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), staff).more)).toEqual(["Call", "Snooze", "Lost"]);
-    expect(labels(rowButtons(row("quote_awaiting"), staff).more)).toEqual(["Lost"]);
+    expect(labels(rowButtons(row("quote_awaiting"), staff).more)).toEqual(["Won It", "Lost"]);
     expect(labels(rowButtons(row("quote_draft"), staff).more)).toEqual(["Not Needed"]);
     expect(labels(rowButtons(row("appointment"), staff).more)).toEqual(["Didn't Happen"]);
     expect(labels(rowButtons(row("visit_unbilled"), staff).more)).toEqual(["Cancel"]);
     expect(labels(rowButtons(row("invoice_draft"), staff).more)).toEqual(["Set Aside Until…"]);
     expect(labels(rowButtons(row("organize", { paper: "tray" }), staff).more)).toEqual(["Set Aside"]);
     for (const d of rowButtons(row("job_to_schedule"), staff).more.filter((x) => x.label !== "Assign")) expect(d.act.type).toBe("confirm");
+  });
+
+  it("the doors where the app can't know (2026-11-04): Already Invoiced, Lost on a win, Won It, Signed On Paper", () => {
+    // A win with no job (the live case: nothing can settle it): its two doors behind ⋯.
+    const win = row("quote_accepted", { alreadyInvoiced: { kind: "quote", id: "q1" } });
+    expect(rowButtons(win, staff).primary?.label).toBe("Pick A Day");
+    expect(labels(rowButtons(win, staff).more)).toEqual(["Already Invoiced", "Lost"]);
+    expect(rowButtons(win, staff).more[0].act).toEqual({ type: "alreadyInvoiced", target: { kind: "quote", id: "q1" } });
+    expect(rowButtons(win, staff).more[1].act).toMatchObject({ type: "confirm", verb: "dismiss" });
+    // No answer yet: Won It, Already Invoiced, Lost.
+    expect(labels(rowButtons(row("quote_awaiting", { alreadyInvoiced: { kind: "quote", id: "q2" } }), staff).more)).toEqual(["Won It", "Already Invoiced", "Lost"]);
+    expect(rowButtons(row("quote_awaiting"), staff).more[0].act).toMatchObject({ type: "confirm", verb: "do" });
+    // Done, Not Billed: Already Invoiced beside Cancel; a technician never sees it.
+    const done = row("visit_unbilled", { alreadyInvoiced: { kind: "job", id: "j1" } });
+    expect(labels(rowButtons(done, staff).more)).toEqual(["Already Invoiced", "Cancel"]);
+    expect(labels(rowButtons(done, { leadsOn: true, isStaff: false }).more)).toEqual(["Cancel"]);
+    // An unsigned contract: Signed On Paper behind a confirm.
+    const c = rowButtons(row("contract_unsigned"), staff);
+    expect(labels(c.more)).toEqual(["Signed On Paper"]);
+    expect(c.more[0].act).toMatchObject({ type: "confirm", verb: "do" });
   });
 
   it("a draft whose job is finished ('Honeysuckle · J-011 Finished · Send INV-078') has no Set Aside Until…: it waits on nothing", () => {

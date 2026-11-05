@@ -245,6 +245,36 @@ describe("the jobs the sheet offers", () => {
       return { data: [job("last", { status: "scheduled" }), job("seg", { status: "scheduled", scheduled_start: "2026-09-26T16:00:00Z" })] };
   };
 
+  it("WITH A FIX ON THE PUNCH, the jobs near it come first, nearest first, with their distance; then the order as before", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    const HERE = { lat: 39.3, lng: -120.2 };
+    state.client = fakeSupabase((q) => {
+      if (q.table === "time_entries" && q.cols === "gps_in") return { data: { gps_in: { ...HERE, accuracy: 12 } } };
+      if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+      if (q.table === "jobs" && q.cols === "id" && has(q, "eq", "org_id", "org-1")) return { data: [{ id: "near" }, { id: "older" }, { id: "far" }] };
+      if (q.table === "jobs" && q.cols.startsWith("id, address, city"))
+        return {
+          data: [
+            { id: "near", geo_lat: HERE.lat + 50 / 111_195, geo_lng: HERE.lng, geocoded_at: "x" },
+            { id: "older", geo_lat: HERE.lat + 1500 / 111_195, geo_lng: HERE.lng, geocoded_at: "x" },
+            { id: "far", geo_lat: HERE.lat + 0.5, geo_lng: HERE.lng, geocoded_at: "x" },
+          ],
+        };
+      if (q.table === "jobs" && q.filters.some((f) => f[0] === "in" && f[1] === "id"))
+        return { data: [job("last", { status: "scheduled" }), job("seg", { status: "scheduled", scheduled_start: "2026-09-26T16:00:00Z" }), job("near", { status: "scheduled" })] };
+      return route(q);
+    }, calls);
+    const r = await whichJobChoices(PUNCH);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.jobs.map((j) => j.id)).toEqual(["near", "older", "last", "window", "seg", "newer"]);
+    expect(r.jobs[0].why).toBe("160 ft away");
+    expect(r.jobs[1].why).toBe("0.9 mi away");
+    // His own punch's fix, and the company's jobs only.
+    expect(has(calls.find((c) => c.table === "time_entries" && c.cols === "gps_in")!, "eq", "profile_id", "user-1")).toBe(true);
+    expect(has(calls.find((c) => c.table === "jobs" && c.cols.startsWith("id, address, city"))!, "eq", "org_id", "org-1")).toBe(true);
+  });
+
   it("puts the job he punched last first, today's schedule next, then the rest in progress, newest first", async () => {
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
     state.client = fakeSupabase(route, calls);

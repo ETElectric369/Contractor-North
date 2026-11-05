@@ -437,7 +437,7 @@ export function CommandBar({
       >
         <div className="flex items-center gap-2 border-b border-slate-100 px-4">
           <Search className="h-4 w-4 shrink-0 text-slate-400" />
-          <input
+          <input autoComplete="off"
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}

@@ -77,7 +77,7 @@ export function RenameListButton({
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div>
             <Label htmlFor="ml-name">{t("mt_listName")}</Label>
-            <Input id="ml-name" value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
+            <Input autoComplete="off" id="ml-name" value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
           </div>
           <div>
             <Label htmlFor="ml-job">{t("mt_job")}</Label>

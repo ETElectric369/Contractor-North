@@ -143,7 +143,7 @@ export function EditMemberButton({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="m-name">Name</Label>
-              <Input id="m-name" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input id="m-name" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div>
               <Label htmlFor="m-phone">Phone</Label>
@@ -221,12 +221,12 @@ export function EditMemberButton({
             )}
             <div>
               <Label htmlFor="m-email">Email</Label>
-              <Input id="m-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!authConfigured} />
+              <Input id="m-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!authConfigured} />
             </div>
             <div className="mt-3">
               <Label htmlFor="m-pw">New password (optional)</Label>
               <div className="flex gap-2">
-                <Input id="m-pw" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep" disabled={!authConfigured} />
+                <Input id="m-pw" type={showPw ? "text" : "password"} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep" disabled={!authConfigured} />
                 <Button type="button" size="sm" variant="outline" onClick={() => setShowPw((v) => !v)} disabled={!authConfigured} aria-label="Toggle password">
                   {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>

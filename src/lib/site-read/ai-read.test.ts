@@ -9,23 +9,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const metered = vi.hoisted(() => [] as unknown[]);
 vi.mock("@/lib/ai-cost", () => ({
   modelFor: () => "claude-haiku-4-5",
+  // The small model carries no fallbacks (ai-cost fallbacksFor gives it nothing).
+  fallbacksFor: () => ({}),
   recordAiUsage: vi.fn(async (a: unknown) => {
     metered.push(a);
   }),
 }));
 
 import { guardModelFields, readWithModel } from "./ai-read";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refusalWords } from "@/lib/ai-refusal";
 
 const CATEGORIES = ["Building Department", "Utility", "Supplier / Distributor", "Other"] as const;
 
-function client(reply: string) {
+function client(reply: string, stop_reason = "end_turn") {
   const calls: any[] = [];
   const create = vi.fn(async (params: any, opts?: any) => {
     calls.push({ params, opts });
-    return { model: "claude-haiku-4-5-20251001", usage: { input_tokens: 900, output_tokens: 80 }, stop_reason: "end_turn", content: [{ type: "text", text: reply }] };
+    return { model: "claude-haiku-4-5-20251001", usage: { input_tokens: 900, output_tokens: 80 }, stop_reason, content: reply ? [{ type: "text", text: reply }] : [] };
   });
   return { calls, c: { messages: { create } } as any };
 }
+
+const EMPTY = { name: "", phones: [], email: "", street: "", city: "", state: "", zip: "", hours: "", about: "", category: "" };
 
 beforeEach(() => {
   metered.length = 0;
@@ -35,22 +41,46 @@ describe("readWithModel: one call, never a second", () => {
   it("a prose reply fills nothing and makes no repair call (no second, unfenced, untimed request)", async () => {
     const { calls, c } = client("Sorry, I can't find any contact details on that page.");
     const out = await readWithModel({ client: c, orgId: "org-1", pageText: "Acme Electric Supply home page", categories: CATEGORIES });
-    expect(out).toEqual({});
+    expect(out).toEqual({ fields: {} });
     expect(calls).toHaveLength(1);
     expect(calls[0].opts).toEqual({ timeout: 12_000, maxRetries: 0 });
     expect(metered).toHaveLength(1);
   });
 
+  it("asks with the table's row (no thinking field on the small model) and the reply's schema", async () => {
+    const { calls, c } = client(JSON.stringify(EMPTY));
+    await readWithModel({ client: c, orgId: "org-1", pageText: "Acme", categories: CATEGORIES });
+    const { thinking: _t, ...row } = aiRequestFor("resource-from-link");
+    expect(calls[0].params.max_tokens).toBe(row.max_tokens);
+    expect(calls[0].params).not.toHaveProperty("thinking");
+    expect(calls[0].params).not.toHaveProperty("betas");
+    expect(calls[0].params.output_config.effort).toBe(row.output_config.effort);
+    expect(calls[0].params.output_config.format).toMatchObject({ type: "json_schema" });
+  });
+
+  it("a refusal fills nothing and says the one sentence", async () => {
+    const { calls, c } = client("", "refusal");
+    const out = await readWithModel({ client: c, orgId: "org-1", pageText: "Acme", categories: CATEGORIES });
+    expect(out).toEqual({ fields: {}, said: refusalWords() });
+    expect(calls).toHaveLength(1);
+    expect(metered).toHaveLength(1);
+  });
+
   it("broken JSON (an unescaped quote) also fills nothing, in one call", async () => {
     const { calls, c } = client('{"name":"Acme 6" Supply"}');
-    expect(await readWithModel({ client: c, orgId: "org-1", pageText: "Acme", categories: CATEGORIES })).toEqual({});
+    expect(await readWithModel({ client: c, orgId: "org-1", pageText: "Acme", categories: CATEGORIES })).toEqual({ fields: {} });
     expect(calls).toHaveLength(1);
   });
 
-  it("a fenced JSON reply is read and guarded", async () => {
-    const { calls, c } = client('Here you go:\n```json\n{"name":"Acme Electric Supply","phones":["530-555-0150"],"category":"Utility",}\n```');
+  it("a cut-off reply fills nothing", async () => {
+    const { c } = client('{"name":"Acme', "max_tokens");
+    expect(await readWithModel({ client: c, orgId: "org-1", pageText: "Acme", categories: CATEGORIES })).toEqual({ fields: {} });
+  });
+
+  it("a structured reply is read and guarded", async () => {
+    const { calls, c } = client(JSON.stringify({ ...EMPTY, name: "Acme Electric Supply", phones: ["530-555-0150"], category: "Utility" }));
     const out = await readWithModel({ client: c, orgId: "org-1", pageText: "Acme Electric Supply. Call 530-555-0150.", categories: CATEGORIES });
-    expect(out).toEqual({ name: "Acme Electric Supply", phones: ["(530) 555-0150"], category: "Utility" });
+    expect(out).toEqual({ fields: { name: "Acme Electric Supply", phones: ["(530) 555-0150"], category: "Utility" } });
     expect(calls).toHaveLength(1);
   });
 });

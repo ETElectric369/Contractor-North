@@ -7,6 +7,8 @@
  * began with a punch the schedule didn't cover (day two of a job scheduled for one day), which
  * landed on no job with nothing asking. The person holding the phone knows where he is standing,
  * so the sheet puts the likely jobs first, one tap each:
+ *   0. when the punch carries a fix, the jobs within 2 km of it, nearest first, each saying how far
+ *      ("120 ft away"; the owner, 2026-11-04: the clock never asked where he was);
  *   1. the job he last punched on in the past three days, while it is still going;
  *   2. the jobs on today's schedule (anyone's: he may be helping a crewmate);
  *   3. the rest of the jobs in progress, newest first.
@@ -21,6 +23,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { todayStrInTz } from "@/lib/tz";
 import { fillText, translator, type Lang } from "@/lib/i18n";
+import { distanceWords } from "@/lib/timeclock/nearest-job";
 
 /**
  * THE WORDS, IN THE PERSON'S LANGUAGE (cn-v1138). Every sentence here is a function of `lang`
@@ -132,6 +135,9 @@ export function orderWhichJobChoices(input: {
   excludeJobId?: string | null;
   /** The reader's language for each row's why (English when omitted). */
   lang?: Lang | null;
+  /** The jobs near the punch's fix (lib/timeclock/job-coordinates jobsNearFix), nearest first:
+   *  they go first, each row's why its distance. Omitted or empty: the order without a fix. */
+  near?: readonly { id: string; distanceM: number }[] | null;
 }): WhichJobOption[] {
   const t = translator(input.lang);
   const byId = new Map<string, ChoiceJob>();
@@ -143,6 +149,12 @@ export function orderWhichJobChoices(input: {
     taken.add(j.id);
     out.push({ id: j.id, label: whichJobLabel(j, input.codesOn), ...(why ? { why } : {}) });
   };
+
+  const nearest = [...(input.near ?? [])].sort((a, b) => a.distanceM - b.distanceM);
+  for (const n of nearest) {
+    const j = byId.get(n.id);
+    if (j && active(j)) add(j, distanceWords(n.distanceM, input.lang));
+  }
 
   const last = input.lastJobId ? byId.get(input.lastJobId) : undefined;
   if (last && active(last)) add(last, t("cs_whereYouWorkedLast"));

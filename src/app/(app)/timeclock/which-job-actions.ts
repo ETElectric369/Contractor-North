@@ -1,6 +1,5 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { dbError } from "@/lib/db-error";
 import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -9,6 +8,9 @@ import { todayBoundsInTz } from "@/lib/tz";
 import { promoteJobToInProgress } from "@/lib/job-promote";
 import { asLang, fillText, translator } from "@/lib/i18n";
 import { callerLang } from "@/lib/lang-of";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { jobsNearFix } from "@/lib/timeclock/job-coordinates";
+import { reportError } from "@/lib/observe";
 import {
   LAST_JOB_LOOKBACK_MS,
   WHICH_JOB_COLUMNS,
@@ -75,7 +77,23 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
   // its filter instead: exactly the jobs whose own window covers today (onToday's rule: it starts
   // before today ends, and it starts today or ends today or later).
   const dayStartIso = dayStart.toISOString();
-  const [lastR, segR, goingR, windowR] = await Promise.all([
+  // The fifth read: the jobs near where the punch was taken (none without a fix), from the punch's
+  // own gps_in and the caller's company. It never sinks the sheet: a failure is said in the server
+  // log and the list is the one without a fix.
+  const nearP = (async () => {
+    const [fixR, orgIdR] = await Promise.all([
+      supabase.from("time_entries").select("gps_in").eq("id", entry.id).eq("profile_id", user.id).maybeSingle(),
+      supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle(),
+    ]);
+    const fix = (fixR?.data as { gps_in?: { lat: number; lng: number; accuracy?: number } | null } | null)?.gps_in ?? null;
+    if (!fix) return [];
+    const orgId = (orgIdR?.data as { org_id?: string | null } | null)?.org_id ?? null;
+    return jobsNearFix(supabase, createServiceClient(), orgId, fix, settings.geofence_radius_m);
+  })().catch((e) => {
+    reportError("timeclock.whichJobChoices.near", e);
+    return [];
+  });
+  const [lastR, segR, goingR, windowR, near] = await Promise.all([
     supabase
       .from("time_entries")
       .select("job_id, clock_in")
@@ -95,6 +113,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
       .in("status", ACTIVE_JOB_STATUSES)
       .lt("scheduled_start", dayEnd.toISOString())
       .or(`scheduled_start.gte.${dayStartIso},scheduled_end.gte.${dayStartIso}`),
+    nearP,
   ]);
   // A MOVE'S PUNCH ALREADY HAS A JOB, so it is not in Hours On No Job and the office is never
   // prompted about it: the line must not promise that they will pick it (which-job-choices).
@@ -103,7 +122,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
   const lastJobId = ((lastR.data as { job_id?: string | null } | null)?.job_id ?? null) || null;
   const segToday = new Set(((segR.data ?? []) as { job_id: string }[]).map((s) => s.job_id));
   const have = new Set<string>([...((goingR.data ?? []) as ChoiceJob[]), ...((windowR.data ?? []) as ChoiceJob[])].map((j) => j.id));
-  const missing = [...new Set([lastJobId, ...segToday].filter((x): x is string => !!x && !have.has(x)))];
+  const missing = [...new Set([lastJobId, ...segToday, ...near.map((n) => n.id)].filter((x): x is string => !!x && !have.has(x)))];
   const extraR = missing.length
     ? await supabase.from("jobs").select(WHICH_JOB_COLUMNS).in("id", missing).in("status", ACTIVE_JOB_STATUSES)
     : { data: [] };
@@ -132,6 +151,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
     // On a move, the job the punch is on is never offered back to itself.
     excludeJobId: moving ? entry.job_id : null,
     lang,
+    near,
   });
   return { ok: true, isStaff, jobs };
 }

@@ -15,7 +15,7 @@ const state = vi.hoisted(() => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => ({ supabase: client, userId: "user-1", orgId: "org-1" })) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => client) }));
-vi.mock("@/lib/ai-cost", () => ({ aiAllowed: vi.fn(async () => state.gate), modelFor: () => "test-model", recordAiUsage: async () => {} }));
+vi.mock("@/lib/ai-cost", () => ({ aiAllowed: vi.fn(async () => state.gate), modelFor: () => "test-model", recordAiUsage: async () => {}, fallbacksFor: () => ({}) }));
 vi.mock("@/lib/ai-json", () => ({ parseAiJson: async () => ({ kind: "note", confidence: "low" }) }));
 vi.mock("@/lib/analytics/job-profitability", () => ({ listJobScopes: async () => [] }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));

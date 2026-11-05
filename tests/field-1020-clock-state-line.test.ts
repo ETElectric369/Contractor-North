@@ -50,7 +50,7 @@ describe("the route reads it every turn, into the volatile (per-person) block", 
   it("it sits after RIGHT NOW and before the standing orders, in the volatile prompt", () => {
     const now = r.indexOf("RIGHT NOW: ${stamp}");
     const clock = r.indexOf("volatilePrompt += clockStateLine(");
-    const orders = r.indexOf("volatilePrompt += standingOrders(");
+    const orders = r.indexOf("personPrompt += standingOrders("); // cn-v1142: the slow per-person block
     expect(now).toBeGreaterThan(0);
     expect(clock).toBeGreaterThan(now);
     expect(orders).toBeGreaterThan(clock);

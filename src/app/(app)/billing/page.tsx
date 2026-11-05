@@ -31,6 +31,7 @@ import { smsReadiness } from "@/lib/sms";
 import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
 import { GetPaidPickButton } from "./record-payment-button";
 import { readWaitingToBeBilled } from "@/lib/waiting-to-be-billed";
+import { datedWhen } from "@/lib/action-items/dated-when";
 
 export const dynamic = "force-dynamic";
 
@@ -313,7 +314,12 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
             <li key={j.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <Link href={`/jobs/${j.id}`} className="min-w-0 hover:underline">
                 <div className="truncate text-sm font-medium text-slate-900">{j.customer ?? "—"}</div>
-                <div className="truncate text-xs text-slate-500">{j.name ?? j.job_number}{j.value > 0 ? ` · est. ${money(j.value)}` : ""}</div>
+                <div className="truncate text-xs text-slate-500">
+                  {j.name ?? j.job_number}
+                  {j.value > 0 ? ` · est. ${money(j.value)}` : ""}
+                  {/* A draw row says its age as a date ("Since Jun 12"), never hidden. */}
+                  {j.since ? ` · ${datedWhen("Since", j.since, todayStrInTz(orgSettings.timezone), orgSettings.timezone)}` : ""}
+                </div>
               </Link>
               {j.draw ? (
                 // Schedule job → draws bill via "Request next payment" on the job's payment

@@ -79,7 +79,7 @@ export function InviteManager({
       <form action={onInvite} className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="flex-1">
           <Label htmlFor="invite-email">Invite by email</Label>
-          <Input id="invite-email" name="email" type="email" placeholder="crew@company.com" required />
+          <Input id="invite-email" name="email" type="email" autoComplete="email" placeholder="crew@company.com" required />
         </div>
         <div className="sm:w-40">
           <Label htmlFor="invite-role">Role</Label>

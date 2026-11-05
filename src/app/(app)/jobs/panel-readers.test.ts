@@ -34,6 +34,9 @@ vi.mock("@/lib/ai-cost", () => ({
     s.spent ? { ok: false, reason: "ceiling", why: opts?.ceilingWords ?? "the ceiling" } : { ok: true },
   ),
   modelFor: () => "claude-opus-4-8",
+  // The doors are pinned here, not the surface a read rides (read-panel-photo.test / read-models.test
+  // pin the fallback fields): no fallback fields, so every stub answers on client.messages.
+  fallbacksFor: () => ({}),
   recordAiUsage: vi.fn(async () => {}),
 }));
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));

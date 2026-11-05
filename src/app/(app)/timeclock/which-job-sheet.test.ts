@@ -303,6 +303,37 @@ describe("the order, and the label", () => {
     ]);
   });
 
+  it("WITH A FIX ON THE PUNCH, the jobs near it go first, nearest first, each saying how far; then last, today's, the rest", () => {
+    const base = {
+      jobs: [
+        { id: "last", name: "Bayberry", status: "in_progress", created_at: "2026-09-01" },
+        { id: "today", name: "Thistlewood", status: "scheduled", scheduled_start: "2026-09-26T15:00:00Z" },
+        { id: "near1", name: "Larkspur", status: "scheduled" },
+        { id: "near2", name: "Snowbell", status: "to_be_scheduled" },
+        { id: "going", name: "Catbird", status: "in_progress", created_at: "2026-09-20" },
+        { id: "done", name: "Done", status: "complete" },
+      ],
+      lastJobId: "last",
+      segToday: new Set<string>(),
+      hasSegments: new Set<string>(),
+      todayStr: "2026-09-26",
+      tz: "America/Los_Angeles",
+      codesOn: true,
+    };
+    const out = orderWhichJobChoices({ ...base, near: [{ id: "near2", distanceM: 1287 }, { id: "near1", distanceM: 36.6 }, { id: "done", distanceM: 5 }] });
+    expect(out).toEqual([
+      { id: "near1", label: "Larkspur", why: "120 ft away" },
+      { id: "near2", label: "Snowbell", why: "0.8 mi away" },
+      { id: "last", label: "Bayberry", why: "Where you worked last" },
+      { id: "today", label: "Thistlewood", why: "On today's schedule" },
+      { id: "going", label: "Catbird" },
+    ]);
+    // In Spanish, metric.
+    expect(orderWhichJobChoices({ ...base, near: [{ id: "near1", distanceM: 36.6 }], lang: "es" })[0].why).toBe("a 40 m");
+    // No fix, no near: the order it always had.
+    expect(orderWhichJobChoices(base).map((o) => o.id)).toEqual(["last", "today", "going"]);
+  });
+
   it("codes off, a job reads the way the crew knows it: customer · street", () => {
     const j = { id: "x", name: "Panel swap", address: "41 Larkspur", customers: { name: "Nora" } };
     expect(whichJobLabel(j, false)).toBe("Nora · 41 Larkspur");

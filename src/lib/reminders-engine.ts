@@ -23,7 +23,12 @@ import { readActiveOrgs } from "@/lib/cron-orgs";
 type Counts = { invoice_due: number; quote_followup: number; appointment: number; skipped_no_email: number; lapsed_skipped: number; failed: number };
 const DAY = 86_400_000;
 
-export async function sendDueReminders(supabase: any): Promise<Counts> {
+export async function sendDueReminders(
+  supabase: any,
+  // THE COMPANIES AT ONE OF THEIR OWN REMINDER HOURS (8 AM, noon, 4 PM local; the hourly reminders
+  // cron, 2026-11-02). Absent = every company. The dedupe below (reminder_log) is unchanged.
+  opts: { orgIds?: ReadonlySet<string> } = {},
+): Promise<Counts> {
   const now = Date.now();
   const counts: Counts = { invoice_due: 0, quote_followup: 0, appointment: 0, skipped_no_email: 0, lapsed_skipped: 0, failed: 0 };
 
@@ -37,6 +42,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
   counts.lapsed_skipped = lapsedSkipped;
 
   for (const org of orgs) {
+    if (opts.orgIds && !opts.orgIds.has(org.id)) continue; // not one of this company's hours
     try {
       const s = getOrgSettings(org.settings);
       if (!s.remind_invoice_due && !s.remind_quote_followup && !s.remind_appointments) continue;

@@ -188,7 +188,7 @@ function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
       footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!name.trim()} />}
     >
       <div className="space-y-3">
-        <div><Label htmlFor="ek-name">Kit name</Label><Input id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="A name for the whole assembly" /></div>
+        <div><Label htmlFor="ek-name">Kit name</Label><Input autoComplete="off" id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="A name for the whole assembly" /></div>
         <div><Label htmlFor="ek-cat">Scope</Label><Input id="ek-cat" value={category} placeholder="e.g. Deck — the job kind that offers this kit's tasks" onChange={(e) => setCategory(e.target.value)} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label htmlFor="ek-hours">Hours Per Unit</Label><Input id="ek-hours" inputMode="decimal" value={hoursPerUnit} onChange={(e) => setHoursPerUnit(e.target.value)} placeholder="empty = parts only" /></div>
@@ -525,7 +525,7 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <div className="flex-1">
               <Label htmlFor="k-name">New kit name</Label>
-              <Input
+              <Input autoComplete="off"
                 id="k-name"
                 autoFocus
                 value={name}

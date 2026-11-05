@@ -1,5 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { recordAiUsage } from "@/lib/ai-cost";
+import { fallbacksFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor, effortFor } from "@/lib/ai-effort";
+import { refused, saidFailure } from "@/lib/ai-refusal";
+import type { Lang } from "@/lib/locale";
 import { parseAiJson } from "@/lib/ai-json";
 import { parseQuoteBreaker } from "./model";
 import { cleanAmps, cleanKind, cleanPoles, cleanText, type ReadRow } from "./readers";
@@ -26,7 +30,8 @@ export const PLAN_MAX_BYTES = 20 * 1024 * 1024;
 /** Five plan reads per job per day: the number lives with the photo's cap (readers.ts), so the tab
  *  can say it without pulling the model code into a page. */
 export { PLAN_READS_PER_JOB_PER_DAY } from "./readers";
-export const PLAN_MAX_TOKENS = 6000;
+/** The cap is the effort table's (ai-effort "panel-plans": high, 10000 — thinking counts toward it). */
+export const PLAN_MAX_TOKENS = effortFor("panel-plans").maxTokens;
 
 /** How a plan paper goes to the model: a PDF as a document, a photo of a sheet as an image. */
 export function planMedia(...names: (string | null | undefined)[]): { kind: "pdf"; mime: "application/pdf" } | { kind: "image"; mime: string } | null {
@@ -96,24 +101,29 @@ export function parsePlanCircuits(raw: unknown): PlanReading {
 }
 
 export async function readPlanWithModel(o: {
-  client: Pick<Anthropic, "messages">;
+  client: Pick<Anthropic, "messages" | "beta">;
   model: string;
   media: { kind: "pdf" | "image"; mime: string };
   base64: string;
   name: string;
   orgId: string;
+  /** The asker's language, for a declined read's words (default English). */
+  lang?: Lang;
 }): Promise<{ ok: true; reading: PlanReading } | { ok: false; error: string }> {
   const block =
     o.media.kind === "pdf"
       ? { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: o.base64 } }
       : { type: "image" as const, source: { type: "base64" as const, media_type: o.media.mime as "image/jpeg", data: o.base64 } };
-  const msg = await o.client.messages.create({
+  const msg = await aiCreate(o.client as Anthropic, {
     model: o.model,
-    max_tokens: PLAN_MAX_TOKENS,
+    ...fallbacksFor(o.model),
+    ...aiRequestFor("panel-plans"),
     system: PLAN_SYSTEM,
     messages: [{ role: "user", content: [block as never, { type: "text", text: `The plans: ${o.name}. JSON only.` }] }],
   });
-  void recordAiUsage({ orgId: o.orgId, model: o.model, surface: "panel-plans", usage: msg.usage as never });
+  void recordAiUsage({ orgId: o.orgId, model: msg.model, surface: "panel-plans", usage: msg.usage as never });
+  // A decline is said, never parsed as an empty reading (ai-refusal).
+  if (refused(msg)) return saidFailure("refused", o.lang);
   if (msg.stop_reason === "max_tokens") {
     return { ok: false, error: "These plans list more circuits than one read can hold. Upload the panel schedule sheet on its own and read that." };
   }

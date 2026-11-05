@@ -8,17 +8,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const meter = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: meter, modelFor: () => "claude-haiku-4-5" }));
+// fallbacksFor stays the real one (cn-v1142): which surface a read rides is part of what is pinned.
+vi.mock("@/lib/ai-cost", async (orig) => ({ ...(await orig<typeof import("@/lib/ai-cost")>()), recordAiUsage: meter, modelFor: () => "claude-haiku-4-5" }));
 
-import { parsePlanCircuits, planMedia, readPlanWithModel } from "./read-plan-circuits";
+import { PLAN_MAX_TOKENS, parsePlanCircuits, planMedia, readPlanWithModel } from "./read-plan-circuits";
+import { effortFor } from "@/lib/ai-effort";
 
 function stubModel(reply: string, stop = "end_turn") {
-  const create = vi.fn(async () => ({
-    content: [{ type: "text", text: reply }],
+  // The answering model echoes the asked one (a fallback would name its own); both surfaces share
+  // the one stub, since ai-call routes a request with the fallback fields to client.beta.messages.
+  const create = vi.fn(async (p: { model: string }) => ({
+    model: p.model,
+    content: stop === "refusal" ? [] : [{ type: "text", text: reply }],
     stop_reason: stop,
     usage: { input_tokens: 1800, output_tokens: 900 },
   }));
-  return { client: { messages: { create } } as never, create };
+  return { client: { messages: { create }, beta: { messages: { create } } } as never, create };
 }
 
 beforeEach(() => meter.mockClear());
@@ -37,8 +42,12 @@ describe("Read Circuits From The Plans: the model call", () => {
     });
     const { client, create } = stubModel(reply);
     const r = await readPlanWithModel({ client, model: "m", media: { kind: "pdf", mime: "application/pdf" }, base64: "JVBER", name: "Honeysuckle E-sheets.pdf", orgId: "org-1" });
-    const sent = create.mock.calls[0] as unknown as [{ messages: { content: { type: string }[] }[] }];
+    const sent = create.mock.calls[0] as unknown as [{ max_tokens: number; output_config: unknown; messages: { content: { type: string }[] }[] }];
     expect(sent[0].messages[0].content[0]).toMatchObject({ type: "document" });
+    // The effort table's row (cn-v1142): high effort, its floor as the cap.
+    expect(PLAN_MAX_TOKENS).toBe(effortFor("panel-plans").maxTokens);
+    expect(sent[0].max_tokens).toBe(PLAN_MAX_TOKENS);
+    expect(sent[0].output_config).toEqual({ effort: effortFor("panel-plans").effort });
     expect(meter).toHaveBeenCalledWith(expect.objectContaining({ surface: "panel-plans" }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;

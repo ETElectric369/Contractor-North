@@ -21,33 +21,123 @@ import type { AccessState } from "@/lib/subscription";
  *      is not an optimization here, it is what makes an affordable tier honest.
  */
 
-/** USD per MILLION tokens. Cache reads are ~10% of input; cache writes ~125%. */
-type Price = { input: number; output: number };
+/** USD per MILLION tokens, one rate per token class (G3, cn-v1142). The ledger prices what it
+ *  pays: a cache read and a cache write are NOT flat multiples of input on every model — Opus 5.5
+ *  reads at 0.05x and Fable 5.1 at 0.025x — and a 1-hour write costs 2x input where a 5-minute one
+ *  costs 1.25x. Every rate below is the published one; where the docs publish only the general
+ *  multiplier (reads ~0.1x, writes 1.25x / 2x) the row applies it. */
+type Rates = { input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number };
+/** A model whose price steps up past a prompt size: above `overPromptTokens` (input + cache read +
+ *  cache write) the whole call is priced at `rates`. */
+type Price = Rates & { longContext?: { overPromptTokens: number; rates: Rates } };
+/** The general cache multipliers, for a row whose docs publish no model-specific rate. */
+const READ_X = 0.1;
+const WRITE_5M_X = 1.25;
+const WRITE_1H_X = 2;
+function rates(input: number, output: number, cacheRead: number = input * READ_X): Rates {
+  return { input, output, cacheRead, cacheWrite5m: input * WRITE_5M_X, cacheWrite1h: input * WRITE_1H_X };
+}
 const PRICES: Record<string, Price> = {
-  // THE 5.5 LINE (cn-v1128, the model move): list prices as published 2026-10. Haiku 5.5's price
-  // is its ≤100k-input tier (a long statement scan can pass it and is then slightly underpriced).
-  "claude-opus-5-5": { input: 4, output: 20 },
-  "claude-sonnet-5-5": { input: 2, output: 10 },
-  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
-  "claude-fable-5-1": { input: 10, output: 50 },
+  // THE 5.5 LINE (cn-v1128, the model move): list prices as published 2026-10.
+  "claude-opus-5-5": rates(4, 20, 0.2),
+  "claude-sonnet-5-5": rates(2, 10, 0.2),
+  // Haiku 5.5's list price steps up past a 100K-token prompt; a long statement scan is priced there.
+  "claude-haiku-5-5": { ...rates(0.1, 0.5), longContext: { overPromptTokens: 100_000, rates: rates(0.5, 2.5) } },
+  "claude-fable-5-1": rates(10, 50, 0.25),
   // Earlier lines stay so the ledger's older rows keep pricing as they were billed.
-  "claude-opus-4-8": { input: 5, output: 25 },
-  "claude-fable-5": { input: 10, output: 50 },
-  "claude-sonnet-5": { input: 2, output: 10 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
+  "claude-opus-4-8": rates(5, 25),
+  // A documented server-side fallback target (shared/model-migration.md:1398, "the supported fallback
+  // targets are claude-opus-4-8 and claude-opus-5"): $5 / $25 per MTok, "a drop-in upgrade at Opus
+  // 4.8's pricing" (shared/models.md:80; no model-specific cache rate published, so the general one).
+  "claude-opus-5": rates(5, 25),
+  "claude-fable-5": rates(10, 50, 1),
+  "claude-sonnet-5": rates(2, 10),
+  "claude-haiku-4-5": rates(1, 5),
 };
 /** Unknown model → price it as the most expensive we use, so a surprise never reads as free. */
-const FALLBACK: Price = { input: 10, output: 50 };
+const FALLBACK: Price = rates(10, 50);
 
 export type TokenUsage = {
   input_tokens?: number | null;
   output_tokens?: number | null;
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
+  /** The write split by TTL (the SDK's Usage.cache_creation). When present it is the truth; when
+   *  absent every write is priced at the 5-minute rate. */
+  cache_creation?: { ephemeral_5m_input_tokens?: number | null; ephemeral_1h_input_tokens?: number | null } | null;
   /** Server tools the call ran on Anthropic's side. Web search is billed per search, on top of
    *  the tokens its results add to the input. */
   server_tool_use?: { web_search_requests?: number | null } | null;
+  /** Per-attempt usage (beta Usage.iterations: message / fallback_message / compaction / advisor
+   *  entries, each naming its model). Present, it is the billing truth: see billedParts. */
+  iterations?: readonly IterationUsage[] | null;
 };
+
+export type IterationUsage = {
+  type?: string | null;
+  model?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_creation?: TokenUsage["cache_creation"];
+};
+
+/** The refusal categories billed when the decline came BEFORE any output (refusals-and-fallback,
+ *  "How refusals are billed": bio, frontier_llm, reasoning_extraction; any other or null is not). */
+const BILLED_PRE_OUTPUT = new Set(["bio", "frontier_llm", "reasoning_extraction"]);
+
+/** The categories a response's `fallback` blocks record (trigger.category), in order: what each
+ *  declined hop was declined for. Anything that is not a fallback block is skipped. */
+export function declineCategories(content: unknown): (string | null)[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((b) => b && typeof b === "object" && (b as { type?: unknown }).type === "fallback")
+    .map((b) => {
+      const c = (b as { trigger?: { category?: unknown } | null }).trigger?.category;
+      return typeof c === "string" ? c : null;
+    });
+}
+
+/**
+ * WHAT ONE CALL WAS BILLED FOR, attempt by attempt (cn-v1142 skeptic, finding 11). Top-level usage
+ * "covers only the attempt that produced the returned message"; "usage.iterations is the per-attempt
+ * source of truth" (shared/model-migration.md:1429). So when iterations are present each entry is
+ * its own part at its OWN model's rate ("fallback attempts bill at the fallback model's rates",
+ * ibid.), compaction entries included (they are not in the top-level fields, messages.d.ts
+ * BetaIterationsUsage; "sum the iterations", shared/cost-optimization.md:67). A declined attempt that
+ * produced output (mid-stream) "bills at normal rates" (model-migration.md:1429); one declined BEFORE
+ * any output (a zero-output `message` entry in a fallback-served turn) is billed only when its
+ * category is bio, frontier_llm or reasoning_extraction ("How refusals are billed"), so it counts
+ * only when a caller passes the response's fallback categories and one of them is billed. No
+ * iterations: the top-level usage is the one part, as before.
+ */
+export function billedParts(model: string, u: TokenUsage, categories: readonly (string | null)[] = []): { model: string; usage: TokenUsage }[] {
+  const its = Array.isArray(u.iterations) ? u.iterations : [];
+  if (!its.length) return [{ model, usage: u }];
+  const fellBack = its.some((e) => e?.type === "fallback_message");
+  const preOutputBilled = categories.some((c) => c != null && BILLED_PRE_OUTPUT.has(c));
+  return its
+    .filter((e) => {
+      if (!e) return false;
+      const declinedBeforeOutput = fellBack && e.type === "message" && !(Number(e.output_tokens ?? 0) > 0);
+      return !declinedBeforeOutput || preOutputBilled;
+    })
+    .map((e) => ({ model: e.model || model, usage: e as TokenUsage }));
+}
+
+/** The token totals of what was billed (the ledger's four columns), summed over billedParts. */
+export function billedTokens(model: string, u: TokenUsage, categories: readonly (string | null)[] = []) {
+  const n = (v: number | null | undefined) => Math.max(0, Number(v ?? 0) || 0);
+  const t = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  for (const { usage } of billedParts(model, u, categories)) {
+    t.input += n(usage.input_tokens);
+    t.cacheRead += n(usage.cache_read_input_tokens);
+    t.cacheWrite += n(usage.cache_creation_input_tokens);
+    t.output += n(usage.output_tokens);
+  }
+  return t;
+}
 
 /** USD per web search (Anthropic bills $10 per 1,000 searches). */
 export const WEB_SEARCH_USD = 0.01;
@@ -60,21 +150,40 @@ export const WEB_SEARCH_USD = 0.01;
  *  public site-chat's ballparks went onto the ledger at their token cost alone, so the $150
  *  ceiling could be walked past a cent a search. Recorded spend for orgs that use research rises
  *  from here on; that is a gap closing, not new cost. */
-export function costOf(model: string, u: TokenUsage): number {
+export function costOf(model: string, u: TokenUsage, categories: readonly (string | null)[] = []): number {
+  const parts = billedParts(model, u, categories);
+  // One part (no iterations): the call itself. Several: each attempt at its own model's rate, and the
+  // call's web searches once (they ride the top-level server_tool_use, never an iteration).
+  if (parts.length === 1 && parts[0].usage === u) return costOfOne(model, u);
+  const searches = Math.max(0, Number(u.server_tool_use?.web_search_requests ?? 0) || 0);
+  const dollars = parts.reduce((sum, p) => sum + costOfOne(p.model, { ...p.usage, server_tool_use: null }), 0) + searches * WEB_SEARCH_USD;
+  return Math.round(dollars * 1e6) / 1e6;
+}
+
+function costOfOne(model: string, u: TokenUsage): number {
   // Strip a trailing date snapshot before the lookup (audit 8): "claude-haiku-4-5-20251001" is
   // the same model as "claude-haiku-4-5", but the exact-key miss fell through to FALLBACK and
   // metered the public site-chat at ~10x — the org's AI ceiling tripped at a tenth of real
   // spend and the lead-capture assistant went dark.
-  const p = PRICES[model.replace(/-\d{8}$/, "")] ?? FALLBACK;
-  const input = Number(u.input_tokens ?? 0);
-  const read = Number(u.cache_read_input_tokens ?? 0);
-  const write = Number(u.cache_creation_input_tokens ?? 0);
-  const output = Number(u.output_tokens ?? 0);
-  const searches = Math.max(0, Number(u.server_tool_use?.web_search_requests ?? 0) || 0);
+  const row = PRICES[model.replace(/-\d{8}$/, "")] ?? FALLBACK;
+  const n = (v: number | null | undefined) => Math.max(0, Number(v ?? 0) || 0);
+  const input = n(u.input_tokens);
+  const read = n(u.cache_read_input_tokens);
+  const output = n(u.output_tokens);
+  // The TTL breakdown first; without it the flat total is all 5-minute writes (the cheaper TTL,
+  // and the only one this app asks for unless a call says ttl: "1h").
+  const split = u.cache_creation;
+  const has = split != null && (split.ephemeral_5m_input_tokens != null || split.ephemeral_1h_input_tokens != null);
+  const write5m = has ? n(split!.ephemeral_5m_input_tokens) : n(u.cache_creation_input_tokens);
+  const write1h = has ? n(split!.ephemeral_1h_input_tokens) : 0;
+  const searches = n(u.server_tool_use?.web_search_requests);
+  const lc = row.longContext;
+  const p: Rates = lc && input + read + write5m + write1h > lc.overPromptTokens ? lc.rates : row;
   const dollars =
     (input / 1e6) * p.input +
-    (read / 1e6) * p.input * 0.1 +
-    (write / 1e6) * p.input * 1.25 +
+    (read / 1e6) * p.cacheRead +
+    (write5m / 1e6) * p.cacheWrite5m +
+    (write1h / 1e6) * p.cacheWrite1h +
     (output / 1e6) * p.output +
     searches * WEB_SEARCH_USD;
   return Math.round(dollars * 1e6) / 1e6;
@@ -104,6 +213,35 @@ export function modelFor(kind: WorkKind): string {
 }
 
 /**
+ * SERVER-SIDE FALLBACKS (cn-v1142, the SDK half). The 5.5 line runs safety classifiers that can
+ * DECLINE a request (an HTTP 200 with stop_reason "refusal" — benign trade work trips them now
+ * and then). With one beta header plus `fallbacks: "default"` on the request, the API re-runs a
+ * declined request on the model Anthropic recommends for that category, in the same round trip,
+ * instead of handing the refusal back. The answer then says which model ran (`response.model`)
+ * and carries a `fallback` block at the point it switched; the ledger already meters by the
+ * model the response reports, so a stood-in call bills as the model that ran. A refusal that
+ * comes back anyway means the whole chain declined: ai-refusal's `refused` is still the check.
+ *
+ * The BIG and the MIDDLE model carry it. The SMALL model carries NOTHING — not the header either:
+ * the docs say there is no server-side fallback for Haiku 5.5 and a fallbacks parameter on its
+ * requests is at best ignored, at worst a 400. An unknown name carries nothing for the same
+ * reason (the usage tier may hand a call any of the three).
+ *
+ * Usage: `client.beta.messages.stream({ model, ...fallbacksFor(model), ... })` — the beta
+ * namespace is where the SDK types `betas` and `fallbacks`; the stable `client.messages` does
+ * not. A replayed assistant turn must keep its `fallback` block in place and leave out the
+ * thinking and tool_use blocks that came before it (lib/nort/replay replayContent does).
+ */
+export const FALLBACK_BETA = "server-side-fallback-2026-07-01" as const;
+export type FallbackFields = { betas: [typeof FALLBACK_BETA]; fallbacks: "default" } | { betas?: undefined; fallbacks?: undefined };
+
+export function fallbacksFor(model: string): FallbackFields {
+  const base = String(model ?? "").replace(/-\d{8}$/, "");
+  if (/^claude-(opus|sonnet|fable)-/.test(base)) return { betas: [FALLBACK_BETA], fallbacks: "default" };
+  return {};
+}
+
+/**
  * Record one call against an org's ledger. Best-effort and never throws: a metering
  * failure must not break a contractor's estimate. Missing org → skipped rather than
  * recorded against nobody.
@@ -113,20 +251,25 @@ export async function recordAiUsage(args: {
   model: string;
   surface: string;
   usage: TokenUsage | null | undefined;
+  /** The response's content, when the caller has it: its `fallback` blocks say why each hop was
+   *  declined, which decides whether a decline before any output was billed (billedParts). */
+  content?: unknown;
 }): Promise<void> {
   const { orgId, model, surface, usage } = args;
   if (!orgId || !usage) return;
   try {
+    const categories = declineCategories(args.content);
+    const t = billedTokens(model, usage, categories);
     const sb = createServiceClient();
     await sb.rpc("record_ai_usage", {
       p_org_id: orgId,
       p_model: model,
       p_surface: surface,
-      p_input: Math.max(0, Number(usage.input_tokens ?? 0)),
-      p_cache_read: Math.max(0, Number(usage.cache_read_input_tokens ?? 0)),
-      p_cache_write: Math.max(0, Number(usage.cache_creation_input_tokens ?? 0)),
-      p_output: Math.max(0, Number(usage.output_tokens ?? 0)),
-      p_cost_usd: costOf(model, usage),
+      p_input: t.input,
+      p_cache_read: t.cacheRead,
+      p_cache_write: t.cacheWrite,
+      p_output: t.output,
+      p_cost_usd: costOf(model, usage, categories),
     });
   } catch (e) {
     reportError("recordAiUsage", e, { orgId, model, surface });

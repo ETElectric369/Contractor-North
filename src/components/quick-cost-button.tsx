@@ -1426,7 +1426,7 @@ export function StockFields({
           ))}
         </Select>
         {stockItem === NEW_ITEM && (
-          <Input
+          <Input autoComplete="off"
             id="ti-item-name"
             aria-label="New item name"
             value={stockName}

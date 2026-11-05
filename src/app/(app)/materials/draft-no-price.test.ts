@@ -19,19 +19,27 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 const calls: Record<string, unknown>[] = [];
+const refuseNext = vi.hoisted(() => ({ on: false }));
 vi.mock("@/lib/anthropic", () => ({
   DEFAULT_MODEL: "test-model",
   getAnthropic: () => ({
     messages: {
       create: async (req: Record<string, unknown>) => {
         calls.push(req);
+        if (refuseNext.on) {
+          refuseNext.on = false;
+          return { content: [], stop_reason: "refusal", usage: { input_tokens: 1, output_tokens: 0 } };
+        }
         return {
           content: [
             {
               type: "text",
-              text: '[{"description":"12/2 NM-B","part_number":null,"quantity":250,"unit":"ft","vendor":"Northline Supply","est_cost":1.1},{"description":"20A breaker","quantity":2,"unit":"ea"}]',
+              // The structured answer (cn-v1142): every key its schema names, plus a vendor and a
+              // price volunteered, which never land.
+              text: '{"items":[{"description":"12/2 NM-B","part_number":null,"quantity":250,"unit":"ft","vendor":"Northline Supply","est_cost":1.1},{"description":"20A breaker","part_number":null,"quantity":2,"unit":"ea"}]}',
             },
           ],
+          stop_reason: "end_turn",
           usage: { input_tokens: 1, output_tokens: 1 },
         };
       },
@@ -44,9 +52,11 @@ const door = vi.hoisted(() => ({
   gate: { ok: true } as { ok: true } | { ok: false; why: string; reason: "lapsed" | "ceiling" },
 }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => door.staff) }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(async () => {}), aiAllowed: vi.fn(async () => door.gate) }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: vi.fn(async () => {}), aiAllowed: vi.fn(async () => door.gate), fallbacksFor: () => ({}) }));
 
 import { generateMaterialDraft } from "./actions";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refusalWords } from "@/lib/ai-refusal";
 
 describe("generateMaterialDraft", () => {
   it("is the office's: the crew is refused in words, and no model is reached", async () => {
@@ -79,5 +89,14 @@ describe("generateMaterialDraft", () => {
     expect(system).not.toContain("est_cost");
     expect(system).not.toContain('"vendor"');
     expect(system).not.toContain("USD");
+    // The table's row (ai-effort "materials") and the take-off's schema.
+    const req = aiRequestFor("materials");
+    expect(calls[0]).toMatchObject({ max_tokens: req.max_tokens, thinking: req.thinking });
+    expect(calls[0]?.output_config).toMatchObject({ effort: req.output_config.effort, format: { type: "json_schema" } });
+  });
+
+  it("a refusal is the one sentence, never a parse error", async () => {
+    refuseNext.on = true;
+    expect(await generateMaterialDraft("200A panel swap")).toEqual({ ok: false, error: refusalWords() });
   });
 });

@@ -4,6 +4,8 @@
  * reasoning the tables itself. Same tables the /tools calculators use (NEC ch. 9 / 310.16 / 314.16).
  */
 
+import type Anthropic from "@anthropic-ai/sdk";
+
 /* Circular mils per AWG/kcmil (NEC ch.9 table 8). */
 const CMIL: Record<string, number> = {
   "14": 4110, "12": 6530, "10": 10380, "8": 16510, "6": 26240, "4": 41740, "3": 52620, "2": 66360,
@@ -280,7 +282,7 @@ export const CALC_TOOLS = [
       },
     },
   },
-] as const;
+] satisfies readonly Anthropic.Tool[];
 
 export function runCalc(name: string, input: any): string {
   switch (name) {

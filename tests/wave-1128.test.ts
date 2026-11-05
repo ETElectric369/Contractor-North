@@ -23,7 +23,8 @@ describe("cn-v1128 — the model move", () => {
     const m = { input_tokens: 1_000_000, output_tokens: 1_000_000 };
     expect(costOf("claude-opus-5-5", m)).toBeCloseTo(24, 6);
     expect(costOf("claude-sonnet-5-5", m)).toBeCloseTo(12, 6);
-    expect(costOf("claude-haiku-5-5", m)).toBeCloseTo(0.6, 6);
+    // A 1M-token prompt is past Haiku 5.5's 100K step, so it prices at $0.50 / $2.50 (G3, cn-v1142).
+    expect(costOf("claude-haiku-5-5", m)).toBeCloseTo(3, 6);
     expect(costOf("claude-fable-5-1", m)).toBeCloseTo(60, 6);
     expect(costOf("claude-sonnet-5", m)).toBeCloseTo(12, 6);
     expect(costOf("claude-opus-4-8", m)).toBeCloseTo(30, 6);

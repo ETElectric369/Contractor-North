@@ -52,7 +52,7 @@ export function NewItemButton() {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Label htmlFor="name">Name *</Label>
-                <Input id="name" name="name" required placeholder="The name the crew calls it" />
+                <Input autoComplete="off" id="name" name="name" required placeholder="The name the crew calls it" />
               </div>
               <div>
                 <Label htmlFor="part_number">Part #</Label>

@@ -1,7 +1,11 @@
 "use server";
 
-import { aiAllowed, modelFor, recordAiUsage, AI_CEILING_WORDS } from "@/lib/ai-cost";
-import { parseAiJson } from "@/lib/ai-json";
+import { aiAllowed, fallbacksFor, modelFor, recordAiUsage, AI_CEILING_WORDS } from "@/lib/ai-cost";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { readStructured, type StructuredRead } from "@/lib/ai-structured";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import * as z from "zod/v4";
 import { getAnthropic } from "@/lib/anthropic";
 import { isPdfBytes } from "@/lib/pdf-text";
 import { reportError } from "@/lib/observe";
@@ -179,6 +183,23 @@ const READ_SYSTEM = [
   'No vendor names on the page: {"rows":[]}.',
 ].join("\n");
 
+/** The read's answer, held by structured outputs (cn-v1142): no hand parse, no repair round trip. */
+const READ_FORMAT = zodOutputFormat(
+  z.object({
+    rows: z.array(
+      z.object({
+        name: z.string(),
+        contact_name: z.string(),
+        phone: z.string(),
+        email: z.string(),
+        website: z.string(),
+        address: z.string(),
+        trade: z.string(),
+      }),
+    ),
+  }),
+);
+
 const HEADINGS = ["Vendor", "Contact", "Phone", "Email", "Website", "Address", "Trade"];
 const KEYS = ["name", "contact_name", "phone", "email", "website", "address", "trade"] as const;
 
@@ -246,32 +267,34 @@ export async function readVendorList(form: FormData): Promise<{ ok: true; table:
   }
 
   const model = modelFor("routine");
-  let text = "";
+  let read: StructuredRead<{ rows: Record<string, unknown>[] }>;
   try {
-    const msg = await client.messages.create({
+    const req = aiRequestFor(READ_SURFACE);
+    const msg = await aiCreate(client, {
       model,
-      max_tokens: 8000,
+      ...fallbacksFor(model),
+      ...req,
+      output_config: { ...req.output_config, format: READ_FORMAT },
       system: READ_SYSTEM,
       messages: [{ role: "user", content: [block as never, { type: "text", text: `File: ${name}. Copy the vendor list.` }] }],
     });
     // METER THE READ, awaited: it is the one paid step here, and it was paid whether or not it parses.
-    await recordAiUsage({ orgId, model: (msg as { model?: string }).model || model, surface: READ_SURFACE, usage: msg.usage as never });
-    if ((msg.stop_reason as string) === "max_tokens") {
-      return { ok: false, error: `${name} has more on it than can be read in one go. Split it into parts and read each.` };
-    }
-    text = ((msg.content as { type: string; text?: string }[]).find((b) => b.type === "text")?.text ?? "").trim();
+    await recordAiUsage({ orgId, model: msg.model || model, surface: READ_SURFACE, usage: msg.usage as never });
+    read = readStructured(msg, READ_FORMAT);
   } catch (e) {
     reportError("readVendorList", e, { orgId });
     return { ok: false, error: `${name} couldn't be read just now. Try again, or save the list as Excel or CSV.` };
   }
-
-  let parsed: unknown;
-  try {
-    parsed = await parseAiJson(client, text, orgId);
-  } catch {
+  // A refusal says the one sentence (never a parse error, never an error row); a cut-off and an
+  // unreadable answer keep the words they always had.
+  if (!read.ok && read.reason === "refused") return { ok: false, error: read.error };
+  if (!read.ok && read.reason === "cut_off") {
+    return { ok: false, error: `${name} has more on it than can be read in one go. Split it into parts and read each.` };
+  }
+  if (!read.ok) {
     return { ok: false, error: `${name} was read, but the answer couldn't be understood. Try again, or save the list as Excel or CSV.` };
   }
-  const raw = Array.isArray((parsed as { rows?: unknown } | null)?.rows) ? ((parsed as { rows: unknown[] }).rows as Record<string, unknown>[]) : [];
+  const raw = read.value.rows;
   const rows = raw
     .filter((r) => r && typeof r === "object")
     .map((r) => KEYS.map((k) => String(r[k] ?? "").replace(/\s+/g, " ").trim().slice(0, k === "name" ? 200 : 300)))

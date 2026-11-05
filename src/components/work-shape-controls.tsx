@@ -93,7 +93,7 @@ export function WorkShapeControls({
       </select>
       {custom !== null && (
         <>
-          <input
+          <input autoComplete="off"
             autoFocus
             value={custom}
             onChange={(e) => setCustom(e.target.value)}

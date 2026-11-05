@@ -268,7 +268,14 @@ async function skipDueRun(supabase: any, t: any, today: string): Promise<void> {
  *  (all orgs — the cron). Answers how many occurrences were created, and how many companies were
  *  passed over because their plan has ended (cn-v1137, decision 3: readActiveOrgs drops a lapsed
  *  company, so its templates stay due — not stepped — and are made up when a plan is picked). */
-export async function generateDueTemplates(supabase: any, userId: string | null): Promise<{ generated: number; lapsed_skipped: number }> {
+export async function generateDueTemplates(
+  supabase: any,
+  userId: string | null,
+  // THE COMPANIES AT THEIR OWN 8 AM (the hourly daily cron, 2026-11-02): only their templates are
+  // made on this run; every other company's wait for its own hour. Absent = every reachable company
+  // (the office's "Generate" button). Twice in a day is safe: the claim on next_date is the lock.
+  opts: { orgIds?: ReadonlySet<string> } = {},
+): Promise<{ generated: number; lapsed_skipped: number }> {
   // "Due" is judged against each ORG's local today — a UTC today rolls over at ~5 PM
   // Pacific, generating tomorrow's occurrences tonight. Fetch every reachable org's
   // settings once (service client = all orgs; user client = RLS-scoped to one), query
@@ -304,6 +311,7 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
     // Isolate each template: one malformed row (e.g. a bad next_date that makes new Date(...)
     // throw) must NOT abort the whole run OR re-crash the cron every night. Name it, skip it.
     try {
+      if (opts.orgIds && !opts.orgIds.has(t.org_id)) continue; // not this company's hour
       // A lapsed company's template (not in the active map, and the map is whole: a failed read
       // fails the run) waits: nothing generated, nothing stepped. Only when a company was read.
       if (lapsedSkipped > 0 && !(t.org_id in todayByOrg)) continue;

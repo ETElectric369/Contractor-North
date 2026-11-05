@@ -1,5 +1,8 @@
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { recordAiUsage, aiAllowed } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, fallbacksFor } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refused, saidFailure } from "@/lib/ai-refusal";
 import { coerceByPlaybook } from "./answers";
 import { applyHeard, hearRequest, parseHeard, HEAR_SYSTEM } from "./hear";
 import { clearInapplicable } from "./resolve";
@@ -32,7 +35,8 @@ export type HearRun =
  */
 export interface HearCtx {
   orgId: string | null;
-  surface: string;
+  /** The ledger name AND the effort row (ai-effort): the inspector's hearing or the setup card's. */
+  surface: "playbook:hear" | "setup:talk";
 }
 
 export async function runHear(
@@ -61,9 +65,10 @@ export async function runHear(
 
   let text = "";
   try {
-    const resp = await getAnthropic().messages.create({
+    const resp = await aiCreate(getAnthropic(), {
       model: DEFAULT_MODEL,
-      max_tokens: 2000,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor(ctx.surface),
       // The instruction never changes; the job does. Caching it keeps the cost of a fill down to
       // the paragraph itself, which matters when this runs on every visit.
       system: [{ type: "text", text: HEAR_SYSTEM, cache_control: { type: "ephemeral" } }],
@@ -71,7 +76,9 @@ export async function runHear(
     });
     // Metered here rather than at the call sites, because `resp.usage` only exists inside this
     // function — and because two callers each doing their own would be two chances to forget.
-    void recordAiUsage({ orgId: ctx.orgId, model: DEFAULT_MODEL, surface: ctx.surface, usage: resp.usage as never });
+    void recordAiUsage({ orgId: ctx.orgId, model: resp.model, surface: ctx.surface, usage: resp.usage as never });
+    // A decline is said, never parsed as "heard nothing" (ai-refusal).
+    if (refused(resp)) return saidFailure("refused");
     text = resp.content
       .filter((b) => b.type === "text")
       .map((b) => (b as { text: string }).text)

@@ -1,6 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { DEFAULT_MODEL, getAnthropic } from "@/lib/anthropic";
-import { aiAllowed, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, fallbacksFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { isAiRefused, refused, saidFailure } from "@/lib/ai-refusal";
 import { parseAiJson } from "@/lib/ai-json";
 import { createServiceClient } from "@/lib/supabase/server";
 import { rateLimited } from "@/lib/rate-limit";
@@ -218,9 +221,10 @@ export async function runPlanBrief(
     const trade = tradeWordsOr(getOrgSettings((org as { settings?: unknown } | null)?.settings));
 
     const client = getAnthropic();
-    const msg = await client.messages.create({
+    const msg = await aiCreate(client, {
       model: DEFAULT_MODEL,
-      max_tokens: 4096,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor("plan-brief"),
       system:
         `You prepare a PRELIMINARY inspection report for ${withArticle(trade)}, from plan documents a customer uploaded with their request — before anyone has visited the site. ` +
         "You are a careful reader, not an estimator: report what the documents and the customer's own words actually state, and nothing else. " +
@@ -249,7 +253,14 @@ export async function runPlanBrief(
         },
       ],
     });
-    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "plan-brief", usage: msg.usage as never });
+    void recordAiUsage({ orgId, model: msg.model, surface: "plan-brief", usage: msg.usage as never });
+    // A DECLINE IS SAID, NOT PARSED (ai-refusal): the failed mark carries the words (or the last
+    // good report is put back), and the door hands back the one envelope every reader returns.
+    if (refused(msg)) {
+      const said = saidFailure("refused");
+      await fail(said.error);
+      return said;
+    }
 
     if (msg.stop_reason === "max_tokens") {
       return fail("The report ran too long in one pass — try again, or read the plans from the paperclip.");
@@ -279,7 +290,7 @@ export async function runPlanBrief(
       v: 1,
       status: "ready",
       at: nowIso(),
-      model: DEFAULT_MODEL,
+      model: msg.model,
       files: readPaths,
       skipped,
       summary: String(parsed.summary ?? "").replace(/\s+/g, " ").trim().slice(0, BRIEF_LIMITS.summary),
@@ -293,6 +304,7 @@ export async function runPlanBrief(
     if (!wrote) return { ok: false, error: "The lead disappeared while the plans were being read." };
     return { ok: true };
   } catch (e) {
+    if (isAiRefused(e)) return fail(saidFailure("refused").error);
     const message = e instanceof Error ? e.message : "The plans couldn't be read.";
     return fail(
       /ANTHROPIC_API_KEY/i.test(message)

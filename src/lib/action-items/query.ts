@@ -32,6 +32,7 @@ import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import { COSTED_INVOICE_COLUMNS, NEEDS_RETURN_DAYS, costedJobIds, daysAgoStr, detectStrayTime, detectUnbilledWork, rollupWorkedJobs } from "./leak-detectors";
 import { NEEDS_A_DAY_STATUSES, companyDay, jobsNeedingADay, type NeedDayJob } from "./jobs-needing-a-day";
+import { quoteSettled, type SettledInvoice } from "./quote-settled";
 import {
   RECEIPT_CATEGORIES,
   RECEIPT_TIE_COLUMNS,
@@ -402,7 +403,7 @@ async function buildActionItems(ctx: {
           const [doneWork, doneJobs] = (await Promise.all([
             supabase
               .from("appointments")
-              .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)", { count: "exact" })
+              .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name), jobs:job_id(status)", { count: "exact" })
               .eq("absorbed", false)
               .in("type", ["service_call", "job"])
               .eq("status", "completed")
@@ -582,7 +583,8 @@ async function buildActionItems(ctx: {
       ? (async () => {
           const read = (cols: string, rule: string) =>
             supabase.from("quotes").select(cols, { count: "exact" }).eq("status", "sent").or(rule).order("created_at", { ascending: true }).limit(50);
-          const base = "id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)";
+          // The job rides along (job_id, its status): the one settled rule (quoteSettled) reads it.
+          const base = "id, quote_number, doc_type, status, total, valid_until, created_at, job_id, customer_id, customers(name), jobs:job_id(status)";
           const [withDay, later] = await Promise.all([
             read(`${base}, follow_up_at`, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)),
             supabase
@@ -600,11 +602,11 @@ async function buildActionItems(ctx: {
         })()
       : empty,
     // Accepted estimates — THE WIN. The job's scheduled_start and status (joined) say whether it has
-    // been handled; a held job waits with its own day.
+    // been handled; a held job waits with its own day; quoteSettled says whether the money moved.
     isStaff
       ? supabase
           .from("quotes")
-          .select("id, quote_number, doc_type, accepted_at, job_id, customers(name), jobs:job_id(job_number, name, scheduled_start, status)", { count: "exact" })
+          .select("id, quote_number, doc_type, status, accepted_at, created_at, job_id, customer_id, customers(name), jobs:job_id(job_number, name, scheduled_start, status)", { count: "exact" })
           .eq("status", "accepted")
           .order("accepted_at", { ascending: false })
           .limit(50)
@@ -624,7 +626,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("contracts")
-          .select("id, contract_number, status, job_id, jobs(job_number, name)", { count: "exact" })
+          .select("id, contract_number, status, job_id, created_at, customers(name), jobs(job_number, name, status)", { count: "exact" })
           .eq("status", "sent")
           .order("created_at", { ascending: true })
           .limit(50)
@@ -692,7 +694,7 @@ async function buildActionItems(ctx: {
     // The kind rides along: a deposit or progress draw is money for work NOT done yet, so the two
     // needs-a-day feeders read a narrower set.
     isStaff
-      ? supabase.from("invoices").select("job_id, invoice_kind").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
+      ? supabase.from("invoices").select("id, job_id, invoice_kind, status, created_at").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
       : empty,
     doneP,
     // ── Estimates started and never sent ───────────────────────────────────────
@@ -702,7 +704,7 @@ async function buildActionItems(ctx: {
     isStaff && feederOn("quote_draft", features)
       ? supabase
           .from("quotes")
-          .select("id, quote_number, title, total, created_at, job_id, jobs:job_id(status), quote_line_items(count), customer_name_snapshot:customers(name), inquiries(name)", { count: "exact" })
+          .select("id, quote_number, title, status, total, created_at, job_id, jobs:job_id(status), quote_line_items(count), customer_name_snapshot:customers(name), inquiries(name)", { count: "exact" })
           .eq("status", "draft")
           .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString())
           .order("created_at", { ascending: true })
@@ -722,17 +724,75 @@ async function buildActionItems(ctx: {
   const waiting: WaitingItem[] = [];
   const counts: Partial<Record<PileName, PileCount>> = {};
   const todayMs = Date.parse(todayStr);
-  const billedRows = (billedJobR.data ?? []) as { job_id: string; invoice_kind?: string | null }[];
+  const billedRows = (billedJobR.data ?? []) as { id?: string; job_id: string; invoice_kind?: string | null; status?: string | null; created_at?: string | null }[];
   const billedJobs = new Set(billedRows.map((r) => r.job_id).filter(Boolean));
   // A JOB WHOSE BILLING SAYS THE WORK IS OVER: a standard invoice or the final draw. A deposit or a
   // progress draw (invoice_kind deposit/progress, 0063) is the opposite: money collected for work
   // still ahead, so a deck builder's $10,000 deposit on a to_be_scheduled job must keep asking for
-  // a day. Only the two needs-a-day feeders read this set; the outcome feeders (visit unbilled,
-  // done job unbilled, estimate to send) keep billedJobs, where any real invoice settles them.
+  // a day. Jobs Needing A Day reads this set (the won estimate asks quoteSettled, which applies the
+  // same kind rule with the bill's day); the inspections and the deploy window's done reads keep
+  // billedJobs, where any real invoice settles them.
   const finishedBilledJobs = new Set(
     billedRows.filter((r) => r.job_id && (!isDrawKind(r.invoice_kind) || r.invoice_kind === "final")).map((r) => r.job_id),
   );
   const clockedInJobIds = new Set(((openTimeR.data ?? []) as any[]).map((e) => e.job_id).filter(Boolean) as string[]);
+
+  // ── IS THIS ESTIMATE SETTLED? ONE RULE (quoteSettled, 2026-11-04). The three estimate rows (Won,
+  // Needs A Day; No Answer Yet; Estimates Not Sent) and the unsigned contract each ask it, never an
+  // inline billed-jobs check of their own. What it reads: the job (joined on each read), the job's
+  // live invoices (billedRows, with their day and kind), the invoices that NAME the estimate
+  // (invoices.quote_id) and the estimate's revisions (0391 revises_quote_id), the last two read here
+  // once for the estimates in play, org-scoped. A failed read is said to the ops sink and settles
+  // nothing (the row stays; never hidden on a guess).
+  const jobInvoicesOf = new Map<string, SettledInvoice[]>();
+  for (const r of billedRows) {
+    if (!r.job_id) continue;
+    const k = String(r.job_id);
+    jobInvoicesOf.set(k, [...(jobInvoicesOf.get(k) ?? []), r]);
+  }
+  const quoteIdsInPlay = [
+    ...new Set(
+      [
+        ...((quoteR.data ?? []) as any[]),
+        ...((quoteR.later?.data ?? []) as any[]),
+        ...((acceptedR.data ?? []) as any[]),
+        ...((draftQuoteR.data ?? []) as any[]),
+      ]
+        .map((q) => (q?.id ? String(q.id) : ""))
+        .filter(Boolean),
+    ),
+  ];
+  const namingInvoices = new Map<string, SettledInvoice[]>();
+  const revisionsOf = new Map<string, { status?: string | null }[]>();
+  {
+    const orgId = quoteIdsInPlay.length ? await orgIdP : null;
+    if (orgId) {
+      const [namedR, revR] = (await Promise.all([
+        supabase.from("invoices").select("id, quote_id, job_id, status, created_at, invoice_kind").eq("org_id", orgId).in("quote_id", quoteIdsInPlay).limit(500),
+        supabase.from("quotes").select("id, revises_quote_id, status").eq("org_id", orgId).in("revises_quote_id", quoteIdsInPlay).limit(500),
+      ]).catch((e) => [{ data: null, error: e }, { data: null, error: e }])) as Read[];
+      if (namedR.error) reportError("action-items.quoteInvoices", namedR.error);
+      if (revR.error && !isMissingColumn(revR.error)) reportError("action-items.quoteRevisions", revR.error);
+      for (const r of (namedR.data ?? []) as SettledInvoice[]) {
+        const k = String(r.quote_id ?? "");
+        if (k) namingInvoices.set(k, [...(namingInvoices.get(k) ?? []), r]);
+      }
+      for (const r of (revR.data ?? []) as { revises_quote_id?: string | null; status?: string | null }[]) {
+        const k = String(r.revises_quote_id ?? "");
+        if (k) revisionsOf.set(k, [...(revisionsOf.get(k) ?? []), { status: r.status ?? null }]);
+      }
+    }
+  }
+  const settledOf = (q: any) => {
+    const job = one(q.jobs as any) as { status?: string | null } | null;
+    const id = String(q.id);
+    return quoteSettled({
+      quote: { id, status: q.status ?? null, accepted_at: q.accepted_at ?? null, created_at: q.created_at ?? null, revisions: revisionsOf.get(id) ?? [] },
+      job: q.job_id && job ? { id: String(q.job_id), status: job.status ?? null } : null,
+      jobInvoices: q.job_id ? (jobInvoicesOf.get(String(q.job_id)) ?? []) : [],
+      quoteInvoices: namingInvoices.get(id) ?? [],
+    });
+  };
 
   // ── THE WIN: an accepted estimate whose job still has no date. Urgency 2, money stream → the top,
   // so a "yes" can never again slip by unseen. Its Pick A Day puts the day on the JOB.
@@ -741,13 +801,14 @@ async function buildActionItems(ctx: {
     for (const a of (acceptedR.data ?? []) as any[]) {
       const job = one(a.jobs) as any;
       if (job?.scheduled_start) continue; // scheduled → win captured, item self-clears
-      // A JOB THAT'S OVER DOESN'T NEED A DATE (work ending is an outcome, 0205), and a held one
-      // waits with its own day and reason (NY-feeders: holds quiet the nudges).
-      if (job?.status === "complete" || job?.status === "cancelled" || job?.status === "on_hold") continue;
-      // A JOB ALREADY BILLED FOR THE WORK IS OVER TOO (0205): sending or paying an invoice never
-      // moves jobs.status, so without this the Lim "new power to garage" win asked for a day
-      // forever. A deposit or progress draw is not that: the work is still ahead, so it still nags.
-      if (a.job_id && finishedBilledJobs.has(String(a.job_id))) continue; // billed for the work = done (0205)
+      // A held job waits with its own day and reason (NY-feeders: holds quiet the nudges).
+      if (job?.status === "on_hold") continue;
+      // SETTLED (quoteSettled, the one rule): an invoice names it, its job is billed for the work
+      // since it was won (a deposit or progress draw is not that: the work is still ahead, so it
+      // still nags), its job is complete, cancelled or invoiced, or a revision replaced it. Sending
+      // or paying an invoice never moves jobs.status, so without the bill test a customer's "new power
+      // to garage" win asked for a day forever (0205).
+      if (settledOf(a).settled) continue;
       if (a.job_id) wonJobIds.add(String(a.job_id));
       const who = one(a.customers as any)?.name ?? null;
       items.push({
@@ -760,8 +821,12 @@ async function buildActionItems(ctx: {
         urgency: 2,
         done: false,
         href: a.job_id ? `/jobs/${a.job_id}` : `/quotes/${a.id}`,
-        affordances: a.job_id ? ["schedule", "open"] : AFFORDANCES.quote_accepted,
+        // Pick A Day only when there is a job to put the day on; ⋯ Already Invoiced and Lost always
+        // (an estimate with no job is the one no rule can settle: a person says which it is).
+        affordances: a.job_id ? ["schedule", ...AFFORDANCES.quote_accepted] : AFFORDANCES.quote_accepted,
         targetId: a.job_id ?? null,
+        alreadyInvoiced: { kind: "quote", id: String(a.id) },
+        dated: "Accepted",
       });
     }
     // THE PILE COUNTS THE WINS READ HERE, never "N+" off the read's exact count: that count is every
@@ -966,6 +1031,8 @@ async function buildActionItems(ctx: {
     for (const q of [...((quoteR.data ?? []) as any[]), ...((quoteR.later?.data ?? []) as any[])]) {
       if (seenQuotes.has(String(q.id))) continue;
       seenQuotes.add(String(q.id));
+      // Won and billed, closed, or replaced: nothing is waiting on an answer (quoteSettled).
+      if (settledOf(q).settled) continue;
       const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
       const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
       const quiet = daysOut >= QUOTE_QUIET_DAYS;
@@ -1000,9 +1067,10 @@ async function buildActionItems(ctx: {
         urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
         done: false,
         href: `/quotes/${q.id}`,
-        // Still Waiting needs the follow-up day's column (0366); without it, only Lost.
+        // Still Waiting needs the follow-up day's column (0366); without it, Won It and Lost.
         affordances: followUpReady ? AFFORDANCES.quote_awaiting : AFFORDANCES.quote_awaiting.filter((v) => v !== "snooze"),
         amount: Number(q.total ?? 0),
+        dated: "Sent",
       });
     }
     counts.no_answer_yet = codeCount(quoteR);
@@ -1229,9 +1297,9 @@ async function buildActionItems(ctx: {
   //    the customer, the total and the number of lines (lane 4's Send sheet). Dropped only when its
   //    job is finished, cancelled or billed: then there is nothing left to estimate.
   for (const q of (draftQuoteR.data ?? []) as any[]) {
-    const job = one(q.jobs as any) as { status?: string | null } | null;
-    if (job?.status === "complete" || job?.status === "invoiced" || job?.status === "cancelled") continue;
-    if (q.job_id && billedJobs.has(q.job_id)) continue;
+    // Its job finished, cancelled, invoiced or billed since it was started, an invoice naming it, a
+    // revision replacing it: nothing left to estimate (quoteSettled, the one rule).
+    if (settledOf(q).settled) continue;
     const who = one((q as any).customer_name_snapshot)?.name ?? one((q as any).inquiries)?.name ?? null;
     const lines = one(q.quote_line_items as any) as { count?: number } | null;
     items.push({
@@ -1246,6 +1314,7 @@ async function buildActionItems(ctx: {
       href: `/quotes/${q.id}`,
       affordances: AFFORDANCES.quote_draft,
       amount: Number(q.total ?? 0),
+      dated: "Started",
       send: {
         kind: "quote",
         id: String(q.id),
@@ -1263,20 +1332,28 @@ async function buildActionItems(ctx: {
   // it (a legal clock).
   for (const cont of (conR.data ?? []) as any[]) {
     const job = one(cont.jobs as any);
+    // A job that is over, or billed for the work since the contract went out, has nothing left to
+    // sign for (the same one rule as the estimates: quoteSettled, read from the contract's own day).
+    if (
+      settledOf({ id: `contract-${cont.id}`, status: "sent", created_at: cont.created_at ?? null, job_id: cont.job_id, jobs: cont.jobs }).settled
+    ) continue;
     items.push({
       id: cont.id,
       kind: "contract_unsigned",
       title: cont.contract_number ? `Contract ${cont.contract_number}` : "A contract",
-      subtitle: job ? jobWords(job) : "Awaiting signature",
+      subtitle: [job ? jobWords(job) : "Awaiting signature", one(cont.customers as any)?.name ?? null].filter(Boolean).join(" · "),
       who: null,
-      when: null,
+      // The day it went out, said as a date ("Sent Jun 12"), never hidden.
+      when: cont.created_at ?? null,
       urgency: 1,
       done: false,
       href: `/jobs/${cont.job_id}?tab=invoices`,
       affordances: AFFORDANCES.contract_unsigned,
+      dated: "Sent",
     });
   }
-  counts.contracts_not_signed = sqlCount(conR);
+  // Rows dropped in code (settledOf): the read's count includes settled ones, so it may only say "N+".
+  counts.contracts_not_signed = codeCount(conR);
 
   // ── Lien deadlines coming due or past — only the pressing one per job. Never quieted by a hold.
   for (const l of (lienR.data ?? []) as any[]) {

@@ -34,22 +34,20 @@ vi.mock("@/lib/staff-guard", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
-vi.mock("@/lib/anthropic", () => ({
-  DEFAULT_MODEL: "model-test",
-  getAnthropic: () => ({
-    messages: {
-      // THE SECOND ARGUMENT IS KEPT TOO: a read's own timeout is what stops the platform ending it.
-      create: async (args: unknown, options?: unknown) => {
-        state.calls.push(Object.assign({ options }, args));
-        const bang = state.throwOn?.(state.calls.length);
-        if (bang) throw bang;
-        const next = state.answers.shift();
-        if (!next) throw new Error("the test queued no answer for this call");
-        return next;
-      },
-    },
-  }),
-}));
+vi.mock("@/lib/anthropic", () => {
+  // THE SECOND ARGUMENT IS KEPT TOO: a read's own timeout is what stops the platform ending it.
+  // ONE fake behind both surfaces: aiCreate rides client.beta.messages when the request carries the
+  // fallbacks beta (the big model's careful look does), client.messages otherwise (the cheap look).
+  const create = async (args: unknown, options?: unknown) => {
+    state.calls.push(Object.assign({ options }, args));
+    const bang = state.throwOn?.(state.calls.length);
+    if (bang) throw bang;
+    const next = state.answers.shift();
+    if (!next) throw new Error("the test queued no answer for this call");
+    return next;
+  };
+  return { DEFAULT_MODEL: "model-test", getAnthropic: () => ({ messages: { create }, beta: { messages: { create } } }) };
+});
 // The real `modelFor` stays (the choice of model is part of what this builds); the ledger and the
 // ceiling are the two that would reach a real database.
 vi.mock("@/lib/ai-cost", async (orig) => ({
@@ -61,7 +59,9 @@ vi.mock("@/lib/ai-cost", async (orig) => ({
 }));
 
 import { readStatementScan } from "./statement-scan-actions";
-import { SCAN_MORE_CALLS, SCAN_READ_MS } from "@/lib/statement-scan";
+import { SCAN_MAX_TOKENS, SCAN_MORE_CALLS, SCAN_READ_MS } from "@/lib/statement-scan";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refusalWords } from "@/lib/ai-refusal";
 
 type Row = Record<string, any>;
 let db: Record<string, Row[]>;
@@ -190,8 +190,16 @@ describe("a scanned bank statement becomes the one bank card, and nothing else",
     await drop();
     expect(state.calls).toHaveLength(2);
     // Reading forty money lines off a picture is not a classify job, and the budget says so.
-    expect(state.calls[0].max_tokens).toBeLessThan(4000); // a small cap, with room for the 5.5 line to think (cn-v1128)
+    // The table's rows (ai-effort): the cheap look's small cap and no thinking field; the careful
+    // look's 16,000, thinking, and the big model's fallbacks.
+    expect(state.calls[0].max_tokens).toBe(aiRequestFor("statement-scan-kind").max_tokens);
+    expect(state.calls[0]).not.toHaveProperty("thinking");
+    expect(state.calls[0]).not.toHaveProperty("betas");
+    expect(state.calls[0].output_config.format).toMatchObject({ type: "json_schema" });
+    expect(state.calls[1].max_tokens).toBe(aiRequestFor("statement-scan", { maxTokens: SCAN_MAX_TOKENS }).max_tokens);
     expect(state.calls[1].max_tokens).toBeGreaterThanOrEqual(16_000);
+    expect(state.calls[1].thinking).toEqual({ type: "adaptive" });
+    expect(state.calls[1].fallbacks).toBe("default");
     expect(state.calls[0].model).not.toBe(state.calls[1].model);
     // The pages themselves go up, as the document block that reads his handwriting today.
     expect(state.calls[1].messages[0].content[0]).toMatchObject({ type: "document", source: { media_type: "application/pdf" } });
@@ -606,5 +614,22 @@ describe("nothing is read twice, and nothing is read for free", () => {
     expect(got.ok).toBe(false);
     expect(got.error).toContain("isn't a PDF inside");
     expect(state.calls).toEqual([]);
+  });
+});
+
+describe("a refusal is said as one, at either look (cn-v1142)", () => {
+  it("the cheap look declines: the one sentence, no careful look, nothing written", async () => {
+    state.answers = [{ model: "model-test", stop_reason: "refusal", usage: { input_tokens: 2000, output_tokens: 0 }, content: [] }];
+    const got = await drop();
+    expect(got).toMatchObject({ ok: false, error: refusalWords() });
+    expect(state.calls).toHaveLength(1);
+    expect(items()).toHaveLength(0);
+  });
+
+  it("the careful look declines mid-answer: the partial is discarded, nothing written", async () => {
+    state.answers = [isBank(), { ...answer(GOOD), stop_reason: "refusal" }];
+    const got = await drop();
+    expect(got).toMatchObject({ ok: false, error: refusalWords() });
+    expect(items()).toHaveLength(0);
   });
 });

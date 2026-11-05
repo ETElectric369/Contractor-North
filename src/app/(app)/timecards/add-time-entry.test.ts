@@ -111,7 +111,7 @@ describe("six fields, top to bottom, and nothing the shift's editor already carr
     expect(closed).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>(?:(?!<\/button>).)*Add Time Entry<\/button>/);
     const open = form({ jobCodesEnabled: true });
     for (const id of ["ate-who", "ate-job", "ate-day", "ate-start", "ate-end", "ate-code"]) {
-      expect(open, id).toMatch(new RegExp(`<(select|input) class="[^"]*\\bh-11\\b[^"]*" id="${id}"`));
+      expect(open, id).toMatch(new RegExp(`<(select|input)[^>]* class="[^"]*\\bh-11\\b[^"]*"[^>]* id="${id}"`));
     }
     const s = src("./add-time-entry.tsx");
     expect(s).toContain('<NewJobInline onCreated={addNewJob} className="min-h-11" />');

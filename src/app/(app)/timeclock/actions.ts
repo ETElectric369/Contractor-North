@@ -28,6 +28,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
+import { usableFix } from "@/lib/timeclock/nearest-job";
+import { jobsNearFix } from "@/lib/timeclock/job-coordinates";
 import { switchMovesWholePunch } from "./switch-window";
 import {
   clampCloseAtMs,
@@ -111,23 +113,32 @@ function clashIdFrom(err: unknown): string | null {
  *      in flight (never punches into a completed/cancelled job);
  *   1. else the job the tech is ASSIGNED to that's scheduled TODAY (scheduled_start
  *      today, or a job_schedule_segments row covering the org-local day),
- *   2. else the org's ONLY in_progress job (unambiguous),
- *   3. else null — the entry lands job-less and the office attaches it later.
+ *   2. else WHERE HE IS STANDING (the owner, 2026-11-04: "location for clock-in defaults to the job
+ *      picker and doesn't necessarily ask location"): with a fix on the punch, exactly ONE of the
+ *      company's jobs (to be scheduled, scheduled, in progress) inside the fence radius
+ *      (geofence_radius_m) is the job, and the clock says "you're here"; SEVERAL within 2 km is no
+ *      pick at all — the sheet asks, with those first, nearest first (which-job-actions). The fix
+ *      must be sharp enough to say "here" (accuracy within the radius); the step has NEAR_DEADLINE_MS
+ *      and then the punch goes on without it;
+ *   3. else the org's ONLY in_progress job (unambiguous),
+ *   4. else null — the entry lands job-less and the office attaches it later.
  * Never guesses between candidates beyond "earliest scheduled first"; RLS scopes every
  * read to the caller's org. Best-effort: any failure resolves to null, never blocks the punch.
  *
  * TIERS 0 AND 1 ARE scheduledJobFor (./scheduled-job, Wave 2), asked about the org's today: the
  * same answer Add Time Entry starts its Job field on for any day. The one thing that moved is the
  * job's own window, read in company days now instead of the UTC date (an evening start no longer
- * covers the next morning). Tier 2 stays here: it is the clock's alone.
+ * covers the next morning). Tiers 2 and 3 stay here: they are the clock's alone.
  */
 async function resolveTechJobToday(
   supabase: SupabaseClient,
   uid: string,
+  fix: GeoPoint | null = null,
 ): Promise<{ jobId: string; from: AppPickSource } | null> {
   try {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-    const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+    const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+    const tz = orgSettings.timezone;
     const { todayStr } = todayBoundsInTz(tz);
 
     /**
@@ -146,6 +157,14 @@ async function resolveTechJobToday(
     if (scheduled.off) return null;
     if (scheduled.jobId) return { jobId: scheduled.jobId, from: "schedule" };
 
+    // TIER 2: where he is standing. Only with a usable fix; a step that errs or runs long is no answer.
+    const at = usableFix(fix);
+    if (at) {
+      const near = await nearestStep(supabase, uid, at, orgSettings.geofence_radius_m);
+      if (near.kind === "here") return { jobId: near.jobId, from: "here" };
+      if (near.kind === "ask") return null; // several nearby: the sheet asks, those first
+    }
+
     // No scheduled assignment — if the org has exactly ONE job in progress, that's the site. WHICH
     // TIER PICKED IT RIDES OUT WITH IT: this one has nothing to do with today's schedule, and a
     // sentence that said it did sent a man to look at a schedule with nothing on it (clock-told).
@@ -155,6 +174,45 @@ async function resolveTechJobToday(
     return null;
   } catch {
     return null; // the punch must never wait on / fail over job resolution
+  }
+}
+
+/** How long the nearest step may hold a punch (its first ask may geocode a job's address once). */
+const NEAR_DEADLINE_MS = 1500;
+
+/**
+ * THE NEAREST STEP'S ANSWER: one job inside the fence ("here"), several jobs within 2 km and not
+ * exactly one inside it ("ask"), or nothing to say ("none": today's rule goes on). A fix blurrier
+ * than the fence never claims "here" — it can still make the sheet ask.
+ */
+async function nearestStep(
+  supabase: SupabaseClient,
+  uid: string,
+  at: { lat: number; lng: number; accuracy?: number | null },
+  radiusM: number,
+): Promise<{ kind: "here"; jobId: string } | { kind: "ask" } | { kind: "none" }> {
+  const none = { kind: "none" } as const;
+  const step = (async () => {
+    const { data: me } = await supabase.from("profiles").select("org_id").eq("id", uid).maybeSingle();
+    const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
+    const ranked = await jobsNearFix(supabase, createServiceClient(), orgId, at, radiusM);
+    const inside = ranked.filter((r) => r.within);
+    const sharp = at.accuracy == null || at.accuracy <= radiusM;
+    if (inside.length === 1 && sharp) return { kind: "here", jobId: inside[0].id } as const;
+    if (ranked.length >= 2) return { kind: "ask" } as const;
+    return none;
+  })().catch((e) => {
+    reportError("timeclock.nearestStep", e);
+    return none;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<typeof none>((resolve) => {
+    timer = setTimeout(() => resolve(none), NEAR_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([step, late]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -342,8 +400,9 @@ async function clockInInner(
 
   // Simple-by-default flow: a job-less punch resolves its job server-side for EVERY
   // role now (techs never see a picker; staff only pick via "More options" — and Erik's
-  // own one-tap punch must resolve the same way): today's assignment → the only
-  // in_progress job → none (the office attaches it later).
+  // own one-tap punch must resolve the same way): today's assignment → the one job the
+  // punch's fix is inside the fence of → the only in_progress job → none (the office
+  // attaches it later; several jobs nearby also land on none, and the sheet asks).
   //
   // WHO CHOSE THE JOB IS A FACT ONLY THIS LINE KNOWS, so it is carried out in the answer rather
   // than guessed at later from job_id (Erik's ARR 56 morning, 2026-10-01). `appPick` is set for the
@@ -352,7 +411,7 @@ async function clockInInner(
   // WHICH tier picked, so the sentence names the source it actually used.
   let appPick: AppPickSource | null = null;
   if (!jobId) {
-    const picked = await resolveTechJobToday(supabase, user.id);
+    const picked = await resolveTechJobToday(supabase, user.id, input.gps);
     jobId = picked?.jobId ?? null;
     appPick = picked?.from ?? null;
   }

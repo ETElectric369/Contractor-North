@@ -171,6 +171,9 @@ export function NewReminderBox() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
+          name="task-words"
+          autoComplete="off"
+          enterKeyHint="done"
           placeholder={t("tk_addPlaceholder")}
           aria-label={t("tk_addAria")}
           className="h-11 min-w-0 flex-1"

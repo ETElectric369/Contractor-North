@@ -65,6 +65,9 @@ export function doneVisitItem(v: { id: string; job_id: string | null; title: str
     // (which carries Pay now) when it has no job (Bill It).
     href: v.openInvoice ? `/billing/${v.openInvoice}` : v.job_id ? `/jobs/${v.job_id}?tab=invoices` : `/appointments/${v.id}`,
     affordances: AFFORDANCES.visit_unbilled,
+    // ⋯ Already Invoiced (2026-11-04): billed on an invoice the app can't tie to it. Not on a visit
+    // already billed and waiting on the money: its bill is known.
+    ...(v.openInvoice ? {} : { alreadyInvoiced: { kind: "visit" as const, id: v.id } }),
   };
 }
 
@@ -81,6 +84,7 @@ export function doneJobItem(j: { id: string; job_number: string | null; name: st
     done: false,
     href: `/jobs/${j.id}?tab=invoices`,
     affordances: AFFORDANCES.visit_unbilled,
+    alreadyInvoiced: { kind: "job", id: j.id },
   };
 }
 
@@ -135,6 +139,8 @@ export function legacyDoneItems(input: {
   doneJobs: readonly any[];
   settled: readonly { id: string; appointment_id: string | null; amount_paid: number | string | null }[];
   billedJobs: ReadonlySet<string>;
+  /** 0403's rule, in code: jobs one of whose estimates a live, non-draft invoice names. */
+  quoteBilledJobs?: ReadonlySet<string>;
   seen: DoneSeen;
 }): Item[] {
   const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
@@ -148,16 +154,27 @@ export function legacyDoneItems(input: {
   const out: Item[] = [];
   for (const a of input.doneWork) {
     if (settled.has(String(a.id))) continue;
-    if (a.job_id && input.billedJobs.has(String(a.job_id))) continue;
+    if (a.job_id && doneJobBilled(String(a.job_id), input)) continue;
+    // 0403: a visit on a job of the retired status `invoiced` is billed.
+    if (one(a.jobs as any)?.status === "invoiced") continue;
     const who = one(a.customers as any)?.name ?? one(a.inquiries as any)?.name ?? null;
     const openInvoice = billedUnpaid.get(String(a.id)) ?? null;
     if (openInvoice && input.seen.overdueEmitted.has(openInvoice)) continue;
     out.push(doneVisitItem({ id: String(a.id), job_id: a.job_id ? String(a.job_id) : null, title: a.title ?? null, who, at: a.starts_at ?? null, openInvoice }));
   }
   for (const j of input.doneJobs) {
-    if (input.billedJobs.has(String(j.id))) continue; // any real (non-draft, non-void) invoice settles it
+    if (doneJobBilled(String(j.id), input)) continue; // any real (non-draft, non-void) invoice settles it, or one naming its estimate (0403)
     if (input.seen.draftOnNowJobs.has(String(j.id))) continue;
     out.push(doneJobItem({ id: String(j.id), job_number: j.job_number ?? null, name: j.name ?? null, customer: one(j.customers as any)?.name ?? null, at: j.updated_at ?? null }));
   }
   return out;
+}
+
+/**
+ * IS THIS JOB BILLED? (0371 + 0403, the code side kept in step with public.needs_you_done_not_billed):
+ * a real (not draft, not void) invoice on the job, or one that NAMES one of the job's estimates
+ * (invoices.quote_id) wherever it was put — a job billed on another job's invoice.
+ */
+export function doneJobBilled(jobId: string, input: { billedJobs: ReadonlySet<string>; quoteBilledJobs?: ReadonlySet<string> }): boolean {
+  return input.billedJobs.has(jobId) || !!input.quoteBilledJobs?.has(jobId);
 }

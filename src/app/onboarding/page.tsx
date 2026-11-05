@@ -111,7 +111,7 @@ export default async function OnboardingPage({
           <form action={createOrganization} className="space-y-4">
             <div>
               <Label htmlFor="name">Company name</Label>
-              <Input
+              <Input autoComplete="organization"
                 id="name"
                 name="name"
                 required

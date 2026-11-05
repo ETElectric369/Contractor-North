@@ -178,7 +178,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
           {mode === "why" ? (
             <div className="space-y-2">
               {/* THE WHY ALONE: its day is kept, so no day chips are offered that would do nothing. */}
-              <input
+              <input autoComplete="off"
                 autoFocus
                 value={why}
                 onChange={(e) => setWhy(e.target.value)}

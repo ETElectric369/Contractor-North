@@ -144,8 +144,16 @@ describe("the mappings that matter", () => {
     expect(map("job_to_schedule", "dismiss", "job-1")).toEqual({ name: "job.setStatus", input: { id: "job-1", status: "cancelled" } });
   });
 
+  it("the 2026-11-04 doors: Won It, Lost on a win, Signed On Paper (each a person's tap behind a confirm)", () => {
+    expect(map("quote_awaiting", "do", "quote-1")).toEqual({ name: "quote.setStatus", input: { id: "quote-1", status: "accepted" } });
+    expect(map("quote_accepted", "dismiss", "quote-1")).toEqual({ name: "quote.setStatus", input: { id: "quote-1", status: "declined" } });
+    expect(map("contract_unsigned", "do", "contract-1")).toEqual({ name: "contract.recordPaperSignature", input: { id: "contract-1" } });
+    // Signed On Paper never ends a contract any other way.
+    for (const verb of ["dismiss", "assign"] as Affordance[]) expect(map("contract_unsigned", verb, "x")).toBeNull();
+  });
+
   it("an open-only kind sends nothing", () => {
-    for (const kind of ["invoice_overdue", "lien_deadline", "contract_unsigned", "time_stray", "stock_short", "supplier_paper", "supplier_pay", "receipt_unbilled"] as ActionKind[])
+    for (const kind of ["invoice_overdue", "lien_deadline", "time_stray", "stock_short", "supplier_paper", "supplier_pay", "receipt_unbilled"] as ActionKind[])
       for (const verb of ["do", "dismiss", "assign"] as Affordance[]) expect(map(kind, verb, "x"), `${kind} ${verb}`).toBeNull();
   });
 });

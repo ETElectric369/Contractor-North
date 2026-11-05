@@ -12,8 +12,8 @@ import { splitClock } from "@/lib/split-preview";
 import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
-import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
-import { armFence, disarmFence, fenceArmOptions, fenceReadiness, onFenceExit, shellMayReadLocation, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
+import { geoPermission, getPosition, shellMayReadLocation, watchPosition } from "@/lib/geo";
+import { armFence, disarmFence, fenceArmOptions, fenceReadiness, onFenceExit, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { trace } from "@/lib/nort/trace";
@@ -22,7 +22,7 @@ import type { GeoPoint } from "@/lib/types";
 /**
  * May the fence read the phone's location without a tap? Off the shell, the web rule (geo.ts: a live
  * grant, never a read in "prompt" — the installed PWA silently denies an off-gesture prompt and it can
- * persist). Inside the shell, the phone's own answer (native-geofence shellMayReadLocation): the app
+ * persist). Inside the shell, the phone's own answer (geo.ts shellMayReadLocation): the app
  * holds location permission itself, so a voice punch's fence can take the fix that adopts its site.
  */
 async function mayReadLocation(): Promise<boolean> {

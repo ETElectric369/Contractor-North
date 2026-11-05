@@ -259,10 +259,10 @@ export function Configurator({
 
         {step === 3 && (
           <div className="space-y-3">
-            <input className={field} style={ring} placeholder="Your name *" value={f.name} onChange={(e) => set("name", e.target.value)} />
+            <input autoComplete="name" className={field} style={ring} placeholder="Your name *" value={f.name} onChange={(e) => set("name", e.target.value)} />
             <div className="grid grid-cols-2 gap-3">
-              <input className={field} style={ring} placeholder="Phone" inputMode="tel" value={f.phone} onChange={(e) => set("phone", e.target.value)} />
-              <input className={field} style={ring} placeholder="Email" inputMode="email" value={f.email} onChange={(e) => set("email", e.target.value)} />
+              <input autoComplete="tel" className={field} style={ring} placeholder="Phone" inputMode="tel" value={f.phone} onChange={(e) => set("phone", e.target.value)} />
+              <input autoComplete="email" className={field} style={ring} placeholder="Email" inputMode="email" value={f.email} onChange={(e) => set("email", e.target.value)} />
             </div>
             <AddressAutocomplete
               placeholder="Job address"
@@ -311,7 +311,7 @@ function L({ label, children }: { label: string; children: React.ReactNode }) {
 
 function Num({ v, on, field, ring }: { v: number; on: (n: number) => void; field: string; ring: React.CSSProperties }) {
   return (
-    <input type="number" min={0} inputMode="numeric" className={field} style={ring}
+    <input autoComplete="off" type="number" min={0} inputMode="numeric" className={field} style={ring}
       value={v === 0 ? "" : v} placeholder="0" onChange={(e) => on(Math.max(0, Number(e.target.value) || 0))} />
   );
 }

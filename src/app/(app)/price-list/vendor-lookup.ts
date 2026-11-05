@@ -1,7 +1,11 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { modelFor, recordAiUsage, type TokenUsage } from "@/lib/ai-cost";
+import { fallbacksFor, modelFor, recordAiUsage, type TokenUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { refused } from "@/lib/ai-refusal";
+import { replayContent } from "@/lib/nort/replay";
 import { LOOKUP_MAX_SEARCHES, citedTextsIn, guardAnswer, sourcesIn, type LookupAnswer, type LookupPlace } from "./vendor-lookup-math";
 
 /**
@@ -41,15 +45,8 @@ const SYSTEM = [
   "Leave out any key you have no sourced value for.",
 ].join("\n");
 
-type WebSearchTool = {
-  type: "web_search_20250305";
-  name: "web_search";
-  max_uses: number;
-  user_location?: { type: "approximate"; city: string; region?: string; country: "US" };
-};
-
 /** The web search tool as this lookup sends it: 3 searches at most, located near the company. */
-export function webSearchTool(place: LookupPlace | null, maxUses = LOOKUP_MAX_SEARCHES): WebSearchTool {
+export function webSearchTool(place: LookupPlace | null, maxUses = LOOKUP_MAX_SEARCHES): Anthropic.WebSearchTool20250305 {
   return {
     type: "web_search_20250305",
     name: "web_search",
@@ -94,6 +91,7 @@ export async function lookUpVendor(args: {
   const blocks: unknown[] = [];
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: ask(name, place, isPerson) }];
   let finished = false;
+  let declined = false;
   const deadline = Date.now() + LOOKUP_BUDGET_MS;
   try {
     // The first call, then at most two resumptions of a paused turn, all inside the budget.
@@ -101,21 +99,30 @@ export async function lookUpVendor(args: {
       const left = LOOKUP_MAX_SEARCHES - sum.searches;
       const timeLeft = deadline - Date.now();
       if (timeLeft < 3_000) break;
-      const resp = await client.messages.create(
+      // The table's row (ai-effort "vendor-lookup") and the middle model's fallbacks. The answer is
+      // read by hand, not by structured outputs: web search answers carry citations, and the docs
+      // say structured outputs are incompatible with citations (a 400).
+      const resp = await aiCreate(
+        client,
         {
           model,
-          max_tokens: 2000,
+          ...fallbacksFor(model),
+          ...aiRequestFor(LOOKUP_SURFACE),
           system: SYSTEM,
-          // The SDK in this repo predates server tools' types (chat/route.ts casts the same way).
-          tools: [webSearchTool(place, left)] as unknown as Anthropic.Tool[],
+          tools: [webSearchTool(place, left)],
           messages,
         },
         // No silent retries past the budget: a name that times out is "failed", with Look Up Again.
         { timeout: timeLeft, maxRetries: 0 },
       );
       calls++;
-      usedModel = (resp as { model?: string }).model || model;
+      usedModel = resp.model || model;
       addUsage(sum, resp.usage as unknown as TokenUsage);
+      // A REFUSAL, BEFORE ITS CONTENT IS KEPT: a partial is never read as an answer.
+      if (refused(resp)) {
+        declined = true;
+        break;
+      }
       blocks.push(...(resp.content as unknown[]));
       if ((resp.stop_reason as string) !== "pause_turn") {
         finished = true;
@@ -123,7 +130,8 @@ export async function lookUpVendor(args: {
       }
       // Paused mid-search. Resume only while searches are left: a fourth search is never bought.
       if (sum.searches >= LOOKUP_MAX_SEARCHES) break;
-      messages.push({ role: "assistant", content: resp.content });
+      // The turn as the replay rule keeps it (lib/nort/replay): a fallback's declined work is left out.
+      messages.push({ role: "assistant", content: replayContent(resp.content) });
     }
   } catch (e) {
     await meter();
@@ -147,6 +155,7 @@ export async function lookUpVendor(args: {
     });
   }
 
+  if (declined) return { found: false, why: "refused", dropped: 0, near, searches: sum.searches };
   const text = blocks
     .filter((b): b is { type: "text"; text: string } => (b as { type?: string })?.type === "text")
     .map((b) => b.text)

@@ -1,6 +1,6 @@
 import { buyMaterialsTitle } from "@/lib/materials-checklist";
 import { INSPECTION_DOOR } from "./permit-inspection-items";
-import type { ActionItem, Affordance } from "./types";
+import type { ActionItem, Affordance, AlreadyInvoicedTarget } from "./types";
 
 /**
  * ONE NAMED BUTTON PER ROW, AND ⋯ (Wave 1, W1-13).
@@ -38,6 +38,8 @@ export type RowAct =
   | { type: "confirm"; verb: Affordance; title: string; body: string; button: string; keep: string }
   /** Lane 4's Send sheet: who, how much, how many lines, then Email It or Text It. */
   | { type: "send" }
+  /** The Already Invoiced sheet: pick the customer's invoice that billed it, and it is tied (no verb). */
+  | { type: "alreadyInvoiced"; target: AlreadyInvoicedTarget }
   /** A pile opens in place (or its list page, when it can't show every row here). */
   | { type: "unfold" };
 
@@ -75,6 +77,9 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
   // A "Couldn't Check" line only opens the page that can say what it couldn't.
   if (item.id.endsWith("-unread")) return none;
 
+  // ALREADY INVOICED (2026-11-04): the bill exists, the app can't see it tie to this work. Staff only.
+  const invoiced: RowDoor | null =
+    ctx.isStaff && item.alreadyInvoiced ? { label: "Already Invoiced", act: { type: "alreadyInvoiced", target: item.alreadyInvoiced } } : null;
   const snooze = (askWhy: boolean): RowDoor | null =>
     has(item, "snooze") ? { label: "Snooze", act: { type: "comeBack", verb: "snooze", askWhy, button: "Snooze" } } : null;
   const endlessSnooze = item.waitKey ? snooze(true) : null;
@@ -95,7 +100,9 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       return {
         primary: open(billed ? "Get Paid" : "Bill It", item.href),
         also: null,
-        more: has(item, "dismiss")
+        more: [
+          ...(invoiced ? [invoiced] : []),
+          ...(has(item, "dismiss")
           ? [
               ending(
                 "dismiss",
@@ -105,7 +112,8 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
                 onJob ? "Cancel The Job" : "Cancel The Visit",
               ),
             ]
-          : [],
+          : []),
+        ],
       };
     }
     case "quote_draft":
@@ -128,14 +136,33 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       return {
         primary: has(item, "snooze") ? { label: "Still Waiting", act: { type: "comeBack", verb: "snooze", askWhy: false, button: "Still Waiting" } } : null,
         also: null,
-        more: has(item, "dismiss")
-          ? [ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The estimate is marked declined; you can change it back on its own page.`, "Mark It Lost")]
-          : [],
+        more: [
+          has(item, "do")
+            ? ending(
+                "do",
+                "Won It",
+                "Won It?",
+                `Marks ${what} accepted: the day it was won is stamped and its job is made or caught up. Nothing is sent to anyone, and you can change it back on the estimate.`,
+                "Mark It Won",
+              )
+            : null,
+          invoiced,
+          has(item, "dismiss")
+            ? ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The estimate is marked declined; you can change it back on its own page.`, "Mark It Lost")
+            : null,
+        ].filter((d): d is RowDoor => !!d),
       };
     case "quote_accepted":
       return {
-        ...none,
         primary: has(item, "schedule") && item.targetId ? { label: "Pick A Day", act: { type: "pickDay", verb: "schedule" } } : open("Pick A Day", item.href),
+        also: null,
+        // The bill exists (tie it), or the work went away after all (Lost marks the estimate declined).
+        more: [
+          invoiced,
+          has(item, "dismiss")
+            ? ending("dismiss", "Lost", "Lost After All?", `Marks ${what} declined, so it stops asking for a day. Its job is left as it is, and you can change the estimate back on its own page.`, "Mark It Lost")
+            : null,
+        ].filter((d): d is RowDoor => !!d),
       };
     case "inquiry": {
       const call: RowDoor | null = item.phone ? { label: leadsOn ? "Call" : "Call Back", act: { type: "call", tel: item.phone } } : null;
@@ -172,7 +199,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
         primary: open("Write It Up", item.href),
         also: null,
         // Open The Visit (cn-v1071): the row's id IS the visit. Every door here used to lead to a
-        // NEW estimate, so a visit that had already become a job by another road (Lim: written up
+        // NEW estimate, so a visit that had already become a job by another road (one customer's: written up
         // without the backlink) could only be called Lost; its page has the attach door (won).
         more: [
           open("Open The Visit", `/appointments/${item.id}`),
@@ -251,7 +278,21 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
     case "lien_deadline":
       return { ...none, primary: open("See Deadline", item.href) };
     case "contract_unsigned":
-      return { ...none, primary: open("See Contract", item.href) };
+      return {
+        primary: open("See Contract", item.href),
+        also: null,
+        more: has(item, "do")
+          ? [
+              ending(
+                "do",
+                "Signed On Paper",
+                "Signed On Paper?",
+                `Records ${what} signed on paper by its customer today, so it stops asking. The wording they signed is frozen as it was sent. To name someone else or another day, use Signed On Paper on the job's contract.`,
+                "Record It Signed",
+              ),
+            ]
+          : [],
+      };
     default:
       return none;
   }

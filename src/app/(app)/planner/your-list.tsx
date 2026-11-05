@@ -209,6 +209,9 @@ export function AddReminderLine({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
+          name="reminder-words"
+          autoComplete="off"
+          enterKeyHint="done"
           placeholder={t("md_addPlaceholder")}
           aria-label={t("md_addAria")}
           className="h-11 min-w-0 flex-1"

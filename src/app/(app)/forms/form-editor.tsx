@@ -176,7 +176,7 @@ export function FormEditor({
         )}
         <div>
           <Label htmlFor="form-name">Form name *</Label>
-          <Input
+          <Input autoComplete="off"
             id="form-name"
             value={name}
             onChange={(e) => setName(e.target.value)}

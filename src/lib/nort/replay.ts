@@ -4,103 +4,97 @@ import Anthropic from "@anthropic-ai/sdk";
  * REPLAYING AN ASSISTANT TURN — what Nort's tool loop sends back to the API after each round.
  *
  * The chat route streams every round and pushes `finalMessage().content` back into the
- * conversation so the next round can see its own tool calls. That snapshot is built by the SDK's
- * stream accumulator, and @anthropic-ai/sdk 0.36.3 predates extended thinking: its accumulator
- * handles text_delta, citations_delta and input_json_delta (for `tool_use` only) and silently
- * ignores everything else. So a `thinking` block is left exactly as its content_block_start
- * announced it — `thinking: ""`, `signature: ""` — with the reasoning and the signature that
- * followed in thinking_delta / signature_delta thrown away. Replaying that block is a 400:
+ * conversation so the next round can see its own tool calls. Since @anthropic-ai/sdk 1.5.0 (the
+ * cn-v1142 bump) the SDK's own stream accumulator carries every block whole — a thinking block's
+ * text and signature, a web search's input, the closing usage with its search count — which
+ * replay.test.ts proves against a fake wire (GATE 2). The SDK before it (0.36.3) predated
+ * extended thinking and left a thinking block exactly as its content_block_start announced it,
+ * `thinking: ""`, `signature: ""`; replaying that was a 400:
  *
  *   messages.3.content.0.thinking: each thinking block must contain thinking
  *
- * (error_events, 2026-09-23 23:16 PT: Erik asked Nort to move the Schaefer job, round one looked
- * the job up, round two died, and all he got was "Something went wrong on my end".)
+ * (error_events, 2026-09-23 23:16 PT: Erik asked Nort to move a job, round one looked the job up,
+ * round two died, and all he got was "Something went wrong on my end".) This module used to
+ * record the raw stream events itself and rebuild each block from the wire; that capture went
+ * with the bump. What stays is THE RULEBOOK for what may be sent back, applied to the SDK's
+ * snapshot and proven on the wire:
  *
- * The rule from the API docs: pass a thinking block back EXACTLY as received — text and
- * signature, even when the text is empty — and never edit or rebuild one. This module rebuilds
- * nothing: it records the raw stream events itself and reassembles each block from what the wire
- * actually carried, independent of what the SDK's accumulator did with it. A thinking block whose
- * signature never arrived cannot be proven intact, so it is dropped rather than sent broken.
- * `server_tool_use` (web search) gets the same treatment for its input, which the old accumulator
- * also leaves at `{}`.
+ *   - a thinking block goes back EXACTLY as received, text and signature, even when the text is
+ *     empty — never edited, never rebuilt. One whose signature never arrived cannot be proven
+ *     intact and is left out rather than sent broken;
+ *   - redacted_thinking goes back whole (only a missing payload is unsafe);
+ *   - AFTER A SERVER-SIDE FALLBACK (ai-cost fallbacksFor: a declined request re-run on another
+ *     model mid-turn, marked by a `fallback` block) the API's echo rule applies to the declined
+ *     model's blocks BEFORE the turn's last fallback block: its thinking, redacted thinking, tool
+ *     calls, unfinished server-tool calls and anything unrecognised are left out; its text and
+ *     its finished server-tool work (a server_tool_use with its result) echo normally; the
+ *     fallback block stays where it was (moving it is rejected, dropping it is allowed — kept);
+ *     everything after the boundary follows the normal rules. A tool_use left out is NEVER
+ *     answered — the route runs toolUsesToAnswer(content), not every tool_use it can see.
  *
  * Model changes are not a concern here: the thinking blocks only ever live inside ONE request's
- * tool loop (the client sends plain text history), and one request runs on one model.
+ * tool loop (the client sends plain text history), and one request runs on one model — or, after
+ * a fallback, on the model the API chose, which read the blocks it kept.
  */
 
 type Json = Record<string, unknown>;
 
-/** The stream events this module reads, typed loosely: the SDK's own types know no thinking. */
-type RawStreamEvent = {
-  type?: string;
-  index?: number;
-  content_block?: Json;
-  delta?: { type?: string; thinking?: string; signature?: string; partial_json?: string };
-};
+const asBlock = (raw: unknown): Json | null => (raw && typeof raw === "object" ? (raw as Json) : null);
 
-type BlockParts = { start: Json; thinking: string; signature: string; json: string };
+/** The index of the turn's last `fallback` block, or -1. Everything before it is the declined model's. */
+function fallbackBoundary(content: readonly unknown[]): number {
+  return content.findLastIndex((b) => asBlock(b)?.type === "fallback");
+}
 
-export type ReplayCapture = {
-  /** Wire this to `stream.on("streamEvent", …)`. */
-  onEvent: (event: unknown) => void;
-  /** The content to push back as the assistant turn: every block replay-valid, or left out. */
-  replayContent: (content: readonly unknown[]) => Anthropic.ContentBlockParam[];
-};
+const isServerToolResult = (b: Json) => typeof b.type === "string" && b.type.endsWith("_tool_result") && typeof b.tool_use_id === "string";
 
-export function createReplayCapture(): ReplayCapture {
-  const parts = new Map<number, BlockParts>();
-
-  const onEvent = (event: unknown) => {
-    const ev = event as RawStreamEvent | null;
-    if (!ev || typeof ev.index !== "number") return;
-    if (ev.type === "content_block_start" && ev.content_block) {
-      // A copy: the SDK pushes this same object into its snapshot and may mutate it.
-      parts.set(ev.index, { start: { ...ev.content_block }, thinking: "", signature: "", json: "" });
+/**
+ * The content to push back as the assistant turn: every block replay-valid, or left out. Pure:
+ * it reads the SDK's final snapshot and builds nothing — a kept block is the block as received.
+ */
+export function replayContent(content: readonly unknown[]): Anthropic.ContentBlockParam[] {
+  const boundary = fallbackBoundary(content);
+  // Server-tool work that finished: the ids of server_tool_use blocks, and of the results here.
+  const uses = new Set<string>();
+  const answered = new Set<string>();
+  for (const raw of content) {
+    const b = asBlock(raw);
+    if (!b) continue;
+    if (b.type === "server_tool_use" && typeof b.id === "string") uses.add(b.id);
+    else if (isServerToolResult(b)) answered.add(b.tool_use_id as string);
+  }
+  const out: unknown[] = [];
+  content.forEach((raw, i) => {
+    const block = asBlock(raw);
+    if (!block) return;
+    const type = block.type;
+    if (i < boundary) {
+      // The declined model's work: its words, its finished server-tool work, the marker itself.
+      if (type === "text" || type === "fallback") out.push(block);
+      else if (type === "server_tool_use" && typeof block.id === "string" && answered.has(block.id)) out.push(block);
+      else if (isServerToolResult(block) && uses.has(block.tool_use_id as string)) out.push(block);
       return;
     }
-    if (ev.type !== "content_block_delta" || !ev.delta) return;
-    const p = parts.get(ev.index);
-    if (!p) return;
-    if (ev.delta.type === "thinking_delta" && typeof ev.delta.thinking === "string") p.thinking += ev.delta.thinking;
-    else if (ev.delta.type === "signature_delta" && typeof ev.delta.signature === "string") p.signature += ev.delta.signature;
-    else if (ev.delta.type === "input_json_delta" && typeof ev.delta.partial_json === "string") p.json += ev.delta.partial_json;
-  };
+    if (type === "thinking") {
+      if (typeof block.signature === "string" && block.signature) out.push(block);
+      return;
+    }
+    if (type === "redacted_thinking") {
+      if (typeof block.data === "string" && block.data) out.push(block);
+      return;
+    }
+    out.push(block);
+  });
+  return out as Anthropic.ContentBlockParam[];
+}
 
-  const replayContent = (content: readonly unknown[]): Anthropic.ContentBlockParam[] => {
-    const out: unknown[] = [];
-    content.forEach((raw, i) => {
-      const block = raw as Json;
-      const p = parts.get(i);
-      if (block?.type === "thinking") {
-        // Reassembled from the wire: the start block's own text/signature (normally "") plus the
-        // deltas. The SDK's copy is ignored on purpose, so a future SDK that DOES accumulate
-        // cannot double the text.
-        const startThinking = typeof p?.start.thinking === "string" ? p.start.thinking : "";
-        const startSig = typeof p?.start.signature === "string" ? p.start.signature : "";
-        const thinking = p ? startThinking + p.thinking : typeof block.thinking === "string" ? block.thinking : "";
-        const signature = p ? startSig + p.signature : typeof block.signature === "string" ? block.signature : "";
-        if (signature) out.push({ type: "thinking", thinking, signature });
-        return;
-      }
-      if (block?.type === "redacted_thinking") {
-        // Arrives whole in content_block_start (no deltas); only a missing payload is unsafe.
-        if (typeof block.data === "string" && block.data) out.push({ type: "redacted_thinking", data: block.data });
-        return;
-      }
-      if (block?.type === "server_tool_use" && p?.json) {
-        try {
-          out.push({ ...block, input: JSON.parse(p.json) });
-          return;
-        } catch {
-          /* a truncated input: keep the SDK's copy as it stands */
-        }
-      }
-      out.push(block);
-    });
-    return out as Anthropic.ContentBlockParam[];
-  };
-
-  return { onEvent, replayContent };
+/**
+ * The tool calls the route must run and answer: exactly those the replay keeps. A tool_use the
+ * echo rule left out (the declined model's, before a fallback) has no place in the next request,
+ * and a tool_result for it would be a 400 of its own.
+ */
+export function toolUsesToAnswer(content: readonly unknown[]): Anthropic.ToolUseBlockParam[] {
+  return replayContent(content).filter((b): b is Anthropic.ToolUseBlockParam => b.type === "tool_use");
 }
 
 /** True for a block the API binds with a signature (thinking or redacted_thinking). */
@@ -144,32 +138,77 @@ export function isThinkingRefusal(e: unknown): boolean {
 }
 
 /**
- * The prompt-cache tail marker: strip every old marker (the API allows 4 breakpoints) and put
- * one on the last block of the last message. Never on a thinking block (the API refuses
- * cache_control there): the marker goes on the last block that can carry it. The tail is almost
- * always a user turn, but a pause_turn round leaves an assistant turn last. Mutates in place and
- * returns the same array.
+ * The prompt-cache message markers: strip every old marker, then put one on the TAIL (the last
+ * block of the last user or assistant message) and, when the conversation carries a
+ * mid-conversation system message (the chat's per-turn note: the clock, the app context), one on
+ * the turn that note follows — the last real user turn, which is the one point whose bytes are
+ * the same on the NEXT request, so the next turn reads the history from cache up to there. A
+ * system message itself is never marked (its text changes every minute: a marker on it is a pure
+ * write surcharge). With the chat's two system blocks marked that is at most FOUR breakpoints,
+ * the API's limit; on round one the tail IS that user turn, so it is three. Never on a thinking
+ * block (the API refuses cache_control there) and never on a fallback marker (an ignored audit
+ * block): the marker goes on the last block that can carry it. The tail is almost always a user
+ * turn, but a pause_turn round leaves an assistant turn last. Both markers are the default 5m
+ * TTL, so they sit after any 1h system marker as the ordering rule requires. Mutates in place
+ * and returns the same array.
  */
 export function markCacheTail(msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
   for (const m of msgs) {
     if (Array.isArray(m.content)) for (const b of m.content) delete (b as { cache_control?: unknown }).cache_control;
   }
-  const last = msgs[msgs.length - 1];
-  if (last) {
-    if (typeof last.content === "string") {
-      last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
-    } else if (Array.isArray(last.content) && last.content.length) {
-      const idx = last.content.findLastIndex((b) => !isThinkingBlock(b));
-      if (idx >= 0) (last.content[idx] as { cache_control?: unknown }).cache_control = { type: "ephemeral" };
+  const mark = (m: Anthropic.MessageParam | undefined) => {
+    if (!m || m.role === "system") return;
+    if (typeof m.content === "string") {
+      m.content = [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }];
+    } else if (Array.isArray(m.content) && m.content.length) {
+      const idx = m.content.findLastIndex((b) => !isThinkingBlock(b) && asBlock(b)?.type !== "fallback");
+      if (idx >= 0) (m.content[idx] as { cache_control?: unknown }).cache_control = { type: "ephemeral" };
     }
-  }
+  };
+  const tail = msgs.findLastIndex((m) => m.role !== "system");
+  if (tail >= 0) mark(msgs[tail]);
+  const note = msgs.findLastIndex((m) => m.role === "system");
+  if (note > 0 && note - 1 !== tail) mark(msgs[note - 1]);
   return msgs;
+}
+
+/**
+ * The models that take a `role: "system"` message inside `messages` (no beta header; the stable
+ * SDK types carry it, messages.d.ts SystemMessageParam). The skill's shared/prompt-caching.md
+ * § Mid-conversation system messages names them: Claude Opus 5, Opus 5.5, Opus 4.8, Fable 5,
+ * Fable 5.1, Mythos 5, Mythos 5.1 and Sonnet 5.5 — NOT Sonnet 5 (sources conflict; treat as
+ * unsupported) and not Haiku. Any other name (an env override naming an older or unknown model)
+ * gets the shape the chat had before: the per-turn note in the system array, the app context on
+ * the user's message. An unsupported model answers a 400, so the list is closed, not a pattern.
+ */
+export function acceptsSystemMessage(model: string): boolean {
+  const base = String(model ?? "").replace(/-\d{8}$/, "");
+  return /^claude-(opus-5|opus-5-5|opus-4-8|fable-5|fable-5-1|mythos-5|mythos-5-1|sonnet-5-5)$/.test(base);
+}
+
+/**
+ * The conversation window, trimmed in CHUNKS: at most `max` messages, and when the history runs
+ * past it the oldest messages go `chunk` at a time (the excess rounded UP to a whole chunk). A
+ * one-message slide moved the start of the history on every turn past the cap, so the cached
+ * prefix never matched twice; a chunk keeps the same start for `chunk / 2` turns (each turn adds
+ * a user and an assistant message). An even chunk keeps the history's first role in place.
+ *   20 → 20 · 21 → 17 · 22 → 18 · 24 → 20 · 25 → 17 · 30 → 18.
+ */
+export function windowMessages<T>(list: readonly T[], max = 20, chunk = 4): T[] {
+  const over = list.length - max;
+  if (over <= 0) return [...list];
+  return list.slice(Math.ceil(over / chunk) * chunk);
 }
 
 export type ReplayRoundOptions = {
   client: Anthropic;
-  /** The request minus `messages`, which always come from `convo` (through `prepare`). */
-  params: Omit<Anthropic.MessageStreamParams, "messages">;
+  /**
+   * The request minus `messages`, which always come from `convo` (through `prepare`). With
+   * `betas` and/or `fallbacks` on it (ai-cost fallbacksFor) the round goes through
+   * `client.beta.messages`, where the SDK types them and sends the header; otherwise the stable
+   * `client.messages`.
+   */
+  params: Omit<Anthropic.MessageStreamParams, "messages"> & { betas?: Anthropic.AnthropicBeta[]; fallbacks?: "default" };
   /** The conversation. Mutated: the replay-valid assistant turn is pushed onto it. */
   convo: Anthropic.MessageParam[];
   /** Runs on `convo` before every attempt (the route's cache-tail marker). */
@@ -182,10 +221,31 @@ export type ReplayRoundOptions = {
   report?: (e: unknown, info: { stripped: number; recovered: boolean; retryError?: unknown }) => void;
 };
 
+type ReplayBody = ReplayRoundOptions["params"] & { messages: Anthropic.MessageParam[] };
+type OpenTurn = { onText: (fn: (text: string) => void) => void; finalMessage: () => Promise<Anthropic.Message> };
+
 /**
- * ONE ROUND OF NORT'S TOOL LOOP, with its replay made safe: stream the request, record the raw
- * events, push the assistant turn back onto `convo` exactly as the wire carried it (see
- * createReplayCapture), and return the final message.
+ * The stream, on the surface the request needs. The closing usage (input tokens, cache counts,
+ * the web-search count a round ran up) rides on message_delta, and since 1.5.0 the SDK's own
+ * accumulator copies it onto the final message (replay.test.ts pins it) — nothing to merge here.
+ */
+function openTurn(client: Anthropic, body: ReplayBody): OpenTurn {
+  if (body.betas?.length || body.fallbacks) {
+    // The one shape the two surfaces disagree on: the stable types let output_config be null.
+    const { output_config, ...rest } = body;
+    const turn = client.beta.messages.stream({ ...rest, ...(output_config ? { output_config } : {}) });
+    // The beta message is the same wire shape with more block kinds typed; the route reads
+    // content, stop_reason, usage and model, which the two share.
+    return { onText: (fn) => void turn.on("text", fn), finalMessage: () => turn.finalMessage() as Promise<Anthropic.Message> };
+  }
+  const { betas: _betas, fallbacks: _fallbacks, ...stable } = body;
+  const turn = client.messages.stream(stable);
+  return { onText: (fn) => void turn.on("text", fn), finalMessage: () => turn.finalMessage() };
+}
+
+/**
+ * ONE ROUND OF NORT'S TOOL LOOP, with its replay made safe: stream the request, push the
+ * replay-valid assistant turn back onto `convo` (see replayContent), and return the final message.
  *
  * The one retry is for one failure: the API refused a replayed thinking block, which it does
  * before a single token streams. Then every thinking block is stripped from `convo` and the
@@ -194,55 +254,28 @@ export type ReplayRoundOptions = {
  * already reached the screen (it would say it twice), when no one is left to answer, or when
  * there was nothing to strip.
  */
-/**
- * THE CLOSING USAGE (vendor import, Phase 2 fix). The API reports a streamed message's usage twice:
- * once in message_start (before any server tool ran) and again, cumulatively, in message_delta at
- * the end. The pinned SDK (0.36) copies only output_tokens from the second, so a round that
- * searched the web came back with server_tool_use missing and the search results' input tokens
- * left out, and costOf metered those searches at $0. Every field the closing usage carries (input,
- * cache, server_tool_use) replaces the early one here; a field it leaves out or sends as null is kept.
- */
-export function mergeClosingUsage(final: Anthropic.Message, closing: Record<string, unknown> | null): void {
-  if (!closing || !final?.usage) return;
-  const usage = final.usage as unknown as Record<string, unknown>;
-  for (const k of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "server_tool_use"]) {
-    const v = closing[k];
-    if (v !== undefined && v !== null) usage[k] = v;
-  }
-}
-
 export async function runReplayRound(opts: ReplayRoundOptions): Promise<Anthropic.Message> {
   const { client, params, convo, onText } = opts;
   const prepare = opts.prepare ?? ((m: Anthropic.MessageParam[]) => m);
   let emitted = false;
   const attempt = async () => {
-    const capture = createReplayCapture();
-    const turn = client.messages.stream({ ...params, messages: prepare(convo) });
-    turn.on("text", (text) => {
+    const turn = openTurn(client, { ...params, messages: prepare(convo) });
+    turn.onText((text) => {
       if (text) emitted = true;
       onText(text);
     });
-    turn.on("streamEvent", capture.onEvent);
-    // The closing usage rides on message_delta, which this SDK copies only output_tokens from.
-    let closing: Record<string, unknown> | null = null;
-    turn.on("streamEvent", (ev) => {
-      const u = (ev as { type?: string; usage?: unknown }).type === "message_delta" ? (ev as { usage?: unknown }).usage : null;
-      if (u && typeof u === "object") closing = u as Record<string, unknown>;
-    });
-    const final = await turn.finalMessage();
-    mergeClosingUsage(final, closing);
-    return { final, capture };
+    return turn.finalMessage();
   };
 
-  let result: Awaited<ReturnType<typeof attempt>>;
+  let final: Anthropic.Message;
   try {
-    result = await attempt();
+    final = await attempt();
   } catch (e) {
     if (!isThinkingRefusal(e) || emitted || (opts.mayRetry && !opts.mayRetry())) throw e;
     const stripped = stripThinkingBlocks(convo);
     if (!stripped) throw e;
     try {
-      result = await attempt();
+      final = await attempt();
     } catch (retryError) {
       opts.report?.(e, { stripped, recovered: false, retryError });
       throw retryError;
@@ -251,9 +284,10 @@ export async function runReplayRound(opts: ReplayRoundOptions): Promise<Anthropi
   }
 
   // Replay-valid content only: thinking blocks exactly as the wire carried them (text AND
-  // signature), or left out when that can't be proven. An assistant turn with nothing left to
-  // replay is not pushed (an empty content array is its own 400).
-  const replay = result.capture.replayContent(result.final.content);
+  // signature), or left out when that can't be proven; the declined model's blocks left out after
+  // a fallback. An assistant turn with nothing left to replay is not pushed (an empty content
+  // array is its own 400).
+  const replay = replayContent(final.content);
   if (replay.length) convo.push({ role: "assistant", content: replay });
-  return result.final;
+  return final;
 }

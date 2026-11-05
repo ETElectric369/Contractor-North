@@ -137,7 +137,7 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
     order: "id",
     columns: [
       "id", "job_number", "customer_id", "inquiry_id", "name", "description", "notes", "status", "billing_type", "address", "unit", "city",
-      "state", "zip", "scheduled_start", "scheduled_end", "planned_minutes", "assigned_to", "code_template_id", "google_event_id",
+      "state", "zip", "geo_lat", "geo_lng", "geocoded_at", "scheduled_start", "scheduled_end", "planned_minutes", "assigned_to", "code_template_id", "google_event_id",
       "blocked_on", "blocked_since", "hold_reason", "hold_until", "hold_by", "report_back_at", "dismissed_task_keys", "created_by",
       "created_at", "updated_at",
     ],

@@ -43,6 +43,8 @@ export type JobChosenBy = "person" | "app";
  * WHICH RULE PUT THE JOB THERE — carried out with the pick, because the sentence NAMES the source
  * and the sources are not the same fact (Erik's own law: don't say a thing you didn't check).
  *   · "schedule"  the office's day row, or a job of his scheduled today (resolveTechJobToday 0/1);
+ *   · "here"      nothing scheduled, and the punch's own fix is inside the fence of exactly ONE job
+ *                 (lib/timeclock/nearest-job; the owner, 2026-11-04: the clock never asked where);
  *   · "only-job"  nothing scheduled at all — the org has exactly ONE job in progress (tier 2). On a
  *                 day with nothing on the schedule, "from today's schedule" sent a person to look at
  *                 a schedule with nothing on it, which makes the one sentence that has to be trusted
@@ -51,7 +53,7 @@ export type JobChosenBy = "person" | "app";
  *                 it is the app's but WHICH tier chose it is not recoverable (answerForAlreadyFiled).
  *                 Then the sentence names no source rather than guessing one.
  */
-export type AppPickSource = "schedule" | "only-job" | "unknown";
+export type AppPickSource = "schedule" | "here" | "only-job" | "unknown";
 
 /**
  * The job a punch landed on, and who chose it. A UNION, not a boolean beside a label, because the
@@ -89,6 +91,7 @@ export function unreadJobLabel(lang?: Lang | null): string {
 function pickedBecause(from: AppPickSource, lang?: Lang | null): string {
   const t = translator(lang);
   if (from === "schedule") return t("cs_fromTodaysSchedule");
+  if (from === "here") return t("cs_becauseHere");
   if (from === "only-job") return t("cs_becauseOnlyJob");
   return "";
 }
@@ -96,6 +99,8 @@ function pickedBecause(from: AppPickSource, lang?: Lang | null): string {
 /** THE ONE SENTENCE a door says when the app chose the job. Plain words, the job named, the source
  *  it actually came from, and it ends in the door out, so it is never a dead end. */
 export function appChoseSentence(label: string, from: AppPickSource, lang?: Lang | null): string {
+  // Standing at it: the sentence says where he is, plainly, and still ends in the door out.
+  if (from === "here") return fillText(translator(lang)("cs_appChoseHere"), { label });
   return fillText(translator(lang)("cs_appChoseSentence"), { label, because: pickedBecause(from, lang) });
 }
 

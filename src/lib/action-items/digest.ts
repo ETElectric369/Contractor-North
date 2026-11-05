@@ -1,5 +1,5 @@
 import "server-only";
-import { todayStrInTz } from "@/lib/tz";
+import { todayBoundsInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured } from "@/lib/push";
@@ -53,8 +53,12 @@ import { reportError } from "@/lib/observe";
  * A COMPANY WHOSE PLAN HAS ENDED gets no morning push (cn-v1137, decision 3: readActiveOrgs drops
  * it) and is counted in `lapsed_skipped`.
  */
-export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number; pushed: number; failed: number; lapsed_skipped: number }> {
-  const counts = { orgs: 0, pushed: 0, failed: 0, lapsed_skipped: 0 };
+export async function sendDayAheadDigests(
+  supabase: any,
+  // THE COMPANIES AT THEIR OWN 8 AM (the hourly daily cron, 2026-11-02); absent = every company.
+  opts: { orgIds?: ReadonlySet<string> } = {},
+): Promise<{ orgs: number; pushed: number; already: number; failed: number; lapsed_skipped: number }> {
+  const counts = { orgs: 0, pushed: 0, already: 0, failed: 0, lapsed_skipped: 0 };
   if (!pushConfigured()) return counts; // no VAPID keys → nothing to send
 
   // Every company, whole, or a throw the daily cron files as cron-day-ahead (cn-v1130): a failed
@@ -63,10 +67,11 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
   counts.lapsed_skipped = lapsedSkipped;
 
   for (const org of orgs) {
+    if (opts.orgIds && !opts.orgIds.has(org.id)) continue; // not this company's hour
     counts.orgs++;
     try {
       const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
-      const today = todayStrInTz(tz);
+      const { todayStr: today, dayStart } = todayBoundsInTz(tz);
 
       // Decision head-counts (+2 title rows each), and first THE HOLDS THAT ARE BACK (Wave 1, lane 5):
       // every job on hold whose day is today or earlier, or that has no day at all (a hold from before
@@ -152,10 +157,27 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
       const staff = await orgStaffIds(org.id);
       if (!staff.length) continue;
 
+      // ONCE A DAY PER PERSON (the hourly cron, 2026-11-02). A pushed digest leaves its day_ahead line
+      // on that person's bell (notifyPeople), so a person who already has one since the company's own
+      // midnight is passed over: a retried hour, or a run that straddles it, never pushes twice. A
+      // failed read is not "nobody has one": it throws, and this company pushes nobody this morning.
+      const { data: sentRows, error: sentErr } = await supabase
+        .from("notifications")
+        .select("user_id")
+        .eq("org_id", org.id)
+        .eq("type", "day_ahead")
+        .gte("created_at", dayStart.toISOString());
+      if (sentErr) throw sentErr;
+      const alreadySent = new Set(((sentRows ?? []) as { user_id: string }[]).map((r) => r.user_id));
+
       // ONE PUSH PER PERSON, their own six in it. Lead with the six; decisions ride the body.
       // Resilient when someone's six are empty: the decisions-only shape rather than a hollow
       // "Today:" header; nobody with no six and no decisions is pushed at all.
       for (const personId of staff) {
+        if (alreadySent.has(personId)) {
+          counts.already++;
+          continue;
+        }
         const six = sixForPerson(pool, personId, today);
         if (six.length === 0 && decisions === 0) continue;
         const sixLine =

@@ -11,16 +11,20 @@ const door = vi.hoisted(() => ({
   gate: { ok: true } as { ok: true } | { ok: false; why: string; reason: "lapsed" | "ceiling" },
   inserted: [] as Record<string, unknown>[],
   modelCalls: 0,
+  refuse: false,
+  requests: [] as Record<string, any>[],
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => ({ supabase: client, userId: "user-1", orgId: "org-1" })) }));
-vi.mock("@/lib/ai-cost", () => ({ aiAllowed: vi.fn(async () => door.gate), modelFor: () => "test-model", recordAiUsage: vi.fn(async () => {}) }));
+vi.mock("@/lib/ai-cost", () => ({ aiAllowed: vi.fn(async () => door.gate), modelFor: () => "test-model", recordAiUsage: vi.fn(async () => {}), fallbacksFor: () => ({}) }));
 vi.mock("@/lib/anthropic", () => ({
   DEFAULT_MODEL: "test-model",
   getAnthropic: () => ({
     messages: {
-      create: async () => {
+      create: async (req: Record<string, any>) => {
         door.modelCalls++;
+        door.requests.push(req);
+        if (door.refuse) return { model: "test-model", stop_reason: "refusal", content: [], usage: {} };
         return { model: "test-model", content: [{ type: "text", text: '{"type":"Other","name":"x"}' }], usage: {} };
       },
     },
@@ -52,6 +56,8 @@ const client = {
 };
 
 import { importFromCslb, importPolicyDoc } from "./actions";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refusalWords } from "@/lib/ai-refusal";
 
 const WHY = "This company's free trial has ended, so Nort is paused. Pick a plan in Settings › Getting Paid.";
 const fetchSpy = vi.fn(async () => new Response("<html>never</html>", { status: 200 }));
@@ -60,6 +66,8 @@ beforeEach(() => {
   door.gate = { ok: true };
   door.inserted = [];
   door.modelCalls = 0;
+  door.refuse = false;
+  door.requests = [];
   fetchSpy.mockClear();
   vi.stubGlobal("fetch", fetchSpy);
 });
@@ -78,6 +86,17 @@ describe("importPolicyDoc and a plan that has ended", () => {
   it("a standing company's upload is read", async () => {
     await importPolicyDoc({ path: "org-1/compliance/policy.pdf", mime: "application/pdf", fileName: "policy.pdf" });
     expect(door.modelCalls).toBe(1);
+    // The table's row (ai-effort "compliance") and the document's schema (cn-v1142).
+    const req = aiRequestFor("compliance");
+    expect(door.requests[0]).toMatchObject({ max_tokens: req.max_tokens, thinking: req.thinking });
+    expect(door.requests[0].output_config).toMatchObject({ effort: req.output_config.effort, format: { type: "json_schema" } });
+  });
+
+  it("a refusal still files the upload for review, and its note is the one sentence (cn-v1142)", async () => {
+    door.refuse = true;
+    const r = await importPolicyDoc({ path: "org-1/compliance/policy.pdf", mime: "application/pdf", fileName: "policy.pdf" });
+    expect(r).toMatchObject({ ok: true, type: "Other", summary: refusalWords(), reviewNeeded: true });
+    expect(door.inserted[0]).toMatchObject({ file_url: "org-1/compliance/policy.pdf", notes: `Imported — not auto-read. ${refusalWords()} Fill in the details.` });
   });
 });
 

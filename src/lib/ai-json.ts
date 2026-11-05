@@ -1,5 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { fallbacksFor, modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { AiRefusedError, refused } from "@/lib/ai-refusal";
 
 /**
  * READING A JSON OBJECT OUT OF A MODEL'S REPLY, ONCE, FOR EVERYBODY.
@@ -56,9 +59,13 @@ export async function parseAiJson(client: Anthropic, raw: string, orgId?: string
     /* fall through to one repair round-trip */
   }
   const model = modelFor("classify");
-  const fix = await client.messages.create({
+  // The small model's mechanics row: no thinking field, low effort, and the table's 4,096 floor
+  // raised to the caller's own budget (aiRequestFor only ever raises it). No fallbacks: the small
+  // model has none (fallbacksFor gives it nothing).
+  const fix = await aiCreate(client, {
     model,
-    max_tokens: Math.max(4096, Math.trunc(Number(maxTokens) || 0)),
+    ...fallbacksFor(model),
+    ...aiRequestFor("json-repair", { maxTokens }),
     system:
       "You repair malformed JSON. Output ONLY one valid, complete JSON object — no prose, no code fences. " +
       'Escape every double-quote that appears INSIDE a string value (inch marks: write 6\\" not 6"). ' +
@@ -67,7 +74,10 @@ export async function parseAiJson(client: Anthropic, raw: string, orgId?: string
   });
   // METER THE MODEL THAT ACTUALLY RAN, never the constant — costOf() prices from this string, so
   // naming the wrong one overstates or understates the org's month.
-  void recordAiUsage({ orgId, model, surface: "json-repair", usage: fix.usage as never });
+  void recordAiUsage({ orgId, model: fix.model || model, surface: "json-repair", usage: fix.usage as never });
+  // A REFUSED REPAIR IS NOT A PARSE ERROR, AND NOT A FAULT: a typed AiRefusedError whose message is
+  // the one sentence. Every caller that reports errors checks isAiRefused and SAYS it, never files it.
+  if (refused(fix)) throw new AiRefusedError();
   // A repair that ran out of tokens "closed the open arrays" mid-amputation — that is a
   // DIFFERENT document wearing valid syntax, worse than the parse error it replaced.
   if (fix.stop_reason === "max_tokens") throw new Error("The response was too large to repair.");

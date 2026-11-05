@@ -77,3 +77,27 @@ describe("the public site chat and a plan that has ended", () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+describe("a refusal is said in the visitor's language", () => {
+  const askIn = (lang: string | null) =>
+    chat(
+      new Request("https://x/api/site-chat", {
+        method: "POST",
+        headers: lang ? { "accept-language": lang } : {},
+        body: JSON.stringify({ handle: "fixture", messages: [{ role: "user", content: "hola" }] }),
+      }),
+    );
+  const declined = { content: [], stop_reason: "refusal", usage: { input_tokens: 1, output_tokens: 0 } };
+
+  it("a Spanish browser hears it in Spanish", async () => {
+    create.mockResolvedValueOnce(declined as never);
+    const res = await askIn("es-US,es;q=0.9,en;q=0.5");
+    expect((await res.json()).reply).toBe("Nort no puede ayudar con eso.");
+  });
+
+  it("any other browser hears it in English", async () => {
+    create.mockResolvedValueOnce(declined as never);
+    const res = await askIn(null);
+    expect((await res.json()).reply).toBe("Nort can't help with that one.");
+  });
+});

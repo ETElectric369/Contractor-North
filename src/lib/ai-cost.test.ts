@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { costOf, modelFor, MONTHLY_AI_CEILING_USD, WEB_SEARCH_USD } from "./ai-cost";
+import { costOf, FALLBACK_BETA, fallbacksFor, modelFor, MONTHLY_AI_CEILING_USD, WEB_SEARCH_USD } from "./ai-cost";
 
 /**
  * These guard the number the whole pricing model rests on. If costOf() is wrong, the
@@ -43,6 +43,59 @@ describe("costOf — the four token classes are priced differently", () => {
   });
 });
 
+describe("costOf — the ledger prices what it pays (G3, cn-v1142)", () => {
+  const M = 1_000_000;
+
+  it("a 1-hour cache write costs more than a 5-minute one for the same tokens (2x vs 1.25x input)", () => {
+    const fiveMin = costOf("claude-opus-5-5", { cache_creation: { ephemeral_5m_input_tokens: M, ephemeral_1h_input_tokens: 0 } });
+    const oneHour = costOf("claude-opus-5-5", { cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: M } });
+    expect(fiveMin).toBeCloseTo(5, 6);
+    expect(oneHour).toBeCloseTo(8, 6);
+    expect(oneHour).toBeGreaterThan(fiveMin);
+  });
+
+  it("the breakdown wins over the flat total when both are present", () => {
+    const u = { cache_creation_input_tokens: M, cache_creation: { ephemeral_5m_input_tokens: 400_000, ephemeral_1h_input_tokens: 600_000 } };
+    // 0.4M x $5 + 0.6M x $8 on Opus 5.5
+    expect(costOf("claude-opus-5-5", u)).toBeCloseTo(2 + 4.8, 6);
+  });
+
+  it("without the breakdown, every write is priced at the 5-minute rate", () => {
+    expect(costOf("claude-opus-5-5", { cache_creation_input_tokens: M })).toBeCloseTo(5, 6);
+    expect(costOf("claude-opus-5-5", { cache_creation_input_tokens: M, cache_creation: null })).toBeCloseTo(5, 6);
+    expect(costOf("claude-sonnet-5-5", { cache_creation_input_tokens: M })).toBeCloseTo(2.5, 6);
+  });
+
+  it("cache reads are the row's own price, not a flat 10%", () => {
+    expect(costOf("claude-opus-5-5", { cache_read_input_tokens: M })).toBeCloseTo(0.2, 6); // 0.05x
+    expect(costOf("claude-sonnet-5-5", { cache_read_input_tokens: M })).toBeCloseTo(0.2, 6); // 0.1x
+    expect(costOf("claude-fable-5-1", { cache_read_input_tokens: M })).toBeCloseTo(0.25, 6); // 0.025x
+    expect(costOf("claude-fable-5", { cache_read_input_tokens: M })).toBeCloseTo(1, 6);
+  });
+
+  it("Haiku 5.5 steps up past a 100K-token prompt, counting cached tokens in the prompt", () => {
+    const under = { input_tokens: 100_000, output_tokens: 10_000 };
+    expect(costOf("claude-haiku-5-5", under)).toBeCloseTo(0.1 * 0.1 + 0.01 * 0.5, 6);
+    const over = { input_tokens: 100_001, output_tokens: 10_000 };
+    expect(costOf("claude-haiku-5-5", over)).toBeCloseTo(0.100001 * 0.5 + 0.01 * 2.5, 5);
+    // 50K fresh + 60K read = a 110K prompt: the whole call is on the long-context card.
+    const mixed = { input_tokens: 50_000, cache_read_input_tokens: 60_000 };
+    expect(costOf("claude-haiku-5-5", mixed)).toBeCloseTo(0.05 * 0.5 + 0.06 * 0.05, 6);
+    // A dated id strips to the same row.
+    expect(costOf("claude-haiku-5-5-20261001", over)).toBeCloseTo(costOf("claude-haiku-5-5", over), 6);
+  });
+
+  it("an unknown model keeps today's price: $10 input, reads $1, 5-minute writes $12.50", () => {
+    expect(costOf("some-future-model", { input_tokens: M, output_tokens: M })).toBeCloseTo(60, 6);
+    expect(costOf("some-future-model", { cache_read_input_tokens: M })).toBeCloseTo(1, 6);
+    expect(costOf("some-future-model", { cache_creation_input_tokens: M })).toBeCloseTo(12.5, 6);
+  });
+
+  it("web searches stay a cent each on any model", () => {
+    expect(costOf("claude-haiku-5-5", { server_tool_use: { web_search_requests: 3 } })).toBeCloseTo(3 * WEB_SEARCH_USD, 6);
+  });
+});
+
 describe("modelFor — reasoning keeps the good model, everything else gets routed", () => {
   it("estimating and takeoff stay on the frontier model", () => {
     // Downgrading this is a false economy: a wrong estimate costs a contractor far
@@ -67,6 +120,32 @@ describe("modelFor — reasoning keeps the good model, everything else gets rout
     // like it worked.
     const u = { input_tokens: 100_000, output_tokens: 10_000 };
     expect(costOf(modelFor("routine"), u)).toBeLessThan(costOf(modelFor("reasoning"), u));
+  });
+});
+
+describe("fallbacksFor — the big and the middle model ask for a server-side stand-in; the small one never", () => {
+  const asked = { betas: [FALLBACK_BETA], fallbacks: "default" };
+
+  it("the reasoning and routine models carry the beta header + fallbacks: default", () => {
+    expect(FALLBACK_BETA).toBe("server-side-fallback-2026-07-01");
+    expect(fallbacksFor("claude-opus-5-5")).toEqual(asked);
+    expect(fallbacksFor("claude-sonnet-5-5")).toEqual(asked);
+    expect(fallbacksFor(modelFor("reasoning"))).toEqual(asked);
+    expect(fallbacksFor(modelFor("routine"))).toEqual(asked);
+  });
+
+  it("the small model carries NOTHING — no fallbacks field and no beta header", () => {
+    expect(fallbacksFor("claude-haiku-5-5")).toEqual({});
+    expect(fallbacksFor(modelFor("classify"))).toEqual({});
+    expect("betas" in fallbacksFor(modelFor("classify"))).toBe(false);
+    expect("fallbacks" in fallbacksFor(modelFor("classify"))).toBe(false);
+  });
+
+  it("a dated snapshot is its model; an unknown or empty name carries nothing", () => {
+    expect(fallbacksFor("claude-sonnet-5-5-20261001")).toEqual(asked);
+    expect(fallbacksFor("claude-haiku-5-5-20261001")).toEqual({});
+    expect(fallbacksFor("")).toEqual({});
+    expect(fallbacksFor("some-other-vendor-model")).toEqual({});
   });
 });
 
@@ -119,6 +198,7 @@ const gateDb = vi.hoisted(() => ({
   role: "office",
   owner: "Larkspur Owner",
   reads: [] as string[],
+  rpcArgs: null as Record<string, unknown> | null,
 }));
 vi.mock("@/lib/stripe", async (orig) => ({ ...(await orig<typeof import("@/lib/stripe")>()), billingEnabled: true }));
 vi.mock("@/lib/observe", async (orig) => ({ ...(await orig<typeof import("@/lib/observe")>()), reportError: vi.fn() }));
@@ -141,8 +221,9 @@ vi.mock("@/lib/supabase/server", () => {
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     from: (table: string) => chain(table, false),
-    rpc: async (fn: string) => {
+    rpc: async (fn: string, args?: Record<string, unknown>) => {
       gateDb.reads.push(`rpc:${fn}`);
+      if (fn === "record_ai_usage") gateDb.rpcArgs = args ?? null;
       return fn === "ai_spend_since" ? { data: gateDb.spend, error: null } : { data: null, error: null };
     },
   };
@@ -248,5 +329,91 @@ describe("tierOfUsage — full until the month's usage is used up, lighter past 
     expect(tierOfUsage({ state: "almost" })).toBe("full");
     expect(tierOfUsage({ state: "watch" })).toBe("full");
     expect(tierOfUsage({ state: "fine" })).toBe("full");
+  });
+});
+
+/**
+ * A FALLBACK'S USAGE IS METERED AS BILLED (cn-v1142 skeptic, finding 11). Top-level usage covers only
+ * the attempt that produced the message; usage.iterations is the per-attempt truth, each attempt at
+ * its own model's rate (shared/model-migration.md:1429). A decline before any output is billed only
+ * in the bio / frontier_llm / reasoning_extraction categories; a mid-stream decline always is.
+ */
+import { billedTokens, costOf as costOfIt, declineCategories, recordAiUsage } from "./ai-cost";
+
+describe("costOf — a server-side fallback meters every billed attempt at its own model's rate", () => {
+  const M = 1_000_000;
+  it("claude-opus-5 has its own row ($5 / $25 per MTok), not the unknown-model row", () => {
+    expect(costOfIt("claude-opus-5", { input_tokens: M, output_tokens: M })).toBe(30);
+    expect(costOfIt("claude-opus-5", { input_tokens: M })).not.toBe(costOfIt("claude-not-a-model", { input_tokens: M }));
+  });
+
+  it("a mid-stream decline is billed at the declined model's rate, the rescue at the fallback's", () => {
+    const usage = {
+      input_tokens: M, // top-level: the serving attempt only
+      output_tokens: M,
+      iterations: [
+        { type: "message", model: "claude-opus-5-5", input_tokens: M, output_tokens: M / 2 },
+        { type: "fallback_message", model: "claude-opus-4-8", input_tokens: M, output_tokens: M },
+      ],
+    };
+    // opus-5-5: 4 + 10 = 14; opus-4-8: 5 + 25 = 30
+    expect(costOfIt("claude-opus-4-8", usage)).toBe(44);
+    expect(billedTokens("claude-opus-4-8", usage)).toEqual({ input: 2 * M, cacheRead: 0, cacheWrite: 0, output: 1.5 * M });
+  });
+
+  it("a decline before any output is not billed in an unbilled category, and is in a billed one", () => {
+    const usage = {
+      input_tokens: M,
+      output_tokens: M,
+      iterations: [
+        { type: "message", model: "claude-opus-5-5", input_tokens: M, output_tokens: 0 },
+        { type: "fallback_message", model: "claude-opus-4-8", input_tokens: M, output_tokens: M },
+      ],
+    };
+    expect(costOfIt("claude-opus-4-8", usage)).toBe(30);
+    expect(costOfIt("claude-opus-4-8", usage, ["cyber"])).toBe(30);
+    expect(costOfIt("claude-opus-4-8", usage, [null])).toBe(30);
+    expect(costOfIt("claude-opus-4-8", usage, ["bio"])).toBe(34);
+  });
+
+  it("no iterations: the top-level usage, as before; web searches count once", () => {
+    expect(costOfIt("claude-opus-5-5", { input_tokens: M, output_tokens: M })).toBe(24);
+    const withSearch = {
+      input_tokens: M,
+      output_tokens: 0,
+      server_tool_use: { web_search_requests: 2 },
+      iterations: [{ type: "message", model: "claude-opus-5-5", input_tokens: M, output_tokens: 0 }],
+    };
+    expect(costOfIt("claude-opus-5-5", withSearch)).toBe(4.02);
+  });
+
+  it("declineCategories reads the fallback blocks' trigger categories", () => {
+    expect(
+      declineCategories([
+        { type: "fallback", from: { model: "a" }, to: { model: "b" }, trigger: { type: "refusal", category: "bio" } },
+        { type: "text", text: "hi" },
+        { type: "fallback", trigger: { type: "refusal", category: null } },
+      ]),
+    ).toEqual(["bio", null]);
+    expect(declineCategories(undefined)).toEqual([]);
+  });
+
+  it("recordAiUsage writes the billed totals and cost to the ledger", async () => {
+    gateDb.rpcArgs = null;
+    await recordAiUsage({
+      orgId: "org-1",
+      model: "claude-opus-4-8",
+      surface: "test",
+      usage: {
+        input_tokens: M,
+        output_tokens: M,
+        iterations: [
+          { type: "message", model: "claude-opus-5-5", input_tokens: M, output_tokens: 0 },
+          { type: "fallback_message", model: "claude-opus-4-8", input_tokens: M, output_tokens: M },
+        ],
+      },
+      content: [{ type: "fallback", trigger: { type: "refusal", category: "reasoning_extraction" } }, { type: "text", text: "ok" }],
+    });
+    expect(gateDb.rpcArgs).toMatchObject({ p_input: 2 * M, p_output: M, p_cost_usd: 34 });
   });
 });

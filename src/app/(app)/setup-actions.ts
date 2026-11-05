@@ -1,5 +1,9 @@
 "use server";
-import { recordAiUsage, aiAllowed, currentOrgId } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, currentOrgId, fallbacksFor } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refused, refusalWords } from "@/lib/ai-refusal";
+import { callerLang } from "@/lib/lang-of";
 import { dbError } from "@/lib/db-error";
 import { isStaffRole } from "@/lib/actions/perms";
 
@@ -127,16 +131,19 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
 
   let raw = "";
   try {
-    const resp = await getAnthropic().messages.create({
+    const resp = await aiCreate(getAnthropic(), {
       model: DEFAULT_MODEL,
-      max_tokens: 1200,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor("setup:converse"),
       system: [
         { type: "text", text: CONVERSE_SYSTEM, cache_control: { type: "ephemeral" } },
         { type: "text", text: tone },
       ],
       messages: [{ role: "user", content: conversePrompt(need, known, text, first) }],
     });
-    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "setup:converse", usage: resp.usage as never });
+    void recordAiUsage({ orgId, model: resp.model, surface: "setup:converse", usage: resp.usage as never });
+    // A DECLINE IS SAID IN NORT'S WORDS (ai-refusal), in the person's language; nothing is filled.
+    if (refused(resp)) return { ok: true, say: refusalWords(await callerLang(supabase, user.id)), answers: known, filled: [] };
     raw = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A model that is down must not become an error message about a model being down.
@@ -328,13 +335,17 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
 
   let text = "";
   try {
-    const resp = await getAnthropic().messages.create({
+    const resp = await aiCreate(getAnthropic(), {
       model: DEFAULT_MODEL,
-      max_tokens: 4000,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor("setup:draft"),
       system: [{ type: "text", text: DRAFT_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: draftRequest(pb, about) }],
     });
-    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "setup:draft", usage: resp.usage as never });
+    void recordAiUsage({ orgId, model: resp.model, surface: "setup:draft", usage: resp.usage as never });
+    // A DECLINE IS NOT A DEAD END either: their own questions, undrafted — the same escape a
+    // failed draft takes below — and nothing is parsed out of a partial (ai-refusal).
+    if (refused(resp)) return undrafted;
     text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A drafting failure is not a dead end — they can still read and write their own lines.

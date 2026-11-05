@@ -18,7 +18,8 @@ vi.mock("@/lib/anthropic", () => ({
   DEFAULT_MODEL: "claude-test-model",
   getAnthropic: () => {
     if (model.keyUnset) throw new Error("ANTHROPIC_API_KEY is not set. Add it to .env.local / Vercel env vars.");
-    return { messages: { create: model.create } };
+    // Both surfaces share the one stub: ai-call routes a request carrying the fallback fields to beta.
+    return { messages: { create: model.create }, beta: { messages: { create: model.create } } };
   },
   // The real rule (a 401/403 or an authentication_error body) is pinned in lib/anthropic.test.ts.
   isModelDead: (e: unknown) => [401, 403].includes((e as { status?: number } | null)?.status ?? 0),
@@ -26,7 +27,7 @@ vi.mock("@/lib/anthropic", () => ({
   modelDeadError: (e: unknown) => new Error(`Anthropic refused the API key (HTTP ${(e as { status?: number } | null)?.status ?? "?"})`),
 }));
 vi.mock("@/lib/observe-blocker", () => ({ reportBlocker: spies.reportBlocker }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: spies.recordAiUsage }));
+vi.mock("@/lib/ai-cost", async (orig) => ({ ...(await orig<typeof import("@/lib/ai-cost")>()), recordAiUsage: spies.recordAiUsage }));
 vi.mock("@/lib/observe", () => ({
   reportError: spies.reportError,
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : String((e as { message?: string } | null)?.message ?? e)),
@@ -36,6 +37,7 @@ vi.mock("@/lib/cron-orgs", () => ({ readActiveOrgs: spies.readActiveOrgs }));
 const standing = (rows: { id: string }[], lapsedSkipped = 0) => ({ rows, lapsedSkipped });
 
 import { generateNortReview, generateNortReviewsForAllOrgs } from "./review";
+import { effortFor } from "@/lib/ai-effort";
 
 type Answer = { data?: unknown; error?: unknown };
 
@@ -107,13 +109,29 @@ describe("generateNortReview", () => {
     expect(spies.recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-a", surface: "nort:review" }));
   });
 
+  it("a declined review is said in Nort's words with no findings: not a throw, not a quiet night", async () => {
+    model.create.mockResolvedValue({ model: "claude-test-model", stop_reason: "refusal", usage: { input_tokens: 10, output_tokens: 0 }, content: [] });
+    const r = await generateNortReview(fake(BUSY).client, "org-a");
+    expect(r?.summary).toBe("Nort can't help with that one.");
+    expect(r?.findings).toEqual([]);
+    expect(spies.recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-a", surface: "nort:review", model: "claude-test-model" }));
+  });
+
+  it("a declined review is said in the company's language (its owner's), else English", async () => {
+    model.create.mockResolvedValue({ model: "claude-test-model", stop_reason: "refusal", usage: { input_tokens: 10, output_tokens: 0 }, content: [] });
+    const es = { ...BUSY, profiles: { data: [{ id: "p-1", full_name: "Larkspur", role: "owner", language: "es" }] } };
+    expect((await generateNortReview(fake(es).client, "org-a"))?.summary).toBe("Nort no puede ayudar con eso.");
+    const broken = { ...BUSY, profiles: { data: CREW, error: { message: "column profiles.language does not exist" } } };
+    expect((await generateNortReview(fake(broken).client, "org-a"))?.summary).toBe("Nort can't help with that one.");
+  });
+
   it("the model call carries its own clock and no retries, as the SDK's second argument", async () => {
     model.create.mockResolvedValue(MODEL_ANSWER);
     await generateNortReview(fake(BUSY).client, "org-a");
     expect(model.create).toHaveBeenCalledTimes(1);
     expect(model.create.mock.calls[0][1]).toEqual({ timeout: 120_000, maxRetries: 0 });
     // the params stay the first argument, untouched by the options
-    expect(model.create.mock.calls[0][0]).toMatchObject({ model: "claude-test-model", max_tokens: 1500 });
+    expect(model.create.mock.calls[0][0]).toMatchObject({ model: "claude-test-model", max_tokens: effortFor("nort:review").maxTokens });
     expect(model.create.mock.calls[0][0]).not.toHaveProperty("timeout");
 
     model.create.mockClear();
@@ -179,7 +197,7 @@ describe("generateNortReviewsForAllOrgs", () => {
       .mockRejectedValueOnce(new Error("overloaded_error: the vendor is busy"))
       .mockResolvedValueOnce(MODEL_ANSWER);
     const { client } = fake(BUSY);
-    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 2, failed: 1, left: 0, lapsed_skipped: 0 });
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 2, already: 0, failed: 1, left: 0, lapsed_skipped: 0 });
     expect(spies.readActiveOrgs).toHaveBeenCalledWith(client, "id");
     expect(spies.reportError).toHaveBeenCalledTimes(1);
     expect(spies.reportError).toHaveBeenCalledWith("nort:review", expect.any(Error), { orgId: "org-b" });
@@ -190,14 +208,14 @@ describe("generateNortReviewsForAllOrgs", () => {
     spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }], 2));
     model.create.mockResolvedValue(MODEL_ANSWER);
     const { client } = fake(BUSY);
-    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 1, failed: 0, left: 0, lapsed_skipped: 2 });
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 1, already: 0, failed: 0, left: 0, lapsed_skipped: 2 });
     expect(model.create).toHaveBeenCalledTimes(1); // the standing company only
   });
 
   it("a quiet company is neither made nor failed", async () => {
     spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }]));
     const { client } = fake(QUIET);
-    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 0, failed: 0, left: 0, lapsed_skipped: 0 });
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 0, already: 0, failed: 0, left: 0, lapsed_skipped: 0 });
     expect(spies.reportError).not.toHaveBeenCalled();
   });
 
@@ -219,7 +237,7 @@ describe("generateNortReviewsForAllOrgs", () => {
       return MODEL_ANSWER;
     });
     const { client } = fake(BUSY);
-    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: T + 1_000 })).toEqual({ made: 1, failed: 0, left: 1, lapsed_skipped: 0 });
+    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: T + 1_000 })).toEqual({ made: 1, already: 0, failed: 0, left: 1, lapsed_skipped: 0 });
     expect(model.create).toHaveBeenCalledTimes(1);
     expect(spies.reportError).toHaveBeenCalledTimes(1);
     expect(spies.reportError).toHaveBeenCalledWith("nort:review", expect.any(Error), { left: 1 });
@@ -267,7 +285,48 @@ describe("generateNortReviewsForAllOrgs", () => {
     spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }, { id: "org-b" }]));
     model.create.mockResolvedValue(MODEL_ANSWER);
     const { client } = fake(BUSY);
-    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: Date.now() + 60_000 })).toEqual({ made: 2, failed: 0, left: 0, lapsed_skipped: 0 });
+    expect(await generateNortReviewsForAllOrgs(client, { deadlineMs: Date.now() + 60_000 })).toEqual({ made: 2, already: 0, failed: 0, left: 0, lapsed_skipped: 0 });
     expect(spies.reportError).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ONCE A DAY PER COMPANY, AND ONLY THE COMPANIES AT THEIR 8 AM (the hourly daily cron, 2026-11-02).
+ * A company with a review made in the last 20 hours is counted `already` and costs no model call, so
+ * a retried hour or a run that straddles it never reviews twice; a failed read of that is the
+ * company's failure, never "none yet". Handed orgIds, every other company waits for its own hour.
+ */
+describe("generateNortReviewsForAllOrgs on the hourly cron", () => {
+  it("a company reviewed in the last 20 hours is counted already, with no model call; the read is its own rows since then", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-11-02T16:00:00Z"));
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }]));
+    const gte: unknown[][] = [];
+    const { client } = fake({ ...BUSY, nort_reviews: { data: [{ id: "rev-0" }] } });
+    const from = client.from.bind(client);
+    client.from = (t: string) => {
+      const q = from(t);
+      if (t === "nort_reviews") q.gte = (...a: unknown[]) => (gte.push(a), q);
+      return q;
+    };
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 0, already: 1, failed: 0, left: 0, lapsed_skipped: 0 });
+    expect(model.create).not.toHaveBeenCalled();
+    expect(gte).toEqual([["created_at", "2026-11-01T20:00:00.000Z"]]);
+  });
+
+  it("a failed read of the recent reviews is the company's failure, filed, and no model call", async () => {
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }]));
+    const { client } = fake({ ...BUSY, nort_reviews: { error: { message: "permission denied for table nort_reviews" } } });
+    expect(await generateNortReviewsForAllOrgs(client)).toEqual({ made: 0, already: 0, failed: 1, left: 0, lapsed_skipped: 0 });
+    expect(model.create).not.toHaveBeenCalled();
+    expect(spies.reportError).toHaveBeenCalledWith("nort:review", expect.any(Error), { orgId: "org-a" });
+  });
+
+  it("handed the companies at their 8 AM, it reviews those alone", async () => {
+    spies.readActiveOrgs.mockResolvedValue(standing([{ id: "org-a" }, { id: "org-b" }]));
+    model.create.mockResolvedValue(MODEL_ANSWER);
+    const { client } = fake(BUSY);
+    expect(await generateNortReviewsForAllOrgs(client, { orgIds: new Set(["org-b"]) })).toEqual({ made: 1, already: 0, failed: 0, left: 0, lapsed_skipped: 0 });
+    expect(model.create).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,8 +3,14 @@
 import { requireStaff } from "@/lib/staff-guard";
 import { reportError } from "@/lib/observe";
 import { getAnthropic } from "@/lib/anthropic";
-import { aiAllowed, modelFor, recordAiUsage, AI_CEILING_WORDS } from "@/lib/ai-cost";
+import { aiAllowed, fallbacksFor, modelFor, recordAiUsage, AI_CEILING_WORDS } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { isAiRefused, refused, saidFailure } from "@/lib/ai-refusal";
+import { answerText, readStructured } from "@/lib/ai-structured";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import * as z from "zod/v4";
 import { isSha256 } from "@/lib/content-hash";
 import { isPdfBytes } from "@/lib/pdf-text";
 import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
@@ -63,6 +69,18 @@ import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
  */
 
 type Result = { ok: boolean; error?: string; id?: string; line?: string; already?: string };
+
+/**
+ * THE CHEAP LOOK'S ANSWER, AS A SCHEMA (cn-v1142): structured outputs hold the reply to this shape,
+ * so it is read without a hand parse or a repair round trip. scanKindFrom still clamps it (an
+ * unknown word is "other", the words are cut to one short phrase): the schema fixes the shape only.
+ */
+const SCAN_KIND_FORMAT = zodOutputFormat(
+  z.object({
+    paper: z.enum(["bank_statement", "supplier_statement", "one_paper", "other"]),
+    what: z.string(),
+  }),
+);
 
 /**
  * WHAT A READ THAT COULD NOT HAPPEN SAYS. One action, then the fallback if that one fails — a sequence,
@@ -135,19 +153,27 @@ export async function readStatementScan(input: {
   let kind: ReturnType<typeof scanKindFrom>;
   try {
     const model = modelFor("classify");
-    const msg = await client.messages.create(
+    // The small model's mechanics: no thinking field, no fallbacks (fallbacksFor gives Haiku nothing).
+    const req = aiRequestFor("statement-scan-kind");
+    const msg = await aiCreate(
+      client,
       {
         model,
-        max_tokens: 1500, // the 5.5 line may think inside the cap (cn-v1128)
+        ...fallbacksFor(model),
+        ...req,
+        output_config: { ...req.output_config, format: SCAN_KIND_FORMAT },
         system: SCAN_KIND_SYSTEM,
         messages: [{ role: "user", content: [paper, { type: "text", text: `Filename: ${name}. What is this paper?` }] }],
       },
       { timeout: SCAN_READ_MS, maxRetries: 0 },
     );
     // METER THE MODEL THAT RAN (0162), never the constant: costOf prices from this string.
-    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? model, surface: "statement-scan-kind", usage: msg.usage as never });
-    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    kind = scanKindFrom(await parseAiJson(client, text?.text ?? "", ctx.orgId));
+    void recordAiUsage({ orgId: ctx.orgId, model: msg.model || model, surface: "statement-scan-kind", usage: msg.usage as never });
+    const said = readStructured(msg, SCAN_KIND_FORMAT);
+    // A REFUSAL IS SAID AS ONE, never as "the reader didn't answer" and never as an error row.
+    if (!said.ok && said.reason === "refused") return said;
+    if (!said.ok) return { ok: false, error: READER_SILENT(name) };
+    kind = scanKindFrom(said.value);
   } catch (e) {
     reportError("bills:statementScan.kind", e, { name });
     if (ranOutOfTime(e, since)) return { ok: false, error: scanTooSlowSaid(name) };
@@ -187,10 +213,13 @@ export async function readStatementScan(input: {
         slow = true;
         break;
       }
-      const msg = await client.messages.create(
+      const msg = await aiCreate(
+        client,
         {
           model,
-          max_tokens: SCAN_MAX_TOKENS,
+          ...fallbacksFor(model),
+          // The table's floor, or this lane's own budget if that is ever the larger.
+          ...aiRequestFor("statement-scan", { maxTokens: SCAN_MAX_TOKENS }),
           system: SCAN_LINES_SYSTEM,
           messages: turns,
         },
@@ -201,8 +230,12 @@ export async function readStatementScan(input: {
       );
       // METERED THE MOMENT THE CALL RETURNS, before anything can throw on its contents: a cut answer,
       // an answer that won't parse and an answer the gate refuses all cost the same tokens.
-      void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? model, surface: "statement-scan", usage: msg.usage as never });
-      const raw = (msg.content.find((b) => b.type === "text") as { text: string } | undefined)?.text ?? "";
+      void recordAiUsage({ orgId: ctx.orgId, model: msg.model || model, surface: "statement-scan", usage: msg.usage as never });
+      // A REFUSAL BEFORE ANY CONTENT IS READ: a partial is discarded, never kept as lines, and the
+      // whole read says the one sentence (nothing is written, as with any read that did not finish).
+      if (refused(msg)) return saidFailure("refused");
+      // The answer's text after any fallback switch point (ai-structured answerText).
+      const raw = answerText(msg.content);
       cut = msg.stop_reason === "max_tokens";
       // THE CUT IS CLOSED HERE, IN CODE, and never handed to the repair model (see the note above).
       // Nothing is invented: the text is cut back to its last whole transaction line and the open
@@ -240,6 +273,8 @@ export async function readStatementScan(input: {
       turns.push({ role: "assistant", content: said }, { role: "user", content: scanMoreAsked(last ? { date: last.date, description: last.description } : null) });
     }
   } catch (e) {
+    // A refused repair is an answer, said, never a fault in error_events.
+    if (isAiRefused(e)) return { ok: false, error: saidFailure("refused").error };
     reportError("bills:statementScan.lines", e, { name });
     // THE CLOCK IS SAID AS THE CLOCK. Everything else is "the reader didn't answer", which names the
     // one action and then the door that keeps the paper. "Too large to repair" is no longer one of

@@ -21,20 +21,28 @@ vi.mock("@/lib/staff-guard", () => ({
 const jobGuard = vi.hoisted(() => ({ jobInOrg: vi.fn(async (_s: unknown, _o: unknown, id: unknown) => !!id) }));
 vi.mock("@/lib/job-in-org", () => jobGuard);
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-const ai = vi.hoisted(() => ({ parsed: {} as any, systems: [] as string[] }));
+const ai = vi.hoisted(() => ({ parsed: {} as any, systems: [] as string[], requests: [] as any[], refuse: false }));
 vi.mock("@/lib/anthropic", () => ({
   DEFAULT_MODEL: "test-model",
   getAnthropic: () => ({
     messages: {
-      create: async (args: { system?: string }) => {
+      create: async (args: { system?: string; output_config?: { format?: unknown } }) => {
         ai.systems.push(String(args?.system ?? ""));
-        return { model: "test-model", content: [{ type: "text", text: "{}" }], usage: {} };
+        ai.requests.push(args);
+        if (ai.refuse) return { model: "test-model", stop_reason: "refusal", content: [], usage: {} };
+        // AI Suggest's pick is a structured answer (cn-v1142, TRIAGE_FORMAT): the model hands back
+        // every key the schema names, so the scripted pick is filled out the way the API fills it.
+        // The paper reads still go through parseAiJson (mocked below), so their text is never read.
+        const text = args?.output_config?.format
+          ? JSON.stringify({ action: "unsure", job_id: null, overhead_category: null, task_title: null, task_category: "office", reason: "", ...ai.parsed })
+          : "{}";
+        return { model: "test-model", stop_reason: "end_turn", content: [{ type: "text", text }], usage: {} };
       },
     },
   }),
 }));
 vi.mock("@/lib/ai-json", () => ({ parseAiJson: async () => ai.parsed }));
-vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model", aiAllowed: async () => ({ ok: true }) }));
+vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model", aiAllowed: async () => ({ ok: true }), fallbacksFor: () => ({}) }));
 // What the job's estimate is broken into: nothing, unless a test says otherwise (item C1-4 needs a
 // job with real parts before the reader can put a cost under one).
 const estimate = vi.hoisted(() => ({ scopes: [] as string[] }));
@@ -51,6 +59,8 @@ import { addPaperwork, addSupplierDocuments, updatePaperwork } from "./paperwork
 import { insertItemizedBill } from "./paperwork-core";
 import { RETURN_ON_JOB_NEEDS_LINES } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { refusalWords } from "@/lib/ai-refusal";
 
 type Call = { table: string; verb: string; payload?: any; selected?: boolean; eqs: [string, unknown][]; ins?: [string, unknown[]][] };
 
@@ -125,6 +135,8 @@ beforeEach(() => {
   calls = [];
   estimate.scopes = [];
   ai.systems = [];
+  ai.requests = [];
+  ai.refuse = false;
   storageLog.copied = [];
   storageLog.removed = [];
   storageLog.copyError = null;
@@ -1255,6 +1267,30 @@ describe("AI Suggest never takes money out of the tray", () => {
     await aiReviewItem("oi-1");
     expect(ai.systems[0]).toContain("for a deck builder");
     expect(ai.systems[0]).not.toContain("electrical contractor");
+  });
+
+  it("asks with its own row (organize:triage) and its schema; a refusal is the one sentence and writes nothing (cn-v1142)", async () => {
+    ai.parsed = { action: "unsure", reason: "Can't tell." };
+    const rows = () =>
+      fakeSupabase(
+        {
+          "organized_items.select": [{ data: RECEIPT_ROW, error: null }],
+          "jobs.select": [{ data: [], error: null }],
+          "organizations.select": [{ data: { settings: {} }, error: null }],
+        },
+        calls,
+      );
+    state.client = rows();
+    await aiReviewItem("oi-1");
+    const req = aiRequestFor("organize:triage");
+    expect(ai.requests[0]).toMatchObject({ max_tokens: req.max_tokens, thinking: req.thinking });
+    expect(ai.requests[0].output_config).toMatchObject({ effort: req.output_config.effort, format: { type: "json_schema" } });
+
+    calls = [];
+    ai.refuse = true;
+    state.client = rows();
+    expect(await aiReviewItem("oi-1")).toEqual({ ok: false, message: refusalWords() });
+    expect(did("organized_items", "update")).toBeUndefined();
   });
 });
 

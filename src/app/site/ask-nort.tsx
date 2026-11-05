@@ -172,7 +172,7 @@ export function AskNort({ handle, orgName, brand }: { handle: string; orgName: s
             >
               <ImagePlus className="h-5 w-5" />
             </button>
-            <input
+            <input autoComplete="off"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Describe your project…"

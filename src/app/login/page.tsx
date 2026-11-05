@@ -123,7 +123,7 @@ export default async function LoginPage({
               {isSignup && (
                 <div>
                   <Label htmlFor="full_name">{t("au_fullName")}</Label>
-                  <Input id="full_name" name="full_name" placeholder={t("au_fullNamePlaceholder")} required />
+                  <Input id="full_name" name="full_name" autoComplete="name" placeholder={t("au_fullNamePlaceholder")} required />
                 </div>
               )}
               <div>

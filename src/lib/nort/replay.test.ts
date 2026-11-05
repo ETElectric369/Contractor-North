@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
-import { createReplayCapture, markCacheTail, runReplayRound, stripThinkingBlocks } from "./replay";
+import { markCacheTail, runReplayRound, stripThinkingBlocks, toolUsesToAnswer } from "./replay";
 
 /**
  * The 2026-09-23 Nort 400 ("each thinking block must contain thinking"), rebuilt against the REAL
@@ -70,12 +70,14 @@ const ROUND_TWO = message(
 type Refusal = { status: number; message: string };
 const refusal = (status: number, message: string): Refusal => ({ status, message });
 
-/** A client whose fetch serves the scripted rounds in order and records every request body. */
+/** A client whose fetch serves the scripted rounds in order and records every request body + headers. */
 function scriptedClient(rounds: Array<Ev[] | Refusal>) {
-  const bodies: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+  const bodies: Array<{ messages: Array<{ role: string; content: unknown }>; fallbacks?: unknown }> = [];
+  const headers: Headers[] = [];
   let n = 0;
-  const fetch = async (_url: unknown, init?: { body?: unknown }) => {
+  const fetch = async (_url: unknown, init?: { body?: unknown; headers?: HeadersInit }) => {
     bodies.push(JSON.parse(String(init?.body)));
+    headers.push(new Headers(init?.headers));
     const next = rounds[Math.min(n++, rounds.length - 1)];
     if (!Array.isArray(next)) {
       const body = { type: "error", error: { type: "invalid_request_error", message: next.message } };
@@ -84,7 +86,7 @@ function scriptedClient(rounds: Array<Ev[] | Refusal>) {
     return new Response(sse(next), { status: 200, headers: { "content-type": "text/event-stream" } });
   };
   const client = new Anthropic({ apiKey: "test-key", fetch: fetch as never, maxRetries: 0 });
-  return { client, bodies };
+  return { client, bodies, headers };
 }
 
 /** What the API enforces on a replayed thinking block: both fields strings, a signature present. */
@@ -194,25 +196,160 @@ describe("Nort replays an assistant turn that thought", () => {
     expect(replayed).toEqual([{ type: "tool_use", id: "toolu_3", name: "list_jobs", input: {} }]);
   });
 
-  it("carries redacted thinking whole and restores a web search's query", () => {
-    const capture = createReplayCapture();
-    const events: Ev[] = [
-      start(0, { type: "redacted_thinking", data: "opaque-bytes" }),
-      stop(0),
-      start(1, { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: {} }),
-      delta(1, { type: "input_json_delta", partial_json: '{"query":"12/2 romex price"}' }),
-      stop(1),
-    ];
-    events.forEach(capture.onEvent);
-    // What the old accumulator leaves behind: the start blocks, deltas unapplied.
-    const snapshot = [
-      { type: "redacted_thinking", data: "opaque-bytes" },
-      { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: {} },
-    ];
-    expect(capture.replayContent(snapshot)).toEqual([
+  it("carries redacted thinking whole and a web search's query and result, straight off the wire", async () => {
+    const { client, bodies } = scriptedClient([
+      message(
+        [
+          start(0, { type: "redacted_thinking", data: "opaque-bytes" }),
+          stop(0),
+          start(1, { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: {} }),
+          delta(1, { type: "input_json_delta", partial_json: '{"query":"12/2 ' }),
+          delta(1, { type: "input_json_delta", partial_json: 'romex price"}' }),
+          stop(1),
+          start(2, { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [] }),
+          stop(2),
+          start(3, { type: "tool_use", id: "toolu_4", name: "list_jobs", input: {} }),
+          stop(3),
+        ],
+        "tool_use",
+      ),
+      ROUND_TWO,
+    ]);
+    const convo: Anthropic.MessageParam[] = [{ role: "user", content: "What does 12/2 run at Snowbell Supply?" }];
+    await runRound(client, convo);
+    convo.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_4", content: "[]" }] });
+    await runRound(client, convo);
+
+    const replayed = bodies[1].messages[1].content as Ev[];
+    assertReplayValid(replayed);
+    expect(replayed).toEqual([
       { type: "redacted_thinking", data: "opaque-bytes" },
       { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: { query: "12/2 romex price" } },
+      { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [] },
+      { type: "tool_use", id: "toolu_4", name: "list_jobs", input: {} },
     ]);
+  });
+});
+
+/** The fallback block as the API streams it: an ordinary content_block_start, no deltas. */
+const FALLBACK_BLOCK: Ev = {
+  type: "fallback",
+  from: { model: "claude-opus-5-5" },
+  to: { model: "claude-opus-4-8" },
+  trigger: { type: "refusal", category: "cyber" },
+};
+
+describe("after a server-side fallback: the echo rule", () => {
+  it("leaves the declined model's thinking, tool call and unfinished search out, keeps its words, its finished search and the marker in place, and everything after the boundary as normal", async () => {
+    const { client, bodies } = scriptedClient([
+      message(
+        [
+          // The requested model: thought, said a sentence, searched (finished), searched again
+          // (never finished), called a tool (never answered) — then declined.
+          start(0, { type: "thinking", thinking: "", signature: "" }),
+          delta(0, { type: "thinking_delta", thinking: "Look at the Larkspur panel." }),
+          delta(0, { type: "signature_delta", signature: SIGNATURE }),
+          stop(0),
+          start(1, { type: "text", text: "" }),
+          delta(1, { type: "text_delta", text: "Checking the Larkspur panel. " }),
+          stop(1),
+          start(2, { type: "server_tool_use", id: "srvtoolu_a", name: "web_search", input: {} }),
+          delta(2, { type: "input_json_delta", partial_json: '{"query":"200A panel price"}' }),
+          stop(2),
+          start(3, { type: "web_search_tool_result", tool_use_id: "srvtoolu_a", content: [] }),
+          stop(3),
+          start(4, { type: "server_tool_use", id: "srvtoolu_b", name: "web_search", input: {} }),
+          delta(4, { type: "input_json_delta", partial_json: '{"query":"breaker price"}' }),
+          stop(4),
+          start(5, { type: "tool_use", id: "toolu_declined", name: "list_jobs", input: {} }),
+          stop(5),
+          start(6, FALLBACK_BLOCK),
+          stop(6),
+          // The fallback model: thought, said a sentence, called a tool.
+          start(7, { type: "thinking", thinking: "", signature: "" }),
+          delta(7, { type: "thinking_delta", thinking: "Find the job first." }),
+          delta(7, { type: "signature_delta", signature: SIGNATURE }),
+          stop(7),
+          start(8, { type: "text", text: "" }),
+          delta(8, { type: "text_delta", text: "Let me find that job." }),
+          stop(8),
+          start(9, { type: "tool_use", id: "toolu_9", name: "list_jobs", input: {} }),
+          delta(9, { type: "input_json_delta", partial_json: '{"search":"Larkspur"}' }),
+          stop(9),
+        ],
+        "tool_use",
+      ),
+      ROUND_TWO,
+    ]);
+    const convo: Anthropic.MessageParam[] = [{ role: "user", content: "Price the Larkspur panel swap" }];
+    const { final } = await runRound(client, convo);
+
+    // Only the fallback model's tool call is to be run and answered.
+    expect(toolUsesToAnswer(final.content)).toEqual([{ type: "tool_use", id: "toolu_9", name: "list_jobs", input: { search: "Larkspur" } }]);
+    convo.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_9", content: "J-031 Larkspur" }] });
+    await runRound(client, convo);
+
+    const replayed = bodies[1].messages[1].content as Ev[];
+    assertReplayValid(replayed);
+    expect(replayed).toEqual([
+      { type: "text", text: "Checking the Larkspur panel. " },
+      { type: "server_tool_use", id: "srvtoolu_a", name: "web_search", input: { query: "200A panel price" } },
+      { type: "web_search_tool_result", tool_use_id: "srvtoolu_a", content: [] },
+      FALLBACK_BLOCK,
+      { type: "thinking", thinking: "Find the job first.", signature: SIGNATURE },
+      { type: "text", text: "Let me find that job." },
+      { type: "tool_use", id: "toolu_9", name: "list_jobs", input: { search: "Larkspur" } },
+    ]);
+  });
+
+  it("a pre-output fallback puts the marker first and changes nothing else", async () => {
+    const { client, bodies } = scriptedClient([
+      message(
+        [
+          start(0, FALLBACK_BLOCK),
+          stop(0),
+          start(1, { type: "thinking", thinking: "", signature: "" }),
+          delta(1, { type: "signature_delta", signature: SIGNATURE }),
+          stop(1),
+          start(2, { type: "tool_use", id: "toolu_5", name: "list_team", input: {} }),
+          stop(2),
+        ],
+        "tool_use",
+      ),
+      ROUND_TWO,
+    ]);
+    const convo: Anthropic.MessageParam[] = [{ role: "user", content: "Who is on the Thistlewood job?" }];
+    const { final } = await runRound(client, convo);
+    expect(toolUsesToAnswer(final.content)).toHaveLength(1);
+    convo.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_5", content: "[]" }] });
+    await runRound(client, convo);
+
+    const replayed = bodies[1].messages[1].content as Ev[];
+    assertReplayValid(replayed);
+    expect(replayed).toEqual([FALLBACK_BLOCK, { type: "thinking", thinking: "", signature: SIGNATURE }, { type: "tool_use", id: "toolu_5", name: "list_team", input: {} }]);
+  });
+
+  it("a cache marker never lands on a fallback block", () => {
+    const convo = [
+      { role: "assistant", content: [{ type: "text", text: "Searching." }, FALLBACK_BLOCK] },
+    ] as unknown as Anthropic.MessageParam[];
+    markCacheTail(convo);
+    const blocks = convo[0].content as unknown as Ev[];
+    expect(blocks[0].cache_control).toEqual({ type: "ephemeral" });
+    expect("cache_control" in blocks[1]).toBe(false);
+  });
+
+  it("with fallbacksFor's fields on the params the round rides the beta surface: the body asks for the default fallback and the header names the beta; without them, neither", async () => {
+    const { fallbacksFor } = await import("@/lib/ai-cost");
+    const { client, bodies, headers } = scriptedClient([ROUND_TWO, ROUND_TWO]);
+    await runRound(client, [{ role: "user", content: "hi" }], { params: { model: "claude-opus-5-5", max_tokens: 2048, ...fallbacksFor("claude-opus-5-5") } });
+    expect(bodies[0].fallbacks).toBe("default");
+    expect(headers[0].get("anthropic-beta")).toContain("server-side-fallback-2026-07-01");
+    expect("betas" in bodies[0]).toBe(false);
+
+    await runRound(client, [{ role: "user", content: "hi" }], { params: { model: "claude-haiku-5-5", max_tokens: 2048, ...fallbacksFor("claude-haiku-5-5") } });
+    expect("fallbacks" in bodies[1]).toBe(false);
+    expect(headers[1].get("anthropic-beta") ?? "").not.toContain("server-side-fallback");
   });
 });
 
@@ -330,6 +467,47 @@ describe("markCacheTail", () => {
     ] as unknown as Anthropic.MessageParam[];
     markCacheTail(onlyThinking);
     expect("cache_control" in (onlyThinking[0].content as unknown as Ev[])[0]).toBe(false);
+  });
+});
+
+describe("GATE 2 (the SDK bump): the stock accumulator carries what the capture used to rebuild", () => {
+  it("finalMessage().content holds the thinking text, its signature, a redacted block and a web search's input, straight off the wire", async () => {
+    const { client } = scriptedClient([
+      message(
+        [
+          start(0, { type: "thinking", thinking: "", signature: "" }),
+          delta(0, { type: "thinking_delta", thinking: "Find the Larkspur job " }),
+          delta(0, { type: "thinking_delta", thinking: "before moving it." }),
+          delta(0, { type: "signature_delta", signature: SIGNATURE }),
+          stop(0),
+          start(1, { type: "redacted_thinking", data: "opaque-bytes" }),
+          stop(1),
+          start(2, { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: {} }),
+          delta(2, { type: "input_json_delta", partial_json: '{"query":"12/2 ' }),
+          delta(2, { type: "input_json_delta", partial_json: 'romex price"}' }),
+          stop(2),
+          start(3, { type: "text", text: "" }),
+          delta(3, { type: "text_delta", text: "Let me find that job." }),
+          stop(3),
+          start(4, { type: "tool_use", id: "toolu_1", name: "list_jobs", input: {} }),
+          delta(4, { type: "input_json_delta", partial_json: '{"search":' }),
+          delta(4, { type: "input_json_delta", partial_json: '"Larkspur"}' }),
+          stop(4),
+        ],
+        "tool_use",
+      ),
+    ]);
+    // No capture, no replay module: the SDK's own stream, its own final message.
+    const final = await client.messages
+      .stream({ model: "claude-opus-4-8", max_tokens: 2048, messages: [{ role: "user", content: "Move the Larkspur job" }] })
+      .finalMessage();
+    expect(final.content).toEqual([
+      { type: "thinking", thinking: "Find the Larkspur job before moving it.", signature: SIGNATURE },
+      { type: "redacted_thinking", data: "opaque-bytes" },
+      { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: { query: "12/2 romex price" } },
+      { type: "text", text: "Let me find that job." },
+      { type: "tool_use", id: "toolu_1", name: "list_jobs", input: { search: "Larkspur" } },
+    ]);
   });
 });
 

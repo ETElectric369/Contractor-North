@@ -215,7 +215,23 @@ export interface ActionItem {
   payee?: string | null;
   /** materials_needed only: how many lines are still open to buy, for "Buy Materials · N open". */
   openToBuy?: number | null;
+  /**
+   * ALREADY INVOICED (2026-11-04): the work this row asks about was billed on an invoice the app
+   * can't tie to it. The ⋯ door opens a sheet of the customer's live invoices; the one picked is
+   * tied to the estimate (invoices.quote_id), the job or the visit (lib/action-items/already-invoiced).
+   * Staff only; absent: no such door.
+   */
+  alreadyInvoiced?: AlreadyInvoicedTarget | null;
+  /**
+   * A DATED AGE (2026-11-04: "140d ago" hid that it was June). The word the row's day is said with:
+   * "Accepted Jun 12", "Sent Jun 12", "Started Jul 3" (the year only when it isn't this year).
+   * Absent: the relative form (prettyWhen).
+   */
+  dated?: "Accepted" | "Sent" | "Started" | null;
 }
+
+/** What an Already Invoiced door ties a picked invoice to: an estimate, or done work (a job or a visit). */
+export type AlreadyInvoicedTarget = { kind: "quote"; id: string } | { kind: "job"; id: string } | { kind: "visit"; id: string };
 
 /** What the Send sheet needs to name before an estimate goes (who, how much, how many lines). */
 export interface SendFacts {
@@ -387,11 +403,13 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // notice, chase a signature) — no generic "do"/"dismiss" that would mislabel them.
   invoice_overdue: ["open"],
   // Still Waiting (snooze) sets the FOLLOW-UP day (0366 quotes.follow_up_at), never valid_until,
-  // which is the customer's offer window on the public share. Lost (dismiss) marks it declined, the
-  // same decision the quote page's status dropdown makes, one tap closer.
-  quote_awaiting: ["snooze", "dismiss", "open"],
+  // which is the customer's offer window on the public share. ⋯ Won It (do) marks it accepted (the
+  // quote page's own Accepted: it stamps the day and makes the job); ⋯ Lost (dismiss) marks it
+  // declined, the same decision the quote page's status dropdown makes, one tap closer.
+  quote_awaiting: ["snooze", "do", "dismiss", "open"],
   // Pick A Day lands on the won JOB (schedule, added by the build only when the estimate has one).
-  quote_accepted: ["open"],
+  // ⋯ Already Invoiced (its own sheet, not a verb) and ⋯ Lost (dismiss: marks it declined).
+  quote_accepted: ["dismiss", "open"],
   // ⋯ Set Aside Until… (snooze: invoice.setAside, a day and an optional reason). Send It opens it.
   invoice_draft: ["snooze", "open"],
   // DERIVED rows whose ids are prefixed composites (unbilled-<visit>, jdone-<job>). Their dismiss
@@ -402,7 +420,8 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // estimate declined (qdraft-<quote>, prefix stripped).
   quote_draft: ["dismiss", "open"],
   lien_deadline: ["open"],
-  contract_unsigned: ["open"],
+  // ⋯ Signed On Paper (do: contract.recordPaperSignature, signed by its customer today).
+  contract_unsigned: ["do", "open"],
   // Detector findings are DERIVED rows (a time entry / a job), not their own records, and a money
   // leak is never dismissed. An ENDLESS one (No Costs Yet on a labor-only job, To Buy while a part is
   // back-ordered) gets a Snooze that picks a day (needs_you_waits, 0367): the build adds it.

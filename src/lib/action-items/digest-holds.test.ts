@@ -35,7 +35,7 @@ function fake(answers: Record<string, Answer | (() => Answer)>) {
         return q;
       },
     };
-    for (const m of ["select", "eq", "in", "is", "or", "lt", "lte", "order", "limit"]) {
+    for (const m of ["select", "eq", "in", "is", "or", "lt", "lte", "gte", "order", "limit"]) {
       q[m] = (...args: unknown[]) => {
         filters[table].push([m, ...args]);
         return q;
@@ -69,7 +69,7 @@ describe("the holds line", () => {
 describe("the morning push", () => {
   it("a morning with only holds back still pushes, and the line leads", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
-    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, failed: 0, lapsed_skipped: 0 });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, already: 0, failed: 0, lapsed_skipped: 0 });
     expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", { title: "Needs You: 2", body: "2 Holds Are Back", url: "/planner" });
     // Filtered to this company by hand; on hold; back today or earlier, or no day at all.
     const jobs = db.filters.jobs;
@@ -107,14 +107,14 @@ describe("the morning push", () => {
   it("a company whose plan has ended gets no push and is counted; the standing company still gets its morning (cn-v1137)", async () => {
     const lapsed = { id: "org-2", settings: { timezone: "America/Los_Angeles" }, subscription_status: "canceled" };
     const db = fake({ organizations: { data: [ORG, lapsed] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
-    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, failed: 0, lapsed_skipped: 1 });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, already: 0, failed: 0, lapsed_skipped: 1 });
     expect(notifyPeople).toHaveBeenCalledTimes(1);
     expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", expect.anything());
   });
 
   it("before 0366 the holds read fails: no line, and nothing to push when nothing else waits", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { error: { code: "42703" }, count: null }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
-    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, failed: 0, lapsed_skipped: 0 });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, already: 0, failed: 0, lapsed_skipped: 0 });
     expect(notifyPeople).not.toHaveBeenCalled();
   });
 });
@@ -131,7 +131,7 @@ describe("the morning push and a failed read", () => {
 
   it("a failed tasks read pushes nothing for the company (its decisions would have pushed), counts it, and files it with the orgId", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { error: boom } });
-    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, failed: 1, lapsed_skipped: 0 });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, already: 0, failed: 1, lapsed_skipped: 0 });
     expect(notifyPeople).not.toHaveBeenCalled();
     expect(reportError).toHaveBeenCalledTimes(1);
     expect(reportError).toHaveBeenCalledWith("cron-day-ahead", boom, { orgId: "org-1" });
@@ -146,9 +146,43 @@ describe("the morning push and a failed read", () => {
       inquiries: { count: 0 },
       tasks: () => (++taskReads === 1 ? { error: boom } : { data: [] }),
     });
-    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 2, pushed: 1, failed: 1, lapsed_skipped: 0 });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 2, pushed: 1, already: 0, failed: 1, lapsed_skipped: 0 });
     expect(notifyPeople).toHaveBeenCalledTimes(1);
     expect(notifyPeople).toHaveBeenCalledWith("org-2", ["owner-1"], "day_ahead", { title: "Needs You: 2", body: "2 Holds Are Back", url: "/planner" });
     expect(reportError).toHaveBeenCalledWith("cron-day-ahead", boom, { orgId: "org-1" });
+  });
+});
+
+/**
+ * ONCE A DAY PER PERSON, AND ONLY THE COMPANIES AT THEIR 8 AM (the hourly daily cron, 2026-11-02).
+ * A person whose bell already carries today's day_ahead line (since the company's own midnight) is
+ * passed over and counted `already`, so a retried hour never pushes twice; a failed read of those
+ * lines pushes nobody for the company. Handed orgIds, every other company is left for its own hour.
+ */
+describe("the morning push on the hourly cron", () => {
+  it("someone already pushed today is passed over and counted; the read is this company's day_ahead lines since its own midnight", async () => {
+    const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] }, notifications: { data: [{ user_id: "owner-1" }] } });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, already: 1, failed: 0, lapsed_skipped: 0 });
+    expect(notifyPeople).not.toHaveBeenCalled();
+    const n = db.filters.notifications;
+    expect(n).toContainEqual(["eq", "org_id", "org-1"]);
+    expect(n).toContainEqual(["eq", "type", "day_ahead"]);
+    expect(n.find((f) => f[0] === "gte")?.[1]).toBe("created_at");
+  });
+
+  it("a failed read of today's lines pushes nobody for the company, counted and filed", async () => {
+    const boom = { message: "boom" };
+    const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] }, notifications: { error: boom } });
+    expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0, already: 0, failed: 1, lapsed_skipped: 0 });
+    expect(notifyPeople).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledWith("cron-day-ahead", boom, { orgId: "org-1" });
+  });
+
+  it("handed the companies at their 8 AM, it pushes for those alone", async () => {
+    const other = { id: "org-2", settings: { timezone: "America/New_York" }, subscription_status: "active" };
+    const db = fake({ organizations: { data: [ORG, other] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
+    expect(await sendDayAheadDigests(db, { orgIds: new Set(["org-2"]) })).toEqual({ orgs: 1, pushed: 1, already: 0, failed: 0, lapsed_skipped: 0 });
+    expect(notifyPeople).toHaveBeenCalledTimes(1);
+    expect(notifyPeople).toHaveBeenCalledWith("org-2", ["owner-1"], "day_ahead", expect.anything());
   });
 });

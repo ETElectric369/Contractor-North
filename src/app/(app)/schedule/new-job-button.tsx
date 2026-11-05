@@ -83,7 +83,7 @@ export function CustomerPicker({
           {/* The mode travels with the form, so a phone typed with no name is refused in words on the
               server ("Type the new customer's name, or tap Pick Existing."), never dropped. */}
           <input type="hidden" name="new_customer" value="1" />
-          <Input
+          <Input autoComplete="name"
             id={`${idPrefix}-new-name`}
             name="new_customer_name"
             placeholder="Name"

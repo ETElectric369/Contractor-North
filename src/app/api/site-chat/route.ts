@@ -1,4 +1,8 @@
-import { recordAiUsage, aiAllowed } from "@/lib/ai-cost";
+import { recordAiUsage, aiAllowed, fallbacksFor } from "@/lib/ai-cost";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { refused, refusalWords } from "@/lib/ai-refusal";
+import { replayContent, toolUsesToAnswer } from "@/lib/nort/replay";
 import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropic } from "@/lib/anthropic";
@@ -9,6 +13,7 @@ import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import type { LeadIntake } from "@/lib/lead-triage";
 import { computeDeckEstimate, buildDeckRates, deckAsksTrpa, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
+import { langFromAcceptLanguage } from "@/lib/request-lang";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { deckConfiguratorOn, orgTrade } from "@/lib/org-trade";
 import { tradeNort } from "@/lib/trade-nort";
@@ -40,7 +45,7 @@ const MAX_CHATS_PER_DAY = 2000;
 const MAX_LEADS_PER_IP_HOUR = 3;
 const MAX_LEADS_PER_ORG_HOUR = 20;
 
-const TOOLS = [
+const TOOLS: Anthropic.Tool[] = [
   {
     name: "search_prices",
     description:
@@ -70,11 +75,11 @@ const TOOLS = [
       required: ["name"],
     },
   },
-] as unknown as Anthropic.Tool[];
+];
 
 // Only added for orgs that actually have deck pricing — gives Nort EXACT deck numbers from the
 // same deterministic engine the configurator uses, instead of doing the math itself.
-const DECK_TOOL = {
+const DECK_TOOL: Anthropic.Tool = {
   name: "deck_estimate",
   description:
     "Compute an EXACT preliminary deck estimate from THIS company's real deck pricing. For ANY deck job, gather the measurements from the customer, then call this instead of doing the math yourself. Returns an itemized total.",
@@ -99,21 +104,21 @@ const DECK_TOOL = {
     },
     required: ["projectType", "lengthFt", "widthFt"],
   },
-} as unknown as Anthropic.Tool;
+};
 /** The deck tool as THIS company asks it: the TRPA question only where the company priced its own
  *  TRPA line (deckAsksTrpa); every other deck company's visitors are never asked about a region. */
 function deckTool(asksTrpa: boolean): Anthropic.Tool {
   if (asksTrpa) return DECK_TOOL;
-  const t = DECK_TOOL as unknown as { input_schema: { properties: Record<string, unknown> } };
-  const { trpa: _trpa, ...properties } = t.input_schema.properties;
-  return { ...t, input_schema: { ...t.input_schema, properties } } as unknown as Anthropic.Tool;
+  // The SDK types a schema's `properties` as unknown; the deck tool's are the map written above.
+  const { trpa: _trpa, ...properties } = (DECK_TOOL.input_schema.properties ?? {}) as Record<string, unknown>;
+  return { ...DECK_TOOL, input_schema: { ...DECK_TOOL.input_schema, properties } };
 }
 
 // Anthropic's SERVER-SIDE web search — the SAME tool the internal quote drafter uses, so a
 // research-mode org (no fixed price list; prices market-researched + buffered) can quote live.
 // Executes inline server-side (no client round-trip); capped hard because this is a public,
 // unauthenticated endpoint — every search costs money. Only attached for research-mode orgs.
-const WEB_SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 3 } as unknown as Anthropic.Tool;
+const WEB_SEARCH_TOOL: Anthropic.WebSearchTool20250305 = { type: "web_search_20250305", name: "web_search", max_uses: 3 };
 
 // Clamping keeps a hostile or fat-fingered number from reaching the engine, but a SILENT clamp
 // manufactures a confident wrong answer: "2000 x 1500" (a typo, or feet-vs-inches) became 500×500
@@ -458,16 +463,17 @@ export async function POST(req: Request) {
   // Research-mode orgs (electricians etc.) get live web-priced materials; catalog orgs (decks)
   // price from their own list + the deterministic deck engine, so they don't need it.
   const canWebSearch = org.settings.estimating_mode === "research" && !isDeck;
-  const tools = [
+  const tools: Anthropic.ToolUnion[] = [
     ...TOOLS,
     ...(isDeck ? [deckTool(asksTrpa)] : []),
     ...(canWebSearch ? [WEB_SEARCH_TOOL] : []),
-  ] as Anthropic.Tool[];
+  ];
 
   const system = systemPrompt(org, area, threshold, isDeck, canWebSearch, asksTrpa);
   const client = getAnthropic();
 
   let leadCaptured = false;
+  let declined = false;
   let lastEstimate: DeckEstimateResult | null = null;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -475,9 +481,12 @@ export async function POST(req: Request) {
       // every turn of a visitor's conversation) — one cache breakpoint makes rounds 2..N read that
       // prefix at ~0.1x instead of re-billing it in full. The volatile part is the convo, which
       // stays after the breakpoint. Pure cost control; no behavior change.
-      const resp = await client.messages.create({
+      // The table's row (ai-effort "site-chat"); fallbacks only if an override names a model that
+      // carries them (the small model carries none).
+      const resp = await aiCreate(client, {
         model: MODEL,
-        max_tokens: 1500, // the 5.5 line may think inside the cap (cn-v1128)
+        ...fallbacksFor(MODEL),
+        ...aiRequestFor("site-chat"),
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         tools,
         messages: convo,
@@ -486,16 +495,24 @@ export async function POST(req: Request) {
       // contractor's website drives it — and it was one of ten model call sites with no ledger
       // row at all, so the one place a runaway bill would show up first was invisible. Per round,
       // not per request: the round loop is where the tokens actually go.
-      void recordAiUsage({ orgId: org.id, model: MODEL, surface: "site-chat", usage: resp.usage as never });
-      convo.push({ role: "assistant", content: resp.content });
+      void recordAiUsage({ orgId: org.id, model: resp.model || MODEL, surface: "site-chat", usage: resp.usage as never });
+      // A REFUSAL, BEFORE ANY CONTENT IS READ: a partial is never shown or replayed, and the
+      // visitor gets the one sentence.
+      if (refused(resp)) {
+        declined = true;
+        break;
+      }
+      // The turn as the replay rule keeps it (lib/nort/replay): every block, unless a fallback
+      // switched models mid-answer, when the declined model's unfinished work is left out.
+      convo.push({ role: "assistant", content: replayContent(resp.content) });
       // web_search runs server-side and can pause a long turn — re-invoke to let it finish, but
       // do NOT push a tool_result (there's no CLIENT tool to answer). Only client tool_use gets one.
       if ((resp.stop_reason as string) === "pause_turn") continue;
       if (resp.stop_reason !== "tool_use") break;
 
       const results: Anthropic.ToolResultBlockParam[] = [];
-      for (const block of resp.content) {
-        if (block.type !== "tool_use") continue; // ignore server_tool_use / web_search_tool_result blocks
+      // ONLY the tool calls the replay keeps (server_tool_use / web_search_tool_result are not ours).
+      for (const block of toolUsesToAnswer(resp.content)) {
         let out = "{}";
         if (block.name === "search_prices") out = await searchPrices(supabase, org, block.input);
         else if (block.name === "deck_estimate") { const de = deckEstimate(block.input, deckRates); out = de.summary; lastEstimate = de.est; }
@@ -516,6 +533,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Nort is unavailable right now — please call or use the form." }, { status: 502 });
   }
 
+  // The visitor is nobody's profile: their language is their browser's (Accept-Language, the same
+  // read the sign-in doors make before a session), so a Spanish visitor hears the refusal in Spanish.
+  if (declined) return NextResponse.json({ reply: refusalWords(langFromAcceptLanguage(req.headers.get("accept-language"))), leadCaptured });
   const reply = lastAssistantText(convo) || "Sorry — could you say that another way?";
   return NextResponse.json({ reply, leadCaptured });
 }

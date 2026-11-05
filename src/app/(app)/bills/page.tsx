@@ -94,8 +94,9 @@ import { stopWaitingOnCredit } from "./waiting-credit-actions";
 export const dynamic = "force-dynamic";
 // Read Now and Read Again on a card read a paper inside this page's server actions: a 12-page CED
 // PDF gets the reader's own time, not the platform default (audit v994, SI4). A paper put in
-// through Snap Or Note is read on its own route (/api/paperwork/read), with the same 60 seconds.
-export const maxDuration = 60;
+// through Snap Or Note is read on its own route (/api/paperwork/read), with 60 seconds. The statement
+// scan reads here too at up to 16000 tokens, so the page carries 300 s (the largest the repo uses).
+export const maxDuration = 300;
 
 /**
  * The bills ledger, with each receipt's lines. `billable` (0268) and the line's own id ride along

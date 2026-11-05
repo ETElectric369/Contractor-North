@@ -20,7 +20,8 @@ import { rowButtons, type RowDoor } from "@/lib/action-items/row-buttons";
 import { pileAges, pileTitle, pileUnfoldsHere } from "@/lib/action-items/piles";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { SupplierPaperCards, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
-import { AlreadyBilledButton } from "@/components/already-billed-sheet";
+import { AlreadyBilledButton, AlreadyInvoicedSheet } from "@/components/already-billed-sheet";
+import { datedWhen } from "@/lib/action-items/dated-when";
 
 /**
  * Friendly relative day for the "when" line; times for datetime values.
@@ -275,8 +276,10 @@ function Row(p: RowProps) {
   // The row's own words when its state has them, else its kind's; a request with Leads off
   // reads Request even on a row built without its chip.
   const chip = item.kind === "inquiry" && !leadsOn && !item.chip ? "Request" : chipOf(item);
-  const when = prettyWhen(item.when, todayStr, tz, WHEN_IS_A_DEADLINE[item.kind]);
-  const overdue = item.when && !item.when.includes("T") && item.when < todayStr;
+  // A quote's or a contract's day is said as a date with its word ("Accepted Jun 12"), never hidden
+  // as "140d ago"; a dated row is never painted overdue by that day (the day it was sent is not a miss).
+  const when = item.dated ? datedWhen(item.dated, item.when, todayStr, tz) : prettyWhen(item.when, todayStr, tz, WHEN_IS_A_DEADLINE[item.kind]);
+  const overdue = !item.dated && item.when && !item.when.includes("T") && item.when < todayStr;
   const doors = rowButtons(item, { leadsOn, isStaff: p.isStaff });
   const open = () => p.router.push(item.href);
   return (
@@ -469,6 +472,7 @@ function DoorButton(p: RowProps & { door: RowDoor }) {
     );
   }
   if (a.type === "unfold") return null; // a pile draws its own
+  if (a.type === "alreadyInvoiced") return <AlreadyInvoicedDoor {...p} door={door} className={ROW_BUTTON} />;
   // comeBack, assign, confirm: the door's question in its own sheet.
   return (
     <>
@@ -513,6 +517,7 @@ function MoreSheetBody(p: RowProps & { doors: RowDoor[]; close: () => void }) {
             </a>
           );
         }
+        if (a.type === "alreadyInvoiced") return <AlreadyInvoicedDoor key={d.label} {...p} door={d} className={SHEET_ROW} after={p.close} />;
         if (a.type === "run") {
           return (
             <button
@@ -537,6 +542,38 @@ function MoreSheetBody(p: RowProps & { doors: RowDoor[]; close: () => void }) {
           </button>
         );
       })}
+    </>
+  );
+}
+
+/**
+ * ALREADY INVOICED: the sheet of the customer's live invoices; the one picked is tied to the row's
+ * work (a real fact), the answer is said as a toast, and the row leaves on the refresh. A refusal is
+ * said on the sheet itself.
+ */
+function AlreadyInvoicedDoor(p: RowProps & { door: RowDoor; className: string; after?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const toast = useToast();
+  const a = p.door.act;
+  if (a.type !== "alreadyInvoiced") return null;
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className={p.className}>
+        {p.door.label}
+      </button>
+      {open && (
+        <AlreadyInvoicedSheet
+          target={a.target}
+          onClose={() => setOpen(false)}
+          onTied={(message) => {
+            setOpen(false);
+            p.removeHere(p.item.id);
+            toast(message, "success");
+            p.router.refresh();
+            p.after?.();
+          }}
+        />
+      )}
     </>
   );
 }

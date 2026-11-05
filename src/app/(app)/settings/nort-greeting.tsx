@@ -35,7 +35,7 @@ export function NortGreeting({ greets, name }: { greets: boolean; name: string }
       </label>
       <div>
         <Label htmlFor="nort-name" className="mb-1.5">{t("sh_nortGreetsYouAs")}</Label>
-        <Input id="nort-name" value={n} maxLength={40} placeholder={t("sh_yourFirstName")} onChange={(e) => { setN(e.target.value); setSaved(false); }} />
+        <Input autoComplete="off" id="nort-name" value={n} maxLength={40} placeholder={t("sh_yourFirstName")} onChange={(e) => { setN(e.target.value); setSaved(false); }} />
       </div>
       <div className="flex items-center gap-3">
         <Button

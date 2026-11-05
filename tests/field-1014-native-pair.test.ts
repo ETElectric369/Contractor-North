@@ -70,3 +70,14 @@ describe("the page's doors", () => {
     expect(EXIT_EVENT).toBe("cn:geofence-exit");
   });
 });
+
+describe("one position, read by the phone", () => {
+  it("a read that times out stops the pending requestLocation, so a late fix is never the next reader's", () => {
+    const geo = read("ios/App/App/GeofencePlugin.swift");
+    const timer = geo.split("readTimer = Timer.scheduledTimer")[1].split("manager.requestLocation()")[0];
+    expect(timer).toContain("self.manager.stopUpdatingLocation()");
+    expect(timer.indexOf("stopUpdatingLocation")).toBeLessThan(timer.indexOf('finishRead(nil, "timeout")'));
+    // finishRead clears the waiting resolvers (the pending reader is answered once, then gone).
+    expect(geo.split("private func finishRead")[1].split("}")[0]).toContain("readers = []");
+  });
+});

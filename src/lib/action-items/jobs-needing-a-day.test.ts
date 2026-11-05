@@ -139,15 +139,16 @@ describe("the build reads it", () => {
   });
 
   it("billed for the work = done (0205) reaches both feeders: Won, Needs A Day and Jobs Needing A Day", () => {
-    // The win: an accepted estimate whose job already has a live invoice for the work is over, not dateless.
-    expect(query).toContain("if (a.job_id && finishedBilledJobs.has(String(a.job_id))) continue; // billed for the work = done (0205)");
+    // The win: an accepted estimate whose job already has a live invoice for the work is over, not
+    // dateless. It asks the one settled rule (quoteSettled: a standard or final bill since it was won).
+    expect(query).toContain("if (settledOf(a).settled) continue;");
     // The jobs read: the same set goes into the pure reading (the second call reuses needDayPre's jobs).
     expect(query).toContain("billedJobIds: finishedBilledJobs,");
   });
 
   it("a deposit or progress draw is not billing for the work: the job keeps asking for a day", () => {
     // The read carries the kind, and the needs-a-day set keeps only a standard invoice or the final draw.
-    expect(query).toContain('supabase.from("invoices").select("job_id, invoice_kind").not("job_id", "is", null).not("status", "in", "(draft,void)")');
+    expect(query).toContain('supabase.from("invoices").select("id, job_id, invoice_kind, status, created_at").not("job_id", "is", null).not("status", "in", "(draft,void)")');
     const rule = 'billedRows.filter((r) => r.job_id && (!isDrawKind(r.invoice_kind) || r.invoice_kind === "final")).map((r) => r.job_id)';
     expect(query).toContain(rule);
     // The same rule, run: a deck builder's paid $10,000 deposit on a to_be_scheduled job with no day.
@@ -168,8 +169,10 @@ describe("the build reads it", () => {
     const midBuild = job({ id: "progress-only", status: "in_progress", time_entries: [{ clock_in: "2026-09-11T15:00:00Z" }] });
     expect(whyOf(midBuild, { billedJobIds: finished })).toBe("Quiet since Sep 11");
     // The outcome feeders keep the wide set: any real invoice settles "did this work turn into money".
+    // The inspections read it; an estimate to send asks the one settled rule (quoteSettled, 2026-11-04:
+    // a standard or final bill since it was started, an invoice naming it, a closed job).
     expect(query).toContain("const billedJobs = new Set(billedRows.map((r) => r.job_id).filter(Boolean));");
-    for (const site of ["billedJobs, // jobs with real", "billedJobs.has(q.job_id)) continue;"]) {
+    for (const site of ["billedJobs, // jobs with real", "if (settledOf(q).settled) continue;"]) {
       expect(query).toContain(site);
     }
     // Done, Not Billed asks the same wide question in SQL now (0371), so its two sites moved out of
@@ -181,7 +184,8 @@ describe("the build reads it", () => {
     // set query.ts hands it, never finishedBilledJobs.
     expect(query).toContain("billedJobs,\n          seen,");
     const legacy = readFileSync(join(process.cwd(), "src/lib/action-items/done-not-billed.ts"), "utf8");
-    for (const site of ["input.billedJobs.has(String(a.job_id))) continue;", "input.billedJobs.has(String(j.id))) continue;"]) {
+    // (doneJobBilled: the wide set, or an invoice naming one of the job's estimates — 0403.)
+    for (const site of ["doneJobBilled(String(a.job_id), input)) continue;", "doneJobBilled(String(j.id), input)) continue;", "return input.billedJobs.has(jobId) ||"]) {
       expect(legacy).toContain(site);
     }
     expect(legacy).not.toContain("isDrawKind");

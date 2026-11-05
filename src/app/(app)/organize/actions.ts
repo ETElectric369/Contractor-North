@@ -6,8 +6,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { aiAllowed, modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, fallbacksFor, modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { aiCreate } from "@/lib/ai-call";
+import { refused, saidFailure } from "@/lib/ai-refusal";
+import { answerText, readStructured } from "@/lib/ai-structured";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import * as z from "zod/v4";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
 import { scopeAnswered } from "@/lib/bill-scope";
@@ -179,9 +185,13 @@ async function readInto(
   try {
     const client = getAnthropic();
     const trade = await tradeOf(supabase, ctx.orgId);
-    const msg = await client.messages.create({
+    // The paper read: the table's row, the big model's fallbacks. Its answer is still read by the
+    // repair-backed parse (parseAiJson): the reader's shape is a long prose contract readerFields
+    // clamps field by field, and no schema for it exists yet.
+    const msg = await aiCreate(client, {
       model: DEFAULT_MODEL,
-      max_tokens: 4096,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor("organize"),
       system: paperReaderSystem(trade),
       messages: [
         {
@@ -197,9 +207,17 @@ async function readInto(
       ],
     });
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
-    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
-    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, text?.text ?? "", ctx.orgId);
+    void recordAiUsage({ orgId: ctx.orgId, model: msg.model || DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
+    // A REFUSAL BEFORE ANY CONTENT IS READ: the paper is NOT lost (it waits in the tray, saying the
+    // reader declined it), and the answer is the one sentence — never a parse error, never an error row.
+    if (refused(msg)) {
+      await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the reader declined it" } }, waiting);
+      revalidatePath("/organize");
+      revalidatePath("/bills");
+      const said = saidFailure("refused");
+      return { ok: false, error: `${said.error} It is saved and waiting; fill it in yourself.` };
+    }
+    parsed = await parseAiJson(client, answerText(msg.content), ctx.orgId);
   } catch (e: any) {
     // The paper is NOT lost: the row stays in the tray, saying it was not read.
     await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the reader didn't answer" } }, waiting);
@@ -523,9 +541,12 @@ export async function billJobReceipt(
   try {
     const client = getAnthropic();
     const trade = await tradeOf(supabase, ctx.orgId);
-    const msg = await client.messages.create({
+    // The receipt read: the table's row, the big model's fallbacks; the repair-backed parse stays
+    // (its scope line is per job, and readers below clamp every field).
+    const msg = await aiCreate(client, {
       model: DEFAULT_MODEL,
-      max_tokens: 4096,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor("organize"),
       system: `You read a purchase receipt for ${withArticle(trade)} and itemize it as a job cost.
 
 Respond with ONLY a JSON object (no prose):
@@ -553,9 +574,10 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       ],
     });
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
-    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
-    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, text?.text ?? "", ctx.orgId);
+    void recordAiUsage({ orgId: ctx.orgId, model: msg.model || DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
+    // A refusal is the one sentence, before any content is read.
+    if (refused(msg)) return { ok: false, error: saidFailure("refused").error };
+    parsed = await parseAiJson(client, answerText(msg.content), ctx.orgId);
   } catch (e: any) {
     return { ok: false, error: e?.message ?? "AI could not read this receipt." };
   }
@@ -1913,6 +1935,22 @@ const SUGGEST_MISSED =
   "Nothing was suggested: this paper was filed or moved while AI Suggest was looking, or it isn't here any more. Refresh to see where it is.";
 
 /**
+ * THE TRIAGE PICK'S ANSWER, AS A SCHEMA (cn-v1142): structured outputs hold the reply to it, so it
+ * is read without a hand parse or a repair round trip. Everything below still checks the pick (a
+ * job id must be one of the open jobs, a bucket one of the buckets): the schema fixes the shape only.
+ */
+const TRIAGE_FORMAT = zodOutputFormat(
+  z.object({
+    action: z.enum(["file_job", "overhead", "task", "keep_note", "unsure"]),
+    job_id: z.string().nullable(),
+    overhead_category: z.string().nullable(),
+    task_title: z.string().nullable(),
+    task_category: z.enum(["office", "operations", "sales"]),
+    reason: z.string(),
+  }),
+);
+
+/**
  * Let Claude look at a needs-attention item and SUGGEST where it goes: a job or a business-cost
  * bucket (written onto the row as a suggestion, never filed), or turn a to-do note into a task,
  * or keep a reference note. Returns what it did.
@@ -2011,11 +2049,16 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   let parsed: any;
   try {
     const client = getAnthropic();
-    const msg = await client.messages.create({
-      // Categorising one document into an action bucket, with a human review tray
-      // behind it — not the receipt-reading that becomes billable money.
-      model: modelFor("routine"),
-      max_tokens: 500,
+    // Categorising one document into an action bucket, with a human review tray
+    // behind it — not the receipt-reading that becomes billable money. Metered under its own
+    // name ("organize:triage", cn-v1142) and its answer held by TRIAGE_FORMAT.
+    const model = modelFor("routine");
+    const req = aiRequestFor("organize:triage");
+    const msg = await aiCreate(client, {
+      model,
+      ...fallbacksFor(model),
+      ...req,
+      output_config: { ...req.output_config, format: TRIAGE_FORMAT },
       system: `You triage one piece of paperwork for ${withArticle(trade)} and decide the single best action. Output ONLY a JSON object:
 {
   "action": "file_job" | "overhead" | "task" | "keep_note" | "unsure",
@@ -2037,9 +2080,11 @@ ${jobLines.join("\n") || "(none)"}`,
       ],
     });
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
-    void recordAiUsage({ orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
-    const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, block?.text ?? "", orgId);
+    void recordAiUsage({ orgId, model: msg.model || model, surface: "organize:triage", usage: msg.usage as never });
+    const read = readStructured(msg, TRIAGE_FORMAT);
+    // A refusal is the one sentence; a cut-off or an unreadable pick says what it always said.
+    if (!read.ok) return { ok: false, message: read.reason === "refused" ? read.error : "AI couldn't review this one." };
+    parsed = read.value;
   } catch (e: any) {
     return {
       ok: false,

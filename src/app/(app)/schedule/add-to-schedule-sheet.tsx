@@ -216,7 +216,7 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
           <Heading>Job</Heading>
           <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 focus-within:border-brand">
             <Search className="h-4 w-4 shrink-0 text-slate-400" />
-            <input
+            <input autoComplete="off"
               type="search"
               value={query}
               onChange={(ev) => setQuery(ev.target.value)}

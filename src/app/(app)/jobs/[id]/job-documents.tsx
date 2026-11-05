@@ -473,7 +473,7 @@ export function JobDocuments({
         <div className="space-y-4">
           <div>
             <Label htmlFor="doc-name">{t("jb_name")}</Label>
-            <Input
+            <Input autoComplete="off"
               id="doc-name"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}

@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   overCeiling: false,
   lapsed: false,
   reply: "",
+  stop: "end_turn",
   seeded: 0,
   seedSchema: [] as unknown[],
 }));
@@ -25,7 +26,9 @@ vi.mock("./forms/actions", () => ({
     return { ok: true, id: "f-seeded" };
   }),
 }));
-vi.mock("@/lib/ai-cost", () => ({
+vi.mock("@/lib/ai-cost", async (orig) => ({
+  // fallbacksFor stays the real one (cn-v1142): "test-model" carries no fallback, so the stable surface.
+  fallbacksFor: (await orig<typeof import("@/lib/ai-cost")>()).fallbacksFor,
   recordAiUsage: vi.fn(async () => undefined),
   // The one gate (cn-v1137): the ceiling as before, or a plan that has ended, in words.
   aiAllowed: vi.fn(async () =>
@@ -43,7 +46,8 @@ vi.mock("@/lib/anthropic", () => ({
     messages: {
       create: vi.fn(async () => {
         state.modelCalls++;
-        return { content: [{ type: "text", text: state.reply }], usage: {} };
+        const declined = state.stop === "refusal";
+        return { model: "test-model", stop_reason: state.stop, content: declined ? [] : [{ type: "text", text: state.reply }], usage: {} };
       }),
     },
   }),
@@ -83,6 +87,7 @@ beforeEach(() => {
   state.overCeiling = false;
   state.lapsed = false;
   state.reply = QUIET_REPLY;
+  state.stop = "end_turn";
   state.seeded = 0;
   state.seedSchema = SHEET;
 });
@@ -210,6 +215,13 @@ describe("Nort on: the same doors as before", () => {
   it("draftMyPlaybook drafts", async () => {
     expect((await draftMyPlaybook()).ok).toBe(true);
     expect(state.modelCalls).toBe(1);
+  });
+
+  it("a declined turn is said in Nort's words and fills nothing; a declined draft hands back the plain questions (cn-v1142)", async () => {
+    state.stop = "refusal";
+    expect(await talkSetup("trade", {}, "I'm a painter")).toMatchObject({ ok: true, say: "Nort can't help with that one.", filled: [] });
+    expect(await draftMyPlaybook()).toMatchObject({ ok: true, formId: "f1", wasDrafted: false });
+    expect(state.modelCalls).toBe(2);
   });
 
   it("...except past this month's ceiling, where the draft door now falls back like talkSetup does", async () => {

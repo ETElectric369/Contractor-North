@@ -40,7 +40,7 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
           <Label htmlFor="name">Company name</Label>
-          <Input id="name" name="name" defaultValue={org.name} required />
+          <Input id="name" name="name" autoComplete="organization" defaultValue={org.name} required />
         </div>
         <div className="col-span-2">
           <Label htmlFor="address_line1">Street address</Label>
@@ -70,7 +70,7 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
         </div>
         <div>
           <Label htmlFor="email">Email</Label>
-          <Input id="email" name="email" type="email" defaultValue={org.email ?? ""} />
+          <Input id="email" name="email" type="email" autoComplete="email" defaultValue={org.email ?? ""} />
         </div>
         <div>
           <Label htmlFor="license">License #</Label>

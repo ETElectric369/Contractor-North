@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { DEFAULT_MODEL, getAnthropic } from "@/lib/anthropic";
-import { aiAllowed, recordAiUsage } from "@/lib/ai-cost";
+import { aiAllowed, fallbacksFor, recordAiUsage } from "@/lib/ai-cost";
+import { aiCreate } from "@/lib/ai-call";
+import { aiRequestFor } from "@/lib/ai-effort";
+import { isAiRefused, refused, saidFailure } from "@/lib/ai-refusal";
 import { parseAiJson } from "@/lib/ai-json";
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -95,9 +98,10 @@ async function runDesignModel(args: {
   const library = [...knownImageUrls(base)].map((url) => ({ url, caption: captions.get(url) ?? "" }));
   try {
     const client = getAnthropic();
-    const msg = await client.messages.create({
+    const msg = await aiCreate(client, {
       model: DEFAULT_MODEL,
-      max_tokens: 12288,
+      ...fallbacksFor(DEFAULT_MODEL),
+      ...aiRequestFor("site-designer"),
       system:
         `You are the design lead for ${withArticle(tradeWordsOr(settings))}'s public website, working INSIDE a fixed design system. You edit a SITE DOCUMENT (JSON) that a trusted renderer draws — you never write HTML pages.\n` +
         "THE LAWS:\n" +
@@ -138,7 +142,9 @@ async function runDesignModel(args: {
         },
       ],
     });
-    void recordAiUsage({ orgId: ctx.orgId, model: DEFAULT_MODEL, surface: "site-designer", usage: msg.usage as never });
+    void recordAiUsage({ orgId: ctx.orgId, model: msg.model, surface: "site-designer", usage: msg.usage as never });
+    // A decline is said, never parsed into a draft (ai-refusal).
+    if (refused(msg)) return saidFailure("refused");
     if (msg.stop_reason === "max_tokens")
       return { ok: false, error: "That pass ran long — ask for the change in smaller steps." };
     const text = msg.content
@@ -176,6 +182,7 @@ async function runDesignModel(args: {
 
     return { ok: true, doc, changes, dropped, cannot, note, noop: diffSiteDoc(base, doc).length === 0 };
   } catch (e) {
+    if (isAiRefused(e)) return saidFailure("refused");
     const message = e instanceof Error ? e.message : "The design pass failed.";
     return {
       ok: false,

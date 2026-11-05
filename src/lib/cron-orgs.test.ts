@@ -8,7 +8,7 @@ vi.mock("@/lib/stripe", () => ({
     return billing.enabled;
   },
 }));
-import { atLocalHour, readAllOrgs, readActiveOrgs, withBillingColumns } from "./cron-orgs";
+import { DAILY_LOCAL_HOUR, GLOBAL_UTC_HOUR, REMINDER_LOCAL_HOURS, atLocalHour, readAllOrgs, readActiveOrgs, withBillingColumns } from "./cron-orgs";
 import { BILLING_COLUMNS } from "./subscription";
 import { todayStrInTz, tzDayOfWeek } from "./tz";
 
@@ -159,6 +159,49 @@ describe("atLocalHour", () => {
     expect(instants.filter((at) => atLocalHour(PACIFIC, 2, at)).length).toBe(0);
     expect(instants.find((at) => atLocalHour(PACIFIC, 7, at))).toBe(Date.parse("2027-03-14T14:00:00Z")); // 7:00 AM PDT
     expect(instants.find((at) => atLocalHour(PACIFIC, 18, at))).toBe(Date.parse("2027-03-15T01:00:00Z")); // 6:00 PM PDT
+  });
+
+  /**
+   * THE DAILY CRON AND THE REMINDERS ON THE COMPANY'S CLOCK (2026-11-02). The daily ran at 15:00 UTC
+   * and the reminders at 15/19/23 UTC, tuned to Pacific summer: the day after DST ended they landed at
+   * 7 AM, 11 AM and 3 PM. Both are hourly now, judged by atLocalHour: the company steps at its 8 AM,
+   * the reminders at its 8 AM, noon and 4 PM. Swept the same way as the nudge: each exactly once.
+   */
+  it("the daily 8 AM and the reminder hours are 8, noon and 4 PM; North's own housekeeping hour is 15:00 UTC", () => {
+    expect(DAILY_LOCAL_HOUR).toBe(8);
+    expect([...REMINDER_LOCAL_HOURS]).toEqual([8, 12, 16]);
+    expect(GLOBAL_UTC_HOUR).toBe(15);
+  });
+
+  it("the fall-back day (2026-11-01): the daily 8 AM and each reminder hour come exactly once, at the standard-time instant", () => {
+    const instants = hourlyOnLocalDay("2026-11-01", PACIFIC);
+    expect(instants).toHaveLength(25);
+    expect(instants.filter((at) => atLocalHour(PACIFIC, DAILY_LOCAL_HOUR, at)).length).toBe(1);
+    expect(instants.find((at) => atLocalHour(PACIFIC, DAILY_LOCAL_HOUR, at))).toBe(Date.parse("2026-11-01T16:00:00Z")); // 8:00 AM PST
+    for (const h of REMINDER_LOCAL_HOURS) expect(instants.filter((at) => atLocalHour(PACIFIC, h, at)).length).toBe(1);
+    // Three reminder runs in the day, never overnight.
+    const reminderRuns = instants.filter((at) => REMINDER_LOCAL_HOURS.some((h) => atLocalHour(PACIFIC, h, at)));
+    expect(reminderRuns).toEqual([Date.parse("2026-11-01T16:00:00Z"), Date.parse("2026-11-01T20:00:00Z"), Date.parse("2026-11-02T00:00:00Z")]);
+  });
+
+  it("the Monday after (2026-11-02): 8 AM is 16:00 UTC, and the old 15:00 UTC run is 7 AM, not the company's morning", () => {
+    expect(atLocalHour(PACIFIC, DAILY_LOCAL_HOUR, Date.parse("2026-11-02T16:00:00Z"))).toBe(true);
+    expect(atLocalHour(PACIFIC, DAILY_LOCAL_HOUR, Date.parse("2026-11-02T15:00:00Z"))).toBe(false);
+    // The reminders: 8 AM, noon, 4 PM PST = 16, 20, 00 UTC; the old 15/19/23 UTC are 7, 11 and 3.
+    for (const utc of ["2026-11-02T16:00:00Z", "2026-11-02T20:00:00Z", "2026-11-03T00:00:00Z"]) {
+      expect(REMINDER_LOCAL_HOURS.some((h) => atLocalHour(PACIFIC, h, Date.parse(utc)))).toBe(true);
+    }
+    for (const utc of ["2026-11-02T15:00:00Z", "2026-11-02T19:00:00Z", "2026-11-02T23:00:00Z"]) {
+      expect(REMINDER_LOCAL_HOURS.some((h) => atLocalHour(PACIFIC, h, Date.parse(utc)))).toBe(false);
+    }
+  });
+
+  it("the spring-forward day (2027-03-14): the daily 8 AM and each reminder hour come exactly once, at the daylight instant", () => {
+    const instants = hourlyOnLocalDay("2027-03-14", PACIFIC);
+    expect(instants).toHaveLength(23);
+    expect(instants.filter((at) => atLocalHour(PACIFIC, DAILY_LOCAL_HOUR, at)).length).toBe(1);
+    expect(instants.find((at) => atLocalHour(PACIFIC, DAILY_LOCAL_HOUR, at))).toBe(Date.parse("2027-03-14T15:00:00Z")); // 8:00 AM PDT
+    for (const h of REMINDER_LOCAL_HOURS) expect(instants.filter((at) => atLocalHour(PACIFIC, h, at)).length).toBe(1);
   });
 
   it("judges another company in its own zone", () => {

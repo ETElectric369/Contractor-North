@@ -44,7 +44,7 @@ export default async function ResetPage({
           <form action={updatePassword} className="space-y-4">
             <div>
               <Label htmlFor="password">New password</Label>
-              <PasswordInput id="password" name="password" placeholder="••••••••" required minLength={6} />
+              <PasswordInput id="password" name="password" autoComplete="new-password" placeholder="••••••••" required minLength={6} />
             </div>
             <Button type="submit" size="lg" className="w-full">
               Update Password

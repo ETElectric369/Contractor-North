@@ -3,19 +3,27 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+// Safari (and password managers) guess "username" for an undeclared lone text field and pop the
+// saved-login panel on it, so every field defaults to off; a field that declares its own token wins
+// (and a declared login/name/email token keeps the password managers too).
 export const Input = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement>
->(({ className, ...props }, ref) => (
-  <input
-    ref={ref}
-    className={cn(
-      "flex h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:border-brand disabled:cursor-not-allowed disabled:opacity-50",
-      className,
-    )}
-    {...props}
-  />
-));
+>(({ className, ...props }, ref) => {
+  const ignore = !props.autoComplete || props.autoComplete === "off";
+  return (
+    <input
+      ref={ref}
+      autoComplete="off"
+      {...(ignore ? { "data-1p-ignore": "", "data-lpignore": "true" } : {})}
+      className={cn(
+        "flex h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:border-brand disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
 Input.displayName = "Input";
 
 /** Textarea that grows with its content so you can always see all the text. */

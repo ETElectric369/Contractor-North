@@ -112,7 +112,7 @@ export function ItemActions({ item, hasHistory = false }: { item: InventoryItem;
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <Label htmlFor="ii-name">Name *</Label>
-              <Input id="ii-name" name="name" required defaultValue={item.name} />
+              <Input autoComplete="off" id="ii-name" name="name" required defaultValue={item.name} />
             </div>
             <div>
               <Label htmlFor="ii-part">Part #</Label>

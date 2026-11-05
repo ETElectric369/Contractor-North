@@ -107,7 +107,7 @@ export function InquiryFields({
         {/* Fragment-first: a bare phone or note is a valid lead — name alone is no longer required
             (the modal checks for ANY of name/phone/message). */}
         <Label htmlFor="name">Name</Label>
-        <Input id="name" name="name" value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="Contact name (phone or note alone works)" />
+        <Input id="name" name="name" autoComplete="name" value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="Contact name (phone or note alone works)" />
       </div>
       <div>
         <Label htmlFor="phone">Phone</Label>
@@ -204,7 +204,7 @@ export function InquiryFields({
           <div className="space-y-3 border-t border-slate-100 px-3 pb-3 pt-2">
             <div>
               <Label htmlFor="company_name">Company</Label>
-              <Input id="company_name" value={value.company_name} onChange={(e) => onChange({ company_name: e.target.value })} placeholder="(optional)" />
+              <Input autoComplete="organization" id="company_name" value={value.company_name} onChange={(e) => onChange({ company_name: e.target.value })} placeholder="(optional)" />
             </div>
             <div>
               <Label htmlFor="email">Email</Label>

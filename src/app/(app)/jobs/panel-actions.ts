@@ -8,6 +8,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { isStaffRole } from "@/lib/actions/perms";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
+import { isAiRefused, saidFailure } from "@/lib/ai-refusal";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
 import {
   circuitName,
@@ -1431,6 +1432,8 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
     if (!r.ok) return failed(r);
     reading = r.reading;
   } catch (e) {
+    // A refused repair is an answer, said, never a fault in error_events.
+    if (isAiRefused(e)) return failed({ ok: false, error: saidFailure("refused").error });
     reportError("panel.readPanelPhoto", e, { jobId, documentId });
     return failed(readFailure(e, "The photo"));
   }
@@ -1512,6 +1515,7 @@ export async function readPlanCircuits(jobId: string, documentId: string): Promi
     if (!r.ok) return failedRead(capKey, PLAN_READS_PER_JOB_PER_DAY, r);
     reading = r.reading;
   } catch (e) {
+    if (isAiRefused(e)) return failedRead(capKey, PLAN_READS_PER_JOB_PER_DAY, { ok: false, error: saidFailure("refused").error });
     reportError("panel.readPlanCircuits", e, { jobId, documentId });
     return failedRead(capKey, PLAN_READS_PER_JOB_PER_DAY, readFailure(e, "The plans"));
   }

@@ -16,7 +16,9 @@ const s = vi.hoisted(() => ({ client: null as any, model: null as any }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => s.client), createServiceClient: vi.fn(() => s.client) }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => ({ supabase: s.client, userId: "user-1", orgId: ORG })) }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimited: vi.fn(async () => false) }));
-vi.mock("@/lib/ai-cost", () => ({
+vi.mock("@/lib/ai-cost", async (orig) => ({
+  // The real fallback rule (cn-v1142): which surface a call rides follows the model it names.
+  fallbacksFor: (await orig<typeof import("@/lib/ai-cost")>()).fallbacksFor,
   recordAiUsage: vi.fn(async () => {}),
   aiSpendExceeded: vi.fn(async () => false),
   aiAllowed: vi.fn(async () => ({ ok: true })),
@@ -96,7 +98,7 @@ function fakeSupabase(rows: Record<string, any>) {
 
 function stubModel(text: string) {
   const create = vi.fn(async () => ({ content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 10 } }));
-  s.model = { messages: { create } };
+  s.model = { messages: { create }, beta: { messages: { create } } };
   return create;
 }
 

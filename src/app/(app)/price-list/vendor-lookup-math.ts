@@ -1,5 +1,6 @@
 import { formatPhone, formatState } from "@/lib/utils";
 import { linkOf, websiteHref } from "./item-options-math";
+import { refusalWords } from "@/lib/ai-refusal";
 
 /**
  * LOOK UP (vendor import, Phase 2): what a web lookup of one vendor is allowed to put in front of a
@@ -63,7 +64,7 @@ export interface LookupChoice {
 
 export type LookupAnswer =
   | { found: true; choices: LookupChoice[]; dropped: number; near: string }
-  | { found: false; why: "nothing" | "unsourced" | "unreadable" | "unfinished" | "failed"; dropped: number; near: string };
+  | { found: false; why: "nothing" | "unsourced" | "unreadable" | "unfinished" | "failed" | "refused"; dropped: number; near: string };
 
 /* ── THE SOURCES: every page this response's searches actually returned ─────────────────────── */
 
@@ -446,6 +447,9 @@ export function nothingFoundText(name: string, answer: Extract<LookupAnswer, { f
       return `The lookup for ${who} used its searches without finishing, so nothing is shown. ${yourself}`;
     case "failed":
       return `The lookup for ${who} didn't answer. Try this one again.`;
+    case "refused":
+      // The one sentence every door says for a refusal (ai-refusal), then the way forward.
+      return `${refusalWords()} ${yourself}`;
     default:
       return isPerson
         ? `Nothing found for ${who}${near}. A person's name is harder to find. ${yourself}`

@@ -23,6 +23,20 @@ export type OrgRow = { id: string; settings: unknown };
 export const NUDGE_LOCAL_HOUR = 7;
 export const EOD_LOCAL_HOUR = 18;
 
+/** THE DAILY CRON'S TWO CLOCKS (2026-11-02, the day after DST ended). /api/automations/daily runs
+ *  hourly: its COMPANY steps (recurring templates, the day-ahead digest, the billing and usage
+ *  notices, stale bank transfers, Nort's review, the shelf check) run for each company on the run
+ *  that falls in ITS 8 AM; its GLOBAL steps (North's own housekeeping: the processor-fee backfill,
+ *  the error sweep, the Bug Watch digest, the rate-limit and storage sweeps) run once a day, on the
+ *  run that begins in GLOBAL_UTC_HOUR (15:00 UTC = 7 AM PST / 8 AM PDT, the hour the whole cron
+ *  used to run at). */
+export const DAILY_LOCAL_HOUR = 8;
+export const GLOBAL_UTC_HOUR = 15;
+
+/** The customer reminders' three daytime runs, each in the company's own zone: 8 AM, noon, 4 PM
+ *  (the old 15/19/23 UTC, which was 8/12/4 only in Pacific summer). Never overnight. */
+export const REMINDER_LOCAL_HOURS: readonly number[] = [8, 12, 16];
+
 export async function readAllOrgs<T = OrgRow>(supabase: Client, columns = "id, settings"): Promise<T[]> {
   const { rows, error } = await readAllPages<T>((from, to) =>
     supabase.from("organizations").select(columns).order("id").range(from, to),

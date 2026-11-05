@@ -219,7 +219,7 @@ function EditDocModal({
         </div>
         <div>
           <Label htmlFor="edoc-name">Name</Label>
-          <Input id="edoc-name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input autoComplete="off" id="edoc-name" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div>
           <Label htmlFor="edoc-exp">Expires (optional)</Label>

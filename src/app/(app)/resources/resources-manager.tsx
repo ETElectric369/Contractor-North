@@ -309,7 +309,7 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
             )}
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-name">Name *{siteTag("name")}</Label><Input id="r-name" value={name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. County Building Department" className={marked("name")} /></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-name">Name *{siteTag("name")}</Label><Input autoComplete="organization" id="r-name" value={name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. County Building Department" className={marked("name")} /></div>
             <div>
               <Label htmlFor="r-cat">Category{siteTag("category")}</Label>
               {/* A category from before the list changed (Supplier / Distributor, or Nort's own word)
@@ -331,9 +331,9 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
                 </Link>
               </p>
             </div>
-            <div><Label htmlFor="r-contact">Contact person</Label><Input id="r-contact" value={contact} onChange={(e) => set("contact", e.target.value)} /></div>
-            <div><Label htmlFor="r-phone">Phone{siteTag("phone")}</Label><Input id="r-phone" type="tel" inputMode="tel" value={phone} onChange={(e) => set("phone", formatPhone(e.target.value))} className={marked("phone")} /></div>
-            <div><Label htmlFor="r-email">Email{siteTag("email")}</Label><Input id="r-email" type="email" value={email} onChange={(e) => set("email", e.target.value)} className={marked("email")} /></div>
+            <div><Label htmlFor="r-contact">Contact person</Label><Input id="r-contact" autoComplete="name" value={contact} onChange={(e) => set("contact", e.target.value)} /></div>
+            <div><Label htmlFor="r-phone">Phone{siteTag("phone")}</Label><Input id="r-phone" type="tel" autoComplete="tel" inputMode="tel" value={phone} onChange={(e) => set("phone", formatPhone(e.target.value))} className={marked("phone")} /></div>
+            <div><Label htmlFor="r-email">Email{siteTag("email")}</Label><Input id="r-email" type="email" autoComplete="email" value={email} onChange={(e) => set("email", e.target.value)} className={marked("email")} /></div>
             <div className="col-span-2 sm:col-span-3"><Label htmlFor="r-addr">Address{siteTag("address")}</Label><Input id="r-addr" value={address} onChange={(e) => set("address", e.target.value)} className={marked("address")} /></div>
           </div>
           <div><Label htmlFor="r-notes">Notes{siteTag("notes")}</Label><Textarea id="r-notes" rows={2} value={notes} onChange={(e) => set("notes", e.target.value)} placeholder="Hours, account #, inspection request line, etc." className={marked("notes")} /></div>

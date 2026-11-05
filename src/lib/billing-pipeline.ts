@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { contractTotalFromQuotes, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
@@ -22,7 +22,41 @@ export async function orgTodayStr(supabase: SupabaseClient): Promise<string> {
  */
 // `draw` marks a schedule job whose next action is "Request next payment" (milestone draw),
 // NOT a standard invoice — the UI must route those to the job's payment schedule.
-export type PipelineJob = { id: string; name: string | null; job_number: string | null; customer: string | null; value: number; draw?: boolean };
+export type PipelineJob = {
+  id: string;
+  name: string | null;
+  job_number: string | null;
+  customer: string | null;
+  value: number;
+  draw?: boolean;
+  /** A draw row: the day its oldest open milestone was set, said as a date ("Since Jun 12"), never hidden. */
+  since?: string | null;
+};
+
+/**
+ * IS A FINISHED JOB'S OPEN MILESTONE STILL TO BILL? (the settled spirit of Needs You's quoteSettled,
+ * 2026-11-04). A "Final payment — …" row stayed on a job billed by ONE standard invoice instead of
+ * draws. It leaves when the job carries a live (not draft, not void) invoice that is not a draw,
+ * created on or after the day the milestone was set (an older bill is the work before the schedule),
+ * or when the job is of the retired status invoiced and carries any live invoice. A deposit or
+ * progress draw never settles it: that is the schedule being drawn. Pure.
+ */
+export function milestoneSettled(input: {
+  milestoneAt: string | null | undefined;
+  jobStatus: string | null | undefined;
+  jobInvoices: readonly { status?: string | null; invoice_kind?: string | null; created_at?: string | null }[];
+}): boolean {
+  const live = input.jobInvoices.filter((i) => i.status !== "draft" && i.status !== "void");
+  if (input.jobStatus === "invoiced" && live.length > 0) return true;
+  const since = input.milestoneAt ? Date.parse(input.milestoneAt) : NaN;
+  const day = (ms: number) => Math.floor(ms / 86_400_000);
+  return live.some((i) => {
+    if (isDrawKind(i.invoice_kind)) return false;
+    if (!Number.isFinite(since)) return true;
+    const at = i.created_at ? Date.parse(i.created_at) : NaN;
+    return !Number.isFinite(at) || day(at) >= day(since);
+  });
+}
 export type PipelineInvoice = {
   id: string; invoice_number: string | null; total: number; balance: number; status: string;
   due_date: string | null; customer: string | null; job: string | null; overdue: boolean;
@@ -77,16 +111,16 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     // PostgREST's 1000-row max, and invoicedJobIds below is built from whatever survived —
     // past that cliff a job whose invoice fell outside the window reappears in "Done - Not
     // Invoiced" and the Outstanding/Overdue tiles undercount.
-    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customer_id, customers(name), jobs(name)").limit(50000),
+    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customer_id, invoice_kind, created_at, customers(name), jobs(name)").limit(50000),
     // 'invoiced' is a RETIRED job status (the lifecycle rework moved every row off it), but
     // a stray legacy row could still carry it — keep it in the filter as stage-1 safety so
     // such a job can't escape the board (jobs with a real invoice are removed by the
     // invoicedJobIds filter below).
-    supabase.from("jobs").select("id, name, job_number, customers(name)").in("status", ["complete", "invoiced"]).limit(500),
+    supabase.from("jobs").select("id, name, job_number, status, customers(name)").in("status", ["complete", "invoiced"]).limit(500),
     supabase.from("quotes").select("job_id, total, status, created_at").not("job_id", "is", null).limit(1000),
     // Un-drawn payment-schedule milestones. "Unbilled" = no linked invoice — the same rule
     // as scheduleStatus (deleting a mistaken draft draw nulls the FK and re-offers it).
-    supabase.from("payment_milestones").select("job_id, label, percent, amount, sort_order").is("invoice_id", null).limit(1000),
+    supabase.from("payment_milestones").select("job_id, label, percent, amount, sort_order, created_at").is("invoice_id", null).limit(1000),
   ]);
   const invoices = (invRes.data ?? []) as any[];
   const completeJobs = (jobRes.data ?? []) as any[];
@@ -113,9 +147,15 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
   // Surface each finished job's un-drawn milestones as a stage-1 entry so it can't fall out.
   const openMsByJob: Record<string, any[]> = {};
   for (const m of openMilestones) (openMsByJob[m.job_id] ??= []).push(m);
+  const invoicesByJob: Record<string, any[]> = {};
+  for (const i of invoices) if (i.job_id) (invoicesByJob[i.job_id] ??= []).push(i);
   for (const j of completeJobs) {
     if (!invoicedJobIds.has(j.id)) continue; // no invoice at all → already listed above at quote value
-    const pending = (openMsByJob[j.id] ?? []).sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+    // A milestone the job's own standard bill already covered is settled (milestoneSettled): billed by
+    // one invoice instead of draws, the "Final payment — …" row never asks again.
+    const pending = (openMsByJob[j.id] ?? [])
+      .filter((m) => !milestoneSettled({ milestoneAt: m.created_at, jobStatus: j.status, jobInvoices: invoicesByJob[j.id] ?? [] }))
+      .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
     if (!pending.length) continue;
     const contract = contractTotalFromQuotes(quotesByJob[j.id] ?? []);
     const value = pending.reduce((s, m) => s + milestoneAmount(m as Milestone, contract), 0);
@@ -129,6 +169,7 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
       customer: j.customers?.name ?? null,
       value,
       draw: true,
+      since: pending.map((m) => m.created_at as string | null).filter((x): x is string => !!x).sort()[0] ?? null,
     });
   }
 

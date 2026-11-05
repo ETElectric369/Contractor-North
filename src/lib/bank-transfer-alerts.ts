@@ -19,9 +19,16 @@ import { readActiveOrgs } from "@/lib/cron-orgs";
  * are said the first morning after a plan is picked. The companies come through readActiveOrgs —
  * whole, or a throw the daily cron files as cron-stale-bank-transfers.
  */
-export async function tellStaleBankTransfers(supabase: any, now: Date = new Date()): Promise<{ told: number; lapsed_skipped: number } | { skipped: string }> {
-  const { rows, problem } = await staleTransfers(supabase, now);
+export async function tellStaleBankTransfers(
+  supabase: any,
+  now: Date = new Date(),
+  // THE COMPANIES AT THEIR OWN 8 AM (the hourly daily cron, 2026-11-02); every other company's rows
+  // wait, unstamped, for its own hour. Absent = every company.
+  opts: { orgIds?: ReadonlySet<string> } = {},
+): Promise<{ told: number; lapsed_skipped: number } | { skipped: string }> {
+  const { rows: allRows, problem } = await staleTransfers(supabase, now);
   if (problem) return { skipped: problem };
+  const rows = opts.orgIds ? allRows.filter((t) => opts.orgIds!.has(t.orgId)) : allRows;
   let told = 0;
   let lapsed_skipped = 0;
   const active = rows.length ? new Set((await readActiveOrgs<{ id: string }>(supabase, "id", now.getTime())).rows.map((o) => o.id)) : null;

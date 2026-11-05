@@ -15,6 +15,11 @@ import type { Customer } from "@/lib/types";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
+// The estimator runs inside this page's server actions (generateQuoteDraft and kin, quotes/actions):
+// effort high, up to 16000 tokens a round and up to three rounds, not streamed. A server action
+// runs under the segment config of the page that invoked it, so the page carries the time: 300 s,
+// the largest the repo uses (Vercel Pro's ceiling for these functions).
+export const maxDuration = 300;
 
 /**
  * THE JOB THAT KEEPS THIS ESTIMATE'S CIRCUITS NOW (Panel plan, phase 2). The estimate's circuit

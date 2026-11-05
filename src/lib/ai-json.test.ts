@@ -6,6 +6,8 @@ vi.mock("@/lib/ai-cost", async (orig) => ({
 }));
 
 import { extractJsonObject, parseAiJson } from "./ai-json";
+import { effortFor } from "./ai-effort";
+import { AiRefusedError, isAiRefused, refusalWords } from "./ai-refusal";
 
 describe("reading a JSON object out of a model's reply", () => {
   it("takes the object out of a ```json fence", () => {
@@ -73,7 +75,10 @@ describe("the one repair round trip", () => {
   it("4,096 tokens by default, and a long-answer caller passes its own budget", async () => {
     const small = client('{"description":"3/4\\" EMT"}');
     await parseAiJson(small.api, '{"description":"3/4" EMT"}');
-    expect(small.calls[0].max_tokens).toBe(4096);
+    // The table's floor (ai-effort "json-repair"), and the small model's mechanics: no thinking field.
+    expect(small.calls[0].max_tokens).toBe(effortFor("json-repair").maxTokens);
+    expect(small.calls[0]).not.toHaveProperty("thinking");
+    expect(small.calls[0].output_config).toEqual({ effort: effortFor("json-repair").effort });
 
     const big = client('{"description":"3/4\\" EMT"}');
     await parseAiJson(big.api, '{"description":"3/4" EMT"}', null, 16_000);
@@ -81,7 +86,22 @@ describe("the one repair round trip", () => {
     // A budget smaller than the default is never honoured: it would only move the failure.
     const tiny = client('{"description":"3/4\\" EMT"}');
     await parseAiJson(tiny.api, '{"description":"3/4" EMT"}', null, 10);
-    expect(tiny.calls[0].max_tokens).toBe(4096);
+    expect(tiny.calls[0].max_tokens).toBe(effortFor("json-repair").maxTokens);
+  });
+
+  it("a refused repair throws the one sentence, never a parse error", async () => {
+    const c = client("", "refusal");
+    await expect(parseAiJson(c.api, '{"description":"3/4" EMT"}')).rejects.toThrow(refusalWords());
+  });
+
+  it("a refused repair throws a TYPED AiRefusedError, so a caller says it and never reports it", async () => {
+    const c = client("", "refusal");
+    const e = await parseAiJson(c.api, '{"description":"3/4" EMT"}').catch((x) => x);
+    expect(e).toBeInstanceOf(AiRefusedError);
+    expect(isAiRefused(e)).toBe(true);
+    expect((e as AiRefusedError).reason).toBe("refused");
+    // a parse failure is not one
+    expect(isAiRefused(new Error("No JSON in AI reply"))).toBe(false);
   });
 
   it("a repair that itself ran out of room still refuses rather than closing over an amputation", async () => {

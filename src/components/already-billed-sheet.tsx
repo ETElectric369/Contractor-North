@@ -42,7 +42,17 @@ import {
   type AlreadyBilledKind,
 } from "@/lib/already-billed";
 import type { AlreadyBilledSheetData } from "@/lib/already-billed-read";
-import { alreadyBilledSheet, markAlreadyBilled, noJobHoursSheet, unmarkAlreadyBilled, type AlreadyBilledWrite } from "@/app/(app)/jobs/already-billed-actions";
+import {
+  alreadyBilledSheet,
+  alreadyInvoicedSheet,
+  markAlreadyBilled,
+  markAlreadyInvoiced,
+  noJobHoursSheet,
+  unmarkAlreadyBilled,
+  type AlreadyBilledWrite,
+} from "@/app/(app)/jobs/already-billed-actions";
+import type { AlreadyInvoicedLoad } from "@/lib/action-items/already-invoiced";
+import type { AlreadyInvoicedTarget } from "@/lib/action-items/types";
 import { receiptForBilling } from "@/app/(app)/bills/receipt-for-billing-action";
 import { ReceiptLines, type ReceiptForBilling } from "@/app/(app)/bills/receipt-billing-card";
 
@@ -503,6 +513,91 @@ export function AlreadyBilledSheet({
           <p className="rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
             {error}
           </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * ALREADY INVOICED (Needs You, 2026-11-04): "which invoice billed this?" The customer's live invoices
+ * (sent or later), newest first; the one picked is tied to the estimate, the job or the visit
+ * (lib/action-items/already-invoiced: one fact, written while empty). The answer is said on the
+ * sheet (a refusal) or handed to `onTied` (the row then leaves on the refresh).
+ */
+export function AlreadyInvoicedSheet({
+  target,
+  onClose,
+  onTied,
+}: {
+  target: AlreadyInvoicedTarget;
+  onClose: () => void;
+  onTied: (message: string) => void;
+}) {
+  const [load, setLoad] = useState<AlreadyInvoicedLoad | null>(null);
+  const [chosen, setChosen] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    alreadyInvoicedSheet(target)
+      .then((r) => live && setLoad(r))
+      .catch(() => live && setLoad({ ok: false, error: "Couldn't open that just now. Nothing was changed - try again in a moment." }));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target.kind, target.id]);
+  const picked = load?.ok ? load.choices.find((c) => c.id === chosen) : undefined;
+  const press = async () => {
+    if (!chosen) return;
+    setErr(null);
+    setSaving(true);
+    const r = await markAlreadyInvoiced(target, chosen).catch(() => ({ ok: false as const, error: "That didn't save. Nothing was changed - try again in a moment." }));
+    setSaving(false);
+    if (r.ok) onTied(r.message);
+    else setErr(r.error);
+  };
+  const footer = (
+    <ModalActions
+      onCancel={onClose}
+      onSave={press}
+      saving={saving}
+      saveLabel={picked?.number ? `Billed On ${picked.number}` : "Billed On It"}
+      disabled={!chosen || saving || !load?.ok}
+    />
+  );
+  return (
+    <Modal open onClose={onClose} title="Already Invoiced" size="md" portal footer={footer}>
+      <div className="space-y-3 text-sm">
+        {!load && <p className="text-slate-500">Reading the invoices…</p>}
+        {load && !load.ok && <div className="rounded-lg bg-red-50 px-3 py-2 text-red-700">{load.error}</div>}
+        {load?.ok && (
+          <>
+            <p className="text-slate-600">
+              Which invoice billed {load.what}
+              {load.customer ? ` for ${load.customer}` : ""}? Nothing on the invoice changes but which work it names.
+            </p>
+            {load.choices.length === 0 && (
+              <p className="text-slate-500">No sent invoice for this customer yet. If it was never billed, use Bill It instead.</p>
+            )}
+            <div className="space-y-1">
+              {load.choices.map((c) => (
+                <label key={c.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
+                  <input type="radio" name="already-invoiced" value={c.id} checked={chosen === c.id} onChange={() => setChosen(c.id)} />
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-medium text-slate-900">{c.number ?? "Invoice"}</span>
+                    {c.jobWords ? <span className="text-slate-500"> · {c.jobWords}</span> : null}
+                  </span>
+                  <span className="shrink-0 font-mono text-xs tabular-nums text-slate-500">
+                    {formatCurrency(c.total)}
+                    {c.createdAt ? ` · ${formatDateShort(c.createdAt)}` : ""}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-red-700">{err}</div>}
+          </>
         )}
       </div>
     </Modal>

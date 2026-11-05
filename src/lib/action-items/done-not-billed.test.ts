@@ -5,6 +5,7 @@ import {
   DONE_NOT_BILLED_RPC,
   DONE_UNREAD_ITEM,
   doneRowItems,
+  doneJobBilled,
   doneRowsCount,
   isMissingDoneRpc,
   legacyDoneItems,
@@ -88,6 +89,7 @@ describe("the function's rows as Needs You rows: the same ids, chips, hrefs and 
         done: false,
         href: "/jobs/j11?tab=invoices",
         affordances: ["dismiss", "open"],
+        alreadyInvoiced: { kind: "job", id: "j11" },
       },
     ]);
   });
@@ -123,6 +125,31 @@ describe("the function's rows as Needs You rows: the same ids, chips, hrefs and 
     const byId = (xs: { id: string }[]) => [...xs].sort((a, b) => a.id.localeCompare(b.id));
     expect(byId(doneRowItems(rows, none))).toEqual(byId(old));
     expect(old.map((i) => i.id).sort()).toEqual(["jdone-j11", "unbilled-a1", "unbilled-a2"]);
+  });
+});
+
+describe("0403, the code side: a bill naming the job's estimate, and an invoiced job", () => {
+  it("a job billed on another job's invoice naming its estimate leaves; so does a visit on it, and one on an invoiced job", () => {
+    const doneWork = [
+      { id: "a1", title: "Larkspur Ln service", starts_at: "2026-07-02T17:00:00+00:00", job_id: "j-named", customers: null, inquiries: null, jobs: { status: "in_progress" } },
+      { id: "a2", title: "Snowbell Ct day", starts_at: "2026-07-03T17:00:00+00:00", job_id: "j-inv", customers: null, inquiries: null, jobs: { status: "invoiced" } },
+      { id: "a3", title: "Bayberry Rd day", starts_at: "2026-07-04T17:00:00+00:00", job_id: "j-open", customers: null, inquiries: null, jobs: { status: "in_progress" } },
+    ];
+    const doneJobs = [
+      { id: "j-named", job_number: "J-020", name: "Larkspur Ln", updated_at: "2026-09-20T16:00:00+00:00", customers: null },
+      { id: "j-free", job_number: "J-021", name: "Thistlewood Dr", updated_at: "2026-09-21T16:00:00+00:00", customers: null },
+    ];
+    const out = legacyDoneItems({ doneWork, doneJobs, settled: [], billedJobs: new Set(), quoteBilledJobs: new Set(["j-named"]), seen: none });
+    expect(out.map((i) => i.id).sort()).toEqual(["jdone-j-free", "unbilled-a3"]);
+    expect(doneJobBilled("j-named", { billedJobs: new Set(), quoteBilledJobs: new Set(["j-named"]) })).toBe(true);
+    expect(doneJobBilled("j-free", { billedJobs: new Set() })).toBe(false);
+  });
+
+  it("⋯ Already Invoiced rides a job and an unbilled visit, never a visit already Billed, Not Paid", () => {
+    const [free, owed, done] = doneRowItems([visit(), visit({ id: "a2", open_invoice_id: "inv-2" }), job()], none);
+    expect(free.alreadyInvoiced).toEqual({ kind: "visit", id: "a1" });
+    expect(owed.alreadyInvoiced).toBeUndefined();
+    expect(done.alreadyInvoiced).toEqual({ kind: "job", id: "j11" });
   });
 });
 
