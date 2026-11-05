@@ -195,7 +195,10 @@ describe("the pickers offer the five (and a row's own old kind)", () => {
   it("the New/Edit Appointment modal maps typeOptions, never the full nine", () => {
     const btn = read("app/(app)/appointments/appointment-button.tsx");
     expect(btn).toContain("const typeOptions = appointmentTypeOptions(appointment?.type ?? defaultType ?? null);");
-    expect(btn).toContain("{typeOptions.map((t) => (");
+    // `type`, not `t`: the translator is t on this screen since the visit-page-in-Spanish wave, and each
+    // option's words come through appointmentTypeLabel with the reader's language.
+    expect(btn).toContain("{typeOptions.map((type) => (");
+    expect(btn).toContain("{appointmentTypeLabel(type, lang, t)}");
     expect(btn).not.toContain("APPOINTMENT_TYPES.map(");
     // The create default: Job from a job, Other anywhere else (the Inspections tab passes its own).
     expect(btn).toContain('type: appointment?.type ?? urlSeed.current.type ?? defaultType ?? (defaultJobId ? "job" : "other"),');

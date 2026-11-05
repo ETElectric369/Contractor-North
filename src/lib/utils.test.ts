@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hoursBetween, formatCurrency, formatCityStateZip, formatFullAddress, formatDate, formatDateTime } from "@/lib/utils";
+import { hoursBetween, formatCurrency, formatCityStateZip, formatFullAddress, formatDate, formatDateTime, formatTime } from "@/lib/utils";
 
 describe("formatCityStateZip — the one canonical 'City, ST ZIP'", () => {
   it("joins city+state with a comma, ZIP after a SPACE (owner-chosen format)", () => {
@@ -86,5 +86,14 @@ describe("the formatters in Spanish (es-US), and in English when no lang is pass
     expect(es.toLowerCase()).toMatch(/a\.?\s?m/);
     expect(formatDateTime("2026-10-28T17:15:00Z", "America/Los_Angeles")).toBe("Oct 28, 10:15 AM");
     expect(formatDateTime("2026-10-28T17:15:00Z", "America/Los_Angeles", "en")).toBe("Oct 28, 10:15 AM");
+  });
+
+  it("a Spanish date and time spells the half of the day the one way formatTime does — \"p. m.\", never Node's \"p.m.\" (the visit page's header and its Visit Time row agree); English byte for byte", () => {
+    expect(formatDateTime("2026-10-28T20:00:00Z", "America/Los_Angeles", "es")).toMatch(/^28 oct\.?,? 1:00 p\. m\.$/);
+    expect(formatDateTime("2026-10-28T17:15:00Z", "America/Los_Angeles", "es")).toMatch(/^28 oct\.?,? 10:15 a\. m\.$/);
+    expect(formatDateTime("2026-10-28T20:00:00Z", "America/Los_Angeles", "es")).not.toMatch(/p\.m\./);
+    expect(formatDateTime("2026-10-28T20:00:00Z", "America/Los_Angeles", "es")).toContain(formatTime("2026-10-28T20:00:00Z", "America/Los_Angeles", "es"));
+    expect(formatDateTime("2026-10-28T20:00:00Z", "America/Los_Angeles")).toBe("Oct 28, 1:00 PM");
+    expect(formatDateTime("2026-10-28T20:00:00Z", "America/Los_Angeles", "en")).toBe("Oct 28, 1:00 PM");
   });
 });

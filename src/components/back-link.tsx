@@ -84,12 +84,18 @@ export function BackLinkTracker() {
 export function BackLink({
   fallback,
   fallbackLabel,
+  backLabel = "Back",
   className = "mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800",
 }: {
   /** Where to go on a cold entry (deep link / reload / new tab). */
   fallback: string;
   /** Honest label for that destination, e.g. "Back to Estimates". */
   fallbackLabel: string;
+  /** The word when real history is behind us. "Back" unless the caller hands the reader's own (the
+   *  shell catalog's sh_back, lib/words/shell — the visit page passes t("sh_back")). Handed in, not read
+   *  here: this piece is drawn on the print pages too, whose client bundle carries no dictionary
+   *  (lib/catalog-free-libs.test.ts). */
+  backLabel?: string;
   /** Full class override — default matches the detail-page breadcrumb style. */
   className?: string;
 }) {
@@ -112,7 +118,7 @@ export function BackLink({
         router.back();
       }}
     >
-      <ArrowLeft className="h-4 w-4 shrink-0" /> {canGoBack ? "Back" : fallbackLabel}
+      <ArrowLeft className="h-4 w-4 shrink-0" /> {canGoBack ? backLabel : fallbackLabel}
     </Link>
   );
 }

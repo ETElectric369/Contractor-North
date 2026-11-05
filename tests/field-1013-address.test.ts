@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { partsFromComponents, pickReverse, orgAddressLine } from "@/lib/geocode-server";
 import { typedLineKeepsParts } from "@/lib/site-address";
 import { addressBias, setOrgBias } from "@/lib/place-bias";
+import { fillText, translator } from "@/lib/i18n";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -137,18 +138,26 @@ describe("the doors carry the rules (source pins)", () => {
     // no speculation: a loose fix or a numberless road fills nothing and says the one thing to do
     expect(s).toContain("const LOCATE_SURE_M = 150;");
     expect(s).toContain("if (m > LOCATE_SURE_M) {");
-    expect(s).toContain("Only sure to within ${m} m — step closer and tap again, or type the number.");
-    expect(s).toContain("No street address at this spot — type the number and street.");
-    expect(s).toContain("Address lookup is down — type the address.");
-    expect(s).toContain("Address lookup is at its daily limit — type the address.");
-    expect(s).toContain("Use My Location");
+    // (cn-v1144, the visit page in Spanish: these words read the vi_ catalog through t(); the English is byte for byte what the screen said, pinned here)
+    const en = translator("en");
+    expect(s).toContain('setLocatedNote(fillText(t("vi_onlySureWithin"), { m: String(m) }));');
+    expect(fillText(en("vi_onlySureWithin"), { m: "12" })).toBe("Only sure to within 12 m — step closer and tap again, or type the number.");
+    expect(s).toContain('setLocatedNote(t("vi_noStreetAddressHere"));');
+    expect(en("vi_noStreetAddressHere")).toBe("No street address at this spot — type the number and street.");
+    expect(s).toContain('t(r.status === 404 ? "vi_noStreetAddressHere" : r.status === 429 ? "vi_lookupDailyLimit" : "vi_lookupDown")');
+    expect(en("vi_lookupDown")).toBe("Address lookup is down — type the address.");
+    expect(en("vi_lookupDailyLimit")).toBe("Address lookup is at its daily limit — type the address.");
+    expect(s).toContain('{t("vi_btn_useMyLocation")}');
+    expect(en("vi_btn_useMyLocation")).toBe("Use My Location");
     expect(s).toContain("/api/geocode?latlng=${fix.coords.lat},${fix.coords.lng}");
     expect(s).toContain("key={whereKey}");
     // the located line is written WITH its parts, and a refusal names one action
     // (cn-v1123: through savePick, which writes it and marks it saved only on ok)
     expect(s).toMatch(/savePick\(line, \{ city: found\.city \?\? null, state: found\.state \?\? null, zip: found\.zip \?\? null \}\)/);
     expect(s).toContain("await setAppointmentPlace(appointmentId, line, parts)");
-    expect(s).toContain("Location is off for North — turn it on in Settings.");
+    expect(s).toContain('t(fix.status === "denied" ? "vi_locationOffForNorth" : "vi_couldntGetFix")');
+    expect(en("vi_locationOffForNorth")).toBe("Location is off for North — turn it on in Settings.");
+    expect(en("vi_couldntGetFix")).toBe("Couldn't get a fix — step outside and try again, or type the address.");
   });
   it("setAppointmentPlace reads the stored parts and clears them when a typed line drops them", () => {
     const s = read("src/app/(app)/appointments/actions.ts");

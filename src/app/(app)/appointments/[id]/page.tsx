@@ -10,7 +10,10 @@ import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz, formatDateTimeTz } from "@/lib/tz";
+import { todayStrInTz } from "@/lib/tz";
+import { formatDateTime } from "@/lib/utils";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { Badge } from "@/components/ui/badge";
 import { NavLink } from "@/components/nav-link";
 import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
@@ -41,7 +44,7 @@ import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
 import {
-  INSPECTION_UNREAD,
+  inspectionUnreadWords,
   answersWithoutPrices,
   isMissingRpc,
   readViaView,
@@ -50,10 +53,6 @@ import {
 } from "@/lib/inspection/inspection-access";
 
 export const dynamic = "force-dynamic";
-
-/** The visit's ⋯ (W2-11): every row is a composed child (they each own a toast or a modal), so the
- *  tree itself is empty — the detail pages' one Actions door, last on the header row. */
-const VISIT_ACTIONS_MENU: NavTree = { center: { label: "Actions", icon: "more" }, nodes: [] };
 
 /** The table read's pre-0165 shape (the column isn't there yet): the one failure the page still
  *  reads as "no sheet", as tolerateMissingColumns always did. */
@@ -85,6 +84,14 @@ export default async function AppointmentCapturePage({
   // can never file one person's work under another's name.
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
+  // THE SIGNED-IN PERSON'S LANGUAGE (the visit-page-in-Spanish wave): the page's own words come from
+  // lib/words/visit-page (vp_) the way the schedule's page reads lib/words/agenda-rail; the client
+  // pieces below read useLang() themselves. One cached profile read per request (lib/current-lang).
+  const lang = await currentLangFor(viewerId);
+  const t = translator(lang);
+  /** The visit's ⋯ (W2-11): every row is a composed child (they each own a toast or a modal), so the
+   *  tree itself is empty — the detail pages' one Actions door, last on the header row. */
+  const VISIT_ACTIONS_MENU: NavTree = { center: { label: t("vp_btn_actions"), icon: "more" }, nodes: [] };
   // The visit's company, read first (RLS-scoped: a visit the viewer cannot see has none): the kits read
   // below goes through the service client and MUST be scoped to it ([[three-orgs-one-database]]).
   const { data: apptOrgRow } = await supabase.from("appointments").select("org_id").eq("id", id).maybeSingle();
@@ -275,7 +282,7 @@ export default async function AppointmentCapturePage({
     ? {
         id: oe.id,
         job_id: oe.job_id,
-        label: oeJob ? jobShort(oeJob) : (oe.job_code ?? "").trim() || "no job",
+        label: oeJob ? jobShort(oeJob, lang, t) : (oe.job_code ?? "").trim() || t("vp_noJob"),
         clock_in: oe.clock_in,
         // The two facts a switch's outcome is decided from, never the decision itself: whether the
         // punch has a PLACE (a job or a code) and when it started. Whether it moves whole or gets cut
@@ -303,7 +310,7 @@ export default async function AppointmentCapturePage({
   });
   const viewNote =
     crewProbe && isMissingRpc(crewProbe.error)
-      ? "Crew leads can fill this in once the office finishes an update. Until then only the office can change it."
+      ? t("vp_crewLeadsAfterUpdate")
       : null;
 
   const linkInstead =
@@ -425,21 +432,21 @@ export default async function AppointmentCapturePage({
   return (
     <div className="mx-auto max-w-2xl">
       {viewerIsStaff ? (
-        <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back To Schedule" />
+        <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel={t("vp_btn_backToSchedule")} backLabel={t("sh_back")} />
       ) : (
-        <BackLink fallback="/planner" fallbackLabel="Back To My Day" />
+        <BackLink fallback="/planner" fallbackLabel={t("vp_btn_backToMyDay")} backLabel={t("sh_back")} />
       )}
 
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="blue" className={isInspectionType(a.type) ? "bg-teal-100 text-teal-800" : undefined}>
-            {appointmentTypeLabel(a.type)}
+            {appointmentTypeLabel(a.type, lang, t)}
           </Badge>
-          {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
-          {a.status === "completed" && <Badge tone="green">done</Badge>}
+          {a.status === "proposed" && <Badge tone="amber">{t("vp_pendingPick")}</Badge>}
+          {a.status === "completed" && <Badge tone="green">{t("vp_doneBadge")}</Badge>}
           {/* A cancelled appointment showed NO chip at all, so the page looked identical to a
               live one — which is half of why "can't cancel inspection" reads as broken. */}
-          {a.status === "cancelled" && <Badge tone="slate">cancelled</Badge>}
+          {a.status === "cancelled" && <Badge tone="slate">{t("vp_cancelledBadge")}</Badge>}
           {/* AT MOST ONE MAIN BUTTON, THEN ⋯ (W2-11). The row used to carry up to seven controls
               (Get Paid, a small "mark complete", Delete, a bare ✓ and ✗, Clear The Date, Edit
               Details). THE OFFICE'S VERBS all save through requireStaff, and Get Paid puts money
@@ -463,7 +470,7 @@ export default async function AppointmentCapturePage({
               To write up. A completed inspection has none: the Inspector's Start The Estimate
               is its next step. A cancelled visit has none either. */}
           {viewerIsStaff && isInspection && booked && (
-            <MarkCompleteButton id={a.id} label="Mark Inspection Done" />
+            <MarkCompleteButton id={a.id} label={t("vp_btn_markInspectionDone")} />
           )}
           {/* ⋯ ACTIONS, last on the row. Edit Details… is never rendered conditionally inside the
               open panel (its modal would unmount mid-edit); its footer Delete stays the deliberate
@@ -478,7 +485,7 @@ export default async function AppointmentCapturePage({
                 customers={picker.custOpts}
                 staff={picker.staffOpts}
                 appointment={apptValue}
-                rowLabel="Edit Details…"
+                rowLabel={t("vp_btn_editDetails")}
                 triggerClassName={ACTIONS_ROW_CLS}
                 afterDeleteHref={scheduleDayHref}
               />
@@ -493,7 +500,7 @@ export default async function AppointmentCapturePage({
         <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
           {/* A visit with its date cleared waits on the schedule's rail (0368): said, never blank. */}
-          {a.starts_at ? <span>{formatDateTimeTz(a.starts_at, tz)}</span> : <span>Waiting For A Day</span>}
+          {a.starts_at ? <span>{formatDateTime(a.starts_at, tz, lang)}</span> : <span>{t("vp_waitingForADay")}</span>}
           {who && <span>· {who}</span>}
           {a.location && (
             <NavLink address={a.location} className="inline-flex items-center gap-0.5 text-brand hover:underline">
@@ -566,7 +573,7 @@ export default async function AppointmentCapturePage({
         {a.inquiry_id && customerSaid.length > 0 && (
           <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              What the customer told us online
+              {t("vp_customerToldUsOnline")}
             </p>
             <dl className="mt-1.5 space-y-1">
               {customerSaid.map((l) => (
@@ -577,16 +584,14 @@ export default async function AppointmentCapturePage({
               ))}
             </dl>
             <p className="mt-2 text-xs text-slate-400">
-              Their words, not a finding — confirm on site.
-              {sheetAsksNone
-                ? " None of these matched a question on your inspection sheet, so none of them could fill it in."
-                : ""}
+              {t("vp_theirWordsConfirm")}
+              {sheetAsksNone ? ` ${t("vp_noneMatchedSheet")}` : ""}
             </p>
           </div>
         )}
         {/* The website form's questions couldn't be read: said, not a card that silently isn't there. */}
         {a.inquiry_id && lead?.intake && intakeUnread && (
-          <p className="mt-2 text-xs text-slate-500">Couldn&apos;t read the website form&apos;s questions just now, so the customer&apos;s answers aren&apos;t shown. Reload to try again.</p>
+          <p className="mt-2 text-xs text-slate-500">{t("vp_couldntReadWebsiteForm")}</p>
         )}
         {/* What the customer attached at intake — the plans this inspection prices from. The
             lead leaves the inbox once it converts, so every linked surface carries its files. */}
@@ -607,14 +612,14 @@ export default async function AppointmentCapturePage({
           visit that already holds one (under the Off line); Estimates off drops Start The Estimate. */}
       {showInspector && (
         <>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? "Inspection Or Estimate" : "Inspection"}</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? t("vp_inspectionOrEstimate") : t("vp_inspection")}</h2>
           {isInspection && (
             <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
           )}
           {/* An inspection read that failed is SAID, and nothing is drawn that could save over it:
               an empty sheet's first keystroke would autosave the emptiness over the real answers. */}
           {inspectionUnread ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{INSPECTION_UNREAD}</p>
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{inspectionUnreadWords(lang, t)}</p>
           ) : (
           <Inspector
             appointmentId={a.id}
@@ -642,7 +647,7 @@ export default async function AppointmentCapturePage({
             kitsPicker={kitsOn}
             // How the kits read went, said once above the tasks (no money in it, so every role reads it);
             // on a failed read a task that picked a kit says "not read", never that the kit left the list.
-            kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state) : null}
+            kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state, lang, t) : null}
             kitsUnread={taskKitsRead.state === "failed"}
             initialTemplateId={inspection?.inspection_template_id ?? null}
             // A scope pick stores its price: the office's answers go as they are; nobody else's page
@@ -662,7 +667,7 @@ export default async function AppointmentCapturePage({
                 : a.customer_id && a.customers?.name
                   ? { kind: "customer" as const, name: a.customers.name }
                   : a.job_id
-                    ? { kind: "job" as const, name: "This job" }
+                    ? { kind: "job" as const, name: t("vp_thisJob") }
                     : null
             }
             // Pricing is the office's: nobody else is handed the door to the estimator.

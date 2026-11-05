@@ -30,7 +30,9 @@ export const words: WordCatalog = {
     ag_cal_btn_nobody: "Nobody",
     ag_cal_btn_moreFor: "More For {title}",
     ag_cal_btn_more: "More",
-    ag_cal_moveToADay: "Move to a day",
+    // Erik's decision, cn-v1144: Move To Day's trigger (its title and aria-label) and its sheet's title are a
+    // clickable's words, so Title Case in both languages — the one English change of the visit-page wave.
+    ag_cal_btn_moveToADay: "Move To A Day",
     ag_cal_couldntMove: "Couldn't move it — try again.",
     ag_cal_btn_clearDate: "Clear Date",
     ag_cal_orPickADate: "Or pick a date",
@@ -154,7 +156,7 @@ export const words: WordCatalog = {
     ag_cal_btn_nobody: "Nadie",
     ag_cal_btn_moreFor: "Más Para {title}",
     ag_cal_btn_more: "Más",
-    ag_cal_moveToADay: "Mover a un día",
+    ag_cal_btn_moveToADay: "Mover A Un Día",
     ag_cal_couldntMove: "No se pudo mover — inténtalo de nuevo.",
     ag_cal_btn_clearDate: "Quitar Fecha",
     ag_cal_orPickADate: "O elige una fecha",

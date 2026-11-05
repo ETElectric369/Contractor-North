@@ -23,6 +23,7 @@ vi.mock("@/lib/notifications", () => ({
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn(), reportErrorAwaited: vi.fn(async () => {}), errorMessage: (e: unknown) => String(e) }));
 import { linkAppointmentTo } from "@/app/(app)/appointments/actions";
+import { translator } from "@/lib/i18n";
 
 /**
  * EVERY DOOR THAT MAKES A JOB FROM HIS TASKS BIRTHS THEM THE SAME WAY (W3, cn-v1075).
@@ -400,7 +401,8 @@ describe("Won · Pick The Job carries the visit's work onto the job it links (cn
     const picker = src("src/app/(app)/appointments/[id]/link-picker.tsx");
     expect(picker).toContain('if (done.res.note) toast(done.res.note, "success");');
     expect(picker).toContain('if (done.res.warning) toast(done.res.warning, "info", undefined, { sticky: true });');
-    expect(src("src/app/(app)/appointments/[id]/visit-ending.tsx")).toContain('openLabel="Won · Pick The Job"');
+    expect(src("src/app/(app)/appointments/[id]/visit-ending.tsx")).toContain('openLabel={t("vp_btn_wonPickTheJob")}');
+    expect(translator("en")("vp_btn_wonPickTheJob")).toBe("Won · Pick The Job");
   });
 
   it("the one list writer keys a typed row on its capture id, so a second press lists nothing twice", () => {

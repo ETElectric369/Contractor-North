@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 import { setAppointmentOutcome } from "../actions";
 import { LinkPicker } from "./link-picker";
@@ -29,19 +31,25 @@ import { LinkPicker } from "./link-picker";
  *
  * The outcome is the visit's own answer (setAppointmentOutcome), the same column the estimate's
  * Accepted / Declined and the Inspections tab's bucket read. Change re-opens the three words; Clear
- * takes the answer back. Nothing here is drawn for a visit with nothing to say.
+ * takes the answer back. Nothing here is drawn for a visit with nothing to say. Every word is the
+ * signed-in person's language (lib/words/visit-page, vp_); the estimate's stored status word stays
+ * as stored.
  */
 export type VisitEstimate = { id: string; number: string | null; status: string | null; live: boolean };
 export type VisitOutcomeWord = "won" | "lost" | "no_bid";
 
+type Words = (key: string) => string;
+
 // ONE WORD FOR AN ENDING THAT ISN'T A WIN (Erik, 2026-10-08: "just keep Lost everywhere - KISS"). The
 // column still holds no_bid on a few old rows (Nort's tool can write it); every one of them reads Lost.
-const WORDS: Record<VisitOutcomeWord, string> = { won: "Won", lost: "Lost", no_bid: "Lost" };
+const WORD_KEY: Record<VisitOutcomeWord, string> = { won: "vp_won", lost: "vp_lost", no_bid: "vp_lost" };
 
-/** The outcome, in the page's words; an unknown stored word is shown as stored, never hidden. */
-export function outcomeWord(outcome: string | null | undefined): string | null {
+/** The outcome, in the page's words (the reader's language when handed its translator; English by
+ *  default); an unknown stored word is shown as stored, never hidden. */
+export function outcomeWord(outcome: string | null | undefined, t: Words = translator("en")): string | null {
   if (!outcome) return null;
-  return WORDS[outcome as VisitOutcomeWord] ?? outcome;
+  const key = WORD_KEY[outcome as VisitOutcomeWord];
+  return key ? t(key) : outcome;
 }
 
 /** Whether the office is offered the ending doors: a completed estimate visit, still undecided, with
@@ -86,10 +94,12 @@ export function VisitEnding({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
   const [changing, setChanging] = useState(false);
   const [pending, start] = useTransition();
 
-  const word = outcomeWord(outcome);
+  const word = outcomeWord(outcome, t);
   const offered = endingOffered({ isStaff, status, outcome, hasJob: !!job, estimateLive: !!estimate?.live, decidable });
   if (!estimate && !word && !offered) return null;
 
@@ -97,10 +107,10 @@ export function VisitEnding({
     start(async () => {
       const res = await setAppointmentOutcome(appointmentId, next);
       if (!res.ok) {
-        toast(res.error ?? "That didn't save — try again.", "error");
+        toast(res.error ?? t("vp_thatDidntSave"), "error");
         return;
       }
-      toast(next ? `Marked ${WORDS[next]}.` : "Answer cleared.", "success");
+      toast(next ? t(next === "won" ? "vp_markedWon" : "vp_markedLost") : t("vp_answerCleared"), "success");
       setChanging(false);
       router.refresh();
     });
@@ -109,23 +119,23 @@ export function VisitEnding({
   const choices = (
     <div className="mt-2 flex flex-wrap items-start gap-2">
       <Button type="button" variant="secondary" disabled={pending} className={DOOR} onClick={() => decide("lost")}>
-        {WORDS.lost}
+        {t("vp_btn_lost")}
       </Button>
       {/* The win is the job it became: the attach door (jobs only, every status but cancelled). */}
       {!job && (
         <div className="min-w-[14rem] flex-1 [&>div]:mt-0">
-          <LinkPicker appointmentId={appointmentId} linked={null} seed={seed} kinds={["job"]} openLabel="Won · Pick The Job" label={null} />
+          <LinkPicker appointmentId={appointmentId} linked={null} seed={seed} kinds={["job"]} openLabel={t("vp_btn_wonPickTheJob")} label={null} />
         </div>
       )}
       {changing && (
         <>
           {outcome && (
             <Button type="button" variant="ghost" disabled={pending} className={DOOR} onClick={() => decide(null)}>
-              Clear The Answer
+              {t("vp_btn_clearTheAnswer")}
             </Button>
           )}
           <Button type="button" variant="ghost" disabled={pending} className={DOOR} onClick={() => setChanging(false)}>
-            Keep It
+            {t("vp_btn_keepIt")}
           </Button>
         </>
       )}
@@ -136,18 +146,18 @@ export function VisitEnding({
     <div className="my-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3 text-sm" data-testid="visit-ending">
       {estimate && (
         <p className="text-slate-700">
-          Written up as{" "}
+          {t("vp_writtenUpAs")}{" "}
           <Link href={`/quotes/${estimate.id}`} className="font-medium text-brand hover:underline">
-            {estimate.number ?? "The Estimate"}
+            {estimate.number ?? t("vp_btn_theEstimate")}
           </Link>
           {estimate.status ? ` · ${estimate.status}` : ""}
-          {!estimate.live && <span className="text-slate-500"> — that estimate is over; a new one can be started below.</span>}
+          {!estimate.live && <span className="text-slate-500"> {t("vp_estimateIsOver")}</span>}
         </p>
       )}
       {word && (
         <p className={`flex flex-wrap items-center gap-x-2 text-slate-700 ${estimate ? "mt-1" : ""}`}>
           <span className="font-medium">{word}</span>
-          {outcomeAt && <span className="text-slate-500">· {formatDate(outcomeAt, tz)}</span>}
+          {outcomeAt && <span className="text-slate-500">· {formatDate(outcomeAt, tz, lang)}</span>}
           {outcome === "won" && job && (
             <Link href={`/jobs/${job.id}`} className="text-brand hover:underline">
               · {[job.job_number, job.name].filter(Boolean).join(" ")}
@@ -155,14 +165,14 @@ export function VisitEnding({
           )}
           {isStaff && !changing && (
             <button type="button" onClick={() => setChanging(true)} className="min-h-[44px] text-xs text-slate-500 underline-offset-2 hover:underline">
-              Change
+              {t("vp_btn_change")}
             </button>
           )}
         </p>
       )}
       {offered && !changing && (
         <>
-          <p className={`text-slate-700 ${estimate ? "mt-2" : ""}`}>How did this one end?</p>
+          <p className={`text-slate-700 ${estimate ? "mt-2" : ""}`}>{t("vp_howDidThisOneEnd")}</p>
           {choices}
         </>
       )}

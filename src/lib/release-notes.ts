@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1144", date: "2026-11-05", line: "The visit page in Spanish — the page a tech opens from the schedule, its inspection sheet, the start card, every door, the Settle Up button and the server's words follow your language. No migration." },
   { version: "cn-v1143", date: "2026-11-05", line: "The Schedule in Spanish — the calendar, the crew board, every sheet and rail, the New Job form and every message the server sends back follow your language; dates and times too. No migration." },
   { version: "cn-v1142", date: "2026-11-05", line: "Weather follows the phone; clock-in picks the job you're at; Needs You's one settled rule; crons at each company's own 8 AM; the Safari box gone; the SDK half: effort, fallbacks, cached history." },
   { version: "cn-v1141", date: "2026-10-30", line: "The Panel tab is the box: Panel 1 from the first circuit, two columns of breakers drawn to scale and filled by tapping, one Read A Photo button, Breakers in one line, Door Labels printed at true size." },

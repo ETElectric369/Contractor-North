@@ -15,6 +15,8 @@
  * cannot work.
  */
 import { parsePlaybook } from "@/lib/playbook/parse";
+import { say, type Words } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 
 export type InspectionAccess = "office" | "crewLead" | "view";
 
@@ -80,6 +82,13 @@ export async function readViaView<T>(
 /** An inspection read's failure, in words the page shows in place of the sheet it couldn't read. */
 export const INSPECTION_UNREAD =
   "Couldn't read this inspection just now, so it isn't shown (nothing on it changed). Reload the page to try again.";
+
+/** The same sentence in the reader's language (the visit-page-in-Spanish wave): INSPECTION_UNREAD, byte
+ *  for byte, unless the caller hands "es" and its translator (lib/i18n translator), then lib/words/visit-page
+ *  vp_inspectionUnread. This file imports no catalog (lib/lang-words say). */
+export function inspectionUnreadWords(lang: Lang | string | null = "en", words?: Words): string {
+  return say(lang, words, "vp_inspectionUnread", INSPECTION_UNREAD);
+}
 
 /**
  * THE ANSWERS, WITH NO PRICE IN THEM, for anyone who isn't the office.

@@ -32,8 +32,8 @@ import { CATALOGS } from "@/lib/i18n";
  */
 const ROOT = process.cwd();
 
-/** The screens the catalogs name at the agenda wave's foundation (122: the sheet, the calendar's eleven, the rail's ten, the server's three), at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
-export const FILES_FLOOR = 122;
+/** The screens the catalogs name at the visit-page wave's foundation (133: the agenda wave's 122 + the Settle Up button, the shell's off line and directions link, the Inspector, and the visit page's six — its page, start card, link picker, ending, header actions, Mark Complete — and its hear-actions), at the agenda wave's foundation (122: the sheet, the calendar's eleven, the rail's ten, the server's three), at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
+export const FILES_FLOOR = 138;
 
 /** English that stands on a named screen on purpose: the exact words, the file, and why. */
 const ALLOW: { file: string; text: string; why: string }[] = [
@@ -301,7 +301,7 @@ describe("every named screen's words come through the catalog", () => {
   const leaks = files.flatMap((f) => collectLeaks(readFileSync(join(ROOT, f), "utf8"), f).map((l) => ({ ...l, file: f })));
 
   it("the catalogs loaded and the scan read every screen they name", () => {
-    expect(CATALOGS.length).toBe(17);
+    expect(CATALOGS.length).toBe(20);
     expect(files.length).toBeGreaterThanOrEqual(FILES_FLOOR);
   });
 

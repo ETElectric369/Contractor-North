@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { arPreviewPresent, base64Of, bytesOf, CHUNK_BYTES, discardScan, keptWords, MODEL_MAX_BYTES, openInAr, pullFile, scan3dNative, scanDoors, USDZ_MIME } from "@/lib/native-scan";
 import { modelKind } from "@/components/model-viewer";
+import { translator } from "@/lib/i18n";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -450,19 +451,20 @@ describe("the wiring, pinned", () => {
   it("the Inspector: the button, the landing (the model uploaded, filed on the job), the tiles open the viewer, drops take a 3D file; the portal spins it", () => {
     const insp = read("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(insp).toContain('onClick={() => void scan3dInto(taskId)}');
-    expect(insp).toContain('<Box className="h-4 w-4" /> 3D Scan\n');
+    expect(insp).toContain('<Box className="h-4 w-4" /> {t("vi_btn_scan3d")}\n'); // the door reads the vi_ catalog since cn-v1144 …
+    expect(translator("en")("vi_btn_scan3d")).toBe("3D Scan"); // … and its English is byte for byte what it said
     expect(insp).toContain("!readOnly && (canMeasure || scanOn.model) ? (");
     // The old doors are gone from the page too (Erik 2026-10-16); no plan drawing, no site rows.
     for (const gone of ["scanInto(", "scanNative", "scanLanding", "planImageFile", "Scan The Site", "Scan The Room", "Scan In 3D"]) expect(insp).not.toContain(gone);
     const fn = insp.slice(insp.indexOf("async function scan3dInto("), insp.indexOf("/** A COPY of the visit's file"));
-    expect(fn).toContain("const r = await scan3dNative();");
+    expect(fn).toContain("const r = await scan3dNative(Date.now(), lang, t);"); // (cn-v1144: the reader's language rides along)
     // (cn-v1123: a kept model whose file is already up sends nothing, only the row is saved again)
     expect(fn).toContain('const stored = await upload(landed ? [] : [model], { caption: "3D model", about: "3D Scan" }, landed ? [landed] : undefined);');
     // A failed upload keeps the model (and the shell's copy) for one more tap, for the place it was
     // scanned for; the shell's copy goes only after the upload landed; upload()'s own reason is
     // kept, not overwritten.
     expect(fn).toContain("keep({ model, path, taskId, landed: null });");
-    expect(fn).toContain("keptWords(false)");
+    expect(fn).toContain("keptWords(false, lang, t)");
     expect(keptWords(false)).toContain("tap 3D Scan again to send it without scanning.");
     expect(fn).toContain("keep(null);\n      await discardScan(path);");
     expect(fn).toContain("const filed = await fileOnJob(jobId, stored[0], model.name, model.size);");

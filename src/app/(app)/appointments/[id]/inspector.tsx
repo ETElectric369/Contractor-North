@@ -37,12 +37,33 @@ import type { InspectionAccess } from "@/lib/inspection/inspection-access";
 import { registerNortDoors, type NortDoor } from "@/lib/nort/doors";
 import { measureNative, measurePluginPresent, type MeasureMode } from "@/lib/native-measure";
 import { Box, Ruler } from "lucide-react";
-import { DISCARD_KEPT_LABEL, discardScan, jobFilingWords, keptElsewhereWords, keptStep, keptWords, NO_SCAN_DOORS, scan3dNative, scanDoors, type KeptModel, type ScanDoors } from "@/lib/native-scan";
+import { discardScan, jobFilingWords, keptElsewhereWords, keptStep, keptWords, NO_SCAN_DOORS, scan3dNative, scanDoors, type KeptModel, type ScanDoors } from "@/lib/native-scan";
 import { ModelViewer } from "@/components/model-viewer";
 import { jobFilePath } from "@/lib/job-file-upload";
 import { uploadRefusal } from "@/lib/upload-words";
 import { addDocument } from "../../jobs/actions";
 import { inspectorDoors } from "@/lib/inspection/doors";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
+
+/**
+ * A MEASURED ROW'S STORED LABEL IS ENGLISH (skeptic #50). "Measured length" is a RECORD — the office, the
+ * estimate and every later reader open the capture as stored — so Measure writes the row's label through
+ * translator("en") whatever the tech's language, and the sheet draws the tech's own word for it (the
+ * catalog's Spanish) while the stored text is still one of the four; anything he typed over it is shown as
+ * typed. An English reader sees the stored text either way.
+ */
+const MEASURED_LABEL_KEYS = ["vi_measuredLength", "vi_measuredLengthApprox", "vi_measuredArea", "vi_measuredAreaApprox"] as const;
+/** The label Measure writes on its row: neutral, not a guess, and English for the record. */
+export function measuredRowLabel(mode: MeasureMode, approx: boolean): string {
+  return translator("en")(mode === "area" ? (approx ? "vi_measuredAreaApprox" : "vi_measuredArea") : approx ? "vi_measuredLengthApprox" : "vi_measuredLength");
+}
+/** The label as the reader sees it in the row's box: the catalog's word for a stored Measure label, else as stored. */
+export function measureLabelWords(label: string, t: (key: string) => string): string {
+  const en = translator("en");
+  const key = MEASURED_LABEL_KEYS.find((k) => en(k) === label);
+  return key ? t(key) : label;
+}
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
  *  it renders 0 as blank, so "I didn't count it" and "zero of them" become the same stored value —
@@ -302,6 +323,14 @@ export function Inspector({
   const crew = access === "crewLead";
   const readOnly = access === "view";
   const router = useRouter();
+  // THE READER'S WORDS (the visit-page-in-Spanish wave, cn-v1144): lib/i18n translator(lang), bound to the
+  // signed-in person's language (useLang). Every sentence the sheet says itself comes through t() and the
+  // vi_ catalog (lib/words/visit-inspector); a question's own words, a stored answer, a file name and a
+  // figure stay as they are, and the server's refusals (res.error) arrive already in that language. The
+  // shell's libraries (native-measure, native-scan, upload-words, playbook/scope, playbook/answers) and the
+  // drop zone keep their English inline and are handed `lang` + `t` to say the same catalog's Spanish.
+  const lang = useLang();
+  const t = translator(lang);
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
 
   // Only an explicit CHOICE is state. The default is DERIVED, fresh, every render — because the
@@ -605,7 +634,7 @@ export function Inspector({
         const w = await setAppointmentPlace(appointmentId, line, parts);
         if (!w.ok) {
           setSavedAt(null); // a stale green tick must never stand over an address that is not written
-          setError(w.error ?? "Couldn't save the address — still trying.");
+          setError(w.error ?? t("vi_couldntSaveAddress"));
           if (!w.refused) schedule();
           return;
         }
@@ -615,7 +644,7 @@ export function Inspector({
       } catch {
         // No signal. Nothing is written; the line is held here and goes as soon as there are bars.
         setSavedAt(null);
-        setError("No signal — the address is held on this phone and will save when you're back in range.");
+        setError(t("vi_noSignalAddressHeld"));
         schedule();
       }
     });
@@ -634,42 +663,32 @@ export function Inspector({
     try {
       const fix = await getPosition({ enableHighAccuracy: true, timeout: 12_000, maximumAge: 0 });
       if (fix.status !== "ok") {
-        setLocatedNote(
-          fix.status === "denied"
-            ? "Location is off for North — turn it on in Settings."
-            : "Couldn't get a fix — step outside and try again, or type the address.",
-        );
+        setLocatedNote(t(fix.status === "denied" ? "vi_locationOffForNorth" : "vi_couldntGetFix"));
         return;
       }
       const m = Math.round(fix.accuracy);
       if (m > LOCATE_SURE_M) {
-        setLocatedNote(`Only sure to within ${m} m — step closer and tap again, or type the number.`);
+        setLocatedNote(fillText(t("vi_onlySureWithin"), { m: String(m) }));
         return;
       }
       const r = await fetch(`/api/geocode?latlng=${fix.coords.lat},${fix.coords.lng}`);
       if (!r.ok) {
-        setLocatedNote(
-          r.status === 404
-            ? "No street address at this spot — type the number and street."
-            : r.status === 429
-              ? "Address lookup is at its daily limit — type the address."
-              : "Address lookup is down — type the address.",
-        );
+        setLocatedNote(t(r.status === 404 ? "vi_noStreetAddressHere" : r.status === 429 ? "vi_lookupDailyLimit" : "vi_lookupDown"));
         return;
       }
       const found = (await r.json()) as { formatted?: string; line1?: string; city?: string; state?: string; zip?: string };
       const line = (found.formatted ?? "").trim();
       // A street with no number is a road, not an address: never written to the record.
       if (!line || !/^\d/.test((found.line1 ?? "").trim())) {
-        setLocatedNote("No street address at this spot — type the number and street.");
+        setLocatedNote(t("vi_noStreetAddressHere"));
         return;
       }
       setPlace(line);
       setWhereKey((k) => k + 1);
-      setLocatedNote(`From your phone, within ${m} m.`);
+      setLocatedNote(fillText(t("vi_fromYourPhoneWithin"), { m: String(m) }));
       savePick(line, { city: found.city ?? null, state: found.state ?? null, zip: found.zip ?? null });
     } catch {
-      setLocatedNote("No signal — type the address for now.");
+      setLocatedNote(t("vi_noSignalTypeAddress"));
     } finally {
       setLocating(false);
     }
@@ -732,23 +751,23 @@ export function Inspector({
       try {
         if (Object.keys(patch).length) {
           const r = await saveInspectionCapture(appointmentId, patch as never);
-          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.", !r.refused);
+          if (!r.ok) return restore(r.error ?? t("vi_couldntSaveStillTrying"), !r.refused);
         }
         if (placeDirty) {
           const r = await setAppointmentPlace(appointmentId, latestPlace, partsForLine(latestPlace));
-          if (!r.ok) return restore(r.error ?? "Couldn't save the address — still trying.");
+          if (!r.ok) return restore(r.error ?? t("vi_couldntSaveAddress"));
           savedPlaceRef.current = latestPlace;
           if (unsavedPickRef.current?.line.trim() === latestPlace.trim()) unsavedPickRef.current = null;
         }
         if (wantAnswers) {
           const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answersRef.current) as never);
-          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.", !r.refused);
+          if (!r.ok) return restore(r.error ?? t("vi_couldntSaveStillTrying"), !r.refused);
           setSheetSaved(true);
         }
         setSavedAt(Date.now());
       } catch {
         // No signal. Nothing is lost and nothing is written; it will go as soon as there are bars.
-        restore("No signal — your answers are held on this phone and will save when you're back in range.");
+        restore(t("vi_noSignalAnswersHeld"));
       }
     });
   }
@@ -830,7 +849,7 @@ export function Inspector({
     setMeasuring(true);
     setError(null);
     try {
-      const r = await measureNative(mode);
+      const r = await measureNative(mode, lang, t);
       if (!r.ok) {
         if ("refused" in r) setError(r.refused);
         return;
@@ -838,8 +857,9 @@ export function Inspector({
       const id = captureId();
       // A NAMED ROW: the server drops a nameless measurement on save (skeptic #16, M8), so the row
       // says what the tool did — neutral, not a guess — and he renames it in the label box. A figure
-      // off a phone without the sensor says so: an estimated plane is close, not exact.
-      const label = `${mode === "area" ? "Measured area" : "Measured length"}${r.approx ? " (approx.)" : ""}`;
+      // off a phone without the sensor says so: an estimated plane is close, not exact. Stored in
+      // ENGLISH (a record); the box draws it in the reader's language (measureLabelWords).
+      const label = measuredRowLabel(mode, r.approx);
       const row: CaptureMeasure = { id, label, value: r.value, unit: r.unit, ...(taskId ? { task_id: taskId } : {}) };
       const next = [...measuresRef.current, row];
       measuresRef.current = next;
@@ -853,7 +873,7 @@ export function Inspector({
         pendingTaskRef.current = taskId;
         await upload([r.photo], { caption: r.caption, about: label });
       } else {
-        setError("The measurement landed, but its picture didn't come back.");
+        setError(t("vi_measurePictureMissing"));
       }
     } finally {
       measuringRef.current = false;
@@ -888,8 +908,8 @@ export function Inspector({
       // The kept model is for another place: the old room's model never lands here, and the sentence
       // says where it waits (a task that has been removed can only be discarded).
       const at = step.kept.taskId;
-      const t = at === null ? null : tasksNow().find((x) => x.id === at);
-      setError(keptElsewhereWords(at === null ? "the visit" : t ? `"${t.name.trim() || "A task with no name yet"}"` : null));
+      const forTask = at === null ? null : tasksNow().find((x) => x.id === at);
+      setError(keptElsewhereWords(at === null ? t("vi_theVisit") : forTask ? `"${forTask.name.trim() || t("vi_taskNoNameYet")}"` : null, lang, t));
       return;
     }
     measuringRef.current = true;
@@ -900,7 +920,7 @@ export function Inspector({
       let path: string;
       let landed: CapturePhoto | null = null;
       if (step.step === "scan") {
-        const r = await scan3dNative();
+        const r = await scan3dNative(Date.now(), lang, t);
         if (!r.ok) {
           if ("refused" in r) setError(r.refused);
           return;
@@ -930,12 +950,12 @@ export function Inspector({
           // is safe in storage) and the next tap saves the row alone, never a second upload.
           await discardScan(path);
           keep({ model, path, taskId, landed: up });
-          setError((e) => `${e ?? "The visit didn't save the 3D model."} ${keptWords(true)}`);
+          setError((e) => `${e ?? t("vi_visitDidntSaveModel")} ${keptWords(true, lang, t)}`);
           return;
         }
         // upload() said why (the signal); the model waits here for one more tap, for this place.
         keep({ model, path, taskId, landed: null });
-        setError((e) => `${e ?? "The 3D model didn't upload."} ${keptWords(false)}`);
+        setError((e) => `${e ?? t("vi_modelDidntUpload")} ${keptWords(false, lang, t)}`);
         return;
       }
       keep(null);
@@ -964,13 +984,13 @@ export function Inspector({
     // Through the one door that takes a photo off a visit (removePhoto's): it drops the path from the
     // stored list and deletes the file, so a save that threw after the server had committed cannot
     // leave the visit pointing at a file that is gone.
-    const stillThere = () => setError("The 3D model is off the visit, but its file is still in storage.");
+    const stillThere = () => setError(t("vi_modelOffVisitFileInStorage"));
     await removeInspectionPhoto(appointmentId, up.path).then((r) => { if (!r.ok) stillThere(); }, stillThere);
   }
   async function discardKept() {
     const kept = unsentModelRef.current;
     if (!kept || measuringRef.current) return;
-    if (!confirm("Discard the kept 3D model? The room would need scanning again.")) return;
+    if (!confirm(t("vi_discardKeptConfirm"))) return;
     await dropKept(kept);
   }
 
@@ -981,7 +1001,7 @@ export function Inspector({
     const storage = createClient().storage.from("documents");
     const { error: copyErr } = await storage.copy(from, to);
     // Storage's own sentence never reaches the contractor (jobFilingWords says it in the app's words).
-    if (copyErr) return { ok: false, error: jobFilingWords(copyErr) };
+    if (copyErr) return { ok: false, error: jobFilingWords(copyErr, lang, t) };
     let failed: { why: unknown } | null = null;
     try {
       const r = await addDocument({ job_id: job, name, category: "Other", file_url: to, size_bytes: size });
@@ -992,7 +1012,7 @@ export function Inspector({
     if (failed === null) return { ok: true };
     // No row points at the copy: take it back out, so nothing orphaned sits in the job's folder.
     await storage.remove([to]).then(() => undefined, () => undefined);
-    return { ok: false, error: jobFilingWords(failed.why) };
+    return { ok: false, error: jobFilingWords(failed.why, lang, t) };
   }
 
   // THE LIDAR GROUP (Erik 2026-10-16: "lets group everything with a title called Lidar … keep
@@ -1003,28 +1023,28 @@ export function Inspector({
   const measureButtons = (taskId: string | null) =>
     !readOnly && (canMeasure || scanOn.model) ? (
       <div>
-        <SectionLabel>Lidar</SectionLabel>
+        <SectionLabel>{t("vi_lidar")}</SectionLabel>
         <div className="mt-2 flex flex-wrap gap-2">
           {canMeasure && (
             <>
               <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(taskId, "length")}>
-                {measuring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ruler className="h-4 w-4" />} Measure
+                {measuring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ruler className="h-4 w-4" />} {t("vi_btn_measure")}
               </Button>
               <Button type="button" variant="secondary" disabled={measuring} onClick={() => void measureInto(taskId, "area")}>
-                Measure Area
+                {t("vi_btn_measureArea")}
               </Button>
             </>
           )}
           {scanOn.model && (
             <>
               <Button type="button" variant="secondary" disabled={measuring} onClick={() => void scan3dInto(taskId)}>
-                <Box className="h-4 w-4" /> 3D Scan
+                <Box className="h-4 w-4" /> {t("vi_btn_scan3d")}
               </Button>
               {/* A kept model has a way out in words: without it a refusal that never changes (a login
                   that cannot write) would keep every tap on this page re-sending the same file. */}
               {keptModel && (
                 <Button type="button" variant="secondary" disabled={measuring} onClick={() => void discardKept()}>
-                  {DISCARD_KEPT_LABEL}
+                  {t("vi_btn_discardKept3dModel")}
                 </Button>
               )}
             </>
@@ -1185,7 +1205,7 @@ export function Inspector({
         ? await addInspectionPhotos(appointmentId, added.map((p) => p.path))
         : await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
       if (!r.ok) {
-        setError(r.error ?? "Couldn't save the photos.");
+        setError(r.error ?? t("vi_couldntSavePhotos"));
         uploadLandedRef.current = added; // the files are up; the row is what is owed
       } else setSavedAt(Date.now());
       if (r.ok) stored.push(...added.map((a) => a.path));
@@ -1212,12 +1232,12 @@ export function Inspector({
         // the file landed and nothing sends it a second time. An ordinary photo has no such tap: it
         // keeps the sentence below, whose action is to try again.
         uploadLandedRef.current = added;
-        setError("Couldn't save the photos.");
+        setError(t("vi_couldntSavePhotos"));
         return stored;
       }
       // Storage's sentence in plain words; a 3D model is named as one, a photo by its file.
       const model = extra?.about === "3D Scan";
-      const r = uploadRefusal(e, { what: model ? "The 3D model" : sending?.name ?? "The file", bytes: sending?.size ?? 0, action: model ? "Scan a smaller area." : "Send a smaller file." });
+      const r = uploadRefusal(e, { what: model ? t("vi_the3dModel") : sending?.name ?? t("vi_theFile"), bytes: sending?.size ?? 0, action: model ? t("vi_scanSmallerArea") : t("vi_sendSmallerFile") }, lang, t);
       uploadFinalRef.current = r.final;
       setError(r.sentence);
     } finally {
@@ -1227,7 +1247,7 @@ export function Inspector({
   }
 
   function removePhoto(p: CapturePhoto) {
-    if (!confirm("Remove this?")) return;
+    if (!confirm(t("vi_removeThisConfirm"))) return;
     // The tile of a model that is up but unsaved IS the kept model: removing it lets go of the whole
     // thing, or the next tap would put it back.
     const kept = unsentModelRef.current;
@@ -1243,11 +1263,11 @@ export function Inspector({
       (r) => {
         if (r.ok) return setSavedAt(Date.now());
         setPhotos((cur) => (cur.some((x) => x.path === p.path) ? cur : [...cur, p]));
-        setError(r.error ?? "Couldn't remove it.");
+        setError(r.error ?? t("vi_couldntRemoveIt"));
       },
       () => {
         setPhotos((cur) => (cur.some((x) => x.path === p.path) ? cur : [...cur, p]));
-        setError("No signal — the photo is still on the inspection. Try again when you're back in range.");
+        setError(t("vi_noSignalPhotoStays"));
       },
     );
   }
@@ -1371,7 +1391,7 @@ export function Inspector({
                     : "min-h-[44px] rounded-full border border-dashed border-slate-400 bg-white px-4 text-sm text-slate-600 active:bg-slate-50"
                 }
               >
-                Something Else
+                {t("vi_btn_somethingElse")}
               </button>
             )}
           </div>
@@ -1389,7 +1409,7 @@ export function Inspector({
               onFocus={() => focusNeed(n.key)}
               onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
               rows={Math.min(10, Math.max(2, free.split("\n").length + 1))}
-              placeholder="In your own words"
+              placeholder={t("vi_inYourOwnWords")}
               value={free}
               onChange={(e) => put(multi ? listed : [], e.target.value)}
             />
@@ -1433,9 +1453,9 @@ export function Inspector({
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-slate-500">Nothing picked yet.</p>
+              <p className="text-sm text-slate-500">{t("vi_nothingPickedYet")}</p>
             )}
-            <p className="mt-1.5 text-xs text-slate-400">The office picks and prices these.</p>
+            <p className="mt-1.5 text-xs text-slate-400">{t("vi_officePicksAndPrices")}</p>
           </div>
         );
       const allowed = n.slot.codes?.length ? new Set(n.slot.codes) : null;
@@ -1466,7 +1486,7 @@ export function Inspector({
                       type="button"
                       onClick={() => setPicks(picked.filter((_, j) => j !== idx))}
                       className="shrink-0 px-1 text-xs text-slate-400 hover:text-rose-600"
-                      aria-label={`Remove ${row?.description || p.code}`}
+                      aria-label={fillText(t("vi_btn_removeWhat"), { what: row?.description || p.code })}
                     >
                       ×
                     </button>
@@ -1491,7 +1511,7 @@ export function Inspector({
                 setPicks([...picked, { code: row.code, qty: 1, price: row.price }]);
               }}
             >
-              <option value="">Add A Line Item…</option>
+              <option value="">{t("vi_btn_addALineItem")}</option>
               {menu.map((b) => (
                 <option key={b.code} value={b.code}>
                   {b.description || b.code}
@@ -1501,7 +1521,7 @@ export function Inspector({
             </Select>
           ) : (
             <p className="text-xs text-slate-400">
-              {priceBook.length ? "That's all of them." : "Add items to your price list and they'll show up here."}
+              {t(priceBook.length ? "vi_thatsAllOfThem" : "vi_addItemsToPriceList")}
             </p>
           )}
         </div>
@@ -1598,68 +1618,68 @@ export function Inspector({
               }}
               className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg border border-dashed border-brand/60 bg-brand/5 px-3 text-sm font-medium text-brand active:bg-brand/10"
             >
-              <span>{offerLabel(word, offer.length)}</span>
+              <span>{offerLabel(word, offer.length, lang, t)}</span>
               <Plus className="h-4 w-4 shrink-0" />
             </button>
           )}
-          {tasks.map((t, i) => {
-            const sheetOpen = openTaskId === t.id;
-            const kitOf = t.kit_id ? taskKits.find((k) => k.id === t.kit_id) ?? null : null;
-            const taskPhotos = photos.filter((p) => photoMeta[p.path]?.task_id === t.id);
-            const taskMeasures = measures.filter((m) => m.task_id === t.id);
+          {tasks.map((task, i) => {
+            const sheetOpen = openTaskId === task.id;
+            const kitOf = task.kit_id ? taskKits.find((k) => k.id === task.kit_id) ?? null : null;
+            const taskPhotos = photos.filter((p) => photoMeta[p.path]?.task_id === task.id);
+            const taskMeasures = measures.filter((m) => m.task_id === task.id);
             const chip = (text: string, title?: string) => (
               <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700" title={title}>{text}</span>
             );
             // THE ROW: what the task is and what it still asks — never a price.
             const rowWords = [
-              t.hours !== null ? `${t.hours} h` : kitOf ? "hours from the kit" : null,
-              t.units !== null ? `×${t.units}${kitOf?.unit ? ` ${kitOf.unit}` : ""}` : null,
+              task.hours !== null ? `${task.hours} h` : kitOf ? t("vi_hoursFromTheKit") : null,
+              task.units !== null ? `×${task.units}${kitOf?.unit ? ` ${kitOf.unit}` : ""}` : null,
               kitOf ? kitOf.name : null,
-              t.materials.length ? `${t.materials.length} part${t.materials.length === 1 ? "" : "s"}` : null,
-              taskPhotos.length ? `${taskPhotos.length} photo${taskPhotos.length === 1 ? "" : "s"}` : null,
-              taskMeasures.length ? `${taskMeasures.length} measurement${taskMeasures.length === 1 ? "" : "s"}` : null,
+              task.materials.length ? fillText(t(task.materials.length === 1 ? "vi_partsOne" : "vi_partsMany"), { n: String(task.materials.length) }) : null,
+              taskPhotos.length ? fillText(t(taskPhotos.length === 1 ? "vi_photosOne" : "vi_photosMany"), { n: String(taskPhotos.length) }) : null,
+              taskMeasures.length ? fillText(t(taskMeasures.length === 1 ? "vi_measurementsOne" : "vi_measurementsMany"), { n: String(taskMeasures.length) }) : null,
             ].filter(Boolean).join(" · ");
             return (
-            <div key={t.id} id={`task-${t.id}`} className={sheetOpen ? "scroll-mt-16 rounded-lg border border-brand/50 p-2 ring-1 ring-brand/20" : "scroll-mt-16 rounded-lg border border-slate-200"}>
+            <div key={task.id} id={`task-${task.id}`} className={sheetOpen ? "scroll-mt-16 rounded-lg border border-brand/50 p-2 ring-1 ring-brand/20" : "scroll-mt-16 rounded-lg border border-slate-200"}>
               {!sheetOpen ? (
                 <div
                   role="button"
                   tabIndex={0}
                   aria-expanded={false}
-                  data-task-row={t.id}
-                  onClick={() => openTask(t.id)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } }}
+                  data-task-row={task.id}
+                  onClick={() => openTask(task.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(task.id); } }}
                   className="flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left active:bg-slate-50"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-800">{t.name.trim() || "A task with no name yet"}</span>
+                    <span className="block truncate text-sm font-medium text-slate-800">{task.name.trim() || t("vi_taskNoNameYet")}</span>
                     {rowWords && <span className="block truncate text-xs text-slate-500">{rowWords}</span>}
                   </span>
-                  {!t.name.trim() && chip("name?")}
-                  {taskAsking(t) && chip("hours?")}
-                  {!!kitOf && t.units === null && chip("units?", "How many units? The kit's hours and parts are per unit")}
+                  {!task.name.trim() && chip(t("vi_chipName"))}
+                  {taskAsking(task) && chip(t("vi_chipHours"))}
+                  {!!kitOf && task.units === null && chip(t("vi_chipUnits"), t("vi_howManyUnitsTitle"))}
                   <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
                 </div>
               ) : (
               <>
               <div className="flex items-center gap-2">
                 <Input
-                  id={`task-name-${t.id}`}
+                  id={`task-name-${task.id}`}
                   autoComplete="off"
-                  value={t.name}
-                  placeholder="The piece of work, in your words"
+                  value={task.name}
+                  placeholder={t("vi_pieceOfWorkPlaceholder")}
                   {...focus}
                   onChange={(e) => patchTask(i, { name: e.target.value })}
                 />
                 {/* A task with no name is not saved (coerceTasks drops it): say so where he can see it. */}
-                {!t.name.trim() && (
-                  <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">name?</span>
+                {!task.name.trim() && (
+                  <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{t("vi_chipName")}</span>
                 )}
                 {!readOnly && (
                   <button
                     type="button"
                     onClick={() => removeTask(i)}
-                    aria-label="Remove This Task"
+                    aria-label={t("vi_btn_removeThisTask")}
                     className={removeClass}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -1667,11 +1687,11 @@ export function Inspector({
                 )}
               </div>
               <div className="mt-2 flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Hours</span>
-                <NumBox id={`task-hours-${t.id}`} value={t.hours} className="w-20" {...focus} onValue={(x) => patchTask(i, { hours: x })} />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t("vi_hours")}</span>
+                <NumBox id={`task-hours-${task.id}`} value={task.hours} className="w-20" {...focus} onValue={(x) => patchTask(i, { hours: x })} />
                 {/* THE ASKING STATE: his number or a question, never an average filled in for him. */}
-                {taskAsking(t) && (
-                  <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">hours?</span>
+                {taskAsking(task) && (
+                  <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{t("vi_chipHours")}</span>
                 )}
               </div>
               {/* THE KIT AND THE UNITS (W4): a task kit is his minutes and his parts for ONE unit
@@ -1679,47 +1699,47 @@ export function Inspector({
                   from THE SAME expandTaskKit the estimate seeds from, so the two never disagree —
                   names and counts only, never a price (the page drops every money field). */}
               {(() => {
-                const kit = t.kit_id ? taskKits.find((k) => k.id === t.kit_id) ?? null : null;
+                const kit = task.kit_id ? taskKits.find((k) => k.id === task.kit_id) ?? null : null;
                 // A picked kit that is not in the list: NOT READ when the read failed (the kit may well be
                 // there), GONE only when the kits were read and it was not among them.
-                const kitUnread = !!t.kit_id && !kit && kitsUnread;
-                const kitGone = !!t.kit_id && !kit && !kitsUnread;
-                const preview = kit ? expandTaskKit(t, kit, KIT_PREVIEW_PRICING) : null;
+                const kitUnread = !!task.kit_id && !kit && kitsUnread;
+                const kitGone = !!task.kit_id && !kit && !kitsUnread;
+                const preview = kit ? expandTaskKit(task, kit, KIT_PREVIEW_PRICING) : null;
                 // HIS HOURS WIN over the kit's (buildTaskDetail: task.hours ?? the kit's): the
                 // preview says which figure the estimate will take.
                 const previewHours =
-                  preview && t.hours !== null && preview.hours !== null
-                    ? `your ${t.hours} h stand (the kit says ${preview.hours} h)`
+                  preview && task.hours !== null && preview.hours !== null
+                    ? fillText(t("vi_yourHoursStand"), { hours: String(task.hours), kit: String(preview.hours) })
                     : preview?.hours !== null && preview?.hours !== undefined
                       ? `${preview.hours} h`
-                      : "hours?";
+                      : t("vi_chipHours");
                 // Units count a KIT's units; his hours are the whole task's. The box appears with a
                 // kit (or where a count already stands), never beside hand-typed hours alone.
-                const showUnits = !!t.kit_id || t.units !== null;
+                const showUnits = !!task.kit_id || task.units !== null;
                 // A KIT WITH NO COUNT asks (audit v1085, carried [5]): the kit answers the hours, so without
                 // this the task priced as one unit and nothing said so. Typing 1 answers it.
-                const unitsAsking = !!kit && t.units === null;
+                const unitsAsking = !!kit && task.units === null;
                 const label = "text-[11px] font-semibold uppercase tracking-wide text-slate-400";
-                if (!((kitsPicker && taskKits.length > 0) || t.kit_id || showUnits)) return null;
+                if (!((kitsPicker && taskKits.length > 0) || task.kit_id || showUnits)) return null;
                 return (
                   <>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {((kitsPicker && taskKits.length > 0) || !!t.kit_id) && (
+                      {((kitsPicker && taskKits.length > 0) || !!task.kit_id) && (
                         <>
-                          <span className={label}>Kit</span>
+                          <span className={label}>{t("vi_kit")}</span>
                           {readOnly || kitUnread || !kitsPicker ? (
                             <span className="text-sm text-slate-700">
-                              {kit ? kit.name : kitUnread ? "not read" : kitGone ? "a kit no longer in the price list" : "none"}
+                              {kit ? kit.name : t(kitUnread ? "vi_notRead" : kitGone ? "vi_kitGoneLower" : "vi_none")}
                             </span>
                           ) : (
                             <select
-                              aria-label="Kit"
-                              value={t.kit_id ?? ""}
+                              aria-label={t("vi_kit")}
+                              value={task.kit_id ?? ""}
                               {...focus}
                               onChange={(e) => patchTask(i, { kit_id: e.target.value || null })}
                               className="min-h-[44px] max-w-[14rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
                             >
-                              <option value="">No Kit</option>
+                              <option value="">{t("vi_btn_noKit")}</option>
                               {/* GROUPED BY SCOPE when any kit has one — the visit's scope first — else the flat list. */}
                               {groups
                                 ? groups.map((g) => (
@@ -1728,19 +1748,19 @@ export function Inspector({
                                     </optgroup>
                                   ))
                                 : taskKits.map(kitOption)}
-                              {kitGone && <option value={t.kit_id ?? ""}>Kit No Longer In The Price List</option>}
+                              {kitGone && <option value={task.kit_id ?? ""}>{t("vi_btn_kitNoLongerInThePriceList")}</option>}
                             </select>
                           )}
                         </>
                       )}
                       {showUnits && (
                         <>
-                          <span className={label}>Units</span>
-                          <NumBox id={`task-units-${t.id}`} value={t.units} className="w-20" placeholder="units" {...focus} onValue={(x) => patchTask(i, { units: x })} />
+                          <span className={label}>{t("vi_units")}</span>
+                          <NumBox id={`task-units-${task.id}`} value={task.units} className="w-20" placeholder={t("vi_unitsPlaceholder")} {...focus} onValue={(x) => patchTask(i, { units: x })} />
                           {kit?.unit && <span className="text-sm text-slate-500">{kit.unit}</span>}
                           {unitsAsking && (
-                            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700" title="How many units? The kit's hours and parts are per unit">
-                              units?
+                            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700" title={t("vi_howManyUnitsTitle")}>
+                              {t("vi_chipUnits")}
                             </span>
                           )}
                         </>
@@ -1748,23 +1768,23 @@ export function Inspector({
                       {kitGone && (
                         <span
                           className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
-                          title="That kit is no longer in the price list — pick another or give the task its hours"
+                          title={t("vi_kitGoneTitle")}
                         >
-                          kit?
+                          {t("vi_chipKit")}
                         </span>
                       )}
                       {kitUnread && (
                         <span
                           className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
-                          title="The kits could not be read — reload to see this task's kit; its own hours stand"
+                          title={t("vi_kitsNotReadTitle")}
                         >
-                          kit not read
+                          {t("vi_kitNotRead")}
                         </span>
                       )}
                     </div>
                     {preview && (
                       <p className="mt-1 text-xs text-slate-500">
-                        {t.units === null ? `From the kit, per ${kit?.unit || "unit"}` : `From the kit, for ×${t.units}${kit?.unit ? ` ${kit.unit}` : ""}`}: {previewHours}
+                        {task.units === null ? fillText(t("vi_fromKitPer"), { unit: kit?.unit || t("vi_unitLower") }) : kit?.unit ? fillText(t("vi_fromKitForUnit"), { units: String(task.units), unit: kit.unit }) : fillText(t("vi_fromKitFor"), { units: String(task.units) })}: {previewHours}
                         {preview.materials.length ? ` · ${preview.materials.map((m) => `${m.name} ×${m.qty}`).join(", ")}` : ""}
                       </p>
                     )}
@@ -1772,8 +1792,8 @@ export function Inspector({
                 );
               })()}
               <div className="mt-2 space-y-2">
-                <SectionLabel>Materials</SectionLabel>
-                {t.materials.map((m, mi) => (
+                <SectionLabel>{t("vi_materials")}</SectionLabel>
+                {task.materials.map((m, mi) => (
                   <div key={mi} className="flex items-center gap-2">
                     {m.code ? (
                       // A PART PICKED FROM THE BOOK stays the book's: a keystroke in a free box would
@@ -1787,7 +1807,7 @@ export function Inspector({
                         autoComplete="off"
                         list={hasBook ? bookId : undefined}
                         value={m.words ?? ""}
-                        placeholder="A part, in your words"
+                        placeholder={t("vi_partPlaceholder")}
                         {...focus}
                         onChange={(e) => {
                           // Typed exactly as the book lists it → the CODE; anything else is his words.
@@ -1797,12 +1817,12 @@ export function Inspector({
                         }}
                       />
                     )}
-                    <NumBox value={m.qty} className="w-20" placeholder="how many" {...focus} onValue={(x) => patchPart(i, mi, { qty: x })} />
+                    <NumBox value={m.qty} className="w-20" placeholder={t("vi_howManyPlaceholder")} {...focus} onValue={(x) => patchPart(i, mi, { qty: x })} />
                     {!readOnly && (
                       <button
                         type="button"
-                        onClick={() => patchTask(i, { materials: t.materials.filter((_, j) => j !== mi) })}
-                        aria-label="Remove This Material"
+                        onClick={() => patchTask(i, { materials: task.materials.filter((_, j) => j !== mi) })}
+                        aria-label={t("vi_btn_removeThisMaterial")}
                         className={removeClass}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -1814,8 +1834,8 @@ export function Inspector({
                     empty, which is right: an empty row is not a part. */}
                 {!readOnly && (
                   <AddRow
-                    label="Add A Material"
-                    onClick={() => patchTask(i, { materials: [...t.materials, { code: null, words: "", qty: null }] })}
+                    label={t("vi_btn_addAMaterial")}
+                    onClick={() => patchTask(i, { materials: [...task.materials, { code: null, words: "", qty: null }] })}
                   />
                 )}
               </div>
@@ -1823,20 +1843,20 @@ export function Inspector({
                   Take / Add here place the shot on the task; the visit's own grid still shows it. */}
               <div className="mt-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <SectionLabel>Photos</SectionLabel>
+                  <SectionLabel>{t("vi_photos")}</SectionLabel>
                   {!readOnly && (
                     <div className="flex gap-2">
-                      <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = t.id; captureRef.current?.click(); }}>
-                        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
+                      <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = task.id; captureRef.current?.click(); }}>
+                        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} {t("vi_btn_take")}
                       </Button>
-                      <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = t.id; fileRef.current?.click(); }}>
-                        <Upload className="h-4 w-4" /> Add
+                      <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = task.id; fileRef.current?.click(); }}>
+                        <Upload className="h-4 w-4" /> {t("vi_btn_add")}
                       </Button>
                     </div>
                   )}
                 </div>
                 {taskPhotos.length === 0 ? (
-                  <p className="text-xs text-slate-400">No photos on this task yet.</p>
+                  <p className="text-xs text-slate-400">{t("vi_noPhotosOnTaskYet")}</p>
                 ) : (
                   <div className="grid grid-cols-4 gap-2">
                     {taskPhotos.map((p) => (
@@ -1852,7 +1872,7 @@ export function Inspector({
                           <TapTile readOnly={readOnly} onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-slate-500">
                             <Box className="h-5 w-5 shrink-0 text-slate-400" />
                             <span className="line-clamp-2 break-all leading-tight">{fileLabel(p.path)}</span>
-                            <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>
+                            <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">{t("vi_badge3d")}</span>
                           </TapTile>
                         ) : (
                           <a href={p.url ?? "#"} target="_blank" rel="noopener noreferrer" className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-slate-500">
@@ -1861,7 +1881,7 @@ export function Inspector({
                           </a>
                         )}
                         {office && !readOnly && (
-                          <button type="button" onClick={() => removePhoto(p)} aria-label="Remove This Photo" className="absolute right-1 top-1 rounded-full bg-black/55 p-1.5 text-white">
+                          <button type="button" onClick={() => removePhoto(p)} aria-label={t("vi_btn_removeThisPhoto")} className="absolute right-1 top-1 rounded-full bg-black/55 p-1.5 text-white">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         )}
@@ -1871,34 +1891,34 @@ export function Inspector({
                 )}
               </div>
               {/* THE LIDAR GROUP, THEN THE MEASUREMENTS ON THIS TASK — typed rows and Measure's land here; 3D Scan lands as a file. */}
-              <div id={`task-measure-${t.id}`} className="mt-3 scroll-mt-16 space-y-2">
-                {measureButtons(t.id)}
-                <SectionLabel>Measurements</SectionLabel>
+              <div id={`task-measure-${task.id}`} className="mt-3 scroll-mt-16 space-y-2">
+                {measureButtons(task.id)}
+                <SectionLabel>{t("vi_measurements")}</SectionLabel>
                 {taskMeasures.map((m) => (
                   <div key={m.id} className="flex items-center gap-2">
-                    <Input id={`measure-label-${m.id}`} value={m.label} placeholder="what you measured" {...focus} onChange={(e) => patchMeasure(m.id, { label: e.target.value })} />
+                    <Input id={`measure-label-${m.id}`} value={measureLabelWords(m.label, t)} placeholder={t("vi_whatYouMeasuredPlaceholder")} {...focus} onChange={(e) => patchMeasure(m.id, { label: e.target.value })} />
                     <NumBox value={m.value} className="w-24" {...focus} onValue={(x) => patchMeasure(m.id, { value: x })} />
-                    <Input value={m.unit} placeholder="ft" className="w-16" {...focus} onChange={(e) => patchMeasure(m.id, { unit: e.target.value })} />
+                    <Input value={m.unit} placeholder={t("vi_ftPlaceholder")} className="w-16" {...focus} onChange={(e) => patchMeasure(m.id, { unit: e.target.value })} />
                     {!readOnly && (
-                      <button type="button" onClick={() => dropMeasure(m.id)} aria-label="Remove This Measurement" className={removeClass}>
+                      <button type="button" onClick={() => dropMeasure(m.id)} aria-label={t("vi_btn_removeThisMeasurement")} className={removeClass}>
                         <Trash2 className="h-4 w-4" />
                       </button>
                     )}
                   </div>
                 ))}
                 {!readOnly && (
-                  <AddRow label="Add A Measurement" onClick={() => setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "", task_id: t.id }])} />
+                  <AddRow label={t("vi_btn_addAMeasurement")} onClick={() => setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "", task_id: task.id }])} />
                 )}
               </div>
               {/* THE NOTE — what is true about this piece, in his words. */}
               <div className="mt-3">
-                <SectionLabel>Note</SectionLabel>
+                <SectionLabel>{t("vi_note")}</SectionLabel>
                 <Textarea
-                  id={`task-note-${t.id}`}
+                  id={`task-note-${task.id}`}
                   rows={2}
                   className="mt-1"
-                  value={t.note ?? ""}
-                  placeholder="What's true about this piece — the wall, the access, the catch."
+                  value={task.note ?? ""}
+                  placeholder={t("vi_taskNotePlaceholder")}
                   {...focus}
                   onChange={(e) => patchTask(i, { note: e.target.value || null })}
                 />
@@ -1907,9 +1927,9 @@ export function Inspector({
                   (the read-only fieldset disables every button). */}
               <div className="mt-3 flex justify-end">
                 {readOnly ? (
-                  <TapTile readOnly onClick={() => openTask(null)} className="inline-flex h-11 items-center justify-center rounded-lg bg-slate-100 px-4 text-sm font-medium text-slate-900 active:bg-slate-200">Done</TapTile>
+                  <TapTile readOnly onClick={() => openTask(null)} className="inline-flex h-11 items-center justify-center rounded-lg bg-slate-100 px-4 text-sm font-medium text-slate-900 active:bg-slate-200">{t("vi_btn_done")}</TapTile>
                 ) : (
-                  <Button type="button" variant="secondary" onClick={() => openTask(null)}>Done</Button>
+                  <Button type="button" variant="secondary" onClick={() => openTask(null)}>{t("vi_btn_done")}</Button>
                 )}
               </div>
               </>
@@ -1919,7 +1939,7 @@ export function Inspector({
           })}
           {!readOnly && (
             <AddRow
-              label="Add A Task"
+              label={t("vi_btn_addATask")}
               onClick={() => {
                 // HOLD THE QUESTION STILL. One task, even nameless, reads as answered, and without
                 // the hold the card he just made would leave the ask list before he could type in
@@ -1961,7 +1981,7 @@ export function Inspector({
           const supabase = createClient();
           const added: string[] = [];
           for (const raw of files) {
-            if (!isAllowedUpload(raw.name)) throw new Error(`${raw.name} isn't a file type we accept.`);
+            if (!isAllowedUpload(raw.name)) throw new Error(fillText(t("vi_fileTypeNotAccepted"), { name: raw.name }));
             sending = raw;
             const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
             sending = file;
@@ -1973,17 +1993,17 @@ export function Inspector({
           }
           setAnswer(n.key, [...have, ...added]);
         } catch (err) {
-          setError(uploadRefusal(err, { what: sending?.name ?? "The file", bytes: sending?.size ?? 0, action: "Send a smaller file." }).sentence);
+          setError(uploadRefusal(err, { what: sending?.name ?? t("vi_theFile"), bytes: sending?.size ?? 0, action: t("vi_sendSmallerFile") }, lang, t).sentence);
         } finally {
           setUploading(false);
         }
       };
       return (
-        <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} label="Drop the Plans" className="rounded-lg border border-dashed border-slate-300 p-2">
+        <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} label={t("vi_dropThePlans")} words={t} className="rounded-lg border border-dashed border-slate-300 p-2">
           {/* A 44px door, not the browser's own file button (a thumb-sized target on the truck). The
               input rides inside its label, so tapping anywhere on it opens the picker. */}
           <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-medium text-white has-[:disabled]:cursor-default has-[:disabled]:opacity-50">
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Add Files
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} {t("vi_btn_addFiles")}
             <input
               type="file"
               multiple={n.slot.multi !== false}
@@ -2010,7 +2030,7 @@ export function Inspector({
                       onClick={() => setAnswer(n.key, have.filter((x) => x !== path))}
                       className="min-h-[44px] shrink-0 px-2 text-slate-400 underline-offset-2 hover:underline"
                     >
-                      Remove
+                      {t("vi_btn_remove")}
                     </button>
                   )}
                 </li>
@@ -2047,17 +2067,21 @@ export function Inspector({
 
   // The Tasks chip lands on the tasks question only while it applies (a rule may gate it off).
   const tasksKey = applicableNeeds(playbook, answers).find((n) => n.slot?.type === "tasks")?.key ?? null;
+  // "{list} — they're under {answered} below, …" is ONE sentence with a bold word in it: the key holds the whole
+  // sentence and is split at the slot where the heading's own name (vi_answered) is drawn bold — never two
+  // translated halves glued together.
+  const [seededBefore = "", seededAfter = ""] = t("vi_seededUnderAnswered").split("{answered}");
   const jumps: { label: string; go: () => void }[] = [
-    ...(office ? [{ label: "Where", go: () => jumpTo("insp-where") }] : []),
-    ...(tasksKey ? [{ label: "Tasks", go: () => jumpTo(`need-${tasksKey}`) }] : []),
-    { label: "Photos", go: () => jumpTo("insp-photos") },
-    { label: "Notes", go: () => { open1("notes"); jumpTo("insp-notes"); } },
+    ...(office ? [{ label: t("vi_btn_where"), go: () => jumpTo("insp-where") }] : []),
+    ...(tasksKey ? [{ label: t("vi_btn_tasks"), go: () => jumpTo(`need-${tasksKey}`) }] : []),
+    { label: t("vi_btn_photos"), go: () => jumpTo("insp-photos") },
+    { label: t("vi_btn_notes"), go: () => { open1("notes"); jumpTo("insp-notes"); } },
   ];
   return (
     <>
     {/* THE JUMP BAR (Erik, in front of a client: "i couldnt jump to what i needed when i needed
         it"). Sticky at the top of the scroll; one tap lands on the piece. */}
-    <div role="group" className="sticky top-0 z-20 -mx-1 mb-2 flex gap-2 overflow-x-auto bg-slate-50/95 px-1 py-1.5 backdrop-blur" aria-label="Jump To">
+    <div role="group" className="sticky top-0 z-20 -mx-1 mb-2 flex gap-2 overflow-x-auto bg-slate-50/95 px-1 py-1.5 backdrop-blur" aria-label={t("vi_jumpTo")}>
       {jumps.map((j) => (
         <button key={j.label} type="button" onClick={j.go} className="min-h-[44px] shrink-0 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 active:bg-slate-50">
           {j.label}
@@ -2067,12 +2091,12 @@ export function Inspector({
     <Card className="overflow-hidden p-0">
       {readOnly && (
         <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-          {viewNote || "Only the office can change the inspection."}
+          {viewNote || t("vi_onlyOfficeChanges")}
         </p>
       )}
       {crew && (
         <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-          You&rsquo;re the crew lead on this visit: fill it in here. The office prices it.
+          {t("vi_crewLeadLine")}
         </p>
       )}
       <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
@@ -2081,7 +2105,7 @@ export function Inspector({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium">
             <ClipboardList className="h-4 w-4 text-slate-400" />
-            Inspection
+            {t("vi_inspection")}
           </div>
           {/* A crew lead picks the sheet only while none is saved: switching a saved one clears
               every answer, and that is the office's call. */}
@@ -2101,14 +2125,14 @@ export function Inspector({
                 const hasAnswers = Object.values(answers).some(
                   (v) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && !v.length),
                 );
-                if (hasAnswers && !confirm("Switching to a different set of questions clears the answers you've given — they belong to the other sheet. Switch anyway?"))
+                if (hasAnswers && !confirm(t("vi_switchSheetConfirm")))
                   return;
                 setChosenId(next);
                 setAnswers({});
                 queueAnswers();
               }}
             >
-              <option value="">Pick A Sheet…</option>
+              <option value="">{t("vi_btn_pickASheet")}</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
@@ -2122,13 +2146,13 @@ export function Inspector({
             record it before. Saves on resolve/blur, and renames a stock-titled record so a list
             of visits stops reading "Site inspection" six times. */}
         <div className="mt-3 scroll-mt-16" id="insp-where">
-          <Label className="mb-1.5">Where</Label>
+          <Label className="mb-1.5">{t("vi_where")}</Label>
           {office ? (
             <>
             <AddressAutocomplete
               key={whereKey}
               defaultValue={place}
-              placeholder="Job address"
+              placeholder={t("vi_jobAddressPlaceholder")}
               // Typing only moves the box. The record is written on blur or on a pick — which is what
               // "saves on resolve/blur" always claimed, and a schedule() on every keystroke never did:
               // it wrote the half-typed street every 900 ms.
@@ -2158,7 +2182,7 @@ export function Inspector({
                   disabled={locating}
                   className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 active:bg-slate-100 disabled:opacity-60"
                 >
-                  {locating ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />} Use My Location
+                  {locating ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />} {t("vi_btn_useMyLocation")}
                 </button>
                 {locatedNote && <span className="min-w-0 text-xs text-slate-500">{locatedNote}</span>}
               </div>
@@ -2166,7 +2190,7 @@ export function Inspector({
             </>
           ) : (
             // The address, like the visit's links, is the office's (setAppointmentPlace is staff-only).
-            <p className="text-sm text-slate-700">{initialLocation.trim() || "No address yet. The office adds it."}</p>
+            <p className="text-sm text-slate-700">{initialLocation.trim() || t("vi_noAddressYet")}</p>
           )}
         </div>
 
@@ -2175,7 +2199,7 @@ export function Inspector({
         ) : (
           linked && (
             <div className="mt-3">
-              <Label className="mb-1.5">For</Label>
+              <Label className="mb-1.5">{t("vi_for")}</Label>
               <p className="text-sm text-slate-700">{linked.name}</p>
             </div>
           )
@@ -2188,28 +2212,28 @@ export function Inspector({
         {planBrief?.status === "ready" && (planBrief.summary || briefHadFills || briefSeededAtLoad.length > 0) && (
           <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/60 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-              Preliminary report — from the customer&apos;s plans
+              {t("vi_preliminaryReport")}
             </p>
             {planBrief.summary && <p className="mt-1 text-sm text-slate-700">{planBrief.summary}</p>}
             {!!planBrief.scope_included?.length && (
               <p className="mt-1 text-xs text-slate-600">
-                <span className="font-semibold">Includes:</span> {planBrief.scope_included.join(" · ")}
+                <span className="font-semibold">{t("vi_includes")}</span> {planBrief.scope_included.join(" · ")}
               </p>
             )}
             {!!planBrief.scope_excluded?.length && (
               <p className="mt-0.5 text-xs text-slate-600">
-                <span className="font-semibold">Excludes:</span> {planBrief.scope_excluded.join(" · ")}
+                <span className="font-semibold">{t("vi_excludes")}</span> {planBrief.scope_excluded.join(" · ")}
               </p>
             )}
             {!!planBrief.cautions?.length && (
               <p className="mt-1 text-xs text-amber-700">
-                <span className="font-semibold">Verify on site:</span> {planBrief.cautions.join(" · ")}
+                <span className="font-semibold">{t("vi_verifyOnSite")}</span> {planBrief.cautions.join(" · ")}
               </p>
             )}
             {!!planBrief.observations?.length && (
               <details className="mt-1">
                 <summary className="cursor-pointer text-xs font-medium text-sky-700">
-                  More from the plans ({planBrief.observations.length})
+                  {fillText(t("vi_moreFromThePlans"), { n: String(planBrief.observations.length) })}
                 </summary>
                 <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-slate-600">
                   {planBrief.observations.map((o, i) => (
@@ -2220,10 +2244,10 @@ export function Inspector({
             )}
             {briefSeededAtLoad.length > 0 && (
               <p className="mt-1.5 text-xs text-slate-600">
-                <span className="font-semibold text-sky-700">Already filled from the plans:</span>{" "}
-                {briefSeededAtLoad.join(", ")} — they&apos;re under <span className="font-medium">Answered</span> below,
-                edit anything that&apos;s off. The questions still showing here are the ones the plans couldn&apos;t
-                answer.
+                <span className="font-semibold text-sky-700">{t("vi_alreadyFilledFromPlans")}</span>{" "}
+                {fillText(seededBefore, { list: briefSeededAtLoad.join(", ") })}
+                <span className="font-medium">{t("vi_answered")}</span>
+                {seededAfter}
               </p>
             )}
             {briefHadFills && (
@@ -2234,8 +2258,8 @@ export function Inspector({
                 className="mt-2 min-h-[44px] rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-700 disabled:bg-slate-300"
               >
                 {briefFills.length
-                  ? `Fill ${briefFills.length} Answer${briefFills.length === 1 ? "" : "s"} From The Plans`
-                  : "Filled From The Plans"}
+                  ? fillText(t(briefFills.length === 1 ? "vi_btn_fillAnswersFromPlansOne" : "vi_btn_fillAnswersFromPlansMany"), { n: String(briefFills.length) })
+                  : t("vi_btn_filledFromThePlans")}
               </button>
             )}
           </div>
@@ -2246,7 +2270,7 @@ export function Inspector({
         {!noSheet && (
           <TellNort
             nortOn={nortOn}
-            label="Just Tell Nort"
+            label={t("vi_btn_justTellNort")}
             hear={(a, said) => hearIntoPlaybook(appointmentId, templateId, a, said)}
             answers={answers}
             hint={ask[0]?.ask}
@@ -2284,16 +2308,10 @@ export function Inspector({
         {noSheet ? (
           <div className="mt-3">
             {office ? (
-              <p className="text-sm text-slate-500">
-                You don&rsquo;t have a set of inspection questions yet. Start with the ones for your trade —
-                one question at a time, and only what applies to the job in front of you.
-              </p>
+              <p className="text-sm text-slate-500">{t("vi_noQuestionsYetOffice")}</p>
             ) : (
               // Setting up the questions is the office's (createStarterInspectionSheet is staff-only).
-              <p className="text-sm text-slate-500">
-                The office hasn&rsquo;t set up inspection questions yet.
-                {crew ? " Notes, measurements and photos below still save." : ""}
-              </p>
+              <p className="text-sm text-slate-500">{t(crew ? "vi_officeNoQuestionsYetCrew" : "vi_officeNoQuestionsYet")}</p>
             )}
             {office && <div className="mt-3 flex flex-wrap items-center gap-3">
               <Button
@@ -2302,19 +2320,19 @@ export function Inspector({
                 onClick={() =>
                   startSeed(async () => {
                     const r = await createStarterInspectionSheet();
-                    if (!r.ok) setError(r.error ?? "Couldn't set that up.");
+                    if (!r.ok) setError(r.error ?? t("vi_couldntSetThatUp"));
                     else router.refresh();
                   })
                 }
               >
-                {seeding ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting Up…</> : "Set Up My Questions"}
+                {seeding ? <><Loader2 className="h-4 w-4 animate-spin" /> {t("vi_btn_settingUp")}</> : t("vi_btn_setUpMyQuestions")}
               </Button>
-              {buildOwn && <Link href="/forms" className="inline-flex min-h-[44px] items-center text-sm text-slate-500 underline-offset-2 hover:underline">Or Build My Own</Link>}
+              {buildOwn && <Link href="/forms" className="inline-flex min-h-[44px] items-center text-sm text-slate-500 underline-offset-2 hover:underline">{t("vi_btn_orBuildMyOwn")}</Link>}
             </div>}
           </div>
         ) : open.length === 0 ? (
           <p className="mt-3 flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            <Check className="h-4 w-4" /> That&rsquo;s everything this job needs.
+            <Check className="h-4 w-4" /> {t("vi_thatsEverything")}
           </p>
         ) : (
           <div className="mt-3 space-y-4">
@@ -2333,7 +2351,7 @@ export function Inspector({
                 <Label className="mb-1">{n.ask}</Label>
                 {n.hold && (
                   <span className="mb-1.5 ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                    before you price it
+                    {t("vi_beforeYouPriceIt")}
                   </span>
                 )}
                 {/* HIS OWN REASON, on his own screen. Two lines, because the why is the fuel and
@@ -2355,16 +2373,13 @@ export function Inspector({
             retiredAnswers); this is where he can see it and move it somewhere that still exists. */}
         {Object.keys(retired).length > 0 && (
           <div>
-            <SectionLabel>From questions you&rsquo;ve since changed</SectionLabel>
-            <p className="mt-1 text-xs text-slate-500">
-              You answered these on site, then edited your questions. Nothing was lost — copy anything
-              still worth keeping into the boxes above.
-            </p>
+            <SectionLabel>{t("vi_fromQuestionsChanged")}</SectionLabel>
+            <p className="mt-1 text-xs text-slate-500">{t("vi_answeredThenEdited")}</p>
             <div className="mt-2 space-y-3">
-              {Object.entries(retired).map(([k, t]) => (
+              {Object.entries(retired).map(([k, text]) => (
                 <div key={k} className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-amber-700">{retiredLabel(k)}</div>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{t}</p>
+                  <div className="text-[11px] uppercase tracking-wide text-amber-700">{retiredLabel(k, lang, t)}</div>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{text}</p>
                 </div>
               ))}
             </div>
@@ -2373,7 +2388,7 @@ export function Inspector({
 
         {answered.length > 0 && (
           <div>
-            <SectionLabel>Answered</SectionLabel>
+            <SectionLabel>{t("vi_answered")}</SectionLabel>
             <div className="mt-2 space-y-3">
               {answered.map((n) => (
                 <div key={n.key} id={`need-${n.key}`} className="scroll-mt-16 rounded-lg bg-slate-50 p-3">
@@ -2392,14 +2407,14 @@ export function Inspector({
         {shows("measures", measures.some((m) => !claimed(m)) || !!proseMeasurements.trim()) && (
         <div id="insp-measures" className="scroll-mt-16 space-y-2">
           {measureButtons(null)}
-          <SectionLabel>Measurements</SectionLabel>
+          <SectionLabel>{t("vi_measurements")}</SectionLabel>
           <div className="mt-2 space-y-2">
             {measures.map((m, i) => claimed(m) ? null : (
               <div key={m.id} className="flex items-center gap-2">
                 <Input
                   id={`measure-label-${m.id}`}
-                  value={m.label}
-                  placeholder="what you measured"
+                  value={measureLabelWords(m.label, t)}
+                  placeholder={t("vi_whatYouMeasuredPlaceholder")}
                   onChange={(e) => {
                     const next = measures.map((x, j) => (j === i ? { ...x, label: e.target.value } : x));
                     setMeasures(next);
@@ -2417,7 +2432,7 @@ export function Inspector({
                 />
                 <Input
                   value={m.unit}
-                  placeholder="ft"
+                  placeholder={t("vi_ftPlaceholder")}
                   className="w-16"
                   onChange={(e) => {
                     const next = measures.map((x, j) => (j === i ? { ...x, unit: e.target.value } : x));
@@ -2432,7 +2447,7 @@ export function Inspector({
                     setMeasures(next);
                     queueCapture({ measures: next });
                   }}
-                  aria-label="Remove This Measurement"
+                  aria-label={t("vi_btn_removeThisMeasurement")}
                   className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -2440,13 +2455,13 @@ export function Inspector({
               </div>
             ))}
             <AddRow
-              label="Add A Measurement"
+              label={t("vi_btn_addAMeasurement")}
               onClick={() => setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "" }])}
             />
             <Textarea
               rows={2}
               value={proseMeasurements}
-              placeholder="Anything a number doesn't hold — “35' to the far corner, uphill”."
+              placeholder={t("vi_measurementsProsePlaceholder")}
               onChange={(e) => {
                 setProseMeasurements(e.target.value);
                 queueCapture({ measurements: e.target.value });
@@ -2459,13 +2474,13 @@ export function Inspector({
         {/* MATERIALS — a list you or Nort can add to, PLUS the paragraph box. Both, still. */}
         {shows("items", items.length > 0 || !!materials.trim()) && (
         <div>
-          <SectionLabel>Materials</SectionLabel>
+          <SectionLabel>{t("vi_materials")}</SectionLabel>
           <div className="mt-2 space-y-2">
             {items.map((it, i) => (
               <div key={it.id} className="flex items-center gap-2">
                 <Input
                   value={it.description}
-                  placeholder="what you need"
+                  placeholder={t("vi_whatYouNeedPlaceholder")}
                   onChange={(e) => {
                     const next = items.map((x, j) => (j === i ? { ...x, description: e.target.value } : x));
                     setItems(next);
@@ -2497,7 +2512,7 @@ export function Inspector({
                     setItems(next);
                     queueCapture({ items: next });
                   }}
-                  aria-label="Remove This Material"
+                  aria-label={t("vi_btn_removeThisMaterial")}
                   className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -2505,13 +2520,13 @@ export function Inspector({
               </div>
             ))}
             <AddRow
-              label="Add A Material"
+              label={t("vi_btn_addAMaterial")}
               onClick={() => setItems([...items, { id: captureId(), description: "", quantity: null, unit: "ea" }])}
             />
             <Textarea
               rows={2}
               value={materials}
-              placeholder="Or just type it, the way you'd read it out: each item, how much, and the size."
+              placeholder={t("vi_materialsProsePlaceholder")}
               onChange={(e) => {
                 setMaterials(e.target.value);
                 queueCapture({ materials: e.target.value });
@@ -2527,16 +2542,16 @@ export function Inspector({
             behind a chip would be tidiness at the cost of the single most-used control. */}
         <div id="insp-photos" className="scroll-mt-16">
           <div className="flex items-center justify-between">
-            <SectionLabel>Photos &amp; documents</SectionLabel>
-            {!readOnly && <DropTarget onFiles={(files) => { pendingTaskRef.current = null; void upload(files); }} accept="image/*,application/pdf,.usdz,.glb" label="Drop Photos, PDFs Or 3D Files" className="shrink-0">
+            <SectionLabel>{t("vi_photosAndDocuments")}</SectionLabel>
+            {!readOnly && <DropTarget onFiles={(files) => { pendingTaskRef.current = null; void upload(files); }} accept="image/*,application/pdf,.usdz,.glb" label={t("vi_dropPhotosPdfs3d")} words={t} className="shrink-0">
               <div className="flex gap-2">
                 {/* The visit's own doors clear the pending task: a Take cancelled inside a task's
                     sheet fires no change event, so the ref would otherwise still be set here. */}
                 <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = null; captureRef.current?.click(); }}>
-                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} {t("vi_btn_take")}
                 </Button>
                 <Button type="button" variant="secondary" disabled={uploading} onClick={() => { pendingTaskRef.current = null; fileRef.current?.click(); }}>
-                  <Upload className="h-4 w-4" /> Add
+                  <Upload className="h-4 w-4" /> {t("vi_btn_add")}
                 </Button>
               </div>
             </DropTarget>}
@@ -2547,7 +2562,7 @@ export function Inspector({
                  onChange={(e) => { upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {photos.length === 0 ? (
             <p className="mt-2 rounded-lg bg-slate-50 px-3 py-3 text-center text-xs text-slate-400">
-              Whatever you&rsquo;d want to look at again from the office.
+              {t("vi_whateverYoudWant")}
             </p>
           ) : (
             <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -2574,7 +2589,7 @@ export function Inspector({
                     <TapTile readOnly={readOnly} onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
                       <Box className="h-6 w-6 shrink-0 text-slate-400" />
                       <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
-                      <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">3D</span>
+                      <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">{t("vi_badge3d")}</span>
                     </TapTile>
                   ) : (
                     /* A PDF SHOWS ITS FACE (Erik: "i cant see an image of the pdf"). The browser's
@@ -2595,7 +2610,7 @@ export function Inspector({
                               <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
                             </span>
                           </object>
-                          <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">PDF</span>
+                          <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">{t("vi_badgePdf")}</span>
                         </>
                       ) : (
                         <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
@@ -2626,12 +2641,12 @@ export function Inspector({
         {/* NOTES — the escape hatch. The sentence nobody's template anticipated. */}
         {shows("notes", !!notes.trim()) && (
           <div id="insp-notes" className="scroll-mt-16">
-            <SectionLabel>Notes</SectionLabel>
+            <SectionLabel>{t("vi_notes")}</SectionLabel>
             <Textarea
               rows={3}
               className="mt-2"
               value={notes}
-              placeholder="Anything the questions didn't cover."
+              placeholder={t("vi_notesPlaceholder")}
               onChange={(e) => {
                 setNotes(e.target.value);
                 queueCapture({ notes: e.target.value });
@@ -2649,14 +2664,14 @@ export function Inspector({
             // because they are the same kind of thing: something you can reach for, named, not a
             // box announcing itself. Tap one and its question opens upstairs with the rest.
             ...reach.map((n) => ({ k: n.key, label: n.label, on: () => open1(n.key) })),
-            { k: "measures", label: "Measurement", on: () => { open1("measures"); setMeasures((m) => [...m, { id: captureId(), label: "", value: null, unit: "" }]); } },
-            { k: "items", label: "Material", on: () => { open1("items"); setItems((i) => [...i, { id: captureId(), description: "", quantity: null, unit: "ea" }]); } },
-            { k: "notes", label: "Note", on: () => open1("notes") },
+            { k: "measures", label: t("vi_btn_measurement"), on: () => { open1("measures"); setMeasures((m) => [...m, { id: captureId(), label: "", value: null, unit: "" }]); } },
+            { k: "items", label: t("vi_btn_material"), on: () => { open1("items"); setItems((i) => [...i, { id: captureId(), description: "", quantity: null, unit: "ea" }]); } },
+            { k: "notes", label: t("vi_btn_note"), on: () => open1("notes") },
           ].filter((x) => !shows(x.k, false));
           if (!hidden.length || readOnly) return null;
           return (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Add</span>
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">{t("vi_add")}</span>
               {hidden.map((h) => (
                 <button
                   key={h.k}
@@ -2679,18 +2694,18 @@ export function Inspector({
         <div className="text-xs text-slate-500">
           {/* Counts, never confidence. */}
           {[
-            open.length > 0 ? `${open.length} still open` : "all questions answered",
-            readiness.items ? `${readiness.items} materials` : null,
-            readiness.measures ? `${readiness.measures} measurements` : null,
-            readiness.photos ? `${readiness.photos} photos` : null,
+            open.length > 0 ? fillText(t("vi_stillOpen"), { n: String(open.length) }) : t("vi_allQuestionsAnswered"),
+            readiness.items ? fillText(t("vi_countMaterials"), { n: String(readiness.items) }) : null,
+            readiness.measures ? fillText(t("vi_measurementsMany"), { n: String(readiness.measures) }) : null,
+            readiness.photos ? fillText(t("vi_photosMany"), { n: String(readiness.photos) }) : null,
           ].filter(Boolean).join(" · ")}
           <span className="ml-2">
             {pending ? (
-              <span className="text-slate-400">saving…</span>
+              <span className="text-slate-400">{t("vi_savingLower")}</span>
             ) : error ? (
               <span className="text-rose-600"><CloudOff className="mr-1 inline h-3 w-3" />{error}</span>
             ) : savedAt ? (
-              <span className="font-medium text-emerald-700"><Check className="mr-0.5 inline h-3 w-3" />Saved</span>
+              <span className="font-medium text-emerald-700"><Check className="mr-0.5 inline h-3 w-3" />{t("vi_saved")}</span>
             ) : null}
           </span>
         </div>
@@ -2711,19 +2726,19 @@ export function Inspector({
               flush(true);
             }}
           >
-            {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
+            {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> {t("vi_btn_saving")}</> : <><Check className="h-4 w-4" /> {t("vi_btn_save")}</>}
           </Button>
           {/* Pricing is the office's: a crew lead fills the inspection in and the office starts the
               estimate from it. */}
           {office && estimate?.live ? (
             // The write-up exists and stands: open it, never a second one beside it (cn-v1069).
             <Link href={`/quotes/${estimate.id}`}>
-              <Button type="button">Open The Estimate</Button>
+              <Button type="button">{t("vi_btn_openTheEstimate")}</Button>
             </Link>
           ) : (
             office && estimateHref && (
               <Link href={estimateHref}>
-                <Button type="button">Start The Estimate</Button>
+                <Button type="button">{t("vi_btn_startTheEstimate")}</Button>
               </Link>
             )
           )}

@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { setFeature } from "@/app/(app)/settings/features-actions";
 import { FEATURE_BY_KEY, featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
@@ -14,6 +16,10 @@ import { FEATURE_BY_KEY, featureOn, type FeatureKey, type FeatureMap } from "@/l
  *                   that is what's off, then refreshes the page).
  *   everyone else:  "<Feature> · Off · Ask The Owner", no button: only the owner can turn a switch
  *                   on (set_org_feature), and a button that can't work for this person is a dead door.
+ *
+ * The words follow the signed-in person's language (useLang + the shell catalog, lib/words/shell
+ * sh_off / sh_askTheOwner / sh_btn_turnOn — the visit-page-in-Spanish wave, cn-v1144); the feature's
+ * own name (lib/features label) is the switch board's English word today.
  *
  * Usage: <FeatureOffLine feature="panel_map" features={settings.features} isOwner={role === "owner"} />
  */
@@ -30,6 +36,7 @@ export function FeatureOffLine({
   className?: string;
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   if (featureOn(features, feature)) return null;
@@ -58,12 +65,12 @@ export function FeatureOffLine({
       className={`mb-3 flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-600 ${className}`}
     >
       <span>
-        <span className="font-medium text-slate-800">{def.label}</span> · Off
-        {!isOwner && <> · Ask The Owner</>}
+        <span className="font-medium text-slate-800">{def.label}</span> · {t("sh_off")}
+        {!isOwner && <> · {t("sh_askTheOwner")}</>}
       </span>
       {isOwner && (
         <Button type="button" variant="outline" onClick={turnOn} disabled={pending} className="ml-auto">
-          {pending ? "Turning On…" : "Turn On"}
+          {pending ? t("sh_btn_turningOn") : t("sh_btn_turnOn")}
         </Button>
       )}
       {error && <span className="w-full text-xs text-red-700">{error}</span>}

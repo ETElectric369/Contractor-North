@@ -20,10 +20,18 @@
  *     yesterday on the ORG's clock (older hours are a Timecards entry, not a clock-in);
  *   - the words said afterwards (startedWords), in the org's time zone.
  *
- * Pure: no database, no React.
+ * Pure: no database, no React. THE WORDS FOLLOW THE READER (the visit-page-in-Spanish wave): every
+ * sentence here keeps its English inline as the default — byte for byte what it always said, so every
+ * caller and test that hands no language reads the same — and takes the caller's `lang` plus the
+ * caller's translator (`words`, lib/i18n translator(lang)) for the Spanish, which lives in
+ * lib/words/visit-page (vp_). This file imports no catalog (lib/lang-words say). A Spanish clock
+ * reads "12:00 p. m." (lib/utils formatTime), and no Spanish sentence ends on one.
  */
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { say, type Words } from "@/lib/lang-words";
+import { formatTime } from "@/lib/utils";
+import type { Lang } from "@/lib/locale";
 
 export type LinkInsteadJob = {
   id: string;
@@ -138,29 +146,31 @@ export function startFloorMs(nowMs: number, tz: string): number {
  * What is wrong with this start time, as the sentence to show, or null when it is a real start.
  * The same window on the sheet and on the server.
  */
-export function startedAtProblem(iso: string | null | undefined, nowMs: number, tz: string): string | null {
+export function startedAtProblem(iso: string | null | undefined, nowMs: number, tz: string, lang: Lang | string | null = "en", words?: Words): string | null {
   if (iso == null) return null; // "now"
   const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return "Pick a start time.";
-  if (ms > nowMs + 60_000) return "That time hasn't happened yet.";
+  if (!Number.isFinite(ms)) return say(lang, words, "vp_pickAStartTime", "Pick a start time.");
+  if (ms > nowMs + 60_000) return say(lang, words, "vp_timeNotYet", "That time hasn't happened yet.");
   if (ms < startFloorMs(nowMs, tz)) {
-    return "Pick a time since midnight yesterday. For older hours, add them on Timecards.";
+    return say(lang, words, "vp_pickSinceMidnightYesterday", "Pick a time since midnight yesterday. For older hours, add them on Timecards.");
   }
   return null;
 }
 
-/** "12:00 PM", on the org's clock. ICU's narrow no-break space is made a plain space. */
-export function clockWords(iso: string, tz: string): string {
+/** "12:00 PM", on the org's clock. ICU's narrow no-break space is made a plain space. A Spanish reader's
+ *  "12:00 p. m." comes through lib/utils formatTime, the one spelling the visit page's card uses. */
+export function clockWords(iso: string, tz: string, lang: Lang | string | null = "en"): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
+  if (lang === "es") return formatTime(d, tz, "es");
   return d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/\s/g, " ");
 }
 
 /** "J-055", or the job's name when it has no number yet. */
-export function jobShort(j: { job_number?: string | null; name?: string | null } | null | undefined): string {
+export function jobShort(j: { job_number?: string | null; name?: string | null } | null | undefined, lang: Lang | string | null = "en", words?: Words): string {
   const num = (j?.job_number ?? "").trim();
   const name = (j?.name ?? "").trim();
-  return num || name || "the job";
+  return num || name || say(lang, words, "vp_theJobLower", "the job");
 }
 
 /**
@@ -184,28 +194,34 @@ export type StartedClock =
  *   "Started J-056 for Tom Goodman and moved your whole punch since 12:00 PM onto it."
  *   "Started J-056 for Tom Goodman."
  */
-export function startedWords(input: {
-  jobNumber: string;
-  customer: string | null;
-  tz: string;
-  clock?: StartedClock | null;
-  /** The visit already had a job (someone else started it a moment ago): say so, never "Started". */
-  existing?: boolean;
-}): string {
-  const who = input.customer?.trim() ? ` for ${input.customer.trim()}` : "";
+export function startedWords(
+  input: {
+    jobNumber: string;
+    customer: string | null;
+    tz: string;
+    clock?: StartedClock | null;
+    /** The visit already had a job (someone else started it a moment ago): say so, never "Started". */
+    existing?: boolean;
+  },
+  lang: Lang | string | null = "en",
+  words?: Words,
+): string {
+  const customer = input.customer?.trim() ?? "";
+  const who = customer ? ` ${say(lang, words, "vp_forCustomer", `for ${customer}`, { customer })}` : "";
   const c = input.clock;
-  const at = c ? clockWords(c.kind === "move" ? c.since : c.at, input.tz) : "";
+  const at = c ? clockWords(c.kind === "move" ? c.since : c.at, input.tz, lang) : "";
+  const from = c && c.kind === "switch" && c.from ? ` ${say(lang, words, "vp_fromJob", `from ${c.from}`, { from: c.from })}` : "";
+  const job = input.jobNumber;
   if (input.existing) {
     // Somebody started it a moment ago: the job is theirs, the clock is this tap's.
-    const head = `This visit already had ${input.jobNumber}${who}.`;
+    const head = say(lang, words, "vp_visitAlreadyHad", `This visit already had ${job}${who}.`, { job, who });
     if (!c) return head;
-    if (c.kind === "in") return `${head} Clocked you in on it at ${at}.`;
-    if (c.kind === "move") return `${head} Moved your whole punch since ${at} onto it.`;
-    return `${head} Switched your clock to it${c.from ? ` from ${c.from}` : ""} at ${at}.`;
+    if (c.kind === "in") return `${head} ${say(lang, words, "vp_clockedYouInOnIt", `Clocked you in on it at ${at}.`, { at })}`;
+    if (c.kind === "move") return `${head} ${say(lang, words, "vp_movedWholePunchOntoIt", `Moved your whole punch since ${at} onto it.`, { at })}`;
+    return `${head} ${say(lang, words, "vp_switchedClockToIt", `Switched your clock to it${from} at ${at}.`, { from, at })}`;
   }
-  const head = `Started ${input.jobNumber}${who}`;
-  if (!c) return `${head}.`;
-  if (c.kind === "in") return `${head} and clocked you in at ${at}.`;
-  if (c.kind === "move") return `${head} and moved your whole punch since ${at} onto it.`;
-  return `${head} and switched your clock here${c.from ? ` from ${c.from}` : ""} at ${at}.`;
+  if (!c) return say(lang, words, "vp_startedJob", `Started ${job}${who}.`, { job, who });
+  if (c.kind === "in") return say(lang, words, "vp_startedAndClockedIn", `Started ${job}${who} and clocked you in at ${at}.`, { job, who, at });
+  if (c.kind === "move") return say(lang, words, "vp_startedAndMovedPunch", `Started ${job}${who} and moved your whole punch since ${at} onto it.`, { job, who, at });
+  return say(lang, words, "vp_startedAndSwitched", `Started ${job}${who} and switched your clock here${from} at ${at}.`, { job, who, from, at });
 }

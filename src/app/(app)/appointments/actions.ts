@@ -1976,7 +1976,10 @@ export async function putVisitBackOnSchedule(id: string): Promise<Result & { mes
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
   const startsAt = (row as { starts_at?: string | null }).starts_at ?? null;
-  const plan = putBackPlan(startsAt ? todayStrInTz(tz, new Date(startsAt)) : null, todayStrInTz(tz));
+  // The sentence it answers with (lib/appointments/wont-happen putBackPlan) in the caller's language:
+  // the visit page's PutBackRow says it as received (vp_backOnScheduleFor and its two siblings).
+  const lang = await ws.lang();
+  const plan = putBackPlan(startsAt ? todayStrInTz(tz, new Date(startsAt)) : null, todayStrInTz(tz), lang, translator(lang));
 
   const { data: wrote, error } = await supabase
     .from("appointments")

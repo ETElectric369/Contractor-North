@@ -449,7 +449,8 @@ describe("the wiring, pinned", () => {
   it("the Inspector registers ONE provider that reads a per-render ref, and its boxes carry the door names as ids", () => {
     expect(insp).toContain("useEffect(() => registerNortDoors(() => doorsRef.current), []);");
     expect(insp).toContain("doorsRef.current = inspectorDoors({");
-    for (const id of ["task-name-${t.id}", "task-hours-${t.id}", "task-units-${t.id}", "task-note-${t.id}", "task-measure-${t.id}"]) expect(insp).toContain(`id={\`${id}\`}`);
+    // (the card's task is `task` since cn-v1144 — `t` is the translator)
+    for (const id of ["task-name-${task.id}", "task-hours-${task.id}", "task-units-${task.id}", "task-note-${task.id}", "task-measure-${task.id}"]) expect(insp).toContain(`id={\`${id}\`}`);
     expect(insp).toContain('<div id="insp-measures" className="scroll-mt-16 space-y-2">');
     expect(insp).toContain('<div id="insp-notes" className="scroll-mt-16">');
     // The provider's setters are the page's own: the tasks need's answer, the measures list, the capture's notes.

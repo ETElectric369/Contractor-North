@@ -5,6 +5,24 @@ import { playbookForForm } from "@/lib/playbook/parse";
 import { runHear, type HearRun } from "@/lib/playbook/hear-run";
 import { readViaView } from "@/lib/inspection/inspection-access";
 import type { Answers } from "@/lib/playbook/types";
+import { translator } from "@/lib/i18n";
+import { callerLang } from "@/lib/lang-of";
+import { fillSlots } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
+
+/**
+ * THE CALLER'S OWN WORDS (the visit-page-in-Spanish wave): every refusal this file answers comes from
+ * lib/words/visit-page (vp_) in the caller's language — profiles.language through lib/lang-of
+ * callerLang, read ONCE per call and only when an answer needs words (appointments/actions wordsOf,
+ * the same shape); English when nobody is signed in or the read fails, byte for byte what this file
+ * always said. Not exported: a "use server" file exports only async functions.
+ */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+function wordsOf(supabase: Awaited<ReturnType<typeof createClient>>, userId?: string | null): Said {
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as unknown as Parameters<typeof callerLang>[0], userId));
+  return { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+}
 
 /**
  * WHAT HE SAID → WHAT THE PLAYBOOK KNOWS.
@@ -40,7 +58,8 @@ export async function hearIntoPlaybook(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Sign in first." };
+  if (!user) return { ok: false, error: await wordsOf(supabase).say("vp_signInFirst") };
+  const ws = wordsOf(supabase, user.id);
 
   // RLS scopes both reads to the caller's org — an appointment id from another tenant simply
   // doesn't resolve, so the playbook we fill against is always one this org owns.
@@ -49,11 +68,11 @@ export async function hearIntoPlaybook(
     .select("id, org_id, inspection_template_id")
     .eq("id", appointmentId)
     .maybeSingle();
-  if (!appt) return { ok: false, error: "That inspection no longer exists." };
+  if (!appt) return { ok: false, error: await ws.say("vp_inspectionNoLongerExists") };
 
   // What he's looking at wins; the stored column is the fallback for anything that calls without one.
   const useId = templateId || (appt as { inspection_template_id?: string | null }).inspection_template_id;
-  if (!useId) return { ok: false, error: "Pick an inspection first." };
+  if (!useId) return { ok: false, error: await ws.say("vp_pickAnInspectionFirst") };
   // Through form_playbooks (0366): a crew lead can't read a playbook sheet from forms itself any more,
   // and gets its questions without the owner's notes or dollar figures (which filling never needs).
   // A failed read is said, never "no sheet".
@@ -62,11 +81,11 @@ export async function hearIntoPlaybook(
     "sheets",
     (from) => from.select("schema, playbook, is_inspection").eq("id", useId).maybeSingle(),
   );
-  if (formErr) return { ok: false, error: "Couldn't read the inspection just now. Try again." };
-  if (!form) return { ok: false, error: "That inspection no longer exists." };
+  if (formErr) return { ok: false, error: await ws.say("vp_couldntReadInspection") };
+  if (!form) return { ok: false, error: await ws.say("vp_inspectionNoLongerExists") };
   // Same bound saveInspectionAnswersInner applies: an id must name an INSPECTION, not any old form.
   if (!(form as { is_inspection?: boolean }).is_inspection)
-    return { ok: false, error: "That form isn't an inspection." };
+    return { ok: false, error: await ws.say("vp_formIsntAnInspection") };
 
   return runHear(playbookForForm(form as { schema?: unknown; playbook?: unknown }), answers, transcript, {
     orgId: (appt as { org_id?: string } | null)?.org_id ?? null,

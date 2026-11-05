@@ -1,6 +1,8 @@
 import { KIT_ITEM_SELECT_RUNGS, kitsSelectRungs, type KitLineRaw, type KitLinkedItem } from "@/lib/kit-line";
 import type { TaskKit } from "./task-lines";
 import type { PriceItemOptionRow } from "@/lib/pricing/item-options";
+import { say, type Words } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 
 /**
  * TASK KITS, READ (W4, cn-v1076). A kit with `labor_minutes` (0386) is a TASK PER UNIT — "Footing":
@@ -87,17 +89,19 @@ export function plainKitsReadWords(read: Pick<TaskKitsRead, "state" | "rung">): 
   return null;
 }
 
-/** The one sentence a page says for a read that was not whole — null when it was. */
-export function kitsReadWords(state: KitsReadState): string | null {
+/** The one sentence a page says for a read that was not whole — null when it was. English inline and the
+ *  default (every caller reads it as before); handed "es" and the caller's translator (lib/i18n translator)
+ *  it says lib/words/visit-page's (vp_kits…), through lib/lang-words say — this file imports no catalog. */
+export function kitsReadWords(state: KitsReadState, lang: Lang | string | null = "en", words?: Words): string | null {
   switch (state) {
     case "ok":
       return null;
     case "thin":
-      return "The kits were read without their vendors or part links — part names may differ from the estimate's.";
+      return say(lang, words, "vp_kitsThin", "The kits were read without their vendors or part links — part names may differ from the estimate's.");
     case "pre-0386":
-      return "Kits need the database update before a task can pick one.";
+      return say(lang, words, "vp_kitsNeedUpdate", "Kits need the database update before a task can pick one.");
     case "failed":
-      return "The kits could not be read — a task's kit picker is off until you reload; its own hours stand.";
+      return say(lang, words, "vp_kitsCouldNotBeRead", "The kits could not be read — a task's kit picker is off until you reload; its own hours stand.");
   }
 }
 

@@ -27,7 +27,9 @@
  *   closed   the visit is over and its job is finished: Open J-055 only. No clock to start.
  *   here     already on it:        You're On The Clock Here · Open J-055.
  *
- * Every time shown or picked is the ORG's clock.
+ * Every time shown or picked is the ORG's clock. Every word is the signed-in person's language
+ * (lib/words/visit-page, vp_): the card reads useLang() and its clocks through lib/utils formatTime
+ * for a Spanish reader ("12:00 p. m."), clockWords for an English one, byte for byte as before.
  */
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
@@ -36,9 +38,12 @@ import { Play, ArrowLeftRight, Clock, Link2, Phone, MessageSquare, Bell, Briefca
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillNodes } from "@/components/fill-nodes";
+import { fillText, translator } from "@/lib/i18n";
+import { formatDateTime, formatTime } from "@/lib/utils";
 import { getPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
-import { formatDateTimeTz } from "@/lib/tz";
 import { clockOffered, clockWords, jobIsFinished, jobShort, startedAtProblem } from "@/lib/appointments/visit-start";
 import { ClockStartPicker, pickerInstant, pickerParts } from "../../timeclock/clock-start-picker";
 import { clockIn, switchJob, deleteTimeEntry } from "../../timeclock/actions";
@@ -100,11 +105,12 @@ async function gpsBestEffort(): Promise<GeoPoint | null> {
   }
 }
 
-const OFFLINE = "No connection. That didn't go through; try again when you have a bar or two.";
-
 const btn = "h-11 w-full justify-center sm:w-auto";
 const linkBtn =
   "btn-gloss inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:bg-[rgb(var(--glass-tint))]/10 sm:w-auto";
+
+/** The job's short name, bold, inside a sentence (a {job} slot filled through fillNodes). */
+const bold = (s: string) => <span className="font-semibold">{s}</span>;
 
 export function VisitStartCard({
   appointmentId,
@@ -134,6 +140,10 @@ export function VisitStartCard({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
+  /** "12:00 PM" on the org's clock, as always; "12:00 p. m." to a Spanish reader (lib/utils formatTime). */
+  const clockAt = (iso: string) => (lang === "es" ? formatTime(iso, tz, "es") : clockWords(iso, tz));
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -150,7 +160,7 @@ export function VisitStartCard({
           jobCode: (openEntry.job_code ?? "").trim() || null,
           label: openEntry.label,
           clockIn: openEntry.clock_in,
-          since: clockWords(openEntry.clock_in, tz),
+          since: clockAt(openEntry.clock_in),
         }
       : null,
   );
@@ -159,10 +169,13 @@ export function VisitStartCard({
   const onLinkJob = !!linkInstead && !!onClock?.jobId && onClock.jobId === linkInstead.id;
 
   const state = visitStartState({ isStaff, job, openEntry, visitOver });
-  const jobNo = job ? jobShort(job) : "";
+  const jobNo = job ? jobShort(job, lang, t) : "";
   // The visit is over: nothing on the start face starts a clock (a new job is the job only).
   const over = visitOver;
   const linkFinished = !!linkInstead && jobIsFinished(linkInstead.status);
+  // " · 3245 West Garnet Boulevard" after the linkable job's number, when it has both.
+  const linkName = linkInstead && linkInstead.name && linkInstead.job_number ? ` · ${linkInstead.name}` : "";
+  const linkCustomer = linkInstead?.customer ?? t("vp_thisCustomer");
 
   /**
    * ONE CLOCK, AND IT TICKS WHILE SOMEBODY IS ON IT. Every sentence and chip below turns on what time
@@ -179,8 +192,8 @@ export function VisitStartCard({
   useEffect(() => {
     if (!onClock && !sheet) return;
     setNowMs(Date.now());
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(tick);
   }, [onClock, sheet]);
   /**
    * DOES A SWITCH MOVE THE WHOLE PUNCH, OR CUT IT — the server's own rule (switch-window), asked here
@@ -194,7 +207,7 @@ export function VisitStartCard({
   // from being the trap).
   const visitOk = visitTimeOffered(preview.scheduledStart, lastClockOut, nowMs, tz);
   const startIso = choice === "now" ? null : choice === "visit" ? preview.scheduledStart : picked;
-  const problem = choice === "pick" && !picked ? "Pick a start time." : startedAtProblem(startIso, nowMs, tz);
+  const problem = choice === "pick" && !picked ? t("vp_pickAStartTime") : startedAtProblem(startIso, nowMs, tz, lang, t);
 
   function run<T extends { ok: boolean; error?: string }>(fn: () => Promise<T>, after: (r: T) => void) {
     setErr(null);
@@ -204,13 +217,13 @@ export function VisitStartCard({
       try {
         res = await fn();
       } catch {
-        setErr(OFFLINE);
+        setErr(t("vp_noConnection"));
         return;
       }
       if (!res?.ok) {
         const oc = (res as unknown as StartJobResult).onClock;
         if (oc) setOnClock(oc);
-        setErr(res?.error ?? "Something went wrong. Nothing was changed.");
+        setErr(res?.error ?? t("vp_somethingWrongNothingChanged"));
         return;
       }
       after(res);
@@ -222,20 +235,20 @@ export function VisitStartCard({
     setSheet(false);
     const undoId = res.undoEntryId;
     toast(
-      res.message ?? "Done.",
+      res.message ?? t("vp_doneDot"),
       "success",
       undoId
         ? {
-            label: "Undo Clock-In",
+            label: t("vp_btn_undoClockIn"),
             onClick: async () => {
               try {
                 const u = await deleteTimeEntry(undoId);
                 toast(
-                  u.ok ? `Clock-in undone. ${res.jobNumber ?? "The job"} stays.` : (u.error ?? "The clock-in could not be undone."),
+                  u.ok ? fillText(t("vp_clockInUndone"), { job: res.jobNumber ?? t("vp_theJob") }) : (u.error ?? t("vp_clockInNotUndone")),
                   u.ok ? "success" : "error",
                 );
               } catch {
-                toast(OFFLINE, "error");
+                toast(t("vp_noConnection"), "error");
               }
               router.refresh();
             },
@@ -282,14 +295,14 @@ export function VisitStartCard({
         return clockIn({ job_id: job!.id, job_code: null, gps, clock_in_at: null });
       },
       (res: { ok: boolean; warning?: string; mode?: "cut" | "repointed" }) => {
-        const at = clockWords(new Date().toISOString(), tz);
+        const at = clockAt(new Date().toISOString());
         toast(
           state === "switch"
             ? res.mode === "repointed" && openEntry
               ? // "Punch", not "shift": the move is one row, and an earlier part of a cut day stays put.
-                `Moved your whole punch since ${clockWords(openEntry.clock_in, tz)} onto ${jobNo}.`
-              : `Switched your clock to ${jobNo} from ${openEntry?.label ?? "the other job"} at ${at}.`
-            : `Clocked you in on ${jobNo} at ${at}.`,
+                fillText(t("vp_movedWholePunch"), { since: clockAt(openEntry.clock_in), job: jobNo })
+              : fillText(t("vp_switchedClock"), { job: jobNo, from: openEntry?.label ?? t("vp_theOtherJob"), at })
+            : fillText(t("vp_clockedYouIn"), { job: jobNo, at }),
           "success",
         );
         if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
@@ -300,7 +313,7 @@ export function VisitStartCard({
   const ask = () =>
     run(
       () => askOfficeToStartJob(appointmentId),
-      (res: { ok: boolean; message?: string }) => setNote(res.message ?? "The office has been asked."),
+      (res: { ok: boolean; message?: string }) => setNote(res.message ?? t("vp_officeAsked")),
     );
 
   const tel = (officePhone ?? "").replace(/[^\d+]/g, "");
@@ -308,48 +321,42 @@ export function VisitStartCard({
   return (
     <section
       className="rounded-xl border border-teal-200 bg-teal-50/60 p-4"
-      aria-label="Start the work"
+      aria-label={t("vp_startTheWorkAria")}
       data-visit-start={state}
     >
       {state === "start" && (
         <>
-          <h2 className="text-base font-semibold text-slate-900">{over ? "This visit is done" : "Here to do the work?"}</h2>
+          <h2 className="text-base font-semibold text-slate-900">{over ? t("vp_thisVisitIsDone") : t("vp_hereToDoTheWork")}</h2>
           {linkInstead ? (
             onLinkJob ? (
               <p className="mt-0.5 text-sm text-slate-700">
-                You&rsquo;re on the clock on <span className="font-semibold">{jobShort(linkInstead)}</span> since{" "}
-                {onClock!.since}
-                {linkInstead.name && linkInstead.job_number ? ` · ${linkInstead.name}` : ""}.{" "}
-                {linkInstead.customer ?? "This customer"} already has it. Link this visit to it.
+                {fillNodes(t("vp_onClockOnLinkJob"), { job: bold(jobShort(linkInstead, lang, t)), since: onClock!.since, name: linkName, customer: linkCustomer })}
               </p>
             ) : (
               <p className="mt-0.5 text-sm text-slate-700">
-                {linkInstead.customer ?? "This customer"} already has{" "}
-                <span className="font-semibold">{jobShort(linkInstead)}</span>
-                {linkInstead.name && linkInstead.job_number ? ` · ${linkInstead.name}` : ""}, made that day
-                {linkFinished ? " and finished" : ""}.{" "}
-                {over ? "Link this visit to it?" : "Use it instead of making a second job?"}
+                {fillNodes(t(linkFinished ? "vp_alreadyHasMadeThatDayFinished" : "vp_alreadyHasMadeThatDay"), {
+                  customer: linkCustomer,
+                  job: bold(jobShort(linkInstead, lang, t)),
+                  name: linkName,
+                })}{" "}
+                {over ? t("vp_linkThisVisitToItQ") : t("vp_useItInsteadQ")}
               </p>
             )
           ) : over ? (
             <p className="mt-0.5 text-sm text-slate-600">
-              It has no job. If the work goes on, start one from it: it brings {preview.customer ?? "the customer"}, the
-              address and the visit time along, and it doesn&rsquo;t start your clock.
+              {fillText(t("vp_overNoJobLine"), { customer: preview.customer ?? t("vp_theCustomer") })}
             </p>
           ) : (
             <p className="mt-0.5 text-sm text-slate-600">
-              Start a job from this visit. It brings {preview.customer ?? "the customer"}, the address and the visit time
-              along.
+              {fillText(t("vp_startAJobLine"), { customer: preview.customer ?? t("vp_theCustomer") })}
             </p>
           )}
           {onClock && !onLinkJob && !over && (
             // suppressHydrationWarning: the fork is the punch's age, so the server's HTML and the
             // first client render can land either side of the fifteen-minute line.
             <p className="mt-1 text-sm text-amber-700" suppressHydrationWarning>
-              You&rsquo;re on the clock on {onClock.label} since {onClock.since}.{" "}
-              {movesWhole(onClock)
-                ? "Starting this job moves this whole punch onto it — none of it stays behind."
-                : "Starting this job switches your clock here."}
+              {fillText(t("vp_onClockSince"), { label: onClock.label, since: onClock.since })}{" "}
+              {movesWhole(onClock) ? t("vp_startingMovesWhole") : t("vp_startingSwitchesHere")}
             </p>
           )}
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -357,7 +364,7 @@ export function VisitStartCard({
               <>
                 <Button className={btn} onClick={linkInsteadTap} disabled={pending}>
                   <Link2 />{" "}
-                  {onLinkJob || over ? `Link To ${jobShort(linkInstead)}` : `Link To ${jobShort(linkInstead)} Instead`}
+                  {fillText(t(onLinkJob || over ? "vp_btn_linkTo" : "vp_btn_linkToInstead"), { job: jobShort(linkInstead, lang, t) })}
                 </Button>
                 {/* The second door. On the clock on the linkable job it makes the job only: moving
                     that clock is exactly the mistake this card exists to prevent. On a visit that is
@@ -368,21 +375,21 @@ export function VisitStartCard({
                   onClick={onLinkJob || over ? startOnly : openSheet}
                   disabled={pending}
                 >
-                  <Briefcase /> Make A New Job Anyway
+                  <Briefcase /> {t("vp_btn_makeANewJobAnyway")}
                 </Button>
               </>
             ) : over ? (
               // Quiet on purpose: the visit is over, so this is the job only, and never the lead door.
               <Button variant="outline" className={btn} onClick={startOnly} disabled={pending}>
-                <Briefcase /> Start A Job From This Visit
+                <Briefcase /> {t("vp_btn_startAJobFromThisVisit")}
               </Button>
             ) : (
               <>
                 <Button className={btn} onClick={openSheet} disabled={pending}>
-                  <Play /> Start The Job And Clock In
+                  <Play /> {t("vp_btn_startTheJobAndClockIn")}
                 </Button>
                 <Button variant="outline" className={btn} onClick={startOnly} disabled={pending}>
-                  <Briefcase /> Start The Job
+                  <Briefcase /> {t("vp_btn_startTheJob")}
                 </Button>
               </>
             )}
@@ -392,24 +399,20 @@ export function VisitStartCard({
 
       {state === "ask" && (
         <>
-          <h2 className="text-base font-semibold text-slate-900">Ask the office to start the job</h2>
-          <p className="mt-0.5 text-sm text-slate-600">
-            {over
-              ? "This visit is done and has no job. If the work goes on, ask the office to start one."
-              : "This visit has no job yet, and only the office can start one. Once they do, you can clock in right here."}
-          </p>
+          <h2 className="text-base font-semibold text-slate-900">{t("vp_askOfficeToStart")}</h2>
+          <p className="mt-0.5 text-sm text-slate-600">{over ? t("vp_askOverNoJob") : t("vp_askNoJobYet")}</p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button className={btn} onClick={ask} disabled={pending}>
-              <Bell /> Ask The Office
+              <Bell /> {t("vp_btn_askTheOffice")}
             </Button>
             {tel && (
               <a href={`tel:${tel}`} className={linkBtn}>
-                <Phone className="h-4 w-4" /> Call The Office
+                <Phone className="h-4 w-4" /> {t("vp_btn_callTheOffice")}
               </a>
             )}
             {tel && (
               <a href={`sms:${tel}`} className={linkBtn}>
-                <MessageSquare className="h-4 w-4" /> Text The Office
+                <MessageSquare className="h-4 w-4" /> {t("vp_btn_textTheOffice")}
               </a>
             )}
           </div>
@@ -419,7 +422,7 @@ export function VisitStartCard({
       {(state === "linked" || state === "switch" || state === "here" || state === "closed") && job && (
         <>
           <h2 className="text-base font-semibold text-slate-900">
-            This visit is {jobNo}
+            {fillText(t("vp_thisVisitIs"), { job: jobNo })}
             {job.name && job.job_number ? <span className="font-normal text-slate-600"> · {job.name}</span> : null}
           </h2>
           {state === "switch" && openEntry && (
@@ -427,20 +430,18 @@ export function VisitStartCard({
             // about which customer gets the hours, and a tech reaches this face too (visitStartState
             // has no staff gate once a job is linked). suppressHydrationWarning: see the start face.
             <p className="mt-0.5 text-sm text-amber-700" suppressHydrationWarning>
-              You&rsquo;re on the clock on {openEntry.label} since {clockWords(openEntry.clock_in, tz)}.{" "}
+              {fillText(t("vp_onClockSince"), { label: openEntry.label, since: clockAt(openEntry.clock_in) })}{" "}
               {movesWhole({
                 jobId: openEntry.job_id,
                 jobCode: (openEntry.job_code ?? "").trim() || null,
                 clockIn: openEntry.clock_in,
               })
-                ? `Switching moves this whole punch onto ${jobNo} — none of it stays behind.`
-                : "Switching ends that part now and starts this one."}
+                ? fillText(t("vp_switchingMovesWhole"), { job: jobNo })
+                : t("vp_switchingEndsPart")}
             </p>
           )}
           {state === "closed" && (
-            <p className="mt-0.5 text-sm text-slate-600">
-              The visit is done and {jobNo} is finished, so there&rsquo;s no clock to start here.
-            </p>
+            <p className="mt-0.5 text-sm text-slate-600">{fillText(t("vp_closedLine"), { job: jobNo })}</p>
           )}
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             {state === "here" ? (
@@ -448,16 +449,16 @@ export function VisitStartCard({
                 className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-green-300 bg-green-50 px-4 text-sm font-semibold text-green-700 sm:w-auto"
                 role="status"
               >
-                <Clock className="h-4 w-4" /> You&rsquo;re On The Clock Here
+                <Clock className="h-4 w-4" /> {t("vp_youreOnTheClockHere")}
               </span>
             ) : state === "closed" ? null : (
               <Button className={btn} onClick={clockHere} disabled={pending}>
                 {state === "switch" ? <ArrowLeftRight /> : <Play />}
-                {state === "switch" ? `Switch To ${jobNo}` : `Clock In On ${jobNo}`}
+                {fillText(t(state === "switch" ? "vp_btn_switchTo" : "vp_btn_clockInOn"), { job: jobNo })}
               </Button>
             )}
             <Link href={`/jobs/${job.id}`} className={linkBtn}>
-              <Briefcase className="h-4 w-4" /> Open {jobNo}
+              <Briefcase className="h-4 w-4" /> {fillText(t("vp_btn_open"), { job: jobNo })}
             </Link>
           </div>
         </>
@@ -478,16 +479,16 @@ export function VisitStartCard({
         <Modal
           open={sheet}
           onClose={() => setSheet(false)}
-          title={linkInstead ? "Make A New Job" : "Start The Job And Clock In"}
+          title={linkInstead ? t("vp_makeANewJob") : t("vp_btn_startTheJobAndClockIn")}
           size="sm"
           footer={
             <>
               <Button type="button" variant="outline" className="h-11" onClick={() => setSheet(false)} disabled={pending}>
-                Cancel
+                {t("vp_btn_cancel")}
               </Button>
               {onLinkJob && linkInstead ? (
                 <Button type="button" className="h-11" onClick={linkInsteadTap} disabled={pending}>
-                  {pending ? "Linking…" : `Link To ${jobShort(linkInstead)}`}
+                  {pending ? t("vp_btn_linking") : fillText(t("vp_btn_linkTo"), { job: jobShort(linkInstead, lang, t) })}
                 </Button>
               ) : (
                 <Button
@@ -496,7 +497,7 @@ export function VisitStartCard({
                   onClick={startWithClock}
                   disabled={pending || (!onClock && !!problem)}
                 >
-                  {pending ? "Starting…" : onClock ? "Switch To This Job" : "Start The Job And Clock In"}
+                  {pending ? t("vp_btn_starting") : onClock ? t("vp_btn_switchToThisJob") : t("vp_btn_startTheJobAndClockIn")}
                 </Button>
               )}
             </>
@@ -505,29 +506,28 @@ export function VisitStartCard({
           <div className="space-y-4">
             {linkInstead && (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                {linkInstead.customer ?? "This customer"} already has{" "}
-                <span className="font-semibold">{jobShort(linkInstead)}</span>, made that day. This makes a second job.
+                {fillNodes(t("vp_alreadyHasSecondJob"), { customer: linkCustomer, job: bold(jobShort(linkInstead, lang, t)) })}
               </p>
             )}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">The job will be</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("vp_theJobWillBe")}</p>
               <dl className="mt-1.5 space-y-1 text-sm">
                 <div className="flex gap-2">
-                  <dt className="w-20 shrink-0 text-slate-500">Name</dt>
+                  <dt className="w-20 shrink-0 text-slate-500">{t("vp_name")}</dt>
                   <dd className="font-medium text-slate-900">{preview.name}</dd>
                 </div>
                 <div className="flex gap-2">
-                  <dt className="w-20 shrink-0 text-slate-500">Customer</dt>
-                  <dd className="text-slate-800">{preview.customer ?? "None yet"}</dd>
+                  <dt className="w-20 shrink-0 text-slate-500">{t("vp_customer")}</dt>
+                  <dd className="text-slate-800">{preview.customer ?? t("vp_noCustomerYet")}</dd>
                 </div>
                 <div className="flex gap-2">
-                  <dt className="w-20 shrink-0 text-slate-500">Address</dt>
-                  <dd className="text-slate-800">{preview.address ?? "None yet"}</dd>
+                  <dt className="w-20 shrink-0 text-slate-500">{t("vp_address")}</dt>
+                  <dd className="text-slate-800">{preview.address ?? t("vp_noAddressYet")}</dd>
                 </div>
                 {preview.scheduledStart && (
                   <div className="flex gap-2">
-                    <dt className="w-20 shrink-0 text-slate-500">Planned</dt>
-                    <dd className="text-slate-800">{formatDateTimeTz(preview.scheduledStart, tz)}</dd>
+                    <dt className="w-20 shrink-0 text-slate-500">{t("vp_planned")}</dt>
+                    <dd className="text-slate-800">{formatDateTime(preview.scheduledStart, tz, lang)}</dd>
                   </div>
                 )}
               </dl>
@@ -535,26 +535,25 @@ export function VisitStartCard({
 
             {onLinkJob && linkInstead ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                You&rsquo;re on the clock on {jobShort(linkInstead)} since {onClock!.since}. Link this visit to it instead;
-                a new job here would take your clock off the job you are on.
+                {fillText(t("vp_onClockLinkInsteadSheet"), { job: jobShort(linkInstead, lang, t), since: onClock!.since })}
               </p>
             ) : onClock ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                 {movesWhole(onClock)
                   ? // Said with the label, not "with no job": a punch that HAS a job moves whole too
                     // while it is this young, and the old wording was false for exactly that case.
-                    `You're on the clock on ${onClock.label} since ${onClock.since}. This moves this whole punch onto the new job, from ${onClock.since} — none of it stays behind. No second clock is opened.`
-                  : `You're on the clock on ${onClock.label} since ${onClock.since}. This switches your clock to the new job now: the part on ${onClock.label} ends at this moment. No second clock is opened.`}
+                    fillText(t("vp_sheetMovesWhole"), { label: onClock.label, since: onClock.since })
+                  : fillText(t("vp_sheetSwitchesNow"), { label: onClock.label, since: onClock.since })}
               </p>
             ) : (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Started at</p>
-                <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Started at">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("vp_startedAt")}</p>
+                <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label={t("vp_startedAt")}>
                   {(
                     [
-                      ["now", "Now"],
-                      ...(visitOk ? [["visit", `Visit Time · ${clockWords(preview.scheduledStart!, tz)}`]] : []),
-                      ["pick", "Pick A Time"],
+                      ["now", t("vp_btn_now")],
+                      ...(visitOk ? [["visit", fillText(t("vp_btn_visitTime"), { clock: clockAt(preview.scheduledStart!) })]] : []),
+                      ["pick", t("vp_btn_pickATime")],
                     ] as [typeof choice, string][]
                   ).map(([k, label]) => (
                     <button
@@ -588,7 +587,7 @@ export function VisitStartCard({
                     startExpanded
                     staff
                     tz={tz}
-                    caption="Your clock starts at the time above."
+                    caption={t("vp_clockStartsAtTimeAbove")}
                     onChange={(iso) => setPicked(iso)}
                   />
                 )}

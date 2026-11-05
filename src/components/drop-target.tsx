@@ -2,6 +2,8 @@
 
 import { useRef, useState, useSyncExternalStore } from "react";
 import { describeLeftBehind, sortDrop } from "@/lib/drop-sort";
+import { useLang } from "@/components/lang-provider";
+import { say, type Words } from "@/lib/lang-words";
 
 /* The zone's interior is a PATTERN, not words (Erik: "how about a pattern — or nothing"): the
    classic diagonal-stripe drop texture, keyed to the brand color, faint at reveal and solid-er
@@ -38,6 +40,13 @@ const STRIPES_OVER = {
  *     them), the Safari-weight lesson.
  *   · Buttons stay the universal way in. A drop that matches nothing says so briefly instead of
  *     silently eating the file (NOTHING SILENT).
+ *
+ * THE READER'S LANGUAGE (the visit-page-in-Spanish wave, cn-v1144). This zone is drawn on a customer's
+ * public pages too (intake, inquire, the estimate configurator), so it must not import the dictionary
+ * (lib/catalog-free-libs.test.ts): its own words keep their English inline as the default and the caller
+ * that has a translator hands it in as `words` (the Inspector: its vi_ catalog, lib/words/visit-inspector),
+ * the way the schedule's libraries take theirs (lib/lang-words say). The language itself is the
+ * provider's (useLang: English outside one).
  */
 
 // ── Window-level "a file drag is happening" store (one set of listeners, many targets). ──
@@ -97,7 +106,8 @@ export function DropTarget({
   accept,
   multiple = true,
   disabled = false,
-  label = "Drop Files Here",
+  label,
+  words,
   className,
   children,
 }: {
@@ -108,12 +118,18 @@ export function DropTarget({
   multiple?: boolean;
   disabled?: boolean;
   /** Title Case, rendered as a small pill over the stripes (Erik settled it: pattern AND "some
-   *  text overlay Title Case"). Say what THIS door takes — specific beats generic. */
+   *  text overlay Title Case"). Say what THIS door takes — specific beats generic. Unset, "Drop Files Here"
+   *  (or its Spanish, when `words` is handed in). */
   label?: string;
+  /** The caller's translator (lib/i18n translator(lang)) for the zone's own words — the pill's default, the
+   *  wrong-type line, the dismiss title. Without it they are English. */
+  words?: Words;
   className?: string;
   children: React.ReactNode;
 }) {
   const active = useFileDragActive();
+  const lang = useLang();
+  const pill = label ?? say(lang, words, "vi_dropFilesHere", "Drop Files Here");
   const [over, setOver] = useState(false);
   const [refused, setRefused] = useState(false);
   // WHAT A MIXED DROP LEFT BEHIND, BY NAME. The door gets the files that fit; this line names
@@ -169,7 +185,7 @@ export function DropTarget({
           onClick={() => setLeftBehind(null)}
           className="mt-2 block min-h-11 w-full rounded-lg bg-amber-50 px-3 py-2 text-left text-sm text-amber-900"
           role="status"
-          title="Tap To Dismiss"
+          title={say(lang, words, "vi_btn_tapToDismiss", "Tap To Dismiss")}
         >
           {leftBehind}
         </button>
@@ -189,9 +205,9 @@ export function DropTarget({
           style={refused ? undefined : over ? STRIPES_OVER : STRIPES_IDLE}
         >
           {refused ? (
-            "That file type doesn't go here"
-          ) : label ? (
-            <span className="rounded-full bg-white/95 px-2 py-0.5">{label}</span>
+            say(lang, words, "vi_fileTypeDoesntGoHere", "That file type doesn't go here")
+          ) : pill ? (
+            <span className="rounded-full bg-white/95 px-2 py-0.5">{pill}</span>
           ) : null}
         </div>
       )}

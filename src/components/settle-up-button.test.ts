@@ -3,6 +3,10 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { translator } from "@/lib/i18n";
+
+/** The sheet's English, by key (lib/words/settle-up, the visit-page-in-Spanish wave): what a pin on the source reads through. */
+const en = translator("en");
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
@@ -131,7 +135,8 @@ describe("every way to the reader goes through doorFor", () => {
     // `const holdCard = ...` above the terms gate was the bug's other half: a re-minted door
     // would have repainted the pre-terms number on the card prompt.
     expect(SRC).not.toMatch(/const holdCard\s*=/);
-    expect([...SRC.matchAll(/label: holdCardLine\(pi\.amount\)/g)]).toHaveLength(2);
+    // In the reader's language (the visit-page-in-Spanish wave): the figure is still the door's, read at the paint.
+    expect([...SRC.matchAll(/label: holdCardLine\(pi\.amount, lang\)/g)]).toHaveLength(2);
   });
 
   it("the balance re-check lives in exactly one place", () => {
@@ -143,10 +148,15 @@ describe("every way to the reader goes through doorFor", () => {
   });
 
   it("a moved balance stops the retry in words, and names a button that is on the screen", () => {
-    expect(SRC).toContain("The balance changed while Apple's terms were up. Press Tap to Pay again for the new amount.");
+    // The sentence is the catalog's (su_balanceChanged, the visit-page-in-Spanish wave); its English is the old one, byte for byte.
+    expect(SRC).toContain('error: t("su_balanceChanged")');
+    expect(en("su_balanceChanged")).toBe("The balance changed while Apple's terms were up. Press Tap to Pay again for the new amount.");
     // NO DEAD ENDS: the sentence names Tap to Pay, and that button renders on both outcome
-    // screens (Apple 5.3 keeps it enabled), so there is something to press.
-    expect([...SRC.matchAll(/<TapToPayGlyph \/> Tap to Pay/g)].length).toBeGreaterThanOrEqual(2);
+    // screens (Apple 5.3 keeps it enabled), so there is something to press. Apple's short form is
+    // Apple's in both languages (su_apple_tapToPay, the Title Case law's one exception).
+    expect([...SRC.matchAll(/<TapToPayGlyph \/> \{t\("su_apple_tapToPay"\)\}/g)].length).toBeGreaterThanOrEqual(2);
+    expect(en("su_apple_tapToPay")).toBe("Tap to Pay");
+    expect(translator("es")("su_apple_tapToPay")).toBe("Tap to Pay");
   });
 });
 
@@ -192,9 +202,12 @@ describe("Or They Paid Another Way (Record Payment's machine) records Venmo like
   });
 
   it("always offers Record It, whatever chip is picked", () => {
-    expect(BODY).toMatch(/onClick=\{go\} disabled=\{pending \|\| qrPending\}>\s*\{pending \? "Saving…" : "Record It"\}/);
+    // Through the catalog since the visit-page-in-Spanish wave; the English is the old door, byte for byte.
+    expect(BODY).toMatch(/onClick=\{go\} disabled=\{pending \|\| qrPending\}>\s*\{pending \? t\("su_btn_saving"\) : t\("su_btn_recordIt"\)\}/);
+    expect(en("su_btn_saving")).toBe("Saving…");
+    expect(en("su_btn_recordIt")).toBe("Record It");
     expect(BODY).not.toMatch(/saveLabel=\{key === "venmo"/);
-    expect(BODY).not.toMatch(/key === "venmo" \? [^:]*"Record It"/);
+    expect(BODY).not.toMatch(/key === "venmo" \? [^:]*("Record It"|su_btn_recordIt)/);
   });
 
   it("stores the picked chip, not a hard-coded venmo", () => {
@@ -220,7 +233,9 @@ describe("Or They Paid Another Way (Record Payment's machine) records Venmo like
   });
 
   it("says the QR sends the bill when it does, and never reads Saving over a read", () => {
-    expect(BODY).toContain('props.source === "invoice" ? "Show Venmo QR" : "Send The Bill & Show Venmo QR"');
+    expect(BODY).toContain('props.source === "invoice" ? t("su_btn_showVenmoQr") : t("su_btn_sendBillShowVenmoQr")');
+    expect(en("su_btn_showVenmoQr")).toBe("Show Venmo QR");
+    expect(en("su_btn_sendBillShowVenmoQr")).toBe("Send The Bill & Show Venmo QR");
     const qr = BODY.slice(BODY.indexOf("function showVenmoQr()"), BODY.indexOf("function venmoPaid()"));
     expect(qr).toContain("startQr(");
     expect(qr).not.toMatch(/\bstart\(/);
@@ -315,8 +330,9 @@ describe("the one Get Paid sheet", () => {
 
   it("Tap to Pay is FIRST in the card panel, primary, full width, never disabled (Apple 5.1/5.2/5.3)", () => {
     const panel = SRC.slice(SRC.indexOf("const panel: React.ReactNode = !props.cardEnabled ? null : !art ? ("), SRC.indexOf("return { onOpen, reset, takeover, panel };"));
-    const tap = panel.indexOf("<TapToPayGlyph /> Tap to Pay");
-    const qr = panel.indexOf('"Show Card QR"');
+    const tap = panel.indexOf('<TapToPayGlyph /> {t("su_apple_tapToPay")}');
+    const qr = panel.indexOf('t("su_btn_showCardQr")');
+    expect(en("su_btn_showCardQr")).toBe("Show Card QR");
     expect(tap).toBeGreaterThan(-1);
     expect(qr).toBeGreaterThan(tap);
     for (const m of panel.matchAll(/<Button className="w-full" onClick=\{\(\) => void tapToPay\(\)\}>/g)) expect(m[0]).not.toContain("disabled");
@@ -328,7 +344,8 @@ describe("the one Get Paid sheet", () => {
     expect(SRC).toContain("if (r.needsSend && gen.current === g) setDraftAtOpen(r.invoiceNumber ?? null);");
     expect(SRC).not.toMatch(/then: "mint"/);
     // Not Now on a card's question goes back to the sheet, never closes it.
-    expect(SRC).toContain('<Button variant="outline" onClick={() => setAsk(null)}>Not Now</Button>');
+    expect(SRC).toContain('<Button variant="outline" onClick={() => setAsk(null)}>{t("su_btn_notNow")}</Button>');
+    expect(en("su_btn_notNow")).toBe("Not Now");
   });
 });
 

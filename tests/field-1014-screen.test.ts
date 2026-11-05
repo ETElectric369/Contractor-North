@@ -294,7 +294,7 @@ describe("the registry: every spot named is a real data-tour or id in the markup
 
   it("the placeholder spots name a real template each", () => {
     const inspector = read("src/app/(app)/appointments/[id]/inspector.tsx");
-    expect(inspector).toContain("id={`task-${t.id}`}");
+    expect(inspector).toContain("id={`task-${task.id}`}"); // the card's task is `task` since cn-v1144 (`t` is the translator)
     expect(inspector).toContain("id={`need-${n.key}`}");
     expect(read("src/app/(app)/settings/settings-subnav.tsx")).toContain("data-tour={`settings-${c.id}`}");
     expect(read("src/components/app-shell/dock.tsx")).toContain("data-tour={`dock-${s.key}`}");

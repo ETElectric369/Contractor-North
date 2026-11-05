@@ -25,6 +25,7 @@ vi.mock("@/lib/notifications", () => ({ notifyPeople: vi.fn(async () => ({ bell:
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 
 import { linkAppointmentToNewLead } from "@/app/(app)/appointments/actions";
+import { translator } from "@/lib/i18n";
 
 const visit = (): Row => ({
   id: "a1",
@@ -83,12 +84,15 @@ describe("the picker offers it, pinned", () => {
   it("offers Add As A New Lead for what was TYPED only (never the address seed), where a lead may be picked, and not for a name already in the rows", () => {
     expect(picker).toContain('const offerLead = !searching && open && typed.length >= 2 && (!kinds || kinds.includes("lead")) && !rows.some((r) => r.name.trim().toLowerCase() === typed.toLowerCase());');
     expect(picker).toContain("const typed = q.replace(/\\s+/g, \" \").trim();");
-    expect(picker).toContain(">Add As A New Lead<");
+    expect(picker).toContain('>{t("vp_btn_addAsANewLead")}<');
+    expect(translator("en")("vp_btn_addAsANewLead")).toBe("Add As A New Lead");
     expect(picker).toContain("linkAppointmentToNewLead(appointmentId, typed)");
     // Nothing silent: a refusal is shown where the tap was.
     expect(picker).toContain('<p role="alert" className="px-1 py-1 text-xs text-red-700">');
     // The old reassurance stays for the address seed; the typed-name case says the honest thing.
-    expect(picker).toContain('offerLead ? "Nobody by that name yet." : "Nothing matches yet — carry on, you can connect this later."');
+    expect(picker).toContain('offerLead ? t("vp_nobodyByThatName") : t("vp_nothingMatchesYet")');
+    expect(translator("en")("vp_nobodyByThatName")).toBe("Nobody by that name yet.");
+    expect(translator("en")("vp_nothingMatchesYet")).toBe("Nothing matches yet — carry on, you can connect this later.");
   });
   it("the ending card's Won · Pick The Job (jobs only) never offers a lead", () => {
     expect(readFileSync("src/app/(app)/appointments/[id]/visit-ending.tsx", "utf8")).toContain('kinds={["job"]}');

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { translator } from "@/lib/i18n";
 
 /**
  * A PRICED TASK IS REMEMBERED AS A KIT, AND A KIT IS A TASK ON THE NEXT VISIT (W4, cn-v1076).
@@ -72,16 +73,20 @@ describe("the inspector", () => {
     // The kits reach the Inspector whatever the switch says; the switch hides the PICKER (carried [39]).
     expect(page).toContain("taskKits={kitsWithoutMoney(taskKitsRead.kits)}");
     expect(page).toContain("kitsPicker={kitsOn}");
-    expect(page).toContain("kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state) : null}");
+    // In the reader's language since the visit-page-in-Spanish wave (English by default, the same words every page says).
+    expect(page).toContain("kitsNote={kitsOn ? kitsReadWords(taskKitsRead.state, lang, t) : null}");
     expect(page).toContain('kitsUnread={taskKitsRead.state === "failed"}');
     expect(page).toContain('reportError("appointment:kits"');
   });
   it("previews a picked kit through THE expandTaskKit the estimate seeds from", () => {
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(inspector).toContain('import { expandTaskKit, type TaskKit } from "@/lib/estimate/task-lines";');
-    expect(inspector).toContain("expandTaskKit(t, kit, KIT_PREVIEW_PRICING)");
-    expect(inspector).toContain('aria-label="Kit"');
-    expect(inspector).toContain('placeholder="units"');
+    // (cn-v1144, the visit page in Spanish: the card's task is `task` — `t` is the translator — and the two labels read the vi_ catalog, English byte for byte)
+    expect(inspector).toContain("expandTaskKit(task, kit, KIT_PREVIEW_PRICING)");
+    expect(inspector).toContain('aria-label={t("vi_kit")}');
+    expect(inspector).toContain('placeholder={t("vi_unitsPlaceholder")}');
+    expect(translator("en")("vi_kit")).toBe("Kit");
+    expect(translator("en")("vi_unitsPlaceholder")).toBe("units");
   });
 });
 

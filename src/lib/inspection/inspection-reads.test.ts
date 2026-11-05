@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { isMissingView, readViaView, INSPECTION_VIEWS } from "./inspection-access";
+import { isMissingView, readViaView, inspectionUnreadWords, INSPECTION_UNREAD, INSPECTION_VIEWS } from "./inspection-access";
 
 /**
  * INSPECTION PRICES STAY IN THE OFFICE (LEAK-0227, 0366), in the code.
@@ -125,7 +125,10 @@ describe("the tech-facing inspection reads a sheet's playbook only through form_
   it("an inspection it couldn't read is said, and no sheet is drawn to save over it", () => {
     const page = read("app/(app)/appointments/[id]/page.tsx");
     expect(page).toContain("const inspectionUnread = unread(sheetsRead) || unread(answersRead);");
-    expect(page).toMatch(/\{inspectionUnread \? \(\s*<p[^>]*>\{INSPECTION_UNREAD\}<\/p>\s*\) : \(\s*<Inspector/);
+    // The same sentence in the reader's language since the visit-page-in-Spanish wave (inspectionUnreadWords: INSPECTION_UNREAD by default).
+    expect(page).toMatch(/\{inspectionUnread \? \(\s*<p[^>]*>\{inspectionUnreadWords\(lang, t\)\}<\/p>\s*\) : \(\s*<Inspector/);
+    expect(inspectionUnreadWords()).toBe(INSPECTION_UNREAD);
+    expect(inspectionUnreadWords("en", () => "never")).toBe(INSPECTION_UNREAD);
   });
 });
 

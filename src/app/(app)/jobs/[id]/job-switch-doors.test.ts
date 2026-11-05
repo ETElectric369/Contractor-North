@@ -185,7 +185,9 @@ describe("Estimates on a lead's row", () => {
 describe("Nort off: the surfaces that stay say it without the name", () => {
   const hear = vi.fn();
   it("the voice fill on an inspection keeps working, as Just Say It", () => {
-    expect(r(TellNort, { hear, answers: {}, onFilled: () => {} })).toContain("Just tell Nort");
+    // (cn-v1144: the default label is the Nort catalog's nt_btn_justTellNort, Title Case like every door — "Just Tell Nort",
+    // the words the inspection already passed; no surface drew the lowercase default)
+    expect(r(TellNort, { hear, answers: {}, onFilled: () => {} })).toContain("Just Tell Nort");
     const html = r(TellNort, { hear, answers: {}, onFilled: () => {}, nortOn: false });
     expect(html).toContain("Just Say It");
     expect(html).not.toContain("Nort");

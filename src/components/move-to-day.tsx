@@ -65,7 +65,7 @@ export function MoveToDay({
   const toast = useToast();
   const lang = useLang();
   const t = translator(lang);
-  label = label ?? t("ag_cal_moveToADay");
+  label = label ?? t("ag_cal_btn_moveToADay");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { translator } from "@/lib/i18n";
 
 /**
  * THE CONTROLS WAVE 0 TOUCHED KEEP THE HOUSE LAWS: a 44px target on a 375px phone, and a Title Case
@@ -76,15 +77,20 @@ describe("Title Case on the clickables Wave 0 re-wrapped", () => {
     expect(settings).toContain("Open Kits &amp; Job Lists");
     expect(settings).toContain("Open The Design Studio");
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
-    expect(inspector).toContain('<Button type="button">Start The Estimate</Button>');
-    expect(inspector).toContain('label="Drop Photos, PDFs Or 3D Files"');
+    // (cn-v1144, the visit page in Spanish: both read the vi_ catalog through t(); the English is byte for byte what the screen said, pinned here)
+    expect(inspector).toContain('<Button type="button">{t("vi_btn_startTheEstimate")}</Button>');
+    expect(translator("en")("vi_btn_startTheEstimate")).toBe("Start The Estimate");
+    expect(inspector).toContain('label={t("vi_dropPhotosPdfs3d")}');
+    expect(translator("en")("vi_dropPhotosPdfs3d")).toBe("Drop Photos, PDFs Or 3D Files");
     // The cap is gone (W1-09): its rows are built once, for Search Or Ask and for Help; their words are
     // the shell catalog's since cn-v1139 (sh_help_again), English byte for byte.
     expect(src("src/lib/onboarding/help-rows.ts")).toContain('label: t("sh_help_again")');
     expect(src("src/lib/words/shell.ts")).toContain('sh_help_again: "Take The Setup Again"');
     const appt = src("src/app/(app)/appointments/[id]/page.tsx");
-    expect(appt).toContain('fallbackLabel="Back To Schedule"');
-    expect(appt).toContain('fallbackLabel="Back To My Day"');
+    expect(appt).toContain('fallbackLabel={t("vp_btn_backToSchedule")}');
+    expect(appt).toContain('fallbackLabel={t("vp_btn_backToMyDay")}');
+    expect(translator("en")("vp_btn_backToSchedule")).toBe("Back To Schedule");
+    expect(translator("en")("vp_btn_backToMyDay")).toBe("Back To My Day");
     for (const f of [
       "src/app/(app)/jobs/[id]/job-documents.tsx",
       "src/lib/receipt-capture.ts",

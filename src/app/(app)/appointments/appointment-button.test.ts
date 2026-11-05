@@ -98,9 +98,11 @@ describe("the closed form, rendered", () => {
 
 describe("the Modal reads the same function (a pin: the words cannot drift from the test above)", () => {
   const src = readFileSync(join(__dirname, "appointment-button.tsx"), "utf8");
-  it("title and Save from apptFormWords on the live Type box; the trigger from the caller's default kind", () => {
-    expect(src).toContain('const words = apptFormWords({ kind: form.type, editing, mode, linkReady: !!linkToken });');
-    expect(src).toContain('const triggerWords = apptFormWords({ kind: defaultType ?? "", editing, mode: "set", linkReady: false });');
+  it("title and Save from apptFormWords on the live Type box, in the reader's words; the trigger from the caller's default kind", () => {
+    // The reader's translator rides along (the visit-page-in-Spanish wave): English, byte for byte, without a provider.
+    expect(src).toContain('const words = apptFormWords({ kind: form.type, editing, mode, linkReady: !!linkToken }, t);');
+    expect(src).toContain('const triggerWords = apptFormWords({ kind: defaultType ?? "", editing, mode: "set", linkReady: false }, t);');
+    expect(src).toContain("const t = translator(lang);");
     expect(src).toContain("title={words.title}");
     expect(src).toContain("saveLabel={words.saveLabel}");
     expect(src).toContain('{buttonLabel ?? triggerWords.trigger}');

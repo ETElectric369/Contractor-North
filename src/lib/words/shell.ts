@@ -37,9 +37,11 @@ export const words: WordCatalog = {
     "src/app/(app)/settings/nort-greeting.tsx",
     "src/app/(app)/settings/passkey-manager.tsx",
     "src/app/(app)/settings/avatar-upload.tsx",
+    "src/components/feature-off-line.tsx",
+    "src/components/nav-link.tsx",
   ],
-  // "Plan" is the same word; Tap to Pay on iPhone is Apple's name; Nort is Nort.
-  sameInBoth: ["sh_dock_plan", "sh_push_tap_to_pay", "sh_kind_nort"],
+  // "Plan" is the same word; Tap to Pay on iPhone is Apple's name; Nort is Nort; the two maps apps are their names.
+  sameInBoth: ["sh_dock_plan", "sh_push_tap_to_pay", "sh_kind_nort", "sh_btn_googleMaps", "sh_btn_appleMaps"],
   en: {
     sh_language: "Language",
     sh_languageDesc: "Your preferred language for the app and the AI assistant.",
@@ -325,6 +327,17 @@ export const words: WordCatalog = {
     sh_addPhoto: "Add Photo",
     sh_remove: "Remove",
     sh_uploadFailed: "Upload failed.",
+
+    // ── The off line (feature-off-line.tsx: a record in a switched-off feature, with Turn On for the owner) and the
+    //    directions link (nav-link.tsx: the first tap asks which maps app). A clickable key here is sh_btn_, Title
+    //    Case in both languages (the visit-page-in-Spanish wave, cn-v1144). ──
+    sh_off: "Off",
+    sh_askTheOwner: "Ask The Owner",
+    sh_btn_turnOn: "Turn On",
+    sh_btn_turningOn: "Turning On…",
+    sh_openIn: "Open in…",
+    sh_btn_googleMaps: "Google Maps",
+    sh_btn_appleMaps: "Apple Maps",
   },
   es: {
     sh_language: "Idioma",
@@ -592,5 +605,13 @@ export const words: WordCatalog = {
     sh_addPhoto: "Agregar Foto",
     sh_remove: "Quitar",
     sh_uploadFailed: "No se pudo subir.",
+
+    sh_off: "Desactivado",
+    sh_askTheOwner: "Pídele Al Dueño",
+    sh_btn_turnOn: "Activar",
+    sh_btn_turningOn: "Activando…",
+    sh_openIn: "Abrir en…",
+    sh_btn_googleMaps: "Google Maps",
+    sh_btn_appleMaps: "Apple Maps",
   },
 };

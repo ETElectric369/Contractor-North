@@ -9,6 +9,7 @@ import type { BornTask } from "../src/lib/estimate/born-with-tasks";
 import { discountOverflow } from "../src/lib/invoice-math";
 import { deleteCredit } from "../src/lib/billing/withdraw-credit";
 import { expandTaskKit, taskFlags, type TaskKit } from "../src/lib/estimate/task-lines";
+import { fillText, translator } from "../src/lib/i18n";
 type TaskDetail = Parameters<typeof taskFlags>[0];
 
 /**
@@ -307,9 +308,14 @@ describe("[5] a kit with no count asks; [31] an unlinked kit line names its part
   });
   it("the Inspector shows the amber 'units?' chip beside a known kit's blank Units box, and the builder's box reads blank", () => {
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
-    expect(inspector).toContain("const unitsAsking = !!kit && t.units === null;");
-    expect(inspector).toContain("units?");
-    expect(inspector).toContain('{t.units === null ? `From the kit, per ${kit?.unit || "unit"}` : `From the kit, for ×${t.units}${kit?.unit ? ` ${kit.unit}` : ""}`}');
+    // (cn-v1144, the visit page in Spanish: the card's task is `task` — `t` is the translator — and the chip and the kit line read the vi_ catalog, English byte for byte)
+    expect(inspector).toContain("const unitsAsking = !!kit && task.units === null;");
+    expect(inspector).toContain('{t("vi_chipUnits")}');
+    expect(translator("en")("vi_chipUnits")).toBe("units?");
+    expect(inspector).toContain('{task.units === null ? fillText(t("vi_fromKitPer"), { unit: kit?.unit || t("vi_unitLower") }) : kit?.unit ? fillText(t("vi_fromKitForUnit"), { units: String(task.units), unit: kit.unit }) : fillText(t("vi_fromKitFor"), { units: String(task.units) })}');
+    expect(fillText(translator("en")("vi_fromKitPer"), { unit: translator("en")("vi_unitLower") })).toBe("From the kit, per unit");
+    expect(fillText(translator("en")("vi_fromKitForUnit"), { units: "7", unit: "footing" })).toBe("From the kit, for ×7 footing");
+    expect(fillText(translator("en")("vi_fromKitFor"), { units: "7" })).toBe("From the kit, for ×7");
     expect(src("src/app/(app)/quotes/task-breakdown.tsx")).toContain('value={d.units ?? 0} disabled={disabled} onValueChange={setUnits}');
   });
   it("an UNLINKED kit line that froze its book words drops the code lead; a hand-typed line with a dash keeps it", () => {
@@ -328,7 +334,7 @@ describe("[5] a kit with no count asks; [31] an unlinked kit line names its part
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(inspector).toContain("kitsPicker = true,");
     expect(inspector).toContain("{readOnly || kitUnread || !kitsPicker ? (");
-    expect(inspector).toContain("if (!((kitsPicker && taskKits.length > 0) || t.kit_id || showUnits)) return null;");
+    expect(inspector).toContain("if (!((kitsPicker && taskKits.length > 0) || task.kit_id || showUnits)) return null;"); // `task`, not `t`, since cn-v1144
   });
   it("Edit Kit says a task kit leaves Add From Kit", () => {
     expect(src("src/app/(app)/price-list/kits-manager.tsx")).toContain("It will no longer appear in Add From Kit on estimates and invoices (clear the hours to bring it back).");

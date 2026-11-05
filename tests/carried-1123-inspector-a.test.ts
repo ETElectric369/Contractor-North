@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createElement, isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
+import { translator } from "@/lib/i18n";
 
 /**
  * The Inspector's carried findings, group A (audit v1120, 2026-10-17):
@@ -156,8 +157,11 @@ describe("A picked or located visit address is written without reading the resul
     expect(fn.indexOf("if (!w.ok) {")).toBeGreaterThan(fn.indexOf("await setAppointmentPlace"));
     expect(fn.indexOf("savedPlaceRef.current = line;")).toBeGreaterThan(fn.indexOf("if (!w.ok) {"));
     // a refusal and a dead zone are both said in words, and the green tick comes down
-    expect(fn).toContain('setError(w.error ?? "Couldn\'t save the address — still trying.");');
-    expect(fn).toContain("No signal — the address is held on this phone and will save when you're back in range.");
+    // (cn-v1144, the visit page in Spanish: these words read the vi_ catalog through t(); the English is byte for byte what the screen said, pinned here)
+    expect(fn).toContain('setError(w.error ?? t("vi_couldntSaveAddress"));');
+    expect(fn).toContain('setError(t("vi_noSignalAddressHeld"));');
+    expect(translator("en")("vi_couldntSaveAddress")).toBe("Couldn't save the address — still trying.");
+    expect(translator("en")("vi_noSignalAddressHeld")).toBe("No signal — the address is held on this phone and will save when you're back in range.");
     expect(fn.match(/setSavedAt\(null\)/g)?.length).toBe(2);
     // and the autosave is left to try it again
     expect(fn).toContain("if (!w.refused) schedule();");

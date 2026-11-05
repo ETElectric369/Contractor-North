@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { translator } from "@/lib/i18n";
 import {
   putBackPlan,
   somethingCaptured,
@@ -281,7 +282,8 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
   it("Get Paid on a work visit, Mark Inspection Done on a booked inspection, none otherwise", () => {
     expect(page).toContain("{viewerIsStaff && a.status !== \"cancelled\" && !isInspection && (");
     expect(page).toContain("{viewerIsStaff && isInspection && booked && (");
-    expect(page).toContain('<MarkCompleteButton id={a.id} label="Mark Inspection Done" />');
+    expect(page).toContain('<MarkCompleteButton id={a.id} label={t("vp_btn_markInspectionDone")} />');
+    expect(translator("en")("vp_btn_markInspectionDone")).toBe("Mark Inspection Done");
     expect(page).not.toContain("Mark inspection complete");
   });
 
@@ -290,11 +292,17 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
     const order = ["<MarkDoneRow", "<AppointmentButton", "<UnscheduleButton id={a.id} menuItem", "<PutBackRow", "<WontHappenRow"].map((t) => menu.indexOf(t));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((x, y) => x - y)).toEqual(order);
-    expect(menu).toContain('rowLabel="Edit Details…"');
+    expect(menu).toContain('rowLabel={t("vp_btn_editDetails")}');
+    expect(translator("en")("vp_btn_editDetails")).toBe("Edit Details…");
     expect(menu).toContain("triggerClassName={ACTIONS_ROW_CLS}");
     expect(menu).toContain("afterDeleteHref={scheduleDayHref}");
-    expect(page).toContain('const VISIT_ACTIONS_MENU: NavTree = { center: { label: "Actions", icon: "more" }, nodes: [] };');
-    for (const w of ['"Mark Done"', '"Put It Back On The Schedule"', '"Won\'t Happen"']) expect(rows).toContain(w);
+    expect(page).toContain('const VISIT_ACTIONS_MENU: NavTree = { center: { label: t("vp_btn_actions"), icon: "more" }, nodes: [] };');
+    expect(translator("en")("vp_btn_actions")).toBe("Actions");
+    // The rows' words come from the catalog (the visit-page-in-Spanish wave), the English byte for byte.
+    for (const [key, w] of [["vp_btn_markDone", "Mark Done"], ["vp_btn_putItBackOnTheSchedule", "Put It Back On The Schedule"], ["vp_btn_wontHappen", "Won't Happen"]]) {
+      expect(rows).toContain(`t("${key}")`);
+      expect(translator("en")(key)).toBe(w);
+    }
     expect(rows).toMatch(/<div className=\{ACTIONS_DIVIDER_CLS\} \/>\s*<button[^>]*className=\{ACTIONS_DANGER_ROW_CLS\}/);
   });
 });

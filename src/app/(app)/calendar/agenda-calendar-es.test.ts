@@ -184,12 +184,14 @@ describe("the day drill's card, the grid, the chips, the map, the ⋯ and Move T
     expect(html).toContain('title="Agregar A La Agenda: toca una hora libre"');
   });
 
-  it("the chips say Nadie; the ⋯ says Más Para; Move To Day's trigger says Mover a un día", () => {
+  it("the chips say Nadie; the ⋯ says Más Para; Move To Day's trigger says Mover A Un Día (Title Case, Erik's cn-v1144 decision)", () => {
     expect(es(createElement(CrewInitials, { crew: [], lang: "es" }))).toContain(">Nadie<");
     const more = es(createElement(RowMoreSheet, { title: "14 Bayberry Ln", children: "rows" }));
     expect(more).toContain('aria-label="Más Para 14 Bayberry Ln"');
     expect(more).toContain('title="Más"');
-    expect(es(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Mover a un día"');
+    expect(es(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Mover A Un Día"');
+    // The one intended English change of the visit-page wave: the trigger's words are a clickable's.
+    expect(renderToStaticMarkup(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Move To A Day"');
   });
 
   it("the map, before its key is set, says so in Spanish", () => {

@@ -7,6 +7,9 @@ import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
 import { clockedOutWords } from "@/lib/long-shift";
 import { jobLabel } from "@/lib/schedule-options";
+import { say, type Words } from "@/lib/lang-words";
+import { localeOf, type Lang } from "@/lib/locale";
+import { formatTime } from "@/lib/utils";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -219,25 +222,61 @@ export async function findOverlap(
  * THE CLOCK-IN'S OWN SENTENCE for a start time over hours already recorded (a back-dated staff
  * clock-in, an offline punch delivered late). 0360 refuses it underneath; this says it the way the
  * person tapping the clock can act on: start after the other shift ends, or have it fixed.
+ *
+ * THE WORDS FOLLOW THE READER (cn-v1144, skeptic #50): the English stays inline as the default, byte
+ * for byte what it always said, so the Time Clock's clockIn and every test that hands no language read
+ * the same; a caller with the reader's language in hand (the visit's Start The Job, start-job-actions)
+ * passes `lang` + its translator (`words`, lib/i18n translator(lang)) and the sentence is said from the
+ * visit page's catalog (lib/words/visit-page, vp_clash…) through lib/lang-words say — this file imports
+ * no catalog. A Spanish clock reads "11:00 a. m." (lib/utils formatTime, one spelling everywhere) and
+ * its day "jueves 17 sept" (Intl es-US); no Spanish sentence ends on the clock.
  */
-export function clockInClashWords(input: {
-  clash: OverlapClash;
-  startIso: string;
-  tz: string;
-  isStaff: boolean;
-  /** What the refused tap did not do: a punch records nothing; the visit's Start The Job starts nothing. */
-  nothing?: string;
-}): string {
+export function clockInClashWords(
+  input: {
+    clash: OverlapClash;
+    startIso: string;
+    tz: string;
+    isStaff: boolean;
+    /** What the refused tap did not do: a punch records nothing; the visit's Start The Job starts nothing. */
+    nothing?: string;
+  },
+  lang: Lang | string | null = "en",
+  words?: Words,
+): string {
   const { clash, startIso, tz, isStaff } = input;
-  const nothing = input.nothing ?? "Nothing was recorded.";
+  const nothing = input.nothing ?? say(lang, words, "vp_nothingWasRecorded", "Nothing was recorded.");
   const at = (iso: string) =>
-    new Date(iso).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
-  const when = clash.clockOut ? shiftWhen(clash.clockIn, clash.clockOut, tz) : shiftWhen(clash.clockIn, clash.clockIn, tz).split(" to ")[0];
-  const where = clash.jobLabel ? ` on ${clash.jobLabel}` : clash.noJob ? " with no job" : "";
-  const fix = isStaff ? "fix that shift on Timecards" : "ask the office to fix that shift";
+    lang === "es"
+      ? formatTime(iso, tz, "es")
+      : new Date(iso).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+  // The clash's day in the reader's words: shiftWhen's English, or "jueves 17 sept" for a Spanish reader.
+  const day = (iso: string) => {
+    const d = new Date(iso);
+    const locale = localeOf(lang);
+    return `${d.toLocaleDateString(locale, { timeZone: tz, weekday: "long" })} ${d.toLocaleDateString(locale, { timeZone: tz, month: "short", day: "numeric" })}`;
+  };
+  const when = clash.clockOut
+    ? say(lang, words, "vp_clashWhen", shiftWhen(clash.clockIn, clash.clockOut, tz), { day: day(clash.clockIn), from: at(clash.clockIn), to: at(clash.clockOut) })
+    : lang === "es"
+      ? `${day(clash.clockIn)}, ${at(clash.clockIn)}`
+      : shiftWhen(clash.clockIn, clash.clockIn, tz).split(" to ")[0];
+  const where = clash.jobLabel
+    ? ` ${say(lang, words, "vp_clashOnJob", `on ${clash.jobLabel}`, { job: clash.jobLabel })}`
+    : clash.noJob
+      ? ` ${say(lang, words, "vp_clashWithNoJob", "with no job")}`
+      : "";
+  const fix = isStaff
+    ? say(lang, words, "vp_clashFixOnTimecards", "fix that shift on Timecards")
+    : say(lang, words, "vp_clashAskOfficeToFix", "ask the office to fix that shift");
   return clash.clockOut
-    ? `You already have hours recorded ${when}${where}, so a clock started at ${at(startIso)} would count them twice. ${nothing} Start the clock at ${at(clash.clockOut)} or later, or ${fix}.`
-    : `You already have a clock running since ${when}${where}. ${nothing}`;
+    ? say(
+        lang,
+        words,
+        "vp_clashRecorded",
+        `You already have hours recorded ${when}${where}, so a clock started at ${at(startIso)} would count them twice. ${nothing} Start the clock at ${at(clash.clockOut)} or later, or ${fix}.`,
+        { when, where, at: at(startIso), nothing, end: at(clash.clockOut), fix },
+      )
+    : say(lang, words, "vp_clashRunning", `You already have a clock running since ${when}${where}. ${nothing}`, { when, where, nothing });
 }
 
 /** "Thursday Sep 17, 11:00 AM to 9:00 PM" in the ORG's day (days are org-local, never the

@@ -117,12 +117,15 @@ export function formatDate(value: string | Date | null | undefined, tz: string =
   return dateFormat(lang, { timeZone: tz, month: "short", day: "numeric", year: "numeric" }).format(d);
 }
 
-/** Format an instant (timestamp) as date + time in the business timezone. */
+/** Format an instant (timestamp) as date + time in the business timezone. `lang` "es": "28 oct, 1:00 p. m." — the
+ *  half of the day spelled the one way formatTime spells it (lib/lang-words esMeridiem; Node's ICU says "p.m.",
+ *  a browser's "p. m.", and the visit page's header and its Visit Time row must print the same thing). */
 export function formatDateTime(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE, lang?: string | null) {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   if (isNaN(d.getTime())) return "—";
-  return dateFormat(lang, { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d);
+  const out = dateFormat(lang, { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d);
+  return lang === "es" ? esMeridiem(out) : out;
 }
 
 /** Time-only ("h:mm AM") in the business timezone. `lang` "es" (agenda wave): "9:30 a. m." through

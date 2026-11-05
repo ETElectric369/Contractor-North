@@ -17,6 +17,7 @@ vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 vi.mock("@/lib/notifications", () => ({ notifyPeople: vi.fn(async () => ({ bell: true, pushed: [] })) }));
 
 import { unscheduleAppointment } from "./actions";
+import { translator } from "@/lib/i18n";
 
 function client() {
   return {
@@ -74,7 +75,8 @@ describe("Clear The Date", () => {
     const walks = read("src/app/(app)/inspections/page.tsx");
     expect(walks).toContain('.order("starts_at", { ascending: false, nullsFirst: false })');
     expect(walks).toContain("<span>Waiting For A Day</span>");
-    expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain("<span>Waiting For A Day</span>");
+    expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain('<span>{t("vp_waitingForADay")}</span>');
+    expect(translator("en")("vp_waitingForADay")).toBe("Waiting For A Day");
     expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain('a.starts_at ? formatDateTime(a.starts_at, undefined, lang) : t("jb_waitingForADay")');
     // A waiting visit made into a job makes a job waiting for a day, not a "scheduled" one with none.
     expect(read("src/app/(app)/appointments/actions.ts")).toContain('status: appt.starts_at ? "scheduled" : "to_be_scheduled"');
@@ -82,9 +84,14 @@ describe("Clear The Date", () => {
 
   it("the button says what it does, in Title Case, at 44px (no small size)", () => {
     const s = readFileSync(join(process.cwd(), "src/app/(app)/appointments/unschedule-button.tsx"), "utf8");
-    expect(s).toContain('"Clear The Date"');
+    // The words come from the catalog since the visit-page-in-Spanish wave (vp_btn_clearTheDate), English byte for byte.
+    expect(s).toContain('const words = pending ? t("vp_btn_clearing") : t("vp_btn_clearTheDate");');
+    expect(translator("en")("vp_btn_clearTheDate")).toBe("Clear The Date");
+    expect(translator("en")("vp_btn_clearing")).toBe("Clearing…");
     expect(s).not.toContain('size="sm"');
-    expect(s).toContain("Waiting For A Day");
+    expect(s).toContain('toast(t("vp_waitsUnderWaitingForADay"), "success");');
+    expect(translator("en")("vp_waitsUnderWaitingForADay")).toBe("It waits under Waiting For A Day on the schedule. Place it there when they call.");
+    expect(translator("en")("vp_couldntClearTheDate")).toBe("Couldn't clear the date.");
     // On the visit page it is a ⋯ Actions row (W2-11): the same words and toast, the menu's 44px row.
     expect(s).toContain("className={ACTIONS_ROW_CLS}");
     const page = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/page.tsx"), "utf8");

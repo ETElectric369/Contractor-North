@@ -4,6 +4,8 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Ban, CalendarPlus, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { hasInAppHistory } from "@/components/back-link";
 import {
   ACTIONS_DANGER_ROW_CLS,
@@ -22,6 +24,8 @@ import { putVisitBackOnSchedule, setAppointmentStatus, wontHappenAppointment } f
  * the row: Mark Done · Edit Details… · Clear The Date · Put It Back On The Schedule · — · Won't Happen.
  *
  * Each row says what happened in a toast and closes the panel; a status it changes has an Undo.
+ * The rows' own words are the signed-in person's language (lib/words/visit-page, vp_); a note the
+ * server sends back (res.note, in the caller's language already) is said as received.
  */
 
 /** Undo for a status deed: back to what it was. A visit that was waiting on the customer's pick
@@ -29,14 +33,16 @@ import { putVisitBackOnSchedule, setAppointmentStatus, wontHappenAppointment } f
 export function useStatusUndo(id: string) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
   return (previousStatus: string | undefined) => ({
-    label: "Undo",
+    label: t("vp_btn_undo"),
     onClick: () => {
-      const back = wontHappenUndo(previousStatus);
+      const back = wontHappenUndo(previousStatus, lang, t);
       void (async () => {
         const res = await setAppointmentStatus(id, back.status);
         toast(
-          res.ok ? (back.note ? `Put back. ${back.note}` : "Put back.") : (res.error ?? "Couldn't put it back."),
+          res.ok ? (back.note ? fillText(t("vp_putBackNote"), { note: back.note }) : t("vp_putBack")) : (res.error ?? t("vp_couldntPutItBack")),
           res.ok ? "success" : "error",
         );
         router.refresh();
@@ -49,6 +55,7 @@ export function useStatusUndo(id: string) {
 export function MarkDoneRow({ id }: { id: string }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const closeMenu = useCloseActionsMenu();
   const undo = useStatusUndo(id);
   const [pending, start] = useTransition();
@@ -61,16 +68,16 @@ export function MarkDoneRow({ id }: { id: string }) {
         start(async () => {
           const res = await setAppointmentStatus(id, "completed");
           if (!res.ok) {
-            toast(res.error ?? "Couldn't mark it done — try again.", "error");
+            toast(res.error ?? t("vp_couldntMarkItDone"), "error");
             return;
           }
-          toast(res.note ? `Marked Done. ${res.note}` : "Marked Done", "success", undo(res.previousStatus));
+          toast(res.note ? fillText(t("vp_markedDoneNote"), { note: res.note }) : t("vp_markedDone"), "success", undo(res.previousStatus));
           closeMenu();
           router.refresh();
         })
       }
     >
-      <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? "Saving…" : "Mark Done"}
+      <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? t("vp_btn_saving") : t("vp_btn_markDone")}
     </button>
   );
 }
@@ -79,6 +86,7 @@ export function MarkDoneRow({ id }: { id: string }) {
 export function PutBackRow({ id }: { id: string }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const closeMenu = useCloseActionsMenu();
   const [pending, start] = useTransition();
   return (
@@ -90,16 +98,16 @@ export function PutBackRow({ id }: { id: string }) {
         start(async () => {
           const res = await putVisitBackOnSchedule(id);
           if (!res.ok) {
-            toast(res.error ?? "Couldn't put it back on the schedule — try again.", "error");
+            toast(res.error ?? t("vp_couldntPutBackOnSchedule"), "error");
             return;
           }
-          toast(res.message ?? "Back on the schedule.", "success");
+          toast(res.message ?? t("vp_backOnTheSchedule"), "success");
           closeMenu();
           router.refresh();
         })
       }
     >
-      <CalendarPlus className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? "Saving…" : "Put It Back On The Schedule"}
+      <CalendarPlus className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? t("vp_btn_saving") : t("vp_btn_putItBackOnTheSchedule")}
     </button>
   );
 }
@@ -112,20 +120,22 @@ export function PutBackRow({ id }: { id: string }) {
 export function WontHappenRow({ id, deletes, afterHref }: { id: string; deletes: boolean; afterHref: string }) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
   const closeMenu = useCloseActionsMenu();
   const undo = useStatusUndo(id);
   const [pending, start] = useTransition();
   function go() {
-    if (!confirm(wontHappenConfirm(deletes ? "delete" : "cancel"))) return;
+    if (!confirm(wontHappenConfirm(deletes ? "delete" : "cancel", lang, t))) return;
     start(async () => {
       const res = await wontHappenAppointment(id);
       if (!res.ok || !res.did) {
-        toast(res.error ?? "That visit didn't change — try again.", "error");
+        toast(res.error ?? t("vp_thatVisitDidntChange"), "error");
         return;
       }
       closeMenu();
       if (res.did === "deleted") {
-        toast(wontHappenToast("deleted"), "success");
+        toast(wontHappenToast("deleted", null, lang, t), "success");
         // GO BACK WHERE THEY CAME FROM, not to a hardcoded parent (Erik deleted from the
         // Inspections list and landed on /schedule). Real in-app history wins; the explicit
         // fallback, the visit's schedule day, only covers a cold entry. The deleted page can't
@@ -134,7 +144,7 @@ export function WontHappenRow({ id, deletes, afterHref }: { id: string; deletes:
         else router.push(afterHref);
         return;
       }
-      toast(wontHappenToast("cancelled", res.note), "success", undo(res.previousStatus));
+      toast(wontHappenToast("cancelled", res.note, lang, t), "success", undo(res.previousStatus));
       router.refresh();
     });
   }
@@ -142,7 +152,7 @@ export function WontHappenRow({ id, deletes, afterHref }: { id: string; deletes:
     <>
       <div className={ACTIONS_DIVIDER_CLS} />
       <button type="button" disabled={pending} onClick={go} className={ACTIONS_DANGER_ROW_CLS}>
-        <Ban className="h-4 w-4 shrink-0" /> {pending ? "Saving…" : "Won't Happen"}
+        <Ban className="h-4 w-4 shrink-0" /> {pending ? t("vp_btn_saving") : t("vp_btn_wontHappen")}
       </button>
     </>
   );

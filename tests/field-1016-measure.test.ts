@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { feetInches, measureNative, measurePluginPresent, metersToFeet, photoFile, squareMetersToSquareFeet } from "@/lib/native-measure";
+import { translator } from "@/lib/i18n";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -134,21 +135,35 @@ describe("the wiring, pinned", () => {
     // Measurements rows (Erik 2026-10-16: "group everything with a title called Lidar").
     expect(insp).toContain("const measureButtons = (taskId: string | null) =>");
     expect(insp).toContain("!readOnly && (canMeasure || scanOn.model) ? (");
-    expect(insp).toContain("<SectionLabel>Lidar</SectionLabel>");
-    expect((insp.match(/<SectionLabel>Lidar<\/SectionLabel>/g) ?? []).length).toBe(1);
-    expect(insp).toContain("{measureButtons(t.id)}\n                <SectionLabel>Measurements</SectionLabel>");
-    expect(insp).toContain("{measureButtons(null)}\n          <SectionLabel>Measurements</SectionLabel>");
-    expect(insp).toContain("{measureButtons(t.id)}");
+    // (cn-v1144, the visit page in Spanish: these words read the vi_ catalog through t(); the English is byte for byte what the screen said, pinned here)
+    // (the task card's loop variable is `task` since then — `t` is the translator)
+    const en = translator("en");
+    expect(en("vi_lidar")).toBe("Lidar");
+    expect(en("vi_measurements")).toBe("Measurements");
+    expect(insp).toContain('<SectionLabel>{t("vi_lidar")}</SectionLabel>');
+    expect((insp.match(/<SectionLabel>\{t\("vi_lidar"\)\}<\/SectionLabel>/g) ?? []).length).toBe(1);
+    expect(insp).toContain('{measureButtons(task.id)}\n                <SectionLabel>{t("vi_measurements")}</SectionLabel>');
+    expect(insp).toContain('{measureButtons(null)}\n          <SectionLabel>{t("vi_measurements")}</SectionLabel>');
+    expect(insp).toContain("{measureButtons(task.id)}");
     expect(insp).toContain("{measureButtons(null)}");
     expect(insp).toContain('onClick={() => void measureInto(taskId, "length")}');
     expect(insp).toContain('onClick={() => void measureInto(taskId, "area")}');
     const fn = insp.slice(insp.indexOf("async function measureInto("), insp.indexOf("// ── THE DOORS NORT TYPES INTO"));
     expect(fn).toContain('if ("refused" in r) setError(r.refused);');
-    expect(fn).toContain("const label = `${mode === \"area\" ? \"Measured area\" : \"Measured length\"}${r.approx ? \" (approx.)\" : \"\"}`;");
+    // The row's label is the catalog's (neutral, not a guess), stored in ENGLISH whatever the tech reads — a record the office
+    // and the estimate open (cn-v1144, skeptic #50); the box draws it in the reader's language (measureLabelWords).
+    expect(fn).toContain("const label = measuredRowLabel(mode, r.approx);");
+    expect(insp).toContain('return translator("en")(mode === "area" ? (approx ? "vi_measuredAreaApprox" : "vi_measuredArea") : approx ? "vi_measuredLengthApprox" : "vi_measuredLength");');
+    expect(insp.split("value={measureLabelWords(m.label, t)}").length - 1).toBe(2); // the task's rows and the visit's
+    expect(en("vi_measuredArea")).toBe("Measured area");
+    expect(en("vi_measuredLength")).toBe("Measured length");
+    expect(en("vi_measuredAreaApprox")).toBe("Measured area (approx.)");
+    expect(en("vi_measuredLengthApprox")).toBe("Measured length (approx.)");
     expect(fn).toContain("const row: CaptureMeasure = { id, label, value: r.value, unit: r.unit, ...(taskId ? { task_id: taskId } : {}) };");
     expect(fn).toContain("const next = [...measuresRef.current, row];\n      measuresRef.current = next;");
     expect(fn).toContain("if (measuringRef.current) return;");
-    expect(fn).toContain('setError("The measurement landed, but its picture didn\'t come back.");');
+    expect(fn).toContain('setError(t("vi_measurePictureMissing"));');
+    expect(en("vi_measurePictureMissing")).toBe("The measurement landed, but its picture didn't come back.");
     expect(fn).toContain("queueCapture({ measures: next });");
     expect(fn).toContain("await upload([r.photo], { caption: r.caption, about: label });");
     expect(fn).toContain("document.getElementById(`measure-label-${id}`)?.focus()");

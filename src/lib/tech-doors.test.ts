@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { translator } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ACTIONS } from "@/components/global-quick-add";
@@ -93,7 +94,9 @@ describe("the job's side doors", () => {
     expect(s).toContain("templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}");
     expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
     // The heading names the estimate only for the people who get its door.
-    expect(s).toContain('{viewerIsStaff && estimatesOn ? "Inspection Or Estimate" : "Inspection"}');
+    expect(s).toContain('{viewerIsStaff && estimatesOn ? t("vp_inspectionOrEstimate") : t("vp_inspection")}');
+    expect(translator("en")("vp_inspectionOrEstimate")).toBe("Inspection Or Estimate");
+    expect(translator("en")("vp_inspection")).toBe("Inspection");
   });
 
   it("the job's Tasks card is the crew's too: the Overview and the Tasks tab render it for every role (0358)", () => {

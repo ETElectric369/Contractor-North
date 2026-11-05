@@ -1,6 +1,7 @@
 "use client";
 
 import { isNativeShell } from "@/lib/native-shell";
+import { say, type Words } from "@/lib/lang-words";
 
 /**
  * MEASURE WITH THE CAMERA — the page's door to MeasurePlugin.swift (LiDAR rung 1, field feedback
@@ -13,6 +14,12 @@ import { isNativeShell } from "@/lib/native-shell";
  * THE BRIDGE, NEVER AN IMPORT (native-tap.ts / native-orientation.ts): a local plugin compiled
  * into the shell, read off window.Capacitor.Plugins. A build without it (today's App Store build)
  * has no key, so measurePluginPresent() is false and the Inspector draws nothing.
+ *
+ * THE READER'S LANGUAGE (the visit-page-in-Spanish wave, cn-v1144): a refusal a tech reads keeps its
+ * English inline as the default, byte for byte, and takes the caller's `lang` plus translator (`words`,
+ * lib/i18n translator(lang)) for the Spanish in the Inspector's catalog (lib/words/visit-inspector, vi_)
+ * through lib/lang-words say — this file imports no catalog. The caption ("12 ft 0 in", "100 sq ft
+ * (approx.)") and the row's unit are written into the capture and stay as stored: data, not words.
  */
 
 export type MeasureMode = "length" | "area";
@@ -93,21 +100,23 @@ export function photoFile(b64: unknown, mime: unknown, name: string): File | nul
   }
 }
 
-/** Open the measuring view and wait for the figure. The tap that calls this is the camera ask. */
-export async function measureNative(mode: MeasureMode): Promise<MeasureResult> {
+/** Open the measuring view and wait for the figure. The tap that calls this is the camera ask. A refusal
+ *  is said in the reader's language when the caller hands `lang` + `words`; the plugin's own sentence (a
+ *  rejection) is shown as it came. */
+export async function measureNative(mode: MeasureMode, lang?: string | null, words?: Words): Promise<MeasureResult> {
   const p = plugin();
-  if (!p?.measure) return { ok: false, refused: "Measure needs the North app on an iPhone." };
+  if (!p?.measure) return { ok: false, refused: say(lang, words, "vi_measureNeedsIphone", "Measure needs the North app on an iPhone.") };
   let r: Awaited<ReturnType<NonNullable<Plugin["measure"]>>>;
   try {
     r = await p.measure({ mode });
   } catch (e: unknown) {
     const msg = (e as { message?: unknown })?.message;
-    return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : "Couldn't open Measure. Try again, or type the measurement." };
+    return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : say(lang, words, "vi_couldntOpenMeasure", "Couldn't open Measure. Try again, or type the measurement.") };
   }
   if (r?.ok !== true) return { ok: false, cancelled: true };
   const raw = mode === "area" ? r.squareMeters : r.meters;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return { ok: false, refused: "Measure came back without a number. Try again." };
-  if (raw < (mode === "area" ? MIN_SQUARE_METERS : MIN_METERS)) return { ok: false, refused: "Measure came back with nothing — the points sat on the same spot. Try again." };
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return { ok: false, refused: say(lang, words, "vi_measureNoNumber", "Measure came back without a number. Try again.") };
+  if (raw < (mode === "area" ? MIN_SQUARE_METERS : MIN_METERS)) return { ok: false, refused: say(lang, words, "vi_measureSameSpot", "Measure came back with nothing — the points sat on the same spot. Try again.") };
   const lidar = r.lidar === true;
   const exact = mode === "area" ? squareMetersToSquareFeet(raw) : metersToFeet(raw);
   const value = lidar ? exact : approxFeet(exact);

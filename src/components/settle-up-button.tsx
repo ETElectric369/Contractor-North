@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- the QRs are data URLs and the Tap to Pay symbol is a 4KB static PNG; next/image adds nothing */
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeDollarSign, Check, Copy, Loader2, Mail, MessageSquare, QrCode, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,10 @@ import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
-import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { paymentMethodKey } from "@/lib/payment-method";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
+import type { Lang } from "@/lib/locale";
 import { cancelTapPaymentIntent, createTapPaymentIntent, tapPaymentOutcome, tapToPayContext } from "@/app/(app)/billing/tap-actions";
 import { verdictAfterConfirm, watchConfirmedTap } from "@/lib/tap-verdict";
 import {
@@ -136,12 +138,47 @@ type Receipt = { link: string; business: string; invoiceNumber: string | null } 
 
 const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** The reader's words: lib/i18n translator(lang), bound to the signed-in person's language (useLang). Every sentence this
+ *  sheet says is a key in lib/words/settle-up (su_); the English there is byte for byte what it said before the catalog. */
+type Words = (key: string) => string;
+
 /**
  * The last thing WE say before Apple owns the screen, and it carries the figure read straight off
  * the PaymentIntent — never off a balance captured earlier in the flow. A label built from a
  * stale number is how a tech reads "$500" aloud while the reader is armed for something else.
  */
-export const holdCardLine = (cents: number) => `Hold their card to the top of the phone: ${money(cents / 100)}`;
+export const holdCardLine = (cents: number, lang?: Lang | string | null) => fillText(translator(lang)("su_holdCard"), { amount: money(cents / 100) });
+
+/**
+ * WHAT THE CUSTOMER READS STAYS ENGLISH (skeptic #50). The customer has no language of their own yet, so the
+ * three strings that leave the tech's phone for the customer — the receipt's share sheet, its Text From This
+ * Phone body and the pay-link text — are composed through translator("en") whatever the tech reads on
+ * screen: the same rule start-job-actions keeps for the office's bell (office_t). Everything the TECH reads
+ * on the sheet stays `t`. Exported so the test can read what the customer gets.
+ */
+const customer_t = translator("en");
+
+/** The receipt's share-sheet title and the one line every door from this phone carries: who, which invoice,
+ *  how much, what happened, when. The link rides separately (the share sheet wants it as `url`). */
+export function customerReceiptWords(
+  outcome: "paid" | "declined",
+  receipt: { business: string; invoiceNumber: string | null },
+  amount: number,
+  date: Date = new Date(),
+): { title: string; line: string } {
+  const who = receipt.business ? `${receipt.business}: ` : "";
+  const inv = receipt.invoiceNumber ? fillText(customer_t("su_invoiceN"), { n: receipt.invoiceNumber }) : customer_t("su_yourInvoice");
+  const when = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return {
+    title: fillText(customer_t(outcome === "paid" ? "su_receiptTitle" : "su_declinedTitle"), { inv }),
+    line: fillText(customer_t(outcome === "paid" ? "su_paidLine" : "su_declinedLine"), { who, inv, amount: money(amount), date: when }),
+  };
+}
+
+/** The pay-link text (Text The Pay Link): "Invoice 1042 — $150.00. Pay by card here: …". */
+export function customerPayLinkText(invoiceNumber: string | null | undefined, amount: number, url: string): string {
+  return fillText(customer_t("su_payLinkSms"), { inv: invoiceNumber ? fillText(customer_t("su_invoiceDash"), { n: invoiceNumber }) : "", amount: money(amount), url });
+}
 
 /** What invoiceCollectStatus answers with: the one row this screen re-checks the money against. */
 type LiveBalance = { ok: boolean; total?: number; amountPaid?: number } | null;
@@ -158,10 +195,8 @@ export function doorAmountStillMatches(cents: number, live: LiveBalance): boolea
   return Math.round(invoiceBalance(live.total, live.amountPaid) * 100) === cents;
 }
 
-/** Apple 3.8.1, word for word what a non-admin needs to hear. */
-const ASK_ADMIN = "Ask an owner or admin to enable Tap to Pay on iPhone first.";
-/** Apple 1.4, in place of the button on an iPhone whose iOS can't run it. */
-const UPDATE_IOS = "Update iOS to use Tap to Pay on iPhone.";
+// Apple 3.8.1 (word for word what a non-admin needs to hear) and Apple 1.4 (in place of the button on an
+// iPhone whose iOS can't run it) are su_askAdmin and su_updateIos in lib/words/settle-up, in the reader's language.
 
 /**
  * The bridge returns sentences, not codes (native-tap.ts: the plugin drops the SDK's code), so
@@ -200,6 +235,8 @@ async function ensureInvoice(
   note: string,
   paidAt: string | null,
   toast: (m: string, k?: "success" | "error" | "info") => void,
+  /** The reader's words (translator(lang)): what a refusal says back. */
+  t: Words,
   onOtherInvoice: (id: string) => void,
   /** The card door on a job whose open bill is a draft: the person has said yes to sending it. */
   sendIt = false,
@@ -209,20 +246,20 @@ async function ensureInvoice(
   if (props.source === "invoice") {
     if (collect === "record") {
       const r = await recordPayment({ invoice_id: props.invoiceId, amount, method, note, paid_at: paidAt });
-      if (!r.ok) { toast(r.error ?? "Couldn't record that.", "error"); return null; }
+      if (!r.ok) { toast(r.error ?? t("su_couldntRecord"), "error"); return null; }
     }
     return props.invoiceId;
   }
   const res = await settleUp({ source: props.source, id: props.id, amount, method, note, collect, sendIt }).catch(() => ({
     ok: false as const,
-    error: "That didn't reach the server — check your connection and try again.",
+    error: t("su_didntReachServer"),
   }));
   if (!res.ok) {
     if ("needsSend" in res && res.needsSend && onNeedsSend) {
       onNeedsSend(("invoiceNumber" in res ? res.invoiceNumber : null) ?? null);
       return null;
     }
-    toast(res.error ?? "Couldn't settle that.", "error");
+    toast(res.error ?? t("su_couldntSettle"), "error");
     if ("invoiceId" in res && res.invoiceId) onOtherInvoice(res.invoiceId);
     return null;
   }
@@ -239,26 +276,26 @@ async function ensureInvoice(
  * 5.8: a "processing" line after the card is read). The stage strings are native-tap.ts's
  * published vocabulary. "ready"/"not ready"/nothing yet fall back to the step's own label.
  */
-function busyLine(label: string, p: TapProgress | null): { title: string; detail: string | null; percent: number | null } {
+function busyLine(label: string, p: TapProgress | null, t: Words): { title: string; detail: string | null; percent: number | null } {
   const stage = p?.stage;
   switch (stage) {
     case "configuring the reader":
       return {
-        title: `Getting Tap to Pay on iPhone ready… ${p?.percent ?? 0}%`,
-        detail: "Apple is setting this iPhone up as a card reader — the first time takes a minute or two.",
+        title: fillText(t("su_gettingReadyPct"), { percent: String(p?.percent ?? 0) }),
+        detail: t("su_appleSettingUp"),
         percent: p?.percent ?? null,
       };
     case "waiting for the tap":
       // Apple owns the screen from here; the label already says to hold the card to the phone.
       return { title: label, detail: null, percent: null };
     case "confirming with Stripe":
-      return { title: "Processing the payment…", detail: "Confirming with Stripe — a few seconds.", percent: null };
+      return { title: t("su_processingPayment"), detail: t("su_confirmingStripe"), percent: null };
     case "ready":
     case "not ready":
     case undefined:
       return { title: label, detail: null, percent: null };
     default:
-      return { title: "Getting Tap to Pay on iPhone ready…", detail: stage ? `${stage[0].toUpperCase()}${stage.slice(1)}…` : null, percent: null };
+      return { title: t("su_gettingReady"), detail: stage ? `${stage[0].toUpperCase()}${stage.slice(1)}…` : null, percent: null };
   }
 }
 
@@ -313,6 +350,8 @@ function ReceiptRow({
    *  Text From This Phone and never offers Text Receipt, which could only refuse. */
   textReady?: boolean;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const [texting, setTexting] = useState(false);
   const [texted, setTexted] = useState(false);
   /** The SMS service said this customer has no number: the text door becomes this phone's. */
@@ -324,7 +363,6 @@ function ReceiptRow({
   const [emailing, setEmailing] = useState(false);
   const [emailed, setEmailed] = useState(false);
   const [showQr, setShowQr] = useState(false);
-  const date = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   // Read at render, not in an effect: this row only ever mounts on the client, after an outcome
   // (never in the server render), so there is no hydration split to protect against.
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
@@ -340,7 +378,7 @@ function ReceiptRow({
       const r = await textInvoice(invoiceId);
       if (r.ok) {
         setTexted(true);
-        toast("Receipt texted — the paid invoice, from the business's number.", "success");
+        toast(t("su_receiptTexted"), "success");
         return;
       }
       // The one refusal with a door behind it. textInvoice's sentence is the key ("This customer
@@ -352,12 +390,12 @@ function ReceiptRow({
       // Texting isn't set up: say so here, where he tapped, and hand him the door that works.
       if (r.notReady) {
         setNotReadySeen(true);
-        toast("Texting isn't set up yet, so the business can't text it. Text From This Phone sends it from yours.", "info");
+        toast(t("su_textingNotSetUp"), "info");
         return;
       }
-      toast(r.error ?? "The text didn't send — open the invoice and send it from there.", "error");
+      toast(r.error ?? t("su_textDidntSend"), "error");
     } catch {
-      toast("The text didn't reach the server — check your connection and try again.", "error");
+      toast(t("su_textDidntReach"), "error");
     } finally {
       setTexting(false);
     }
@@ -370,31 +408,25 @@ function ReceiptRow({
       const r = await emailInvoice(invoiceId);
       if (r.ok) {
         setEmailed(true);
-        toast("Receipt emailed — the paid invoice.", "success");
+        toast(t("su_receiptEmailed"), "success");
       } else {
-        toast(r.error ?? "The email didn't send — open the invoice and send it from there.", "error");
+        toast(r.error ?? t("su_emailDidntSend"), "error");
       }
     } catch {
-      toast("The email didn't reach the server — check your connection and try again.", "error");
+      toast(t("su_emailDidntReach"), "error");
     } finally {
       setEmailing(false);
     }
   }
 
-  // The one sentence every door from this phone carries: who, which invoice, how much, what
-  // happened, when. The link rides separately (the share sheet wants it as `url`).
+  // The one sentence every door from this phone carries, and the share sheet's title: the CUSTOMER's, so
+  // English whatever the tech reads (customerReceiptWords, customer_t). The link rides separately.
   let line = "";
   let title = "";
   let link = "";
   if (receipt && "link" in receipt) {
-    const who = receipt.business ? `${receipt.business}: ` : "";
-    const inv = receipt.invoiceNumber ? `Invoice ${receipt.invoiceNumber}` : "Your invoice";
     link = receipt.link;
-    title = `${outcome === "paid" ? "Receipt" : "Card declined"} — ${inv}`;
-    line =
-      outcome === "paid"
-        ? `${who}${inv} — ${money(amount)} paid by card on ${date}. Your receipt:`
-        : `${who}${inv} — ${money(amount)} card payment declined on ${date}; nothing was charged. The invoice is still open:`;
+    ({ title, line } = customerReceiptWords(outcome, receipt, amount));
   }
 
   async function shareIt() {
@@ -405,24 +437,24 @@ function ReceiptRow({
       // Closing the sheet without picking anything rejects with AbortError — that is a choice,
       // not a failure. Anything else is said.
       if (e instanceof Error && e.name === "AbortError") return;
-      toast("Couldn't open the share sheet — use Text or Email instead.", "error");
+      toast(t("su_shareFailed"), "error");
     }
   }
 
   const note = [
-    offerServiceText && "Text Receipt sends from the business’s number.",
-    fromThisPhone && "Text From This Phone sends from this phone’s number.",
-    outcome === "paid" && "Email Receipt sends from the business’s email.",
-    canShare && "Share opens this phone’s share sheet.",
+    offerServiceText && t("su_noteTextReceipt"),
+    fromThisPhone && t("su_noteTextFromPhone"),
+    outcome === "paid" && t("su_noteEmailReceipt"),
+    canShare && t("su_noteShare"),
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <div className="w-full space-y-2 text-center">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Receipt</div>
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("su_receipt")}</div>
       {receipt === null ? (
-        <p className="text-xs text-slate-400">Getting the receipt link…</p>
+        <p className="text-xs text-slate-400">{t("su_gettingReceiptLink")}</p>
       ) : "error" in receipt ? (
         <p className="text-xs text-rose-600">{receipt.error}</p>
       ) : (
@@ -431,7 +463,7 @@ function ReceiptRow({
             {offerServiceText && (
               <Button size="sm" variant="outline" onClick={() => void textIt()} disabled={texting}>
                 {texted ? <Check className="h-4 w-4 text-emerald-600" /> : texting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
-                {texted ? "Texted" : texting ? "Sending…" : "Text Receipt"}
+                {texted ? t("su_btn_texted") : texting ? t("su_btn_sending") : t("su_btn_textReceipt")}
               </Button>
             )}
             {fromThisPhone && (
@@ -439,33 +471,33 @@ function ReceiptRow({
                 href={`sms:?body=${encodeURIComponent(`${line} ${link}`)}`}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:bg-slate-50"
               >
-                <MessageSquare className="h-4 w-4" /> Text From This Phone
+                <MessageSquare className="h-4 w-4" /> {t("su_btn_textFromThisPhone")}
               </a>
             )}
             {outcome === "paid" && (
               <Button size="sm" variant="outline" onClick={() => void emailIt()} disabled={emailing}>
                 {emailed ? <Check className="h-4 w-4 text-emerald-600" /> : emailing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-                {emailed ? "Emailed" : emailing ? "Sending…" : "Email Receipt"}
+                {emailed ? t("su_btn_emailed") : emailing ? t("su_btn_sending") : t("su_btn_emailReceipt")}
               </Button>
             )}
             {canShare && (
               <Button size="sm" variant="outline" onClick={() => void shareIt()}>
-                <Share className="h-4 w-4" /> Share
+                <Share className="h-4 w-4" /> {t("su_btn_share")}
               </Button>
             )}
             {outcome === "paid" && qr && (
               <Button size="sm" variant="outline" onClick={() => setShowQr((v) => !v)}>
-                <QrCode className="h-4 w-4" /> {showQr ? "Hide QR" : "Show QR"}
+                <QrCode className="h-4 w-4" /> {showQr ? t("su_btn_hideQr") : t("su_btn_showQr")}
               </Button>
             )}
           </div>
-          {noPhone && <p className="text-xs text-slate-500">No phone number on file for this customer — text it from this phone instead.</p>}
+          {noPhone && <p className="text-xs text-slate-500">{t("su_noPhoneOnFile")}</p>}
           {outcome === "paid" && !noPhone && !serviceText && (
-            <p className="text-xs text-slate-500">{TEXTS_NOT_READY_LINE} Until then, text it from this phone.</p>
+            <p className="text-xs text-slate-500">{t("su_textsNotReady")} {t("su_untilThenTextFromPhone")}</p>
           )}
         </>
       )}
-      {showQr && outcome === "paid" && qr && <img src={qr} alt="Scan for the receipt" className="mx-auto h-40 w-40 rounded-lg" />}
+      {showQr && outcome === "paid" && qr && <img src={qr} alt={t("su_scanForReceipt")} className="mx-auto h-40 w-40 rounded-lg" />}
       {note && <p className="text-[11px] text-slate-400">{note}</p>}
     </div>
   );
@@ -474,14 +506,15 @@ function ReceiptRow({
 /** The outcome, named (Apple 5.9), with the bridge's sentence and — for a declined or timed-out
  *  card — Try Again on the SAME PaymentIntent (Stripe: re-use it, never mint a second door). */
 function TapOutcomeBox({ tap, onRetry }: { tap: Extract<TapState, { kind: "error" }>; onRetry: (() => void) | null }) {
+  const t = translator(useLang());
   const heading =
     tap.outcome === "declined"
-      ? "Declined"
+      ? t("su_declined")
       : tap.outcome === "timed-out"
-        ? "Timed out"
+        ? t("su_timedOut")
         : tap.outcome === "not-enabled"
-          ? "Not enabled yet"
-          : "Didn't go through";
+          ? t("su_notEnabledYet")
+          : t("su_didntGoThrough");
   return (
     <div className="w-full space-y-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-left text-sm text-rose-700">
       <div className="font-semibold">{heading}</div>
@@ -492,12 +525,12 @@ function TapOutcomeBox({ tap, onRetry }: { tap: Extract<TapState, { kind: "error
           charge that went through flips this screen to Paid on its own. */}
       {tap.outcome === "timed-out" && (
         <p className="text-rose-600">
-          If the card was read, this flips to Paid on its own within a minute. If it doesn&rsquo;t, press Tap to Pay again.
+          {t("su_timeoutFlips")}
         </p>
       )}
       {onRetry && (
         <Button size="sm" variant="outline" onClick={onRetry}>
-          Try Again
+          {t("su_btn_tryAgain")}
         </Button>
       )}
     </div>
@@ -522,6 +555,9 @@ function useCardDoor(
 ) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  // Bound once per language: `landed` and the receipt effect carry it in their deps.
+  const t = useMemo(() => translator(lang), [lang]);
   const [pending, start] = useTransition();
   const [art, setArt] = useState<Art | null>(null);
   const [invoiceId, setInvoiceId] = useState<string | null>(props.source === "invoice" ? props.invoiceId : null);
@@ -588,7 +624,7 @@ function useCardDoor(
 
   function invoiceDoor(): Promise<string | null> {
     if (!door.current) {
-      door.current = ensureInvoice(props, "card", "later", 0, "", null, toast, (other) => router.push(`/billing/${other}`), sendOk.current, (n) => {
+      door.current = ensureInvoice(props, "card", "later", 0, "", null, toast, t, (other) => router.push(`/billing/${other}`), sendOk.current, (n) => {
         askFromDoor.current = n;
       }).then(
         (id) => {
@@ -621,9 +657,9 @@ function useCardDoor(
       const a = await collectArtifacts(id, undefined, { sendIt: sendOk.current });
       if (gen.current !== g) return;
       if (!a.ok && a.needsSend) { setAsk({ invoiceNumber: a.invoiceNumber ?? null, then: "qr" }); return; }
-      if (!a.ok) { toast(a.error ?? "Couldn't build the payment code.", "error"); return; }
+      if (!a.ok) { toast(a.error ?? t("su_couldntBuildCode"), "error"); return; }
       if (!a.payQr) {
-        toast("Card payments aren't switched on yet — Settings → Getting Paid → Set Up Card Payments.", "error");
+        toast(t("su_cardsNotOn"), "error");
         return;
       }
       balanceRef.current = a.balance ?? balanceRef.current;
@@ -646,7 +682,7 @@ function useCardDoor(
     const ctx = await tapToPayContext().catch(() => null);
     if (gen.current !== g) return "stale";
     if (ctx?.ok && ctx.canEnable) {
-      setTap({ kind: "busy", phase: "enable", label: "Turning on Tap to Pay on iPhone — Apple's terms come up first." });
+      setTap({ kind: "busy", phase: "enable", label: t("su_turningOnTap") });
       const en = await enableTapToPay();
       if (gen.current !== g) return "stale";
       return en.ok ? "retry" : { error: en.error, outcome: "setup" };
@@ -654,7 +690,7 @@ function useCardDoor(
     const linked = await tapToPayAccountLinked();
     if (gen.current !== g) return "stale";
     if (linked === true) return "retry";
-    if (linked === false) return { error: ASK_ADMIN, outcome: "not-enabled" };
+    if (linked === false) return { error: t("su_askAdmin"), outcome: "not-enabled" };
     // Couldn't be known on this build/iOS — the bridge's sentence already names the Settings door.
     return { error: bridgeSentence, outcome: "not-enabled" };
   }
@@ -757,7 +793,7 @@ function useCardDoor(
       return { pi: held, moved };
     }
 
-    setTap({ kind: "busy", phase: "pay", label: "Getting Tap to Pay on iPhone ready…" });
+    setTap({ kind: "busy", phase: "pay", label: t("su_gettingReady") });
     try {
       // The device probe from opening may still hold the SDK's turn — let it finish first.
       await probe.current;
@@ -780,7 +816,7 @@ function useCardDoor(
       // only when THIS press minted it; the open-time mint (Apple 5.6) skipped that branch, and a
       // confirmed tap sat on "recording it…" forever while the invoice had long read Paid.
       setTapStarted(true);
-      setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount) });
+      setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount, lang) });
       let c = await collect(pi);
       if (stale(true)) return;
       if (!c.ok && c.notEnabled) {
@@ -791,12 +827,12 @@ function useCardDoor(
         // card only once the person has closed it (Apple's sheet dismisses, then the reader
         // arms). Its refusal — no guide on iOS < 18, an older shell — is already a sentence for
         // the Settings door; it is no reason to hold up a customer standing there, card out.
-        setTap({ kind: "busy", phase: "guide", label: "Apple's guide to Tap to Pay on iPhone is up." });
+        setTap({ kind: "busy", phase: "guide", label: t("su_appleGuideUp") });
         const guide = await showHowToTap().catch(() => null);
         if (stale()) return;
         // No guide on this iOS (< 18) or this build: the written steps live in Settings, and the
         // person is told so once, under the card prompt — not a wall, the card is still next.
-        if (!guide?.ok) setTapNote("Apple's guide isn't available on this iPhone — the steps are in Settings › Getting Paid › How To Tap.");
+        if (!guide?.ok) setTapNote(t("su_appleGuideUnavailable"));
         // THE DOOR IS CHECKED AGAIN HERE, and this is the whole reason doorFor exists. Apple's
         // terms sheet and the connect behind it are allowed eight minutes; the how-to guide ten
         // more. The `pi` above was minted before any of that, at the balance of that moment, and
@@ -812,12 +848,12 @@ function useCardDoor(
           setTap({
             kind: "error",
             outcome: "setup",
-            error: "The balance changed while Apple's terms were up. Press Tap to Pay again for the new amount.",
+            error: t("su_balanceChanged"),
           });
           return;
         }
         pi = again.pi;
-        setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount) });
+        setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount, lang) });
         c = await collect(pi);
         if (stale(true)) return;
       }
@@ -836,7 +872,7 @@ function useCardDoor(
          *   no answer → the claim is shown as a claim, and a watch that ENDS: ~20 s, then one
          *   more look at Stripe, then a verdict either way. Never a spinner forever.
          */
-        setTap({ kind: "confirmed", note: "Card approved — checking with Stripe…" });
+        setTap({ kind: "confirmed", note: t("su_cardApprovedChecking") });
         const first = await tapPaymentOutcome(id, pi.paymentIntentId).catch(() => null);
         if (stale()) return;
         const verdict = verdictAfterConfirm(first);
@@ -875,7 +911,7 @@ function useCardDoor(
       if (stale()) return;
       setTap({
         kind: "error",
-        error: e instanceof Error && e.message ? e.message : "That didn't reach the server — check your connection and try again.",
+        error: e instanceof Error && e.message ? e.message : t("su_didntReachServer"),
         outcome: "setup",
       });
     }
@@ -897,9 +933,9 @@ function useCardDoor(
       landedOnce.current = true;
       const a = amountPaid ?? balanceRef.current;
       setPaid(a);
-      toast(`Paid — ${money(a)} by card. Done.`, "success");
+      toast(fillText(t("su_paidByCardDone"), { amount: money(a) }), "success");
     },
-    [toast],
+    [toast, t],
   );
 
   // THE WATCH. Stripe's webhook writes the payment (or the tap's own check does, when Stripe
@@ -954,8 +990,7 @@ function useCardDoor(
         if (!live) return;
         if (s?.ok && s.status === "draft") {
           setReceipt({
-            error:
-              "Nothing was charged, and this invoice is still a draft, so there's no link to send yet. Finish it and send it when you're ready.",
+            error: t("su_declinedDraftNoLink"),
           });
           return;
         }
@@ -975,11 +1010,11 @@ function useCardDoor(
       setReceipt(
         link
           ? { link, business: business === "Invoice payment" ? "" : business, invoiceNumber: got?.invoiceNumber ?? null }
-          : { error: "Couldn't get the receipt link — open the invoice and share it from there." },
+          : { error: t("su_couldntGetReceiptLink") },
       );
     })();
     return () => { live = false; };
-  }, [open, wantsReceipt, invoiceId, receipt, art, paid]);
+  }, [open, wantsReceipt, invoiceId, receipt, art, paid, t]);
 
   /** Mirrors `tap.kind === "busy"` for the unmount cleanup below, which is written once and can
    *  never see the state through its own closure. */
@@ -1055,15 +1090,14 @@ function useCardDoor(
     if (!a) return;
     sendOk.current = true;
     setAsk(null);
-    toast(`Sending ${a.invoiceNumber ?? "the invoice"} as the bill.`, "info");
+    toast(fillText(t("su_sendingAsBill"), { inv: a.invoiceNumber ?? t("su_theInvoice") }), "info");
     if (a.then === "qr") { prepare(); return; }
     void tapToPay();
   }
 
   const amount = art?.balance ?? balanceRef.current;
-  const smsBody = art?.payUrl
-    ? encodeURIComponent(`${art.invoiceNumber ? `Invoice ${art.invoiceNumber} — ` : ""}${money(amount)}. Pay by card here: ${art.payUrl}`)
-    : "";
+  // The customer's text: English whatever the tech reads (customerPayLinkText, customer_t).
+  const smsBody = art?.payUrl ? encodeURIComponent(customerPayLinkText(art.invoiceNumber, amount, art.payUrl)) : "";
   /** Try Again where the same PaymentIntent can take another card: a declined card (Apple 5.9),
    *  and a tap the reader refused before any card was read ("failed": a busy reader, a
    *  connection still finishing, a Stripe session that didn't start) — the PaymentIntent is
@@ -1075,7 +1109,7 @@ function useCardDoor(
     tap.kind === "error" && tap.outcome === "declined" && invoiceId ? (
       <ReceiptRow outcome="declined" receipt={receipt} invoiceId={invoiceId} amount={balanceRef.current} toast={toast} textReady={props.textReady} />
     ) : null;
-  const busy = tap.kind === "busy" ? busyLine(tap.label, progress) : null;
+  const busy = tap.kind === "busy" ? busyLine(tap.label, progress, t) : null;
 
   function onOpen() {
     // A NEW GENERATION and a clean slate. Whatever the last open left — a Declined box, a
@@ -1151,7 +1185,7 @@ function useCardDoor(
               setTapOk(false);
               // Apple 1.4: an iOS that can't run it is told to update. A model that can't
               // simply has no button — Show Card QR is the card door on that phone.
-              setTapNote(d.osTooOld ? UPDATE_IOS : null);
+              setTapNote(d.osTooOld ? t("su_updateIos") : null);
             },
             () => {},
           )
@@ -1169,15 +1203,15 @@ function useCardDoor(
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
             <Check className="h-6 w-6" />
           </span>
-          <div className="text-lg font-semibold text-slate-900">Paid — {money(paid)}</div>
-          <p className="text-xs text-slate-500">Recorded on the invoice. The money lands in your Stripe balance.</p>
+          <div className="text-lg font-semibold text-slate-900">{fillText(t("su_paidAmount"), { amount: money(paid) })}</div>
+          <p className="text-xs text-slate-500">{t("su_recordedOnInvoice")}</p>
           {/* Apple 5.10: the receipt, sendable from the approved outcome — the paid invoice. */}
           {invoiceId && (
             <div className="mt-2 w-full">
               <ReceiptRow outcome="paid" receipt={receipt} invoiceId={invoiceId} amount={paid} qr={art?.payQr} toast={toast} textReady={props.textReady} />
             </div>
           )}
-          <Button className="mt-2" onClick={onDone}>Done</Button>
+          <Button className="mt-2" onClick={onDone}>{t("su_btn_done")}</Button>
         </div>
       );
     } else if (ask) {
@@ -1185,11 +1219,11 @@ function useCardDoor(
       // Now goes back to the sheet with nothing written; Send It goes on with the door pressed.
       takeover = (
         <div className="space-y-3">
-          <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
-          <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber)}</p>
+          <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber, lang, t)}</div>
+          <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber, "card", lang, t)}</p>
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => setAsk(null)}>Not Now</Button>
-            <Button onClick={sendAndGo} disabled={pending}>Send It</Button>
+            <Button variant="outline" onClick={() => setAsk(null)}>{t("su_btn_notNow")}</Button>
+            <Button onClick={sendAndGo} disabled={pending}>{t("su_btn_sendIt")}</Button>
           </div>
         </div>
       );
@@ -1218,16 +1252,16 @@ function useCardDoor(
                 if (!tapCollecting.current) setTap({ kind: "idle" });
               }}
             >
-              Cancel
+              {t("su_btn_cancel")}
             </Button>
           ) : tap.phase === "enable" ? (
             // Apple's terms sheet is a native screen with its own Cancel; a button here that
             // couldn't stop it would be a silent one.
-            <p className="max-w-64 text-xs text-slate-500">Apple&rsquo;s sheet closes on its own once the terms are accepted or declined.</p>
+            <p className="max-w-64 text-xs text-slate-500">{t("su_appleSheetCloses")}</p>
           ) : (
             // Apple's how-to guide (4.2), the same: native, its own Done — and the card is
             // what comes next, so the person knows the tap hasn't been lost behind it.
-            <p className="max-w-64 text-xs text-slate-500">Close Apple&rsquo;s guide when you&rsquo;re done — the card is next.</p>
+            <p className="max-w-64 text-xs text-slate-500">{t("su_closeAppleGuide")}</p>
           )}
         </div>
       );
@@ -1239,7 +1273,7 @@ function useCardDoor(
         <div className="flex flex-col items-center gap-2 py-4 text-center">
           <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
           <div className="text-sm font-medium text-slate-800">{tap.note}</div>
-          <p className="text-xs text-slate-500">This flips to Paid the moment the payment lands on the invoice.</p>
+          <p className="text-xs text-slate-500">{t("su_flipsToPaid")}</p>
         </div>
       );
     }
@@ -1249,9 +1283,7 @@ function useCardDoor(
     <div className="space-y-3">
       {props.source !== "invoice" && (
         <p className="text-xs text-slate-500">
-          {props.source === "job"
-            ? "A card is taken on the job's open bill (or writes one if there's none), then the card door goes in front of the customer."
-            : "A card writes the bill, sends it, and marks the visit done — then the card door goes in front of the customer."}
+          {props.source === "job" ? t("su_cardOnJobLine") : t("su_cardOnVisitLine")}
         </p>
       )}
       {tap.kind === "error" && <TapOutcomeBox tap={tap} onRetry={retry} />}
@@ -1263,16 +1295,16 @@ function useCardDoor(
         {tapNote && <p className="text-xs text-slate-500">{tapNote}</p>}
         {tapOk && (
           <Button className="w-full" onClick={() => void tapToPay()}>
-            <TapToPayGlyph /> Tap to Pay
+            <TapToPayGlyph /> {t("su_apple_tapToPay")}
           </Button>
         )}
         <Button className="w-full" variant={tapOk ? "outline" : "primary"} onClick={prepare} disabled={pending}>
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-          {pending ? "Getting It Ready…" : props.source === "invoice" ? "Show Card QR" : "Send The Bill & Show Card QR"}
+          {pending ? t("su_btn_gettingItReady") : props.source === "invoice" ? t("su_btn_showCardQr") : t("su_btn_sendBillShowCardQr")}
         </Button>
         {draftAtOpen !== undefined && (
           <p className="text-xs text-slate-500">
-            {`${draftAtOpen ?? "This invoice"} is still a draft, so a card asks to send it as the bill first. Money recorded below doesn't.`}
+            {fillText(t("su_draftAtOpen"), { doc: draftAtOpen ?? t("su_thisInvoiceCap") })}
           </p>
         )}
       </div>
@@ -1283,13 +1315,13 @@ function useCardDoor(
           the reader first; the QR under it is for the customer who'd rather use their own. */}
       {tapOk && (
         <Button className="w-full" onClick={() => void tapToPay()}>
-          <TapToPayGlyph /> Tap to Pay
+          <TapToPayGlyph /> {t("su_apple_tapToPay")}
         </Button>
       )}
-      <div className="text-sm font-semibold text-slate-900">Scan to pay — {money(amount)}</div>
-      <img src={art.payQr} alt="Scan to pay by card" className="h-56 w-56 rounded-lg" />
+      <div className="text-sm font-semibold text-slate-900">{fillText(t("su_scanToPay"), { amount: money(amount) })}</div>
+      <img src={art.payQr} alt={t("su_scanToPayByCard")} className="h-56 w-56 rounded-lg" />
       <p className="max-w-64 text-center text-xs text-slate-500">
-        Card, Apple Pay or Google Pay on their phone. It records itself the moment it lands.
+        {t("su_cardApplePayLine")}
       </p>
       {tap.kind === "error" && <TapOutcomeBox tap={tap} onRetry={retry} />}
       {declinedReceipt}
@@ -1299,7 +1331,7 @@ function useCardDoor(
           href={`sms:?body=${smsBody}`}
           className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:bg-slate-50"
         >
-          <MessageSquare className="h-4 w-4" /> Text The Pay Link
+          <MessageSquare className="h-4 w-4" /> {t("su_btn_textThePayLink")}
         </a>
         <Button
           variant="outline"
@@ -1310,16 +1342,16 @@ function useCardDoor(
             setTimeout(() => setCopied(false), 1500);
           }}
         >
-          {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />} {copied ? "Copied" : "Copy Link"}
+          {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />} {copied ? t("su_btn_copied") : t("su_btn_copyLink")}
         </Button>
       </div>
       <div className="flex items-center gap-2 text-xs text-slate-400">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for the payment…
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("su_waitingForPayment")}
       </div>
       {/* Text The Pay Link opens THIS phone's messages, not the business line — same honesty the
           lead-texting doors carry. */}
       <p className="max-w-64 text-center text-[11px] text-slate-400">
-        Text The Pay Link sends from this phone&rsquo;s number. Copy Link to send it from the business line.
+        {t("su_payLinkNote")}
       </p>
     </div>
   );
@@ -1345,6 +1377,8 @@ function useOtherWay(
 ) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   // The QR fetch has its own pending: on an invoice it only READS, so the sheet must not say
   // "Saving…" over a payment nobody is recording.
@@ -1366,6 +1400,15 @@ function useOtherWay(
   const sendOk = useRef(false);
 
   const amt = () => Number(String(amount).replace(/[$,\s]/g, ""));
+  /** A chip's words: the company's own spelling, or — for a Spanish reader — the catalog's word for one of the four methods the
+   *  sheet names itself (su_btn_method_<key>, by lib/payment-method's key: a chip is a door). An English reader sees the
+   *  spelling as it always was. */
+  const methodWords = (m: string) => {
+    if (lang !== "es") return m;
+    const key = `su_btn_method_${paymentMethodKey(m)}`;
+    const word = t(key);
+    return word === key ? m : word;
+  };
   const key = paymentMethodKey(method);
   const dirty = note.trim().length > 0 || paidAt.length > 0;
 
@@ -1388,13 +1431,13 @@ function useOtherWay(
    */
   function go() {
     if (qrPending) return; // Enter in the amount box while the QR is still coming
-    if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they paid.", "error"); return; }
+    if (!Number.isFinite(amt()) || amt() <= 0) { toast(t("su_enterWhatTheyPaid"), "error"); return; }
     start(async () => {
-      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
+      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, t, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
         setAsk({ invoiceNumber: n, then: "record" }),
       );
       if (!id) return;
-      toast(`Paid — ${money(amt())} ${method.toLowerCase()}. Done.`, "success");
+      toast(fillText(t("su_paidMethodDone"), { amount: money(amt()), method: methodWords(method).toLowerCase() }), "success");
       close();
     });
   }
@@ -1406,20 +1449,20 @@ function useOtherWay(
    * QR needs an invoice number to ask for.
    */
   function showVenmoQr() {
-    if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they're paying.", "error"); return; }
+    if (!Number.isFinite(amt()) || amt() <= 0) { toast(t("su_enterWhatTheyrePaying"), "error"); return; }
     startQr(async () => {
       let id: string | null;
       if (props.source === "invoice") {
         id = props.invoiceId;
       } else {
-        id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
+        id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, t, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
           setAsk({ invoiceNumber: n, then: "venmo" }),
         );
         if (!id) return;
       }
       const art = await venmoQrFor(id, amt());
       if (!art.ok || !art.venmoQr) {
-        toast(art.error ?? "Add your Venmo username in Settings → Payment methods first.", "error");
+        toast(art.error ?? t("su_addVenmoFirst"), "error");
         return;
       }
       setVenmo({ qr: art.venmoQr, handle: art.venmoHandle, invoiceId: id, amount: Math.min(amt(), art.balance ?? amt()) });
@@ -1433,7 +1476,7 @@ function useOtherWay(
     if (!a) return;
     sendOk.current = true;
     setAsk(null);
-    toast(`Sending ${a.invoiceNumber ?? "the invoice"} as the bill.`, "info");
+    toast(fillText(t("su_sendingAsBill"), { inv: a.invoiceNumber ?? t("su_theInvoice") }), "info");
     if (a.then === "venmo") showVenmoQr();
     else go();
   }
@@ -1444,8 +1487,8 @@ function useOtherWay(
     start(async () => {
       // The chip label as picked; recordPayment stores its key.
       const r = await recordPayment({ invoice_id: venmo.invoiceId, amount: venmo.amount, method, note, paid_at: paidAt || null });
-      if (!r.ok) { toast(r.error ?? "Couldn't record that.", "error"); return; }
-      toast(`Paid — ${money(venmo.amount)} Venmo. Done.`, "success");
+      if (!r.ok) { toast(r.error ?? t("su_couldntRecord"), "error"); return; }
+      toast(fillText(t("su_paidVenmoDone"), { amount: money(venmo.amount) }), "success");
       close();
     });
   }
@@ -1462,22 +1505,22 @@ function useOtherWay(
     // Asked, never assumed. Not Now goes back to the sheet with nothing written.
     takeover = (
       <div className="space-y-3">
-        <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
-        <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber, "payment")}</p>
+        <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber, lang, t)}</div>
+        <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber, "payment", lang, t)}</p>
       </div>
     );
-    footer = <ModalActions onCancel={() => setAsk(null)} onSave={sendAndGo} saving={pending} saveLabel="Send It" cancelLabel="Not Now" />;
+    footer = <ModalActions onCancel={() => setAsk(null)} onSave={sendAndGo} saving={pending} saveLabel={t("su_btn_sendIt")} cancelLabel={t("su_btn_notNow")} />;
   } else if (venmo) {
     takeover = (
       <div className="flex flex-col items-center gap-2">
-        <span className="text-sm font-semibold text-slate-900">Venmo @{venmo.handle} — {money(venmo.amount)}</span>
-        <img src={venmo.qr} alt="Venmo QR code" className="h-56 w-56 rounded-lg" />
+        <span className="text-sm font-semibold text-slate-900">{fillText(t("su_venmoHandleAmount"), { handle: venmo.handle ?? "", amount: money(venmo.amount) })}</span>
+        <img src={venmo.qr} alt={t("su_venmoQrCode")} className="h-56 w-56 rounded-lg" />
         <p className="max-w-64 text-center text-xs text-slate-500">
-          They scan, they pay. Venmo can&apos;t tell the app when it lands — tap the button when it does.
+          {t("su_venmoTheyScan")}
         </p>
       </div>
     );
-    footer = <ModalActions onCancel={() => setVenmo(null)} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Back" />;
+    footer = <ModalActions onCancel={() => setVenmo(null)} onSave={venmoPaid} saving={pending} saveLabel={t("su_btn_theyPaidRecordIt")} cancelLabel={t("su_btn_back")} />;
   }
 
   /** The panel under the card (`underCard`), or the sheet's only half where cards aren't on. */
@@ -1485,29 +1528,29 @@ function useOtherWay(
     return (
       <section className={`space-y-4 ${underCard ? "border-t border-slate-100 pt-4" : ""}`}>
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">{underCard ? "Or They Paid Another Way" : "How They Paid"}</h3>
-          <p className="mt-0.5 text-xs text-slate-500">Money that moved outside Stripe — cash, a check, a transfer, Venmo.</p>
+          <h3 className="text-sm font-semibold text-slate-900">{underCard ? t("su_orTheyPaidAnotherWay") : t("su_howTheyPaid")}</h3>
+          <p className="mt-0.5 text-xs text-slate-500">{t("su_moneyOutsideStripe")}</p>
         </div>
         {/* A BANK TRANSFER ON ITS WAY (0338): recorded by hand as well, it would count twice. */}
         {transferPending && (
           <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
-            {transferPending} Don&apos;t record it by hand, or it counts twice.
+            {transferPending} {t("su_dontRecordByHand")}
           </p>
         )}
         <div>
-          <label htmlFor="rp-amount" className="mb-1 block text-xs font-medium text-slate-600">Amount</label>
+          <label htmlFor="rp-amount" className="mb-1 block text-xs font-medium text-slate-600">{t("su_amount")}</label>
           <input autoComplete="off"
             id="rp-amount"
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }}
-            placeholder="$ amount"
+            placeholder={t("su_amountPlaceholder")}
             className="h-11 w-full rounded-lg border border-slate-200 px-3 text-lg font-semibold tabular-nums"
           />
         </div>
         <div>
-          <div className="mb-1 text-xs font-medium text-slate-600">How they paid</div>
+          <div className="mb-1 text-xs font-medium text-slate-600">{t("su_howTheyPaidLower")}</div>
           <div className="flex flex-wrap gap-1.5">
             {chips.map((m) => (
               <button
@@ -1518,7 +1561,7 @@ function useOtherWay(
                   method === m ? "border-brand bg-brand text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                {m}
+                {methodWords(m)}
               </button>
             ))}
           </div>
@@ -1529,9 +1572,9 @@ function useOtherWay(
         {key === "venmo" && props.venmoConfigured !== false && (
           <Button type="button" variant="outline" className="w-full" onClick={showVenmoQr} disabled={pending || qrPending}>
             {qrPending ? (
-              <><Loader2 className="animate-spin" /> Getting It Ready…</>
+              <><Loader2 className="animate-spin" /> {t("su_btn_gettingItReady")}</>
             ) : (
-              <><QrCode /> {props.source === "invoice" ? "Show Venmo QR" : "Send The Bill & Show Venmo QR"}</>
+              <><QrCode /> {props.source === "invoice" ? t("su_btn_showVenmoQr") : t("su_btn_sendBillShowVenmoQr")}</>
             )}
           </Button>
         )}
@@ -1541,18 +1584,18 @@ function useOtherWay(
         <div className="grid grid-cols-2 gap-2">
           {props.source === "invoice" && (
             <div>
-              <label htmlFor="rp-date" className="mb-1 block text-xs font-medium text-slate-600">Date Paid</label>
+              <label htmlFor="rp-date" className="mb-1 block text-xs font-medium text-slate-600">{t("su_datePaid")}</label>
               <input id="rp-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
             </div>
           )}
           <div className={props.source === "invoice" ? "" : "col-span-2"}>
-            <label htmlFor="rp-note" className="mb-1 block text-xs font-medium text-slate-600">Note</label>
-            <input autoComplete="off" id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. check #1042" className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+            <label htmlFor="rp-note" className="mb-1 block text-xs font-medium text-slate-600">{t("su_note")}</label>
+            <input autoComplete="off" id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("su_notePlaceholder")} className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
           </div>
         </div>
         {/* RECORD IT — every method, whatever chip is picked (Venmo included, with its paid date). */}
         <Button type="button" className="w-full" onClick={go} disabled={pending || qrPending}>
-          {pending ? "Saving…" : "Record It"}
+          {pending ? t("su_btn_saving") : t("su_btn_recordIt")}
         </Button>
       </section>
     );
@@ -1581,6 +1624,7 @@ export function GetPaidButton(
   },
 ) {
   const router = useRouter();
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const { cardEnabled = false, methods, venmoConfigured, textReady, transferPending, trigger = "primary", label, ...rest } = props;
   const mode = rest as Mode;
@@ -1600,8 +1644,8 @@ export function GetPaidButton(
     router.refresh();
   }
 
-  const title = mode.source === "invoice" ? `Get Paid ${money(mode.balance)}` : "Get Paid";
-  const words = label ?? (trigger === "link" ? "Getting Paid Now?" : "Get Paid");
+  const title = mode.source === "invoice" ? fillText(t("su_getPaidAmount"), { amount: money(mode.balance) }) : t("su_btn_getPaid");
+  const words = label ?? (trigger === "link" ? t("su_btn_gettingPaidNow") : t("su_btn_getPaid"));
   const button =
     trigger === "menuItem" ? (
       <button type="button" onClick={openSheet} className={ACTIONS_ROW_CLS}>
@@ -1634,10 +1678,7 @@ export function GetPaidButton(
             {card.panel}
             {other.panel(!!card.panel, transferPending)}
             {!cardEnabled && (
-              <p className="text-xs text-slate-500">
-                Cards aren&apos;t switched on for this company yet: Settings → Getting Paid → Set Up Card Payments takes about five
-                minutes.
-              </p>
+              <p className="text-xs text-slate-500">{t("su_cardsNotOnForCompany")}</p>
             )}
           </div>
         )}

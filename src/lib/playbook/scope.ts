@@ -1,4 +1,5 @@
 import type { Answers, Need, Playbook } from "./types";
+import { say, type Words } from "@/lib/lang-words";
 
 /**
  * THE SCOPE WORD, AND WHAT IT LIGHTS (Erik, 2026-10-13: "every job has a scope and this can be
@@ -90,9 +91,13 @@ export function scopeTitle(word: string): string {
     .join(" ");
 }
 
-/** The one offer row above a task list: "Add The Deck Tasks (7)". */
-export function offerLabel(word: string, count: number): string {
-  return `Add The ${scopeTitle(word)} Tasks (${count})`;
+/** The one offer row above a task list: "Add The Deck Tasks (7)". The English is inline and the default;
+ *  handed the reader's `lang` and translator (`words`, lib/i18n translator(lang)) it says the Inspector's
+ *  catalog's words (lib/words/visit-inspector vi_btn_addTheScopeTasks) through lib/lang-words say — this
+ *  file imports no catalog. The scope word is the company's own, as typed; the count rides in its parentheses. */
+export function offerLabel(word: string, count: number, lang?: string | null, words?: Words): string {
+  const scope = scopeTitle(word);
+  return say(lang, words, "vi_btn_addTheScopeTasks", `Add The ${scope} Tasks (${count})`, { scope, count: `(${count})` });
 }
 
 /**

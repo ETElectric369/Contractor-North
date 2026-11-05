@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import type { HearRun } from "@/lib/playbook/hear-run";
 import type { Answers } from "@/lib/playbook/types";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /**
  * "TELL NORT" — say the job the way you'd say it to a person, and the boxes fill in.
@@ -24,17 +26,23 @@ import type { Answers } from "@/lib/playbook/types";
  *
  * NOTHING IS COMMITTED HERE. Fills land in the same fields he can edit, and the save button is
  * still his — see hear-actions.
+ *
+ * ITS WORDS ARE THE NORT CATALOG'S (nt_, lib/words/nort; the visit-page-in-Spanish wave, cn-v1144), in
+ * the signed-in person's language: the door's default label, the Nort-off twin, the box, the hint line,
+ * the doors and what it says back. A surface's own `label` and `placeholder`, handed in, stand as they
+ * came; the first question's ask (`hint`) is the company's own words.
  */
 export function TellNort({
   hear,
   answers,
   onFilled,
   hint,
-  label = "Just tell Nort",
+  label,
   // THE SHAPE OF A GOOD ANSWER, in no trade's words: every company sees this on every visit, and an
   // electrician's job meant nothing to a deck builder (Erik: "Nort cant be giving examples that dont
-  // make sense"). A surface with its own words passes `placeholder`.
-  placeholder = "Say the whole job the way you'd tell a person: what they want, where, how much, and anything in the way…",
+  // make sense"). A surface with its own words passes `placeholder`. Both defaults are the catalog's,
+  // resolved below where the translator is in hand (nt_btn_justTellNort, nt_tellNortPlaceholder).
+  placeholder,
   nortOn = true,
   defaultOpen = false,
 }: {
@@ -60,6 +68,9 @@ export function TellNort({
   const [err, setErr] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const t = translator(useLang());
+  const doorLabel = label ?? t("nt_btn_justTellNort");
+  const boxPlaceholder = placeholder ?? t("nt_tellNortPlaceholder");
 
   const recRef = useRef<MediaRecorder | null>(null);
   const chunks = useRef<BlobPart[]>([]);
@@ -85,13 +96,13 @@ export function TellNort({
           fd.append("audio", blob, "turn.webm");
           const r = await fetch("/api/transcribe", { method: "POST", body: fd });
           const j = await r.json();
-          if (!r.ok) throw new Error(j?.error ?? "Couldn't hear that.");
+          if (!r.ok) throw new Error(j?.error ?? t("nt_couldntHearThat"));
           const heard = String(j?.text ?? "").trim();
           // APPEND, never replace: two passes at a wall shouldn't wipe the first one.
           if (heard) setText((t) => (t.trim() ? `${t.trim()} ${heard}` : heard));
-          else setErr("Didn't catch anything.");
+          else setErr(t("nt_didntCatchAnything"));
         } catch (e: unknown) {
-          setErr((e as { message?: string })?.message ?? "Couldn't hear that.");
+          setErr((e as { message?: string })?.message ?? t("nt_couldntHearThat"));
         } finally {
           setTranscribing(false);
         }
@@ -100,7 +111,7 @@ export function TellNort({
       recRef.current = rec;
       setRecording(true);
     } catch {
-      setErr("No mic — type it instead.");
+      setErr(t("nt_noMicTypeInstead"));
     }
   }
 
@@ -131,7 +142,7 @@ export function TellNort({
       try {
         r = await hear(answers, said);
       } catch {
-        return setErr("No signal — your words are still here. Try Fill it in again when you're back in range.");
+        return setErr(t("nt_noSignalWordsStillHere"));
       }
       if (!r.ok) return setErr(r.error);
       onFilled(r.answers, r.filled, r.note);
@@ -142,10 +153,10 @@ export function TellNort({
       // wrong. They're all editable below — but only if he knows to look.
       setSaid(
         r.filled.length
-          ? `Filled in: ${r.filled.join(", ")}${r.note ? " · the rest is in your notes" : ""} — have a look before you price it.`
+          ? fillText(t(r.note ? "nt_filledInRestInNotes" : "nt_filledInLook"), { list: r.filled.join(", ") })
           : r.note
-            ? "Nothing matched a question — it's in the notes, word for word."
-            : "Couldn't place any of that.",
+            ? t("nt_nothingMatchedInNotes")
+            : t("nt_couldntPlaceAny"),
       );
     });
   }
@@ -161,7 +172,7 @@ export function TellNort({
           }}
           className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 text-sm font-medium text-slate-600 active:bg-slate-50"
         >
-          <Sparkles className="h-4 w-4 text-brand" /> {nortOn ? label : "Just Say It"}
+          <Sparkles className="h-4 w-4 text-brand" /> {nortOn ? doorLabel : t("nt_btn_justSayIt")}
         </button>
         {said && <p className="mt-1.5 text-xs leading-snug text-emerald-700">{said}</p>}
       </div>
@@ -171,13 +182,13 @@ export function TellNort({
     <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
       <div className="mb-2 flex items-start justify-between gap-2">
         <p className="text-xs text-slate-500">
-          {hint ? `Say the whole thing — ${hint.replace(/\?$/, "")}, and anything else you'd tell somebody.` : "Say the whole thing, the way you'd say it to a person."}
+          {hint ? fillText(t("nt_sayTheWholeThingHint"), { hint: hint.replace(/\?$/, "") }) : t("nt_sayTheWholeThing")}
         </p>
         {/* A thumb-sized close with a name: 44px like every other door on the inspection, and a
             screen reader says what the X does. */}
         <button
           type="button"
-          aria-label="Close"
+          aria-label={t("nt_btn_close")}
           onClick={() => { stopMic(); setOpen(false); }}
           className="-mr-2 -mt-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100"
         >
@@ -189,7 +200,7 @@ export function TellNort({
         rows={4}
         autoFocus
         value={text}
-        placeholder={placeholder}
+        placeholder={boxPlaceholder}
         onChange={(e) => setText(e.target.value)}
       />
 
@@ -201,25 +212,24 @@ export function TellNort({
           onClick={() => (recording ? stopMic() : startMic())}
         >
           {transcribing ? (
-            <><Loader2 className="h-4 w-4 animate-spin" /> Writing It Down…</>
+            <><Loader2 className="h-4 w-4 animate-spin" /> {t("nt_btn_writingItDown")}</>
           ) : recording ? (
-            <><Square className="h-4 w-4" /> Stop</>
+            <><Square className="h-4 w-4" /> {t("nt_btn_stop")}</>
           ) : (
-            <><Mic className="h-4 w-4" /> Talk</>
+            <><Mic className="h-4 w-4" /> {t("nt_btn_talk")}</>
           )}
         </Button>
         <Button type="button" disabled={!text.trim() || pending || recording} onClick={fill}>
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Filling…</> : "Fill It In"}
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> {t("nt_btn_filling")}</> : t("nt_btn_fillItIn")}
         </Button>
-        {recording && <span className="text-xs text-rose-600">Listening — press Stop when you&rsquo;re done.</span>}
+        {recording && <span className="text-xs text-rose-600">{t("nt_listeningPressStop")}</span>}
         {err && <span className="text-xs text-rose-600">{err}</span>}
       </div>
 
       {/* The one thing worth saying out loud about how this behaves, because it is the difference
           between a tool and a liability: it fills what you SAID and nothing else. */}
       <p className="mt-2 text-[11px] leading-snug text-slate-400">
-        Check the words before you fill — {nortOn ? "Nort" : "it"} only uses what&rsquo;s written here, and it won&rsquo;t work out a
-        measurement you didn&rsquo;t say. Anything it can&rsquo;t place goes in your notes as-is.
+        {t(nortOn ? "nt_checkWordsNort" : "nt_checkWordsPlain")}
       </p>
     </div>
   );

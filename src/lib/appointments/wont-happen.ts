@@ -21,10 +21,15 @@
  * The page asks the same four facts to word its confirm; the server asks them again at the write, so
  * a capture saved in between wins (and the delete itself only lands on the row as it was read).
  *
- * Pure: no database, no React.
+ * Pure: no database, no React. THE WORDS FOLLOW THE READER (the visit-page-in-Spanish wave): each
+ * sentence keeps its English inline as the default — byte for byte what it always said — and takes
+ * the caller's `lang` plus translator (`words`, lib/i18n translator(lang)) for the Spanish in
+ * lib/words/visit-page (vp_), through lib/lang-words say. This file imports no catalog.
  */
 import { captureQuoteId, hasCaptureData } from "@/lib/inspections";
 import { parseInspectorCapture } from "@/lib/inspection/capture";
+import { say, type Words } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 
 /** The four facts. `null` for a count means it couldn't be read; `answersUnread` likewise. */
 export type WontHappenFacts = {
@@ -65,16 +70,17 @@ export function wontHappenVerdict(f: WontHappenFacts): "delete" | "cancel" {
 }
 
 /** The confirm, saying which will happen before it does. */
-export function wontHappenConfirm(verdict: "delete" | "cancel"): string {
+export function wontHappenConfirm(verdict: "delete" | "cancel", lang: Lang | string | null = "en", words?: Words): string {
   return verdict === "delete"
-    ? "This visit won't happen? Nothing was captured on it, so it will be deleted."
-    : "This visit won't happen? Its notes, photos and answers stay on file, marked Cancelled.";
+    ? say(lang, words, "vp_wontHappenDeleteAsk", "This visit won't happen? Nothing was captured on it, so it will be deleted.")
+    : say(lang, words, "vp_wontHappenCancelAsk", "This visit won't happen? Its notes, photos and answers stay on file, marked Cancelled.");
 }
 
-/** What the result toast says: the server's verdict, in plain words, with any withdrawn-link note. */
-export function wontHappenToast(did: "deleted" | "cancelled", note?: string | null): string {
-  if (did === "deleted") return "Deleted. Nothing was on it.";
-  return `Marked Cancelled. Everything on it stays on file.${note ? ` ${note}` : ""}`;
+/** What the result toast says: the server's verdict, in plain words, with any withdrawn-link note
+ *  (the server's own sentence, in the caller's language already, said as received). */
+export function wontHappenToast(did: "deleted" | "cancelled", note?: string | null, lang: Lang | string | null = "en", words?: Words): string {
+  if (did === "deleted") return say(lang, words, "vp_deletedNothingOnIt", "Deleted. Nothing was on it.");
+  return `${say(lang, words, "vp_markedCancelledStays", "Marked Cancelled. Everything on it stays on file.")}${note ? ` ${note}` : ""}`;
 }
 
 /**
@@ -82,16 +88,19 @@ export function wontHappenToast(did: "deleted" | "cancelled", note?: string | nu
  * (proposed): cancelling withdrew that link for good, so it comes back Scheduled, and the Undo says
  * the link stays withdrawn rather than pretending to restore it.
  */
-export function wontHappenUndo(previousStatus: string | null | undefined): { status: string; note: string | null } {
-  if (previousStatus === "proposed") return { status: "scheduled", note: "The pick-a-time link stays withdrawn — send a new one." };
+export function wontHappenUndo(previousStatus: string | null | undefined, lang: Lang | string | null = "en", words?: Words): { status: string; note: string | null } {
+  if (previousStatus === "proposed") {
+    return { status: "scheduled", note: say(lang, words, "vp_pickLinkStaysWithdrawn", "The pick-a-time link stays withdrawn — send a new one.") };
+  }
   return { status: previousStatus || "scheduled", note: null };
 }
 
-/** "Tue Oct 1": a calendar day the way a person says it, the same in every timezone. */
-export function visitDayWords(ymd: string): string {
+/** "Tue Oct 1": a calendar day the way a person says it, the same in every timezone. A Spanish reader's
+ *  "mar 1 oct" (Intl es-US, the agenda's spelling). */
+export function visitDayWords(ymd: string, lang: Lang | string | null = "en"): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
   if (!m) return ymd;
-  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" })
+  return new Intl.DateTimeFormat(lang === "es" ? "es-US" : "en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" })
     .format(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)))
     .replace(",", "");
 }
@@ -104,12 +113,16 @@ export function visitDayWords(ymd: string): string {
 export function putBackPlan(
   startDay: string | null,
   todayStr: string,
+  lang: Lang | string | null = "en",
+  words?: Words,
 ): { keepDay: true; message: string } | { keepDay: false; message: string } {
-  if (startDay && startDay >= todayStr) return { keepDay: true, message: `Back on the schedule for ${visitDayWords(startDay)}.` };
-  return {
-    keepDay: false,
-    message: startDay
-      ? `Back on the schedule, waiting for a day: ${visitDayWords(startDay)} had passed.`
-      : "Back on the schedule, waiting for a day.",
-  };
+  if (startDay && startDay >= todayStr) {
+    const day = visitDayWords(startDay, lang);
+    return { keepDay: true, message: say(lang, words, "vp_backOnScheduleFor", `Back on the schedule for ${day}.`, { day }) };
+  }
+  if (startDay) {
+    const day = visitDayWords(startDay, lang);
+    return { keepDay: false, message: say(lang, words, "vp_backWaitingDayPassed", `Back on the schedule, waiting for a day: ${day} had passed.`, { day }) };
+  }
+  return { keepDay: false, message: say(lang, words, "vp_backWaitingForADay", "Back on the schedule, waiting for a day.") };
 }

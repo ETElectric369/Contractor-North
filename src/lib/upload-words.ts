@@ -8,21 +8,31 @@
  * the size never changes. A refusal that is FINAL says so, names ONE action (the caller's: a smaller
  * walk, a smaller file), and the door drops the copy it kept; one that is the signal's keeps the
  * file for another tap where there's service.
+ *
+ * THE READER'S LANGUAGE (the visit-page-in-Spanish wave, cn-v1144): the English is inline and the
+ * default, byte for byte; handed the caller's `lang` and translator (`words`, lib/i18n translator(lang))
+ * it says the Inspector's catalog's words (lib/words/visit-inspector vi_uploadTooBig / vi_uploadNoSignal /
+ * vi_uploadFailed) through lib/lang-words say — this file imports no catalog. Storage's own sentence, when
+ * it is neither the size nor the signal, is shown as it came.
  */
+import { say, type Words } from "@/lib/lang-words";
+
 export type UploadRefusal = { sentence: string; final: boolean };
 
 const TOO_BIG = /exceeded the maximum allowed size|payload too large|entity too large/i;
 const NO_SIGNAL = /failed to fetch|load failed|networkerror|network request failed/i;
 
-/** `what` leads the sentence ("The 3D model", a photo's name); `bytes` is what was sent; `action` is the one thing to do when it is over the limit. */
-export function uploadRefusal(e: unknown, o: { what: string; bytes: number; action: string }): UploadRefusal {
+/** `what` leads the sentence ("The 3D model", a photo's name); `bytes` is what was sent; `action` is the one thing to do when it is over the limit —
+ *  the caller hands `what` and `action` in the reader's language, with `lang` and its translator `words`. */
+export function uploadRefusal(e: unknown, o: { what: string; bytes: number; action: string }, lang?: string | null, words?: Words): UploadRefusal {
   const err = e as { message?: unknown; statusCode?: unknown; status?: unknown } | null;
   const msg = typeof err?.message === "string" ? err.message.trim() : "";
   // The code as well as the words, so a rewording by storage still reads as the size.
   const code = String(err?.statusCode ?? err?.status ?? "");
-  if (code === "413" || TOO_BIG.test(msg)) return { sentence: `${o.what} is too big to send (${megabytes(o.bytes)} MB). ${o.action}`, final: true };
-  if (NO_SIGNAL.test(msg)) return { sentence: `${o.what} didn't go: no signal. Try again where there's service.`, final: false };
-  return { sentence: msg || "Upload failed.", final: false };
+  const mb = megabytes(o.bytes);
+  if (code === "413" || TOO_BIG.test(msg)) return { sentence: say(lang, words, "vi_uploadTooBig", `${o.what} is too big to send (${mb} MB). ${o.action}`, { what: o.what, mb, action: o.action }), final: true };
+  if (NO_SIGNAL.test(msg)) return { sentence: say(lang, words, "vi_uploadNoSignal", `${o.what} didn't go: no signal. Try again where there's service.`, { what: o.what }), final: false };
+  return { sentence: msg || say(lang, words, "vi_uploadFailed", "Upload failed."), final: false };
 }
 
 /** 62 for a model, 7.5 or 0.4 for a smaller file: one decimal under ten. */

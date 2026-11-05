@@ -5,27 +5,36 @@ import { useRouter } from "next/navigation";
 import { Link2, Loader2, Search, UserPlus, X } from "lucide-react";
 import { Input, Label } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { linkAppointmentTo, linkAppointmentToNewLead, searchLinkTargets, type LinkTarget } from "../actions";
 
-/** What a tap that never reached the server says (the same words the visit's other buttons use). */
-export const LINK_NO_SIGNAL_LINE = "No connection, so that didn't go through. Try again when you have a bar or two.";
+/** What a tap that never reached the server says (the same words the visit's other buttons use): the
+ *  catalog's English (lib/words/visit-page vp_noConnectionLink), byte for byte what it always said; the
+ *  picker hands settleLink the signed-in person's own language. */
+export const LINK_NO_SIGNAL_LINE = translator("en")("vp_noConnectionLink");
 
 /** What a link write came to: its answer, or the ONE line to show. A refusal speaks in the action's own
- *  words (or the caller's fallback); a throw is a tap that never landed. Never rethrows — a rejected
- *  server action used to escape the transition with nothing said and the picker still open. */
+ *  words (or the caller's fallback); a throw is a tap that never landed (`noSignal`, the caller's words
+ *  for it; English when none are handed). Never rethrows — a rejected server action used to escape the
+ *  transition with nothing said and the picker still open. */
 export async function settleLink<T extends { ok: boolean; error?: string }>(
   what: Promise<T>,
   fallback: string,
+  noSignal: string = LINK_NO_SIGNAL_LINE,
 ): Promise<{ res: T } | { error: string }> {
   let res: T;
   try {
     res = await what;
   } catch {
-    return { error: LINK_NO_SIGNAL_LINE };
+    return { error: noSignal };
   }
   if (!res?.ok) return { error: res?.error ?? fallback };
   return { res };
 }
+
+/** The kind chip's word, by the row's kind (lowercase in both languages, as the chip always was). */
+const KIND_KEY: Record<LinkTarget["kind"], string> = { lead: "vp_kind_lead", customer: "vp_kind_customer", job: "vp_kind_job" };
 
 /**
  * WHAT IS THIS VISIT FOR — one control over three tables.
@@ -48,14 +57,17 @@ export async function settleLink<T extends { ok: boolean; error?: string }>(
  * common case is "look down, the Dale lead is already sitting there, tap it" rather than
  * remembering a name and typing it again. Matching on address is the whole point: the address is
  * the fact that names the lead, the estimate, the job and the invoice.
+ *
+ * Every word is the signed-in person's language (lib/words/visit-page, vp_): the closed picker's
+ * default button and the "For" label are the catalog's unless the caller hands its own.
  */
 export function LinkPicker({
   appointmentId,
   linked,
   seed,
   kinds = null,
-  openLabel = "Connect this to a lead, customer or job",
-  label = "For",
+  openLabel,
+  label,
 }: {
   appointmentId: string;
   /** What it's already connected to, for the resting state. */
@@ -64,13 +76,16 @@ export function LinkPicker({
   seed: string;
   /** Only these kinds are offered (the ending card's "Won · Pick The Job" is jobs only). null: all three. */
   kinds?: LinkTarget["kind"][] | null;
-  /** The words on the closed picker's one button. */
+  /** The words on the closed picker's one button; left out, the catalog's "Connect this to a lead, customer or job". */
   openLabel?: string;
-  /** The small label over the box; null draws none (inside a card that already says what it is). */
+  /** The small label over the box; left out, the catalog's "For"; null draws none (inside a card that already says what it is). */
   label?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
+  const openWords = openLabel ?? t("vp_connectThisTo");
+  const labelWords = label === undefined ? t("vp_for") : label;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<LinkTarget[]>([]);
@@ -120,12 +135,12 @@ export function LinkPicker({
   if (linked && !open) {
     return (
       <div className="mt-3">
-        {label && <Label className="mb-1.5">{label}</Label>}
+        {labelWords && <Label className="mb-1.5">{labelWords}</Label>}
         <div className="flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3">
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[linked.kind]}`}>{linked.kind}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[linked.kind]}`}>{t(KIND_KEY[linked.kind])}</span>
           <span className="flex-1 truncate text-sm text-slate-700">{linked.name}</span>
           <button type="button" onClick={() => setOpen(true)} className="text-xs text-slate-500 underline-offset-2 hover:underline">
-            Change
+            {t("vp_btn_change")}
           </button>
         </div>
       </div>
@@ -135,7 +150,7 @@ export function LinkPicker({
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between">
-        {label ? <Label className="mb-1.5">{label}</Label> : <span />}
+        {labelWords ? <Label className="mb-1.5">{labelWords}</Label> : <span />}
         {open && (
           <button type="button" onClick={() => setOpen(false)} className="mb-1.5 text-slate-400">
             <X className="h-4 w-4" />
@@ -151,7 +166,7 @@ export function LinkPicker({
         >
           <Link2 className="h-4 w-4" />
           {/* Says what it DOES, not what it is. "Link a record" means nothing at a job site. */}
-          {openLabel}
+          {openWords}
         </button>
       ) : (
         <>
@@ -160,7 +175,7 @@ export function LinkPicker({
             <Input
               autoFocus
               value={q}
-              placeholder={seed.trim() ? `Searching “${seed.trim()}” — or type a name` : "Name or address"}
+              placeholder={seed.trim() ? fillText(t("vp_searchingSeed"), { seed: seed.trim() }) : t("vp_nameOrAddress")}
               onChange={(e) => setQ(e.target.value)}
               className="pl-9"
             />
@@ -168,13 +183,13 @@ export function LinkPicker({
           <div className="mt-2 space-y-1">
             {searching && (
               <p className="flex items-center gap-1.5 px-1 py-2 text-xs text-slate-400">
-                <Loader2 className="h-3 w-3 animate-spin" /> looking…
+                <Loader2 className="h-3 w-3 animate-spin" /> {t("vp_looking")}
               </p>
             )}
             {!searching && rows.length === 0 && (q.trim() || seed.trim()).length >= 2 && (
               // Not an error. Working unattached is a legitimate outcome, not a failure state.
               <p className="px-1 py-2 text-xs text-slate-400">
-                {kinds?.length === 1 && kinds[0] === "job" ? "No job matches yet — try the street or the customer's name." : offerLead ? "Nobody by that name yet." : "Nothing matches yet — carry on, you can connect this later."}
+                {kinds?.length === 1 && kinds[0] === "job" ? t("vp_noJobMatchesYet") : offerLead ? t("vp_nobodyByThatName") : t("vp_nothingMatchesYet")}
               </p>
             )}
             {offerLead && (
@@ -184,7 +199,7 @@ export function LinkPicker({
                 onClick={() =>
                   start(async () => {
                     setError(null);
-                    const done = await settleLink(linkAppointmentToNewLead(appointmentId, typed), "Couldn't make the lead.");
+                    const done = await settleLink(linkAppointmentToNewLead(appointmentId, typed), t("vp_couldntMakeTheLead"), t("vp_noConnectionLink"));
                     if ("error" in done) {
                       setError(done.error);
                       return;
@@ -200,8 +215,8 @@ export function LinkPicker({
               >
                 <UserPlus className="h-4 w-4 shrink-0 text-emerald-700" />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-emerald-900">Add As A New Lead</span>
-                  <span className="block truncate text-xs text-emerald-800/80">{typed} — this visit&rsquo;s address goes on the lead</span>
+                  <span className="block text-sm font-medium text-emerald-900">{t("vp_btn_addAsANewLead")}</span>
+                  <span className="block truncate text-xs text-emerald-800/80">{fillText(t("vp_addressGoesOnLead"), { typed })}</span>
                 </span>
               </button>
             )}
@@ -218,7 +233,7 @@ export function LinkPicker({
                 onClick={() =>
                   start(async () => {
                     setError(null);
-                    const done = await settleLink(linkAppointmentTo(appointmentId, r.kind, r.id), "Couldn't connect it — try again.");
+                    const done = await settleLink(linkAppointmentTo(appointmentId, r.kind, r.id), t("vp_couldntConnectIt"), t("vp_noConnectionLink"));
                     if ("error" in done) {
                       setError(done.error);
                       return;
@@ -234,7 +249,7 @@ export function LinkPicker({
                 }
                 className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left active:bg-slate-50"
               >
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[r.kind]}`}>{r.kind}</span>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[r.kind]}`}>{t(KIND_KEY[r.kind])}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-slate-800">{r.name}</span>
                   <span className="block truncate text-xs text-slate-400">{r.address ?? r.sub}</span>

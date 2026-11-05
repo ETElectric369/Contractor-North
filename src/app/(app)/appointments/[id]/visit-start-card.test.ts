@@ -18,6 +18,7 @@ vi.mock("../start-job-actions", () => ({
 }));
 vi.mock("../../timeclock/actions", () => ({ clockIn: vi.fn(), switchJob: vi.fn(), deleteTimeEntry: vi.fn() }));
 
+import { translator } from "@/lib/i18n";
 import { VisitStartCard, visitStartState, visitTimeOffered } from "./visit-start-card";
 
 const TZ = "America/Los_Angeles";
@@ -348,10 +349,11 @@ describe("whole or cut, decided by the punch's age and not by a flag", () => {
     expect(card).toContain("{movesWhole(onClock)");
     // The sheet's whole branch no longer claims the punch has no job — it names the job it is on.
     expect(card).not.toContain("with no job. This moves that whole shift");
-    expect(card).toContain("This moves this whole punch onto the new job");
+    expect(card).toContain('fillText(t("vp_sheetMovesWhole"), { label: onClock.label, since: onClock.since })');
+    expect(translator("en")("vp_sheetMovesWhole")).toContain("This moves this whole punch onto the new job");
     // A render-time answer goes stale on a card left open in a truck, so the card re-renders while
     // somebody is on the clock (the Timeclock panel's ticker, for the same reason).
-    expect(card).toMatch(/useEffect\(\(\) => \{\s*if \(!onClock && !sheet\) return;\s*setNowMs\(Date\.now\(\)\);\s*const t = setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\);/);
+    expect(card).toMatch(/useEffect\(\(\) => \{\s*if \(!onClock && !sheet\) return;\s*setNowMs\(Date\.now\(\)\);\s*const tick = setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\);/);
     // And the page hands over the facts, never the decision.
     const page = src("./page.tsx");
     expect(page).not.toContain("whole: !oe.job_id");

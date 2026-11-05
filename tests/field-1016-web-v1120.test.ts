@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { megabytes, uploadRefusal } from "@/lib/upload-words";
 import { keptWords } from "@/lib/native-scan";
+import { translator } from "@/lib/i18n";
 import { APP_VERSION } from "@/lib/version";
 import { RELEASE_NOTES, versionNumber } from "@/lib/release-notes";
 
@@ -49,10 +50,20 @@ describe("the Inspector's two upload roads say it in plain words", () => {
   const src = read("src/app/(app)/appointments/[id]/inspector.tsx");
   it("both catches go through uploadRefusal with the file on its way up, named from before its prep and forgotten once it is up", () => {
     expect(src).toContain('import { uploadRefusal } from "@/lib/upload-words";');
-    expect(src).toContain('const r = uploadRefusal(e, { what: model ? "The 3D model" : sending?.name ?? "The file", bytes: sending?.size ?? 0, action: model ? "Scan a smaller area." : "Send a smaller file." });');
+    // (cn-v1144, the visit page in Spanish: the words the sheet hands in and the refusal itself read the vi_ catalog;
+    // their English is byte for byte the old literals, pinned here beside the call)
+    expect(src).toContain('const r = uploadRefusal(e, { what: model ? t("vi_the3dModel") : sending?.name ?? t("vi_theFile"), bytes: sending?.size ?? 0, action: model ? t("vi_scanSmallerArea") : t("vi_sendSmallerFile") }, lang, t);');
+    const en = translator("en");
+    expect(en("vi_the3dModel")).toBe("The 3D model");
+    expect(en("vi_theFile")).toBe("The file");
+    expect(en("vi_scanSmallerArea")).toBe("Scan a smaller area.");
+    expect(en("vi_sendSmallerFile")).toBe("Send a smaller file.");
+    expect(en("vi_uploadTooBig")).toBe("{what} is too big to send ({mb} MB). {action}");
+    expect(en("vi_uploadNoSignal")).toBe("{what} didn't go: no signal. Try again where there's service.");
+    expect(en("vi_uploadFailed")).toBe("Upload failed.");
     expect(src).toContain("uploadFinalRef.current = r.final;");
     expect(src).toContain("setError(r.sentence);");
-    expect(src).toContain('setError(uploadRefusal(err, { what: sending?.name ?? "The file", bytes: sending?.size ?? 0, action: "Send a smaller file." }).sentence);');
+    expect(src).toContain('setError(uploadRefusal(err, { what: sending?.name ?? t("vi_theFile"), bytes: sending?.size ?? 0, action: t("vi_sendSmallerFile") }, lang, t).sentence);');
     expect(src.split("sending = raw;").length - 1).toBe(2);
     expect(src.split("sending = file;").length - 1).toBe(2);
     expect(src).toContain("sending = null; // every file is up");
@@ -68,7 +79,7 @@ describe("the Inspector's two upload roads say it in plain words", () => {
     expect(door).toContain("keep(null);\n          await discardScan(path);\n          return;");
     expect(door).not.toContain("Scan a smaller area."); // upload() said the action; the door only drops the copy
     expect(door).toContain("keep({ model, path, taskId, landed: null });");
-    expect(door).toContain("keptWords(false)");
+    expect(door).toContain("keptWords(false, lang, t)");
     expect(keptWords(false)).toContain("tap 3D Scan again to send it without scanning.");
     // the final branch returns before the keep
     expect(door.indexOf("if (uploadFinalRef.current) {")).toBeLessThan(door.indexOf("keep({ model, path, taskId, landed: null });"));

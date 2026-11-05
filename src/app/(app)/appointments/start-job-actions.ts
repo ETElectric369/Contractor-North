@@ -14,6 +14,16 @@
  *
  * The app suggests, a person decides: nothing links or starts itself, and every result says what
  * happened in one plain sentence.
+ *
+ * THE CALLER'S OWN WORDS (the visit-page-in-Spanish wave): every message, error and warning this file
+ * returns, and the running clock's `since`, come from lib/words/visit-page (vp_) in the caller's
+ * language — profiles.language through lib/lang-of callerLang, read ONCE per call and only when an
+ * answer needs words (hear-actions wordsOf, the same shape); English when nobody is signed in or the
+ * read fails, byte for byte what this file always said. The pure rules it shares with the page
+ * (lib/appointments/visit-start: startedAtProblem, startedWords, jobShort, clockWords) take the same
+ * language and the caller's translator. A warning the Time Clock's own clockIn / switchJob sends back
+ * is already in the caller's language (cs_) and rides through as received. The office's bell line
+ * (Ask The Office) is one line for every office reader and stays as it was.
  */
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -25,8 +35,20 @@ import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { clockInClashWords, findOverlap } from "@/lib/overlap-refusal";
 import type { GeoPoint } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { translator } from "@/lib/i18n";
+import { callerLang } from "@/lib/lang-of";
+import { fillSlots, say, type Words } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 import { createJobFromAppointment, linkAppointmentTo } from "./actions";
 import { clockIn, switchJob } from "../timeclock/actions";
+
+/** The caller's language, read once per call, and its words. Not exported: a "use server" file exports only async functions. */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+function wordsOf(supabase: Awaited<ReturnType<typeof createClient>>, userId?: string | null): Said {
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as unknown as Parameters<typeof callerLang>[0], userId));
+  return { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+}
 
 export type StartJobResult = {
   ok: boolean;
@@ -116,23 +138,23 @@ async function openEntryOf(supabase: SupabaseClient, userId: string): Promise<Op
   return (data as OpenRow | null) ?? null;
 }
 
-/** The running clock in the card's shape. */
-function onClockOf(o: OpenRow, tz: string): OnClock {
+/** The running clock in the card's shape, its label and `since` in the caller's language. */
+function onClockOf(o: OpenRow, tz: string, lang: Lang, words: Words): OnClock {
   return {
     entryId: o.id,
     jobId: o.job_id,
     jobCode: (o.job_code ?? "").trim() || null,
-    label: openLabel(o),
+    label: openLabel(o, lang, words),
     clockIn: o.clock_in,
-    since: clockWords(o.clock_in, tz),
+    since: clockWords(o.clock_in, tz, lang),
   };
 }
 
-/** "J-050", or the time code a job-less clock runs on ("Shop"), or "the clock". */
-function openLabel(o: OpenRow): string {
+/** "J-050", or the time code a job-less clock runs on ("Shop"), or "no job" (vp_noJob, the page's own word). */
+function openLabel(o: OpenRow, lang: Lang, words: Words): string {
   const j = one(o.job);
-  if (j) return jobShort(j);
-  return (o.job_code ?? "").trim() || "no job";
+  if (j) return jobShort(j, lang, words);
+  return (o.job_code ?? "").trim() || say(lang, words, "vp_noJob", "no job");
 }
 
 /**
@@ -156,19 +178,25 @@ export async function startJobFromVisit(input: {
 }): Promise<StartJobResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) {
-    return { ok: false, error: "Only the office can start a job. Ask the office to start it, then clock in here." };
+    // No staff client came back: the refusal is said in the member's own language, read once.
+    return { ok: false, error: await wordsOf(await createClient()).say("vp_onlyOfficeStartsJob") };
   }
   const supabase = ctx.supabase as unknown as SupabaseClient;
+  const ws = wordsOf(ctx.supabase, ctx.userId);
 
   const visit = await readVisit(supabase, input.appointmentId);
-  if (!visit) return { ok: false, error: "That visit could not be found." };
-  if (visit.status === "cancelled") return { ok: false, error: "This visit was cancelled. Nothing was started." };
+  if (!visit) return { ok: false, error: await ws.say("vp_visitNotFound") };
+  if (visit.status === "cancelled") return { ok: false, error: await ws.say("vp_visitCancelledNothingStarted") };
 
+  // The language once, for the pure rules this file shares with the page (visit-start) and for the
+  // sentences built from their pieces.
+  const lang = await ws.lang();
+  const words = translator(lang);
   const tz = await orgTz(supabase);
   const startAt = input.clock === "in" ? (input.startAt ?? null) : null;
   if (input.clock === "in") {
-    const problem = startedAtProblem(startAt, Date.now(), tz);
-    if (problem) return { ok: false, error: `${problem} Nothing was started.` };
+    const problem = startedAtProblem(startAt, Date.now(), tz, lang, words);
+    if (problem) return { ok: false, error: `${problem} ${await ws.say("vp_nothingWasStarted")}` };
   }
 
   // Who is on the clock, read BEFORE anything is made, so a refusal leaves no job behind.
@@ -176,11 +204,11 @@ export async function startJobFromVisit(input: {
   if (input.clock !== "none") {
     running = await openEntryOf(supabase, ctx.userId);
     if (input.clock === "in" && running && !(visit.job_id && running.job_id === visit.job_id)) {
-      const oc = onClockOf(running, tz);
+      const oc = onClockOf(running, tz, lang, words);
       return {
         ok: false,
         onClock: oc,
-        error: `You're on the clock on ${oc.label} since ${oc.since}. Switch To This Job moves your clock here now. Nothing was started yet.`,
+        error: await ws.say("vp_onClockSwitchHere", { label: oc.label, since: oc.since }),
       };
     }
     /* THE RIGHT SHIFT IS NEVER CUT FOR A DUPLICATE (review, Tom Goodman as it stood): Erik on the
@@ -190,10 +218,10 @@ export async function startJobFromVisit(input: {
     if (input.clock === "switch" && running?.job_id && !visit.job_id) {
       const pick = await loadLinkInstead(supabase, visit, tz);
       if (pick && pick.id === running.job_id) {
-        const j = jobShort(pick);
+        const j = jobShort(pick, lang, words);
         return {
           ok: false,
-          error: `You're on the clock on ${j}, the job ${visitWho(visit) ?? "this customer"} already has from today. Link this visit to ${j} instead. Nothing was started.`,
+          error: await ws.say("vp_onClockLinkInstead", { job: j, customer: visitWho(visit) ?? (await ws.say("vp_thisCustomerLower")) }),
         };
       }
     }
@@ -209,24 +237,27 @@ export async function startJobFromVisit(input: {
     // and the job it would go on does not exist yet.
     const overlap = await findOverlap(supabase, ctx.userId, Date.parse(startAt), Date.now(), { tz });
     if (overlap) {
+      // The clash itself is the Timecards' own sentence (lib/overlap-refusal), said in the caller's language — this
+      // file has `lang` and its translator in hand, so it hands them over; what this tap did not do is this file's.
+      const nothing = await ws.say("vp_nothingWasStarted");
       return {
         ok: false,
         error: overlap.clash
-          ? clockInClashWords({ clash: overlap.clash, startIso: startAt, tz, isStaff: true, nothing: "Nothing was started." })
-          : `${overlap.sentence} Nothing was started.`,
+          ? clockInClashWords({ clash: overlap.clash, startIso: startAt, tz, isStaff: true, nothing }, lang, words)
+          : `${overlap.sentence} ${nothing}`,
       };
     }
   }
 
   const made = await createJobFromAppointment(visit.id);
-  if (!made.ok || !made.id) return { ok: false, error: made.error ?? "The job could not be started. Nothing was changed." };
+  if (!made.ok || !made.id) return { ok: false, error: made.error ?? (await ws.say("vp_jobCouldNotBeStarted")) };
   const jobId = made.id;
   // `already`: another device made this visit's job a moment ago, and made.id is THAT job.
   const existing = !!visit.job_id || !!made.already;
 
   const { data: jobRow } = await supabase.from("jobs").select("id, job_number, name").eq("id", jobId).maybeSingle();
-  if (!jobRow) return { ok: false, error: "The job was made but could not be read back. Reload the page before trying again." };
-  const jobNumber = jobShort(jobRow as { job_number?: string | null; name?: string | null });
+  if (!jobRow) return { ok: false, error: await ws.say("vp_jobMadeNotReadBack") };
+  const jobNumber = jobShort(jobRow as { job_number?: string | null; name?: string | null }, lang, words);
   const customer = visitWho(visit);
   const warnings: string[] = [];
   if (made.note) warnings.push(made.note);
@@ -236,10 +267,10 @@ export async function startJobFromVisit(input: {
 
   if (input.clock === "switch" && running && running.job_id !== jobId) {
     const at = new Date().toISOString();
-    const from = openLabel(running);
+    const from = openLabel(running, lang, words);
     const sw = await switchJob({ entry_id: running.id, job_id: jobId, job_code: null, gps: input.gps ?? null });
     if (!sw.ok) {
-      warnings.push(`Your clock is still on ${from}: ${sw.error ?? "the switch did not go through."}`);
+      warnings.push(await ws.say("vp_clockStillOn", { from, why: sw.error ?? (await ws.say("vp_switchDidntGoThrough")) }));
     } else {
       // A job-less clock — or one still inside the young-punch window (switch-window) — is RE-POINTED
       // whole, not cut: the time since its clock-in is now on this job, and the sentence has to say
@@ -252,11 +283,11 @@ export async function startJobFromVisit(input: {
     // "switch" with nothing running (the clock stopped since the sheet opened) is a plain clock-in at now.
     if (running && running.job_id === jobId) {
       clock = null; // already on this very job: nothing to do, and the sentence below says so
-      warnings.push(`You were already on the clock on ${jobNumber}.`);
+      warnings.push(await ws.say("vp_alreadyOnClockOn", { job: jobNumber }));
     } else {
       const res = await clockIn({ job_id: jobId, job_code: null, gps: input.gps ?? null, clock_in_at: startAt });
       if (!res.ok) {
-        warnings.push(`The clock-in didn't go through: ${res.error ?? "try again from the job page."}`);
+        warnings.push(await ws.say("vp_clockInDidntGoThrough", { why: res.error ?? (await ws.say("vp_tryAgainFromJobPage")) }));
       } else {
         const now = await openEntryOf(supabase, ctx.userId);
         if (now && now.job_id === jobId) {
@@ -280,7 +311,7 @@ export async function startJobFromVisit(input: {
     ok: true,
     jobId,
     jobNumber,
-    message: startedWords({ jobNumber, customer, tz, clock, existing }),
+    message: startedWords({ jobNumber, customer, tz, clock, existing }, lang, words),
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
     ...(undoEntryId ? { undoEntryId } : {}),
   };
@@ -293,27 +324,25 @@ export async function startJobFromVisit(input: {
  */
 export async function linkVisitInstead(appointmentId: string, jobId: string): Promise<StartJobResult> {
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: "Only the office can link a visit to a job." };
+  if ("error" in ctx) return { ok: false, error: await wordsOf(await createClient()).say("vp_onlyOfficeLinksVisit") };
   const supabase = ctx.supabase as unknown as SupabaseClient;
+  const ws = wordsOf(ctx.supabase, ctx.userId);
 
   const visit = await readVisit(supabase, appointmentId);
-  if (!visit) return { ok: false, error: "That visit could not be found." };
+  if (!visit) return { ok: false, error: await ws.say("vp_visitNotFound") };
   if (visit.job_id) {
-    if (visit.job_id === jobId) return { ok: true, jobId, message: "This visit is already linked to that job." };
-    return { ok: false, error: "This visit is already linked to another job. Nothing was changed." };
+    if (visit.job_id === jobId) return { ok: true, jobId, message: await ws.say("vp_alreadyLinkedToThatJob") };
+    return { ok: false, error: await ws.say("vp_alreadyLinkedToAnotherJob") };
   }
 
   const tz = await orgTz(supabase);
   const pick = await loadLinkInstead(supabase, visit, tz);
   if (!pick || pick.id !== jobId) {
-    return {
-      ok: false,
-      error: "That job is no longer the one to offer here. Nothing was changed. Edit Details links any job by hand.",
-    };
+    return { ok: false, error: await ws.say("vp_jobNoLongerOffered") };
   }
 
   const res = await linkAppointmentTo(appointmentId, "job", jobId);
-  if (!res.ok) return { ok: false, error: res.error ?? "The visit could not be linked. Nothing was changed." };
+  if (!res.ok) return { ok: false, error: res.error ?? (await ws.say("vp_visitCouldNotBeLinked")) };
 
   /* STAMP FOLLOWS DEED, the lead too (review, 2026-09-25) — done INSIDE the one attach door now
      (linkAppointmentTo → lib/appointments/lead-won, cn-v1069), so the visit's own Connect picker and
@@ -322,9 +351,10 @@ export async function linkVisitInstead(appointmentId: string, jobId: string): Pr
   const warnings: string[] = [];
   if (res.warning) warnings.push(res.warning);
 
-  const jobNumber = jobShort(pick);
+  const lang = await ws.lang();
+  const jobNumber = jobShort(pick, lang, translator(lang));
   const running = await openEntryOf(supabase, ctx.userId);
-  const onIt = running?.job_id === jobId ? ` Your clock is already running on ${jobNumber}.` : "";
+  const onIt = running?.job_id === jobId ? ` ${await ws.say("vp_clockAlreadyRunningOn", { job: jobNumber })}` : "";
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/planner");
   return {
@@ -333,7 +363,7 @@ export async function linkVisitInstead(appointmentId: string, jobId: string): Pr
     jobNumber,
     // The attach door says what the visit's work did on the job (cn-v1134: "2 tasks and 1 part joined
     // J-055 …", "J-055 already had …"); only a door with nothing to say leaves the old sentence.
-    message: `Linked this visit to ${jobNumber}. ${res.note ?? "Nothing new was made."}${onIt}`,
+    message: await ws.say("vp_linkedThisVisitTo", { job: jobNumber, note: res.note ?? (await ws.say("vp_nothingNewWasMade")), onIt }),
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
 }
@@ -347,41 +377,42 @@ export async function askOfficeToStartJob(appointmentId: string): Promise<{ ok: 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  if (!user) return { ok: false, error: await wordsOf(supabase).say("vp_notSignedIn") };
+  const ws = wordsOf(supabase, user.id);
   const { data: me } = await supabase.from("profiles").select("full_name, org_id, active").eq("id", user.id).maybeSingle();
   const prof = me as { full_name?: string | null; org_id?: string | null; active?: boolean | null } | null;
-  if (!prof?.org_id || prof.active === false) return { ok: false, error: "This account can't send that." };
+  if (!prof?.org_id || prof.active === false) return { ok: false, error: await ws.say("vp_accountCantSendThat") };
 
   const visit = await readVisit(supabase as unknown as SupabaseClient, appointmentId);
-  if (!visit) return { ok: false, error: "That visit could not be found." };
-  if (visit.job_id) return { ok: false, error: "This visit already has a job. Reload the page to clock in on it." };
+  if (!visit) return { ok: false, error: await ws.say("vp_visitNotFound") };
+  if (visit.job_id) return { ok: false, error: await ws.say("vp_visitAlreadyHasJobReload") };
 
   const recipients = await officeRecipients(supabase, user.id);
   if (!recipients.length) {
-    return { ok: false, error: "Nobody in the office gets messages in the app yet. Call them instead." };
+    return { ok: false, error: await ws.say("vp_nobodyInOfficeGetsMessages") };
   }
-  const first = (prof.full_name ?? "").trim().split(/\s+/)[0] || "A crew member";
+  // The office reads English today (sh_spanishCovers: the office pages' contents stay in English for now);
+  // its bell's words come from the same catalog so this file keeps no literal, and the day the office
+  // reads Spanish this one line becomes the reader's language (the long-shift route's own rule).
+  const office_t = translator("en");
+  const first = (prof.full_name ?? "").trim().split(/\s+/)[0] || office_t("cs_aCrewMember");
   const who = visitWho(visit);
-  const place = visit.title?.trim() || "a visit";
+  const place = visit.title?.trim() || office_t("vp_aVisitLower");
   // A visit that is over (audit v1018): he is not "at" it, so the bell says what is true.
   const over = visitIsOver(visit, await orgTz(supabase as unknown as SupabaseClient));
   const rang = await ringOffice(prof.org_id, recipients, {
     type: "visit_needs_job",
-    title: `${first} needs a job started${who ? ` for ${who}` : ""}`,
-    body: over
-      ? `${first} asks for a job on ${place}, a visit that is done, so the work can go on. Start it from the visit.`
-      : `${first} is at ${place} and can't clock in until it has a job. Start it from the visit.`,
+    title: fillSlots(office_t("vp_bellNeedsJobStarted"), { first, forWho: who ? ` ${fillSlots(office_t("vp_forCustomer"), { customer: who })}` : "" }),
+    body: fillSlots(office_t(over ? "vp_bellVisitOverBody" : "vp_bellAtVisitBody"), { first, place }),
     url: `/appointments/${visit.id}`,
     windowMinutes: 15,
     mode: "once_per_window",
   });
   if (rang === "failed" || rang === "nobody") {
-    return { ok: false, error: "That didn't reach the office. Call them instead." };
+    return { ok: false, error: await ws.say("vp_didntReachOffice") };
   }
   return {
     ok: true,
-    message: over
-      ? "The office has been asked to start a job for this visit."
-      : "The office has been asked. Once they start the job, you can clock in right here.",
+    message: await ws.say(over ? "vp_officeAskedToStartJob" : "vp_officeAskedClockInHere"),
   };
 }

@@ -14,10 +14,10 @@ import type { WordCatalog } from "@/lib/words/types";
  * keep the scan honest.
  */
 
-/** The seventeen catalogs (lib/words; nv_ the office's map since cn-v1139, us_ the usage meter since cn-v1140, the agenda's four — ag_, ag_cal_, ag_rail_, ag_srv_ — since the agenda-in-Spanish wave). */
-export const CATALOG_FLOOR = 17;
-/** The keys across every catalog at the agenda wave (2,274: the agenda's four catalogs whole — ag_ 89, ag_cal_ 122, ag_rail_ 175, ag_srv_ 155 = 541), at its foundation (1,825: the agenda's 93 + three placeholders, one per sub-catalog), at cn-v1140 (1,729 with the fixer's four — the shell's used-up line, the estimator's lighter line, the notice button, Ask The Owner — less the owner slot word; 1,726 with the plan card's words; 1,711 when the floor was set; 1,694 at cn-v1139; 1,562 at cn-v1138); raise it as keys land. */
-export const KEYS_FLOOR = 2274;
+/** The twenty catalogs (lib/words; nv_ the office's map since cn-v1139, us_ the usage meter since cn-v1140, the agenda's four — ag_, ag_cal_, ag_rail_, ag_srv_ — since the agenda-in-Spanish wave, the visit page's three — su_ the Settle Up button, vi_ the Inspector, vp_ the visit page — since the visit-page-in-Spanish wave, cn-v1144). */
+export const CATALOG_FLOOR = 20;
+/** The keys across every catalog at the visit-page wave's close (cn-v1144: 2,873 — the visit page's three catalogs whole, su_ 125, vi_ 185, vp_ 260, and the shell's and Nort's additions; skeptic #50's fixes added nine to vp_: the Lost door's own vp_btn_ key and the clock-in clash's eight — recount with `CATALOGS.flatMap((c) => Object.keys(c.en)).length` and set the floor to the count, never below it), at that wave's foundation (2,406: su_ 125 whole and the shell's 7 for the off line and the directions link, vi_ and vp_ still empty shelves), at the agenda wave (2,274: the agenda's four catalogs whole — ag_ 89, ag_cal_ 122, ag_rail_ 175, ag_srv_ 155 = 541), at its foundation (1,825: the agenda's 93 + three placeholders, one per sub-catalog), at cn-v1140 (1,729 with the fixer's four — the shell's used-up line, the estimator's lighter line, the notice button, Ask The Owner — less the owner slot word; 1,726 with the plan card's words; 1,711 when the floor was set; 1,694 at cn-v1139; 1,562 at cn-v1138); raise it as keys land. */
+export const KEYS_FLOOR = 2873;
 
 /**
  * THE KEY FAMILIES THAT ARE CLICKABLES (Erik's law: Title Case in BOTH languages, every word
@@ -27,22 +27,28 @@ export const KEYS_FLOOR = 2274;
  * and four of them ("Tax report", "Activity audit", "Employee documents", "Employee handbook") are
  * not Title Case — the pages' own words, not the catalog's to change.
  */
-// The agenda's four catalogs key every clickable with `_btn_` right after the prefix (lib/words/agenda's header).
-const TITLE_CASE_FAMILIES = ["sh_dock_", "sh_help_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_", "us_door_", "ag_btn_", "ag_cal_btn_", "ag_rail_btn_", "ag_srv_btn_"];
+// The agenda's four catalogs key every clickable with `_btn_` right after the prefix (lib/words/agenda's header); so do
+// the visit page's three (su_btn_, vi_btn_, vp_btn_) and, since that wave, the shell's new clickables (sh_btn_).
+const TITLE_CASE_FAMILIES = [
+  "sh_dock_", "sh_help_", "sh_btn_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_", "us_door_",
+  "ag_btn_", "ag_cal_btn_", "ag_rail_btn_", "ag_srv_btn_", "su_btn_", "vi_btn_", "vp_btn_", "nt_btn_",
+];
 const TITLE_CASE_ES_ONLY = ["nv_page_"];
-/** Every word begins with a capital, a digit or a symbol; a {slot} is a hole, not a word; "/", "&", "+" and "·" pass. */
+/** Every word begins with a capital, a digit or a symbol; a {slot} is a hole, not a word; "/", "&", "+", "·", a dash
+ *  ("They Paid — Record It", the way tests/title-case.test.ts lets "Saved — Open It" through) and Spanish's opening
+ *  "¿" / "¡" ("¿Cobrar Ahora?") pass. */
 const titleCase = (s: string) =>
   s
     .replace(/\{\w+\}/g, " ")
     .split(/\s+/)
     .filter(Boolean)
-    .every((w) => /^[\p{Lu}\p{N}&\/+·(]/u.test(w));
+    .every((w) => /^[¿¡]?[\p{Lu}\p{N}&\/+·(—–]/u.test(w));
 
 const ROOT = process.cwd();
 const keysOf = (c: WordCatalog) => Object.keys(c.en);
 
 describe("the catalogs", () => {
-  it("there are seventeen, each with a prefix of its own, and together they hold at least the floor's keys", () => {
+  it("there are twenty, each with a prefix of its own, and together they hold at least the floor's keys", () => {
     expect(CATALOGS.length).toBeGreaterThanOrEqual(CATALOG_FLOOR);
     const prefixes = CATALOGS.map((c) => c.prefix);
     expect(new Set(prefixes).size).toBe(prefixes.length);
@@ -170,8 +176,12 @@ describe("the catalogs", () => {
     expect(titleCase("Lista De Precios")).toBe(true);
     expect(titleCase("Cuentas Y Órdenes")).toBe(true);
     expect(titleCase("Finish Setting Up · {n} Left")).toBe(true);
+    expect(titleCase("They Paid — Record It")).toBe(true);
+    expect(titleCase("¿Cobrar Ahora?")).toBe(true);
     expect(titleCase("Lista de Precios")).toBe(false);
     expect(titleCase("Cuentas y Órdenes")).toBe(false);
+    expect(titleCase("¿cobrar Ahora?")).toBe(false);
+    expect(titleCase("They Paid — record It")).toBe(false);
   });
 });
 

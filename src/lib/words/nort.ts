@@ -4,7 +4,10 @@ import type { WordCatalog } from "./types";
  * NORT'S WORDS (nt_): the chat door's chrome (assistant-chat.tsx, its error boundary), the greeting
  * he speaks when the mic goes live (lib/nort/greeting), the read-backs his time verbs say word for
  * word (lib/actions/entities/time), and what the transcriber tells the person when it could not
- * hear (api/transcribe). Moved in whole in cn-v1138; the English is byte-for-byte what it was.
+ * hear (api/transcribe), and the Just Tell Nort panel every inspection sheet and the setup interview
+ * draw (components/tell-nort, since the visit-page-in-Spanish wave, cn-v1144: its doors are nt_btn_,
+ * Title Case in both languages; a surface's own label and placeholder, handed in, stand as they came).
+ * Moved in whole in cn-v1138; the English is byte-for-byte what it was.
  * Spanish is US/Mexican, "tú", plain words. The door labels (Guardar Presupuesto →, Sí, Hazlo,
  * Terminar Conversación, Reiniciar Nort) are Title Case like every button (Erik's law; the
  * title-case test reads t() doors in both languages); the sentences keep sentence case.
@@ -16,7 +19,7 @@ import type { WordCatalog } from "./types";
  */
 export const words: WordCatalog = {
   prefix: "nt_",
-  files: ["src/app/(app)/assistant/assistant-chat.tsx", "src/app/(app)/assistant/error.tsx", "src/lib/nort/greeting.ts", "src/app/api/transcribe/route.ts"],
+  files: ["src/app/(app)/assistant/assistant-chat.tsx", "src/app/(app)/assistant/error.tsx", "src/lib/nort/greeting.ts", "src/app/api/transcribe/route.ts", "src/components/tell-nort.tsx"],
   sameInBoth: ["nt_subtotal", "nt_total", "nt_streamLine"],
   en: {
     // The Estimator (the live estimate box) and its buttons.
@@ -145,6 +148,32 @@ export const words: WordCatalog = {
     // lib/voice-failure: what the panel's status line says when a voice turn cannot start.
     nt_tryAgainLine: "Tap Talk To Nort to try again, or type below.",
     nt_noVoiceLine: "Voice isn't available here. Type below.",
+    // components/tell-nort: the Just Tell Nort panel (the visit-page-in-Spanish wave). The door's default label
+    // (every surface today passes its own), the Nort-off twin, the box, the hint line, its doors and what it says back.
+    nt_btn_justTellNort: "Just Tell Nort",
+    nt_btn_justSayIt: "Just Say It",
+    nt_tellNortPlaceholder: "Say the whole job the way you'd tell a person: what they want, where, how much, and anything in the way…",
+    // {hint} is the first open question's own ask, its question mark dropped.
+    nt_sayTheWholeThingHint: "Say the whole thing — {hint}, and anything else you'd tell somebody.",
+    nt_sayTheWholeThing: "Say the whole thing, the way you'd say it to a person.",
+    nt_btn_close: "Close",
+    nt_btn_writingItDown: "Writing It Down…",
+    nt_btn_stop: "Stop",
+    nt_btn_talk: "Talk",
+    nt_btn_filling: "Filling…",
+    nt_btn_fillItIn: "Fill It In",
+    nt_listeningPressStop: "Listening — press Stop when you’re done.",
+    nt_checkWordsNort: "Check the words before you fill — Nort only uses what’s written here, and it won’t work out a measurement you didn’t say. Anything it can’t place goes in your notes as-is.",
+    nt_checkWordsPlain: "Check the words before you fill — it only uses what’s written here, and it won’t work out a measurement you didn’t say. Anything it can’t place goes in your notes as-is.",
+    nt_couldntHearThat: "Couldn't hear that.",
+    nt_didntCatchAnything: "Didn't catch anything.",
+    nt_noMicTypeInstead: "No mic — type it instead.",
+    nt_noSignalWordsStillHere: "No signal — your words are still here. Try Fill it in again when you're back in range.",
+    // {list} is what it filled, by name.
+    nt_filledInLook: "Filled in: {list} — have a look before you price it.",
+    nt_filledInRestInNotes: "Filled in: {list} · the rest is in your notes — have a look before you price it.",
+    nt_nothingMatchedInNotes: "Nothing matched a question — it's in the notes, word for word.",
+    nt_couldntPlaceAny: "Couldn't place any of that.",
   },
   es: {
     nt_estimator: "Estimador",
@@ -251,7 +280,7 @@ export const words: WordCatalog = {
     nt_noJobAttached: ", SIN trabajo asignado",
     nt_switchRepointed: "Listo. Toda esta marcación ya está en el trabajo nuevo. Lo anterior del día se queda donde estaba.",
     nt_switchCut:
-      "Cambiado. El reloj ya corre en el trabajo nuevo. Las {hours} horas antes del cambio se quedaron en {stayed}: un cambio abre un registro nuevo, nunca mueve horas ya trabajadas. Si esas horas también son del trabajo nuevo, la oficina las mueve en Tarjetas de Tiempo.",
+      "Cambiado. El reloj ya corre en el trabajo nuevo. Las {hours} horas antes del cambio se quedaron en {stayed}: un cambio abre un registro nuevo, nunca mueve horas ya trabajadas. Si esas horas también son del trabajo nuevo, la oficina las mueve en Tarjetas De Tiempo.",
     nt_theJobYouWereOn: "el trabajo en el que estabas",
     nt_notSignedIn: "No has iniciado sesión.",
     nt_notClockedIn: "No has marcado entrada.",
@@ -261,5 +290,27 @@ export const words: WordCatalog = {
     nt_badUpload: "Subida inválida.",
     nt_tryAgainLine: "Toca Hablar Con Nort para intentarlo de nuevo, o escribe abajo.",
     nt_noVoiceLine: "La voz no está disponible aquí. Escribe abajo.",
+    nt_btn_justTellNort: "Solo Dile A Nort",
+    nt_btn_justSayIt: "Solo Dilo",
+    nt_tellNortPlaceholder: "Di todo el trabajo como se lo dirías a una persona: qué quieren, dónde, cuánto y cualquier cosa que estorbe…",
+    nt_sayTheWholeThingHint: "Dilo todo — {hint}, y cualquier otra cosa que le dirías a alguien.",
+    nt_sayTheWholeThing: "Dilo todo, como se lo dirías a una persona.",
+    nt_btn_close: "Cerrar",
+    nt_btn_writingItDown: "Anotándolo…",
+    nt_btn_stop: "Detener",
+    nt_btn_talk: "Hablar",
+    nt_btn_filling: "Llenando…",
+    nt_btn_fillItIn: "Llenarlo",
+    nt_listeningPressStop: "Escuchando — toca Detener cuando termines.",
+    nt_checkWordsNort: "Revisa las palabras antes de llenar — Nort solo usa lo que está escrito aquí, y no va a deducir una medida que no dijiste. Lo que no pueda ubicar va a tus notas tal cual.",
+    nt_checkWordsPlain: "Revisa las palabras antes de llenar — solo usa lo que está escrito aquí, y no va a deducir una medida que no dijiste. Lo que no pueda ubicar va a tus notas tal cual.",
+    nt_couldntHearThat: "No se escuchó.",
+    nt_didntCatchAnything: "No se captó nada.",
+    nt_noMicTypeInstead: "Sin micrófono — mejor escríbelo.",
+    nt_noSignalWordsStillHere: "Sin señal — tus palabras siguen aquí. Vuelve a tocar Llenarlo cuando tengas señal.",
+    nt_filledInLook: "Se llenó: {list} — revísalo antes de ponerle precio.",
+    nt_filledInRestInNotes: "Se llenó: {list} · el resto está en tus notas — revísalo antes de ponerle precio.",
+    nt_nothingMatchedInNotes: "Nada coincidió con una pregunta — está en las notas, palabra por palabra.",
+    nt_couldntPlaceAny: "No se pudo ubicar nada de eso.",
   },
 };

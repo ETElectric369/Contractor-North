@@ -4,6 +4,7 @@ import type { Answers, AnswerValue, Need, Playbook } from "./types";
 import { coerceScopes, scopeText } from "./scopes";
 import { coerceTasks, isTaskList, taskText } from "./tasks";
 import { uploadDisplayName } from "./uploads";
+import { say, type Words } from "@/lib/lang-words";
 
 /**
  * THE WRITE CONTRACT, expressed over a playbook instead of a sheet.
@@ -277,22 +278,25 @@ export function orphanedAnswers(pb: Playbook, stored: unknown): Record<string, s
   return out;
 }
 
-/** "materials_known" → "Materials known". The need that carried a real label is gone. */
-export const retiredLabel = (key: string): string => {
+/** "materials_known" → "Materials known". The need that carried a real label is gone. The key's own words
+ *  are data; the suffix that says WHY it is here is inline English by default and, handed the reader's
+ *  `lang` and translator (`words`, lib/i18n translator(lang)), the Inspector's catalog's (lib/words/
+ *  visit-inspector vi_retiredWas / vi_retiredKept) through lib/lang-words say — this file imports no catalog. */
+export const retiredLabel = (key: string, lang?: string | null, words?: Words): string => {
   // `scope__was` is the parking slot retiredOptions writes a renamed chip into. Say what it is,
   // rather than rendering "Scope  was" and leaving somebody to guess.
   if (key.endsWith("__was")) {
-    const base = retiredLabel(key.slice(0, -"__was".length));
-    return `${base} — choices you've since changed`;
+    const base = retiredLabel(key.slice(0, -"__was".length), lang, words);
+    return say(lang, words, "vi_retiredWas", `${base} — choices you've since changed`, { base });
   }
   // `<key>__kept` is where orphanedAnswers parks an answer whose question stopped applying because
   // the playbook changed, not because anyone deselected anything. Say which of those it was.
   if (key.endsWith("__kept")) {
-    const base = retiredLabel(key.slice(0, -"__kept".length));
-    return `${base} — answered before you changed this question`;
+    const base = retiredLabel(key.slice(0, -"__kept".length), lang, words);
+    return say(lang, words, "vi_retiredKept", `${base} — answered before you changed this question`, { base });
   }
-  const words = key.replace(/[_-]+/g, " ").trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  const plain = key.replace(/[_-]+/g, " ").trim();
+  return plain.charAt(0).toUpperCase() + plain.slice(1);
 };
 
 /** One answer as a person would say it. An array is a list, because "outlets AND lights" is one answer. */

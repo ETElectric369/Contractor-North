@@ -148,7 +148,8 @@ describe("the chat door's words", () => {
   });
 
   it("the catalog names its screens and holds the chrome in both languages, Title Case on the doors", () => {
-    expect(nort.files).toEqual(["src/app/(app)/assistant/assistant-chat.tsx", "src/app/(app)/assistant/error.tsx", "src/lib/nort/greeting.ts", "src/app/api/transcribe/route.ts"]);
+    // (cn-v1144, the visit page in Spanish: the Just Tell Nort panel, components/tell-nort, reads this catalog too — lib/scan-upload-spanish.test)
+    expect(nort.files).toEqual(["src/app/(app)/assistant/assistant-chat.tsx", "src/app/(app)/assistant/error.tsx", "src/lib/nort/greeting.ts", "src/app/api/transcribe/route.ts", "src/components/tell-nort.tsx"]);
     expect(CATALOGS.some((c) => c.prefix === "nt_")).toBe(true);
     expect(Object.keys(nort.en).length).toBeGreaterThanOrEqual(100);
     for (const k of ["nt_saveEstimate", "nt_saveDraft", "nt_send", "nt_newChat", "nt_yesDoIt", "nt_cancel", "nt_endConversation", "nt_reload", "nt_restart", "nt_restarting", "nt_view"]) {

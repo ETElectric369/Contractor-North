@@ -36,6 +36,7 @@ vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 
 import { updateAppointment } from "@/app/(app)/appointments/actions";
 import { LINK_NO_SIGNAL_LINE, settleLink } from "@/app/(app)/appointments/[id]/link-picker";
+import { translator } from "@/lib/i18n";
 
 const ROOT = path.resolve(__dirname, "..");
 const picker = readFileSync(path.join(ROOT, "src/app/(app)/appointments/[id]/link-picker.tsx"), "utf8");
@@ -46,6 +47,7 @@ describe("Add As A New Lead in the For picker drops the lead door's own note (du
     const out = await settleLink(Promise.reject(new Error("fetch failed")), "Couldn't make the lead.");
     expect(out).toEqual({ error: LINK_NO_SIGNAL_LINE });
     expect(LINK_NO_SIGNAL_LINE).toContain("didn't go through");
+    expect(LINK_NO_SIGNAL_LINE).toBe(translator("en")("vp_noConnectionLink"));
   });
 
   it("a refusal speaks in the action's own words, else the caller's fallback", async () => {
@@ -60,7 +62,8 @@ describe("Add As A New Lead in the For picker drops the lead door's own note (du
   });
 
   it("the lead button reads the note aloud as a sticky toast BEFORE the picker closes, and goes through settleLink", () => {
-    expect(picker).toContain('settleLink(linkAppointmentToNewLead(appointmentId, typed), "Couldn\'t make the lead.")');
+    expect(picker).toContain('settleLink(linkAppointmentToNewLead(appointmentId, typed), t("vp_couldntMakeTheLead"), t("vp_noConnectionLink"))');
+    expect(translator("en")("vp_couldntMakeTheLead")).toBe("Couldn't make the lead.");
     const note = picker.indexOf('if (done.res.note) toast(done.res.note, "info", undefined, { sticky: true });');
     expect(note).toBeGreaterThan(-1);
     expect(picker.indexOf("setOpen(false);", note)).toBeGreaterThan(note);
@@ -70,7 +73,8 @@ describe("Add As A New Lead in the For picker drops the lead door's own note (du
   });
 
   it("a picked row says its refusal where the tap was, and reads a warning the way the lead button does", () => {
-    expect(picker).toContain('settleLink(linkAppointmentTo(appointmentId, r.kind, r.id), "Couldn\'t connect it — try again.")');
+    expect(picker).toContain('settleLink(linkAppointmentTo(appointmentId, r.kind, r.id), t("vp_couldntConnectIt"), t("vp_noConnectionLink"))');
+    expect(translator("en")("vp_couldntConnectIt")).toBe("Couldn't connect it — try again.");
     expect(picker).toContain('if (done.res.warning) toast(done.res.warning, "info", undefined, { sticky: true });');
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { isNativeShell } from "@/lib/native-shell";
+import { say, type Words } from "@/lib/lang-words";
 
 /**
  * LIDAR — 3D SCAN: the page's door to ScanPlugin.swift. Erik 2026-10-16, after Polycam: "collect
@@ -15,6 +16,12 @@ import { isNativeShell } from "@/lib/native-shell";
  *
  * THE BRIDGE, NEVER AN IMPORT (native-measure.ts): a local plugin compiled into the shell, read
  * off window.Capacitor.Plugins. A build without it has no key: no door is drawn.
+ *
+ * THE READER'S LANGUAGE (the visit-page-in-Spanish wave, cn-v1144): every sentence here a tech reads
+ * keeps its English inline as the default, byte for byte, and takes the caller's `lang` plus the
+ * caller's translator (`words`, lib/i18n translator(lang)) for the Spanish, which lives in the
+ * Inspector's catalog (lib/words/visit-inspector, vi_) — this file imports no catalog (lib/lang-words
+ * say). A caller that hands nothing reads the English it always did.
  */
 
 type Plugin = {
@@ -149,20 +156,25 @@ export function keptStep(kept: KeptModel | null, taskId: string | null): KeptSte
 }
 
 /** The one action after a failed trip, to follow the sentence that said what failed. */
-export function keptWords(landed: boolean): string {
+export function keptWords(landed: boolean, lang?: string | null, words?: Words): string {
   return landed
-    ? "The model is up on the visit, so tap 3D Scan again to save it."
-    : "It's kept on this phone — tap 3D Scan again to send it without scanning.";
+    ? say(lang, words, "vi_keptSaveAgain", "The model is up on the visit, so tap 3D Scan again to save it.")
+    : say(lang, words, "vi_keptSendAgain", "It's kept on this phone — tap 3D Scan again to send it without scanning.");
 }
 
-/** The label of the button that lets go of a kept model (the page draws it; the sentence below names it). */
+/** The label of the button that lets go of a kept model (the page draws it as t("vi_btn_discardKept3dModel"),
+ *  whose English is this; the sentence below names it in the same language). */
 export const DISCARD_KEPT_LABEL = "Discard Kept 3D Model";
 
-/** A tap on 3D Scan somewhere the kept model is not for. `place` names where it waits ("the visit",
- *  or a task in quotes); null is a task that has since been removed, where it can only be discarded. */
-export function keptElsewhereWords(place: string | null): string {
-  if (place === null) return `The kept 3D model was scanned for a task that has been removed. Tap ${DISCARD_KEPT_LABEL}.`;
-  return `The 3D model scanned for ${place} is still waiting to send. Tap 3D Scan there to send it.`;
+/** A tap on 3D Scan somewhere the kept model is not for. `place` names where it waits ("the visit" in the
+ *  reader's language, or a task in quotes); null is a task that has since been removed, where it can only
+ *  be discarded. */
+export function keptElsewhereWords(place: string | null, lang?: string | null, words?: Words): string {
+  if (place === null) {
+    const button = say(lang, words, "vi_btn_discardKept3dModel", DISCARD_KEPT_LABEL);
+    return say(lang, words, "vi_keptForRemovedTask", `The kept 3D model was scanned for a task that has been removed. Tap ${DISCARD_KEPT_LABEL}.`, { button });
+  }
+  return say(lang, words, "vi_keptElsewhere", `The 3D model scanned for ${place} is still waiting to send. Tap 3D Scan there to send it.`, { place });
 }
 
 /** The job's papers did not get their copy of a model that IS on the visit. What went wrong is said
@@ -171,37 +183,42 @@ export function keptElsewhereWords(place: string | null): string {
  *  login can't file there", and anything else is not guessed at. The one action is the office's,
  *  since nothing on this page can send the copy again. `e` is whatever came back (an error from
  *  storage, a thrown error, or the app's own refusal sentence). */
-export function jobFilingWords(e: unknown): string {
+export function jobFilingWords(e: unknown, lang?: string | null, words?: Words): string {
   const msg = (typeof e === "string" ? e : typeof (e as { message?: unknown } | null)?.message === "string" ? (e as { message: string }).message : "").trim();
   const why = /failed to fetch|fetch failed|load failed|networkerror|network request failed|connection dropped/i.test(msg)
-    ? "no signal"
+    ? say(lang, words, "vi_whyNoSignal", "no signal")
     : /row-level security|permission denied|unauthori[sz]ed|forbidden|not allowed|don't have access|not signed in/i.test(msg)
-      ? "this login can't file there"
+      ? say(lang, words, "vi_whyCantFileThere", "this login can't file there")
       : "";
-  return `The 3D model is on the visit, but it didn't file on the job${why ? `: ${why}` : ""}. Tell the office to file it.`;
+  return why
+    ? say(lang, words, "vi_jobFilingWhy", `The 3D model is on the visit, but it didn't file on the job: ${why}. Tell the office to file it.`, { why })
+    : say(lang, words, "vi_jobFiling", "The 3D model is on the visit, but it didn't file on the job. Tell the office to file it.");
 }
 
-/** Open the capture screen, wait for the model, and bring it over. The tap that calls this is the camera ask. */
-export async function scan3dNative(now = Date.now()): Promise<ModelScanResult> {
+/** Open the capture screen, wait for the model, and bring it over. The tap that calls this is the camera ask.
+ *  A refusal is said in the reader's language when the caller hands `lang` + `words`; the plugin's own
+ *  sentence (a rejection) is shown as it came. */
+export async function scan3dNative(now = Date.now(), lang?: string | null, words?: Words): Promise<ModelScanResult> {
   const p = plugin();
-  if (!p?.scan3d) return { ok: false, refused: "3D Scan needs the North app on an iPhone with a LiDAR sensor." };
+  if (!p?.scan3d) return { ok: false, refused: say(lang, words, "vi_scanNeedsLidarIphone", "3D Scan needs the North app on an iPhone with a LiDAR sensor.") };
   let r: Record<string, unknown>;
   try {
     r = await p.scan3d();
   } catch (e: unknown) {
     const msg = (e as { message?: unknown })?.message;
-    return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : "Couldn't open 3D Scan. Try again." };
+    return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : say(lang, words, "vi_couldntOpenScan", "Couldn't open 3D Scan. Try again.") };
   }
   if (r?.ok !== true) return { ok: false, cancelled: true };
   const path = typeof r.path === "string" ? r.path : "";
   const total = typeof r.bytes === "number" ? r.bytes : 0;
   if (!path || total <= 0) {
     await discardScan(path);
-    return { ok: false, refused: "The model came back empty. Try again with more light and a slower walk." };
+    return { ok: false, refused: say(lang, words, "vi_modelCameBackEmpty", "The model came back empty. Try again with more light and a slower walk.") };
   }
   if (total > MODEL_MAX_BYTES) {
     await discardScan(path);
-    return { ok: false, refused: `The model is too big to send (${Math.round(total / 1_000_000)} MB). Scan a smaller area.` };
+    const mb = Math.round(total / 1_000_000);
+    return { ok: false, refused: say(lang, words, "vi_modelTooBig", `The model is too big to send (${mb} MB). Scan a smaller area.`, { mb }) };
   }
   const model = await pullFile(p, path, total, `scan-3d-${now}.usdz`, USDZ_MIME);
   if (!model) {
@@ -209,7 +226,7 @@ export async function scan3dNative(now = Date.now()): Promise<ModelScanResult> {
     // rather than sit in the phone's temp folder, and the sentence says what is true: it is lost,
     // and the one thing left is a new walk. It never promises a retry that is a whole new scan.
     await discardScan(path);
-    return { ok: false, refused: MODEL_LOST_WORDS };
+    return { ok: false, refused: say(lang, words, "vi_modelLost", MODEL_LOST_WORDS) };
   }
   return { ok: true, kind: "model", model, path, shots: typeof r.shots === "number" ? r.shots : 0 };
 }

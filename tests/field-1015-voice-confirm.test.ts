@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { words as serverWords } from "@/lib/words/agenda-server";
+import { words as visitWords } from "@/lib/words/visit-page";
 
 /**
  * THE CONFIRM QUESTION NOBODY HEARD (Erik's locked round, 2026-10-15 22:50). Nort's reply was a confirm
@@ -81,11 +82,16 @@ describe("the appointment form: a new person in plain sight, and the address pic
   const form = src("src/app/(app)/appointments/appointment-button.tsx");
   it("offers New Lead and New Customer as buttons (Title Case), not an option at the bottom of the list", () => {
     expect(form).not.toContain("+ New customer…");
-    expect(form).toContain('<UserPlus className="h-4 w-4" /> New Lead');
-    expect(form).toContain('<Plus className="h-4 w-4" /> New Customer');
+    // The words come from the visit page's catalog since the visit-page-in-Spanish wave (vp_), English byte for byte.
+    expect(form).toContain('<UserPlus className="h-4 w-4" /> {t("vp_btn_newLead")}');
+    expect(form).toContain('<Plus className="h-4 w-4" /> {t("vp_btn_newCustomer")}');
+    expect(visitWords.en.vp_btn_newLead).toBe("New Lead");
+    expect(visitWords.en.vp_btn_newCustomer).toBe("New Customer");
     expect(form).toContain('const isNewPerson = (id: string) => id === "__new__" || id === "__lead__";');
     expect(form).toContain('<input type="hidden" name="customer_id" value={form.customer_id} />');
-    expect(form).toContain('{newLead ? "New lead name" : "New customer name"}');
+    expect(form).toContain('{newLead ? t("vp_newLeadName") : t("vp_newCustomerName")}');
+    expect(visitWords.en.vp_newLeadName).toBe("New lead name");
+    expect(visitWords.en.vp_newCustomerName).toBe("New customer name");
     // The list itself no longer carries the name: the hidden input does.
     expect(form).toContain('<Select\n                id="ap-cust"\n                value={form.customer_id}');
   });

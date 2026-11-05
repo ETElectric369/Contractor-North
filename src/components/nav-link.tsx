@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { navUrl, MAPS_PROVIDER_KEY, type MapsProvider } from "@/lib/maps";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * A "navigate to this address" link that honors the user's preferred maps app.
@@ -9,7 +11,9 @@ import { navUrl, MAPS_PROVIDER_KEY, type MapsProvider } from "@/lib/maps";
  * remembers the choice — so Apple users who want Google find the option at the
  * point of use, not buried in Settings (where it can still be changed). After a
  * choice is made it's a plain link that opens directly. All directions links go
- * through here.
+ * through here. The ask's words follow the signed-in person's language (useLang +
+ * the shell catalog, lib/words/shell sh_openIn / sh_btn_googleMaps / sh_btn_appleMaps —
+ * the visit-page-in-Spanish wave, cn-v1144); the two apps keep their names.
  */
 export function NavLink({
   address,
@@ -23,6 +27,7 @@ export function NavLink({
   const [provider, setProvider] = useState<MapsProvider | null>(null); // null = not yet chosen
   const [picking, setPicking] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  const t = translator(useLang());
 
   useEffect(() => {
     try {
@@ -73,12 +78,12 @@ export function NavLink({
           style={{ position: "absolute", left: 0, top: "calc(100% + 0.25rem)" }}
           className="glass glass-gloss glass-menu z-[90] w-44 overflow-hidden rounded-lg py-1 shadow-xl"
         >
-          <span className="block px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Open in…</span>
+          <span className="block px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t("sh_openIn")}</span>
           <button type="button" onClick={() => choose("google")} className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15">
-            Google Maps
+            {t("sh_btn_googleMaps")}
           </button>
           <button type="button" onClick={() => choose("apple")} className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15">
-            Apple Maps
+            {t("sh_btn_appleMaps")}
           </button>
         </span>
       )}

@@ -25,6 +25,13 @@ import {
   createAppointmentProposal,
 } from "./actions";
 import { createParamClaim } from "@/lib/param-claim";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
+
+/** The reader's words: t("vp_…") from lib/words/visit-page. */
+type Translate = (key: string) => string;
+/** English, for a caller that hands no language (the tests, and every door that reads the words before a provider). */
+const EN: Translate = translator("en");
 
 const p2 = (n: number) => String(n).padStart(2, "0");
 const ymd = (d: Date) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
@@ -163,17 +170,21 @@ const newParam = createParamClaim();
  * THE WORDS ON THE FORM'S DOOR FOLLOW ITS KIND (cn-v1134). One form creates or edits an appointment
  * OR an inspection, and its title and Save button said "appointment" for both. Now an inspection's
  * form says Inspection — in Title Case, like every clickable. The propose mode keeps its own words.
+ * And they follow the reader (the visit-page-in-Spanish wave): each door is a whole phrase in
+ * lib/words/visit-page (vp_btn_newInspection / vp_btn_editAppointment / …), never a slot, because
+ * Cita and Inspección each carry their own article; English when no translator is handed in.
  */
-export function apptFormWords(o: { kind: string; editing: boolean; mode: "set" | "propose"; linkReady: boolean }): {
+export function apptFormWords(o: { kind: string; editing: boolean; mode: "set" | "propose"; linkReady: boolean }, t: Translate = EN): {
   title: string;
   saveLabel: string;
   trigger: string;
 } {
-  const thing = o.kind === "inspection" ? "Inspection" : "Appointment";
+  const inspection = o.kind === "inspection";
+  const fresh = t(inspection ? "vp_btn_newInspection" : "vp_btn_newAppointment");
   return {
-    title: o.editing ? `Edit ${thing}` : o.linkReady ? "Text The Customer These Times" : `New ${thing}`,
-    saveLabel: o.mode === "propose" && !o.editing ? "Create Link" : `Save ${thing}`,
-    trigger: `New ${thing}`,
+    title: o.editing ? t(inspection ? "vp_btn_editInspection" : "vp_btn_editAppointment") : o.linkReady ? t("vp_btn_textTheCustomerTheseTimes") : fresh,
+    saveLabel: o.mode === "propose" && !o.editing ? t("vp_btn_createLink") : t(inspection ? "vp_btn_saveInspection" : "vp_btn_saveAppointment"),
+    trigger: fresh,
   };
 }
 
@@ -233,6 +244,10 @@ export function AppointmentButton({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const toast = useToast();
+  // The reader's words (lib/words/visit-page, vp_): the sheet is shared by the calendar, My Day, the
+  // leads and the visit page's ⋯, and every one of them reads it in the signed-in person's language.
+  const lang = useLang();
+  const t = translator(lang);
   const editing = !!appointment;
   /** WHAT THE URL SAID WHEN IT OPENED THIS FORM: ?type= (New Inspection) and ?time= (a tapped half
    *  hour), kept until the form is closed so a re-seed on the way in keeps them, and cleared on
@@ -435,9 +450,7 @@ export function AppointmentButton({
     // a zone the form isn't keeping.
     try {
       const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      setZoneNote(
-        tz === deviceTz ? null : `Times are ${tz.split("/").pop()?.replace(/_/g, " ") ?? tz} time, the business's clock.`,
-      );
+      setZoneNote(tz === deviceTz ? null : fillText(t("vp_zoneNote"), { zone: tz.split("/").pop()?.replace(/_/g, " ") ?? tz }));
     } catch {
       /* no Intl zone on this device — the note is a courtesy, never a gate */
     }
@@ -451,7 +464,7 @@ export function AppointmentButton({
   }
 
   function openModal() {
-    if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
+    if (draft.restored && dirty) toast(t("vp_draftRestored"), "info");
     setOpen(true);
     // Open FIRST, then correct: waiting on a query before the modal appears reads as a dropped
     // tap. It is cached after the first open on the page, so in practice it is already here.
@@ -475,7 +488,7 @@ export function AppointmentButton({
     setError(null);
     start(async () => {
       const res = await createJobFromAppointment(appointment.id);
-      if (!res.ok || !res.id) return setError(res.error ?? "Could not create job.");
+      if (!res.ok || !res.id) return setError(res.error ?? t("vp_couldNotCreateJob"));
       setOpen(false);
       router.push(`/jobs/${res.id}`);
     });
@@ -487,13 +500,13 @@ export function AppointmentButton({
     // "Propose times" — create a tentative appointment + a pick-a-time link.
     if (mode === "propose" && !editing) {
       const clean = slots.filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.date));
-      if (!clean.length) return setError("Add at least one date option.");
+      if (!clean.length) return setError(t("vp_addAtLeastOneDateOption"));
       formData.set("slots_json", JSON.stringify(clean));
       const first = isoFor(clean[0].date, clean[0].time || "08:00", formTz.current);
       if (first) formData.set("starts_at_iso", first);
       start(async () => {
         const res = await createAppointmentProposal(formData);
-        if (!res.ok || !res.token) return setError(res.error ?? "Could not create the link.");
+        if (!res.ok || !res.token) return setError(res.error ?? t("vp_couldNotCreateTheLink"));
         if (res.warning) toast(res.warning, "info", undefined, { sticky: true }); // must be READ: the form closes
         draft.clear();
         setLinkToken(res.token);
@@ -526,7 +539,7 @@ export function AppointmentButton({
       const res = editing
         ? await updateAppointment(appointment!.id, formData)
         : await createAppointment(formData);
-      if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (!res.ok) return setError(res.error ?? t("vp_couldNotSave"));
       if (res.warning) toast(res.warning, "info", undefined, { sticky: true }); // must be READ: the form closes
       // Saved — drop the draft. New mode resets so reopening doesn't offer a
       // duplicate; edit mode keeps the just-saved values as the new baseline.
@@ -554,8 +567,8 @@ export function AppointmentButton({
   const origin = useOrgPublicBase();
   // The door's words: the live Type box decides (a New Inspection door seeds it; an edit shows the
   // row's own kind); the closed trigger reads the caller's default kind.
-  const words = apptFormWords({ kind: form.type, editing, mode, linkReady: !!linkToken });
-  const triggerWords = apptFormWords({ kind: defaultType ?? "", editing, mode: "set", linkReady: false });
+  const words = apptFormWords({ kind: form.type, editing, mode, linkReady: !!linkToken }, t);
+  const triggerWords = apptFormWords({ kind: defaultType ?? "", editing, mode: "set", linkReady: false }, t);
   const pickLink = linkToken && origin ? `${origin}/pick/${linkToken}` : null;
 
   async function copyLink() {
@@ -571,12 +584,12 @@ export function AppointmentButton({
 
   function remove() {
     if (!appointment) return;
-    if (!confirm(`Delete the appointment "${appointment.title}"? This can't be undone.`)) return;
+    if (!confirm(fillText(t("vp_deleteAppointmentAsk"), { title: appointment.title }))) return;
     start(async () => {
       const res = await deleteAppointment(appointment.id);
-      if (!res?.ok) { toast(res?.error ?? "Couldn't delete appointment — try again.", "error"); return; }
+      if (!res?.ok) { toast(res?.error ?? t("vp_couldntDeleteAppointment"), "error"); return; }
       draft.clear();
-      toast("Appointment deleted", "success");
+      toast(t("vp_appointmentDeleted"), "success");
       setOpen(false);
       if (afterDeleteHref) router.push(afterDeleteHref);
       else router.refresh();
@@ -601,7 +614,7 @@ export function AppointmentButton({
             // Sized by the ROW it sits in when a caller passes a box; the calendar drill keeps the
             // quiet default. (My Day's agenda rows use the worded row in their ⋯ sheet instead.)
             className={triggerClassName ?? "rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"}
-            title="Edit"
+            title={t("vp_btn_edit")}
           >
             <Pencil className="h-4 w-4" />
           </button>
@@ -625,7 +638,7 @@ export function AppointmentButton({
         dirty={dirty}
         footer={
           linkToken ? (
-            <ModalActions onCancel={closeAll} onSave={closeAll} saveLabel="Done" hideCancel />
+            <ModalActions onCancel={closeAll} onSave={closeAll} saveLabel={t("vp_btn_done")} hideCancel />
           ) : (
             <ModalActions
               onCancel={closeAll}
@@ -636,7 +649,7 @@ export function AppointmentButton({
               extra={
                 editing ? (
                   <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">
-                    Delete
+                    {t("vp_btn_delete")}
                   </Button>
                 ) : undefined
               }
@@ -650,32 +663,27 @@ export function AppointmentButton({
 
           {linkToken && (
             <div className="space-y-3">
-              <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-                Link ready — text it to the customer. The appointment confirms onto your calendar the
-                moment they tap a time.
-              </div>
+              <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{t("vp_linkReadyAppointment")}</div>
               <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{pickLink}</code>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" onClick={copyLink}>
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? "Copied" : "Copy Link"}
+                  {copied ? t("vp_btn_copied") : t("vp_btn_copyLink")}
                 </Button>
+                {/* The body is the CUSTOMER's line, not the tech's screen: it stays as it is whatever
+                    language the tech reads (the pick page it opens is the customer's, in English). */}
                 <a
                   href={`sms:?body=${encodeURIComponent(`Hi! Pick a time that works and we'll lock it in: ${pickLink}`)}`}
                   className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark"
                 >
-                  <MessageSquare className="h-4 w-4 shrink-0" /> Text It
+                  <MessageSquare className="h-4 w-4 shrink-0" /> {t("vp_btn_textIt")}
                 </a>
               </div>
               {/* The SAME honesty the /leads handoff carries (e407833a). A defect is never just
                   an instance: this is the identical sms: link reached from the Schedule day
                   view's pencil rather than from a lead, so the same wrong impression — that the
                   customer sees the business number — was available from here too. */}
-              <p className="mt-2 text-xs text-slate-500">
-                Text It opens this phone&rsquo;s own messaging app, so it sends from this
-                phone&rsquo;s number, not the business line. To send it from the business line, use
-                Copy Link and paste it there.
-              </p>
+              <p className="mt-2 text-xs text-slate-500">{t("vp_textItNote")}</p>
             </div>
           )}
 
@@ -685,28 +693,28 @@ export function AppointmentButton({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="ap-type">Type</Label>
+              <Label htmlFor="ap-type">{t("vp_type")}</Label>
               {/* Options driven by the statuses.ts spine (PICKABLE_APPOINTMENT_TYPES, W2-06) — the
                   dropdown, the write-guard and the DB check constraint can't drift apart. An old
                   row's own kind rides along as one extra option (typeOptions). */}
               <Select id="ap-type" name="type" value={form.type} onChange={(e) => patchSuggesting({ type: e.target.value })}>
-                {typeOptions.map((t) => (
-                  <option key={t} value={t}>{appointmentTypeLabel(t)}</option>
+                {typeOptions.map((type) => (
+                  <option key={type} value={type}>{appointmentTypeLabel(type, lang, t)}</option>
                 ))}
               </Select>
             </div>
             <div>
-              <Label htmlFor="ap-assigned">Assigned to</Label>
+              <Label htmlFor="ap-assigned">{t("vp_assignedTo")}</Label>
               <Select id="ap-assigned" name="assigned_to" value={form.assigned_to} onChange={(e) => patch({ assigned_to: e.target.value })}>
-                <option value="">— Anyone —</option>
+                <option value="">{t("vp_btn_anyone")}</option>
                 {staff.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </Select>
             </div>
           </div>
 
           <div>
-            <Label htmlFor="ap-title">Title</Label>
-            <Input id="ap-title" name="title" value={form.title} onChange={(e) => patch({ title: e.target.value })} placeholder="e.g. Inspection at the Smiths', follow-up visit" required />
+            <Label htmlFor="ap-title">{t("vp_title")}</Label>
+            <Input id="ap-title" name="title" value={form.title} onChange={(e) => patch({ title: e.target.value })} placeholder={t("vp_titlePlaceholder")} required />
           </div>
 
           {!editing && (
@@ -715,8 +723,8 @@ export function AppointmentButton({
               activeId={mode}
               onSelect={(id) => setMode(id as typeof mode)}
               items={[
-                { id: "set", label: "Set A Time" },
-                { id: "propose", label: "Propose Times" },
+                { id: "set", label: t("vp_btn_setATime") },
+                { id: "propose", label: t("vp_btn_proposeTimes") },
               ]}
             />
           )}
@@ -724,15 +732,15 @@ export function AppointmentButton({
           {editing || mode === "set" ? (
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <Label htmlFor="ap-date">Date</Label>
+                <Label htmlFor="ap-date">{t("vp_date")}</Label>
                 <Input id="ap-date" name="date" type="date" value={form.date} onChange={(e) => patch({ date: e.target.value })} required />
               </div>
               <div>
-                <Label htmlFor="ap-start">Start</Label>
+                <Label htmlFor="ap-start">{t("vp_start")}</Label>
                 <Input id="ap-start" name="start_time" type="time" value={form.start_time} onChange={(e) => patch({ start_time: e.target.value })} />
               </div>
               <div>
-                <Label htmlFor="ap-end">End</Label>
+                <Label htmlFor="ap-end">{t("vp_end")}</Label>
                 <Input id="ap-end" name="end_time" type="time" value={form.end_time} onChange={(e) => patch({ end_time: e.target.value })} />
               </div>
               {/* NOTHING SILENT: on a laptop set to another zone these hours are no longer the
@@ -741,20 +749,20 @@ export function AppointmentButton({
             </div>
           ) : (
             <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-light/20 p-3">
-              <Label>Offer up to 3 times — the customer taps one</Label>
+              <Label>{t("vp_offerUpToThreeTimes")}</Label>
               {slots.map((sl, i) => (
                 <div key={i} className="grid grid-cols-2 gap-2">
                   <Input
                     type="date"
                     value={sl.date}
                     onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: ev.target.value } : x)))}
-                    aria-label={`Option ${i + 1} date`}
+                    aria-label={fillText(t("vp_optionDateAria"), { n: String(i + 1) })}
                   />
                   <Input
                     type="time"
                     value={sl.time}
                     onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, time: ev.target.value } : x)))}
-                    aria-label={`Option ${i + 1} time`}
+                    aria-label={fillText(t("vp_optionTimeAria"), { n: String(i + 1) })}
                   />
                 </div>
               ))}
@@ -764,7 +772,7 @@ export function AppointmentButton({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="ap-cust">Customer</Label>
+              <Label htmlFor="ap-cust">{t("vp_customer")}</Label>
               <Select
                 id="ap-cust"
                 value={form.customer_id}
@@ -786,12 +794,12 @@ export function AppointmentButton({
                 {customers.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                 {/* A new person is chosen with the buttons below, never from this list (the option that
                     sat at its bottom went unseen — Erik, 2026-10-15). The value still shows here. */}
-                {newLead && <option value="__lead__">New Lead</option>}
-                {newCust && <option value="__new__">New Customer</option>}
+                {newLead && <option value="__lead__">{t("vp_btn_newLead")}</option>}
+                {newCust && <option value="__new__">{t("vp_btn_newCustomer")}</option>}
               </Select>
             </div>
             <div>
-              <Label htmlFor="ap-job">Job</Label>
+              <Label htmlFor="ap-job">{t("vp_job")}</Label>
               <Select
                 id="ap-job"
                 name="job_id"
@@ -820,31 +828,31 @@ export function AppointmentButton({
           <input type="hidden" name="customer_id" value={form.customer_id} />
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" variant={newLead ? "primary" : "outline"} aria-pressed={newLead} className="min-h-11" onClick={() => patchSuggesting({ customer_id: newLead ? "" : "__lead__" })}>
-              <UserPlus className="h-4 w-4" /> New Lead
+              <UserPlus className="h-4 w-4" /> {t("vp_btn_newLead")}
             </Button>
             <Button type="button" size="sm" variant={newCust ? "primary" : "outline"} aria-pressed={newCust} className="min-h-11" onClick={() => patchSuggesting({ customer_id: newCust ? "" : "__new__" })}>
-              <Plus className="h-4 w-4" /> New Customer
+              <Plus className="h-4 w-4" /> {t("vp_btn_newCustomer")}
             </Button>
             <span className="text-xs text-slate-500">
-              {newLead ? "A lead: this visit and its address go on it." : newCust ? "Someone already yours who isn't in the list." : "Not in the list? Add them here."}
+              {newLead ? t("vp_leadGoesOnIt") : newCust ? t("vp_someoneAlreadyYours") : t("vp_notInTheList")}
             </span>
           </div>
 
           {newPerson && (
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-brand/30 bg-brand-light/30 p-3">
               <div>
-                <Label htmlFor="ap-newname">{newLead ? "New lead name" : "New customer name"}</Label>
-                <Input autoComplete="name" id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patchSuggesting({ new_customer_name: e.target.value })} placeholder="Name" required />
+                <Label htmlFor="ap-newname">{newLead ? t("vp_newLeadName") : t("vp_newCustomerName")}</Label>
+                <Input autoComplete="name" id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patchSuggesting({ new_customer_name: e.target.value })} placeholder={t("vp_name")} required />
               </div>
               <div>
-                <Label htmlFor="ap-newphone">Phone</Label>
-                <Input id="ap-newphone" name="new_customer_phone" type="tel" value={form.new_customer_phone} onChange={(e) => patch({ new_customer_phone: e.target.value })} placeholder="Optional" />
+                <Label htmlFor="ap-newphone">{t("vp_phone")}</Label>
+                <Input id="ap-newphone" name="new_customer_phone" type="tel" value={form.new_customer_phone} onChange={(e) => patch({ new_customer_phone: e.target.value })} placeholder={t("vp_optionalPlaceholder")} />
               </div>
             </div>
           )}
 
           <div>
-            <Label htmlFor="ap-loc">Location</Label>
+            <Label htmlFor="ap-loc">{t("vp_location")}</Label>
             {/* THE SAME ADDRESS PICKER THE LEAD FORM HAS (Erik, 2026-10-15: "the new appointment page address
                 picker doesn't work" — this box was a plain input, so a street typed here reached a lead with
                 no town). A pick writes the parts too (city/state/zip, 0177), so a lead made from this visit
@@ -854,7 +862,7 @@ export function AppointmentButton({
               id="ap-loc"
               name="location"
               defaultValue={form.location}
-              placeholder="Address or site"
+              placeholder={t("vp_addressOrSite")}
               onTextChange={(v) => {
                 if (v === form.location) return;
                 patchSuggesting(form.parts_picked ? { location: v, city: "", state: "", zip: "", parts_picked: false } : { location: v });
@@ -870,13 +878,13 @@ export function AppointmentButton({
             )}
           </div>
           <div>
-            <Label htmlFor="ap-notes">Notes</Label>
+            <Label htmlFor="ap-notes">{t("vp_notes")}</Label>
             <Textarea id="ap-notes" name="notes" rows={2} value={form.notes} onChange={(e) => patch({ notes: e.target.value })} />
           </div>
 
           {editing && appointment && !appointment.job_id && (
             <Button type="button" variant="outline" onClick={convertToJob} disabled={pending} className="w-full">
-              Convert To Job →
+              {t("vp_btn_convertToJob")} →
             </Button>
           )}
           </>

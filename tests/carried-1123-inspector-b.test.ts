@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { translator } from "@/lib/i18n";
 
 /**
  * The Inspector's carried findings, group B (audit v1120, 2026-10-17): the 3D Scan model's trip.
@@ -53,6 +54,8 @@ vi.mock("react", async (importOriginal) => {
     useRef: (init: unknown) => slot(() => ({ current: init })),
     useMemo: (fn: () => unknown) => fn(),
     useEffect: () => undefined,
+    // (cn-v1144) the Inspector reads the signed-in person's language through useLang — one useContext; this harness reads English.
+    useContext: () => "en",
     useTransition: () => [false, (cb: () => unknown) => void cb()],
   };
 });
@@ -273,13 +276,17 @@ describe("3D Scan retry conflates 'row not saved' with 'file not uploaded', neve
     await tap(discardButton());
     expect(discardButton()).toBeTruthy();
     expect(h.discardScan).not.toHaveBeenCalled();
-    expect(SRC).toContain('if (!confirm("Discard the kept 3D model? The room would need scanning again.")) return;');
+    // (cn-v1144, the visit page in Spanish: the question reads the vi_ catalog; the English is byte for byte what it asked)
+    expect(SRC).toContain('if (!confirm(t("vi_discardKeptConfirm"))) return;');
+    expect(translator("en")("vi_discardKeptConfirm")).toBe("Discard the kept 3D model? The room would need scanning again.");
   });
 
   it("the button is Title Case, the same one the removed-task sentence names, and sits beside 3D Scan", () => {
     expect(DISCARD_KEPT_LABEL).toBe("Discard Kept 3D Model");
     expect(keptElsewhereWords(null)).toContain(`Tap ${DISCARD_KEPT_LABEL}.`);
-    expect(SRC).toContain("{DISCARD_KEPT_LABEL}");
+    // (cn-v1144, the visit page in Spanish: the sheet draws the door through its catalog; its English is the label, byte for byte)
+    expect(SRC).toContain('{t("vi_btn_discardKept3dModel")}');
+    expect(translator("en")("vi_btn_discardKept3dModel")).toBe(DISCARD_KEPT_LABEL);
     expect(SRC).toContain("{keptModel && (");
   });
 });
@@ -327,15 +334,18 @@ describe("A kept 3D model is re-sent onto whichever task is tapped next, and the
     expect(keptElsewhereWords("the visit")).toBe("The 3D model scanned for the visit is still waiting to send. Tap 3D Scan there to send it.");
     expect(keptElsewhereWords('"Garage"')).toBe('The 3D model scanned for "Garage" is still waiting to send. Tap 3D Scan there to send it.');
     expect(keptElsewhereWords(null)).toBe("The kept 3D model was scanned for a task that has been removed. Tap Discard Kept 3D Model.");
-    // the door looks the task up by its id and names a nameless one as the sheet does
-    expect(SRC).toContain('const t = at === null ? null : tasksNow().find((x) => x.id === at);');
-    expect(SRC).toContain('setError(keptElsewhereWords(at === null ? "the visit" : t ? `"${t.name.trim() || "A task with no name yet"}"` : null));');
+    // the door looks the task up by its id and names a nameless one as the sheet does (cn-v1144: the place
+    // and the nameless task in the reader's language — the catalog's English is the old words, byte for byte)
+    expect(SRC).toContain("const forTask = at === null ? null : tasksNow().find((x) => x.id === at);");
+    expect(SRC).toContain('setError(keptElsewhereWords(at === null ? t("vi_theVisit") : forTask ? `"${forTask.name.trim() || t("vi_taskNoNameYet")}"` : null, lang, t));');
+    expect(translator("en")("vi_theVisit")).toBe("the visit");
+    expect(translator("en")("vi_taskNoNameYet")).toBe("A task with no name yet");
   });
 
   it("the elsewhere refusal happens before the camera could open or the busy flag is taken", () => {
     const door = SRC.slice(SRC.indexOf("async function scan3dInto("), SRC.indexOf("async function dropKept("));
     expect(door.indexOf('step.step === "elsewhere"')).toBeLessThan(door.indexOf("measuringRef.current = true;"));
-    expect(door.indexOf('step.step === "elsewhere"')).toBeLessThan(door.indexOf("await scan3dNative()"));
+    expect(door.indexOf('step.step === "elsewhere"')).toBeLessThan(door.indexOf("await scan3dNative("));
   });
 });
 
@@ -499,8 +509,8 @@ describe("fileOnJob puts storage's raw error text into the sentence shown to the
     const fn = SRC.slice(SRC.indexOf("async function fileOnJob("), SRC.indexOf("// THE LIDAR GROUP"));
     expect(fn).not.toContain("copyErr.message");
     expect(fn).not.toContain("the connection dropped");
-    expect(fn).toContain("jobFilingWords(copyErr)");
-    expect(fn).toContain("jobFilingWords(failed.why)");
+    expect(fn).toContain("jobFilingWords(copyErr, lang, t)");
+    expect(fn).toContain("jobFilingWords(failed.why, lang, t)");
   });
 });
 
@@ -578,6 +588,6 @@ describe("A model that fails to come over the bridge is orphaned in the phone's 
     expect(SCAN).toContain("It never discards: the caller owns the shell's copy");
     const door = SCAN.slice(SCAN.indexOf("const model = await pullFile(p, path, total"), SCAN.indexOf("return { ok: true, kind: \"model\""));
     expect(door.indexOf("await discardScan(path);")).toBeGreaterThan(-1);
-    expect(door.indexOf("await discardScan(path);")).toBeLessThan(door.indexOf("refused: MODEL_LOST_WORDS"));
+    expect(door.indexOf("await discardScan(path);")).toBeLessThan(door.indexOf('"vi_modelLost", MODEL_LOST_WORDS)'));
   });
 });
