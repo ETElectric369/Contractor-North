@@ -41,6 +41,47 @@ import { addCaptureItemsToJobList, canonicalMaterialListId } from "../materials/
 import { reportError } from "@/lib/observe";
 import { visitWork } from "@/lib/appointments/visit-work";
 import { jobShort } from "@/lib/appointments/visit-start";
+import { callerLang } from "@/lib/lang-of";
+import { fillSlots } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
+
+/**
+ * THE CALLER'S OWN WORDS (the agenda-in-Spanish wave; the visit's page is next and reads them). Every
+ * sentence this file answers — a refusal, a note, a warning, the For box's sub line — comes from
+ * lib/words/agenda-server (ag_srv_) in the caller's language: profiles.language through lib/lang-of
+ * callerLang, read ONCE per action call and only when an answer needs words; English when nobody is
+ * signed in or the read fails, byte for byte what this file always said. The push title keeps its own
+ * per-recipient words (nb_apptAssignedTitle). Two things stay English on purpose: a title stored on a
+ * visit ("Site notes — …", read back by whoever opens it) and the status list a door can't send.
+ *
+ * Keyed on the call's own session client (a fresh one per call, lib/supabase/server), so a private
+ * helper handed that client says its words with no second read. Not exported: a "use server" file
+ * exports only async functions.
+ */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+const SAID = new WeakMap<object, Said>();
+function wordsOf(supabase: SupabaseClient, userId?: string | null): Said {
+  // The action's own entry (it hands the signed-in id) starts this call's memo; a helper (no id) reads it.
+  const had = SAID.get(supabase);
+  if (had && userId === undefined) return had;
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as unknown as Parameters<typeof callerLang>[0], userId));
+  const made: Said = { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+  SAID.set(supabase, made);
+  return made;
+}
+
+/** The words for a member a staff door refused (no staff client came back): their own session, read
+ *  once; English if that fails. */
+async function sayToMember(key: string): Promise<string> {
+  try {
+    const m = await requireMember();
+    if (!("error" in m)) return await wordsOf(m.supabase, m.userId).say(key);
+  } catch {
+    /* English below */
+  }
+  return translator("en")(key);
+}
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
  *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
@@ -62,9 +103,10 @@ async function resolveIso(
  *  inspection's autosave stops retrying and says so instead). */
 export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean; /** Landed, with something to say (a lead that could not be marked). */ warning?: string };
 
-/** The one refusal for a kind nobody can pick (W2-06), in the picker's own words. (Not exported: a
- *  "use server" file exports only async functions.) */
-const PICK_A_KIND = "Pick a kind: Inspection, Job, Service Call, Phone Call or Other.";
+/** The one refusal for a kind nobody can pick (W2-06), in the picker's own words: its catalog key
+ *  (ag_srv_pickAKind), said by the caller in the caller's language. (Not exported: a "use server"
+ *  file exports only async functions.) */
+const PICK_A_KIND = "ag_srv_pickAKind";
 
 /**
  * THE KIND A NEW OR EDITED VISIT MAY CARRY (W2-06). Create and Propose Times take one of the five a
@@ -94,23 +136,24 @@ async function resolveCustomer(
   formData: FormData,
   userId: string,
 ): Promise<{ customerId: string | null; error?: string; lead?: { name: string; phone: string | null } }> {
+  const ws = wordsOf(supabase);
   const customerId = emptyToNull(formData.get("customer_id"));
   const newName = emptyToNull(formData.get("new_customer_name"));
   // A NEW LEAD, NOT A CUSTOMER (Erik, 2026-10-15): the form's New Lead makes the person a lead through
   // the door the visit's page already has (linkAppointmentToNewLead), once the visit exists — so the
   // visit's address lands on the lead and the visit is attached. The visit is written with no customer.
   if (customerId === "__lead__") {
-    if (!newName) return { customerId: null, error: "Enter a name for the new lead." };
+    if (!newName) return { customerId: null, error: await ws.say("ag_srv_leadNameFirst") };
     return { customerId: null, lead: { name: newName, phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null } };
   }
   if (customerId === "__new__" || (!customerId && newName)) {
-    if (!newName) return { customerId: null, error: "Enter a name for the new customer." };
+    if (!newName) return { customerId: null, error: await ws.say("ag_srv_customerNameFirst") };
     const { data: c, error } = await supabase
       .from("customers")
       .insert({ name: newName, phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null, created_by: userId })
       .select("id")
       .single();
-    if (error || !c) return { customerId: null, error: error?.message ?? "Could not create the new customer." };
+    if (error || !c) return { customerId: null, error: error?.message ?? (await ws.say("ag_srv_customerNotMade")) };
     return { customerId: c.id };
   }
   return { customerId };
@@ -121,16 +164,17 @@ async function resolveCustomer(
 export async function createAppointment(formData: FormData): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const title = String(formData.get("title") ?? "").trim();
-  if (!title) return { ok: false, error: "Title is required." };
+  if (!title) return { ok: false, error: await ws.say("ag_srv_titleRequired") };
 
   // Prefer the ISO the browser computed in the user's own timezone; the fallback
   // builds the instant in the ORG timezone (never the server's UTC).
   const apptDate = String(formData.get("date") ?? "");
   const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), apptDate, String(formData.get("start_time") ?? ""));
-  if (!startIso) return { ok: false, error: "Pick a date." };
+  if (!startIso) return { ok: false, error: await ws.say("ag_srv_pickADate") };
   const endTime = String(formData.get("end_time") ?? "");
   const endIso =
     emptyToNull(formData.get("ends_at_iso")) ??
@@ -144,7 +188,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
 
   // No kind sent is Other (W2-06): today's plain "appointment", with no write-up nag after it.
   const typed = resolveType(formData, "other");
-  if (typed.error) return { ok: false, error: typed.error };
+  if (typed.error) return { ok: false, error: await ws.say(typed.error) };
 
   const { data, error } = await supabase
     .from("appointments")
@@ -171,7 +215,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
 
   // The New Lead door, once the visit exists (resolveCustomer): the lead inherits the visit's address
   // and the visit is attached to it. A lead that could not be made is SAID, never silent.
-  const warning = cust.lead ? await attachNewLead(data.id, cust.lead) : undefined;
+  const warning = cust.lead ? await attachNewLead(ws, data.id, cust.lead) : undefined;
 
   const assignedTo = emptyToNull(formData.get("assigned_to"));
   if (assignedTo && assignedTo !== ctx.userId) {
@@ -210,17 +254,18 @@ function placeParts(formData: FormData): { city?: string | null; state?: string 
  *  row (a lead that cannot be made must leave the visit as it was), so it goes only once the lead
  *  exists, and a failed lead says the visit keeps it. */
 async function attachNewLead(
+  ws: Said,
   appointmentId: string,
   lead: { name: string; phone: string | null },
   hadCustomer = false,
 ): Promise<string | undefined> {
   const made = await linkAppointmentToNewLead(appointmentId, lead.name, lead.phone);
   if (!made.ok) {
-    const why = made.error ?? "add them from the visit's For box.";
-    if (!hadCustomer) return `Saved, but the lead wasn't made: ${why}`;
-    return `Saved, but the lead wasn't made: ${why.replace(/[.!\s]+$/, "")}. The visit keeps its customer.`;
+    const why = made.error ?? (await ws.say("ag_srv_addFromForBox"));
+    if (!hadCustomer) return ws.say("ag_srv_leadNotMade", { why });
+    return ws.say("ag_srv_leadNotMadeKeeps", { why: why.replace(/[.!\s]+$/, "") });
   }
-  const kept = hadCustomer && made.id ? await dropReplacedCustomer(appointmentId, made.id) : undefined;
+  const kept = hadCustomer && made.id ? await dropReplacedCustomer(ws, appointmentId, made.id) : undefined;
   // the door's own word (named like an existing customer, say) is said too
   return [made.note, kept].filter(Boolean).join(" ") || undefined;
 }
@@ -228,19 +273,19 @@ async function attachNewLead(
 /** The edit's New Lead replaced the visit's customer, and the lead now exists: take the old customer
  *  off the visit — unless the lead came with a customer of its own (linkAppointmentTo already put that
  *  one on). Returns the sentence to say when the old customer could not be taken off. */
-async function dropReplacedCustomer(appointmentId: string, leadId: string): Promise<string | undefined> {
-  const STAYS = "The lead was made, but the old customer is still on this visit — change it from the visit's For box.";
+async function dropReplacedCustomer(ws: Said, appointmentId: string, leadId: string): Promise<string | undefined> {
+  const STAYS = () => ws.say("ag_srv_oldCustomerStays");
   const ctx = await requireStaff();
-  if ("error" in ctx) return STAYS;
+  if ("error" in ctx) return STAYS();
   const { data: l } = await ctx.supabase.from("inquiries").select("customer_id").eq("id", leadId).maybeSingle();
-  if (!l) return STAYS; // can't tell whose it is, so nothing is taken off
+  if (!l) return STAYS(); // can't tell whose it is, so nothing is taken off
   if (l.customer_id) return undefined;
   const { data, error } = await ctx.supabase
     .from("appointments")
     .update({ customer_id: null, updated_at: new Date().toISOString() })
     .eq("id", appointmentId)
     .select("id");
-  if (error || !data?.length) return STAYS;
+  if (error || !data?.length) return STAYS();
   return undefined;
 }
 
@@ -254,6 +299,7 @@ export async function createInspectionNow(
 ): Promise<Result> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   // Lead context (optional): inherit name/address/notes and keep the provenance backlink.
@@ -283,7 +329,7 @@ export async function createInspectionNow(
       .select("id, name, address, city, state, zip, message, notes, customer_id, intake, work_kind")
       .eq("id", opts.inquiryId)
       .maybeSingle();
-    if (!data) return { ok: false, error: "Lead not found." };
+    if (!data) return { ok: false, error: await ws.say("ag_srv_leadNotFound") };
     inq = data as LeadCtx;
   }
 
@@ -387,10 +433,11 @@ export async function createAppointmentProposal(
 ): Promise<{ ok: boolean; error?: string; token?: string; warning?: string }> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const title = String(formData.get("title") ?? "").trim();
-  if (!title) return { ok: false, error: "Title is required." };
+  if (!title) return { ok: false, error: await ws.say("ag_srv_titleRequired") };
 
   let slotsRaw: unknown = [];
   try {
@@ -399,7 +446,7 @@ export async function createAppointmentProposal(
     /* ignore */
   }
   const slots = cleanSlots(slotsRaw);
-  if (!slots.length) return { ok: false, error: "Add at least one date option." };
+  if (!slots.length) return { ok: false, error: await ws.say("ag_srv_addDateOption") };
 
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
@@ -407,7 +454,7 @@ export async function createAppointmentProposal(
   // Offering a customer times is how an inspection gets booked, so that is the kind when none is
   // sent (it was 'quote', a kind nobody picks any more: W2-06).
   const typed = resolveType(formData, "inspection");
-  if (typed.error) return { ok: false, error: typed.error };
+  if (typed.error) return { ok: false, error: await ws.say(typed.error) };
 
   // First slot is the tentative time (browser-computed ISO honors the user's tz).
   const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), slots[0].date, slots[0].time);
@@ -432,7 +479,7 @@ export async function createAppointmentProposal(
     startsAtIso: startIso,
   });
   if (!res.ok) return { ok: false, error: res.error };
-  const warning = cust.lead ? await attachNewLead(res.appointmentId, cust.lead) : undefined;
+  const warning = cust.lead ? await attachNewLead(ws, res.appointmentId, cust.lead) : undefined;
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
@@ -481,6 +528,7 @@ export type LinkTarget = {
 export async function searchLinkTargets(q: string): Promise<LinkTarget[]> {
   const ctx = await requireStaff();
   if ("error" in ctx) return [];
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const term = q.trim();
   if (term.length < 2) return [];
@@ -519,21 +567,29 @@ export async function searchLinkTargets(q: string): Promise<LinkTarget[]> {
   const full = (r: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null }) =>
     formatFullAddress(r.address ?? null, r.city ?? null, r.state ?? null, r.zip ?? null) || null;
 
+  // The sub line in the reader's words (agenda-in-Spanish): one language read for the whole list. A
+  // lead's status is its stored word in English, as it always read; a Spanish reader gets the word.
+  const lang = await ws.lang();
+  const t = translator(lang);
+  const leadStatus = (s: string) => (lang === "es" && t(`ag_srv_leadStatus_${s}`) !== `ag_srv_leadStatus_${s}` ? t(`ag_srv_leadStatus_${s}`) : s);
+  const sub = (key: string, vars?: Record<string, string>) => fillSlots(t(key), vars);
   return [
     // Leads first: an open lead is the freshest context and the one most likely to be the reason
     // somebody is standing at the address right now.
     ...(leads.data ?? []).map((r: any) => ({
-      kind: "lead" as const, id: r.id, name: r.name, address: full(r), sub: `Lead · ${r.status}`,
+      kind: "lead" as const, id: r.id, name: r.name, address: full(r), sub: sub("ag_srv_subLead", { status: leadStatus(String(r.status)) }),
     })),
     ...(customers.data ?? []).map((r: any) => ({
-      kind: "customer" as const, id: r.id, name: r.name, address: full(r), sub: r.phone ? `Customer · ${r.phone}` : "Customer",
+      kind: "customer" as const, id: r.id, name: r.name, address: full(r), sub: r.phone ? sub("ag_srv_subCustomerPhone", { phone: r.phone }) : sub("ag_srv_subCustomer"),
     })),
     ...jobRows.map((r: any) => ({
       kind: "job" as const,
       id: r.id,
       name: r.name ?? r.job_number,
       address: full(r),
-      sub: `Job · ${r.job_number}${r.status ? ` · ${jobStatusLabel(r.status)}` : ""}`,
+      sub: r.status
+        ? sub("ag_srv_subJobStatus", { number: String(r.job_number), status: jobStatusLabel(r.status, lang, t) })
+        : sub("ag_srv_subJob", { number: String(r.job_number) }),
     })),
   ];
 }
@@ -555,6 +611,7 @@ export async function linkAppointmentTo(
 ): Promise<Result & { /** What the visit's work did on the job it was linked to (kind "job"), in a sentence. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const { data: appt } = await supabase
@@ -566,7 +623,7 @@ export async function linkAppointmentTo(
     .select("id, title, location, type, outcome, inquiry_id, job_id")
     .eq("id", id)
     .maybeSingle();
-  if (!appt) return { ok: false, error: "Appointment not found." };
+  if (!appt) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   const visitType = (appt as { type?: string | null }).type ?? null;
   // The job the visit had BEFORE this write (read here, not after the update lands on the row).
   const hadJob = (appt as { job_id?: string | null }).job_id ?? null;
@@ -586,7 +643,7 @@ export async function linkAppointmentTo(
       .select("id, name, address, city, state, zip, customer_id")
       .eq("id", targetId)
       .maybeSingle();
-    if (!r) return { ok: false, error: "Lead not found." };
+    if (!r) return { ok: false, error: await ws.say("ag_srv_leadNotFound") };
     patch.inquiry_id = r.id;
     if (r.customer_id) patch.customer_id = r.customer_id;
     name = r.name;
@@ -598,7 +655,7 @@ export async function linkAppointmentTo(
       .select("id, name, address, city, state, zip")
       .eq("id", targetId)
       .maybeSingle();
-    if (!r) return { ok: false, error: "Customer not found." };
+    if (!r) return { ok: false, error: await ws.say("ag_srv_customerNotFound") };
     patch.customer_id = r.id;
     name = r.name;
     address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
@@ -613,7 +670,7 @@ export async function linkAppointmentTo(
       .select("id, job_number, name, address, city, state, zip, customer_id")
       .eq("id", targetId)
       .maybeSingle();
-    if (!r) return { ok: false, error: "Job not found." };
+    if (!r) return { ok: false, error: await ws.say("ag_srv_jobNotFound") };
     jobRow = r;
     patch.job_id = r.id;
     if (r.customer_id) patch.customer_id = r.customer_id;
@@ -652,7 +709,7 @@ export async function linkAppointmentTo(
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!linked?.length) return { ok: false, error: "That appointment could not be found." };
+  if (!linked?.length) return { ok: false, error: await ws.say("ag_srv_apptGone") };
 
   // The lead behind a visit that took a job is won, and the job carries it (lib/appointments/lead-won;
   // it lived in Link To J-0xx Instead alone before cn-v1069, so this picker's attach never told it).
@@ -671,7 +728,9 @@ export async function linkAppointmentTo(
   if (kind === "job" && jobRow) {
     if (hadJob && hadJob !== targetId) {
       const { data: old } = await supabase.from("jobs").select("id, job_number, name").eq("id", hadJob).maybeSingle();
-      note = `${old ? jobShort(old as { job_number?: string | null; name?: string | null }) : "The job it had"} kept the tasks and parts from this visit.`;
+      note = await ws.say("ag_srv_oldJobKeptWork", {
+        job: old ? jobShort(old as { job_number?: string | null; name?: string | null }) : await ws.say("ag_srv_theJobItHad"),
+      });
     } else {
       const carried = await carryVisitWork(supabase, { appointmentId: id, job: jobRow, orgId: ctx.orgId, createdBy: ctx.userId });
       note = carried.note;
@@ -688,10 +747,15 @@ export async function linkAppointmentTo(
   return { ok: true, id, ...(note ? { note } : {}), ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
 }
 
-/** "3 tasks", "1 part". */
-const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-/** "1 task and 2 parts", "3 tasks", "1 part" — empty when both are zero. */
-const tasksAndParts = (tasks: number, parts: number) => [tasks ? counted(tasks, "task") : "", parts ? counted(parts, "part") : ""].filter(Boolean).join(" and ");
+/** "1 task and 2 parts", "3 tasks", "1 part" — empty when both are zero. Paired keys for the plural
+ *  ("1 tarea y 2 piezas"); the two joined by the catalog's "and". */
+async function tasksAndParts(ws: Said, tasks: number, parts: number): Promise<string> {
+  const said = [
+    tasks ? await ws.say(tasks === 1 ? "ag_srv_taskOne" : "ag_srv_taskMany", { n: tasks }) : "",
+    parts ? await ws.say(parts === 1 ? "ag_srv_partOne" : "ag_srv_partMany", { n: parts }) : "",
+  ].filter(Boolean);
+  return said.length === 2 ? ws.say("ag_srv_listAnd", { list: said[0], last: said[1] }) : (said[0] ?? "");
+}
 
 /**
  * Carry what the visit typed onto the job it was linked to (linkAppointmentTo, kind "job"): the
@@ -714,6 +778,7 @@ async function carryVisitWork(
   supabase: SupabaseClient,
   w: { appointmentId: string; job: { id: string; job_number?: string | null; name?: string | null }; orgId: string | null; createdBy: string },
 ): Promise<{ note?: string; warnings: string[] }> {
+  const ws = wordsOf(supabase);
   const short = jobShort(w.job);
   const name = (w.job.name ?? "").trim();
   const named = (w.job.job_number ?? "").trim() && name ? `${short} (${name})` : short;
@@ -730,7 +795,7 @@ async function carryVisitWork(
     let tq = supabase.from("tasks").select("title, sort_order").eq("job_id", w.job.id);
     if (w.orgId) tq = tq.eq("org_id", w.orgId);
     const { data: onJob, error: tErr } = await tq;
-    if (tErr) warnings.push(`The visit is linked; its tasks and their parts could not be listed (${dbError(tErr)}). Add them on the job.`);
+    if (tErr) warnings.push(await ws.say("ag_srv_linkedTasksUnlisted", { why: dbError(tErr) }));
     else {
       const had = (onJob ?? []) as Array<{ title: string | null; sort_order: number | null }>;
       const titles = new Set(had.map((t) => taskTitleKey(String(t.title ?? ""))));
@@ -742,7 +807,7 @@ async function carryVisitWork(
         { jobId: w.job.id, orgId: w.orgId, createdBy: w.createdBy },
         { ...work.birth, tasks: fresh.map((t) => ({ ...t, sort_order: after + t.sort_order })), plannedMinutes: null },
       );
-      if (born.error) warnings.push(`The visit is linked; its tasks and their parts could not be listed (${born.error}). Add them on the job.`);
+      if (born.error) warnings.push(await ws.say("ag_srv_linkedTasksUnlisted", { why: born.error }));
       else {
         tasksLanded = true;
         inserted = born.inserted;
@@ -776,27 +841,27 @@ async function carryVisitWork(
         added = listed.added;
         kept = listed.kept;
         partsLeftOff = listed.leftOff;
-        if (!listed.ok) warnings.push(`The visit is linked; its materials could not all be listed (${listed.error ?? "the list refused"}). Add them on the Materials tab.`);
+        if (!listed.ok) warnings.push(await ws.say("ag_srv_linkedMaterialsUnlisted", { why: listed.error ?? (await ws.say("ag_srv_listRefused")) }));
       }
     } catch (e) {
       reportError("linkAppointmentTo:materials", e, { jobId: w.job.id, appointmentId: w.appointmentId });
-      warnings.push("The visit is linked; the materials typed on the visit could not be listed. Add them on the Materials tab.");
+      warnings.push(await ws.say("ag_srv_linkedTypedUnlisted"));
     }
   }
-  if (!tasks && !parts) return warnings.length ? { warnings } : { warnings, note: `Nothing was typed on the visit, so ${short} is as it was.` };
+  if (!tasks && !parts) return warnings.length ? { warnings } : { warnings, note: await ws.say("ag_srv_nothingTyped", { job: short }) };
   const leftOff = tasksLeftOff + partsLeftOff;
-  const leftOffWords = leftOff ? ` ${tasksAndParts(tasksLeftOff, partsLeftOff)} left off — deleted from the job before.` : "";
+  const leftOffWords = leftOff ? ` ${await ws.say("ag_srv_leftOffBefore", { what: await tasksAndParts(ws, tasksLeftOff, partsLeftOff) })}` : "";
   const newTasks = tasksLanded ? inserted : 0;
-  if (newTasks + added > 0) return { warnings, note: `${tasksAndParts(newTasks, added)} joined ${named}.${leftOffWords}` };
+  if (newTasks + added > 0) return { warnings, note: `${await ws.say("ag_srv_joinedJob", { what: await tasksAndParts(ws, newTasks, added), job: named })}${leftOffWords}` };
   // Nothing new: whatever landed was already there (a second press, or the estimate's job). What did
   // not land is a warning.
   const hadTasks = sameTitle > 0 || (tasksLanded && tasks - sameTitle - tasksLeftOff > 0);
   const hadParts = sameCode > 0 || kept > 0;
   if (hadTasks || hadParts) {
-    const what = hadTasks && hadParts ? "the tasks and parts" : hadTasks ? "the tasks" : "the parts";
-    return { warnings, note: `${short} already had ${what} from this visit.${leftOffWords}` };
+    const what = await ws.say(hadTasks && hadParts ? "ag_srv_theTasksAndParts" : hadTasks ? "ag_srv_theTasks" : "ag_srv_theParts");
+    return { warnings, note: `${await ws.say("ag_srv_alreadyHad", { job: short, what })}${leftOffWords}` };
   }
-  if (leftOff) return { warnings, note: `${short} left off ${tasksAndParts(tasksLeftOff, partsLeftOff)} from this visit — deleted from the job before.` };
+  if (leftOff) return { warnings, note: await ws.say("ag_srv_leftOffFromVisit", { job: short, what: await tasksAndParts(ws, tasksLeftOff, partsLeftOff) }) };
   return { warnings };
 }
 
@@ -815,15 +880,16 @@ async function carryVisitWork(
 export async function linkAppointmentToNewLead(id: string, typedName: string, phone?: string | null): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const name = String(typedName ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
-  if (name.length < 2) return { ok: false, error: "Type the person's name first." };
+  if (name.length < 2) return { ok: false, error: await ws.say("ag_srv_typeNameFirst") };
   // PROJECTION LAW: the place the lead inherits is read here, by name.
   const { data: appt } = await ctx.supabase
     .from("appointments")
     .select("id, location, city, state, zip")
     .eq("id", id)
     .maybeSingle();
-  if (!appt) return { ok: false, error: "Appointment not found." };
+  if (!appt) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   const fd = new FormData();
   fd.set("name", name);
   if (phone) fd.set("phone", phone); // the form's New Lead types it beside the name
@@ -834,9 +900,9 @@ export async function linkAppointmentToNewLead(id: string, typedName: string, ph
   if (appt.state) fd.set("state", String(appt.state));
   if (appt.zip) fd.set("zip", String(appt.zip));
   const made = await createInquiry(fd);
-  if (!made.ok || !made.id) return { ok: false, error: made.error ?? "Couldn't make the lead." };
+  if (!made.ok || !made.id) return { ok: false, error: made.error ?? (await ws.say("ag_srv_leadNotMadePlain")) };
   const linked = await linkAppointmentTo(id, "lead", made.id);
-  if (!linked.ok) return { ok: false, error: linked.error ?? "Made the lead, but couldn't connect it to this visit." };
+  if (!linked.ok) return { ok: false, error: linked.error ?? (await ws.say("ag_srv_leadNotLinked")) };
   return { ok: true, id: made.id, ...(made.note ? { note: made.note } : {}) };
 }
 
@@ -863,6 +929,7 @@ export async function setAppointmentPlace(
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const clean = location.trim().slice(0, 500);
@@ -897,7 +964,7 @@ export async function setAppointmentPlace(
     .eq("id", id)
     .select("id, title");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "Appointment not found." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   await pushCalendarItem("appointment", id); // live Google push (fire-safe): the event carries the address and the title
   revalidatePath("/schedule");
   revalidatePath("/planner");
@@ -942,6 +1009,7 @@ export async function saveInspectionCapture(
     if (ctx.error === STAFF_ONLY) return saveCaptureAsCrewLead(id, patch);
     return { ok: false, error: ctx.error };
   }
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const { data: existing } = await supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
@@ -955,7 +1023,7 @@ export async function saveInspectionCapture(
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "Appointment not found." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
@@ -1000,11 +1068,12 @@ export async function addInspectionPhotos(id: string, paths: string[]): Promise<
 export async function removeInspectionPhoto(id: string, path: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) {
-    if (ctx.error === STAFF_ONLY) return { ok: false, refused: true, error: "Only the office can take a photo off the inspection." };
+    if (ctx.error === STAFF_ONLY) return { ok: false, refused: true, error: await sayToMember("ag_srv_officeTakesPhoto") };
     return { ok: false, error: ctx.error };
   }
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const { data: existing } = await ctx.supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
-  if (!existing) return { ok: false, error: "Appointment not found." };
+  if (!existing) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   const stored = parseInspectorCapture(existing.capture ?? null).photos;
   const res = await saveInspectionCapture(id, { photos: stored.filter((p) => p !== path) });
   if (!res.ok) return res;
@@ -1075,6 +1144,7 @@ async function saveInspectionAnswersInner(
   templateId: string | null,
   answers: Record<string, unknown>,
 ): Promise<Result> {
+  const ws = wordsOf(supabase);
   const c = await cleanInspectionAnswers(supabase, id, templateId, answers);
   if (!c.ok) return c;
   const { data, error } = await supabase
@@ -1087,7 +1157,7 @@ async function saveInspectionAnswersInner(
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "Appointment not found." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   revalidatePath(`/appointments/${id}`);
   revalidatePath("/inspections");
   return { ok: true, id };
@@ -1103,6 +1173,7 @@ async function cleanInspectionAnswers(
   templateId: string | null,
   answers: Record<string, unknown>,
 ): Promise<{ ok: true; clean: Record<string, unknown> } | { ok: false; error: string }> {
+  const ws = wordsOf(supabase);
   let clean: Record<string, unknown> = {};
   if (templateId) {
     // RLS confines this read to the caller's org, so a template id from another tenant simply
@@ -1116,9 +1187,9 @@ async function cleanInspectionAnswers(
       (from) => from.select("schema, is_inspection, playbook").eq("id", templateId).maybeSingle(),
     );
     if (formErr) return { ok: false, error: dbError(formErr) };
-    if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
+    if (!form) return { ok: false, error: await ws.say("ag_srv_sheetGone") };
     if (!(form as { is_inspection?: boolean }).is_inspection)
-      return { ok: false, error: "That form isn't an inspection sheet." };
+      return { ok: false, error: await ws.say("ag_srv_notASheet") };
     // Coerce, THEN drop anything the rules make inapplicable. Both halves matter and for different
     // reasons: coerce is the type contract, clearing is the truth contract. The client already
     // clears on change, but this row is writable through RLS directly — a payload could set
@@ -1190,15 +1261,16 @@ async function crewLeadOnVisit(
 ): Promise<{ supabase: SupabaseClient; userId: string; orgId: string } | { error: string }> {
   const ctx = await requireMember();
   if ("error" in ctx) return { error: ctx.error ?? "Sign in again to fill in the inspection." };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const { data: me } = await ctx.supabase.from("profiles").select("crew_lead").eq("id", ctx.userId).maybeSingle();
-  if (!(me as { crew_lead?: boolean | null } | null)?.crew_lead) return { error: CREW_OR_OFFICE };
+  if (!(me as { crew_lead?: boolean | null } | null)?.crew_lead) return { error: await ws.say("ag_srv_crewOrOffice") };
   const { data: appt } = await ctx.supabase
     .from("appointments")
     .select("id, assigned_to")
     .eq("id", id)
     .eq("org_id", ctx.orgId)
     .maybeSingle();
-  if (!appt || (appt as { assigned_to?: string | null }).assigned_to !== ctx.userId) return { error: CREW_OR_OFFICE };
+  if (!appt || (appt as { assigned_to?: string | null }).assigned_to !== ctx.userId) return { error: await ws.say("ag_srv_crewOrOffice") };
   return { supabase: ctx.supabase, userId: ctx.userId, orgId: ctx.orgId };
 }
 
@@ -1211,12 +1283,12 @@ async function crewLeadOnVisit(
  *  active seat to fill in the walk-through." on a screen that says Inspection everywhere else.
  *  lib/inspection/db-refusal has the why; inspection-word.test.ts reads the migration and proves
  *  this covers every sentence it can raise. */
-function inspectionRefusal(error: { code?: string | null; message?: string | null }): Result {
+async function inspectionRefusal(ws: Said, error: { code?: string | null; message?: string | null }): Promise<Result> {
   if (isMissingRpc(error))
     return {
       ok: false,
       refused: true,
-      error: "Crew leads can't save the inspection until the office finishes an update. Nothing was saved.",
+      error: await ws.say("ag_srv_crewCantSaveYet"),
     };
   if (error.code === "42501") return { ok: false, refused: true, error: inspectionDbWords(error.message || CREW_OR_OFFICE) };
   return { ok: false, error: inspectionDbWords(dbError(error)) };
@@ -1232,6 +1304,7 @@ function revalidateInspection(id: string) {
 async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<Result> {
   const crew = await crewLeadOnVisit(id);
   if ("error" in crew) return { ok: false, refused: true, error: crew.error };
+  const ws = wordsOf(crew.supabase, crew.userId);
   const attempt = async () => {
     const { data: existing, error: readErr } = await crew.supabase
       .from("appointments")
@@ -1240,7 +1313,7 @@ async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<R
       .eq("org_id", crew.orgId)
       .maybeSingle();
     if (readErr) return { failed: { ok: false, error: dbError(readErr) } as Result };
-    if (!existing) return { failed: { ok: false, error: "Appointment not found." } as Result };
+    if (!existing) return { failed: { ok: false, error: await ws.say("ag_srv_apptNotFound") } as Result };
     const stored = (existing as { capture?: unknown }).capture ?? null;
     // He adds photos; every one already on the list stays (the office takes one off). His `photos`
     // are what he ADDS (addInspectionPhotos sends only the ones just taken), appended to the stored
@@ -1258,9 +1331,9 @@ async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<R
   if (!("failed" in r) && r.error?.code === "42501") r = await attempt();
   if ("failed" in r) return r.failed;
   const { data, error } = r;
-  if (error) return inspectionRefusal(error);
+  if (error) return inspectionRefusal(ws, error);
   // The function returns the id it wrote; nothing back means nothing was written.
-  if (!data) return { ok: false, error: "That didn't save - reload and try again." };
+  if (!data) return { ok: false, error: await ws.say("ag_srv_didntSaveReload") };
   revalidateInspection(id);
   return { ok: true, id };
 }
@@ -1273,6 +1346,7 @@ async function saveAnswersAsCrewLead(
 ): Promise<Result> {
   const crew = await crewLeadOnVisit(id);
   if ("error" in crew) return { ok: false, refused: true, error: crew.error };
+  const ws = wordsOf(crew.supabase, crew.userId);
   return runOnce({ clientOpId, action: "inspection.answers", orgId: crew.orgId, profileId: crew.userId }, async () => {
     const c = await cleanInspectionAnswers(crew.supabase, id, templateId, answers);
     if (!c.ok) return c;
@@ -1281,8 +1355,8 @@ async function saveAnswersAsCrewLead(
       p_template_id: templateId,
       p_answers: c.clean,
     });
-    if (error) return inspectionRefusal(error);
-    if (!data) return { ok: false, error: "That didn't save - reload and try again." };
+    if (error) return inspectionRefusal(ws, error);
+    if (!data) return { ok: false, error: await ws.say("ag_srv_didntSaveReload") };
     revalidatePath(`/appointments/${id}`);
     revalidatePath("/inspections");
     return { ok: true, id };
@@ -1292,9 +1366,10 @@ async function saveAnswersAsCrewLead(
 export async function updateAppointment(id: string, formData: FormData): Promise<Result> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const title = String(formData.get("title") ?? "").trim();
-  if (!title) return { ok: false, error: "Title is required." };
+  if (!title) return { ok: false, error: await ws.say("ag_srv_titleRequired") };
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
   const customerId = cust.customerId;
@@ -1303,7 +1378,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   // builds the instant in the ORG timezone (never the server's UTC).
   const apptDate = String(formData.get("date") ?? "");
   const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), apptDate, String(formData.get("start_time") ?? ""));
-  if (!startIso) return { ok: false, error: "Pick a date." };
+  if (!startIso) return { ok: false, error: await ws.say("ag_srv_pickADate") };
   const endTime = String(formData.get("end_time") ?? "");
   const endIso =
     emptyToNull(formData.get("ends_at_iso")) ??
@@ -1317,10 +1392,10 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   const { data: cur } = await supabase.from("appointments").select("type, city, state, zip, inquiry_id, customer_id").eq("id", id).maybeSingle();
   const row = cur as { type?: string | null; city?: string | null; state?: string | null; zip?: string | null; inquiry_id?: string | null; customer_id?: string | null } | null;
   const typed = resolveType(formData, "other", row?.type ?? null);
-  if (typed.error) return { ok: false, error: typed.error };
+  if (typed.error) return { ok: false, error: await ws.say(typed.error) };
   // ONE LEAD PER VISIT: New Lead on a visit that already has one would make a second lead and point
   // the visit at it (skeptic #12). Who it is for changes from the visit's page.
-  if (cust.lead && row?.inquiry_id) return { ok: false, error: "This visit already has a lead attached — change who it's for from the visit's page." };
+  if (cust.lead && row?.inquiry_id) return { ok: false, error: await ws.say("ag_srv_visitHasLead") };
   // A TYPED line that no longer says a stored part takes the parts with it (the inspector's own rule,
   // typedLineKeepsParts): a pick's zip must not outlive the pick under another street. A pick sends
   // its parts; a typed line that still says them keeps them.
@@ -1347,10 +1422,10 @@ export async function updateAppointment(id: string, formData: FormData): Promise
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!wroteAppt?.length) return { ok: false, error: "That appointment could not be found." };
+  if (!wroteAppt?.length) return { ok: false, error: await ws.say("ag_srv_apptGone") };
 
   await pushCalendarItem("appointment", id); // live Google push (fire-safe)
-  const warning = cust.lead ? await attachNewLead(id, cust.lead, !!row?.customer_id) : undefined;
+  const warning = cust.lead ? await attachNewLead(ws, id, cust.lead, !!row?.customer_id) : undefined;
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
@@ -1376,6 +1451,7 @@ export async function setAppointmentOutcome(
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const { data, error } = await ctx.supabase
     .from("appointments")
     // updated_at too: every other writer on this row stamps it, and this one left the visit reading
@@ -1386,7 +1462,7 @@ export async function setAppointmentOutcome(
   if (error) return { ok: false, error: dbError(error) };
   // Silent-write law: a zero-row update is a 204, and "saved" without a row is the failure
   // this whole fix exists to end.
-  if (!data?.length) return { ok: false, error: "That didn't save — check your access and try again." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_didntSaveAccess") };
   revalidatePath("/planner");
   revalidatePath("/inspections");
   return { ok: true };
@@ -1418,6 +1494,7 @@ export async function setAppointmentStatus(
     return { ok: false, error: `Status must be one of: ${APPOINTMENT_STATUSES.join(", ")}.` };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   // Read first so undo has something to go back TO. RLS scopes this, so a cross-tenant id
   // simply doesn't resolve and we stop before writing anything.
@@ -1434,7 +1511,7 @@ export async function setAppointmentStatus(
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wrote?.length)
-    return { ok: false, error: "That appointment didn't change — reload and check it still exists." };
+    return { ok: false, error: await ws.say("ag_srv_apptDidntChange") };
   // Cancelling/completing an appointment kills any live "pick a time" link, so a
   // customer tap can't resurrect a closed appointment.
   let note: string | undefined;
@@ -1446,7 +1523,7 @@ export async function setAppointmentStatus(
       .eq("status", "pending")
       .select("id");
     // The one part undo can't put back — say so rather than implying a clean reversal.
-    if (withdrawn?.length) note = "The customer's pick-a-time link was withdrawn and can't be un-withdrawn.";
+    if (withdrawn?.length) note = await ws.say("ag_srv_timeLinkWithdrawnFinal");
   }
   // Google reconcile (fire-safe): cancel deletes the event; other statuses re-push.
   await pushCalendarItem("appointment", id);
@@ -1469,15 +1546,16 @@ export async function rescheduleAppointment(
 ): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const start = new Date(startsAtIso);
-  if (isNaN(start.getTime())) return { ok: false, error: "I couldn't read that date/time." };
+  if (isNaN(start.getTime())) return { ok: false, error: await ws.say("ag_srv_cantReadDateTime") };
   const patch: Record<string, string | null> = { starts_at: start.toISOString(), updated_at: new Date().toISOString() };
   if (endsAtIso) {
     const end = new Date(endsAtIso);
     // Don't silently swallow a bad end time and still report success — tell the caller.
-    if (isNaN(end.getTime())) return { ok: false, error: "I couldn't read the end time." };
-    if (end.getTime() <= start.getTime()) return { ok: false, error: "The end time has to be after the start." };
+    if (isNaN(end.getTime())) return { ok: false, error: await ws.say("ag_srv_cantReadEnd") };
+    if (end.getTime() <= start.getTime()) return { ok: false, error: await ws.say("ag_srv_endTimeAfterStart") };
     patch.ends_at = end.toISOString();
   } else {
     /* NO END GIVEN: THE VISIT KEEPS ITS LENGTH, NOT ITS OLD END (audit v994 SI1). Nort's "move the
@@ -1492,12 +1570,12 @@ export async function rescheduleAppointment(
       .eq("id", id)
       .maybeSingle();
     if (curErr) return { ok: false, error: dbError(curErr) };
-    if (!cur) return { ok: false, error: "Appointment not found." };
+    if (!cur) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
     patch.ends_at = keptEnd(start, (cur as { starts_at: string | null; ends_at: string | null }).starts_at, (cur as { ends_at: string | null }).ends_at);
   }
   const { data, error } = await supabase.from("appointments").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data || !data.length) return { ok: false, error: "Appointment not found." };
+  if (!data || !data.length) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   // The reschedule supersedes any pending pick-a-time link — kill it, or the customer
   // could tap a stale option later and move the appointment back underneath us.
   const { data: withdrawn } = await supabase
@@ -1524,7 +1602,7 @@ export async function rescheduleAppointment(
   return {
     ok: true,
     ...(withdrawn?.length
-      ? { note: "The customer's pick-a-time link for this appointment was withdrawn — offer new times if they still need to choose." }
+      ? { note: await ws.say("ag_srv_timeLinkWithdrawn") }
       : {}),
   };
 }
@@ -1537,6 +1615,7 @@ export async function createJobFromAppointment(
 ): Promise<Result & { note?: string; /** The visit already had a job (maybe one made a moment ago on another device); `id` is that job. */ already?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const { data: appt } = await supabase
@@ -1548,7 +1627,7 @@ export async function createJobFromAppointment(
     .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
     .eq("id", appointmentId)
     .maybeSingle();
-  if (!appt) return { ok: false, error: "Appointment not found." };
+  if (!appt) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   if (appt.job_id) return { ok: true, id: appt.job_id, already: true };
 
   /* WHAT THE VISIT ALREADY KNEW TRAVELS WITH IT.
@@ -1700,13 +1779,13 @@ export async function createJobFromAppointment(
         already: true,
         ...(gone?.length
           ? {}
-          : { note: "Someone else started this visit's job a moment ago. A second job was made at the same instant and could not be removed; delete it from Jobs." }),
+          : { note: await ws.say("ag_srv_secondJobStays") }),
       };
     }
   }
   const absorbNote = absorbed?.length
     ? undefined
-    : "That visit disappeared while the job was being created — the job was made from what it had.";
+    : await ws.say("ag_srv_visitGoneMidJob");
 
   /* A THREE-DAY VISIT CONVERTS TO A THREE-DAY JOB. scheduled_end above is clamped to one working
      day (it is a wall-clock pair), so without segments a Mon–Wed visit became a Monday job — and
@@ -1752,7 +1831,7 @@ export async function createJobFromAppointment(
   let tasksNote: string | undefined;
   if (visitBirth.tasks.length) {
     const born = await bornTasks(supabase, { jobId: job.id, orgId: ctx.orgId, createdBy: ctx.userId }, visitBirth);
-    if (born.error) tasksNote = `The job was made; its tasks could not all be listed (${born.error}). Add them on the job.`;
+    if (born.error) tasksNote = await ws.say("ag_srv_madeTasksUnlisted", { why: born.error });
   }
   let materialsNote: string | undefined;
   // The typed take-off and the tasks' parts, as visitWork read them (keyed, so a retry lists nothing twice).
@@ -1760,10 +1839,10 @@ export async function createJobFromAppointment(
   if (typedItems.length) {
     try {
       const listed = await addCaptureItemsToJobList(job.id, typedItems);
-      if (!listed.ok) materialsNote = `The job was made; its materials could not all be listed (${listed.error ?? "the list refused"}). Add them on the Materials tab.`;
+      if (!listed.ok) materialsNote = await ws.say("ag_srv_madeMaterialsUnlisted", { why: listed.error ?? (await ws.say("ag_srv_listRefused")) });
     } catch (e) {
       reportError("createJobFromAppointment:materials", e, { jobId: job.id, appointmentId });
-      materialsNote = "The job was made; the materials typed on the visit could not be listed. Add them on the Materials tab.";
+      materialsNote = await ws.say("ag_srv_madeTypedUnlisted");
     }
   }
   // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
@@ -1783,12 +1862,13 @@ export async function createJobFromAppointment(
 export async function deleteAppointment(id: string): Promise<Result> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
   await deleteCalendarItem("appointment", id);
   const { data: del, error } = await supabase.from("appointments").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!del?.length) return { ok: false, error: "That appointment could not be found." };
+  if (!del?.length) return { ok: false, error: await ws.say("ag_srv_apptGone") };
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
@@ -1820,6 +1900,7 @@ export async function wontHappenAppointment(
 ): Promise<Result & { did?: "deleted" | "cancelled"; previousStatus?: string; note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const { data: row, error: rowErr } = await supabase
@@ -1829,11 +1910,11 @@ export async function wontHappenAppointment(
     .eq("id", id)
     .maybeSingle();
   if (rowErr) return { ok: false, error: dbError(rowErr) };
-  if (!row) return { ok: false, error: "That visit isn't there any more. Reload to see the schedule as it is." };
+  if (!row) return { ok: false, error: await ws.say("ag_srv_visitNotThere") };
   const r = row as { status: string; capture: unknown; updated_at: string | null };
   if (r.status === "completed")
-    return { ok: false, error: "This visit is marked Done, so it did happen. Edit Details can change or remove it." };
-  if (r.status === "cancelled") return { ok: false, error: "This visit is already marked Cancelled." };
+    return { ok: false, error: await ws.say("ag_srv_visitDidHappen") };
+  if (r.status === "cancelled") return { ok: false, error: await ws.say("ag_srv_visitAlreadyCancelled") };
 
   const [answersRead, invoices, links] = await Promise.all([
     readViaView<{ inspection_answers: unknown }>(supabase, "answers", (from) =>
@@ -1864,10 +1945,10 @@ export async function wontHappenAppointment(
     // gone is said; one somebody marked Done or Cancelled in the meantime keeps what they did; one
     // still booked is cancelled, never deleted on a stale read.
     const { data: still } = await supabase.from("appointments").select("id, status").eq("id", id).maybeSingle();
-    if (!still) return { ok: false, error: "That visit isn't there any more. Reload to see the schedule as it is." };
+    if (!still) return { ok: false, error: await ws.say("ag_srv_visitNotThere") };
     const now = (still as { status?: string }).status;
     if (now !== "scheduled" && now !== "proposed")
-      return { ok: false, error: `That visit changed a moment ago: it's marked ${now === "completed" ? "Done" : "Cancelled"} now. Reload to see it.` };
+      return { ok: false, error: await ws.say(now === "completed" ? "ag_srv_visitChangedDone" : "ag_srv_visitChangedCancelled") };
   }
 
   const res = await setAppointmentStatus(id, "cancelled");
@@ -1885,11 +1966,12 @@ export async function wontHappenAppointment(
 export async function putVisitBackOnSchedule(id: string): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const { data: row, error: rowErr } = await supabase.from("appointments").select("id, status, starts_at").eq("id", id).maybeSingle();
   if (rowErr) return { ok: false, error: dbError(rowErr) };
   if (!row || (row as { status?: string }).status !== "cancelled")
-    return { ok: false, error: "Only a cancelled visit can go back on the schedule." };
+    return { ok: false, error: await ws.say("ag_srv_onlyCancelledBack") };
 
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
@@ -1909,10 +1991,10 @@ export async function putVisitBackOnSchedule(id: string): Promise<Result & { mes
   if (error) {
     // A database without 0368 still holds starts_at NOT NULL: said plainly, nothing changed.
     if ((error as { code?: string }).code === "23502")
-      return { ok: false, error: "Its day has passed, and a visit can't wait without a day until a quick database update is done. It stays Cancelled." };
+      return { ok: false, error: await ws.say("ag_srv_putBackNeedsUpdate") };
     return { ok: false, error: dbError(error) };
   }
-  if (!wrote?.length) return { ok: false, error: "Only a cancelled visit can go back on the schedule." };
+  if (!wrote?.length) return { ok: false, error: await ws.say("ag_srv_onlyCancelledBack") };
   await pushCalendarItem("appointment", id); // back on the phone's calendar when it has a day (fire-safe)
   revalidateVisit(id);
   return { ok: true, message: plan.message };
@@ -1934,6 +2016,7 @@ export async function putVisitBackOnSchedule(id: string): Promise<Result & { mes
 export async function unscheduleAppointment(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const { data, error } = await supabase
     .from("appointments")
@@ -1946,11 +2029,11 @@ export async function unscheduleAppointment(id: string): Promise<Result> {
     // door with Postgres' own words: the dead door found on production, 2026-09-27. Said plainly
     // until the migration lands; the visit keeps its date, and says so.
     if ((error as { code?: string }).code === "23502") {
-      return { ok: false, error: "A visit can't wait without a day until a quick database update is done. Its date is unchanged." };
+      return { ok: false, error: await ws.say("ag_srv_unscheduleNeedsUpdate") };
     }
     return { ok: false, error: dbError(error) };
   }
-  if (!data?.length) return { ok: false, error: "Only a scheduled visit can go back to waiting." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_onlyScheduledWaits") };
   await supabase
     .from("schedule_proposals")
     .update({ status: "cancelled" })
@@ -1990,6 +2073,7 @@ export async function unscheduleAppointment(id: string): Promise<Result> {
 export async function openJobInspector(jobId: string): Promise<Result & { redirect?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const { data: job } = await supabase
@@ -1997,7 +2081,7 @@ export async function openJobInspector(jobId: string): Promise<Result & { redire
     .select("id, name, inquiry_id, customer_id, address, city, state, zip")
     .eq("id", jobId)
     .maybeSingle();
-  if (!job) return { ok: false, error: "Job not found." };
+  if (!job) return { ok: false, error: await ws.say("ag_srv_jobNotFound") };
 
   const { data: own } = await supabase
     .from("appointments")
@@ -2067,21 +2151,22 @@ export async function openJobInspector(jobId: string): Promise<Result & { redire
 export async function setAppointmentAssignee(id: string, profileId: string | null): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const who = profileId ? String(profileId) : null;
   if (who) {
     const { data: person } = await supabase.from("profiles").select("id").eq("id", who).maybeSingle();
-    if (!person) return { ok: false, error: "That person isn't on this team, so nobody changed." };
+    if (!person) return { ok: false, error: await ws.say("ag_srv_personNotOnTeam") };
   }
   const { data: before } = await supabase.from("appointments").select("assigned_to, title").eq("id", id).maybeSingle();
-  if (!before) return { ok: false, error: "That visit isn't available, so nobody changed." };
+  if (!before) return { ok: false, error: await ws.say("ag_srv_visitGoneNobody") };
   const { data: wrote, error } = await supabase
     .from("appointments")
     .update({ assigned_to: who, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!wrote?.length) return { ok: false, error: "That visit isn't available, so nobody changed." };
+  if (!wrote?.length) return { ok: false, error: await ws.say("ag_srv_visitGoneNobody") };
 
   const was = (before as { assigned_to?: string | null }).assigned_to ?? null;
   if (who && who !== was && who !== ctx.userId) {

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 /**
  * THE ROW GRAMMAR of a ⋯ sheet: one full-width 44px row per verb, and every row says exactly what it
@@ -108,13 +110,14 @@ export function RowMoreSheet({
   children: ReactNode | ((sheet: RowMoreSheetApi) => ReactNode);
 }) {
   const [open, setOpen] = useState(false);
+  const t = translator(useLang());
   const close = () => {
     setOpen(false);
     onClose?.();
   };
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} aria-label={`More For ${title}`} title="More" className={ROW_MORE_TRIGGER}>
+      <button type="button" onClick={() => setOpen(true)} aria-label={fillText(t("ag_cal_btn_moreFor"), { title })} title={t("ag_cal_btn_more")} className={ROW_MORE_TRIGGER}>
         <MoreHorizontal className="h-4 w-4" />
       </button>
       <RowMoreSheetView open={open} title={title} subline={subline} onClose={close}>

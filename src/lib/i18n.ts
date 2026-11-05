@@ -1,7 +1,8 @@
-// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in thirteen catalogs,
+// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in seventeen catalogs,
 // one per side of the app (lib/words/*: tc_ the Time Clock, cs_ its server, gf_ the geofence, nb_
 // the texts and pushes, au_ sign-in, md_ My Day, tk_ tasks, jb_ jobs, mt_ materials, sh_ the shell,
-// nt_ Nort, nv_ the office's map — cn-v1139, us_ the usage meter — cn-v1140), each English beside
+// nt_ Nort, nv_ the office's map — cn-v1139, us_ the usage meter — cn-v1140; the agenda's four, ag_ / ag_cal_ /
+// ag_rail_ / ag_srv_, since the agenda-in-Spanish wave), each English beside
 // Spanish under its own prefix. This file merges them: dict("en") is
 // every catalog's English; dict("es") is every catalog's Spanish laid over the English, so a key
 // missing from a catalog's Spanish still reads in English at runtime and a person never sees a raw
@@ -37,14 +38,23 @@ import { words as shell } from "@/lib/words/shell";
 import { words as nort } from "@/lib/words/nort";
 import { words as nav } from "@/lib/words/nav";
 import { words as usage } from "@/lib/words/usage";
+import { words as agenda } from "@/lib/words/agenda";
+import { words as agendaCalendar } from "@/lib/words/agenda-calendar";
+import { words as agendaRail } from "@/lib/words/agenda-rail";
+import { words as agendaServer } from "@/lib/words/agenda-server";
 
 export const LANGUAGES: { code: Lang; label: string }[] = [
   { code: "en", label: "English" },
   { code: "es", label: "Español" },
 ];
 
-/** The thirteen catalogs, by name, in the order they are merged. */
-export const CATALOGS: readonly WordCatalog[] = [timeclock, clockserver, geofence, messages, auth, myday, tasks, jobs, materials, shell, nort, nav, usage];
+/** The seventeen catalogs, by name, in the order they are merged (the agenda's four since the
+ *  agenda-in-Spanish wave: ag_ the libraries + shared doors, ag_cal_ the calendar, ag_rail_ the rail
+ *  and sheets, ag_srv_ the server messages). */
+export const CATALOGS: readonly WordCatalog[] = [
+  timeclock, clockserver, geofence, messages, auth, myday, tasks, jobs, materials, shell, nort, nav, usage,
+  agenda, agendaCalendar, agendaRail, agendaServer,
+];
 
 type Dict = Record<string, string>;
 

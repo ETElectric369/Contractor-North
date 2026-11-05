@@ -40,6 +40,8 @@
  *     has contact, no place              → call them; the address arrives with the call (Mike)
  *     has both                           → put it on a day
  */
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 export type Placeable = {
   id: string;
@@ -119,14 +121,14 @@ export function whatsMissing(
 }
 
 /** The next thing a person would actually do, in their words. */
-export function nextAction(m: Missing): string {
+export function nextAction(m: Missing, lang: Lang = "en", words?: Words): string {
   return m === "nothing"
-    ? "Ready to schedule"
+    ? say(lang, words, "ag_readyToSchedule", "Ready to schedule")
     : m === "place"
-      ? "Call to get the address"
+      ? say(lang, words, "ag_callForAddress", "Call to get the address")
       : m === "contact"
-        ? "No phone or email — go and look, or find a number"
-        : "Needs an address and a number";
+        ? say(lang, words, "ag_noPhoneOrEmail", "No phone or email — go and look, or find a number")
+        : say(lang, words, "ag_needsAddressAndNumber", "Needs an address and a number");
 }
 
 const norm = (s: string | null | undefined): string => String(s ?? "").trim().replace(/\s+/g, " ");
@@ -166,12 +168,14 @@ const key = (s: string | null | undefined): string => norm(s).toLowerCase();
  * Ties break alphabetically so the rail doesn't reshuffle between renders — a list that reorders
  * under your thumb is worse than one sorted slightly wrong.
  */
-export function groupByTown(items: Placeable[]): TownGroup[] {
+export function groupByTown(items: Placeable[], lang: Lang = "en", words?: Words): TownGroup[] {
+  // The townless bucket's name in the reader's language (agenda wave); its key stays the English one.
+  const noTown = say(lang, words, "ag_noTownYet", NO_TOWN);
   const buckets = new Map<string, { town: string; items: Placeable[] }>();
   for (const it of items) {
     const found = townOf(it);
     const k = key(found) || NO_TOWN.toLowerCase();
-    const town = found || NO_TOWN;
+    const town = found || noTown;
     const b = buckets.get(k) ?? { town, items: [] };
     b.items.push(it);
     buckets.set(k, b);
@@ -179,7 +183,7 @@ export function groupByTown(items: Placeable[]): TownGroup[] {
 
   const groups: TownGroup[] = [...buckets.values()].map((b) => ({
     town: b.town,
-    unlocatable: b.town === NO_TOWN,
+    unlocatable: b.town === noTown,
     items: [...b.items].sort(
       (a, z) => Number(!!z.urgent) - Number(!!a.urgent) || a.name.localeCompare(z.name),
     ),

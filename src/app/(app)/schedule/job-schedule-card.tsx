@@ -10,6 +10,8 @@ import type { DayHours } from "@/lib/schedule-math";
 import { CrewInitials } from "@/components/crew-initials";
 import { WorkedTrack } from "@/components/worked-track";
 import type { WorkedPerson } from "@/lib/schedule/plan-vs-actual";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 interface Member {
   id: string;
@@ -68,6 +70,8 @@ export function JobScheduleCard({
    *  as a small track under the block (text to visual), its sentence the label. Absent: nothing to say. */
   actual?: { booked: { startMin: number; endMin: number }; people: WorkedPerson[]; sentence: string } | null;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const at = {
     scheduledStart: job.scheduled_start,
     scheduledEnd: job.scheduled_end,
@@ -76,14 +80,14 @@ export function JobScheduleCard({
     workDay,
   };
   const onDay = day ?? readJobBlock(at).day;
-  const time = onDay ? dayBlockWords({ day: onDay, ...at, dayHours }).words : "Worked day · no day planned yet";
+  const time = onDay ? dayBlockWords({ day: onDay, ...at, dayHours }, lang, t).words : t("ag_workedDayNoPlan");
   const place = placeLine({ name: job.name, street: job.address, customer: job.customers?.name });
 
   const inside = (
     <>
       <Clock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
       <span className="min-w-0 flex-1 truncate text-left text-slate-700">{time}</span>
-      <CrewInitials crew={crew ?? crewChips(job.assigned_to, members)} max={4} />
+      <CrewInitials crew={crew ?? crewChips(job.assigned_to, members, undefined, lang, t)} max={4} lang={lang} />
     </>
   );
 
@@ -95,7 +99,7 @@ export function JobScheduleCard({
           <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-blue-500" />
           {job.name}
         </Link>
-        <Badge tone={statusTone(job.status)}>{jobStatusLabel(job.status)}</Badge>
+        <Badge tone={statusTone(job.status)}>{jobStatusLabel(job.status, lang, t)}</Badge>
       </div>
       {/* WHERE: the street, never the city or the zip (the town small beside it); who when the name
           already is the street; nothing when the name says both ("Marla Finch · Panel Upgrade"), never
@@ -111,7 +115,7 @@ export function JobScheduleCard({
         <button
           type="button"
           onClick={onOpen}
-          aria-label={`${job.name}: day, time and crew`}
+          aria-label={fillText(t("ag_cal_dayTimeCrew"), { name: job.name })}
           className="mt-2 flex min-h-11 w-full items-center gap-2 rounded-md border border-slate-200 px-2 hover:border-brand"
         >
           {inside}

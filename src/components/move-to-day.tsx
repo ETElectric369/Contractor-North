@@ -6,6 +6,9 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
+import { localeOf } from "@/lib/locale";
 
 // THE one reschedule idiom for rows: "tap the Move glyph, tap a day" — the
 // row-side twin of the calendar's armed-chip gesture. Deliberately DUMB: it
@@ -21,14 +24,16 @@ const isoOf = (d: Date) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.ge
 /** The next `count` days as chip data (local/user timezone — a picker, not a
  *  boundary computation). Exported so calendar-side surfaces can reuse the
  *  exact same strip without importing the sheet. */
-export function nextDays(count = 14): { iso: string; label: string; sub: string }[] {
+export function nextDays(count = 14, lang?: string | null): { iso: string; label: string; sub: string }[] {
   const out: { iso: string; label: string; sub: string }[] = [];
   const d = new Date();
+  const t = translator(lang);
+  const locale = localeOf(lang);
   for (let i = 0; i < count; i++) {
     out.push({
       iso: isoOf(d),
-      label: i === 0 ? "Today" : i === 1 ? "Tomorrow" : d.toLocaleDateString("en-US", { weekday: "short" }),
-      sub: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      label: i === 0 ? t("ag_btn_today") : i === 1 ? t("ag_btn_tomorrow") : d.toLocaleDateString(locale, { weekday: "short" }),
+      sub: d.toLocaleDateString(locale, { month: "short", day: "numeric" }),
     });
     d.setDate(d.getDate() + 1);
   }
@@ -43,7 +48,7 @@ export function nextDays(count = 14): { iso: string; label: string; sub: string 
  */
 export function MoveToDay({
   onPick,
-  label = "Move to a day",
+  label,
   clearable = false,
   children,
   triggerClassName,
@@ -58,11 +63,14 @@ export function MoveToDay({
   triggerClassName?: string;
 }) {
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
+  label = label ?? t("ag_cal_moveToADay");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customDate, setCustomDate] = useState("");
-  const days = nextDays();
+  const days = nextDays(14, lang);
 
   function close() {
     setOpen(false);
@@ -77,13 +85,13 @@ export function MoveToDay({
     try {
       const res = await onPick(dateISO);
       if (res && !res.ok) {
-        setError(res.error ?? "Couldn't move it — try again.");
+        setError(res.error ?? t("ag_cal_couldntMove"));
         return;
       }
       if (res?.note) toast(res.note, "info");
       close();
     } catch {
-      setError("Couldn't move it — try again.");
+      setError(t("ag_cal_couldntMove"));
     } finally {
       setBusy(false);
     }
@@ -114,12 +122,12 @@ export function MoveToDay({
             {clearable && (
               <div className="mr-auto">
                 <Button type="button" variant="outline" onClick={() => pick(null)} disabled={busy} className="text-red-600">
-                  Clear Date
+                  {t("ag_cal_btn_clearDate")}
                 </Button>
               </div>
             )}
             <Button type="button" variant="outline" onClick={close} disabled={busy}>
-              Cancel
+              {t("ag_btn_cancel")}
             </Button>
           </>
         }
@@ -148,7 +156,7 @@ export function MoveToDay({
               on-change would move things mid-scroll. */}
           <div className="flex items-end gap-2">
             <div className="flex-1">
-              <Label htmlFor="mtd-date">Or pick a date</Label>
+              <Label htmlFor="mtd-date">{t("ag_cal_orPickADate")}</Label>
               <Input id="mtd-date" type="date" value={customDate} onChange={(e) => setCustomDate(e.target.value)} />
             </div>
             <Button
@@ -156,7 +164,7 @@ export function MoveToDay({
               onClick={() => pick(customDate)}
               disabled={busy || !/^\d{4}-\d{2}-\d{2}$/.test(customDate)}
             >
-              {busy ? "Moving…" : "Move"}
+              {busy ? t("ag_cal_btn_moving") : t("ag_btn_move")}
             </Button>
           </div>
         </div>

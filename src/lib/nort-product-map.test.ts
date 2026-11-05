@@ -13,6 +13,8 @@ import { translator } from "./i18n";
 import { appointmentTypeLabel } from "./statuses";
 import { RECONCILE_KINDS } from "./reconcile-kinds";
 import { words as nav } from "./words/nav";
+import { words as calendarWords } from "./words/agenda-calendar";
+const calendarWordsEn = calendarWords.en;
 
 /**
  * WHERE NORT SAYS THINGS LIVE, HELD TO WHERE THEY DO (W1-09 / W1-07 / W1-08). A map that lags the
@@ -145,11 +147,14 @@ describe("Nort's product map after the shell wave", () => {
     // with it, the block's sheet says This Day, the chips say Nobody, and a pick with no length
     // gets two hours (0370's job_takes_picked_day: 120 minutes).
     const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-    expect(src("src/components/time-grid.tsx")).toContain('addLabel = "Add To Schedule"');
-    expect(src("src/app/(app)/calendar/calendar-view.tsx")).toMatch(/<Plus className="h-4 w-4" \/> Add To Schedule/);
-    expect(src("src/app/(app)/schedule/add-to-schedule-sheet.tsx")).toContain('saveLabel="Add To Schedule"');
-    expect(src("src/app/(app)/schedule/tile-sheet.tsx")).toContain("This Day, {dayWords(day)}");
-    expect(src("src/components/crew-initials.tsx")).toContain("Nobody");
+    expect(src("src/components/time-grid.tsx")).toContain('addLabelProp ?? t("ag_cal_btn_addToSchedule")');
+    expect(calendarWordsEn.ag_cal_btn_addToSchedule).toBe("Add To Schedule");
+    expect(src("src/app/(app)/calendar/calendar-view.tsx")).toContain('<Plus className="h-4 w-4" /> {t("ag_cal_btn_addToSchedule")}');
+    expect(src("src/app/(app)/schedule/add-to-schedule-sheet.tsx")).toContain('saveLabel={t("ag_rail_btn_addToSchedule")}');
+    expect(src("src/app/(app)/schedule/tile-sheet.tsx")).toContain('t(dayHours ? "ag_cal_thisDayOwnHours" : "ag_cal_thisDayOnly"), { day: dw(day) }');
+    expect(calendarWordsEn.ag_cal_thisDayOwnHours).toBe("This Day, {day}: its own hours. The job's other days keep theirs.");
+    expect(src("src/components/crew-initials.tsx")).toContain('t("ag_cal_btn_nobody")');
+    expect(calendarWordsEn.ag_cal_btn_nobody).toBe("Nobody");
     expect(src("src/app/(app)/jobs/[id]/propose-dates-button.tsx")).toContain('"Offer Dates"');
     expect(src("supabase/migrations/0370_each_day_keeps_its_own_hours.sql")).toMatch(/\+ 120\b/);
   });

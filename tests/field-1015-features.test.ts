@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { inStockWords, stockForLines } from "@/lib/materials-stock";
 import { apptDayOf } from "@/app/(app)/schedule/add-to-schedule-sheet";
 import { hmWords } from "@/lib/schedule/job-block";
+import { words as railWords } from "@/lib/words/agenda-rail";
 
 /** THE 2026-10-15 ROUND'S THREE ASKS (field-feedback-1015-round items 5, 6, 7). */
 const ROOT = path.resolve(__dirname, "..");
@@ -39,10 +40,13 @@ describe("New Inspection in the + menu (33b28e4b)", () => {
 describe("a tapped time offers a new appointment too (9072ec46)", () => {
   it("the day's Add To Schedule sheet pushes the create intent at that half hour; the calendar closes it once the URL lands", () => {
     const sheet = read("src/app/(app)/schedule/add-to-schedule-sheet.tsx");
-    expect(sheet).toContain("<Heading>Or An Appointment</Heading>");
+    expect(sheet).toContain('<Heading>{t("ag_rail_btn_orAnAppointment")}</Heading>');
+    expect(railWords.en.ag_rail_btn_orAnAppointment).toBe("Or An Appointment");
     expect(sheet).toContain("router.push(`/schedule?view=day&date=${apptDayOf(day, at?.day)}&new=1${at?.minute != null ? `&time=${minutesToHm(at.minute)}` : \"\"}`)");
     expect(sheet).not.toMatch(/onClose\(\);\s*router\.push/); // never close-then-push: the Modal's history step would overtake the navigation
-    expect(sheet).toContain("New Appointment {at?.minute != null ? `At ${hmWords(minutesToHm(at.minute))}` : `On ${dayWords(apptDayOf(day, at?.day))}`}");
+    expect(sheet).toContain('{at?.minute != null\n              ? fillText(t("ag_rail_btn_newApptAt"), { time: hmWords(minutesToHm(at.minute), lang) })\n              : fillText(t("ag_rail_btn_newApptOn"), { day: dayWords(apptDayOf(day, at?.day), lang) })}');
+    expect(railWords.en.ag_rail_btn_newApptAt).toBe("New Appointment At {time}");
+    expect(railWords.en.ag_rail_btn_newApptOn).toBe("New Appointment On {day}");
     const cal = read("src/app/(app)/calendar/calendar-view.tsx");
     expect(cal).toContain('if (searchParams.get("new") === "1") setAdding(null);');
     expect(hmWords("14:30")).toBe("2:30 PM"); // the app's own clock words, not a second copy

@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { scheduleLeadsOnDay } from "../leads/actions";
 import { placeAppointmentOnDay, placeJobOnDay, planDayTimes, undoPlaceJob, undoPlaceVisit, type PlacePrior } from "./actions";
 import { groupByTown, spreadTimes, type Placeable } from "@/lib/schedule/place-by-town";
@@ -97,6 +99,9 @@ export function PlacementProvider({
 }) {
   const router = useRouter();
   const toast = useToast();
+  // The reader's words for every toast this provider says, and the same town order the rail draws.
+  const lang = useLang();
+  const t = useMemo(() => translator(lang), [lang]);
   const [pending, start] = useTransition();
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [half, setHalf] = useState<"am" | "pm">("am");
@@ -169,8 +174,8 @@ export function PlacementProvider({
    * grouping exists to prevent, so the grouping has to survive all the way to the clock.
    */
   const chosen = useMemo(
-    () => groupByTown(items).flatMap((g) => g.items).filter((i) => picked.has(i.id)),
-    [items, picked],
+    () => groupByTown(items, lang, t).flatMap((g) => g.items).filter((i) => picked.has(i.id)),
+    [items, picked, lang, t],
   );
 
   /**
@@ -185,7 +190,7 @@ export function PlacementProvider({
   const undoPlace = useCallback(
     (priors: { id: string; prior: PlacePrior }[], visits: { id: string; placedAt: string }[], withdrew: boolean) => {
       start(async () => {
-        const offline = { ok: false as const, error: "That Undo didn't reach the server. Check your connection; nothing may have changed." };
+        const offline = { ok: false as const, error: t("ag_rail_undoDidntReach") };
         const results: { ok: boolean; error?: string; note?: string }[] = await Promise.all([
           ...priors.map((p) => undoPlaceJob(p.id, p.prior).catch(() => offline)),
           ...visits.map((v) => undoPlaceVisit(v.id, v.placedAt).catch(() => offline)),
@@ -193,17 +198,17 @@ export function PlacementProvider({
         router.refresh();
         const refused = results.filter((r) => !r.ok);
         if (refused.length) {
-          toast(refused[0].error ?? "That didn't go back. Check the schedule.", "error");
+          toast(refused[0].error ?? t("ag_rail_didntGoBack"), "error");
           return;
         }
         const notes = results.map((r) => r.note).filter(Boolean);
         toast(
-          ["Put back where it was.", ...notes, withdrew ? "The customer's pick-a-time link stays withdrawn." : null].filter(Boolean).join(" "),
+          [t("ag_rail_putBack"), ...notes, withdrew ? t("ag_rail_linkStaysWithdrawn") : null].filter(Boolean).join(" "),
           "success",
         );
       });
     },
-    [router, toast],
+    [router, toast, t],
   );
 
   const placeOn = useCallback(
@@ -287,7 +292,7 @@ export function PlacementProvider({
               },
             ).catch(() => ({
               ok: false as const,
-              error: "That didn't reach the server — check your connection and try again.",
+              error: t("ag_rail_didntReachDash"),
               booked: 0,
               failures: [] as { id: string; error: string }[],
             }))
@@ -296,7 +301,7 @@ export function PlacementProvider({
         // A hard failure of the whole lead call is not "0 booked" — it is an error with a reason,
         // and the reason is more useful than a count.
         if (!res.ok && !jobs.length && !appts.length) {
-          toast(res.error ?? "Couldn't book those.", "error");
+          toast(res.error ?? t("ag_rail_couldntBook"), "error");
           return;
         }
 
@@ -309,8 +314,8 @@ export function PlacementProvider({
           jobsPlaced: jobs.length - jobsFailed + (appts.length - apptsFailed),
           jobsFailed: jobsFailed + apptsFailed,
           jobsDefaulted,
-          dayLabel: dayLabelFrom(dateISO, todayISO),
-        });
+          dayLabel: dayLabelFrom(dateISO, todayISO, lang, t),
+        }, lang, t);
         /* UNDO ON THE PLACE (W2-05). The tray that was cut had the only Undo on putting a floater on a
            day; the rail's place carries it now, on the toast that names the day. Only when every job and
            visit placed landed, and only for work an Undo can truly put back: a job the place took off
@@ -327,7 +332,7 @@ export function PlacementProvider({
           const priors = jobs.map((j, i) => ({ id: j.id, prior: jobResults[i].prior as PlacePrior }));
           const visits = appts.map((a, i) => ({ id: a.id, placedAt: apptResults[i].placedAt as string }));
           const withdrew = apptResults.some((r) => !!r.note);
-          toast(msg.text, msg.tone, { label: "Undo", onClick: () => undoPlace(priors, visits, withdrew) });
+          toast(msg.text, msg.tone, { label: t("ag_btn_undo"), onClick: () => undoPlace(priors, visits, withdrew) });
         } else {
           toast(msg.text, msg.tone);
         }
@@ -354,7 +359,7 @@ export function PlacementProvider({
         router.refresh();
       });
     },
-    [chosen, half, startAt, halfTimes, pending, router, toast, todayISO, undoPlace],
+    [chosen, half, startAt, halfTimes, pending, router, toast, todayISO, undoPlace, lang, t],
   );
 
   const value = useMemo<PlacementValue>(

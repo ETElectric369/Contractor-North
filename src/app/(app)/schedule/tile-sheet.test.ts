@@ -162,7 +162,7 @@ describe("a visit's sheet", () => {
     expect(text(crew)).not.toContain("each day");
     // A length that still reaches the visit's writer is refused in words, never a 25-hour visit.
     const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
-    expect(src).toMatch(/if \(block\.multiDay && !\("start" in patch\)\) \{\s*return \{ ok: false, error: `This visit runs over several days/);
+    expect(src).toMatch(/if \(block\.multiDay && !\("start" in patch\)\) \{\s*return \{ ok: false, error: fillText\(t\("ag_cal_visitRunsOver"\)/);
     expect(src).toMatch(/multiDay=\{block\.multiDay\}\s*(\/\/[^\n]*\n\s*)?oneSpan\s/);
     // A job over several days is never one span: its End and its lengths stay.
     const many = render(siskin({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
@@ -368,7 +368,7 @@ describe("nothing said to a sheet nobody can see", () => {
     const controls = readFileSync(join(process.cwd(), "src/components/block-time-controls.tsx"), "utf8");
     // Said before the transition starts, so the backdrop click of the same tap finds the sheet held.
     expect(controls).toMatch(/onPending\?\.\(true\);\s*start\(async/);
-    expect(controls).toContain('refuse("The end has to be after the start.")');
+    expect(controls).toContain('refuse(t("ag_cal_endAfterStart"))');
   });
 });
 
@@ -541,7 +541,7 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
     expect(src).not.toMatch(/Badge|sendPush|notif|action_items|useEffect/);
     expect(src).toContain("const res = await bookWorkedDay(jobId, day);");
     // The Undo is offered only for a day the tap added.
-    expect(src).toContain('res.added ? { label: "Undo", onClick: () => void undo() } : undefined');
+    expect(src).toContain('res.added ? { label: t("ag_btn_undo"), onClick: () => void undo() } : undefined');
     expect(src).toContain("const res = await unbookWorkedDay(jobId, day);");
   });
 

@@ -36,7 +36,9 @@ describe("Start The Job lists the typed rows on the job", () => {
     expect(rule).toContain("typedItems: [...items, ...partsAsCaptureItems(birth.parts)]");
     expect(src).toContain("const typedItems = work.typedItems;");
     expect(src).toContain("await addCaptureItemsToJobList(job.id, typedItems)");
-    expect(src).toContain("Add them on the Materials tab.");
+    // The sentence lives in the catalog since the agenda-in-Spanish wave (ag_srv_, the caller's language).
+    expect(src).toContain('ws.say("ag_srv_madeMaterialsUnlisted"');
+    expect(read("src/lib/words/agenda-server.ts")).toContain("Add them on the Materials tab.");
     expect(src).toContain("const note = [absorbNote, ...work.notes, tasksNote, materialsNote].filter(Boolean).join(\" \");");
   });
   it("the list writer proves every row, prices nothing, and carries the book code as the part number", () => {

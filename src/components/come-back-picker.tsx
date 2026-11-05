@@ -2,6 +2,8 @@
 
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 import {
   COME_BACK_PICKS,
   DEFAULT_COME_BACK,
@@ -32,7 +34,8 @@ import {
  */
 export const SAY_WHY = "Say why: it's the reminder when the job comes back";
 
-const CHIP: Record<ComeBackPick, string> = { tomorrow: "Tomorrow", monday: "Mon", week: "In A Week" };
+/** The chips' words, by catalog key (lib/words/agenda: Tomorrow; agenda-rail: Mon, In A Week). */
+const CHIP: Record<ComeBackPick, string> = { tomorrow: "ag_btn_tomorrow", monday: "ag_rail_btn_mon", week: "ag_rail_btn_inAWeek" };
 
 type Choice = ComeBackPick | "date";
 
@@ -67,6 +70,8 @@ export function ComeBackPicker({
   autoFocus?: boolean;
 }) {
   const id = useId();
+  const lang = useLang();
+  const t = translator(lang);
   const [why, setWhy] = useState(initialWhy ?? "");
   const [choice, setChoice] = useState<Choice>(DEFAULT_COME_BACK);
   const [date, setDate] = useState("");
@@ -78,7 +83,7 @@ export function ComeBackPicker({
     choice === "date"
       ? todayStr
         ? date
-          ? checkComeBackDay(todayStr, date)
+          ? checkComeBackDay(todayStr, date, lang, t)
           : null
         : date
           ? ({ ok: true, day: date } as const)
@@ -103,7 +108,7 @@ export function ComeBackPicker({
     }`;
 
   return (
-    <div className="w-full space-y-2" role="group" aria-label="When it comes back">
+    <div className="w-full space-y-2" role="group" aria-label={t("ag_rail_whenItComesBack")}>
       {showWhy && (
         <div>
           <input autoComplete="off"
@@ -118,21 +123,21 @@ export function ComeBackPicker({
               }
               if (e.key === "Escape" && onCancel) onCancel();
             }}
-            placeholder="Waiting on the permit"
-            aria-label="Why?"
+            placeholder={t("ag_rail_waitingOnPermit")}
+            aria-label={t("ag_rail_why")}
             className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           />
-          {needsWords && <p className="mt-1 text-xs text-slate-500">{SAY_WHY}</p>}
+          {needsWords && <p className="mt-1 text-xs text-slate-500">{t("ag_rail_sayWhy")}</p>}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-1.5">
         {COME_BACK_PICKS.map((p) => (
           <button key={p} type="button" aria-pressed={choice === p} onClick={() => setChoice(p)} className={chip(choice === p)}>
-            {CHIP[p]}
+            {t(CHIP[p])}
           </button>
         ))}
         <button type="button" aria-pressed={choice === "date"} onClick={() => setChoice("date")} className={chip(choice === "date")}>
-          Pick A Day
+          {t("ag_rail_btn_pickADay")}
         </button>
       </div>
       {choice === "date" && (
@@ -141,24 +146,24 @@ export function ComeBackPicker({
           value={date}
           min={todayStr}
           onChange={(e) => setDate(e.target.value)}
-          aria-label="The day it comes back"
+          aria-label={t("ag_rail_dayItComesBack")}
           className="h-11 rounded-lg border border-slate-300 px-3 text-sm"
         />
       )}
       {/* The day, in words, before anything is saved (text to visual: the chip says what it means). */}
       {picked && picked.ok && todayStr && (
         <p className="text-xs text-slate-500">
-          {picked.day === todayStr ? "Comes back today" : `Comes back ${shortDay(picked.day)}`}
+          {picked.day === todayStr ? t("ag_rail_comesBackToday") : fillText(t("ag_rail_comesBackOn"), { day: shortDay(picked.day, lang) })}
         </p>
       )}
       {dateRefused && <p className="text-xs font-medium text-red-600">{dateRefused}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" onClick={submit} disabled={disabled}>
-          {pending ? "Saving…" : label}
+          {pending ? t("ag_btn_saving") : label}
         </Button>
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
-            Cancel
+            {t("ag_btn_cancel")}
           </Button>
         )}
       </div>

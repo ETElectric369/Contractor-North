@@ -141,7 +141,7 @@ describe("the week starts once — the one rule", () => {
     expect(weekdayHeadings("sunday")).toEqual(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
     // The headings and the first cell must come from the same setting, on the same screen.
     const CAL = code("src/app/(app)/calendar/calendar-view.tsx");
-    expect(CAL).toContain("weekdayHeadings(weekStart)");
+    expect(CAL).toContain("weekdayHeadings(weekStart, lang)");
     expect(CAL).toContain("weekDaysOf(first, weekStart)[0]");
     expect(CAL).not.toContain('["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]');
   });
@@ -299,9 +299,9 @@ describe("a weekend day earns its space", () => {
 
   it("names the days it folded away, so a week that grows a column warned you first", () => {
     const { hidden } = weekViewDays(WEEK, { hasWork: none, todayStr: "2026-07-15" });
-    expect(hidden.map(shortDayWords)).toEqual(["Sat 18", "Sun 19"]);
+    expect(hidden.map((d) => shortDayWords(d))).toEqual(["Sat 18", "Sun 19"]);
     // Said on BOTH week views, from the one spelling.
-    expect(code("src/app/(app)/calendar/calendar-view.tsx")).toContain("shortDayWords(k)");
+    expect(code("src/app/(app)/calendar/calendar-view.tsx")).toContain("shortDayWords(k, lang)");
     // My Day maps the days through dayShort (cn-v1138), which is shortDayWords in English and the
     // same shape in the person's own locale otherwise — still the one spelling.
     const planner = code("src/app/(app)/planner/page.tsx");
@@ -349,7 +349,7 @@ describe("the weekend rule changes which columns are drawn, and nothing else", (
     // A span label, "this week", the Card key and how far the clocked time reaches are facts about the
     // week. Reading them off the surviving columns would rename a Sunday-start week the moment its
     // Sunday emptied out, and remount it in the scroll stack under a second key.
-    expect(CAL).toContain("label: spanLabel(wk[0], wk[6], { month: \"long\" })");
+    expect(CAL).toContain("label: spanLabel(wk[0], wk[6], { month: \"long\", lang })");
     expect(CAL).toContain("hasToday: all.some((d) => d.isToday)");
     expect(CAL).toContain("loadsBack: !!actualsCappedBefore && clockInUse && first < actualsCappedBefore && first < todayK");
     expect(CAL).toContain("<Card key={weekKey}");

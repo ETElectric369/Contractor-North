@@ -8,6 +8,8 @@ import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
 import { backStack, createBackStepper, escapeStack, shouldGuardBack } from "./overlay-history";
 import { keyboardClosed, nextKeyboardBaseline, revealScroll, type KeyboardBaseline } from "./modal-keyboard";
 import { safeAreaTop } from "@/lib/native-shell";
+import { useLang } from "@/components/lang-provider";
+import { modalWords } from "./modal-words";
 
 /** Every overlay that closes in the same moment steps history back once, together (overlay-history). */
 const stepBack = createBackStepper(
@@ -89,6 +91,8 @@ export function Modal({
   // whole form off-screen" bug). Tracking vv geometry keeps the overlay pinned inside the visible
   // slice. Undefined off-iOS (no visualViewport) → the overlay falls back to `fixed inset-0`.
   const [vvRect, setVvRect] = useState<CSSProperties | undefined>(undefined);
+  // The sheet's own words in the reader's language (English outside a LangProvider: a public page, a test).
+  const w = modalWords(useLang());
   const requestClose = () => {
     if (holdOpen) return;
     if (dirty && !confirmDiscard) {
@@ -328,7 +332,7 @@ export function Modal({
             onClick={requestClose}
             disabled={holdOpen}
             className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
-            aria-label="Close"
+            aria-label={w.close}
           >
             <X className="h-5 w-5" />
           </button>
@@ -336,7 +340,7 @@ export function Modal({
         {/* Armed discard notice — fixed (shrink-0) so it can't scroll away. */}
         {confirmDiscard && (
           <div className="shrink-0 border-b border-amber-100 bg-amber-50 px-6 py-2 text-sm font-medium text-amber-700">
-            Tap again to discard what you typed
+            {w.tapAgain}
           </div>
         )}
         <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
@@ -365,8 +369,8 @@ export function Modal({
 export function ModalActions({
   onCancel,
   onSave,
-  saveLabel = "Save",
-  cancelLabel = "Cancel",
+  saveLabel,
+  cancelLabel,
   saving = false,
   disabled = false,
   destructive = false,
@@ -393,12 +397,14 @@ export function ModalActions({
   /** Single-button footer (e.g. an acknowledge "Done") — no Cancel. */
   hideCancel?: boolean;
 }) {
+  // "Save" / "Cancel" / "Saving…" in the reader's language when the caller named no words of its own.
+  const w = modalWords(useLang());
   return (
     <>
       {extra && <div className="mr-auto">{extra}</div>}
       {!hideCancel && (
         <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-          {cancelLabel}
+          {cancelLabel ?? w.cancel}
         </Button>
       )}
       <Button
@@ -408,7 +414,7 @@ export function ModalActions({
         onClick={submit ? undefined : onSave}
         disabled={saving || disabled}
       >
-        {saving ? "Saving…" : saveLabel}
+        {saving ? w.saving : (saveLabel ?? w.save)}
       </Button>
     </>
   );

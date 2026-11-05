@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Route } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 interface MapJob {
   id: string;
@@ -13,6 +15,7 @@ interface MapJob {
 
 export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: string | null }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const t = translator(useLang());
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const rendererRef = useRef<any>(null);
@@ -51,7 +54,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
             const marker = new g.maps.Marker({ map, position: loc, title: j.name });
             marker.addListener("click", () => {
               info.setContent(
-                `<div style="font-size:13px"><strong>${j.name}</strong><br/>${j.customer ?? ""}<br/><a href="/jobs/${j.id}">Open Job →</a></div>`,
+                `<div style="font-size:13px"><strong>${j.name}</strong><br/>${j.customer ?? ""}<br/><a href="/jobs/${j.id}">${t("ag_cal_btn_openJob")} →</a></div>`,
               );
               info.open(map, marker);
             });
@@ -69,7 +72,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
               new g.maps.Marker({
                 map,
                 position: loc,
-                title: "Home",
+                title: t("ag_cal_home"),
                 label: { text: "🏠", fontSize: "16px" },
               });
               bounds.extend(loc);
@@ -85,7 +88,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
         }
       })
       .catch(() => {
-        setError("Couldn't load Google Maps. Check the API key and that the Maps JavaScript API is enabled.");
+        setError(t("ag_cal_mapsLoadFailed"));
         setLoading(false);
       });
     return () => {
@@ -102,7 +105,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
     // With a home address we can route home → first job (even a single job).
     // Without one, we still need at least two job stops.
     if (!((home && pts.length >= 1) || pts.length >= 2)) {
-      setError(home ? "Add at least one job with an address." : "Set your home address (Settings) or add 2 jobs to suggest a route.");
+      setError(home ? t("ag_cal_addOneJobWithAddress") : t("ag_cal_setHomeToRoute"));
       return;
     }
     setError(null);
@@ -126,7 +129,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
       (result: any, status: string) => {
         setRouting(false);
         if (status === "OK") rendererRef.current.setDirections(result);
-        else setError("Couldn't build a route. Try again in a bit.");
+        else setError(t("ag_cal_routeFailed"));
       },
     );
   }
@@ -135,7 +138,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
   if (!key) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">
-        The map isn&apos;t available yet.
+        {t("ag_cal_mapNotYet")}
       </div>
     );
   }
@@ -143,15 +146,15 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm text-slate-500">{jobs.length} job{jobs.length === 1 ? "" : "s"} with an address</div>
+        <div className="text-sm text-slate-500">{fillText(t(jobs.length === 1 ? "ag_cal_jobsWithAddressOne" : "ag_cal_jobsWithAddressMany"), { n: String(jobs.length) })}</div>
         <button
           onClick={planRoute}
           disabled={routing || !canRoute}
-          title={!canRoute ? "Set your home address (Settings) or add 2 jobs" : "Driving route through your stops"}
+          title={!canRoute ? t("ag_cal_setHomeOrTwoJobs") : t("ag_cal_drivingRoute")}
           className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {routing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Route className="h-4 w-4" />}
-          {hasHome ? "Route From Home" : "Suggest Route"}
+          {hasHome ? t("ag_cal_btn_routeFromHome") : t("ag_cal_btn_suggestRoute")}
         </button>
       </div>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}

@@ -194,6 +194,6 @@ describe("Edit Details with New Lead clears the visit's customer before the lead
   it("the edit's patch leaves customer_id out for New Lead, and the row's own customer is read for it", () => {
     expect(actions).toContain("...(cust.lead ? {} : { customer_id: customerId }),");
     expect(actions).toContain('.select("type, city, state, zip, inquiry_id, customer_id")');
-    expect(actions).toContain("attachNewLead(id, cust.lead, !!row?.customer_id)");
+    expect(actions).toContain("const warning = cust.lead ? await attachNewLead(ws, id, cust.lead, !!row?.customer_id) : undefined;");
   });
 });

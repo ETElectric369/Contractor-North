@@ -219,7 +219,7 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
     const src = read("src/app/(app)/planner/page.tsx");
     expect(src).toContain("...jobRowInfo(j, todayStr, ownToday.get(j.id)?.get(todayStr) ?? null)");
     expect(src).toContain("...visitRowInfo(a)");
-    expect(src).toContain("<CrewInitials crew={i.crew} />");
+    expect(src).toContain("<CrewInitials crew={i.crew} lang={lang} />");
     expect(src).toContain("const fmtTime = (iso: string) => formatTime(iso, tz);");
     expect(src).toMatch(/placeLine\(\{ name: j\.name, street: j\.address, customer: j\.customers\?\.name \}\)/);
   });
@@ -230,10 +230,10 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
     // The crew as that day's Everyone's Day rows leave it (the day row wins; lib/schedule/block-info);
     // a past day judged shows what happened instead (Wave 2, SV-actual).
     expect(view).toContain("crew: judged && k < todayK ? null : jobCrewOn(job, k)");
-    expect(view).toContain("crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people })");
+    expect(view).toContain("crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people }, lang, t)");
     expect(view).toContain("dayHours: ownHours.get(job.id)?.get(k) ?? null");
     const page = read("src/app/(app)/schedule/page.tsx");
-    expect(page).toContain("crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team)");
+    expect(page).toContain("crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team, undefined, lang, t)");
   });
 
   it("a visit with no place of its own says its job's street on the grid and the day drill, as My Day does", () => {
@@ -255,7 +255,7 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
     expect(page).toMatch(/const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, assigned_to, scheduled_start, customers\(name, phone, email\)"/);
     const rail = code("src/app/(app)/schedule/place-rail.tsx");
     expect(rail).toContain("const place = placeLine({ name: i.name, street: i.address, customer: i.customer });");
-    expect(rail).toContain("<CrewInitials crew={i.crew} />");
+    expect(rail).toContain("<CrewInitials crew={i.crew} lang={lang} />");
     expect(rail).not.toContain("job_number");
   });
 

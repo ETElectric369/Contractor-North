@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Check, Undo2, X } from "lucide-react";
 import { setAppointmentStatus } from "./actions";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /** Quick "mark done" / "cancel" controls for an appointment row. */
 export function ApptQuickActions({ id, status, title, boxClassName }: { id: string; status: string; title: string;
@@ -12,6 +14,9 @@ export function ApptQuickActions({ id, status, title, boxClassName }: { id: stri
   boxClassName?: string }) {
   const router = useRouter();
   const toast = useToast();
+  // The reader's words (agenda-in-Spanish): lib/words/agenda-server (ag_srv_), the shared doors from
+  // lib/words/agenda (ag_). A status word is the stored one in English, as it always read.
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   /**
    * NO SAVE GAME (Erik's standing rule): every deed gets a way back. Cancelling a booking used
@@ -28,13 +33,16 @@ export function ApptQuickActions({ id, status, title, boxClassName }: { id: stri
       if (!res.ok) {
         // Announce the failure. This is the whole reason the action now asks for the row back:
         // silence used to be indistinguishable from success.
-        toast(res.error ?? "That didn't save.", "error");
+        toast(res.error ?? t("ag_srv_didntSave"), "error");
         return;
       }
       setUndoTo(opts.undoable ? (res.previousStatus ?? null) : null);
       // ANNOUNCE THE DEED, NOT THE INTENT — and name the part that can't be undone rather than
       // offering an undo that quietly restores less than it promises.
-      toast(next === "cancelled" ? `Cancelled${res.note ? ` — ${res.note}` : ""}` : "Marked done", "success");
+      toast(
+        next === "cancelled" ? (res.note ? fillText(t("ag_srv_toastCancelledNote"), { note: res.note }) : t("ag_srv_toastCancelled")) : t("ag_srv_toastMarkedDone"),
+        "success",
+      );
       router.refresh();
     });
   }
@@ -43,7 +51,7 @@ export function ApptQuickActions({ id, status, title, boxClassName }: { id: stri
     if (!undoTo) return;
     start(async () => {
       const res = await setAppointmentStatus(id, undoTo);
-      toast(res.ok ? "Put back" : (res.error ?? "Couldn't put it back."), res.ok ? "success" : "error");
+      toast(res.ok ? t("ag_srv_toastPutBack") : (res.error ?? t("ag_srv_couldntPutBack")), res.ok ? "success" : "error");
       if (res.ok) setUndoTo(null);
       router.refresh();
     });
@@ -56,14 +64,14 @@ export function ApptQuickActions({ id, status, title, boxClassName }: { id: stri
           onClick={undo}
           disabled={pending}
           className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-          title={`Put it back to ${undoTo}`}
+          title={fillText(t("ag_srv_putBackTo"), { status: t(`ag_srv_apptStatus_${undoTo}`) === `ag_srv_apptStatus_${undoTo}` ? undoTo : t(`ag_srv_apptStatus_${undoTo}`) })}
         >
           <Undo2 className="h-3.5 w-3.5" />
-          Undo
+          {t("ag_btn_undo")}
         </button>
       )}
       {status !== "completed" && (
-        <button onClick={() => set("completed")} disabled={pending} className={`${boxClassName ?? "rounded-md p-1"} text-slate-400 hover:bg-green-50 hover:text-green-600`} title="Mark done">
+        <button onClick={() => set("completed")} disabled={pending} className={`${boxClassName ?? "rounded-md p-1"} text-slate-400 hover:bg-green-50 hover:text-green-600`} title={t("ag_srv_markDoneTip")}>
           <Check className="h-4 w-4" />
         </button>
       )}
@@ -76,12 +84,12 @@ export function ApptQuickActions({ id, status, title, boxClassName }: { id: stri
           and it says plainly that the record survives. */}
       <button
         onClick={() => {
-          if (!confirm(`Mark "${title}" as cancelled? It stays on file — use Delete to remove it.`)) return;
+          if (!confirm(fillText(t("ag_srv_confirmCancel"), { title }))) return;
           set("cancelled", { undoable: true });
         }}
         disabled={pending}
         className={`${boxClassName ?? "rounded-md p-1"} text-slate-400 hover:bg-red-50 hover:text-red-600`}
-        title="Cancel"
+        title={t("ag_btn_cancel")}
       >
         <X className="h-4 w-4" />
       </button>

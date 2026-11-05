@@ -32,6 +32,8 @@
  * Pure (no clock of its own): every caller hands in the company's today, like defaultJobName.
  */
 import { defaultJobName, unitForName } from "@/lib/schedule-options";
+import type { Lang } from "@/lib/locale";
+import type { Words } from "@/lib/lang-words";
 
 type Customer = { name?: string | null; company_name?: string | null; type?: string | null } | null | undefined;
 
@@ -102,7 +104,10 @@ function tidy(s: string | null | undefined): string {
  *   `aliases`      other spellings of who a stock title may carry: a visit's title is built from the
  *                  LEAD's typed name ("Site inspection: Rich Test") while the job is named for the
  *                  card it links to ("Richard Test"), so the lead's own name counts as only-who too
- *                  (jobWho gives them).
+ *                  (jobWho gives them);
+ *   `lang`, `words` the namer's language and translator (agenda-in-Spanish): only the stub moves
+ *                  ("Trabajo Nuevo · 28 sept"), so the stored name is the line the New Job form showed.
+ *                  None handed in, English, byte for byte.
  */
 export function jobNameFrom(p: {
   typed?: string | null;
@@ -112,6 +117,8 @@ export function jobNameFrom(p: {
   unit?: string | null;
   todayStr: string;
   aliases?: (string | null | undefined)[];
+  lang?: Lang;
+  words?: Words;
 }): string {
   const streetLine = streetOf(p.street);
   const unit = tidy(p.unit);
@@ -143,7 +150,7 @@ export function jobNameFrom(p: {
 
   // 2-4. The street (and unit), else who · the source's work words, else "New Job · Sep 28".
   const { words } = untag(tidy(p.sourceWords), rest);
-  return defaultJobName({ customer: p.customer ?? null, street: p.street ?? null, unit: p.unit ?? null, work: rest(words), todayStr: p.todayStr });
+  return defaultJobName({ customer: p.customer ?? null, street: p.street ?? null, unit: p.unit ?? null, work: rest(words), todayStr: p.todayStr, lang: p.lang, words: p.words });
 }
 
 /**

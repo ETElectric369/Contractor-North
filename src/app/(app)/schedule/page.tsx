@@ -57,7 +57,8 @@ export default async function SchedulePage({
   if (!me || !isStaffRole(me.role)) {
     redirect("/planner");
   }
-  const t = translator(await currentLangFor(user?.id));
+  const lang = await currentLangFor(user?.id);
+  const t = translator(lang);
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date : undefined;
 
@@ -95,7 +96,7 @@ export default async function SchedulePage({
           >
             <ChevronLeft className="h-4 w-4 shrink-0" /> {t("nv_sched_calendar")}
           </Link>
-          <span className="text-sm font-semibold text-slate-900">Job map</span>
+          <span className="text-sm font-semibold text-slate-900">{t("ag_rail_jobMap")}</span>
         </div>
         <MapPanel />
       </div>
@@ -255,7 +256,7 @@ export default async function SchedulePage({
          street said twice. */
       name: String(r.name || (r as unknown as { customers?: { name?: string | null } }).customers?.name || "Job"),
       customer: (r as unknown as { customers?: { name?: string | null } }).customers?.name ?? null,
-      crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team),
+      crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team, undefined, lang, t),
       note: null,
       status: r.status ?? null,
       address: r.address ?? null,
@@ -288,7 +289,7 @@ export default async function SchedulePage({
       kind: "appointment" as const,
       // A dateless visit titled during the three days the visit was a "Walk-Through" reads today's
       // word on the rail too (lib/statuses visitTitle); a name a person typed is untouched.
-      name: visitTitle(r.title) || "Site visit",
+      name: visitTitle(r.title) || t("ag_rail_siteVisit"),
       address: r.location ?? null,
       city: null,
       // Who, and the one person going ([] draws a dashed Nobody).
@@ -297,7 +298,7 @@ export default async function SchedulePage({
         ? crewChips([r.assigned_to], [
             ...team,
             { id: String(r.assigned_to), full_name: (r as unknown as { profiles?: { full_name?: string | null } }).profiles?.full_name ?? null },
-          ])
+          ], undefined, lang, t)
         : [],
       phone: (r as unknown as { customers?: { phone?: string | null } }).customers?.phone ?? null,
       email: (r as unknown as { customers?: { email?: string | null } }).customers?.email ?? null,
@@ -331,7 +332,7 @@ export default async function SchedulePage({
           <h2 className="mb-2 text-sm font-semibold text-slate-900">
             {t("nv_sched_waitingForADay")} <span className="font-normal text-slate-400">({waiting.length}{railCapped ? "+" : ""})</span>
           </h2>
-          {railCapped && <p className="-mt-1 mb-2 text-xs text-slate-500">More is waiting than this list shows. Find the rest on Jobs and Leads.</p>}
+          {railCapped && <p className="-mt-1 mb-2 text-xs text-slate-500">{t("ag_rail_moreWaiting")}</p>}
           <PlaceRail items={waiting} todayStr={today} />
         </aside>
         {/* The id is the landing pad for the rail's "tap the day" jump on phones — see place-rail. */}

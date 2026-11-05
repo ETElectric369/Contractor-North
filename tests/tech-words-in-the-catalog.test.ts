@@ -32,8 +32,8 @@ import { CATALOGS } from "@/lib/i18n";
  */
 const ROOT = process.cwd();
 
-/** The screens the catalogs name at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
-export const FILES_FLOOR = 96;
+/** The screens the catalogs name at the agenda wave's foundation (122: the sheet, the calendar's eleven, the rail's ten, the server's three), at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
+export const FILES_FLOOR = 122;
 
 /** English that stands on a named screen on purpose: the exact words, the file, and why. */
 const ALLOW: { file: string; text: string; why: string }[] = [
@@ -42,6 +42,11 @@ const ALLOW: { file: string; text: string; why: string }[] = [
   { file: "src/app/(app)/timeclock/actions.ts", text: "Daily report from", why: "a stored title two readers match by its English words" },
   // T2: the document title of the PWA's offline fallback is the vendor's name on a page with no session.
   { file: "src/app/offline/page.tsx", text: "Offline · Contractor North", why: "the browser-tab title carries the vendor's name; the page's words are OfflineWords" },
+  // The agenda-in-Spanish wave's server messages (ag_srv_): a visit's stored TITLE is a record every reader
+  // opens (the job page's Inspection door names it once, in the words the visit is filed under), and
+  // setAppointmentStatus' list is the guard's own words for a status no door can send.
+  { file: "src/app/(app)/appointments/actions.ts", text: "Site notes —", why: "a title stored on the visit, read back by whoever opens it: a record, not a sentence" },
+  { file: "src/app/(app)/appointments/actions.ts", text: "Status must be one of: .", why: "a programming refusal: every door sends one of the four statuses, so no person reads it" },
 ];
 
 export type Leak = { line: number; kind: string; text: string };
@@ -296,7 +301,7 @@ describe("every named screen's words come through the catalog", () => {
   const leaks = files.flatMap((f) => collectLeaks(readFileSync(join(ROOT, f), "utf8"), f).map((l) => ({ ...l, file: f })));
 
   it("the catalogs loaded and the scan read every screen they name", () => {
-    expect(CATALOGS.length).toBe(13);
+    expect(CATALOGS.length).toBe(17);
     expect(files.length).toBeGreaterThanOrEqual(FILES_FLOOR);
   });
 

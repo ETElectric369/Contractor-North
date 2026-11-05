@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { words as railWords } from "@/lib/words/agenda-rail";
 
 /**
  * NEW JOB IN FOUR FIELDS, EDIT JOB IN FIVE (W1-22), on the server, without a database.
@@ -22,6 +23,7 @@ const state = vi.hoisted(() => ({
   settings: { timezone: "America/Denver", work_day_start: "07:30", work_day_end: "15:30" } as Row,
   customers: [] as Row[],
   counts: { tm: 0, fixed: 0 } as Record<string, number>,
+  language: "en",
 }));
 
 function builder(table: string) {
@@ -31,6 +33,7 @@ function builder(table: string) {
     if (call.op === "insert") return { data: { id: table === "customers" ? "cust-new" : "job-new" }, error: null };
     if (call.op === "update") return { data: [{ id: String(call.filters.id ?? "x") }], error: null };
     if (table === "organizations") return { data: { settings: state.settings }, error: null };
+    if (table === "profiles" && single) return { data: { language: state.language }, error: null };
     if (table === "customers") {
       if (single) return { data: state.customers.find((c) => c.id === call.filters.id) ?? null, error: null };
       return { data: state.customers, error: null };
@@ -206,6 +209,26 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     expect(inserted().name).toBe(`New Job · ${words}`);
   });
 
+  it("the stub in the reader's language: the form's hidden lang, else the caller's own (agenda-in-Spanish)", async () => {
+    const { defaultJobName } = await import("@/lib/schedule-options");
+    const { translator } = await import("@/lib/i18n");
+    const es = defaultJobName({ todayStr: today(), lang: "es", words: translator("es") });
+    expect(es).toMatch(/^Trabajo Nuevo · \d{1,2} \p{L}+\.?$/u); // "Trabajo Nuevo · 5 nov"
+    await createJob(fd({ scheduled_date: "", lang: "es" }));
+    expect(inserted().name).toBe(es);
+    state.calls = [];
+    state.language = "es"; // no field: Nort, the quick add — the caller's profile decides
+    await createJob(fd({ scheduled_date: "" }));
+    expect(inserted().name).toBe(es);
+    state.calls = [];
+    await createJob(fd({ scheduled_date: "", lang: "en" })); // the form's own word wins
+    expect(inserted().name).toMatch(/^New Job · /);
+    state.calls = [];
+    await createJob(fd({ scheduled_date: "", lang: "es", address: "4 Thistlewood Dr" })); // only the stub moves
+    expect(inserted().name).toBe("4 Thistlewood Dr");
+    state.language = "en";
+  });
+
   it("an explicit status and name still win (the Timeclock's quick add, Nort)", async () => {
     await createJob(fd({ name: "Panel swap", status: "in_progress", scheduled_date: addDays(today(), 5) }));
     expect(inserted()).toMatchObject({ name: "Panel swap", status: "in_progress" });
@@ -301,11 +324,24 @@ describe("the forms (source)", () => {
     const s = code(read("src/app/(app)/schedule/new-job-button.tsx"));
     expect(s).not.toMatch(/name="name"/);
     expect(s).not.toMatch(/name="status"/);
-    expect(s).toContain("It&apos;ll Be Called:");
-    expect(s).toContain('title="New Job"');
-    expect(s).toContain('saveLabel="Create Job"');
-    expect(s).toContain("More Options");
-    expect(s).toContain("Not Scheduled Yet");
+    // The words come through the catalog (lib/words/agenda-rail, the agenda-in-Spanish wave); the
+    // English there is what this form always said.
+    expect(s).toContain('{t("ag_rail_willBeCalled")}');
+    expect(s).toContain('title={t("ag_rail_btn_newJob")}');
+    expect(s).toContain('saveLabel={t("ag_rail_btn_createJob")}');
+    expect(s).toContain('t("ag_rail_btn_moreOptions")');
+    expect(s).toContain('t("ag_rail_btn_notScheduledYet")');
+    const en = railWords.en;
+    expect([en.ag_rail_willBeCalled, en.ag_rail_btn_newJob, en.ag_rail_btn_createJob, en.ag_rail_btn_moreOptions, en.ag_rail_btn_notScheduledYet]).toEqual([
+      "It'll Be Called:",
+      "New Job",
+      "Create Job",
+      "More Options",
+      "Not Scheduled Yet",
+    ]);
+    // The live line and the stored name share one (lang, words) pair: the form sends its language.
+    expect(s).toContain('<input type="hidden" name="lang" value={lang} />');
+    expect(s).toContain("todayStr: today, lang, words: t });");
   });
 
   it("Edit Job is five fields: no dates, no description, no crew", () => {

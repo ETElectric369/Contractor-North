@@ -4,6 +4,9 @@ import { listActiveTechs, jobLabel } from "@/lib/schedule-options";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { isStaffRole } from "@/lib/actions/perms";
 import { tzDayStartUtc, todayStrInTz, prettyDay } from "@/lib/tz";
+import { formatTime } from "@/lib/utils";
+import { currentLangFor } from "@/lib/current-lang";
+import { translator } from "@/lib/i18n";
 import { pickScheduledJobForDay } from "../timeclock/crew-plan";
 import { CrewBoard, type Lane, type CrewJob, type CrewAppt, type JobOption } from "./crew-board";
 
@@ -49,6 +52,8 @@ type RawJob = {
   customers?: { name?: string | null } | null;
 };
 
+const OFF_REASON_KEY: Record<string, string> = { vacation: "ag_rail_vacation", sick: "ag_rail_sick", other: "ag_rail_otherReason" };
+
 const JOB_COLS = "id, job_number, name, status, assigned_to, scheduled_start, customers(name)";
 
 export async function CrewBoardPanel({ date }: { date?: string }) {
@@ -56,6 +61,12 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  // The reader's language (agenda wave): the day's words, the clock, the lane names, the off reasons.
+  const lang = await currentLangFor(user?.id);
+  const t = translator(lang);
+  /** A stored off reason (vacation / sick / other) in the reader's words; English reads it as stored. */
+  const reasonWords = (r: string | null): string | null =>
+    r && lang === "es" && OFF_REASON_KEY[r] ? t(OFF_REASON_KEY[r]) : r;
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const tz = getOrgSettings((org as any)?.settings).timezone;
   const day = /^\d{4}-\d{2}-\d{2}$/.test(date ?? "") ? (date as string) : todayStrInTz(tz);
@@ -176,7 +187,7 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
 
   const jobs: CrewJob[] = jobRows.map((j) => ({
     id: j.id,
-    label: jobLabel(j),
+    label: jobLabel(j, lang, t),
     status: j.status,
     customer: j.customers?.name ?? null,
     assigned: (j.assigned_to ?? []).filter(Boolean),
@@ -185,7 +196,7 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
     id: a.id,
     title: a.title,
     type: a.type,
-    time: new Date(a.starts_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz }),
+    time: formatTime(a.starts_at, tz, lang),
     jobId: a.job_id ?? null,
     who: a.jobs?.name ?? a.customers?.name ?? null,
     assigned: a.assigned_to ?? null,
@@ -219,26 +230,26 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
     const off = row?.kind === "off";
     return {
       id: m.id,
-      name: m.full_name ?? "Unnamed",
+      name: m.full_name ?? t("ag_unnamed"),
       jobs: jobs.filter((j) => j.assigned.includes(m.id)),
       appts: appointments.filter((a) => a.assigned === m.id),
       decision: row
         ? {
             kind: off ? ("off" as const) : ("job" as const),
             jobId: off ? null : (row.job_id ?? null),
-            label: off ? null : row.job ? jobLabel(row.job) : "A job",
-            reason: off ? (row.off_reason ?? null) : null,
+            label: off ? null : row.job ? jobLabel(row.job, lang, t) : t("ag_rail_aJob"),
+            reason: off ? reasonWords(row.off_reason ?? null) : null,
           }
         : null,
       scheduledJobId: sched?.id ?? null,
-      scheduledLabel: sched ? jobLabel(sched) : null,
+      scheduledLabel: sched ? jobLabel(sched, lang, t) : null,
     };
   });
   // Unassigned = nobody on the CURRENT roster is on it. Catches empty assignments AND ones left on a
   // former/inactive employee — those must still show here, never silently vanish from the board.
   const unassigned: Lane = {
     id: "__unassigned__",
-    name: "Unassigned",
+    name: t("ag_rail_unassigned"),
     jobs: jobs.filter((j) => !j.assigned.some((id) => memberIds.has(id))),
     appts: appointments.filter((a) => !a.assigned || !memberIds.has(a.assigned)),
     decision: null,
@@ -256,12 +267,12 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
   // common decision is "put him on one of the jobs already booked for today".
   const todayIds = new Set(jobRows.map((j) => j.id));
   const jobOptions: JobOption[] = ((activeJobRows ?? []) as { id: string; job_number: string | null; name: string | null }[])
-    .map((j) => ({ id: j.id, label: jobLabel(j), today: todayIds.has(j.id) }));
+    .map((j) => ({ id: j.id, label: jobLabel(j, lang, t), today: todayIds.has(j.id) }));
 
   return (
     <CrewBoard
       day={day}
-      dayLabel={prettyDay(day)}
+      dayLabel={prettyDay(day, lang)}
       isToday={day === todayStrInTz(tz)}
       prevHref={`/schedule?view=crew&date=${shiftYmd(day, -1)}`}
       nextHref={`/schedule?view=crew&date=${shiftYmd(day, 1)}`}

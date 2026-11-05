@@ -51,6 +51,18 @@ import {
 import { GhostRow, ghostTitle, type GhostTarget } from "../schedule/ghost-sheet";
 import type { TimeGridActual, TimeGridDay } from "@/components/time-grid";
 import { bookedKeys, dayRange, visitDays } from "@/lib/schedule/booked-days";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
+import type { Lang } from "@/lib/locale";
+
+/** The reader's dictionary, stable per language (the memos and the week cache key on it). */
+function useWords(): { lang: Lang; t: (key: string) => string } {
+  const lang = useLang();
+  const t = useMemo(() => translator(lang), [lang]);
+  return { lang, t };
+}
+/** A Date's own words in the reader's locale; English keeps the browser's, byte for byte as before. */
+const localeFor = (lang: Lang) => (lang === "es" ? "es-US" : undefined);
 
 // THE ONE TIME MAP. Future days show what's booked; past days show what was
 // booked AND what happened, inside the same block: who clocked in as bars in
@@ -295,9 +307,6 @@ function gridActualOf(a: BlockActual | undefined, personFilter: string | null): 
   return { people, hollow: a.state === "hollow", sentence: a.sentence };
 }
 
-const PROPOSED_CONFIRM =
-  "A pick-a-time link is out to the customer for this — moving it withdraws that link. Move it anyway?";
-
 // Stable empties for the optional data props: a fresh `{}` / `[]` default each render would change
 // every memo and cache keyed on them.
 const EMPTY_DAY_ROWS: Record<string, CrewDayRow[]> = {};
@@ -343,8 +352,9 @@ const apptGridColor = (a: CalAppt) =>
  */
 function useDayTarget() {
   const pl = usePlacement();
+  const { lang, t } = useWords();
   return pl.armedCount > 0
-    ? { armed: true as const, pl, prop: { label: dayTargetLabel(pl.armedCount), onPlace: pl.placeOn } }
+    ? { armed: true as const, pl, prop: { label: dayTargetLabel(pl.armedCount, lang, t), onPlace: pl.placeOn } }
     : { armed: false as const, pl, prop: undefined };
 }
 
@@ -417,6 +427,8 @@ export function CalendarView({
 }) {
   const searchParams = useSearchParams();
   const toast = useToast();
+  const { lang, t } = useWords();
+  const loc = localeFor(lang);
 
   // Seed "today" from the SERVER clock so SSR and hydration agree, then correct
   // to the actual now on mount (the existing calendar pattern). The DAY is
@@ -477,7 +489,7 @@ export function CalendarView({
     // NOTHING SILENT: the edge of the loaded window is announced, never rendered as empty days.
     if (ymd > winTo || ymd < winFrom) {
       ymd = ymd > winTo ? winTo : winFrom;
-      toast(ymd === winTo ? "That's the edge of the loaded schedule — about 13 months out." : "That's the edge of the loaded schedule — about 4 months back.");
+      toast(ymd === winTo ? t("ag_cal_edgeForward") : t("ag_cal_edgeBack"));
       if (ymd === anchorK) return;
     }
     nav(view, ymd);
@@ -534,22 +546,22 @@ export function CalendarView({
   /** Job words by id ("12 Elm St · J-048"), for a chip whose person is on ANOTHER job that day. */
   const jobNames = useMemo(() => {
     const m = new Map<string, string>();
-    for (const j of addableJobs) m.set(j.id, jobWords(j));
-    for (const j of jobs) m.set(j.id, jobWords(j));
+    for (const j of addableJobs) m.set(j.id, jobWords(j, lang, t));
+    for (const j of jobs) m.set(j.id, jobWords(j, lang, t));
     return m;
-  }, [jobs, addableJobs]);
+  }, [jobs, addableJobs, lang, t]);
   /** WHO'S ON IT THAT DAY, as chips (lib/schedule/block-info crewChips): the job's crew with that day's
    *  Everyone's Day rows applied (the day row wins), a person who left still named. A visit carries
    *  one person, and only an 'off' row applies to it. */
   const jobCrewOn = useCallback(
     (job: Pick<CalJob, "id" | "assigned_to">, day: string): CrewChip[] =>
-      crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people }),
-    [team, dayRows, jobNames, people],
+      crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people }, lang, t),
+    [team, dayRows, jobNames, people, lang, t],
   );
   const visitCrewOn = useCallback(
     (a: Pick<CalAppt, "assigned_to">, day: string): CrewChip[] =>
-      crewChips(a.assigned_to ? [a.assigned_to] : [], team, { rows: dayRows[day], jobId: null, people }),
-    [team, dayRows, people],
+      crewChips(a.assigned_to ? [a.assigned_to] : [], team, { rows: dayRows[day], jobId: null, people }, lang, t),
+    [team, dayRows, people, lang, t],
   );
   /* A block's tap: its kind and record ("job:<id>", "visit:<id>", "ghost:<job id>") and the day. One
      sheet per block: a ghost opens inside the same sheet (schedule/ghost-sheet). */
@@ -729,8 +741,8 @@ export function CalendarView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs, segByJob, appointments, jobBlockOn, actualsWhole, todayK, winFrom, tz, wdStartMin, wdEndMin]);
   const pva = useMemo(
-    () => (clockInUse ? planVsActual({ blocks: judgedBlocks, spans, todayStr: todayK, nowMin: nowMinToday ?? undefined }) : null),
-    [clockInUse, judgedBlocks, spans, todayK, nowMinToday],
+    () => (clockInUse ? planVsActual({ blocks: judgedBlocks, spans, todayStr: todayK, nowMin: nowMinToday ?? undefined, lang, words: t }) : null),
+    [clockInUse, judgedBlocks, spans, todayK, nowMinToday, lang, t],
   );
   /** A day's worked time for the day drill's card (the track under the block): the booked span
    *  and who clocked in (person-filtered, like the grid), with the sentence. Null when not judged. */
@@ -761,17 +773,17 @@ export function CalendarView({
       if (!actualsWhole(g.dayStr) || g.dayStr < winFrom) continue;
       const known = actualJobs.get(g.jobId);
       const job = jobs.find((j) => j.id === g.jobId);
-      const t: GhostTarget = {
+      const gt: GhostTarget = {
         jobId: g.jobId,
-        name: known?.name ?? job?.name ?? "A Job",
+        name: known?.name ?? job?.name ?? t("ag_aJob"),
         jobNumber: known?.job_number ?? job?.job_number ?? null,
         customer: known?.customer ?? job?.customers?.name ?? null,
         people: g.people,
       };
-      m.set(g.dayStr, [...(m.get(g.dayStr) ?? []), t]);
+      m.set(g.dayStr, [...(m.get(g.dayStr) ?? []), gt]);
     }
     return m;
-  }, [clockInUse, spans, booked, todayK, nowMinToday, actualsWhole, winFrom, actualJobs, jobs]);
+  }, [clockInUse, spans, booked, todayK, nowMinToday, actualsWhole, winFrom, actualJobs, jobs, t]);
   /* The tapped block's sheet target, looked up in what's loaded now (so the refresh after a save shows
      the sheet what was saved; a job whose date was cleared, or a ghost booked into a real block, simply
      leaves, and the sheet with it). */
@@ -829,7 +841,7 @@ export function CalendarView({
         sub: who && ghostTitle(g) !== g.name ? who : null,
         color: GHOST_GRID_TONE,
         ghost: true,
-        actual: { people: g.people.map((p) => ({ key: p.profileId, initials: p.initials, dot: p.dot, spans: p.spans })), sentence: peopleWords(g.people) },
+        actual: { people: g.people.map((p) => ({ key: p.profileId, initials: p.initials, dot: p.dot, spans: p.spans })), sentence: peopleWords(g.people, lang, t) },
         href: `/jobs/${g.jobId}`,
         ...(canEdit ? { tapId: `ghost:${g.jobId}` } : {}),
       });
@@ -1120,7 +1132,7 @@ export function CalendarView({
         const k = dayKey(d);
         return {
           dayStr: k,
-          label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }),
+          label: d.toLocaleDateString(loc, { weekday: "short", day: "numeric" }),
           isToday: k === todayK,
           sublabel: townFor(k),
         };
@@ -1156,7 +1168,7 @@ export function CalendarView({
         /* FROM THE WHOLE WEEK, NOT THE DRAWN DAYS. The span the header names, whether this is "this
            week", and how far back the clocked time reaches are facts about the WEEK; reading them off
            `days` would make a week rename itself when its Saturday went quiet. */
-        label: spanLabel(wk[0], wk[6], { month: "long" }),
+        label: spanLabel(wk[0], wk[6], { month: "long", lang }),
         key: first,
         hasToday: all.some((d) => d.isToday),
         // A week with a past day older than the loaded clocked time says so (never drawn hollow).
@@ -1168,15 +1180,15 @@ export function CalendarView({
     });
     // gridDataFor and townFor read only what the key names (and what is derived from it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced]);
+  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced, lang]);
   /** The day header's tap: drill into that day (stable, so a mounted week's grid never redraws for it). */
   const drillInto = useCallback((ds: string) => {
     window.history.pushState(null, "", `${window.location.pathname}?view=day&date=${ds}`);
   }, []);
   /** The armed day target, stable between renders (a fresh object would redraw every mounted week). */
   const armedProp = useMemo(
-    () => (target.armed ? { label: dayTargetLabel(target.pl.armedCount), onPlace: target.pl.placeOn } : undefined),
-    [target.armed, target.pl.armedCount, target.pl.placeOn],
+    () => (target.armed ? { label: dayTargetLabel(target.pl.armedCount, lang, t), onPlace: target.pl.placeOn } : undefined),
+    [target.armed, target.pl.armedCount, target.pl.placeOn, lang, t],
   );
 
   /* THE YEAR, ALWAYS. Erik: "we have to put the year on there no way around it." Every one of
@@ -1185,10 +1197,10 @@ export function CalendarView({
      each direction. See lib/schedule/span-label for why it isn't hidden when it matches today. */
   const title =
     view === "month"
-      ? spanLabel(stackMonths[0], endOfMonth(stackMonths[stackMonths.length - 1]), { month: "long" })
+      ? spanLabel(stackMonths[0], endOfMonth(stackMonths[stackMonths.length - 1]), { month: "long", lang })
       : view === "week"
-        ? spanLabel(stackWeeks[0][0], stackWeeks[stackWeeks.length - 1][6])
-        : dayLabel(anchor);
+        ? spanLabel(stackWeeks[0][0], stackWeeks[stackWeeks.length - 1][6], { lang })
+        : dayLabel(anchor, lang);
 
   /* EVERY HEADER DOOR IS A 44px TARGET (W2-01). At 375px the row holds the three paging buttons, the
      title and three icons (four with the day drill's ← Week), so each keeps its 32px look and takes a
@@ -1208,7 +1220,7 @@ export function CalendarView({
         {/* ROW 1 — paging + title + the door icons (Everyone's Day, map, person filter), every one a
             44px target. The SectionSubnav pill above stays the ONLY brand-lit chrome. */}
         <div className="flex min-w-0 items-center gap-1 turned:flex-1">
-          <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous" title="Previous">
+          <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label={t("ag_cal_btn_previous")} title={t("ag_cal_btn_previous")}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button
@@ -1217,9 +1229,9 @@ export function CalendarView({
             onClick={() => nav(view, todayK)}
             className="relative overflow-visible! before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"
           >
-            Today
+            {t("ag_btn_today")}
           </Button>
-          <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next" title="Next">
+          <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label={t("ag_cal_btn_next")} title={t("ag_cal_btn_next")}>
             <ChevronRight className="h-4 w-4" />
           </Button>
           {/* The way back out of the day drill — the PWA has no back chrome. */}
@@ -1228,15 +1240,15 @@ export function CalendarView({
               onClick={() => nav("week", anchorK)}
               className="relative ml-1 shrink-0 text-xs font-medium text-brand hover:underline before:absolute before:-inset-x-1 before:-inset-y-3.5 before:content-['']"
             >
-              ← Week
+              ← {t("ag_btn_week")}
             </button>
           )}
           <span className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</span>
           {crewBoard && (
             <Link
               href="/schedule?view=crew"
-              aria-label="Everyone's Day (crew board)"
-              title="Everyone's Day — the whole crew, side by side"
+              aria-label={t("ag_cal_crewBoardLabel")}
+              title={t("ag_cal_crewBoardTitle")}
               className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
             >
               <Columns3 className="h-4 w-4" />
@@ -1244,16 +1256,16 @@ export function CalendarView({
           )}
           <Link
             href="/schedule?view=map"
-            aria-label="Job map"
-            title="Job map"
+            aria-label={t("ag_cal_jobMap")}
+            title={t("ag_cal_jobMap")}
             className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
           >
             <MapPin className="h-4 w-4" />
           </Link>
           <button
             onClick={() => setFilterOpen((v) => !v)}
-            aria-label="Filter by person"
-            title="Filter by person"
+            aria-label={t("ag_cal_filterByPerson")}
+            title={t("ag_cal_filterByPerson")}
             className={`${iconBtn} ${personFilter ? "bg-brand-light/50 text-brand" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"}`}
           >
             <Users className="h-4 w-4" />
@@ -1265,9 +1277,9 @@ export function CalendarView({
           activeId={view}
           onSelect={(id) => nav(id as View, anchorK)}
           items={[
-            { id: "day", label: "Day" },
-            { id: "week", label: "Week" },
-            { id: "month", label: "Month" },
+            { id: "day", label: t("ag_btn_day") },
+            { id: "week", label: t("ag_btn_week") },
+            { id: "month", label: t("ag_btn_month") },
           ]}
         />
       </div>
@@ -1290,7 +1302,7 @@ export function CalendarView({
                 personFilter === null ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              Everyone
+              {t("ag_cal_btn_everyone")}
             </span>
           </button>
           {members.map((m) => (
@@ -1310,7 +1322,7 @@ export function CalendarView({
             </button>
           ))}
           {personFilter && unassignedHidden > 0 && (
-            <span className="shrink-0 text-[11px] text-slate-400">· {unassignedHidden} unassigned hidden</span>
+            <span className="shrink-0 text-[11px] text-slate-400">· {fillText(t("ag_cal_unassignedHidden"), { n: String(unassignedHidden) })}</span>
           )}
         </div>
       )}
@@ -1318,7 +1330,7 @@ export function CalendarView({
       {/* NOTHING SILENT: the clocked time didn't load, so no past block shows what happened (and
           none is drawn hollow: missing data is not nobody). One quiet line says so. */}
       {actuals === null && (
-        <p className="text-xs text-slate-500">Clocked time didn&apos;t load, so today and past days show only what was booked.</p>
+        <p className="text-xs text-slate-500">{t("ag_cal_clockedDidntLoad")}</p>
       )}
 
       {/* ARMED, AND SAYING SO WHERE THE TAP HAPPENS.
@@ -1329,22 +1341,22 @@ export function CalendarView({
           Clear, which is a dead end at the exact moment somebody changes their mind. */}
       {target.armed && (
         <div className="sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-brand/40 bg-brand-light/90 px-3 py-2 text-sm backdrop-blur">
-          <span className="font-semibold text-brand">{dayTargetLabel(target.pl.armedCount)}</span>
+          <span className="font-semibold text-brand">{dayTargetLabel(target.pl.armedCount, lang, t)}</span>
           <span className="text-xs font-medium uppercase tracking-wide text-brand/70">
             {/* An exact time beats the half — the strip must not read "morning" while the write is
                 about to book 3pm. Same precedence as the rail's footer and the write itself. */}
             {/^\d{2}:\d{2}$/.test(target.pl.startAt)
-              ? `at ${target.pl.startAt}`
-              : target.pl.half === "am" ? "morning" : "afternoon"}
+              ? fillText(t("ag_cal_atTime"), { time: target.pl.startAt })
+              : target.pl.half === "am" ? t("ag_cal_morning") : t("ag_cal_afternoon")}
           </span>
-          <span className="text-xs text-slate-600">Tap any day below.</span>
-          {target.pl.pending && <span className="text-xs font-medium text-brand">Placing…</span>}
+          <span className="text-xs text-slate-600">{t("ag_cal_tapAnyDay")}</span>
+          {target.pl.pending && <span className="text-xs font-medium text-brand">{t("ag_cal_placing")}</span>}
           <button
             type="button"
             onClick={target.pl.clear}
             className="ml-auto inline-flex min-h-11 items-center px-1 text-xs font-semibold text-slate-600 underline-offset-2 hover:underline"
           >
-            Cancel
+            {t("ag_btn_cancel")}
           </button>
         </div>
       )}
@@ -1367,7 +1379,7 @@ export function CalendarView({
                     isNow ? "border-brand/30 bg-brand-light/70 text-brand" : "border-slate-100 bg-white/90 text-slate-500"
                   }`}
                 >
-                  {m.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                  {m.toLocaleDateString(loc, { month: "long", year: "numeric" })}
                 </div>
                 <MonthGrid
                   anchor={m}
@@ -1421,7 +1433,7 @@ export function CalendarView({
                   }`}
                 >
                   {label}
-                  {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">this week</span>}
+                  {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">{t("ag_cal_thisWeek")}</span>}
                   {/* THE WEEKEND IT FOLDED AWAY, NAMED AND STILL A DOOR. Nothing is drawn with work on
                       it, so a hidden day is a day that is clear — but the week says which days those
                       are (so growing a Saturday column next time is something it already warned you
@@ -1430,17 +1442,17 @@ export function CalendarView({
                       grammar), so the law is kept without the header growing a line. */}
                   {hiddenWeekend.length > 0 && (
                     <span className="ml-2 text-[11px] font-normal text-slate-400">
-                      Nothing on{" "}
+                      {t("ag_cal_nothingOn")}{" "}
                       {hiddenWeekend.map((k, i) => (
                         <span key={k}>
                           {i > 0 && ", "}
                           <button
                             type="button"
                             onClick={() => drillInto(k)}
-                            title={`Open ${shortDayWords(k)}`}
+                            title={fillText(t("ag_cal_btn_openDay"), { day: shortDayWords(k, lang) })}
                             className="relative inline-flex h-5 items-center align-middle underline-offset-2 hover:text-slate-600 hover:underline before:absolute before:-inset-x-1.5 before:-inset-y-3 before:content-['']"
                           >
-                            {shortDayWords(k)}
+                            {shortDayWords(k, lang)}
                           </button>
                         </span>
                       ))}
@@ -1450,7 +1462,7 @@ export function CalendarView({
                       hollow (missing data is not nobody), and the week says why it shows no bars. */}
                   {loadsBack && actualsCappedBefore && (
                     <span className="block text-[11px] font-normal text-slate-500">
-                      Clocked time loads back to {dayWords(actualsCappedBefore)}.
+                      {fillText(t("ag_cal_clockedLoadsBack"), { day: dayWords(actualsCappedBefore, lang) })}
                     </span>
                   )}
                 </div>
@@ -1482,7 +1494,7 @@ export function CalendarView({
               onClick={() => onSlotTap(anchorK, null)}
               className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-brand/40 bg-white px-4 text-sm font-semibold text-brand hover:bg-brand-light/40"
             >
-              <Plus className="h-4 w-4" /> Add To Schedule
+              <Plus className="h-4 w-4" /> {t("ag_cal_btn_addToSchedule")}
             </button>
           )}
           {(dayGrid.events.length > 0 || dayGrid.allDay.length > 0) && (
@@ -1491,7 +1503,7 @@ export function CalendarView({
                 days={[
                   {
                     dayStr: anchorK,
-                    label: anchor.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }),
+                    label: anchor.toLocaleDateString(loc, { weekday: "short", month: "short", day: "numeric", year: "numeric" }),
                     isToday: anchorK === todayK,
                   },
                 ]}
@@ -1516,7 +1528,7 @@ export function CalendarView({
               onClick={() => target.pl.placeOn(anchorK)}
               className="w-full rounded-xl border-2 border-dashed border-brand/50 bg-brand-light/30 px-4 py-3 text-sm font-semibold text-brand hover:bg-brand-light"
             >
-              {dayTargetLabel(target.pl.armedCount)}
+              {dayTargetLabel(target.pl.armedCount, lang, t)}
             </button>
           )}
           {/* The drill cards below keep every create/edit/move affordance. */}
@@ -1679,6 +1691,7 @@ function MonthGrid({
   /** Set while work is picked in the rail — every cell becomes a target and says so. */
   armedLabel?: string;
 }) {
+  const { lang, t } = useWords();
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   /* THE SAME WEEK START AS THE WEEK VIEW. The month's first cell and its column headings both come
      from the one rule now; they used to be a hardcoded Sunday and a hardcoded ["Sun", …] beside a
@@ -1698,7 +1711,7 @@ function MonthGrid({
   return (
     <Card className="overflow-hidden">
       <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        {weekdayHeadings(weekStart).map((d) => (
+        {weekdayHeadings(weekStart, lang).map((d) => (
           <div key={d} className="py-1.5">{d}</div>
         ))}
       </div>
@@ -1712,7 +1725,7 @@ function MonthGrid({
             <button
               key={i}
               onClick={() => onPick(d)}
-              title={armedLabel ? `${armedLabel} — ${d.toLocaleDateString()}` : undefined}
+              title={armedLabel ? `${armedLabel} — ${d.toLocaleDateString(localeFor(lang))}` : undefined}
               className={`flex min-h-[92px] flex-col items-stretch justify-start gap-1 overflow-hidden border-b border-r border-slate-100 p-1 text-left ${
                 armedLabel
                   ? "bg-brand-light/25 hover:bg-brand-light"
@@ -1742,7 +1755,7 @@ function MonthGrid({
                     </span>
                   ))}
                   {pills.length > MONTH_MAX_PILLS && (
-                    <span className="block px-1 text-[10px] font-semibold text-slate-400">+{pills.length - MONTH_MAX_PILLS} more</span>
+                    <span className="block px-1 text-[10px] font-semibold text-slate-400">{fillText(t("ag_nMore"), { n: String(pills.length - MONTH_MAX_PILLS) })}</span>
                   )}
                 </div>
               )}
@@ -1797,6 +1810,7 @@ function DayDetail({
   const appts = data?.appts ?? [];
   const jobsOn = data?.jobs ?? [];
   const tasksDue = data?.tasks ?? [];
+  const { t } = useWords();
 
   return (
     <div className="space-y-4">
@@ -1804,7 +1818,7 @@ function DayDetail({
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
           <div className="flex items-center gap-2">
             <CalendarClock className="h-4 w-4 text-brand" />
-            <h3 className="text-sm font-semibold text-slate-900">Appointments</h3>
+            <h3 className="text-sm font-semibold text-slate-900">{t("ag_cal_appointments")}</h3>
           </div>
           {/* keyed per day so a fresh open prefills the VIEWED day, and the
               first mounted create instance answers /schedule?…&new=1 */}
@@ -1822,7 +1836,7 @@ function DayDetail({
             />
           ))}
           {!appts.length && (
-            <li className="px-5 py-5 text-center text-sm text-slate-400">Nothing booked this day.</li>
+            <li className="px-5 py-5 text-center text-sm text-slate-400">{t("ag_cal_nothingBookedDay")}</li>
           )}
         </ul>
       </Card>
@@ -1830,7 +1844,7 @@ function DayDetail({
       <Card>
         <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
           <Briefcase className="h-4 w-4 text-brand" />
-          <h3 className="text-sm font-semibold text-slate-900">Scheduled jobs</h3>
+          <h3 className="text-sm font-semibold text-slate-900">{t("ag_cal_scheduledJobs")}</h3>
         </div>
         <div className="grid gap-2 p-3 sm:grid-cols-2">
           {jobsOn.map(({ job }) => (
@@ -1860,7 +1874,7 @@ function DayDetail({
             />
           ))}
           {!jobsOn.length && (
-            <div className="col-span-full py-5 text-center text-sm text-slate-400">Nothing scheduled.</div>
+            <div className="col-span-full py-5 text-center text-sm text-slate-400">{t("ag_cal_nothingScheduled")}</div>
           )}
           {/* WORKED, NOT BOOKED (SV-ghost): under the booked cards, each dashed, with its track, its
               words and the same two doors as its sheet (44px each: the guaranteed door when a ghost is
@@ -1875,11 +1889,11 @@ function DayDetail({
         <Card>
           <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
             <ListTodo className="h-4 w-4 text-brand" />
-            <h3 className="text-sm font-semibold text-slate-900">Tasks due</h3>
+            <h3 className="text-sm font-semibold text-slate-900">{t("ag_cal_tasksDue")}</h3>
           </div>
           <ul className="divide-y divide-slate-100">
-            {tasksDue.map((t) => (
-              <TaskRow key={t.id} t={t} />
+            {tasksDue.map((task) => (
+              <TaskRow key={task.id} t={task} />
             ))}
           </ul>
         </Card>
@@ -1906,12 +1920,14 @@ function ApptRow({
   onOpenPerson?: () => void;
 }) {
   const router = useRouter();
+  const { lang, t } = useWords();
   const place = visitPlace(a);
   const going: CrewChip[] =
-    crew ?? (a.assigned_to ? crewChips([a.assigned_to], [{ id: a.assigned_to, full_name: a.profiles?.full_name ?? null }]) : []);
+    crew ?? (a.assigned_to ? crewChips([a.assigned_to], [{ id: a.assigned_to, full_name: a.profiles?.full_name ?? null }], undefined, lang, t) : []);
   // What a person READS; `appt.title` below stays the STORED string, because that one is the edit
   // form's value and a display word must never be written back over a row (lib/statuses visitTitle).
   const shownTitle = visitTitle(a.title);
+  const goingLabel = fillText(t("ag_cal_dayTimeWhosGoing"), { name: shownTitle });
   const appt: ApptValue = {
     id: a.id,
     type: a.type,
@@ -1930,8 +1946,8 @@ function ApptRow({
           row is clickable exactly like a job card (Erik 7/15). The pencil/move
           handles on the right stay for in-place edits. */}
       <Link href={`/appointments/${a.id}`} className="w-16 shrink-0 text-sm font-medium text-slate-700 hover:text-brand">
-        {formatTime(a.starts_at, tz)}
-        {a.ends_at ? <span className="block text-[11px] font-normal text-slate-400">{formatTime(a.ends_at, tz)}</span> : null}
+        {formatTime(a.starts_at, tz, lang)}
+        {a.ends_at ? <span className="block text-[11px] font-normal text-slate-400">{formatTime(a.ends_at, tz, lang)}</span> : null}
       </Link>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -1939,19 +1955,19 @@ function ApptRow({
               inspection-shape come from the statuses.ts spine (isInspectionType covers
               final_inspection too — a raw a.type === "inspection" check dropped it). */}
           <Badge tone="blue" className={isInspectionType(a.type) ? "bg-teal-100 text-teal-800" : undefined}>
-            {appointmentTypeLabel(a.type)}
+            {appointmentTypeLabel(a.type, lang, t)}
           </Badge>
           <Link href={`/appointments/${a.id}`} className="truncate text-sm font-medium text-slate-900 hover:text-brand hover:underline">
             {shownTitle}
           </Link>
-          {a.status === "completed" && <Badge tone="green">done</Badge>}
-          {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
+          {a.status === "completed" && <Badge tone="green">{t("ag_cal_doneLower")}</Badge>}
+          {a.status === "proposed" && <Badge tone="amber">{t("ag_cal_pendingPick")}</Badge>}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
           {a.customers?.name && <span>{a.customers.name}</span>}
           {a.jobs && (
             <Link href={`/jobs/${a.job_id}`} className="text-brand hover:underline">
-              {jobLabel(a.jobs)}
+              {jobLabel(a.jobs, lang, t)}
             </Link>
           )}
           {/* WHERE, as the visit's block says it: the street (the town small), never the zip; the
@@ -1968,13 +1984,13 @@ function ApptRow({
             <button
               type="button"
               onClick={onOpenPerson}
-              aria-label={`${shownTitle}: day, time and who's going`}
+              aria-label={goingLabel}
               className="inline-flex min-h-11 items-center rounded-md px-1 hover:bg-slate-50"
             >
-              <CrewInitials crew={going} />
+              <CrewInitials crew={going} lang={lang} />
             </button>
           ) : (
-            <CrewInitials crew={going} />
+            <CrewInitials crew={going} lang={lang} />
           )}
         </div>
         {a.notes && <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-500">{a.notes}</p>}
@@ -1987,8 +2003,8 @@ function ApptRow({
           <Link
             href={`/appointments/${a.id}`}
             className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-teal-50 hover:text-teal-700"
-            title="Inspection — notes, measurements, photos"
-            aria-label="Inspection — notes, measurements, photos"
+            title={t("ag_cal_inspectionCapture")}
+            aria-label={t("ag_cal_inspectionCapture")}
           >
             <ClipboardList className="h-4 w-4" />
           </Link>
@@ -1996,13 +2012,13 @@ function ApptRow({
         <ApptQuickActions id={a.id} status={a.status} title={shownTitle} />
         <AppointmentButton jobs={picker.jobs} customers={picker.customers} staff={picker.staff} appointment={appt} />
         <MoveToDay
-          label={`Move ${shownTitle}`}
+          label={fillText(t("ag_cal_btn_moveThing"), { title: shownTitle })}
           triggerClassName="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           onPick={async (iso) => {
-            if (!iso) return { ok: false, error: "Pick a day." };
-            if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM)) return { ok: true, note: "Left it alone — the link is still live." };
-            const t = shiftApptToDay(a.starts_at, a.ends_at, iso, tz); // org tz (audit v921 review)
-            const res = await rescheduleAppointment(a.id, t.start, t.end);
+            if (!iso) return { ok: false, error: t("ag_pickADay") };
+            if (a.status === "proposed" && !confirm(t("ag_cal_proposedMoveConfirm"))) return { ok: true, note: t("ag_cal_leftItAlone") };
+            const shifted = shiftApptToDay(a.starts_at, a.ends_at, iso, tz); // org tz (audit v921 review)
+            const res = await rescheduleAppointment(a.id, shifted.start, shifted.end);
             if (res.ok) router.refresh();
             return res; // a returned `note` (withdrawn link) surfaces as a toast
           }}
@@ -2014,24 +2030,25 @@ function ApptRow({
 
 /** One task due this day — link to where it's worked + the Move glyph
  *  (due_date only; the /tasks workbench owns everything else). */
-function TaskRow({ t }: { t: CalTask }) {
+function TaskRow({ t: task }: { t: CalTask }) {
   const router = useRouter();
-  const sub = [t.assignee?.full_name ?? null, t.jobs ? jobLabel(t.jobs) : null]
+  const { lang, t } = useWords();
+  const sub = [task.assignee?.full_name ?? null, task.jobs ? jobLabel(task.jobs, lang, t) : null]
     .filter(Boolean)
     .join(" · ");
   return (
     <li className="flex items-center gap-3 px-4 py-2.5">
-      <Badge tone="slate">task</Badge>
-      <Link href={taskHref(t)} className="min-w-0 flex-1 hover:opacity-80">
-        <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
+      <Badge tone="slate">{t("ag_cal_taskLower")}</Badge>
+      <Link href={taskHref(task)} className="min-w-0 flex-1 hover:opacity-80">
+        <div className="truncate text-sm font-medium text-slate-900">{task.title}</div>
         {sub && <div className="truncate text-xs text-slate-400">{sub}</div>}
       </Link>
       <MoveToDay
-        label={`Move ${t.title}`}
+        label={fillText(t("ag_cal_btn_moveThing"), { title: task.title })}
         clearable
         triggerClassName="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         onPick={async (iso) => {
-          const res = await updateTask(t.id, { due_date: iso }, { jobId: t.job_id, category: t.category as TaskCategory });
+          const res = await updateTask(task.id, { due_date: iso }, { jobId: task.job_id, category: task.category as TaskCategory });
           if (res.ok) router.refresh();
           return res;
         }}

@@ -27,6 +27,8 @@ import { shiftApptToDay } from "@/lib/appt-time";
 import { initials } from "@/lib/utils";
 import { GhostSheetBody, ghostTitle, type GhostTarget } from "./ghost-sheet";
 import { todayStrInTz } from "@/lib/tz";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 /**
  * TAP A BLOCK ON THE SCHEDULE: ONE SMALL SHEET with its day, its start and its length, and who's on it.
@@ -153,6 +155,7 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
   sayRef.current = toast;
   const [busy, setBusy] = useState(0);
   const [guard] = useState(() => createSheetGuard((w) => sayRef.current(w, "error"), setBusy));
+  const t = translator(useLang());
   const key = !target ? "" : `${target.kind}:${tileId(target)}:${target.day}`;
   useEffect(() => {
     if (key) guard.opened();
@@ -164,7 +167,7 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
   // A ghost is titled with its job and who it's for ("12 Elm St · Rita Moss"), its number inside.
   const title = !target ? "" : target.kind === "job" ? target.job.name : target.kind === "visit" ? target.visit.title : ghostTitle(target.ghost);
   return (
-    <Modal open={!!target} onClose={close} holdOpen={busy > 0} title={title || "Schedule"} size="md">
+    <Modal open={!!target} onClose={close} holdOpen={busy > 0} title={title || t("ag_cal_schedule")} size="md">
       {target && (
         <TileSheetBody
           // A different block (or day) is a fresh sheet: no half-typed time carries over.
@@ -246,7 +249,9 @@ function DayRow({
 }) {
   const [to, setTo] = useState(day);
   const { pending, error, run } = useSheetWrite(voice);
-  if (!canEdit) return <p className="text-sm text-slate-700">{dayWords(day)}</p>;
+  const lang = useLang();
+  const t = translator(lang);
+  if (!canEdit) return <p className="text-sm text-slate-700">{dayWords(day, lang)}</p>;
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
@@ -256,7 +261,7 @@ function DayRow({
           value={to}
           disabled={pending}
           onChange={(e) => setTo(e.target.value)}
-          aria-label="Day"
+          aria-label={t("ag_btn_day")}
           className="h-11 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 disabled:opacity-60"
         />
         <Button
@@ -266,11 +271,11 @@ function DayRow({
           onClick={() =>
             run(async () => {
               const res = await move(to);
-              return res && !res.ok ? (res.error ?? "It didn't move. Try again.") : null;
-            }, "It didn't move. You may be offline.")
+              return res && !res.ok ? (res.error ?? t("ag_cal_didntMove")) : null;
+            }, t("ag_cal_didntMoveOffline"))
           }
         >
-          <CalendarSync className="h-4 w-4" /> {pending ? "Moving…" : "Move"}
+          <CalendarSync className="h-4 w-4" /> {pending ? t("ag_cal_btn_moving") : t("ag_btn_move")}
         </Button>
       </div>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
@@ -284,22 +289,24 @@ function ClearTheDate({
   clear,
   voice,
 }: {
-  what: string;
+  /** What comes off: a whole-phrase sentence per noun ("this job" / "this visit"), never a slot. */
+  what: "job" | "visit";
   clear: () => Promise<{ ok: boolean; error?: string; note?: string }>;
   voice?: SheetVoice;
 }) {
   const [asking, setAsking] = useState(false);
   const { pending, error, run } = useSheetWrite(voice);
+  const t = translator(useLang());
   if (!asking) {
     return (
       <Button type="button" variant="outline" onClick={() => setAsking(true)}>
-        <CalendarOff className="h-4 w-4" /> Clear The Date
+        <CalendarOff className="h-4 w-4" /> {t("ag_cal_btn_clearTheDate")}
       </Button>
     );
   }
   return (
     <div className="w-full rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-      <p>Take {what} off the calendar? It waits under Waiting For A Day until it gets one.</p>
+      <p>{t(what === "job" ? "ag_cal_takeJobOff" : "ag_cal_takeVisitOff")}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         <Button
           type="button"
@@ -309,14 +316,14 @@ function ClearTheDate({
           onClick={() =>
             run(async () => {
               const res = await clear();
-              return res.ok ? null : (res.error ?? "The date didn't clear. Try again.");
-            }, "The date didn't clear. You may be offline.")
+              return res.ok ? null : (res.error ?? t("ag_cal_dateDidntClear"));
+            }, t("ag_cal_dateDidntClearOffline"))
           }
         >
-          {pending ? "Clearing…" : "Clear It"}
+          {pending ? t("ag_cal_btn_clearing") : t("ag_cal_btn_clearIt")}
         </Button>
         <Button type="button" variant="ghost" disabled={pending} onClick={() => setAsking(false)}>
-          Keep
+          {t("ag_cal_btn_keep")}
         </Button>
       </div>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
@@ -340,6 +347,9 @@ function JobSheet({
 }: Shared & { day: string; job: TileJob; dayHours: DayHours | null; dayCrew: CrewChip[] | null }) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
+  const dw = (ymd: string | null | undefined) => dayWords(ymd, lang);
   const block: JobBlock = readJobBlock({
     scheduledStart: job.scheduled_start,
     scheduledEnd: job.scheduled_end,
@@ -385,21 +395,21 @@ function JobSheet({
   function backToUsual() {
     usual.run(async () => {
       const res = await setJobDayTimes(job.id, day, { usual: true });
-      if (!res.ok) return res.error ?? "That day's hours didn't change. Try again.";
+      if (!res.ok) return res.error ?? t("ag_cal_dayHoursDidntChange");
       router.refresh();
       return null;
-    }, "That day's hours didn't change. You may be offline.");
+    }, t("ag_cal_dayHoursDidntChangeOffline"));
   }
 
   async function move(to: string) {
     const from = onPlan ? day : null;
     let res = await moveJobDay(job.id, from, to);
     if (!res.ok && res.needsProposalConfirm) {
-      if (!window.confirm(`${res.error} Move it anyway?`)) return null;
+      if (!window.confirm(fillText(t("ag_cal_moveAnyway"), { why: res.error ?? "" }))) return null;
       res = await moveJobDay(job.id, from, to, { cancelProposals: true });
     }
     if (res.ok) {
-      toast(res.note ?? `Moved to ${dayWords(to)}.`, res.note ? "info" : "success");
+      toast(res.note ?? fillText(t("ag_cal_movedTo"), { day: dw(to) }), res.note ? "info" : "success");
       router.refresh();
       onClose();
     }
@@ -409,7 +419,7 @@ function JobSheet({
   async function clear() {
     const res = await clearJobDate(job.id);
     if (res.ok) {
-      toast(res.note ?? "It waits under Waiting For A Day on the schedule.", res.note ? "info" : "success");
+      toast(res.note ?? t("ag_cal_waitsUnder"), res.note ? "info" : "success");
       router.refresh();
       onClose();
     }
@@ -428,29 +438,28 @@ function JobSheet({
         </p>
       )}
       <section>
-        <Heading>Day</Heading>
+        <Heading>{t("ag_btn_day")}</Heading>
         <DayRow day={day} canEdit={canEdit} move={move} idPrefix={`tile-${job.id}`} voice={voice} />
         {!onPlan && (
           <p className="mt-1 text-xs text-slate-500">
             {block.day
-              ? `Work was done this day; it stays as history. The job is planned ${dayWords(block.day)}${canEdit ? ", and Move moves that" : ""}.`
-              : `Work was done this day; it stays as history. No day is planned yet${canEdit ? ": Move gives it one" : ""}.`}
+              ? fillText(t(canEdit ? "ag_cal_historyPlannedMove" : "ag_cal_historyPlanned"), { day: dw(block.day) })
+              : t(canEdit ? "ag_cal_historyNoneMove" : "ag_cal_historyNone")}
           </p>
         )}
       </section>
       <section>
-        <Heading>Time</Heading>
+        <Heading>{t("ag_cal_time")}</Heading>
         {thisDay || block.day ? (
           <>
             {thisDay ? (
               <p className="mb-1.5 text-xs text-slate-500">
-                This Day, {dayWords(day)}
-                {dayHours ? ": its own hours. The job's other days keep theirs." : ". Only this day changes; the job page sets the hours of its other days."}
+                {fillText(t(dayHours ? "ag_cal_thisDayOwnHours" : "ag_cal_thisDayOnly"), { day: dw(day) })}
               </p>
             ) : !onPlan && block.day ? (
-              <p className="mb-1.5 text-xs text-slate-500">The plan&apos;s time, {dayWords(block.day)}:</p>
+              <p className="mb-1.5 text-xs text-slate-500">{fillText(t("ag_cal_plansTime"), { day: dw(block.day) })}</p>
             ) : perDayHours && canEdit ? (
-              <p className="mb-1.5 text-xs text-slate-500">This Day, {dayWords(day)}: the job&apos;s one day, so this is the job&apos;s time.</p>
+              <p className="mb-1.5 text-xs text-slate-500">{fillText(t("ag_cal_thisDaySole"), { day: dw(day) })}</p>
             ) : null}
             <BlockTimeControls
               key={thisDay ? "this-day" : "the-job"}
@@ -459,7 +468,7 @@ function JobSheet({
               allDay={thisDay ? drawn.allDay : block.allDay}
               sized={thisDay ? !!dayHours || Number(job.planned_minutes ?? 0) > 0 : block.sized}
               multiDay={thisDay ? false : block.multiDay}
-              lastDayWords={dayWords(block.lastDay)}
+              lastDayWords={dw(block.lastDay)}
               workDay={workDay}
               canEdit={canEdit}
               save={thisDay ? saveDayTimes : saveTimes}
@@ -473,7 +482,7 @@ function JobSheet({
             {thisDay && dayHours && canEdit && (
               <div className="mt-2">
                 <Button type="button" variant="outline" disabled={usual.pending} onClick={backToUsual}>
-                  {usual.pending ? "Saving…" : "Use The Job's Usual Hours"}
+                  {usual.pending ? t("ag_btn_saving") : t("ag_cal_btn_useUsualHours")}
                 </Button>
                 {usual.error && <p className="mt-1 text-xs text-red-600">{usual.error}</p>}
               </div>
@@ -481,17 +490,17 @@ function JobSheet({
           </>
         ) : (
           // A day kept as history (worked, its plan cleared): the time belongs to a planned day.
-          <p className="text-sm text-slate-500">No day is planned for it yet. Move it to a day, then set its time.</p>
+          <p className="text-sm text-slate-500">{t("ag_cal_noDayPlannedForIt")}</p>
         )}
       </section>
       <section>
-        <Heading>Crew</Heading>
+        <Heading>{t("ag_cal_crew")}</Heading>
         <JobCrewChips jobId={job.id} crew={crew} team={team} canEdit={canEdit} />
         {/* WHOSE CREW THIS IS, in plain words: the job's crew is the whole job, every day; one day's
             change is Everyone's Day's (when it's on); and what that day's rows already did. */}
         <div className="mt-2 space-y-0.5 text-xs text-slate-500">
-          <p>The whole job, every day.{crewBoard ? " To change one day, use Everyone's Day." : ""}</p>
-          {crewDayLines(dayCrew).map((line) => (
+          <p>{t(crewBoard ? "ag_cal_wholeJobBoard" : "ag_cal_wholeJob")}</p>
+          {crewDayLines(dayCrew, lang, t).map((line) => (
             <p key={line} className="text-slate-600">
               {line}
             </p>
@@ -500,9 +509,9 @@ function JobSheet({
       </section>
       <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
         <Link href={`/jobs/${job.id}`} className={`${BTN} btn-gloss bg-[rgb(var(--glass-ink))] text-white hover:bg-[rgb(var(--glass-ink))]/90`}>
-          Open The Job
+          {t("ag_btn_openTheJob")}
         </Link>
-        {canEdit && block.day && <ClearTheDate what="this job" clear={clear} voice={voice} />}
+        {canEdit && block.day && <ClearTheDate what="job" clear={clear} voice={voice} />}
       </div>
     </div>
   );
@@ -519,11 +528,12 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
   const [pending, start] = useTransition();
   const [who, setWho] = useState<string | null>(assigned);
   const [seen, setSeen] = useState(assigned);
+  const t = translator(useLang());
   if (assigned !== seen && !pending) {
     setSeen(assigned);
     setWho(assigned);
   }
-  const nameOf = (id: string | null) => (id ? (team.find((m) => m.id === id)?.full_name ?? "Unnamed") : "Nobody");
+  const nameOf = (id: string | null) => (id ? (team.find((m) => m.id === id)?.full_name ?? t("ag_unnamed")) : t("ag_cal_btn_nobody"));
   // ONE PERSON IS ONE COLOR: every circle wears its person's color (lib/schedule/block-info chipDot);
   // the one going is lit (full color, a ring), the rest are faded until tapped.
   const dot = (id: string, on: boolean) =>
@@ -541,7 +551,7 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
         {initials(nameOf(who))}
       </span>
     ) : (
-      <span className={nobody(false)}>Nobody</span>
+      <span className={nobody(false)}>{t("ag_cal_btn_nobody")}</span>
     );
   }
 
@@ -554,21 +564,21 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
         const res = await setAppointmentAssignee(visitId, next);
         if (!res.ok) {
           setWho(prev);
-          toast(res.error ?? "Who's going didn't change. Try again.", "error");
+          toast(res.error ?? t("ag_cal_whosGoingDidntChange"), "error");
           return;
         }
         router.refresh();
       } catch {
         setWho(prev);
-        toast("Who's going didn't change. You may be offline.", "error");
+        toast(t("ag_cal_whosGoingOffline"), "error");
       }
     });
   }
 
   return (
-    <div role="group" aria-label="Who's going" className="flex flex-wrap items-center gap-2">
+    <div role="group" aria-label={t("ag_cal_whosGoingLower")} className="flex flex-wrap items-center gap-2">
       <button type="button" disabled={pending} aria-pressed={!who} onClick={() => pick(null)} className={nobody(!who)}>
-        Nobody
+        {t("ag_cal_btn_nobody")}
       </button>
       {team.map((m) => (
         <button
@@ -576,8 +586,8 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
           type="button"
           disabled={pending}
           aria-pressed={who === m.id}
-          aria-label={m.full_name ?? "Unnamed"}
-          title={m.full_name ?? "Unnamed"}
+          aria-label={m.full_name ?? t("ag_unnamed")}
+          title={m.full_name ?? t("ag_unnamed")}
           onClick={() => pick(m.id)}
           className={dot(m.id, who === m.id)}
         >
@@ -593,6 +603,9 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
   const router = useRouter();
   const toast = useToast();
   const block = readVisitBlock({ startsAt: visit.starts_at, endsAt: visit.ends_at, tz, workDay });
+  const lang = useLang();
+  const t = translator(lang);
+  const dw = (ymd: string | null | undefined) => dayWords(ymd, lang);
 
   async function saveTimes(patch: BlockPatch) {
     // The visit's own rule, in the words the controls predict: a new start keeps the length (a full
@@ -603,7 +616,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
     // here would be its start to that many minutes on its LAST day (a 1h chip = a 25-hour visit). The
     // controls hide the chips for it (oneSpan); this refusal is for anything that still asks.
     if (block.multiDay && !("start" in patch)) {
-      return { ok: false, error: `This visit runs over several days, through ${dayWords(block.lastDay)}. Open The Visit to change when it ends.` };
+      return { ok: false, error: fillText(t("ag_cal_visitRunsOver"), { day: dw(block.lastDay) }) };
     }
     if ("start" in patch) {
       start = patch.start;
@@ -623,11 +636,11 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
   }
 
   async function move(to: string) {
-    if (visit.status === "proposed" && !window.confirm("A pick-a-time link is out to the customer for this — moving it withdraws that link. Move it anyway?")) return null;
-    const t = shiftApptToDay(visit.starts_at, visit.ends_at, to, tz);
-    const res = await rescheduleAppointment(visit.id, t.start, t.end);
+    if (visit.status === "proposed" && !window.confirm(t("ag_cal_proposedMoveConfirm"))) return null;
+    const shifted = shiftApptToDay(visit.starts_at, visit.ends_at, to, tz);
+    const res = await rescheduleAppointment(visit.id, shifted.start, shifted.end);
     if (res.ok) {
-      toast(res.note ?? `Moved to ${dayWords(to)}.`, res.note ? "info" : "success");
+      toast(res.note ?? fillText(t("ag_cal_movedTo"), { day: dw(to) }), res.note ? "info" : "success");
       router.refresh();
       onClose();
     }
@@ -637,7 +650,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
   async function clear() {
     const res = await unscheduleAppointment(visit.id);
     if (res.ok) {
-      toast("It waits under Waiting For A Day on the schedule. Place it there when they call.", "success");
+      toast(t("ag_cal_waitsUnderCall"), "success");
       router.refresh();
       onClose();
     }
@@ -648,11 +661,11 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
   return (
     <div className="space-y-5">
       <section>
-        <Heading>Day</Heading>
+        <Heading>{t("ag_btn_day")}</Heading>
         <DayRow day={day} canEdit={canEdit} move={move} idPrefix={`tile-${visit.id}`} voice={voice} />
       </section>
       <section>
-        <Heading>Time</Heading>
+        <Heading>{t("ag_cal_time")}</Heading>
         <BlockTimeControls
           startHm={block.startHm}
           endHm={block.endHm}
@@ -661,7 +674,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
           multiDay={block.multiDay}
           // A visit over several days is one span (Mon 10 AM → Wed 6 PM), never the same hours each day.
           oneSpan
-          lastDayWords={dayWords(block.lastDay)}
+          lastDayWords={dw(block.lastDay)}
           workDay={workDay}
           canEdit={canEdit}
           save={saveTimes}
@@ -673,14 +686,14 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
         />
       </section>
       <section>
-        <Heading>Who&apos;s Going</Heading>
+        <Heading>{t("ag_cal_whosGoing")}</Heading>
         <VisitPerson visitId={visit.id} assigned={visit.assigned_to} team={team} canEdit={canEdit} />
       </section>
       <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
         <Link href={`/appointments/${visit.id}`} className={`${BTN} btn-gloss bg-[rgb(var(--glass-ink))] text-white hover:bg-[rgb(var(--glass-ink))]/90`}>
-          Open The Visit
+          {t("ag_btn_openTheVisit")}
         </Link>
-        {canEdit && open && <ClearTheDate what="this visit" clear={clear} voice={voice} />}
+        {canEdit && open && <ClearTheDate what="visit" clear={clear} voice={voice} />}
       </div>
     </div>
   );

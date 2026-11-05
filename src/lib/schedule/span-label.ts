@@ -32,20 +32,31 @@
  * real local Dates. `new Date("2026-08-27")` is UTC midnight and reads as the 26th west of
  * Greenwich — the bug that once flagged every lead due today as overdue.
  */
-export function spanLabel(a: Date, z: Date, opts: { month?: "long" | "short" } = {}): string {
+export function spanLabel(a: Date, z: Date, opts: { month?: "long" | "short"; lang?: string | null } = {}): string {
   const month = opts.month ?? "short";
-  const name = (d: Date) => d.toLocaleDateString(undefined, { month });
+  // Spanish reads es-US; English keeps the browser's own locale, exactly as before the agenda wave
+  // (calendar-view's localeFor says the same).
+  const locale = opts.lang === "es" ? "es-US" : undefined;
+  const name = (d: Date) => d.toLocaleDateString(locale, { month });
   const sameYear = a.getFullYear() === z.getFullYear();
   const sameMonth = sameYear && a.getMonth() === z.getMonth();
 
+  if (opts.lang === "es") {
+    // Spanish says the day before the month: "25–31 de agosto de 2026", "23 ago – 19 sep 2026".
+    const de = month === "long" ? "de " : "";
+    const one = (d: Date) => `${d.getDate()} ${de}${name(d)}`;
+    if (sameMonth) return `${a.getDate()}–${z.getDate()} ${de}${name(a)} de ${a.getFullYear()}`;
+    if (sameYear) return `${one(a)} – ${one(z)} de ${a.getFullYear()}`;
+    return `${one(a)} de ${a.getFullYear()} – ${one(z)} de ${z.getFullYear()}`;
+  }
   if (sameMonth) return `${name(a)} ${a.getDate()}–${z.getDate()}, ${a.getFullYear()}`;
   if (sameYear) return `${name(a)} ${a.getDate()} – ${name(z)} ${z.getDate()}, ${a.getFullYear()}`;
   return `${name(a)} ${a.getDate()}, ${a.getFullYear()} – ${name(z)} ${z.getDate()}, ${z.getFullYear()}`;
 }
 
-/** One day, named in full. Same rule: the year is always there. */
-export function dayLabel(d: Date): string {
-  return d.toLocaleDateString(undefined, {
+/** One day, named in full. Same rule: the year is always there. `lang` "es": "lunes, 31 ago 2026". */
+export function dayLabel(d: Date, lang?: string | null): string {
+  return d.toLocaleDateString(lang === "es" ? "es-US" : undefined, {
     weekday: "long",
     month: "short",
     day: "numeric",

@@ -14,10 +14,10 @@ import type { WordCatalog } from "@/lib/words/types";
  * keep the scan honest.
  */
 
-/** The thirteen catalogs (lib/words; nv_ the office's map since cn-v1139, us_ the usage meter since cn-v1140). */
-export const CATALOG_FLOOR = 13;
-/** The keys across every catalog at cn-v1140 (1,729 with the fixer's four — the shell's used-up line, the estimator's lighter line, the notice button, Ask The Owner — less the owner slot word; 1,726 with the plan card's words; 1,711 when the floor was set; 1,694 at cn-v1139; 1,562 at cn-v1138); raise it as keys land. */
-export const KEYS_FLOOR = 1729;
+/** The seventeen catalogs (lib/words; nv_ the office's map since cn-v1139, us_ the usage meter since cn-v1140, the agenda's four — ag_, ag_cal_, ag_rail_, ag_srv_ — since the agenda-in-Spanish wave). */
+export const CATALOG_FLOOR = 17;
+/** The keys across every catalog at the agenda wave (2,274: the agenda's four catalogs whole — ag_ 89, ag_cal_ 122, ag_rail_ 175, ag_srv_ 155 = 541), at its foundation (1,825: the agenda's 93 + three placeholders, one per sub-catalog), at cn-v1140 (1,729 with the fixer's four — the shell's used-up line, the estimator's lighter line, the notice button, Ask The Owner — less the owner slot word; 1,726 with the plan card's words; 1,711 when the floor was set; 1,694 at cn-v1139; 1,562 at cn-v1138); raise it as keys land. */
+export const KEYS_FLOOR = 2274;
 
 /**
  * THE KEY FAMILIES THAT ARE CLICKABLES (Erik's law: Title Case in BOTH languages, every word
@@ -27,7 +27,8 @@ export const KEYS_FLOOR = 1729;
  * and four of them ("Tax report", "Activity audit", "Employee documents", "Employee handbook") are
  * not Title Case — the pages' own words, not the catalog's to change.
  */
-const TITLE_CASE_FAMILIES = ["sh_dock_", "sh_help_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_", "us_door_"];
+// The agenda's four catalogs key every clickable with `_btn_` right after the prefix (lib/words/agenda's header).
+const TITLE_CASE_FAMILIES = ["sh_dock_", "sh_help_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_", "us_door_", "ag_btn_", "ag_cal_btn_", "ag_rail_btn_", "ag_srv_btn_"];
 const TITLE_CASE_ES_ONLY = ["nv_page_"];
 /** Every word begins with a capital, a digit or a symbol; a {slot} is a hole, not a word; "/", "&", "+" and "·" pass. */
 const titleCase = (s: string) =>
@@ -41,18 +42,23 @@ const ROOT = process.cwd();
 const keysOf = (c: WordCatalog) => Object.keys(c.en);
 
 describe("the catalogs", () => {
-  it("there are thirteen, each with a prefix of its own, and together they hold at least the floor's keys", () => {
+  it("there are seventeen, each with a prefix of its own, and together they hold at least the floor's keys", () => {
     expect(CATALOGS.length).toBeGreaterThanOrEqual(CATALOG_FLOOR);
     const prefixes = CATALOGS.map((c) => c.prefix);
     expect(new Set(prefixes).size).toBe(prefixes.length);
-    for (const p of prefixes) expect(p, p).toMatch(/^[a-z]{2}_$/);
+    // Two letters, or two letters and a side of them (the agenda's ag_cal_, ag_rail_, ag_srv_).
+    for (const p of prefixes) expect(p, p).toMatch(/^[a-z]{2}_(?:[a-z]+_)?$/);
     expect(CATALOGS.flatMap(keysOf).length).toBeGreaterThanOrEqual(KEYS_FLOOR);
   });
 
   it("every key starts with its catalog's prefix, in en and in es", () => {
     const strays: string[] = [];
     for (const c of CATALOGS) {
-      for (const k of [...Object.keys(c.en), ...Object.keys(c.es)]) if (!k.startsWith(c.prefix)) strays.push(`${c.prefix} ${k}`);
+      // A longer prefix that begins with this one (ag_cal_ under ag_) is another catalog's: its keys live there.
+      const others = CATALOGS.map((o) => o.prefix).filter((p) => p !== c.prefix && p.startsWith(c.prefix));
+      for (const k of [...Object.keys(c.en), ...Object.keys(c.es)]) {
+        if (!k.startsWith(c.prefix) || others.some((p) => k.startsWith(p))) strays.push(`${c.prefix} ${k}`);
+      }
     }
     expect(strays).toEqual([]);
   });

@@ -1,4 +1,5 @@
 import { isWeekendDay } from "@/lib/tz";
+import { localeOf } from "@/lib/locale";
 
 /**
  * A WEEKEND DAY EARNS ITS SPACE, OR IT ISN'T DRAWN.
@@ -69,9 +70,10 @@ export function weekViewDays(
  *  ONE spelling, so the schedule's header and My Day's cannot drift apart.
  *  COMPOSED, not left to a skeleton: `{ weekday: "short", day: "numeric" }` is "18 Sat" in en-US CLDR,
  *  which is how the grid's own column headers read and is not how anybody says it in a sentence. */
-export function shortDayWords(ymd: string): string {
+export function shortDayWords(ymd: string, lang?: string | null): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd ?? ""))) return "";
   const d = new Date(`${ymd}T12:00:00Z`);
-  const weekday = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+  // `lang` "es" (agenda wave): "sáb 4", the shape My Day's dayShort already printed (planner/page).
+  const weekday = d.toLocaleDateString(localeOf(lang), { weekday: "short", timeZone: "UTC" });
   return `${weekday} ${Number(ymd.slice(8, 10))}`;
 }

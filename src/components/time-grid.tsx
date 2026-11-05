@@ -5,6 +5,8 @@ import { Plus } from "lucide-react";
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { blockRows, crewWords, type CrewChip } from "@/lib/schedule/block-info";
 import { CrewInitials } from "./crew-initials";
+import { useLang } from "./lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -239,9 +241,10 @@ function layoutColumns<T extends { startMin: number; endMin: number }>(
   return out;
 }
 
-const hourLabel = (h: number) => {
+const hourLabel = (h: number, lang?: string) => {
   const hh = ((h + 11) % 12) + 1;
-  return `${hh} ${h < 12 || h === 24 ? "AM" : "PM"}`;
+  const am = h < 12 || h === 24;
+  return lang === "es" ? `${hh} ${am ? "a. m." : "p. m."}` : `${hh} ${am ? "AM" : "PM"}`;
 };
 
 function TimeGridInner({
@@ -256,7 +259,7 @@ function TimeGridInner({
   placement,
   onEventTap,
   onSlotTap,
-  addLabel = "Add To Schedule",
+  addLabel: addLabelProp,
 }: {
   days: TimeGridDay[];
   events: TimeGridEvent[];
@@ -296,12 +299,15 @@ function TimeGridInner({
   /** The words the open spots and the "+" say ("Add To Schedule"). */
   addLabel?: string;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
+  const addLabel = addLabelProp ?? t("ag_cal_btn_addToSchedule");
   const [now, setNow] = useState<Now | null>(initialNow ?? null);
   useEffect(() => {
     const tick = () => setNow(computeNow(tz));
     tick();
-    const t = setInterval(tick, 60_000);
-    return () => clearInterval(t);
+    const timer = setInterval(tick, 60_000);
+    return () => clearInterval(timer);
   }, [tz]);
 
   // Scroll today into view once (week view on a phone shows ~4 columns).
@@ -389,7 +395,7 @@ function TimeGridInner({
         {rows.place && <div className="truncate opacity-80">{info.place}</div>}
         {rows.crew && (
           <div className="pointer-events-none mt-0.5 flex h-3.5 items-center overflow-hidden">
-            <CrewInitials crew={info.crew ?? []} size="xs" max={narrow ? 2 : 3} />
+            <CrewInitials crew={info.crew ?? []} size="xs" max={narrow ? 2 : 3} lang={lang} />
           </div>
         )}
         {rows.time && <div className="truncate tabular-nums opacity-70">{info.time}</div>}
@@ -402,11 +408,11 @@ function TimeGridInner({
   const pillTitle = (e: TimeGridEvent) => {
     // A past block's sentence closes its title and label: what was booked, and what happened.
     const said = e.actual?.sentence ?? null;
-    if (e.ghost) return [`${e.label} · worked, not booked`, said].filter(Boolean).join(" · ");
+    if (e.ghost) return [fillText(t("ag_cal_ghostTitle"), { label: e.label }), said].filter(Boolean).join(" · ");
     if (!e.info) return [e.label, e.sub, said].filter(Boolean).join(" · ");
     const crew = e.info.crew;
     // "Crew: Brian Cole, Erik Taylor" or "Nobody on it": a block too short for its chips still says it.
-    const who = Array.isArray(crew) ? crewWords(crew) : null;
+    const who = Array.isArray(crew) ? crewWords(crew, lang, t) : null;
     return [e.label, e.info.place, e.info.town, e.info.time, who, said].filter(Boolean).join(" · ");
   };
 
@@ -498,7 +504,7 @@ function TimeGridInner({
               <span className={d.isToday ? "font-bold text-brand" : ""}>
                 {d.label}
                 {d.isToday && (
-                  <span className="ml-1 text-[9px] font-semibold uppercase tracking-wide">today</span>
+                  <span className="ml-1 text-[9px] font-semibold uppercase tracking-wide">{t("ag_todayLower")}</span>
                 )}
                 {d.sublabel && (
                   <span className="block truncate text-[10px] font-medium text-slate-400" title={d.sublabel}>
@@ -580,7 +586,7 @@ function TimeGridInner({
         {hasAllDay && (
           <div className="flex border-b border-slate-100 bg-slate-50/50">
             <div className="flex w-12 shrink-0 items-start justify-end pr-1 pt-1 text-[9px] font-medium uppercase tracking-wide text-slate-400">
-              all day
+              {t("ag_cal_allDayLower")}
             </div>
             {days.map((d) => (
               <div key={d.dayStr} className={`min-w-0 flex-1 space-y-0.5 p-0.5 ${colBorder(d)}`}>
@@ -631,7 +637,7 @@ function TimeGridInner({
                 className="absolute right-1 text-right text-[10px] leading-none text-slate-400"
                 style={{ top: (h * 60 - rangeStart) * PX_PER_MIN + (h === startHour ? 2 : -4) }}
               >
-                {hourLabel(h)}
+                {hourLabel(h, lang)}
               </div>
             ))}
           </div>
@@ -653,7 +659,7 @@ function TimeGridInner({
                   <button
                     type="button"
                     onClick={() => placement.onPlace(d.dayStr)}
-                    aria-label={`${placement.label} on ${d.label}`}
+                    aria-label={fillText(t("ag_cal_placeOn"), { label: placement.label, day: d.label })}
                     className="absolute inset-0 bg-brand-light/20 transition-colors hover:bg-brand-light/60"
                   />
                 )}
@@ -670,7 +676,7 @@ function TimeGridInner({
                       onSlotTap(d.dayStr, slotMinute(ev.clientY - box.top, rangeStart));
                     }}
                     aria-label={`${addLabel}, ${d.label}`}
-                    title={`${addLabel}: tap an open time`}
+                    title={fillText(t("ag_cal_tapAnOpenTime"), { label: addLabel })}
                     className="absolute inset-0 cursor-copy transition-colors hover:bg-brand-light/10"
                   />
                 )}
@@ -728,7 +734,7 @@ function TimeGridInner({
                       onClick={() => onEventTap(e.tapId!, d.dayStr)}
                       style={style}
                       title={title}
-                      aria-label={e.ghost ? title : `${title}: day, time and crew`}
+                      aria-label={e.ghost ? title : fillText(t("ag_cal_dayTimeCrew"), { name: title })}
                       className={`${cls} text-left hover:opacity-80`}
                     >
                       {pillBody(e, height, narrow)}

@@ -8,6 +8,9 @@ import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { formatPhone } from "@/lib/utils";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
+import { clock12, type Words } from "@/lib/lang-words";
 import { setLeadContact, sizeLead } from "../leads/actions";
 import { setJobContact, setJobHold, sizeAppointment, sizeJob, snoozeJobHold } from "./actions";
 import { usePlacement } from "./placement-context";
@@ -27,7 +30,7 @@ import {
 import {
   dayLoad,
   durationLabel,
-  KIND_LABEL,
+  kindLabel,
   KIND_TONE,
   workKind,
 } from "@/lib/schedule/work-shape";
@@ -63,6 +66,7 @@ import {
  *  same fact, so a job named for its street reads who instead of the street twice. */
 function PlaceAndCrew({ i }: { i: Placeable }) {
   const place = placeLine({ name: i.name, street: i.address, customer: i.customer });
+  const lang = useLang();
   return (
     <>
       {place && (
@@ -72,7 +76,7 @@ function PlaceAndCrew({ i }: { i: Placeable }) {
       )}
       {Array.isArray(i.crew) && (
         <span className="mt-1 flex">
-          <CrewInitials crew={i.crew} />
+          <CrewInitials crew={i.crew} lang={lang} />
         </span>
       )}
     </>
@@ -80,10 +84,10 @@ function PlaceAndCrew({ i }: { i: Placeable }) {
 }
 
 /** Where a card's record lives, and the row that opens it. */
-function openRow(i: Placeable): { href: string; label: string } {
-  if (i.kind === "job") return { href: `/jobs/${i.id}`, label: "Open The Job" };
-  if (i.kind === "appointment") return { href: `/appointments/${i.id}`, label: "Open The Visit" };
-  return { href: `/leads?focus=${i.id}`, label: "Open The Lead" };
+function openRow(i: Placeable, t: Words): { href: string; label: string } {
+  if (i.kind === "job") return { href: `/jobs/${i.id}`, label: t("ag_btn_openTheJob") };
+  if (i.kind === "appointment") return { href: `/appointments/${i.id}`, label: t("ag_btn_openTheVisit") };
+  return { href: `/leads?focus=${i.id}`, label: t("ag_rail_btn_openTheLead") };
 }
 
 /**
@@ -106,11 +110,12 @@ export function RailCardMore({ i, todayStr }: { i: Placeable; todayStr?: string 
 export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: string; close: () => void }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   const [mode, setMode] = useState<"hold" | "snooze" | "why" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [why, setWhy] = useState(i.holdReason ?? "");
-  const open = openRow(i);
+  const open = openRow(i, t);
 
   const run = (fn: () => Promise<{ ok: boolean; error?: string }>, said?: string) =>
     start(async () => {
@@ -118,7 +123,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
       try {
         const res = await fn();
         if (!res.ok) {
-          setErr(res.error ?? "That didn't change. Try again.");
+          setErr(res.error ?? t("ag_rail_didntChange"));
           return;
         }
         close();
@@ -126,7 +131,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
         if (said) toast(said, "success");
         router.refresh();
       } catch {
-        setErr("That didn't reach the server. Check your connection and try again.");
+        setErr(t("ag_rail_didntReach"));
       }
     });
 
@@ -136,7 +141,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
       {i.kind === "job" && !i.onHold && (
         mode === "hold" ? (
           <ComeBackPicker
-            label="Hold It"
+            label={t("ag_rail_btn_holdIt")}
             requireWhy
             autoFocus
             todayStr={todayStr}
@@ -146,11 +151,11 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
               setMode(null);
               setErr(null);
             }}
-            onSubmit={({ why: w, when }) => run(() => setJobHold(i.id, w, when), `${i.name} is on hold.`)}
+            onSubmit={({ why: w, when }) => run(() => setJobHold(i.id, w, when), fillText(t("ag_rail_isOnHold"), { name: i.name }))}
           />
         ) : (
           <button type="button" className={SHEET_ROW} onClick={() => { setErr(null); setMode("hold"); }}>
-            Put On Hold…
+            {t("ag_rail_btn_putOnHold")}
           </button>
         )
       )}
@@ -158,7 +163,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
         <>
           {mode === "snooze" ? (
             <ComeBackPicker
-              label="Snooze"
+              label={t("ag_rail_btn_snooze")}
               askWhy={!i.holdReason}
               autoFocus={!i.holdReason}
               todayStr={todayStr}
@@ -172,7 +177,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
             />
           ) : (
             <button type="button" className={SHEET_ROW} onClick={() => { setErr(null); setMode("snooze"); }}>
-              Snooze…
+              {t("ag_rail_btn_snoozeMore")}
             </button>
           )}
           {mode === "why" ? (
@@ -182,23 +187,23 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
                 autoFocus
                 value={why}
                 onChange={(e) => setWhy(e.target.value)}
-                placeholder="Waiting on the permit"
-                aria-label="Why?"
+                placeholder={t("ag_rail_waitingOnPermit")}
+                aria-label={t("ag_rail_why")}
                 className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm"
               />
               <div className="flex flex-wrap items-center gap-2">
                 <Button type="button" disabled={pending || !why.trim()} onClick={() => run(() => setJobHold(i.id, why.trim()))}>
-                  {pending ? "Saving…" : "Change Why"}
+                  {pending ? t("ag_btn_saving") : t("ag_rail_btn_changeWhy")}
                 </Button>
                 <Button type="button" variant="ghost" disabled={pending} onClick={() => { setMode(null); setErr(null); }}>
-                  Cancel
+                  {t("ag_btn_cancel")}
                 </Button>
               </div>
               {err && <p className="text-xs font-medium text-red-600">{err}</p>}
             </div>
           ) : (
             <button type="button" className={SHEET_ROW} onClick={() => { setErr(null); setWhy(i.holdReason ?? ""); setMode("why"); }}>
-              Change Why…
+              {t("ag_rail_btn_changeWhyMore")}
             </button>
           )}
           <button
@@ -210,11 +215,11 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
                 () => setJobHold(i.id, null),
                 // A held job that still carries a day goes back on the calendar on it; one with none
                 // stays here, waiting for a day. Said, either way.
-                i.hasDay ? `${i.name} is off hold and back on the calendar.` : `${i.name} is off hold. It stays here until it has a day.`,
+                fillText(t(i.hasDay ? "ag_rail_offHoldBack" : "ag_rail_offHoldStays"), { name: i.name }),
               )
             }
           >
-            Take Off Hold
+            {t("ag_rail_btn_takeOffHold")}
           </button>
           {mode === null && err && <p className="text-xs font-medium text-red-600">{err}</p>}
         </>
@@ -224,11 +229,12 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
 }
 
 /** "13:30" is a database. "1:30pm" is a person. The footer reads back what will happen, so it
- *  speaks the second one. */
-function prettyTime(hm: string): string {
+ *  speaks the second one ("1:30 p. m." to a Spanish reader, lib/lang-words clock12). */
+function prettyTime(hm: string, lang?: string): string {
   const m = /^(\d{1,2}):(\d{2})$/.exec(hm);
   if (!m) return hm;
   const h = Number(m[1]);
+  if (lang === "es") return clock12(h, Number(m[2]), "es");
   const suffix = h < 12 ? "am" : "pm";
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return m[2] === "00" ? `${h12}${suffix}` : `${h12}:${m[2]}${suffix}`;
@@ -244,6 +250,8 @@ export function PlaceRail({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   /* WHO IS PICKED IS NOT THE RAIL'S SECRET ANY MORE. The second tap now lands on the calendar next
      door, so the picked set lives in a context both can see. AM/PM likewise: chosen here, applied
@@ -253,12 +261,12 @@ export function PlaceRail({
      while planning. */
   const { picked, toggle, clear, half, setHalf, startAt, setStartAt, halfTimes, pending: placing } = usePlacement();
 
-  const groups = useMemo(() => groupByTown(items), [items]);
+  const groups = useMemo(() => groupByTown(items, lang, translator(lang)), [items, lang]);
   const chosen = useMemo(
     () => items.filter((i) => picked.has(i.id)),
     [items, picked],
   );
-  const load = dayLoad(chosen);
+  const load = dayLoad(chosen, lang, t);
   const jobs = chosen.filter((i) => i.kind === "job");
 
   /** Which card is unfolded for editing — SEPARATE from the pick. Erik: "when i click on the
@@ -273,7 +281,7 @@ export function PlaceRail({
     if (!String(patch.phone ?? patch.email ?? "").trim()) return;
     start(async () => {
       const res = i.kind === "job" ? await setJobContact(i.id, patch) : await setLeadContact(i.id, patch);
-      if (!res.ok) { toast(res.error ?? "Couldn't save that.", "error"); return; }
+      if (!res.ok) { toast(res.error ?? t("ag_rail_couldntSave"), "error"); return; }
       router.refresh();
     });
   }
@@ -290,7 +298,7 @@ export function PlaceRail({
           : i.kind === "appointment"
             ? await sizeAppointment(i.id, patch)
             : await sizeLead(i.id, patch);
-      if (!res.ok) { toast(res.error ?? "Couldn't save that.", "error"); return; }
+      if (!res.ok) { toast(res.error ?? t("ag_rail_couldntSave"), "error"); return; }
       router.refresh();
     });
   }
@@ -298,7 +306,7 @@ export function PlaceRail({
   if (!items.length) {
     return (
       <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-400">
-        Nothing waiting for a day. Leads with no visit booked show up here.
+        {t("ag_rail_nothingWaiting")}
       </p>
     );
   }
@@ -310,9 +318,9 @@ export function PlaceRail({
           <div className="mb-1.5 flex items-baseline gap-2">
             <h3 className="text-sm font-semibold text-slate-900">{g.town}</h3>
             <span className="text-xs text-slate-400">
-              {g.items.length} waiting
+              {fillText(t("ag_rail_nWaiting"), { n: String(g.items.length) })}
               {/* The townless group is labelled, never demoted — it sorts by size like the rest. */}
-              {g.unlocatable && " · no address yet"}
+              {g.unlocatable && ` · ${t("ag_rail_noAddressYetLower")}`}
             </span>
           </div>
           <ul className="space-y-1">
@@ -341,7 +349,7 @@ export function PlaceRail({
                         type="button"
                         onClick={() => toggle(i.id)}
                         aria-pressed={on}
-                        aria-label={on ? `Unpick ${i.name}` : `Pick ${i.name} to place on a day`}
+                        aria-label={fillText(t(on ? "ag_rail_unpick" : "ag_rail_pickToPlace"), { name: i.name })}
                         className="-my-2 -ml-3 -mr-1 flex h-11 w-11 shrink-0 items-center justify-center"
                       >
                         <span
@@ -366,28 +374,28 @@ export function PlaceRail({
                           {/* THE TAG AND THE CLOCK — Erik: "a tag showing service call, job,
                               inspection/walk through, or office … and how much time they are going
                               to take". Between them a day is plannable by eye. */}
-                          <Badge tone={KIND_TONE[workKind(i)]}>{KIND_LABEL[workKind(i)]}</Badge>
+                          <Badge tone={KIND_TONE[workKind(i)]}>{kindLabel(workKind(i), lang, t)}</Badge>
                           <span
                             className={`font-mono text-xs tabular-nums ${
                               i.planned_minutes ? "text-slate-600" : "text-slate-300"
                             }`}
-                            title={i.planned_minutes ? "Expected time" : "Nobody has sized this yet"}
+                            title={i.planned_minutes ? t("ag_rail_expectedTime") : t("ag_rail_nobodySized")}
                           >
-                            {durationLabel(i.planned_minutes)}
+                            {durationLabel(i.planned_minutes, lang, t)}
                           </span>
-                          {i.urgent && <Badge tone="amber">overdue</Badge>}
+                          {i.urgent && <Badge tone="amber">{t("ag_rail_overdue")}</Badge>}
                           {i.onHold && (
                             <Badge tone="slate">
                               {/* THE REASON IS THE ACTION. "On Hold" alone is a shrug; "On Hold —
                                   waiting on the permit" tells you what wakes it. */}
-                              On Hold{i.holdReason ? ` — ${i.holdReason}` : ""}
+                              {t("jb_statusOnHold")}{i.holdReason ? ` — ${i.holdReason}` : ""}
                             </Badge>
                           )}
                           {/* THE DAY IT COMES BACK, ON THE CARD (text to visual, 0366): "Back Oct 3",
                               amber "Back Today" once it has come (or "No Day Set" for a hold from
                               before the day existed). No chip while the database has no day yet. */}
                           {i.onHold && todayStr && i.holdUntil !== undefined && (
-                            <Badge tone={comeBackDue(i.holdUntil, todayStr) ? "amber" : "slate"}>{backWords(i.holdUntil, todayStr)}</Badge>
+                            <Badge tone={comeBackDue(i.holdUntil, todayStr) ? "amber" : "slate"}>{backWords(i.holdUntil, todayStr, lang, t)}</Badge>
                           )}
                         </span>
                         {/* WHERE AND WHO, as the job's block on the calendar says it: a job or a
@@ -412,7 +420,7 @@ export function PlaceRail({
                             there isn't — and picking the card turns the dashes into inputs. */}
                         {miss === "place" && (
                           <span className={`mt-0.5 flex items-center gap-1 text-xs ${on ? "font-medium text-amber-700" : "text-slate-400"}`}>
-                            {on ? nextAction(miss) : "No Address Yet"}
+                            {on ? nextAction(miss, lang, t) : t("ag_rail_noAddressYet")}
                           </span>
                         )}
                       </span>
@@ -489,8 +497,8 @@ export function PlaceRail({
                               <PhoneInput
                                 name="phone"
                                 autoComplete="tel"
-                                placeholder="Phone"
-                                aria-label="Phone — enter it on the spot"
+                                placeholder={t("ag_rail_phone")}
+                                aria-label={t("ag_rail_phoneOnTheSpot")}
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                 onBlur={(e) => contact(i, { phone: e.target.value })}
                                 className="h-11 w-36 rounded-md px-1.5 text-sm"
@@ -502,8 +510,8 @@ export function PlaceRail({
                                 type="email"
                                 autoComplete="email"
                                 inputMode="email"
-                                placeholder="Email"
-                                aria-label="Email — enter it on the spot"
+                                placeholder={t("ag_rail_email")}
+                                aria-label={t("ag_rail_emailOnTheSpot")}
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                 onBlur={(e) => contact(i, { email: e.target.value })}
                                 className="h-11 w-40 rounded-md border border-slate-200 px-1.5 text-sm"
@@ -540,19 +548,19 @@ export function PlaceRail({
         <div className="sticky bottom-20 space-y-2 rounded-xl border border-brand/40 bg-white/95 p-3 shadow-lg backdrop-blur lg:bottom-0">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="text-sm font-semibold text-slate-900">
-              {chosen.length} picked
+              {fillText(t(chosen.length === 1 ? "ag_rail_nPickedOne" : "ag_rail_nPickedMany"), { n: String(chosen.length) })}
             </span>
             {jobs.length > 0 && (
               <span className="text-xs text-slate-500">
-                {jobs.length} {jobs.length === 1 ? "floater" : "floaters"}
+                {fillText(t(jobs.length === 1 ? "ag_rail_nFloaterOne" : "ag_rail_nFloaterMany"), { n: String(jobs.length) })}
               </span>
             )}
             {/* WHAT THE DAY WILL HOLD, before he commits to it — the whole reason the sizes exist.
                 Unsized items are counted separately rather than assumed to take nothing. */}
-            {load.label && <span className="text-xs text-slate-500">· about {load.label}</span>}
+            {load.label && <span className="text-xs text-slate-500">{fillText(t("ag_rail_about"), { load: load.label })}</span>}
           </div>
 
-          <p className="text-sm font-medium text-brand">{armedInstruction(chosen.length)}</p>
+          <p className="text-sm font-medium text-brand">{armedInstruction(chosen.length, lang, t)}</p>
 
           {/* ON A PHONE THE CALENDAR IS BELOW EVERY WAITING CARD — thousands of pixels of rail
               between the first tap and the second. "Tap the day" is not a gesture if the days are
@@ -563,7 +571,7 @@ export function PlaceRail({
             onClick={() => document.getElementById("schedule-calendar")?.scrollIntoView({ behavior: "smooth", block: "start" })}
             className="min-h-11 w-full rounded-lg border-2 border-dashed border-brand/50 bg-brand-light/30 px-3 py-2 text-sm font-semibold text-brand lg:hidden"
           >
-            Jump To The Calendar ↓
+            {t("ag_rail_btn_jumpToCalendar")} ↓
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -594,7 +602,7 @@ export function PlaceRail({
               type="time"
               value={startAt}
               onChange={(e) => setStartAt(e.target.value)}
-              aria-label="Start at an exact time instead"
+              aria-label={t("ag_rail_exactTime")}
               className={`h-11 rounded-lg border px-1.5 text-sm ${
                 startAt ? "border-brand text-brand" : "border-slate-200 text-slate-400"
               }`}
@@ -605,26 +613,26 @@ export function PlaceRail({
                 onClick={() => setStartAt("")}
                 className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-slate-400 hover:text-slate-700"
               >
-                Clear Time
+                {t("ag_rail_btn_clearTime")}
               </button>
             )}
             <span className="w-full text-xs text-slate-400">
               {/* HIS working day (Settings → Crew & time), never a literal — the rail used to
                   promise 8am to a shop that opens at 9. */}
-              Starting {prettyTime(startAt || (half === "am" ? halfTimes.am : halfTimes.pm))}, in the order shown.
+              {fillText(t("ag_rail_startingAt"), { time: prettyTime(startAt || (half === "am" ? halfTimes.am : halfTimes.pm), lang) })}
               {/* THE DEFAULT, SAID BEFORE THE TAP (lib/schedule/job-block): a job with no length
                   lands as two hours, never the rest of the day. Size it above to land it longer. */}
-              {jobs.some((j) => !j.planned_minutes) && " A job with no length goes down as 2 hours."}
+              {jobs.some((j) => !j.planned_minutes) && ` ${t("ag_rail_noLengthTwoHours")}`}
             </span>
             <button
               type="button"
               onClick={clear}
               className="ml-auto inline-flex min-h-11 items-center px-2 text-xs font-medium text-slate-500 hover:text-slate-800"
             >
-              Clear
+              {t("ag_rail_btn_clear")}
             </button>
           </div>
-          {placing && <p className="text-xs font-medium text-brand">Placing…</p>}
+          {placing && <p className="text-xs font-medium text-brand">{t("ag_rail_placing")}</p>}
         </div>
       )}
     </div>

@@ -4,6 +4,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatFullAddress } from "@/lib/utils";
+import type { Lang } from "@/lib/locale";
+import { localeOf } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 export type PickerOption = { id: string; label: string; address?: string | null };
 
@@ -23,18 +26,18 @@ export type PickerOption = { id: string; label: string; address?: string | null 
  * searchable, and it's the fallback for a job that was never named — it just stops being the first
  * thing you read on a screen where you're looking for a house.
  */
-export const jobLabel = (j: { job_number?: string | null; name?: string | null }): string => {
+export const jobLabel = (j: { job_number?: string | null; name?: string | null }, lang: Lang = "en", words?: Words): string => {
   const name = (j.name ?? "").trim();
   const num = (j.job_number ?? "").trim();
-  return name || num || "Job";
+  return name || num || say(lang, words, "ag_job", "Job");
 };
 
 /** Number AND name, for the surfaces that genuinely need the reference: printed documents, the
  *  invoice/quote header, an export somebody reconciles against. Never a picker. */
-export const jobLabelWithNumber = (j: { job_number?: string | null; name?: string | null }): string => {
+export const jobLabelWithNumber = (j: { job_number?: string | null; name?: string | null }, lang: Lang = "en", words?: Words): string => {
   const name = (j.name ?? "").trim();
   const num = (j.job_number ?? "").trim();
-  return num && name ? `${num} · ${name}` : name || num || "Job";
+  return num && name ? `${num} · ${name}` : name || num || say(lang, words, "ag_job", "Job");
 };
 
 /** The CODES-OFF job identity label — "Smith · 123 Main St" (customer · street address).
@@ -71,8 +74,8 @@ export const toCustomerOptions = (rows: any[] | null | undefined): PickerOption[
     label: c.name,
     ...(c.address !== undefined ? { address: formatFullAddress(c.address, c.city, c.state, c.zip) || null } : {}),
   }));
-export const toStaffOptions = (rows: any[] | null | undefined): PickerOption[] =>
-  (rows ?? []).map((s) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
+export const toStaffOptions = (rows: any[] | null | undefined, lang: Lang = "en", words?: Words): PickerOption[] =>
+  (rows ?? []).map((s) => ({ id: s.id, label: s.full_name ?? say(lang, words, "ag_unnamed", "Unnamed") }));
 
 /** THE active-tech roster query — every assignee picker / crew list reads the same
  *  active profiles, id+full_name, sorted by name, so the roster can't drift across
@@ -161,9 +164,9 @@ export function customerNamePart(c: { name?: string | null; company_name?: strin
   return String(c?.name ?? "").trim().replace(/\s+/g, " ");
 }
 
-/** "Sep 27" for a YYYY-MM-DD, the same in every timezone. */
-function monthDay(ymd: string): string {
-  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+/** "Sep 27" for a YYYY-MM-DD, the same in every timezone ("27 sept" in Spanish). */
+function monthDay(ymd: string, lang: Lang = "en"): string {
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString(localeOf(lang), { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 /** The unit as it rides on a job's name, without its own designator: "56", "#56", "Unit 56",
@@ -225,6 +228,10 @@ export function defaultJobName(p: {
   /** The work words a source carried, its tag already off (lib/job-name): only used with no street. */
   work?: string | null;
   todayStr: string;
+  /** The namer's language and translator (agenda wave): "Trabajo Nuevo · 28 sept". The New Job form's
+   *  live line and the server that stores the name must hand in the same pair, or they would differ. */
+  lang?: Lang;
+  words?: Words;
 }): string {
   const line = String(p.street ?? "").split(",")[0].trim().replace(/\s+/g, " ");
   const street = PO_BOX.test(line) ? "" : line;
@@ -235,7 +242,9 @@ export function defaultJobName(p: {
   const who = customerNamePart(p.customer);
   const work = workWordsForName(p.work);
   if (who) return work ? `${who} · ${work}` : who;
-  return work || `New Job · ${monthDay(p.todayStr)}`;
+  if (work) return work;
+  const day = monthDay(p.todayStr, p.lang);
+  return say(p.lang, p.words, "ag_newJobOn", `New Job · ${day}`, { day });
 }
 
 /** The kind of billing most of this company's jobs use; Time & Material on a tie or with none yet. */

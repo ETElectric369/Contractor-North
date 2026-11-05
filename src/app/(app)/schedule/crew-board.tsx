@@ -13,7 +13,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { setCrewDayAssignment, setCrewOffRange, clearCrewOffRange } from "../timeclock/crew-actions";
 import { TimeOffButton } from "./time-off-button";
 import { useLang } from "@/components/lang-provider";
-import { translator } from "@/lib/i18n";
+import { translator, fillText } from "@/lib/i18n";
 
 export type CrewJob = { id: string; label: string; status: string; customer: string | null; assigned: string[] };
 export type CrewAppt = { id: string; title: string; type: string; time: string; jobId: string | null; who: string | null; assigned: string | null };
@@ -79,7 +79,8 @@ export function CrewBoard({
   const columns = [...lanes, unassigned].filter((l) => l.id === "__unassigned__" ? l.jobs.length + l.appts.length > 0 : true);
 
   const router = useRouter();
-  const t = translator(useLang());
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   // The decide sheet. `aimJobId` is set when it was opened by tapping a specific chip, which turns
@@ -97,10 +98,10 @@ export function CrewBoard({
     ? jobOptions.find((j) => j.id === aimId)?.label ??
       (lane?.decision?.jobId === aimId ? lane.decision.label : null) ??
       lane?.jobs.find((j) => j.id === aimId)?.label ??
-      "This Job"
+      t("ag_rail_thisJob")
     : null;
   const aimIsDecision = !!aimId && lane?.decision?.jobId === aimId;
-  const first = (lane?.name ?? "").trim().split(/\s+/)[0] || "Them";
+  const first = (lane?.name ?? "").trim().split(/\s+/)[0] || t("ag_rail_them");
 
   const openSheet = (laneId: string, aimJobId?: string) => {
     const l = lanes.find((x) => x.id === laneId);
@@ -118,7 +119,7 @@ export function CrewBoard({
     start(async () => {
       setErr(null);
       const res = await fn();
-      if (!res.ok) return setErr(res.error ?? "Couldn't save that.");
+      if (!res.ok) return setErr(res.error ?? t("ag_rail_couldntSave"));
       setSheet(null);
       router.refresh();
     });
@@ -160,18 +161,18 @@ export function CrewBoard({
             two arrow Links, which squeeze to ~17px wide while staying 32px tall. This is the
             control Erik uses to plan tomorrow, and it only broke on the days he paged TO. */}
         <div className="flex flex-wrap items-center justify-end gap-1.5">
-          <Link href={prevHref} aria-label="Previous day" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:border-brand hover:text-brand">
+          <Link href={prevHref} aria-label={t("ag_rail_prevDay")} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:border-brand hover:text-brand">
             <ChevronLeft className="h-4 w-4" />
           </Link>
           <span className="min-w-[7rem] text-center text-sm font-semibold text-slate-700">
-            {isToday ? "Today" : dayLabel}
+            {isToday ? t("ag_btn_today") : dayLabel}
           </span>
-          <Link href={nextHref} aria-label="Next day" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:border-brand hover:text-brand">
+          <Link href={nextHref} aria-label={t("ag_rail_nextDay")} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:border-brand hover:text-brand">
             <ChevronRight className="h-4 w-4" />
           </Link>
           {!isToday && (
             <Link href={todayHref} className="ml-1 inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand">
-              <Calendar className="h-3.5 w-3.5" /> Today
+              <Calendar className="h-3.5 w-3.5" /> {t("ag_btn_today")}
             </Link>
           )}
           {/* The one piece of the retired Time Off box with nowhere else to live. It writes the
@@ -183,20 +184,20 @@ export function CrewBoard({
       {/* WHO IS AWAY — the first place in the app that says so. Only when it has something to say. */}
       {offToday.length > 0 && (
         <p className="mb-2 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700">
-          {isToday ? "Off today" : `Off ${dayLabel}`}: {offToday.join(", ")}
+          {isToday ? t("ag_rail_offToday") : fillText(t("ag_rail_offOn"), { day: dayLabel })}: {offToday.join(", ")}
         </p>
       )}
 
       {/* WHAT THE CHIPS MEAN. Three lines, with the real chips in them, readable at arm's length. */}
       <div className="mb-3 flex flex-col gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
         <span className="flex items-center gap-2">
-          <Badge tone="blue">On This Job</Badge> You put them here.
+          <Badge tone="blue">{t("ag_rail_onThisJob")}</Badge> {t("ag_rail_youPutThem")}
         </span>
         <span className="flex items-center gap-2">
-          <Badge tone="slate">Scheduled</Badge> What the job calendar says.
+          <Badge tone="slate">{t("ag_rail_scheduled")}</Badge> {t("ag_rail_calendarSays")}
         </span>
         <span className="flex items-center gap-2">
-          <Badge tone="slate">Off</Badge> Time off. An empty lane means nobody has decided yet.
+          <Badge tone="slate">{t("ag_rail_off")}</Badge> {t("ag_rail_offLegend")}
         </span>
       </div>
 
@@ -224,7 +225,7 @@ export function CrewBoard({
                 <button
                   type="button"
                   onClick={() => openSheet(laneRow.id)}
-                  aria-label={`Set ${laneRow.name}'s day`}
+                  aria-label={fillText(t("ag_rail_setDay"), { name: laneRow.name })}
                   className="flex min-h-11 items-center justify-between gap-2 rounded-t-xl border-b border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50"
                 >
                   <span className="truncate text-sm font-semibold text-slate-900">{laneRow.name}</span>
@@ -247,11 +248,11 @@ export function CrewBoard({
                 {off && (
                   <div className="rounded-lg border border-slate-200 bg-slate-100 p-2 text-xs">
                     <div className="flex items-center gap-1.5">
-                      <Badge tone="slate">Off</Badge>
+                      <Badge tone="slate">{t("ag_rail_off")}</Badge>
                       {decision?.reason && <span className="text-slate-500">{decision.reason}</span>}
                     </div>
                     {stillOn.length > 0 && (
-                      <p className="mt-1 text-slate-500">Still on the calendar: {stillOn.join(", ")}</p>
+                      <p className="mt-1 text-slate-500">{fillText(t("ag_rail_stillOn"), { list: stillOn.join(", ") })}</p>
                     )}
                   </div>
                 )}
@@ -270,7 +271,7 @@ export function CrewBoard({
                         >
                           <div className="flex items-start justify-between gap-1">
                             <span className="min-w-0 flex-1 truncate font-semibold text-slate-900">{decision?.label}</span>
-                            <Badge tone="blue">On This Job</Badge>
+                            <Badge tone="blue">{t("ag_rail_onThisJob")}</Badge>
                           </div>
                         </button>
                       ) : (
@@ -280,13 +281,13 @@ export function CrewBoard({
                         >
                           <div className="flex items-start justify-between gap-1">
                             <span className="min-w-0 flex-1 truncate font-semibold text-slate-900">{decision?.label}</span>
-                            <Badge tone="blue">On This Job</Badge>
+                            <Badge tone="blue">{t("ag_rail_onThisJob")}</Badge>
                           </div>
                         </Link>
                       ))}
 
                     {load === 0 && (
-                      <p className="px-1 pt-3 text-center text-xs text-slate-400">Nothing scheduled. Has room.</p>
+                      <p className="px-1 pt-3 text-center text-xs text-slate-400">{t("ag_rail_hasRoom")}</p>
                     )}
 
                     {scheduledJobs.map((j) =>
@@ -302,11 +303,11 @@ export function CrewBoard({
                         >
                           <div className="flex items-start justify-between gap-1">
                             <span className="min-w-0 flex-1 truncate font-medium text-slate-900">{j.label}</span>
-                            <Badge tone="slate">Scheduled</Badge>
+                            <Badge tone="slate">{t("ag_rail_scheduled")}</Badge>
                           </div>
                           <div className="mt-0.5 flex items-center gap-1.5 text-slate-400">
                             {j.customer && <span className="truncate">{j.customer}</span>}
-                            <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
+                            <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status, lang, t)}</Badge>
                           </div>
                         </button>
                       ) : (
@@ -317,7 +318,7 @@ export function CrewBoard({
                         >
                           <div className="flex items-start justify-between gap-1">
                             <span className="min-w-0 flex-1 truncate font-medium text-slate-900">{j.label}</span>
-                            <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
+                            <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status, lang, t)}</Badge>
                           </div>
                           {j.customer && <div className="mt-0.5 truncate text-slate-400">{j.customer}</div>}
                         </Link>
@@ -333,7 +334,7 @@ export function CrewBoard({
                         className="min-h-11 rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-sm hover:border-brand"
                       >
                         <div className="flex items-center gap-1.5">
-                          <Badge tone={isInspectionType(a.type) ? "amber" : "blue"}>{appointmentTypeLabel(a.type)}</Badge>
+                          <Badge tone={isInspectionType(a.type) ? "amber" : "blue"}>{appointmentTypeLabel(a.type, lang, t)}</Badge>
                           <span className="text-slate-500">{a.time}</span>
                         </div>
                         <div className="mt-0.5 truncate font-medium text-slate-900">{a.title}</div>
@@ -354,7 +355,7 @@ export function CrewBoard({
                     onClick={() => openSheet(laneRow.id)}
                     className="min-h-11 w-full rounded-lg border border-dashed border-slate-300 bg-white/60 px-2 text-xs font-medium text-slate-500 hover:border-brand hover:text-brand"
                   >
-                    Put {(laneRow.name.trim().split(/\s+/)[0] || "Them")} On A Job
+                    {fillText(t("ag_rail_btn_putOnAJob"), { name: laneRow.name.trim().split(/\s+/)[0] || t("ag_rail_them") })}
                   </button>
                 )}
               </div>
@@ -362,7 +363,7 @@ export function CrewBoard({
           );
         })}
         {columns.length === 0 && (
-          <p className="px-1 py-8 text-sm text-slate-400">No crew yet. Add team members to see their day.</p>
+          <p className="px-1 py-8 text-sm text-slate-400">{t("ag_rail_noCrew")}</p>
         )}
       </div>
 
@@ -371,9 +372,9 @@ export function CrewBoard({
         <Modal
           open
           onClose={() => setSheet(null)}
-          title={`${lane.name} · ${isToday ? "Today" : dayLabel}`}
+          title={`${lane.name} · ${isToday ? t("ag_btn_today") : dayLabel}`}
           size="sm"
-          footer={<ModalActions onCancel={() => setSheet(null)} onSave={() => setSheet(null)} saveLabel="Done" hideCancel />}
+          footer={<ModalActions onCancel={() => setSheet(null)} onSave={() => setSheet(null)} saveLabel={t("ag_btn_done")} hideCancel />}
         >
           <div className="space-y-4">
             {/* A refusal goes at the TOP: a sheet this tall scrolls on a phone, and an error under
@@ -385,57 +386,53 @@ export function CrewBoard({
                     decision — offering to put him where he already is reads as a broken button. */}
                 {!aimIsDecision && (
                   <Button className="w-full" onClick={() => putOn(lane.id, aimId)} disabled={pending}>
-                    Put {first} On {aimLabel}
+                    {fillText(t("ag_rail_btn_putOn"), { name: first, job: aimLabel ?? "" })}
                   </Button>
                 )}
                 <Link
                   href={`/jobs/${aimId}`}
                   className="flex min-h-11 items-center justify-center text-sm font-medium text-slate-600 underline underline-offset-2"
                 >
-                  Open The Job
+                  {t("ag_btn_openTheJob")}
                 </Link>
               </div>
             )}
 
             <div>
-              <Label htmlFor="crew-day-job">Put on a job</Label>
+              <Label htmlFor="crew-day-job">{t("ag_rail_putOnAJob")}</Label>
               <Select id="crew-day-job" value={pickJobId} onChange={(e) => setPickJobId(e.target.value)}>
-                <option value="">Pick A Job…</option>
-                <optgroup label="On this day's schedule">
+                <option value="">{t("ag_rail_btn_pickAJob")}</option>
+                <optgroup label={t("ag_rail_onTodaysSchedule")}>
                   {jobOptions.filter((j) => j.today).map((j) => (
                     <option key={j.id} value={j.id}>{j.label}</option>
                   ))}
                 </optgroup>
-                <optgroup label="Other active jobs">
+                <optgroup label={t("ag_rail_otherActiveJobs")}>
                   {jobOptions.filter((j) => !j.today).map((j) => (
                     <option key={j.id} value={j.id}>{j.label}</option>
                   ))}
                 </optgroup>
               </Select>
-              <p className="mt-1 text-xs text-slate-500">
-                They get a heads up, and their Clock In lands on this job without picking one.
-              </p>
+              <p className="mt-1 text-xs text-slate-500">{t("ag_rail_headsUp")}</p>
               <Button
                 className="mt-2 w-full"
                 onClick={() => putOn(lane.id, pickJobId)}
                 disabled={pending || !pickJobId}
               >
-                Put On This Job
+                {t("ag_rail_btn_putOnThisJob")}
               </Button>
             </div>
 
             <div className="border-t border-slate-200 pt-3">
-              <Label htmlFor="crew-day-off">Mark off</Label>
+              <Label htmlFor="crew-day-off">{t("ag_rail_markOff")}</Label>
               <Select id="crew-day-off" value={reason} onChange={(e) => setReason(e.target.value as never)}>
-                <option value="vacation">Vacation</option>
-                <option value="sick">Sick</option>
-                <option value="other">Other</option>
+                <option value="vacation">{t("ag_rail_vacation")}</option>
+                <option value="sick">{t("ag_rail_sick")}</option>
+                <option value="other">{t("ag_rail_otherReason")}</option>
               </Select>
-              <p className="mt-1 text-xs text-slate-500">
-                Just this one day. They stay on their jobs&rsquo; crews. They are not told automatically, so tell them.
-              </p>
+              <p className="mt-1 text-xs text-slate-500">{t("ag_rail_justThisDay")}</p>
               <Button className="mt-2 w-full" variant="outline" onClick={() => markOff(lane.id)} disabled={pending}>
-                Mark Off
+                {t("ag_rail_btn_markOff")}
               </Button>
             </div>
 
@@ -447,14 +444,14 @@ export function CrewBoard({
                   onClick={() => followSchedule(lane.id, lane.decision!.kind)}
                   disabled={pending}
                 >
-                  Follow The Schedule
+                  {t("ag_rail_btn_followSchedule")}
                 </Button>
                 <p className="mt-1 text-xs text-slate-500">
-                  {lane.decision.kind === "off" ? "Clears the time off." : "Drops your pick."}{" "}
+                  {lane.decision.kind === "off" ? t("ag_rail_clearsTimeOff") : t("ag_rail_dropsYourPick")}{" "}
                   {lane.scheduledLabel
-                    ? `The job calendar says ${lane.scheduledLabel}.`
-                    : "The job calendar has nothing on them this day."}
-                  {lane.decision.kind === "job" && " They stay on that job's crew."}
+                    ? fillText(t("ag_rail_calendarSaysJob"), { job: lane.scheduledLabel })
+                    : t("ag_rail_calendarSaysNothing")}
+                  {lane.decision.kind === "job" && ` ${t("ag_rail_stayOnCrew")}`}
                 </p>
               </div>
             )}
@@ -469,12 +466,13 @@ export function CrewBoard({
 /** The load pill — unchanged in shape: a count, or "open" when the day is empty. An OFF lane says
  *  so instead of counting to zero, because "open" on a man who is on vacation reads as "has room". */
 function LoadPill({ load, off }: { load: number; off: boolean }) {
+  const t = translator(useLang());
   if (off) {
-    return <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">off</span>;
+    return <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">{t("ag_rail_pillOff")}</span>;
   }
   return (
     <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${load === 0 ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
-      {load === 0 ? "open" : load}
+      {load === 0 ? t("ag_rail_pillOpen") : load}
     </span>
   );
 }

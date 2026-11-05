@@ -39,6 +39,8 @@ import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { PAGE_ROWS } from "@/lib/read-all-pages";
 import { pillColorForPerson } from "@/lib/employee-color";
 import { initialsOf } from "./block-info";
+import type { Lang } from "@/lib/locale";
+import { clock12, say, type Words } from "@/lib/lang-words";
 
 /** A time entry as the schedule reads it: who, on which job, in and out. */
 export type ActualEntry = {
@@ -75,13 +77,14 @@ const nextDay = (ymd: string) => {
  * every following day it covers starts at 0 (a runaway that was later closed spans at most `maxDays`).
  * An open entry is one span on its clock-in day, open.
  */
-export function actualSpans(entries: readonly ActualEntry[], tz: string, todayStr: string, maxDays = 7): ActualSpan[] {
+export function actualSpans(entries: readonly ActualEntry[], tz: string, todayStr: string, maxDays = 7, lang: Lang = "en", words?: Words): ActualSpan[] {
   const out: ActualSpan[] = [];
+  const someone = say(lang, words, "ag_someone", "Someone");
   for (const e of entries ?? []) {
     if (!e?.jobId || !e.profileId || !e.clockIn) continue;
     const inAt = new Date(e.clockIn);
     if (isNaN(inAt.getTime())) continue;
-    const name = String(e.name ?? "").trim() || "Someone";
+    const name = String(e.name ?? "").trim() || someone;
     const day = todayStrInTz(tz, inAt);
     const startMin = tzMinutesOfDay(inAt, tz);
     const push = (dayStr: string, s: number, en: number | null) => {
@@ -129,7 +132,8 @@ export type ActualsPayload = {
 
 export type ActualJob = { name: string; job_number: string | null; customer: string | null };
 
-export function packActuals(spans: readonly ActualSpan[], jobs: ReadonlyMap<string, ActualJob>): ActualsPayload {
+export function packActuals(spans: readonly ActualSpan[], jobs: ReadonlyMap<string, ActualJob>, lang: Lang = "en", words?: Words): ActualsPayload {
+  const aJob = say(lang, words, "ag_aJob", "A Job");
   const people: ActualsPayload["people"] = [];
   const jobList: ActualsPayload["jobs"] = [];
   const pIdx = new Map<string, number>();
@@ -144,7 +148,7 @@ export function packActuals(spans: readonly ActualSpan[], jobs: ReadonlyMap<stri
     let j = jIdx.get(s.jobId);
     if (j === undefined) {
       const w = jobs.get(s.jobId);
-      j = jobList.push({ id: s.jobId, name: w?.name ?? "A Job", job_number: w?.job_number ?? null, customer: w?.customer ?? null }) - 1;
+      j = jobList.push({ id: s.jobId, name: w?.name ?? aJob, job_number: w?.job_number ?? null, customer: w?.customer ?? null }) - 1;
       jIdx.set(s.jobId, j);
     }
     tuples.push([j, p, s.dayStr, s.startMin, s.endMin]);
@@ -222,6 +226,8 @@ export function actualsFrom(
   tz: string,
   todayStr: string,
   capped = false,
+  lang: Lang = "en",
+  words?: Words,
 ): { actuals: ActualsPayload | null; actualsCappedBefore: string | null } {
   if (!rows) return { actuals: null, actualsCappedBefore: null };
   const entries: ActualEntry[] = rows.map((r) => ({
@@ -233,14 +239,14 @@ export function actualsFrom(
   }));
   const jobsById = new Map<string, ActualJob>();
   for (const r of rows) {
-    if (r.job?.id) jobsById.set(String(r.job.id), { name: r.job.name ?? "A Job", job_number: r.job.job_number ?? null, customer: r.job.customers?.name ?? null });
+    if (r.job?.id) jobsById.set(String(r.job.id), { name: r.job.name ?? say(lang, words, "ag_aJob", "A Job"), job_number: r.job.job_number ?? null, customer: r.job.customers?.name ?? null });
   }
   let actualsCappedBefore: string | null = null;
   // The oldest row READ, found in the rows themselves rather than trusted from their order.
   let oldest: string | null = null;
   if (capped) for (const r of rows) if (r.clock_in && (!oldest || r.clock_in < oldest)) oldest = r.clock_in;
   if (oldest) actualsCappedBefore = nextDay(todayStrInTz(tz, new Date(oldest)));
-  return { actuals: packActuals(actualSpans(entries, tz, todayStr), jobsById), actualsCappedBefore };
+  return { actuals: packActuals(actualSpans(entries, tz, todayStr, 7, lang, words), jobsById, lang, words), actualsCappedBefore };
 }
 
 export function unpackActuals(p: ActualsPayload | null | undefined): ActualSpan[] {
@@ -306,19 +312,20 @@ export function clockShort(min: number): string {
   return `${h % 12 || 12}${mm ? `:${String(mm).padStart(2, "0")}` : ""}`;
 }
 
-/** "11:04 AM", "1:46 PM". */
-export function clockWords(min: number): string {
+/** "11:04 AM", "1:46 PM". `lang` "es": "11:04 a. m.", "1:46 p. m.". */
+export function clockWords(min: number, lang: Lang = "en"): string {
   const m = ((Math.round(min) % DAY_MIN) + DAY_MIN) % DAY_MIN;
-  const h = Math.floor(m / 60);
-  return `${h % 12 || 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  return clock12(Math.floor(m / 60), m % 60, lang);
 }
 
-/** "11:04 AM–1:46 PM", "12:30–5:30 PM" (the half said once when both ends share it). */
-export function rangeWords(a: number, b: number): string {
-  const A = clockWords(a);
-  const B = clockWords(b);
-  const half = (w: string) => w.slice(-2);
-  return half(A) === half(B) ? `${A.slice(0, -3)}–${B}` : `${A}–${B}`;
+/** "11:04 AM–1:46 PM", "12:30–5:30 PM" (the half said once when both ends share it). `lang` "es":
+ *  "12:30–5:30 p. m.". */
+export function rangeWords(a: number, b: number, lang: Lang = "en"): string {
+  const A = clockWords(a, lang);
+  const B = clockWords(b, lang);
+  const n = lang === "es" ? 5 : 2; // "a. m." / "AM"
+  const half = (w: string) => w.slice(-n);
+  return half(A) === half(B) ? `${A.slice(0, -(n + 1))}–${B}` : `${A}–${B}`;
 }
 
 /** "45m", "1h", "1.5h", "2.5h", "1h 10m". */
@@ -386,17 +393,22 @@ export function mergePeople(spans: readonly ActualSpan[], openEnd: (startMin: nu
 
 /** One person's part of a sentence: "Erik 10–7:30", "Erik 8–12, 1–5", "Erik in at 10, never clocked out",
  *  and on today "Erik on the clock since 10". */
-function personPart(p: WorkedPerson): string {
-  const parts = p.spans.map((s) =>
-    s.open ? (s.running ? `on the clock since ${clockShort(s.startMin)}` : `in at ${clockShort(s.startMin)}, never clocked out`) : `${clockShort(s.startMin)}–${clockShort(s.endMin)}`,
-  );
+function personPart(p: WorkedPerson, lang: Lang, words?: Words): string {
+  const parts = p.spans.map((s) => {
+    const time = clockShort(s.startMin);
+    return s.open
+      ? s.running
+        ? say(lang, words, "ag_onClockSince", `on the clock since ${time}`, { time })
+        : say(lang, words, "ag_inNeverOut", `in at ${time}, never clocked out`, { time })
+      : `${clockShort(s.startMin)}–${clockShort(s.endMin)}`;
+  });
   return `${p.first} ${parts.join(", ")}`;
 }
 
 /** Fit a sentence in SENTENCE_MAX: drop the last people into "+N more", then cut with an ellipsis. */
-function fitSentence(head: string, people: string[], tail: string[]): string {
+function fitSentence(head: string, people: string[], tail: string[], lang: Lang = "en", words?: Words): string {
   const build = (shown: string[], hidden: number) =>
-    [head, ...shown, ...(hidden ? [`+${hidden} more`] : []), ...tail].join(" · ");
+    [head, ...shown, ...(hidden ? [say(lang, words, "ag_nMore", `+${hidden} more`, { n: hidden })] : []), ...tail].join(" · ");
   let shown = [...people];
   let s = build(shown, 0);
   while (s.length > SENTENCE_MAX && shown.length > 1) {
@@ -407,19 +419,26 @@ function fitSentence(head: string, people: string[], tail: string[]): string {
 }
 
 /** The block's sentence: "Booked 9–5 · Erik 10–7:30 · Jimmy 10–7:30 · 1h late · 2.5h over". */
-export function blockSentence(b: { startMin: number; endMin: number }, a: Pick<BlockActual, "people" | "lateMin" | "overMin" | "shortMin">): string {
-  const head = `Booked ${clockShort(b.startMin)}–${clockShort(b.endMin)}`;
+export function blockSentence(
+  b: { startMin: number; endMin: number },
+  a: Pick<BlockActual, "people" | "lateMin" | "overMin" | "shortMin">,
+  lang: Lang = "en",
+  words?: Words,
+): string {
+  const span = `${clockShort(b.startMin)}–${clockShort(b.endMin)}`;
+  const head = say(lang, words, "ag_booked", `Booked ${span}`, { span });
   /* SAY ONLY WHAT THE READ KNOWS. The clocked-time read keeps entries ON A JOB (a no-job punch is
      never guessed onto a block), so a helper who clocked in with no job — the Skip on "Which Job Are
      You On?", anyone not rostered on the job — is invisible here. "Nobody clocked in" would name a
      real person as absent while /timecards shows their hours that day and Needs You counts them under
      Hours On No Job. The block's own truth is narrower, and it is the one said. */
-  if (!a.people.length) return `${head} · No time clocked to this job`;
+  if (!a.people.length) return `${head} · ${say(lang, words, "ag_noTimeClocked", "No time clocked to this job")}`;
   const tail: string[] = [];
-  if (a.lateMin != null && a.lateMin >= NOTE_MIN) tail.push(`${durShort(a.lateMin)} late`);
-  if (a.overMin != null && a.overMin >= NOTE_MIN) tail.push(`${durShort(a.overMin)} over`);
-  if (a.shortMin != null && a.shortMin >= NOTE_MIN) tail.push(`${durShort(a.shortMin)} short`);
-  return fitSentence(head, a.people.map(personPart), tail);
+  const by = (min: number, key: string, en: string) => say(lang, words, key, `${durShort(min)} ${en}`, { d: durShort(min) });
+  if (a.lateMin != null && a.lateMin >= NOTE_MIN) tail.push(by(a.lateMin, "ag_late", "late"));
+  if (a.overMin != null && a.overMin >= NOTE_MIN) tail.push(by(a.overMin, "ag_over", "over"));
+  if (a.shortMin != null && a.shortMin >= NOTE_MIN) tail.push(by(a.shortMin, "ag_short", "short"));
+  return fitSentence(head, a.people.map((p) => personPart(p, lang, words)), tail, lang, words);
 }
 
 /**
@@ -430,7 +449,15 @@ export function blockSentence(b: { startMin: number; endMin: number }, a: Pick<B
  * block's actual by its key, and the groups of work on a (job, day) that no drawn block took (part D's
  * ghosts, when nothing was booked).
  */
-export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly ActualSpan[]; todayStr: string; nowMin?: number }): {
+export function planVsActual(p: {
+  blocks: readonly PlanBlock[];
+  spans: readonly ActualSpan[];
+  todayStr: string;
+  nowMin?: number;
+  /** The reader's language and translator for each block's sentence (agenda wave); English without. */
+  lang?: Lang;
+  words?: Words;
+}): {
   byKey: Map<string, BlockActual>;
   unplanned: UnplannedGroup[];
 } {
@@ -480,7 +507,7 @@ export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly 
       // Today's block is hollow only once its booked time has passed: at 7 AM a 9-to-5 is still ahead.
       if (today && nowMin < b.endMin) continue;
       const a = { people, lateMin: null, overMin: null, shortMin: null };
-      byKey.set(b.key, { ...a, state: "hollow", extent: { lo, hi }, sentence: blockSentence(b, a) });
+      byKey.set(b.key, { ...a, state: "hollow", extent: { lo, hi }, sentence: blockSentence(b, a, p.lang, p.words) });
       continue;
     }
     const firstIn = Math.min(...people.map((x) => x.startMin));
@@ -494,7 +521,7 @@ export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly 
       overMin: lastOut == null ? null : lastOut - b.endMin,
       shortMin: lastOut == null ? null : b.endMin - lastOut,
     };
-    byKey.set(b.key, { ...a, state: "worked", extent: { lo, hi }, sentence: blockSentence(b, a) });
+    byKey.set(b.key, { ...a, state: "worked", extent: { lo, hi }, sentence: blockSentence(b, a, p.lang, p.words) });
   }
   return { byKey, unplanned };
 }
@@ -547,13 +574,14 @@ export function ghostsFor(spans: readonly ActualSpan[], booked: ReadonlySet<stri
 
 /** Who worked, in words, for a ghost's sheet and the day drill: "Brian 11:04 AM–1:46 PM · Erik
  *  12:30–5:30 PM" ("in at 7:00 AM, never clocked out" for a runaway; "on the clock since 7:00 AM" today). */
-export function peopleWords(people: readonly WorkedPerson[]): string {
-  return people
-    .map(
-      (p) =>
-        `${p.first} ${p.spans
-          .map((s) => (s.open ? (s.running ? `on the clock since ${clockWords(s.startMin)}` : `in at ${clockWords(s.startMin)}, never clocked out`) : rangeWords(s.startMin, s.endMin)))
-          .join(", ")}`,
-    )
-    .join(" · ");
+export function peopleWords(people: readonly WorkedPerson[], lang: Lang = "en", words?: Words): string {
+  const one = (s: WorkedSpan) => {
+    const time = clockWords(s.startMin, lang);
+    return s.open
+      ? s.running
+        ? say(lang, words, "ag_onClockSince", `on the clock since ${time}`, { time })
+        : say(lang, words, "ag_inNeverOut", `in at ${time}, never clocked out`, { time })
+      : rangeWords(s.startMin, s.endMin, lang);
+  };
+  return people.map((p) => `${p.first} ${p.spans.map(one).join(", ")}`).join(" · ");
 }

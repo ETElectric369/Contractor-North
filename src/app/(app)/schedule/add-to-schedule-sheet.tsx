@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 import { BlockTimeControls, type BlockPatch } from "@/components/block-time-controls";
 import { jobStatusLabel } from "@/lib/job-status";
 import { dayWords, hmWords, readHm, workDayMinutes } from "@/lib/schedule/job-block";
@@ -126,6 +128,8 @@ export function AddToScheduleSheet(props: {
 function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToScheduleSheet>[0]) {
   const router = useRouter();
   const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -153,7 +157,7 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
   /** The time controls save into the sheet, never the database: the same rule the writer keeps. */
   async function draftSave(patch: BlockPatch) {
     const next = nextDraft({ now: hours, chosen, sizeMinutes: job?.planned_minutes, workDay, patch });
-    if (!next) return { ok: false, error: "That time doesn't work. Pick a start and a length." };
+    if (!next) return { ok: false, error: t("ag_rail_timeDoesntWork") };
     setDraft(next.hours);
     setChosen(next.chosen);
     return { ok: true };
@@ -167,8 +171,8 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
   }
 
   function save() {
-    if (!job) return setError("Pick the job first.");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return setError("Pick a day.");
+    if (!job) return setError(t("ag_rail_pickTheJobFirst"));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return setError(t("ag_pickADay"));
     setError(null);
     const length = chosen ? (allDay ? ("full" as const) : e - s) : undefined;
     const add = onIt.filter((id) => !jobCrew.includes(id));
@@ -178,21 +182,21 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
       try {
         let res = await addJobDay(job.id, payload);
         if (!res.ok && res.needsProposalConfirm) {
-          if (!window.confirm(`${res.error} Add the day anyway?`)) {
-            setError("Nothing was added. The customer's link is still out.");
+          if (!window.confirm(fillText(t("ag_rail_addAnyway"), { error: res.error ?? "" }))) {
+            setError(t("ag_rail_nothingAdded"));
             return;
           }
           res = await addJobDay(job.id, payload, { cancelProposals: true });
         }
         if (!res.ok) {
-          setError(res.error ?? "That day didn't go on. Try again.");
+          setError(res.error ?? t("ag_rail_dayDidntGoOn"));
           return;
         }
-        toast(res.note ?? `Added ${dayWords(day)}.`, "success");
+        toast(res.note ?? fillText(t("ag_rail_addedOn"), { day: dayWords(day, lang) }), "success");
         router.refresh();
         onClose();
       } catch {
-        setError("That day didn't go on. You may be offline.");
+        setError(t("ag_rail_dayDidntGoOnOffline"));
       }
     });
   }
@@ -207,25 +211,25 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
       open={!!at}
       onClose={onClose}
       holdOpen={pending}
-      title="Add To Schedule"
+      title={t("ag_rail_btn_addToSchedule")}
       size="md"
-      footer={<ModalActions onCancel={onClose} onSave={save} saveLabel="Add To Schedule" saving={pending} disabled={!job} />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saveLabel={t("ag_rail_btn_addToSchedule")} saving={pending} disabled={!job} />}
     >
       <div className="space-y-5">
         <section>
-          <Heading>Job</Heading>
+          <Heading>{t("ag_job")}</Heading>
           <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 focus-within:border-brand">
             <Search className="h-4 w-4 shrink-0 text-slate-400" />
             <input autoComplete="off"
               type="search"
               value={query}
               onChange={(ev) => setQuery(ev.target.value)}
-              placeholder="Find a job: street, name, customer"
-              aria-label="Find a job"
+              placeholder={t("ag_rail_findAJobHint")}
+              aria-label={t("ag_rail_findAJob")}
               className="h-11 min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none"
             />
           </label>
-          <ul role="listbox" aria-label="Jobs" className="mt-2 max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-md border border-slate-200">
+          <ul role="listbox" aria-label={t("ag_rail_jobs")} className="mt-2 max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-md border border-slate-200">
             {found.slice(0, LIST_MAX).map((j) => {
               const on = j.id === jobId;
               const line = addableLine(j);
@@ -252,31 +256,31 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
                       {line && <span className="block truncate text-xs text-slate-500">{line}</span>}
                     </span>
                     <Badge tone={statusTone(j.status)} className="shrink-0">
-                      {jobStatusLabel(j.status)}
+                      {jobStatusLabel(j.status, lang, t)}
                     </Badge>
                   </button>
                 </li>
               );
             })}
-            {!found.length && <li className="px-3 py-3 text-sm text-slate-500">No job matches that. Try the street number or the customer&apos;s name.</li>}
+            {!found.length && <li className="px-3 py-3 text-sm text-slate-500">{t("ag_rail_noJobMatches")}</li>}
           </ul>
-          {found.length > LIST_MAX && <p className="mt-1 text-xs text-slate-400">Keep typing to find the rest ({found.length - LIST_MAX} more).</p>}
+          {found.length > LIST_MAX && <p className="mt-1 text-xs text-slate-400">{fillText(t("ag_rail_keepTyping"), { n: String(found.length - LIST_MAX) })}</p>}
         </section>
 
         <section>
-          <Heading>Day</Heading>
+          <Heading>{t("ag_btn_day")}</Heading>
           <input
             type="date"
             value={day}
             onChange={(ev) => setDay(ev.target.value)}
-            aria-label="Day"
+            aria-label={t("ag_btn_day")}
             className="h-11 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900"
           />
-          {day && <p className="mt-1 text-xs text-slate-500">{dayWords(day)}. The job keeps every other day it has.</p>}
+          {day && <p className="mt-1 text-xs text-slate-500">{fillText(t("ag_rail_dayKeepsOthers"), { day: dayWords(day, lang) })}</p>}
         </section>
 
         <section>
-          <Heading>Time</Heading>
+          <Heading>{t("ag_rail_time")}</Heading>
           <BlockTimeControls
             startHm={hours.start}
             endHm={hours.end}
@@ -294,18 +298,18 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
 
         {job && (
           <section>
-            <Heading>Who&apos;s On It</Heading>
-            <div role="group" aria-label="Who's on it" className="flex flex-wrap items-center gap-2">
+            <Heading>{t("ag_rail_whosOnIt")}</Heading>
+            <div role="group" aria-label={t("ag_rail_whosOnItAria")} className="flex flex-wrap items-center gap-2">
               {!onIt.length && (
-                <span className="inline-flex h-11 items-center rounded-full border border-dashed border-slate-300 px-3 text-sm text-slate-400">Nobody</span>
+                <span className="inline-flex h-11 items-center rounded-full border border-dashed border-slate-300 px-3 text-sm text-slate-400">{t("ag_rail_nobody")}</span>
               )}
               {team.map((m) => (
                 <button
                   key={m.id}
                   type="button"
                   aria-pressed={onIt.includes(m.id)}
-                  aria-label={m.full_name ?? "Unnamed"}
-                  title={m.full_name ?? "Unnamed"}
+                  aria-label={m.full_name ?? t("ag_unnamed")}
+                  title={m.full_name ?? t("ag_unnamed")}
                   onClick={() => toggle(m.id)}
                   className={chip(onIt.includes(m.id))}
                 >
@@ -313,7 +317,7 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-xs text-slate-500">The job&apos;s crew, for all its days. Tap to put someone on or take them off.</p>
+            <p className="mt-1 text-xs text-slate-500">{t("ag_rail_crewForAllDays")}</p>
           </section>
         )}
 
@@ -324,7 +328,7 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
             the calendar closes this sheet once the URL has landed — closing first would step
             history back under a navigation still in flight (the Modal's own entry). */}
         <section>
-          <Heading>Or An Appointment</Heading>
+          <Heading>{t("ag_rail_btn_orAnAppointment")}</Heading>
           <Button
             type="button"
             variant="outline"
@@ -333,7 +337,10 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
               router.push(`/schedule?view=day&date=${apptDayOf(day, at?.day)}&new=1${at?.minute != null ? `&time=${minutesToHm(at.minute)}` : ""}`)
             }
           >
-            <CalendarPlus className="h-4 w-4" /> New Appointment {at?.minute != null ? `At ${hmWords(minutesToHm(at.minute))}` : `On ${dayWords(apptDayOf(day, at?.day))}`}
+            <CalendarPlus className="h-4 w-4" />{" "}
+            {at?.minute != null
+              ? fillText(t("ag_rail_btn_newApptAt"), { time: hmWords(minutesToHm(at.minute), lang) })
+              : fillText(t("ag_rail_btn_newApptOn"), { day: dayWords(apptDayOf(day, at?.day), lang) })}
           </Button>
         </section>
 

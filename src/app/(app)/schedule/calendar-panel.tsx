@@ -10,6 +10,8 @@ import { dayRowsByDay, type CrewDayRow } from "@/lib/schedule/block-info";
 import { ACTUALS_PAGES, CREW_ROW_PAGES, actualsFrom, readPagesCapped, type ActualEntryRow } from "@/lib/schedule/plan-vs-actual";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
+import { currentLang } from "@/lib/current-lang";
+import { translator } from "@/lib/i18n";
 import {
   CalendarView,
   type CalJob,
@@ -26,6 +28,8 @@ import {
  *  /timecards. The client slices this preloaded ±window into day/week/month; paging never refetches. */
 export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } = {}) {
   const supabase = await createClient();
+  // The reader's language for the past blocks' sentences (actualsFrom); the session read is cached.
+  const langRead = currentLang();
 
   const now = Date.now();
   // A WIDE window so far-future bookings and long in-flight jobs don't silently
@@ -196,7 +200,8 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   ]);
   const historyJobs = historyReads.flatMap((r) => (r.data ?? []) as unknown[]);
   const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
-  const { actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped);
+  const lang = await langRead;
+  const { actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped, lang, translator(lang));
 
   return (
     <div className="mx-auto max-w-5xl">

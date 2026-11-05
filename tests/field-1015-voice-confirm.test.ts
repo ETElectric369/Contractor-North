@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { words as serverWords } from "@/lib/words/agenda-server";
 
 /**
  * THE CONFIRM QUESTION NOBODY HEARD (Erik's locked round, 2026-10-15 22:50). Nort's reply was a confirm
@@ -106,19 +107,21 @@ describe("the appointment form: a new person in plain sight, and the address pic
 describe("the appointment writers: a new lead goes through the visit page's own door", () => {
   const acts = src("src/app/(app)/appointments/actions.ts");
   it("__lead__ makes the lead after the visit exists, with the phone, on create, edit and propose", () => {
-    expect(acts).toContain('if (customerId === "__lead__") {\n    if (!newName) return { customerId: null, error: "Enter a name for the new lead." };');
+    expect(acts).toContain('if (customerId === "__lead__") {\n    if (!newName) return { customerId: null, error: await ws.say("ag_srv_leadNameFirst") };\n    return { customerId: null, lead: { name: newName, phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null } };');
+    expect(serverWords.en.ag_srv_leadNameFirst).toBe("Enter a name for the new lead.");
     // (the edit passes whether the visit had a customer, so a failed lead leaves it: carried-1123-link-picker)
-    expect(acts).toContain("async function attachNewLead(\n  appointmentId: string,\n  lead: { name: string; phone: string | null },\n  hadCustomer = false,\n): Promise<string | undefined> {");
+    expect(acts).toContain("async function attachNewLead(\n  ws: Said,\n  appointmentId: string,\n  lead: { name: string; phone: string | null },\n  hadCustomer = false,\n): Promise<string | undefined> {");
     expect(acts).toContain("const made = await linkAppointmentToNewLead(appointmentId, lead.name, lead.phone);");
-    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(data.id, cust.lead) : undefined;");
-    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(id, cust.lead, !!row?.customer_id) : undefined;");
-    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(res.appointmentId, cust.lead) : undefined;");
+    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(ws, data.id, cust.lead) : undefined;");
+    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(ws, id, cust.lead, !!row?.customer_id) : undefined;");
+    expect(acts).toContain("const warning = cust.lead ? await attachNewLead(ws, res.appointmentId, cust.lead) : undefined;");
     expect(acts).toContain('if (phone) fd.set("phone", phone);');
     expect(acts).toContain("return { ok: true, id: data.id, ...(warning ? { warning } : {}) };");
     expect(acts).toContain("return { ok: true, ...(warning ? { warning } : {}) };");
     expect(acts).toContain('return [made.note, kept].filter(Boolean).join(" ") || undefined;');
     // One lead per visit.
-    expect(acts).toContain('if (cust.lead && row?.inquiry_id) return { ok: false, error: "This visit already has a lead attached — change who it\'s for from the visit\'s page." };');
+    expect(acts).toContain('if (cust.lead && row?.inquiry_id) return { ok: false, error: await ws.say("ag_srv_visitHasLead") };');
+    expect(serverWords.en.ag_srv_visitHasLead).toBe("This visit already has a lead attached — change who it\'s for from the visit\'s page.");
   });
   it("a pick's parts are written on create, propose and edit; on edit a typed line that no longer says a stored part drops the parts", () => {
     expect(acts).toContain('if (!formData.has("city")) return {};');

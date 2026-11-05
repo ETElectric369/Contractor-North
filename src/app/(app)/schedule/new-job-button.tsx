@@ -19,12 +19,17 @@ import {
 } from "@/lib/schedule-options";
 import { createJob } from "./actions";
 import { createParamClaim } from "@/lib/param-claim";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
+import { clock12 } from "@/lib/lang-words";
 
-/** "08:00" → "8:00 AM", for the Start Time line (blank = from the company's start, two hours). */
-function clockWords(hm: string): string {
+/** "08:00" → "8:00 AM", for the Start Time line (blank = from the company's start, two hours);
+ *  "8:00 a. m." to a Spanish reader (lib/lang-words clock12). */
+function clockWords(hm: string, lang?: string): string {
   const m = /^(\d{2}):(\d{2})/.exec(hm);
   if (!m) return hm;
   const h = Number(m[1]);
+  if (lang === "es") return clock12(h, Number(m[2]), "es");
   return `${h % 12 || 12}:${m[2]} ${h < 12 ? "AM" : "PM"}`;
 }
 
@@ -35,7 +40,8 @@ function deviceToday(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-const BILLING_WORDS: Record<string, string> = { tm: "Time & Material", fixed: "Fixed Price" };
+/** Billing's words, by catalog key (lib/words/agenda-rail). */
+const BILLING_WORDS: Record<string, string> = { tm: "ag_rail_billingTm", fixed: "ag_rail_billingFixed" };
 
 /**
  * THE CUSTOMER PICKER, one for New Job and Edit Job (W1-22): the book as a list, or "+ New Customer",
@@ -66,16 +72,17 @@ export function CustomerPicker({
   newPhone: string;
   onNewPhone: (v: string) => void;
 }) {
+  const t = translator(useLang());
   return (
     <div>
       <div className="flex items-center justify-between">
-        <Label htmlFor={isNew ? `${idPrefix}-new-name` : `${idPrefix}-customer`}>Customer</Label>
+        <Label htmlFor={isNew ? `${idPrefix}-new-name` : `${idPrefix}-customer`}>{t("ag_rail_customer")}</Label>
         <button
           type="button"
           onClick={() => onIsNew(!isNew)}
           className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-brand hover:underline"
         >
-          {isNew ? "Pick Existing" : "+ New Customer"}
+          {isNew ? t("ag_rail_btn_pickExisting") : t("ag_rail_btn_newCustomer")}
         </button>
       </div>
       {isNew ? (
@@ -86,8 +93,8 @@ export function CustomerPicker({
           <Input autoComplete="name"
             id={`${idPrefix}-new-name`}
             name="new_customer_name"
-            placeholder="Name"
-            aria-label="New Customer's Name"
+            placeholder={t("ag_rail_name")}
+            aria-label={t("ag_rail_newCustomerName")}
             required
             autoFocus
             value={newName}
@@ -98,15 +105,15 @@ export function CustomerPicker({
             name="new_customer_phone"
             type="tel"
             autoComplete="tel"
-            placeholder="Phone (Optional)"
-            aria-label="Phone (Optional)"
+            placeholder={t("ag_rail_phoneOptional")}
+            aria-label={t("ag_rail_phoneOptional")}
             value={newPhone}
             onChange={(e) => onNewPhone(e.target.value)}
           />
         </div>
       ) : (
         <Select id={`${idPrefix}-customer`} name="customer_id" value={customerId} onChange={(e) => onCustomerId(e.target.value)}>
-          <option value="">— None —</option>
+          <option value="">{t("ag_rail_none")}</option>
           {customers.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -186,6 +193,8 @@ export function NewJobButton({
   /** Street keys of the jobs that carry a unit (unitStreetKeys). */
   unitStreets?: string[];
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -265,7 +274,7 @@ export function NewJobButton({
   }, [searchParams, pathname, router, claimant]);
 
   function openModal() {
-    if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
+    if (draft.restored && dirty) toast(t("ag_rail_draftRestored"), "info");
     setOpen(true);
   }
 
@@ -284,7 +293,7 @@ export function NewJobButton({
     start(async () => {
       const res = await createJob(formData);
       if (!res.ok) {
-        setError(res.error ?? "Something went wrong.");
+        setError(res.error ?? t("ag_rail_somethingWrong"));
         return;
       }
       // Saved — drop the draft and reset so reopening doesn't offer a duplicate.
@@ -312,31 +321,41 @@ export function NewJobButton({
   }
 
   const picked = form.new_customer ? { name: form.new_customer_name } : (option(form.customer_id) ?? null);
-  const willBeCalled = defaultJobName({ customer: picked, street: form.address, unit: form.unit, todayStr: today });
+  // The live line and the stored name are one function with one (lang, words) pair: the form sends
+  // `lang` (hidden, below) so createJob can name a street-less, customer-less job the same way.
+  const willBeCalled = defaultJobName({ customer: picked, street: form.address, unit: form.unit, todayStr: today, lang, words: t });
   const storedLine = formatCityStateZip(form.city, form.state, form.zip);
   const unitHint = !form.unit.trim() && streetHasUnits(form.address, unitStreets);
-  const statusWords =
-    statusFromDate(form.scheduled_date, today) === "in_progress" ? "In Progress" : form.scheduled_date ? "Scheduled" : "To Be Scheduled";
-  const moreSummary = [BILLING_WORDS[form.billing_type] ?? BILLING_WORDS.tm, form.unit.trim() ? unitLine(form.unit) : null, form.scheduled_time ? clockWords(form.scheduled_time) : null]
+  // The status a new job starts as, in the words the job's status pill uses (lib/words/jobs jb_status…).
+  const statusWords = t(
+    statusFromDate(form.scheduled_date, today) === "in_progress" ? "jb_statusInProgress" : form.scheduled_date ? "jb_statusScheduled" : "jb_statusToBeScheduled",
+  );
+  const unitWords = (u: string): string => {
+    const line = unitLine(u);
+    return lang === "es" && line.startsWith("Unit ") ? fillText(t("ag_rail_unitN"), { unit: line.slice(5) }) : line;
+  };
+  const moreSummary = [t(BILLING_WORDS[form.billing_type] ?? BILLING_WORDS.tm), form.unit.trim() ? unitWords(form.unit) : null, form.scheduled_time ? clockWords(form.scheduled_time, lang) : null]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <>
       <Button onClick={openModal}>
-        <Plus className="h-4 w-4" /> New Job
+        <Plus className="h-4 w-4" /> {t("ag_rail_btn_newJob")}
       </Button>
 
       <form action={onSubmit}>
         <Modal
           open={open}
           onClose={discard}
-          title="New Job"
+          title={t("ag_rail_btn_newJob")}
           dirty={dirty}
-          footer={<ModalActions onCancel={discard} submit saving={pending} saveLabel="Create Job" />}
+          footer={<ModalActions onCancel={discard} submit saving={pending} saveLabel={t("ag_rail_btn_createJob")} />}
         >
           <div className="space-y-4">
             {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+            {/* The reader's language, for the name createJob builds when none is typed (defaultJobName). */}
+            <input type="hidden" name="lang" value={lang} />
 
             <CustomerPicker
               idPrefix="nj"
@@ -352,7 +371,7 @@ export function NewJobButton({
             />
 
             <div>
-              <Label htmlFor="nj-address">Address</Label>
+              <Label htmlFor="nj-address">{t("ag_rail_address")}</Label>
               <AddressAutocomplete
                 key={formKey}
                 id="nj-address"
@@ -374,9 +393,9 @@ export function NewJobButton({
               {storedLine && <p className="mt-1 text-xs text-slate-500">{storedLine}</p>}
               {unitHint && (
                 <p className="mt-1 text-xs text-slate-500">
-                  Another job at this address has a unit.{" "}
+                  {t("ag_rail_unitElsewhere")}{" "}
                   <button type="button" onClick={() => setMoreOpen(true)} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
-                    Add It In More Options
+                    {t("ag_rail_btn_addInMoreOptions")}
                   </button>
                 </p>
               )}
@@ -386,7 +405,7 @@ export function NewJobButton({
             </div>
 
             <div>
-              <Label htmlFor="nj-date">Date</Label>
+              <Label htmlFor="nj-date">{t("ag_rail_date")}</Label>
               {form.scheduled_date ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
@@ -401,27 +420,27 @@ export function NewJobButton({
                     onClick={() => patch({ scheduled_date: "" })}
                     className="inline-flex min-h-11 items-center px-1 text-sm font-medium text-brand hover:underline"
                   >
-                    Not Scheduled Yet
+                    {t("ag_rail_btn_notScheduledYet")}
                   </button>
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-slate-700">Not Scheduled Yet</span>
+                  <span className="text-sm text-slate-700">{t("ag_rail_btn_notScheduledYet")}</span>
                   <button
                     type="button"
                     onClick={() => patch({ scheduled_date: today })}
                     className="inline-flex min-h-11 items-center px-1 text-sm font-medium text-brand hover:underline"
                   >
-                    Pick A Day
+                    {t("ag_rail_btn_pickADay")}
                   </button>
                 </div>
               )}
               <input type="hidden" name="scheduled_date" value={form.scheduled_date} />
-              <p className="mt-1 text-xs text-slate-500">It starts as {statusWords}.</p>
+              <p className="mt-1 text-xs text-slate-500">{fillText(t("ag_rail_startsAs"), { status: statusWords })}</p>
             </div>
 
             <div>
-              <Label htmlFor="nj-description">Description</Label>
+              <Label htmlFor="nj-description">{t("ag_rail_description")}</Label>
               <Textarea
                 id="nj-description"
                 name="description"
@@ -429,11 +448,11 @@ export function NewJobButton({
                 value={form.description}
                 onChange={(e) => patch({ description: e.target.value })}
               />
-              <p className="mt-1 text-xs text-slate-500">The scope. It prints on the customer&apos;s invoice.</p>
+              <p className="mt-1 text-xs text-slate-500">{t("ag_rail_scopeHint")}</p>
             </div>
 
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              It&apos;ll Be Called: <span className="font-medium text-slate-900">{willBeCalled}</span>
+              {t("ag_rail_willBeCalled")} <span className="font-medium text-slate-900">{willBeCalled}</span>
             </p>
 
             {/* MORE OPTIONS, closed: Unit / Apt, Start Time and Billing. Their values are always
@@ -445,7 +464,7 @@ export function NewJobButton({
                 onClick={() => setMoreOpen((v) => !v)}
                 className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-sm font-medium text-slate-700"
               >
-                <span>More Options</span>
+                <span>{t("ag_rail_btn_moreOptions")}</span>
                 <span className="flex min-w-0 items-center gap-1.5 text-xs font-normal text-slate-500">
                   <span className="truncate">{moreSummary}</span>
                   <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${moreOpen ? "rotate-180" : ""}`} />
@@ -455,26 +474,26 @@ export function NewJobButton({
                 <div className="space-y-3 border-t border-slate-100 px-3 pb-3 pt-2">
                   <div>
                     <Label htmlFor="nj-unit">
-                      Unit / Apt <span className="font-normal text-slate-400">(optional)</span>
+                      {t("ag_rail_unitApt")} <span className="font-normal text-slate-400">{t("ag_rail_optional")}</span>
                     </Label>
-                    <Input id="nj-unit" value={form.unit} onChange={(e) => patch({ unit: e.target.value })} placeholder="e.g. 224, Apt B" maxLength={24} />
+                    <Input id="nj-unit" value={form.unit} onChange={(e) => patch({ unit: e.target.value })} placeholder={t("ag_rail_unitExample")} maxLength={24} />
                   </div>
                   <div>
-                    <Label htmlFor="nj-time">Start Time</Label>
+                    <Label htmlFor="nj-time">{t("ag_rail_startTime")}</Label>
                     <Input id="nj-time" type="time" value={form.scheduled_time} onChange={(e) => patch({ scheduled_time: e.target.value })} className="w-auto" />
                     {/* The truth about the default (lib/schedule/job-block): no length on this form,
                         so a dated job lands as two hours, never the rest of the day. */}
                     <p className="mt-1 text-xs text-slate-500">
-                      Blank starts at {clockWords(workDay.start)}. It goes down as 2 hours; change the length on the job.
+                      {fillText(t("ag_rail_blankStartsAt"), { time: clockWords(workDay.start, lang) })}
                     </p>
                   </div>
                   <div>
-                    <Label htmlFor="nj-billing">Billing</Label>
+                    <Label htmlFor="nj-billing">{t("ag_rail_billing")}</Label>
                     <Select id="nj-billing" value={form.billing_type} onChange={(e) => patch({ billing_type: e.target.value })}>
-                      <option value="tm">Time &amp; Material</option>
-                      <option value="fixed">Fixed Price</option>
+                      <option value="tm">{t("ag_rail_billingTm")}</option>
+                      <option value="fixed">{t("ag_rail_billingFixed")}</option>
                     </Select>
-                    <p className="mt-1 text-xs text-slate-500">Time &amp; Material bills the hours and materials; the estimate is a guide, not a cap.</p>
+                    <p className="mt-1 text-xs text-slate-500">{t("ag_rail_billingTmHint")}</p>
                   </div>
                 </div>
               )}

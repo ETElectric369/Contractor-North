@@ -7,12 +7,15 @@ import {
   endAfter,
   hmWords,
   keptEndMin,
+  lengthWords,
   QUICK_LENGTHS,
   readHm,
   workDayMinutes,
   type JobLength,
 } from "@/lib/schedule/job-block";
 import { minutesToHm } from "@/lib/schedule/fit-day";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 /** What a change asks for: a new start (the length stays), or a length (1h/2h/4h, "full" for the
  *  company's whole day, or the minutes an End time gives). */
@@ -83,6 +86,8 @@ export function BlockTimeControls({
    *  writes, so nothing here says Saving… or Saved. */
   draft?: boolean;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   const [start_, setStart] = useState(startHm);
   const [end, setEnd] = useState(endHm);
@@ -102,12 +107,16 @@ export function BlockTimeControls({
   const s = readHm(start_) ?? 0;
   const e = readHm(end) ?? 0;
   const minutes = Math.max(1, e - s);
-  const words = blockWords({ allDay, minutes, sized });
+  const words = blockWords({ allDay, minutes, sized }, lang, t);
+  const hm = (v: string) => hmWords(v, lang);
   // One span over several days (a visit): "Starts 10:00 AM · ends 6:00 PM Wed, Sep 30".
   const span = multiDay && oneSpan;
-  const spanWords = (s: string, e: string) => `Starts ${hmWords(s)} · ends ${hmWords(e)}${lastDayWords ? ` ${lastDayWords}` : ""}`;
+  const spanWords = (s: string, e: string) =>
+    lastDayWords
+      ? fillText(t("ag_cal_startsEndsOn"), { start: hm(s), end: hm(e), day: lastDayWords })
+      : fillText(t("ag_cal_startsEnds"), { start: hm(s), end: hm(e) });
   // Several days: "10:00 AM – 12:00 PM each day through Wed, Oct 1 · 2 hours".
-  const eachDay = multiDay && !span && lastDayWords ? ` each day through ${lastDayWords}` : "";
+  const eachDay = multiDay && !span && lastDayWords ? ` ${fillText(t("ag_cal_eachDayThrough"), { day: lastDayWords })}` : "";
 
   if (!canEdit) {
     return (
@@ -115,8 +124,8 @@ export function BlockTimeControls({
         {span
           ? spanWords(startHm, endHm)
           : allDay && !multiDay
-            ? `All day, ${hmWords(startHm)} – ${hmWords(endHm)}`
-            : `${hmWords(startHm)} – ${hmWords(endHm)}${eachDay} · ${blockWords({ allDay, minutes: Math.max(1, (readHm(endHm) ?? 0) - (readHm(startHm) ?? 0)), sized })}`}
+            ? fillText(t("ag_cal_allDayFromTo"), { start: hm(startHm), end: hm(endHm) })
+            : `${hm(startHm)} – ${hm(endHm)}${eachDay} · ${blockWords({ allDay, minutes: Math.max(1, (readHm(endHm) ?? 0) - (readHm(startHm) ?? 0)), sized }, lang, t)}`}
       </p>
     );
   }
@@ -141,7 +150,7 @@ export function BlockTimeControls({
         if (!res.ok) {
           setStart(prev.start);
           setEnd(prev.end);
-          refuse(res.error ?? "That time didn't save. Try again.");
+          refuse(res.error ?? t("ag_cal_timeDidntSave"));
           return;
         }
         setSaved(true);
@@ -149,7 +158,7 @@ export function BlockTimeControls({
       } catch {
         setStart(prev.start);
         setEnd(prev.end);
-        refuse("That time didn't save. You may be offline.");
+        refuse(t("ag_cal_timeDidntSaveOffline"));
       } finally {
         onPending?.(false);
       }
@@ -181,7 +190,7 @@ export function BlockTimeControls({
     const em = readHm(hm);
     if (em == null || hm === endHm) return;
     if (em <= s) {
-      refuse("The end has to be after the start.");
+      refuse(t("ag_cal_endAfterStart"));
       setEnd(endHm);
       return;
     }
@@ -197,7 +206,7 @@ export function BlockTimeControls({
     <div className="space-y-2">
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col text-xs text-slate-500" htmlFor={`${idPrefix}-start`}>
-          Start
+          {t("ag_cal_start")}
           <input
             id={`${idPrefix}-start`}
             type="time"
@@ -209,12 +218,12 @@ export function BlockTimeControls({
               if (ev.key === "Enter") (ev.target as HTMLInputElement).blur();
             }}
             className="mt-0.5 h-11 w-[8.5rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 disabled:opacity-60"
-            aria-label="Start time"
+            aria-label={t("ag_cal_startTime")}
           />
         </label>
         {!span && (
           <label className="flex flex-col text-xs text-slate-500" htmlFor={`${idPrefix}-end`}>
-            End
+            {t("ag_cal_end")}
             <input
               id={`${idPrefix}-end`}
               type="time"
@@ -226,7 +235,7 @@ export function BlockTimeControls({
                 if (ev.key === "Enter") (ev.target as HTMLInputElement).blur();
               }}
               className="mt-0.5 h-11 w-[8.5rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 disabled:opacity-60"
-              aria-label="End time"
+              aria-label={t("ag_cal_endTime")}
             />
           </label>
         )}
@@ -235,7 +244,7 @@ export function BlockTimeControls({
       {/* The lengths, on one day or several: a job's hours are each day's hours. Not on one span over
           several days (a visit): its end is on its last day, and a length here would be a day and more. */}
       {!span && (
-        <div role="group" aria-label="How long" className="flex flex-wrap gap-2">
+        <div role="group" aria-label={t("ag_cal_howLong")} className="flex flex-wrap gap-2">
           {QUICK_LENGTHS.map((q) => {
             const on = !allDay && minutes === q.minutes;
             return (
@@ -244,7 +253,7 @@ export function BlockTimeControls({
                 type="button"
                 disabled={pending}
                 aria-pressed={on}
-                aria-label={q.words}
+                aria-label={lengthWords(q.minutes, lang, t)}
                 onClick={() => run({ length: q.minutes }, { end: endAfter(start_, q.minutes) })}
                 className={chip(on)}
               >
@@ -259,17 +268,17 @@ export function BlockTimeControls({
             onClick={() => run({ length: "full" }, { start: workDay.start, end: workDay.end })}
             className={chip(allDay)}
           >
-            Full Day
+            {t("ag_cal_btn_fullDay")}
           </button>
         </div>
       )}
 
       <p className="text-xs text-slate-500">
-        {span ? `${spanWords(start_, end)}. One visit over several days; Open The Visit changes its end.` : `${hmWords(start_)} – ${hmWords(end)}${eachDay} · ${words}`}
-        {pending && !draft && <span className="ml-2 text-slate-400">Saving…</span>}
+        {span ? fillText(t("ag_cal_spanOneVisit"), { span: spanWords(start_, end) }) : `${hm(start_)} – ${hm(end)}${eachDay} · ${words}`}
+        {pending && !draft && <span className="ml-2 text-slate-400">{t("ag_btn_saving")}</span>}
         {saved && !pending && !draft && (
           <span className="ml-2 inline-flex items-center gap-1 font-medium text-green-600">
-            <Check className="h-3.5 w-3.5" /> Saved
+            <Check className="h-3.5 w-3.5" /> {t("ag_cal_saved")}
           </span>
         )}
       </p>

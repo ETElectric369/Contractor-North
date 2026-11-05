@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { words as calendarWords } from "@/lib/words/agenda-calendar";
+import { words as railWords } from "@/lib/words/agenda-rail";
 
 /**
  * W2-05: ONE DOOR FOR WAITING WORK. The calendar's "To Schedule" tray is cut (every job it held was
@@ -187,19 +189,26 @@ describe("a rail card: one ⋯, no status dropdown", () => {
 
   it("the hold verbs: Hold It asks why and a day; Snooze asks why only when none is saved; Take Off Hold says where it goes", () => {
     const rail = read("src/app/(app)/schedule/place-rail.tsx");
-    expect(rail).toMatch(/label="Hold It"\s*requireWhy/);
+    expect(rail).toMatch(/label=\{t\("ag_rail_btn_holdIt"\)\}\s*requireWhy/);
     expect(rail).toContain("setJobHold(i.id, w, when)");
-    expect(rail).toMatch(/label="Snooze"\s*askWhy=\{!i\.holdReason\}/);
+    expect(rail).toMatch(/label=\{t\("ag_rail_btn_snooze"\)\}\s*askWhy=\{!i\.holdReason\}/);
     expect(rail).toContain("snoozeJobHold(i.id, when, w || null)");
     expect(rail).toContain("setJobHold(i.id, why.trim())");
     expect(rail).toContain("setJobHold(i.id, null)");
-    expect(rail).toContain("`${i.name} is off hold. It stays here until it has a day.`");
+    expect(rail).toContain('fillText(t(i.hasDay ? "ag_rail_offHoldBack" : "ag_rail_offHoldStays"), { name: i.name })');
+    // The words, in the catalog (lib/words/agenda-rail): English is what the rail always said.
+    expect(railWords.en.ag_rail_btn_holdIt).toBe("Hold It");
+    expect(railWords.en.ag_rail_btn_snooze).toBe("Snooze");
+    expect(railWords.en.ag_rail_offHoldStays).toBe("{name} is off hold. It stays here until it has a day.");
+    expect(railWords.en.ag_rail_offHoldBack).toBe("{name} is off hold and back on the calendar.");
   });
 
   it("the footer says Jump To The Calendar ↓ and Clear Time, every target 44px", () => {
     const rail = read("src/app/(app)/schedule/place-rail.tsx");
-    expect(rail).toContain("Jump To The Calendar ↓");
-    expect(rail).toContain("Clear Time");
+    expect(rail).toContain('{t("ag_rail_btn_jumpToCalendar")} ↓');
+    expect(rail).toContain('{t("ag_rail_btn_clearTime")}');
+    expect(railWords.en.ag_rail_btn_jumpToCalendar).toBe("Jump To The Calendar");
+    expect(railWords.en.ag_rail_btn_clearTime).toBe("Clear Time");
     expect(rail).not.toMatch(/Jump to the calendar|clear time/);
     const footer = rail.slice(rail.indexOf("{chosen.length > 0 && ("));
     expect(footer).not.toMatch(/\bh-8\b/);
@@ -211,7 +220,8 @@ describe("the heading counts what waits, and says when a list is capped", () => 
     const page = read("src/app/(app)/schedule/page.tsx");
     expect(page).toContain('{t("nv_sched_waitingForADay")} <span');
     expect(page).toContain('({waiting.length}{railCapped ? "+" : ""})');
-    expect(page).toContain("More is waiting than this list shows. Find the rest on Jobs and Leads.");
+    expect(page).toContain('{railCapped && <p className="-mt-1 mb-2 text-xs text-slate-500">{t("ag_rail_moreWaiting")}</p>}');
+    expect(railWords.en.ag_rail_moreWaiting).toBe("More is waiting than this list shows. Find the rest on Jobs and Leads.");
     expect(page).toContain("const RAIL_LIMITS = { leads: 500, jobs: 200, visits: 200 } as const;");
     for (const k of ["leads", "jobs", "visits"]) expect(page).toContain(`.limit(RAIL_LIMITS.${k})`);
   });
@@ -231,7 +241,7 @@ describe("Undo on the rail's place", () => {
 
   it("the place's toast carries Undo only when every job and visit landed, and never for a held job or a booked lead", () => {
     const ctx = read("src/app/(app)/schedule/placement-context.tsx");
-    expect(ctx).toContain('toast(msg.text, msg.tone, { label: "Undo", onClick: () => undoPlace(priors, visits, withdrew) });');
+    expect(ctx).toContain('toast(msg.text, msg.tone, { label: t("ag_btn_undo"), onClick: () => undoPlace(priors, visits, withdrew) });');
     expect(ctx).toMatch(/!leads\.length &&/);
     expect(ctx).toContain("jobs.every((j, i) => !j.onHold && jobResults[i]?.ok && !!jobResults[i]?.prior)");
     expect(ctx).toContain("undoPlaceJob(p.id, p.prior)");
@@ -241,8 +251,9 @@ describe("Undo on the rail's place", () => {
     expect(ctx).toContain("apptResults.every((r) => r.ok && !!r.placedAt)");
     expect(ctx).not.toContain('from "../appointments/actions"');
     expect(read("src/app/(app)/schedule/actions.ts")).toContain("return unscheduleAppointment(id);");
-    expect(ctx).toContain('"Put back where it was."');
-    expect(ctx).toContain("The customer's pick-a-time link stays withdrawn.");
+    expect(ctx).toContain('[t("ag_rail_putBack"), ...notes, withdrew ? t("ag_rail_linkStaysWithdrawn") : null]');
+    expect(railWords.en.ag_rail_putBack).toBe("Put back where it was.");
+    expect(railWords.en.ag_rail_linkStaysWithdrawn).toBe("The customer's pick-a-time link stays withdrawn.");
     // placeMessage (lane 4's test) is untouched: the Undo rides the toast's action.
     expect(read("src/lib/schedule/placement-plan.ts")).not.toContain("Undo");
   });
@@ -378,10 +389,10 @@ describe("the small parts: every header door 44px (W2-01), one word (lib/statuse
     expect(v.slice(Math.max(0, at - 300), at)).toMatch(/\{crewBoard && \(/);
     expect(v.slice(at, at + 300)).toContain("className={`${iconBtn} text-slate-400");
     // The paging buttons: 32px to the eye, 44 to the thumb (the icon-sm bleed; Today bleeds up and down).
-    expect(v).toContain('<Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous" title="Previous">');
-    expect(v).toContain('<Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next" title="Next">');
+    expect(v).toContain('<Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label={t("ag_cal_btn_previous")} title={t("ag_cal_btn_previous")}>');
+    expect(v).toContain('<Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label={t("ag_cal_btn_next")} title={t("ag_cal_btn_next")}>');
     expect(v).toContain(`className="relative overflow-visible! before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"`);
-    expect(v).toMatch(/← Week/);
+    expect(v).toContain('← {t("ag_btn_week")}');
     expect(v).toContain("before:-inset-y-3.5");
     // The person filter's chips, the armed strip's Cancel, and the day drill's small icons: 44px.
     expect(v.match(/className="flex h-11 shrink-0 items-center"/g)?.length).toBe(2);
@@ -392,7 +403,8 @@ describe("the small parts: every header door 44px (W2-01), one word (lib/statuse
 
   it("the calendar's inspection tooltip says Inspection", () => {
     const v = view();
-    expect(v).toContain('title="Inspection — notes, measurements, photos"');
+    expect(v).toContain('title={t("ag_cal_inspectionCapture")}');
+    expect(calendarWords.en.ag_cal_inspectionCapture).toBe("Inspection — notes, measurements, photos");
     expect(v).not.toContain("Inspection capture");
   });
 

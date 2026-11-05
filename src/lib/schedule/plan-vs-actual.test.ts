@@ -232,7 +232,7 @@ describe("the calendar reads it and draws it (source)", () => {
     expect(crew).toContain(".range(from, to)");
     expect(crew).toContain('.order("profile_id")');
     expect(crew).not.toContain(".limit(");
-    expect(panel).toContain("actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped)");
+    expect(panel).toContain("actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped, lang, translator(lang))");
     const cols = panel.slice(panel.indexOf("const ENTRY_COLS"), panel.indexOf("const [historyReads"));
     expect(cols).not.toMatch(/rate_override|paid_at|miles|notes|lunch|pay/);
     // Jobs with in-window days but no listed day are read by id, 200 at a time, in the same round.
@@ -251,9 +251,9 @@ describe("the calendar reads it and draws it (source)", () => {
     expect(view).toContain('return { people, hollow: a.state === "hollow", sentence: a.sentence };');
     expect(view).toContain("(k: string) => clockInUse && k <= todayK && (!actualsCappedBefore || k >= actualsCappedBefore)");
     // Today's minute rides into the judging and the ghosts: a running punch is drawn to it.
-    expect(view).toContain("planVsActual({ blocks: judgedBlocks, spans, todayStr: todayK, nowMin: nowMinToday ?? undefined })");
-    expect(view).toContain("Clocked time loads back to {dayWords(actualsCappedBefore)}.");
-    expect(view).toContain("Clocked time didn&apos;t load, so today and past days show only what was booked.");
+    expect(view).toContain("planVsActual({ blocks: judgedBlocks, spans, todayStr: todayK, nowMin: nowMinToday ?? undefined, lang, words: t })");
+    expect(view).toContain('{fillText(t("ag_cal_clockedLoadsBack"), { day: dayWords(actualsCappedBefore, lang) })}');
+    expect(view).toContain('{t("ag_cal_clockedDidntLoad")}');
     // The schedule re-reads when the tab comes back (2026-10-26): a running punch's bar never outlives its clock-out on a stale tab.
     expect(read("src/app/(app)/schedule/calendar-panel.tsx")).toContain("<RefreshOnVisible />");
     // A visit on a job draws the time it took, but is never drawn hollow (a city inspection or a

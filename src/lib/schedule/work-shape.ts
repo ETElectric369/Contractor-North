@@ -21,6 +21,8 @@
  * `scheduled_end` are a date SPAN — which days a job occupies — and say nothing about effort. Every
  * inspection in production had a null `ends_at`, so appointments were points, not blocks.
  */
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 /** The tags Erik named, in his words. A job is a kind; the rest come off appointments.type. */
 export type WorkKind = "job" | "walkthrough" | "service" | "office" | "quote" | "call" | "other";
@@ -137,6 +139,24 @@ export const KIND_LABEL: Record<WorkKind, string> = {
   other: "Other",
 };
 
+/** The catalog key each kind's chip word reads in another language (lib/words/agenda, ag_btn_kind…). */
+const KIND_KEY: Record<WorkKind, string> = {
+  job: "ag_btn_kindJob",
+  walkthrough: "ag_btn_kindInspection",
+  service: "ag_btn_kindServiceCall",
+  office: "ag_btn_kindOffice",
+  quote: "ag_btn_kindQuote",
+  call: "ag_btn_kindPhoneCall",
+  other: "ag_btn_kindOther",
+};
+
+/** KIND_LABEL in the reader's language (agenda wave): "Trabajo", "Inspección"… through the caller's
+ *  translator; English — the default — is KIND_LABEL byte for byte, and an unknown kind reads "Other". */
+export function kindLabel(kind: WorkKind, lang: Lang = "en", words?: Words): string {
+  const en = KIND_LABEL[kind] ?? KIND_LABEL.other;
+  return say(lang, words, KIND_KEY[kind] ?? KIND_KEY.other, en);
+}
+
 /** Badge tones, borrowed from the app's one palette so nothing invents a colour. */
 export const KIND_TONE: Record<WorkKind, "blue" | "green" | "amber" | "slate" | "indigo"> = {
   job: "blue",
@@ -160,7 +180,7 @@ export const WORK_DAY_MINUTES = 480;
  * time, blank is the truth that nobody has sized it. Erik must be able to tell the two apart at a
  * glance, because one is ready to plan and the other is a question.
  */
-export function durationLabel(minutes: number | null | undefined): string {
+export function durationLabel(minutes: number | null | undefined, lang: Lang = "en", words?: Words): string {
   const m = Number(minutes ?? 0);
   if (!Number.isFinite(m) || m <= 0) return "—";
   if (m < 60) return `${m}m`;
@@ -174,7 +194,8 @@ export function durationLabel(minutes: number | null | undefined): string {
     const h = m / 60;
     return `${Number.isInteger(h) ? h : h.toFixed(1)}h`;
   }
-  return `${Number.isInteger(days) ? days : days.toFixed(1)} days`;
+  const n = Number.isInteger(days) ? days : days.toFixed(1);
+  return say(lang, words, "ag_nDays", `${n} days`, { n });
 }
 
 /** True when this is a big enough block that it OWNS the day rather than sharing it. */
@@ -188,7 +209,7 @@ export const fillsTheDay = (minutes: number | null | undefined): boolean =>
  * `unsized` rather than being assumed to take nothing — silently treating unknown as zero is how
  * a day looks free right up until you arrive at it.
  */
-export function dayLoad(items: { planned_minutes?: number | null }[]): {
+export function dayLoad(items: { planned_minutes?: number | null }[], lang: Lang = "en", words?: Words): {
   minutes: number;
   unsized: number;
   label: string;
@@ -201,8 +222,8 @@ export function dayLoad(items: { planned_minutes?: number | null }[]): {
     else unsized++;
   }
   const parts: string[] = [];
-  if (minutes > 0) parts.push(durationLabel(minutes));
-  if (unsized > 0) parts.push(`${unsized} unsized`);
+  if (minutes > 0) parts.push(durationLabel(minutes, lang, words));
+  if (unsized > 0) parts.push(say(lang, words, "ag_nUnsized", `${unsized} unsized`, { n: unsized }));
   return { minutes, unsized, label: parts.join(" · ") };
 }
 
@@ -443,3 +464,13 @@ export const DURATION_BUCKETS: { minutes: number; label: string }[] = [
   { minutes: 1440, label: "3 days" },
   { minutes: 2400, label: "A week (5 days)" },
 ];
+
+/** The catalog key of each bucket whose label is words (the "30m"/"1h"/"2h" ones are figures). */
+const BUCKET_KEY: Record<number, string> = { 240: "ag_halfDay", 480: "ag_fullDay", 960: "ag_twoDays", 1440: "ag_threeDays", 2400: "ag_aWeek" };
+
+/** DURATION_BUCKETS in the reader's language (agenda wave): "Medio día", "Día completo"…; English is
+ *  DURATION_BUCKETS itself. */
+export function durationBuckets(lang: Lang = "en", words?: Words): { minutes: number; label: string }[] {
+  if (lang !== "es" || !words) return DURATION_BUCKETS;
+  return DURATION_BUCKETS.map((b) => (BUCKET_KEY[b.minutes] ? { minutes: b.minutes, label: words(BUCKET_KEY[b.minutes]) } : b));
+}

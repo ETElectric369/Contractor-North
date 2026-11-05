@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import {
-  DURATION_BUCKETS,
+  durationBuckets,
   durationLabel,
-  KIND_LABEL,
+  kindLabel,
   kindOptions,
   parseDuration,
 } from "@/lib/schedule/work-shape";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * KIND? · HOW LONG? — the two questions, one control, every surface.
@@ -41,6 +43,10 @@ export function WorkShapeControls({
   onPatch: (patch: { workKind?: string; plannedMinutes?: number | null }) => void;
 }) {
   const [custom, setCustom] = useState<string | null>(null); // null = closed
+  const lang = useLang();
+  const t = translator(lang);
+  // The same buckets in the reader's words (lib/schedule/work-shape durationBuckets; minutes unchanged).
+  const buckets = durationBuckets(lang, t);
 
   function saveCustom() {
     const minutes = parseDuration(custom ?? "");
@@ -50,7 +56,7 @@ export function WorkShapeControls({
   }
 
   const offList =
-    !!plannedMinutes && !DURATION_BUCKETS.some((b) => b.minutes === plannedMinutes);
+    !!plannedMinutes && !buckets.some((b) => b.minutes === plannedMinutes);
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -60,11 +66,11 @@ export function WorkShapeControls({
           onChange={(e) => onPatch({ workKind: e.target.value })}
           disabled={disabled}
           className="h-11 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
-          aria-label="What kind of work"
+          aria-label={t("ag_rail_whatKind")}
         >
-          <option value="">Kind?</option>
+          <option value="">{t("ag_rail_kindQ")}</option>
           {kindOptions(workKind).map((k) => (
-            <option key={k} value={k}>{KIND_LABEL[k]}</option>
+            <option key={k} value={k}>{kindLabel(k, lang, t)}</option>
           ))}
         </select>
       )}
@@ -80,16 +86,16 @@ export function WorkShapeControls({
         }}
         disabled={disabled}
         className="h-11 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
-        aria-label="How long will it take"
+        aria-label={t("ag_rail_howLongAria")}
       >
-        <option value="">How Long?</option>
+        <option value="">{t("ag_rail_howLongQ")}</option>
         {/* A stored size that matches no bucket still shows — a select whose value matches no
             option falls back to the first, and the card would call itself unsized. */}
-        {offList && <option value={String(plannedMinutes)}>{durationLabel(plannedMinutes)}</option>}
-        {DURATION_BUCKETS.map((b) => (
+        {offList && <option value={String(plannedMinutes)}>{durationLabel(plannedMinutes, lang, t)}</option>}
+        {buckets.map((b) => (
           <option key={b.minutes} value={String(b.minutes)}>{b.label}</option>
         ))}
-        <option value="custom">Custom…</option>
+        <option value="custom">{t("ag_rail_custom")}</option>
       </select>
       {custom !== null && (
         <>
@@ -101,8 +107,8 @@ export function WorkShapeControls({
               if (e.key === "Enter") { e.preventDefault(); saveCustom(); }
               if (e.key === "Escape") setCustom(null);
             }}
-            placeholder="45m, 1.5h, 2d"
-            aria-label="Type how long it will take"
+            placeholder={t("ag_rail_durationExample")}
+            aria-label={t("ag_rail_typeHowLong")}
             className="h-11 w-24 rounded-md border border-brand/60 px-1.5 text-xs"
           />
           <button
@@ -110,13 +116,13 @@ export function WorkShapeControls({
             onClick={saveCustom}
             className="h-11 min-w-11 rounded-md bg-brand px-3 text-xs font-semibold text-white"
           >
-            Set
+            {t("ag_rail_btn_set")}
           </button>
           <span className="text-xs text-slate-400">
             {custom.trim()
               ? parseDuration(custom)
-                ? durationLabel(parseDuration(custom))
-                : "can't read that"
+                ? durationLabel(parseDuration(custom), lang, t)
+                : t("ag_rail_cantRead")
               : ""}
           </span>
         </>

@@ -5,6 +5,7 @@
  * in the Americas fall into "tomorrow", so always derive the day in the org tz.
  */
 import { formatDate, formatDateTime } from "./utils";
+import { localeOf } from "./locale";
 
 /** Milliseconds the tz is ahead of UTC at the given instant (handles DST). */
 export function tzOffsetMs(tz: string, at: Date): number {
@@ -331,14 +332,20 @@ export function isWeekendDay(ymd: string): boolean {
 /** The weekday headings of a company's week, in ITS order: Monday-start reads Mon…Sun, Sunday-start
  *  Sun…Sat. The month grid's header row drew a hardcoded Sun…Sat beside a Monday-start week — the
  *  column labels and the columns disagreeing by one on the same screen. */
-export function weekdayHeadings(weekStart: WeekStart): string[] {
-  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+export function weekdayHeadings(weekStart: WeekStart, lang?: string | null): string[] {
+  // Intl's short weekday in the reader's locale (agenda wave): en-US "Sun Mon Tue Wed Thu Fri Sat",
+  // byte for byte the list that was hardcoded here; es-US "dom lun mar mié jue vie sáb". Nov 1 2026 is
+  // a Sunday, at noon UTC so no zone moves it.
+  const names = Array.from({ length: 7 }, (_, i) =>
+    new Date(Date.UTC(2026, 10, 1 + i, 12)).toLocaleDateString(localeOf(lang), { weekday: "short", timeZone: "UTC" }),
+  );
   return weekStart === "sunday" ? names : [...names.slice(1), names[0]];
 }
 
-/** Pretty "Weekday, Month D" label for a "YYYY-MM-DD", tz-stable. */
-export function prettyDay(ymd: string): string {
-  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", {
+/** Pretty "Weekday, Month D" label for a "YYYY-MM-DD", tz-stable. `lang` "es": "jueves, 5 de noviembre"
+ *  (the same words My Day's header prints, planner/page dayWords). */
+export function prettyDay(ymd: string, lang?: string | null): string {
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString(localeOf(lang), {
     weekday: "long",
     month: "long",
     day: "numeric",

@@ -44,6 +44,9 @@ import { todayStrInTz, tzDateTimeUtc, tzMinutesOfDay } from "../tz";
 import type { DayHours } from "../schedule-math";
 import { hmToMinutes, minutesToHm } from "./fit-day";
 import { WORK_DAY_MINUTES } from "./work-shape";
+import type { Lang } from "../locale";
+import { localeOf } from "../locale";
+import { clock12, say, type Words } from "../lang-words";
 
 /** The length a job lands with when nobody chose one: two hours. */
 export const DEFAULT_JOB_MINUTES = 120;
@@ -223,35 +226,39 @@ export function readVisitBlock(p: {
   };
 }
 
-/** "2 hours", "1 hour", "45 minutes", "1.5 hours", "1 hour 20 minutes". */
-export function lengthWords(minutes: number): string {
+/** "2 hours", "1 hour", "45 minutes", "1.5 hours", "1 hour 20 minutes". `lang` + `words` (agenda
+ *  wave): "2 horas", "1 hora", "45 minutos", "1 hora 20 minutos" from the ag_ catalog's paired keys. */
+export function lengthWords(minutes: number, lang: Lang = "en", words?: Words): string {
   const m = Math.max(0, Math.round(Number(minutes) || 0));
-  if (m < 60) return `${m} minute${m === 1 ? "" : "s"}`;
-  if (m % 60 === 0) return `${m / 60} hour${m === 60 ? "" : "s"}`;
-  if (m % 30 === 0) return `${m / 60} hours`;
+  const mins = (n: number, en: string) => say(lang, words, n === 1 ? "ag_minute" : "ag_minutes", en, { n });
+  const hrs = (n: number | string, one: boolean, en: string) => say(lang, words, one ? "ag_hour" : "ag_hours", en, { n });
+  if (m < 60) return mins(m, `${m} minute${m === 1 ? "" : "s"}`);
+  if (m % 60 === 0) return hrs(m / 60, m === 60, `${m / 60} hour${m === 60 ? "" : "s"}`);
+  if (m % 30 === 0) return hrs(m / 60, false, `${m / 60} hours`);
   const h = Math.floor(m / 60);
+  if (lang === "es" && words) return `${hrs(h, h === 1, "")} ${mins(m % 60, "")}`;
   return `${h} hour${h === 1 ? "" : "s"} ${m % 60} minutes`;
 }
 
-/** "2026-09-28" → "Mon, Sep 28", the same in every timezone (a date is a date, never an instant). */
-export function dayWords(ymd: string | null | undefined): string {
+/** "2026-09-28" → "Mon, Sep 28", the same in every timezone (a date is a date, never an instant).
+ *  `lang` "es": "lun, 28 de sept" (Intl es-US). */
+export function dayWords(ymd: string | null | undefined, lang: Lang = "en"): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd ?? ""))) return "";
-  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString(localeOf(lang), { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-/** "10:00" → "10:00 AM", "13:30" → "1:30 PM". */
-export function hmWords(hm: string): string {
+/** "10:00" → "10:00 AM", "13:30" → "1:30 PM". `lang` "es": "10:00 a. m.", "1:30 p. m.". */
+export function hmWords(hm: string, lang: Lang = "en"): string {
   const m = readHm(hm);
   if (m == null) return hm;
-  const h = Math.floor(m / 60);
-  return `${h % 12 || 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  return clock12(Math.floor(m / 60), m % 60, lang);
 }
 
 /** The length in one line of plain words, with "— change it" when the app chose it: "2 hours — change
  *  it", "All day", "4 hours". A job over several days reads the same: its hours are each day's. */
-export function blockWords(b: Pick<JobBlock, "allDay" | "minutes" | "sized"> & { multiDay?: boolean }): string {
-  const words = b.allDay ? "All day" : lengthWords(b.minutes);
-  return b.sized ? words : `${words} — change it`;
+export function blockWords(b: Pick<JobBlock, "allDay" | "minutes" | "sized"> & { multiDay?: boolean }, lang: Lang = "en", words?: Words): string {
+  const w = b.allDay ? say(lang, words, "ag_allDay", "All day") : lengthWords(b.minutes, lang, words);
+  return b.sized ? w : say(lang, words, "ag_changeIt", `${w} — change it`, { words: w });
 }
 
 /**
@@ -260,31 +267,39 @@ export function blockWords(b: Pick<JobBlock, "allDay" | "minutes" | "sized"> & {
  * day kept as history (outside the plan, or with no plan left) is drawn all day and reads as what it is:
  * "Worked day · planned Thu, Oct 1", or "Worked day · no day planned yet".
  */
-export function dayBlockWords(p: {
-  day: string;
-  scheduledStart: string | null;
-  scheduledEnd: string | null;
-  plannedMinutes?: number | null;
-  tz: string;
-  workDay: { start: string; end: string };
-  /** The day's own hours (0370), when it keeps them. */
-  dayHours?: DayHours | null;
-}): { words: string; history: boolean } {
+export function dayBlockWords(
+  p: {
+    day: string;
+    scheduledStart: string | null;
+    scheduledEnd: string | null;
+    plannedMinutes?: number | null;
+    tz: string;
+    workDay: { start: string; end: string };
+    /** The day's own hours (0370), when it keeps them. */
+    dayHours?: DayHours | null;
+  },
+  lang: Lang = "en",
+  words?: Words,
+): { words: string; history: boolean } {
   const plan = readJobBlock(p);
   const history = !plan.day || p.day < plan.day || p.day > (plan.lastDay ?? plan.day);
+  const hm = (min: number) => hmWords(minutesToHm(min), lang);
   // A DAY WITH ITS OWN HOURS reads them, the way the grid draws it (a worked day kept as history
   // still says so).
   const own = ownDayMinutes(p.dayHours);
   if (own) {
-    const hours = `${hmWords(minutesToHm(own.startMin))} – ${hmWords(minutesToHm(Math.min(LAST_MINUTE, own.endMin)))} · ${lengthWords(own.endMin - own.startMin)}`;
-    return { words: history ? `Worked day · ${hours}` : hours, history };
+    const hours = `${hm(own.startMin)} – ${hm(Math.min(LAST_MINUTE, own.endMin))} · ${lengthWords(own.endMin - own.startMin, lang, words)}`;
+    return { words: history ? say(lang, words, "ag_workedDay", `Worked day · ${hours}`, { hours }) : hours, history };
   }
-  if (!plan.day) return { words: "Worked day · no day planned yet", history: true };
-  if (p.day < plan.day || p.day > (plan.lastDay ?? plan.day)) return { words: `Worked day · planned ${dayWords(plan.day)}`, history: true };
+  if (!plan.day) return { words: say(lang, words, "ag_workedDayNoPlan", "Worked day · no day planned yet"), history: true };
+  if (p.day < plan.day || p.day > (plan.lastDay ?? plan.day)) {
+    const day = dayWords(plan.day, lang);
+    return { words: say(lang, words, "ag_workedDayPlanned", `Worked day · planned ${day}`, { day }), history: true };
+  }
   // On any day of the plan: the job's hours, the same on each of its days.
   const b = jobDayBlock({ ...p, wd: workDayMinutes(p.workDay) });
   return {
-    words: `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(Math.min(LAST_MINUTE, b.endMin)))} · ${blockWords({ allDay: b.allDay, minutes: Math.max(1, b.endMin - b.startMin), sized: plan.sized })}`,
+    words: `${hm(b.startMin)} – ${hm(Math.min(LAST_MINUTE, b.endMin))} · ${blockWords({ allDay: b.allDay, minutes: Math.max(1, b.endMin - b.startMin), sized: plan.sized }, lang, words)}`,
     history: false,
   };
 }

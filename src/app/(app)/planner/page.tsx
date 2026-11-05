@@ -795,7 +795,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           {(i.span || i.crew) && (
             <div className="mt-1 flex min-w-0 items-center gap-2">
               {i.span && <span className="min-w-0 truncate text-xs tabular-nums text-slate-600">{i.span}</span>}
-              {i.crew && <CrewInitials crew={i.crew} />}
+              {i.crew && <CrewInitials crew={i.crew} lang={lang} />}
             </div>
           )}
         </Link>

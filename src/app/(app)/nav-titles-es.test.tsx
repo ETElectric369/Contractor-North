@@ -188,7 +188,8 @@ describe("the schedule's two headings", () => {
   it("Waiting For A Day reads nv_sched_waitingForADay beside its count, from currentLangFor(user?.id)", () => {
     const src = read("schedule/page.tsx");
     expect(src).toContain('import { currentLangFor } from "@/lib/current-lang";');
-    expect(src).toContain("const t = translator(await currentLangFor(user?.id));");
+    // The language read once, then handed to the translator and the rail's libraries (crewChips).
+    expect(src).toContain("const lang = await currentLangFor(user?.id);\n  const t = translator(lang);");
     expect(src).not.toContain("currentLang()");
     expect(src).toContain('{t("nv_sched_waitingForADay")} <span className="font-normal text-slate-400">({waiting.length}{railCapped ? "+" : ""})</span>');
     expect(src).not.toContain("Waiting For A Day <span");

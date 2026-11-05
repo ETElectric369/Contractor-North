@@ -10,6 +10,9 @@ import { WorkedTrack } from "@/components/worked-track";
 import { peopleWords, type WorkedPerson } from "@/lib/schedule/plan-vs-actual";
 import { nameSays } from "@/lib/schedule/block-info";
 import { bookWorkedDay, unbookWorkedDay } from "./actions";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
+import type { Lang } from "@/lib/locale";
 
 /**
  * WORK NOBODY BOOKED (Wave 2, SV-ghost; Erik's approval 2026-09-26). A job's past day with clocked time
@@ -46,13 +49,13 @@ export function ghostTitle(g: Pick<GhostTarget, "name" | "customer">): string {
 
 /** What the sheet and the track say: "Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM. Nothing was booked this day."
  *  Today's (since 2026-10-26 the schedule draws today's clocked time too): "… Nothing is booked for today." */
-export function ghostLine(g: Pick<GhostTarget, "people">, today = false): string {
-  return `${peopleWords(g.people)}. ${today ? "Nothing is booked for today." : "Nothing was booked this day."}`;
+export function ghostLine(g: Pick<GhostTarget, "people">, today = false, lang: Lang = "en", t: (key: string) => string = translator("en")): string {
+  return `${peopleWords(g.people, lang, t)}. ${today ? t("ag_cal_nothingBookedToday") : t("ag_cal_nothingBookedThisDay")}`;
 }
 
-/** Today's ghost has no Book This Day: bookWorkedDay takes only a day already past (the hours worked are
- *  not known until the day is done), so the door would refuse — said here instead, as the one next step. */
-export const BOOK_TODAY_LATER = "Book it once the day is done.";
+/* Today's ghost has no Book This Day: bookWorkedDay takes only a day already past (the hours worked are
+ * not known until the day is done), so the door would refuse — said instead (ag_cal_bookTodayLater:
+ * "Book it once the day is done."), as the one next step. */
 
 /** What a sheet around this tells it (the tile sheet's SheetVoice): a write out, or a refusal in words. */
 type Voice = { pending: (busy: boolean) => void; refusal: (words: string | null) => void };
@@ -65,6 +68,7 @@ type Voice = { pending: (busy: boolean) => void; refusal: (words: string | null)
 export function useBookWorkedDay(jobId: string, day: string, opts?: { onBooked?: () => void; voice?: Voice }) {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -77,10 +81,10 @@ export function useBookWorkedDay(jobId: string, day: string, opts?: { onBooked?:
   const undo = async () => {
     try {
       const res = await unbookWorkedDay(jobId, day);
-      if (!res.ok) toast(res.error ?? "That day didn't come off. Check the job's days.", "error");
-      else toast("Put back where it was.", "success");
+      if (!res.ok) toast(res.error ?? t("ag_cal_dayDidntComeOff"), "error");
+      else toast(t("ag_cal_putBack"), "success");
     } catch {
-      toast("That Undo didn't reach the server. Check your connection; nothing may have changed.", "error");
+      toast(t("ag_cal_undoDidntReach"), "error");
     }
     router.refresh();
   };
@@ -92,14 +96,14 @@ export function useBookWorkedDay(jobId: string, day: string, opts?: { onBooked?:
       try {
         const res = await bookWorkedDay(jobId, day);
         if (!res.ok) {
-          refuse(res.error ?? "That day didn't book. Try again.");
+          refuse(res.error ?? t("ag_cal_dayDidntBook"));
           return;
         }
-        toast(res.note ?? "Booked.", "success", res.added ? { label: "Undo", onClick: () => void undo() } : undefined);
+        toast(res.note ?? t("ag_cal_bookedDone"), "success", res.added ? { label: t("ag_btn_undo"), onClick: () => void undo() } : undefined);
         router.refresh();
         opts?.onBooked?.();
       } catch {
-        refuse("That didn't reach the server. Check your connection and try again.");
+        refuse(t("ag_cal_didntReachServer"));
       } finally {
         opts?.voice?.pending(false);
       }
@@ -113,16 +117,17 @@ const DOOR = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-l
 
 /** The ghost's two doors: Book This Day (the office; on a past day — today's says when instead) and Open The Job. 44px each. */
 function GhostDoors({ jobId, canEdit, pending, onBook, today = false }: { jobId: string; canEdit: boolean; pending: boolean; onBook: () => void; today?: boolean }) {
+  const t = translator(useLang());
   return (
     <div className="flex flex-wrap gap-2">
-      {canEdit && today && <p className="text-xs text-slate-500">{BOOK_TODAY_LATER}</p>}
+      {canEdit && today && <p className="text-xs text-slate-500">{t("ag_cal_bookTodayLater")}</p>}
       {canEdit && !today && (
         <Button type="button" onClick={onBook} disabled={pending} className="min-h-11">
-          <CalendarPlus className="h-4 w-4" /> {pending ? "Booking…" : "Book This Day"}
+          <CalendarPlus className="h-4 w-4" /> {pending ? t("ag_cal_btn_booking") : t("ag_cal_btn_bookThisDay")}
         </Button>
       )}
       <Link href={`/jobs/${jobId}`} className={`${DOOR} border border-slate-300 bg-white text-slate-800 hover:border-slate-400`}>
-        Open The Job
+        {t("ag_btn_openTheJob")}
       </Link>
     </div>
   );
@@ -146,10 +151,12 @@ export function GhostSheetBody({
   voice?: Voice;
 }) {
   const { pending, error, book } = useBookWorkedDay(ghost.jobId, day, { onBooked: onClose, voice });
+  const lang = useLang();
+  const t = translator(lang);
   return (
     <div className="space-y-4">
       {ghost.jobNumber && <p className="-mt-2 text-xs text-slate-400">{ghost.jobNumber}</p>}
-      <WorkedTrack booked={null} people={ghost.people} sentence={ghostLine(ghost, today)} />
+      <WorkedTrack booked={null} people={ghost.people} sentence={ghostLine(ghost, today, lang, t)} />
       <div className="border-t border-slate-100 pt-4">
         <GhostDoors jobId={ghost.jobId} canEdit={canEdit} pending={pending} onBook={book} today={today} />
         {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
@@ -161,11 +168,13 @@ export function GhostSheetBody({
 /** The day drill's dashed "Worked, Not Booked" row: the track, the words, the same two doors. */
 export function GhostRow({ day, ghost, canEdit, today = false }: { day: string; ghost: GhostTarget; canEdit: boolean; today?: boolean }) {
   const { pending, error, book } = useBookWorkedDay(ghost.jobId, day);
+  const lang = useLang();
+  const t = translator(lang);
   return (
     <div className="col-span-full rounded-lg border-2 border-dashed border-slate-400 bg-white/60 p-2.5 text-xs text-slate-700">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Worked, Not Booked</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{t("ag_btn_workedNotBooked")}</div>
       <div className="mt-1">
-        <WorkedTrack booked={null} people={ghost.people} sentence={`${ghostTitle(ghost)} — ${peopleWords(ghost.people)}`} />
+        <WorkedTrack booked={null} people={ghost.people} sentence={`${ghostTitle(ghost)} — ${peopleWords(ghost.people, lang, t)}`} />
       </div>
       <div className="mt-2">
         <GhostDoors jobId={ghost.jobId} canEdit={canEdit} pending={pending} onBook={book} today={today} />

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { setCrewOffRange, clearCrewOffRange } from "../timeclock/crew-actions";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 /**
  * TIME OFF — one action for a whole stretch.
@@ -35,6 +37,7 @@ export function TimeOffButton({
   defaultProfileId?: string;
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [profileId, setProfileId] = useState(defaultProfileId ?? "");
   const [from, setFrom] = useState("");
@@ -50,9 +53,9 @@ export function TimeOffButton({
       setErr(null);
       setMsg(null);
       const res = await setCrewOffRange({ profileId, fromDate: from, toDate: to, reason, includeWeekends: weekends });
-      if (!res.ok) return setErr(res.error ?? "Couldn't save that.");
-      const who = members.find((m) => m.id === profileId)?.full_name ?? "They";
-      setMsg(`${who} is off for ${res.days} day${res.days === 1 ? "" : "s"}.`);
+      if (!res.ok) return setErr(res.error ?? t("ag_rail_couldntSave"));
+      const who = members.find((m) => m.id === profileId)?.full_name ?? t("ag_rail_they");
+      setMsg(fillText(t(res.days === 1 ? "ag_rail_offForOne" : "ag_rail_offForMany"), { who, n: String(res.days) }));
       router.refresh();
     });
 
@@ -60,8 +63,8 @@ export function TimeOffButton({
     start(async () => {
       setErr(null);
       const res = await clearCrewOffRange({ profileId, fromDate: from, toDate: to });
-      if (!res.ok) return setErr(res.error ?? "Couldn't clear that.");
-      setMsg("Those days are open again.");
+      if (!res.ok) return setErr(res.error ?? t("ag_rail_couldntClear"));
+      setMsg(t("ag_rail_daysOpenAgain"));
       router.refresh();
     });
 
@@ -70,78 +73,73 @@ export function TimeOffButton({
   return (
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <CalendarOff className="h-4 w-4" /> Time Off
+        <CalendarOff className="h-4 w-4" /> {t("ag_rail_btn_timeOff")}
       </Button>
       {open && (
         <Modal
           open
           onClose={() => setOpen(false)}
-          title="Time Off"
+          title={t("ag_rail_btn_timeOff")}
           size="md"
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}
               onSave={save}
-              saveLabel="Mark Off"
+              saveLabel={t("ag_rail_btn_markOff")}
               saving={pending}
               disabled={!ready}
             />
           }
         >
           <div className="space-y-3">
-            <p className="text-sm text-slate-500">
-              Marks these days off on the crew board. They stay on their jobs&rsquo; crews. This only says
-              they are not there, and their Clock In will not land on a job by mistake.
-            </p>
+            <p className="text-sm text-slate-500">{t("ag_rail_timeOffLead")}</p>
             {/* SAY WHAT IT DOES NOT DO. setJobCrew tells a person when they are put ON a job; nothing
                 tells them when they are marked OFF, so this form was quietly deciding somebody is not
                 working and letting him find out on his own. Until that notification exists, the form
                 says so rather than letting the silence pass for an arrangement. */}
-            <p className="text-sm font-medium text-amber-700">
-              They are not told. Let them know yourself.
-            </p>
+            <p className="text-sm font-medium text-amber-700">{t("ag_rail_notTold")}</p>
             <div>
-              <Label htmlFor="to-who">Who</Label>
+              <Label htmlFor="to-who">{t("ag_rail_who")}</Label>
               <Select id="to-who" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-                <option value="">Pick Someone…</option>
+                <option value="">{t("ag_rail_btn_pickSomeone")}</option>
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.full_name ?? "Crew Member"}
+                    {m.full_name ?? t("ag_rail_crewMember")}
                   </option>
                 ))}
               </Select>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label htmlFor="to-from">First day</Label>
+                <Label htmlFor="to-from">{t("ag_rail_firstDay")}</Label>
                 <Input id="to-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
               </div>
               <div>
-                <Label htmlFor="to-to">Last day</Label>
+                <Label htmlFor="to-to">{t("ag_rail_lastDay")}</Label>
                 <Input id="to-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label htmlFor="to-why">Reason</Label>
+                <Label htmlFor="to-why">{t("ag_rail_reason")}</Label>
                 <Select id="to-why" value={reason} onChange={(e) => setReason(e.target.value as never)}>
-                  <option value="vacation">Vacation</option>
-                  <option value="sick">Sick</option>
-                  <option value="other">Other</option>
+                  <option value="vacation">{t("ag_rail_vacation")}</option>
+                  <option value="sick">{t("ag_rail_sick")}</option>
+                  <option value="other">{t("ag_rail_otherReason")}</option>
                 </Select>
               </div>
               <label className="flex items-end gap-2 pb-2 text-sm text-slate-600">
                 <input type="checkbox" className="h-4 w-4" checked={weekends} onChange={(e) => setWeekends(e.target.checked)} />
                 {/* Weekdays only by default — a Saturday nobody was working doesn't need a record
                     saying so, and rows that say nothing bury the ones that do. */}
-                Include weekends
+                {t("ag_rail_includeWeekends")}
               </label>
             </div>
             {msg && (
               <div className="flex items-center justify-between gap-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
                 <span>{msg}</span>
                 <button onClick={undo} disabled={pending} className="shrink-0 underline underline-offset-2">
-                  Undo
+                  {t("ag_btn_undo")}
                 </button>
               </div>
             )}

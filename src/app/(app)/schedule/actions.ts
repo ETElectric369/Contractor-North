@@ -11,12 +11,16 @@ import { requireStaff } from "@/lib/staff-guard";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
-import { readUsualBillingKind, statusFromDate } from "@/lib/schedule-options";
+import { defaultJobName, readUsualBillingKind, statusFromDate } from "@/lib/schedule-options";
 import { jobNameFrom, typedNameMayBeATag } from "@/lib/job-name";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
-import { resolveComeBack, type ComeBackWhen } from "@/lib/come-back-days";
+import { resolveComeBack, shortDay, type ComeBackWhen } from "@/lib/come-back-days";
+import { callerLang } from "@/lib/lang-of";
+import { translator } from "@/lib/i18n";
+import { fillSlots } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 import { isMissingColumn } from "@/lib/job-tasks";
 import {
   addDaySegment,
@@ -67,6 +71,41 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
+/**
+ * THE CALLER'S OWN WORDS (the agenda-in-Spanish wave). Every sentence this file answers — a refusal,
+ * a note, the toast's words — comes from lib/words/agenda-server (ag_srv_; the shared ones from
+ * lib/words/agenda, ag_) in the caller's language: profiles.language through lib/lang-of callerLang,
+ * read ONCE per action call and only when an answer needs words (the happy path of a tap that says
+ * nothing pays no extra round trip); English when nobody is signed in or the read fails. The English
+ * is the catalog's, byte for byte what this file always said.
+ *
+ * ONE READ PER CALL, KEYED ON THE CALL'S OWN CLIENT. requireStaff makes a fresh session client per
+ * call (lib/supabase/server createClient, bound to that request's cookies), so the memo is kept on
+ * that object (a WeakMap: it goes when the call does): the action registers it with the signed-in id
+ * (no second getUser), and a private helper handed the same client says its refusal in the same
+ * words without a second read. Not exported: a "use server" file exports only async functions.
+ */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+const SAID = new WeakMap<object, Said>();
+function wordsOf(supabase: SupabaseClient, userId?: string | null): Said {
+  // The action's own entry (it hands the signed-in id) starts this call's memo; a helper (no id) reads it.
+  const had = SAID.get(supabase);
+  if (had && userId === undefined) return had;
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as unknown as Parameters<typeof callerLang>[0], userId));
+  const made: Said = { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+  SAID.set(supabase, made);
+  return made;
+}
+
+/** resolveComeBack, its refusal in the caller's words (the language is read only when it refuses). */
+async function comeBack(todayStr: string, when: ComeBackWhen | null | undefined, ws: Said) {
+  const day = resolveComeBack(todayStr, when);
+  if (day.ok) return day;
+  const lang = await ws.lang();
+  return resolveComeBack(todayStr, when, lang, translator(lang));
+}
+
 // Work-day window the scheduler blocks off for a dated (all-day) job: the org's
 // work_day_start/work_day_end (Settings → Scheduling), via workDayWindowHm —
 // which keeps the original 8 AM–4 PM block for an org that never saved a window.
@@ -107,13 +146,14 @@ async function advanceToScheduled(supabase: SupabaseClient, id: string): Promise
 export async function createJob(formData: FormData): Promise<Result & { /** The name the job was saved under (a sent name that was only a tag is not it). */ name?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   // A JOB IS NEVER BORN ON HOLD (NY-hold, 0366). A hold is a reason and the day it comes back, and
   // the new-job form asks neither: made on hold it would park with no reason and a day nobody chose.
   // The job page's status control and the schedule rail put a job on hold, and both ask. Refused
   // before anything is written (no customer is minted for a job that isn't made).
   if (String(formData.get("status") ?? "").trim() === "on_hold") {
-    return { ok: false, error: "Make the job first, then put it on hold. It asks why and for a day." };
+    return { ok: false, error: await ws.say("ag_srv_holdAtBirth") };
   }
 
   const address = emptyToNull(formData.get("address"));
@@ -139,7 +179,7 @@ export async function createJob(formData: FormData): Promise<Result & { /** The 
     if (day) {
       const hm = /^\d{2}:\d{2}$/.test(time) ? time : dayStartHm;
       startIso = /^\d{4}-\d{2}-\d{2}$/.test(day) ? tzDateTimeUtc(day, hm, tz) : null;
-      if (!startIso) return { ok: false, error: "That date doesn't look right. Pick it again, or tap Not Scheduled Yet." };
+      if (!startIso) return { ok: false, error: await ws.say("ag_srv_badNewJobDate") };
       endIso = tzDateTimeUtc(day, endAfter(hm, DEFAULT_JOB_MINUTES), tz);
       dayOfStart = day;
     }
@@ -180,13 +220,27 @@ export async function createJob(formData: FormData): Promise<Result & { /** The 
     const { data: cust } = customerId
       ? await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle()
       : { data: null };
+    const who = (cust as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null;
     name = jobNameFrom({
       typed: sentName,
-      customer: (cust as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null,
+      customer: who,
       street: address,
       unit: emptyToNull(formData.get("unit")),
       todayStr,
     });
+    // THE STUB IN THE READER'S LANGUAGE (agenda-in-Spanish): with no one and nowhere the namer's line
+    // is "New Job · Sep 27"; a Spanish reader's form shows "Trabajo Nuevo · 27 sept" live (it sends its
+    // `lang` as a hidden field), so the job is stored under the line the form showed: the same namer,
+    // handed the same language. A caller that sends none (Nort, the Timeclock's quick add) is answered
+    // in the caller's own language (callerLang), read only when the name IS the stub. Only the stub
+    // moves: a street, a customer or a typed name is never translated.
+    if (name === defaultJobName({ todayStr })) {
+      const sentLang = String(formData.get("lang") ?? "").trim();
+      const lang: Lang = sentLang === "es" || sentLang === "en" ? sentLang : await ws.lang();
+      if (lang === "es") {
+        name = jobNameFrom({ typed: sentName, customer: who, street: address, unit: emptyToNull(formData.get("unit")), todayStr, lang, words: translator(lang) });
+      }
+    }
   }
 
   // THE STATUS (W1-22). An explicit status on the spine wins (the Timeclock's quick add sends In
@@ -301,6 +355,7 @@ export async function setJobAssignee(
 export async function setJobCrew(id: string, employeeIds: string[]): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const ids = await orgMemberIds(supabase, Array.from(new Set((employeeIds ?? []).map(String).filter(Boolean))));
   // Old crew first (diff base) — also proves the job is visible to the caller.
@@ -313,7 +368,7 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
   // gone, or not this company's) has to come back as one, never as a saved crew.
   const { data: saved, error } = await supabase.from("jobs").update({ assigned_to: ids }).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!saved?.length) return { ok: false, error: "That job isn't available, so the crew didn't change." };
+  if (!saved?.length) return { ok: false, error: await ws.say("ag_srv_crewJobGone") };
   if (prev) {
     const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
     // Awaited (not `void`): serverless can drop an un-awaited promise after the action
@@ -334,9 +389,10 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
 export async function changeJobCrew(id: string, change: CrewChange): Promise<Result & { crew?: string[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const { data: job, error } = await ctx.supabase.from("jobs").select("assigned_to").eq("id", id).maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
-  if (!job) return { ok: false, error: "That job isn't available, so the crew didn't change." };
+  if (!job) return { ok: false, error: await ws.say("ag_srv_crewJobGone") };
   const next = applyCrewChange((job as { assigned_to: string[] | null }).assigned_to, change);
   const res = await setJobCrew(id, next);
   return res.ok ? { ...res, crew: next } : res;
@@ -352,13 +408,14 @@ export async function createScheduleProposal(
 ): Promise<Result & { token?: string }> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
 
   const clean = slots
     .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s?.date ?? ""))
     .map((s) => ({ date: s.date, time: /^\d{2}:\d{2}/.test(s.time ?? "") ? (s.time as string) : "" }))
     .slice(0, 3);
-  if (!clean.length) return { ok: false, error: "Pick at least one date." };
+  if (!clean.length) return { ok: false, error: await ws.say("ag_srv_pickOneDate") };
 
   // One pending proposal per job — replace any existing one.
   await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("job_id", jobId).eq("status", "pending");
@@ -376,11 +433,12 @@ export async function createScheduleProposal(
 export async function cancelScheduleProposal(id: string, jobId: string): Promise<Result> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   // SILENT-WRITE LAW: a zero-row update is a 204, so the id comes back or the withdraw says it didn't.
   const { data, error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That link isn't here any more. Reload the job to see where it stands." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_linkGone") };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -412,16 +470,17 @@ export async function setJobScheduleRanges(
 ): Promise<Result & { defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const bad = lengthProblem(length);
-  if (bad) return { ok: false, error: bad };
+  if (bad) return { ok: false, error: await ws.say(bad) };
   return writeScheduleRanges(ctx.supabase, jobId, ranges, startTime, undefined, length);
 }
 
-/** A length a writer can store, or the words for why not. */
+/** A length a writer can store, or the catalog key of the words for why not (its caller says them). */
 function lengthProblem(length: JobLength | undefined): string | null {
   if (length === undefined || length === "full") return null;
   const n = Number(length);
-  if (!Number.isFinite(n) || n < 1 || n > 60 * 24 * 30) return "That length isn't one a job can have. Pick 1h, 2h, 4h, Full Day or an end time.";
+  if (!Number.isFinite(n) || n < 1 || n > 60 * 24 * 30) return "ag_srv_badLength";
   return null;
 }
 
@@ -447,6 +506,7 @@ async function writeScheduleRanges(
    *  write would work out; the length column is left alone. */
   opts?: { freshBlock?: boolean; promote?: boolean; listedAt?: { start: string | null; end: string | null } },
 ): Promise<Result & { defaulted?: boolean }> {
+  const ws = wordsOf(supabase);
   // Keep only well-formed ranges; default a missing end to the start. A range's hours ride with it.
   const clean: DateRange[] = ranges
     .map((r) => ({ start: r.start, end: r.end || r.start, ...(r.hours !== undefined ? { hours: r.hours } : {}) }))
@@ -466,7 +526,7 @@ async function writeScheduleRanges(
   // A missing TABLE (42P01 / PostgREST PGRST205, a database before 0040) is the legacy path below.
   const priorCode = String((priorRead.error as { code?: unknown } | null)?.code ?? "");
   if (priorRead.error && priorCode !== "42P01" && priorCode !== "PGRST205") {
-    return { ok: false, error: "Couldn't read the job's days, so nothing changed. Try again." };
+    return { ok: false, error: await ws.say("ag_srv_daysUnread") };
   }
   const perDayHours = priorRead.perDayHours && !priorRead.error;
 
@@ -550,7 +610,7 @@ async function writeScheduleRanges(
   // wrappers). See also the belt-and-suspenders note in that audit.
   const { data: upd, error } = await supabase.from("jobs").update(patch).eq("id", jobId).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!upd?.length) return { ok: false, error: "Job not found." };
+  if (!upd?.length) return { ok: false, error: await ws.say("ag_srv_jobNotFound") };
   // A scheduled date advances early-stage status (consistent with the other writers), unless the
   // caller said the status never moves (promote: false).
   if (minStart && opts?.promote !== false) await advanceToScheduled(supabase, jobId);
@@ -585,10 +645,10 @@ async function writeScheduleRanges(
   // Surface ANY segment-write failure (not just multi-range) so the editor
   // never silently shows a stale range while the mirror moved underneath it.
   if (!segOk && clean.length > 1) {
-    return { ok: false, error: "Multiple date ranges can't be saved yet. The first range was saved." };
+    return { ok: false, error: await ws.say("ag_srv_multiRanges") };
   }
   if (!segOk && clean.length === 1) {
-    return { ok: false, error: "Couldn't save the date range — please try again. The job's overall window was updated." };
+    return { ok: false, error: await ws.say("ag_srv_rangeUnsaved") };
   }
   // `defaulted`: nobody gave it a length, so it went down as two hours; the caller can say so.
   return times.defaulted ? { ok: true, defaulted: true } : { ok: true };
@@ -602,6 +662,7 @@ async function loadJobDaySegments(
   supabase: SupabaseClient,
   jobId: string,
 ): Promise<{ segments: DateRange[]; perDayHours: boolean; error?: string }> {
+  const ws = wordsOf(supabase);
   // Each day's own hours ride along (0370); before the migration they can't, and every day is the
   // job's usual hours (null), exactly as before.
   const read = await withDayHours((h) =>
@@ -621,7 +682,7 @@ async function loadJobDaySegments(
   // No segments AND no visible job = the id isn't ours (RLS) or doesn't exist. Bail
   // so movers/placers can't write an orphan segment row against a foreign job id
   // (audit cn-v328: the insert would org-stamp to the CALLER and pass WITH CHECK).
-  if (!job) return { segments: [], perDayHours, error: "Job not found." };
+  if (!job) return { segments: [], perDayHours, error: await ws.say("ag_srv_jobNotFound") };
   if (job?.scheduled_start) {
     const tz = await orgTimezone(supabase);
     const start = todayStrInTz(tz, new Date(job.scheduled_start));
@@ -650,8 +711,9 @@ export async function moveJobDay(
 ): Promise<Result & { needsProposalConfirm?: boolean; note?: string; kept?: string[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(toDate)) return { ok: false, error: "Pick a day to move it to." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(toDate)) return { ok: false, error: await ws.say("ag_srv_pickDayToMove") };
   const from = fromDate && /^\d{4}-\d{2}-\d{2}$/.test(fromDate) ? fromDate : null;
 
   const { data: pending } = await supabase
@@ -665,7 +727,7 @@ export async function moveJobDay(
       return {
         ok: false,
         needsProposalConfirm: true,
-        error: "A date-pick link is out to the customer for this job — moving it withdraws that link.",
+        error: await ws.say("ag_srv_pickLinkOutMove"),
       };
     }
     // Withdraw it the same way createScheduleProposal replaces a pending one.
@@ -689,12 +751,18 @@ export async function moveJobDay(
   const plan = moveKeepingWorkedDays(segments, from, toDate, w.days, todayStrInTz(tz));
   const res = await writeScheduleRanges(supabase, jobId, plan.segments, undefined, plan.mirror);
   if (!res.ok || !plan.kept.length) return res;
-  const span = plan.moved.start === plan.moved.end ? dayList([plan.moved.start]) : `${dayList([plan.moved.start])} to ${dayList([plan.moved.end])}`;
+  const lang = await ws.lang();
+  const one = plan.moved.start === plan.moved.end;
+  const at = { day: dayList([plan.moved.start], lang), from: dayList([plan.moved.start], lang), to: dayList([plan.moved.end], lang) };
+  const notWorked = plan.rangeDays - plan.workedInRange;
   const rest =
     plan.workedInRange >= plan.rangeDays
-      ? `Every day of that range was worked, so ${span} is added as a new day.`
-      : `The ${plan.rangeDays - plan.workedInRange === 1 ? "day not yet worked" : `${plan.rangeDays - plan.workedInRange} days not yet worked`} moved to ${span}.`;
-  return { ...res, kept: plan.kept, note: `${keptLine(plan.kept)} ${rest}` };
+      ? await ws.say(one ? "ag_srv_movedAllWorkedOne" : "ag_srv_movedAllWorkedRange", at)
+      : await ws.say(
+          notWorked === 1 ? (one ? "ag_srv_movedOneToDay" : "ag_srv_movedOneToRange") : one ? "ag_srv_movedManyToDay" : "ag_srv_movedManyToRange",
+          { ...at, n: notWorked },
+        );
+  return { ...res, kept: plan.kept, note: `${await keptLine(ws, plan.kept)} ${rest}` };
 }
 
 /** The days this job's work actually happened, up to now (workedDaysFrom says what counts). A
@@ -721,17 +789,21 @@ async function workedDaysForJob(
   };
 }
 
-/** "Sep 22", "Sep 22 and Sep 23", "Sep 18, Sep 22 and Sep 23". */
-function dayList(days: string[]): string {
+/** "Sep 22", "Sep 22 and Sep 23", "Sep 18, Sep 22 and Sep 23". Spanish: "22 sept y 23 sept". */
+function dayList(days: string[], lang: Lang = "en"): string {
   const f = days.map((d) =>
-    new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+    lang === "es" ? shortDay(d, "es") : new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
   );
-  return f.length <= 1 ? (f[0] ?? "") : `${f.slice(0, -1).join(", ")} and ${f[f.length - 1]}`;
+  if (f.length <= 1) return f[0] ?? "";
+  const list = f.slice(0, -1).join(", ");
+  const last = f[f.length - 1];
+  return lang === "es" ? fillSlots(translator("es")("ag_srv_listAnd"), { list, last }) : `${list} and ${last}`;
 }
 
 /** The first half of the note both reschedule verbs return when they kept a worked day. */
-function keptLine(kept: string[]): string {
-  return `Kept ${dayList(kept)} on the calendar: work was done ${kept.length > 1 ? "on those days" : "that day"}.`;
+async function keptLine(ws: Said, kept: string[]): Promise<string> {
+  const days = dayList(kept, await ws.lang());
+  return ws.say(kept.length > 1 ? "ag_srv_keptMany" : "ag_srv_keptOne", { days });
 }
 
 /** Schedule a job's work window (Nort's job.scheduleDay). Used to be a bare
@@ -752,8 +824,9 @@ export async function scheduleJobWindow(
 ): Promise<Result & { note?: string; kept?: string[]; defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start ?? "")) return { ok: false, error: "Pick a day to schedule it on." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start ?? "")) return { ok: false, error: await ws.say("ag_srv_pickDayToSchedule") };
   const win = { start, end: end && /^\d{4}-\d{2}-\d{2}$/.test(end) && end >= start ? end : start };
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
@@ -764,8 +837,10 @@ export async function scheduleJobWindow(
   // writeScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
   const res = await writeScheduleRanges(supabase, jobId, plan.segments, undefined, plan.mirror);
   if (!res.ok || !plan.kept.length) return res;
-  const span = win.start === win.end ? dayList([win.start]) : `${dayList([win.start])} to ${dayList([win.end])}`;
-  return { ...res, kept: plan.kept, note: `${keptLine(plan.kept)} The job is now scheduled ${span}.` };
+  const lang = await ws.lang();
+  const at = { day: dayList([win.start], lang), from: dayList([win.start], lang), to: dayList([win.end], lang) };
+  const now = await ws.say(win.start === win.end ? "ag_srv_nowScheduledDay" : "ag_srv_nowScheduledRange", at);
+  return { ...res, kept: plan.kept, note: `${await keptLine(ws, plan.kept)} ${now}` };
 }
 
 /** PLACE a job on a day — the rail's and the tray's gesture. A needs-return job keeps its
@@ -788,6 +863,7 @@ export async function placeJobOnDay(
 ): Promise<Result & { defaulted?: boolean; prior?: PlacePrior }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  wordsOf(ctx.supabase, ctx.userId); // who reads placeOnDays' refusal (no read until one is said)
   return placeOnDays(ctx.supabase, jobId, dateISO, startHHMM);
 }
 
@@ -812,7 +888,8 @@ async function placeOnDays(
   dateISO: string,
   startHHMM?: string,
 ): Promise<Result & { defaulted?: boolean; prior?: PlacePrior }> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
+  const ws = wordsOf(supabase);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: await ws.say("ag_pickADay") };
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
 
@@ -936,14 +1013,15 @@ function readPlacePrior(p: unknown): PlacePrior | null {
 export async function undoPlaceJob(jobId: string, prior: PlacePrior): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const p = readPlacePrior(prior);
-  if (!p) return { ok: false, error: "There's nothing to put back." };
-  if (p.status === "on_hold") return { ok: false, error: "Undo can't put a job back on hold. Hold it again from its ⋯ on the rail." };
+  if (!p) return { ok: false, error: await ws.say("ag_srv_nothingToPutBack") };
+  if (p.status === "on_hold") return { ok: false, error: await ws.say("ag_srv_undoNoHold") };
 
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
-  if (segmentDays(segments).join(",") !== p.days.join(",")) return { ok: false, error: "It changed since, so nothing was undone." };
+  if (segmentDays(segments).join(",") !== p.days.join(",")) return { ok: false, error: await ws.say("ag_srv_changedSince") };
 
   const res = await writeScheduleRanges(
     supabase,
@@ -963,8 +1041,8 @@ export async function undoPlaceJob(jobId: string, prior: PlacePrior): Promise<Re
       .eq("id", jobId)
       .eq("status", "scheduled")
       .select("id");
-    if (error) return { ok: true, note: "Its days are back, but its status didn't change back. Check it on the job page." };
-    if (!back?.length) return { ok: true, note: "Its days are back. Its status had moved on since, so it stays as it is." };
+    if (error) return { ok: true, note: await ws.say("ag_srv_daysBackStatusNot") };
+    if (!back?.length) return { ok: true, note: await ws.say("ag_srv_daysBackStatusMoved") };
   }
   return { ok: true };
 }
@@ -987,7 +1065,8 @@ export async function undoPlaceJob(jobId: string, prior: PlacePrior): Promise<Re
 export async function undoPlaceVisit(id: string, placedAt: string): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  if (!id || typeof placedAt !== "string" || isNaN(Date.parse(placedAt))) return { ok: false, error: "There's nothing to put back." };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  if (!id || typeof placedAt !== "string" || isNaN(Date.parse(placedAt))) return { ok: false, error: await ws.say("ag_srv_nothingToPutBack") };
 
   const { data: still, error } = await ctx.supabase
     .from("appointments")
@@ -997,7 +1076,7 @@ export async function undoPlaceVisit(id: string, placedAt: string): Promise<Resu
     .in("status", ["scheduled", "proposed"])
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!still?.length) return { ok: false, error: "It changed since, so nothing was undone." };
+  if (!still?.length) return { ok: false, error: await ws.say("ag_srv_changedSince") };
 
   return unscheduleAppointment(id);
 }
@@ -1010,6 +1089,7 @@ export async function undoPlaceVisit(id: string, placedAt: string): Promise<Resu
 export async function unplaceJob(jobId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  wordsOf(ctx.supabase, ctx.userId); // who reads clearPlan's refusal (no read until one is said)
   const res = await clearPlan(ctx.supabase, jobId);
   if (!res.ok) return { ok: false, error: res.error };
   // The placement moved To Be Scheduled to Scheduled; putting it back puts that back too.
@@ -1048,12 +1128,13 @@ export async function setJobTimes(
 ): Promise<Result & { defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const start = times?.start;
   const length = times?.length;
-  if (start !== undefined && readHm(start) == null) return { ok: false, error: "Pick a start time." };
+  if (start !== undefined && readHm(start) == null) return { ok: false, error: await ws.say("ag_srv_pickStartTime") };
   const bad = lengthProblem(length);
-  if (bad) return { ok: false, error: bad };
+  if (bad) return { ok: false, error: await ws.say(bad) };
   if (start === undefined && length === undefined) return { ok: true };
 
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
@@ -1063,7 +1144,7 @@ export async function setJobTimes(
   // A time belongs to a PLANNED day. A job with none (never placed, or its date cleared with only
   // worked days kept as history) gets a day first; a time written onto a history day would make that
   // past day its plan.
-  if (!segments.length || !j.scheduled_start) return { ok: false, error: "Give the job a day first, then its time." };
+  if (!segments.length || !j.scheduled_start) return { ok: false, error: await ws.say("ag_srv_dayFirstThenTime") };
   const tz = await orgTimezone(supabase);
   const first = todayStrInTz(tz, new Date(j.scheduled_start));
   const last = j.scheduled_end ? todayStrInTz(tz, new Date(j.scheduled_end)) : first;
@@ -1081,9 +1162,6 @@ function planSpan(
   const last = j.scheduled_end ? todayStrInTz(tz, new Date(j.scheduled_end)) : first;
   return { start: first, end: last > first ? last : first };
 }
-
-const NEEDS_0370 =
-  "A day keeping its own hours needs a quick database update first. Until then, set the time on the job page; it sets every day.";
 
 /**
  * ONE DAY'S TIME, THAT DAY ONLY (0370): the schedule tile's sheet, "This Day". Erik, 2026-09-28: a job
@@ -1107,22 +1185,23 @@ export async function setJobDayTimes(
 ): Promise<Result & { defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) return { ok: false, error: "Pick a day." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) return { ok: false, error: await ws.say("ag_pickADay") };
   const start = patch?.start;
   const length = patch?.length;
   const usual = patch?.usual === true;
-  if (start !== undefined && readHm(start) == null) return { ok: false, error: "Pick a start time." };
+  if (start !== undefined && readHm(start) == null) return { ok: false, error: await ws.say("ag_srv_pickStartTime") };
   const bad = lengthProblem(length);
-  if (bad) return { ok: false, error: bad };
+  if (bad) return { ok: false, error: await ws.say(bad) };
   if (start === undefined && length === undefined && !usual) return { ok: true };
 
   const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
-  if (!coversDay(segments, day)) return { ok: false, error: `That job isn't on ${dayWords(day)} any more. Reload the schedule to see where it is.` };
+  if (!coversDay(segments, day)) return { ok: false, error: await ws.say("ag_srv_jobNotOnDay", { day: dayWords(day, await ws.lang()) }) };
   // PROJECTION LAW: every column read below.
   const { data: row } = await supabase.from("jobs").select("scheduled_start, scheduled_end, planned_minutes").eq("id", jobId).maybeSingle();
-  if (!row) return { ok: false, error: "That job isn't available." };
+  if (!row) return { ok: false, error: await ws.say("ag_srv_jobGone") };
   const j = row as { scheduled_start: string | null; scheduled_end: string | null; planned_minutes: number | null };
   const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(supabase);
   const plan = planSpan(j, tz);
@@ -1131,7 +1210,7 @@ export async function setJobDayTimes(
   if (!usual && plan && plan.start === day && plan.end === day) {
     return writeScheduleRanges(supabase, jobId, segments, start === undefined ? undefined : start.slice(0, 5), plan, length);
   }
-  if (!perDayHours) return { ok: false, error: NEEDS_0370 };
+  if (!perDayHours) return { ok: false, error: await ws.say("ag_srv_needs0370") };
 
   let hours: DayHours | null = null;
   if (!usual) {
@@ -1153,7 +1232,7 @@ export async function setJobDayTimes(
       patch: start !== undefined ? { start: start.slice(0, 5) } : { length: length as JobLength },
       wd,
     });
-    if (!hours) return { ok: false, error: "That time doesn't work. Pick a start and a length." };
+    if (!hours) return { ok: false, error: await ws.say("ag_srv_timeNoWork") };
   }
   // The job's span stays as it is (none stays none): only this day's hours change.
   return writeScheduleRanges(supabase, jobId, setDayHours(segments, day, hours), undefined, plan ?? "none");
@@ -1189,13 +1268,14 @@ export async function addJobDay(
 ): Promise<Result & { needsProposalConfirm?: boolean; note?: string; defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const day = String(p?.day ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: "Pick a day." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: await ws.say("ag_pickADay") };
   const start = p?.start ? String(p.start).slice(0, 5) : undefined;
-  if (start !== undefined && readHm(start) == null) return { ok: false, error: "Pick a start time." };
+  if (start !== undefined && readHm(start) == null) return { ok: false, error: await ws.say("ag_srv_pickStartTime") };
   const bad = lengthProblem(p?.length);
-  if (bad) return { ok: false, error: bad };
+  if (bad) return { ok: false, error: await ws.say(bad) };
 
   // THE JOB AS IT STANDS. PROJECTION LAW: every column read below is in the list.
   const { data: row, error: readErr } = await supabase
@@ -1204,7 +1284,7 @@ export async function addJobDay(
     .eq("id", jobId)
     .maybeSingle();
   if (readErr) return { ok: false, error: dbError(readErr) };
-  if (!row) return { ok: false, error: "That job isn't available. It may have been deleted." };
+  if (!row) return { ok: false, error: await ws.say("ag_srv_jobGoneDeleted") };
   const job = row as {
     name: string | null;
     status: string | null;
@@ -1212,9 +1292,14 @@ export async function addJobDay(
     scheduled_end: string | null;
     planned_minutes: number | null;
   };
-  const called = job.name?.trim() || "That job";
+  // The job's name, else "That job" in the caller's words (only a refusal reads it).
+  const called = async () => job.name?.trim() || (await ws.say("ag_thatJob"));
   if (!(ACTIVE_JOB_STATUSES as string[]).includes(String(job.status ?? ""))) {
-    return { ok: false, error: `${called} is ${jobStatusLabel(String(job.status ?? ""))}, so it can't take another day. Change its status on the job page first.` };
+    const lang = await ws.lang();
+    const label = jobStatusLabel(String(job.status ?? ""), lang, translator(lang));
+    // Spanish reads the status mid-sentence in lower case ("está terminado"), as English always has ("is complete").
+    const status = lang === "es" ? label.toLocaleLowerCase("es") : label;
+    return { ok: false, error: await ws.say("ag_srv_cantTakeDay", { job: await called(), status }) };
   }
 
   const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
@@ -1228,7 +1313,7 @@ export async function addJobDay(
      plan) takes the add: that day becomes a planned day at these hours. Refusing it would send the
      office to a block whose sheet says the time belongs to the plan: a dead end. */
   if (plan && day >= plan.start && day <= plan.end && coversDay(segments, day)) {
-    return { ok: false, error: `${called} is already on ${dayWords(day)}. Tap its block there to change its time or crew.` };
+    return { ok: false, error: await ws.say("ag_srv_alreadyOnDay", { job: await called(), day: dayWords(day, await ws.lang()) }) };
   }
 
   // THE DAY'S HOURS, as the sheet showed them: the start (the tapped time, else the work day's start)
@@ -1277,9 +1362,14 @@ export async function addJobDay(
          0370 runs): refused in words, nothing written. A day that redraws no other day goes on at the
          job's usual hours, and the note says the hours it actually draws there. */
       if (frozen.frozen.length) {
+        const lang = await ws.lang();
         return {
           ok: false,
-          error: `Adding ${dayWords(day)} would redraw ${called} on ${frozen.frozen.map((d) => dayWords(d)).join(", ")} at different hours. A day keeping its own hours needs a quick database update first; until then, set its days and time on the job page.`,
+          error: await ws.say("ag_srv_wouldRedraw", {
+            day: dayWords(day, lang),
+            job: await called(),
+            days: frozen.frozen.map((d) => dayWords(d, lang)).join(", "),
+          }),
         };
       }
       const drawn = jobDayBlock({ day, ...afterMirror, tz, wd, dayHours: null });
@@ -1295,7 +1385,7 @@ export async function addJobDay(
   let withdrew = false;
   if (pendingPick?.length) {
     if (!opts?.cancelProposals) {
-      return { ok: false, needsProposalConfirm: true, error: "A date-pick link is out to the customer for this job — adding a day withdraws that link." };
+      return { ok: false, needsProposalConfirm: true, error: await ws.say("ag_srv_pickLinkOutAdd") };
     }
     const { data: gone } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("job_id", jobId).eq("status", "pending").select("id");
     withdrew = !!gone?.length;
@@ -1327,14 +1417,14 @@ export async function addJobDay(
         .eq("id", jobId)
         .eq("status", "on_hold")
         .select("id");
-      notes.push(woke?.length ? "It's off hold now." : "It's still marked on hold. Change that on the job page.");
+      notes.push(await ws.say(woke?.length ? "ag_srv_offHoldNow" : "ag_srv_stillOnHold"));
     }
   } else {
-    if (!perDayHours) notes.push("A day keeping its own hours needs a quick database update, so for now it shows the job's usual hours.");
+    if (!perDayHours) notes.push(await ws.say("ag_srv_usualHoursForNow"));
     res = await writeScheduleRanges(supabase, jobId, live.days, undefined, live.mirror);
     if (!res.ok) return res;
   }
-  if (withdrew) notes.push("The customer's pick-a-date link was withdrawn.");
+  if (withdrew) notes.push(await ws.say("ag_srv_pickLinkWithdrawn"));
 
   // THE CREW, as the sheet left it: each person put on or taken off, applied to the crew as saved NOW.
   const add = (p.crew?.add ?? []).map(String).filter(Boolean);
@@ -1347,12 +1437,14 @@ export async function addJobDay(
     for (const id of add) crew = applyCrewChange(crew, { add: id });
     if (crew.join(",") !== now.join(",")) {
       const c = await setJobCrew(jobId, crew);
-      if (!c.ok) notes.push(`The crew didn't change: ${c.error ?? "try again on its block"}`);
+      if (!c.ok) notes.push(await ws.say("ag_srv_crewDidntChange", { why: c.error ?? (await ws.say("ag_srv_tryOnBlock")) }));
     }
   }
 
-  const span = `${hmWords(hours.start)} – ${hmWords(hours.end)}`;
-  const note = [`Added ${dayWords(day)}, ${span}${defaulted ? " (2 hours; change it on its block)" : ""}.`, ...notes].join(" ");
+  const lang = await ws.lang();
+  const span = `${hmWords(hours.start, lang)} – ${hmWords(hours.end, lang)}`;
+  const added = await ws.say(defaulted ? "ag_srv_addedDayDefaulted" : "ag_srv_addedDay", { day: dayWords(day, lang), span });
+  const note = [added, ...notes].join(" ");
   return { ok: true, note, ...(defaulted ? { defaulted: true } : {}) };
 }
 
@@ -1366,6 +1458,7 @@ export async function addJobDay(
 export async function clearJobDate(jobId: string): Promise<Result & { note?: string; kept?: string[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const plan = await clearPlan(supabase, jobId);
   if (!plan.ok) return { ok: false, error: plan.error };
@@ -1378,8 +1471,8 @@ export async function clearJobDate(jobId: string): Promise<Result & { note?: str
     .eq("status", "pending")
     .select("id");
   const notes = [
-    kept.length ? keptLine(kept) : null,
-    withdrawn?.length ? "The customer's pick-a-date link was withdrawn." : null,
+    kept.length ? await keptLine(ws, kept) : null,
+    withdrawn?.length ? await ws.say("ag_srv_pickLinkWithdrawn") : null,
   ].filter(Boolean);
   return { ok: true, kept, ...(notes.length ? { note: notes.join(" ") } : {}) };
 }
@@ -1444,9 +1537,10 @@ async function workedDayGuards(
   | { ok: true; job: { scheduled_start: string | null; scheduled_end: string | null }; words: string; tz: string; span: { startMin: number; endMin: number } }
   | { ok: false; error: string }
 > {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day ?? ""))) return { ok: false, error: "Pick a day." };
+  const ws = wordsOf(supabase);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day ?? ""))) return { ok: false, error: await ws.say("ag_pickADay") };
   const tz = await orgTimezone(supabase);
-  if (day >= todayStrInTz(tz)) return { ok: false, error: "Only a day already past can be booked from the time worked on it." };
+  if (day >= todayStrInTz(tz)) return { ok: false, error: await ws.say("ag_srv_pastDayOnly") };
   // PROJECTION LAW: every column read below.
   const { data: row, error: readErr } = await supabase
     .from("jobs")
@@ -1454,12 +1548,13 @@ async function workedDayGuards(
     .eq("id", jobId)
     .maybeSingle();
   if (readErr) return { ok: false, error: dbError(readErr) };
-  if (!row) return { ok: false, error: "That job isn't available. It may have been deleted." };
+  if (!row) return { ok: false, error: await ws.say("ag_srv_jobGoneDeleted") };
   const job = row as { name: string | null; job_number: string | null; scheduled_start: string | null; scheduled_end: string | null };
-  const words = jobWords(job);
+  const lang = await ws.lang();
+  const words = jobWords(job, lang, translator(lang));
   const worked = await workedSpanOn(supabase, jobId, day, tz);
   if ("error" in worked) return { ok: false, error: worked.error };
-  if (!worked.span) return { ok: false, error: `Nobody clocked time on ${words} on ${dayWords(day)}, so there's nothing to book.` };
+  if (!worked.span) return { ok: false, error: await ws.say("ag_srv_nobodyClocked", { job: words, day: dayWords(day, lang) }) };
   return { ok: true, job, words, tz, span: worked.span };
 }
 
@@ -1482,18 +1577,19 @@ async function workedDayGuards(
 export async function bookWorkedDay(jobId: string, day: string): Promise<Result & { note?: string; added?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const g = await workedDayGuards(supabase, jobId, day);
   if (!g.ok) return { ok: false, error: g.error };
   const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
-  if (coversDay(segments, day)) return { ok: true, added: false, note: `${dayWords(day)} is already on ${g.words}'s schedule.` };
+  if (coversDay(segments, day)) return { ok: true, added: false, note: await ws.say("ag_srv_dayAlreadyBooked", { day: dayWords(day, await ws.lang()), job: g.words }) };
   const hours = perDayHours ? dayHoursOf(g.span.startMin, g.span.endMin) : null;
   const res = await writeScheduleRanges(supabase, jobId, addDaySegment(segments, day, hours), undefined, planSpan(g.job, g.tz) ?? "none", undefined, {
     promote: false,
   });
   if (!res.ok) return { ok: false, error: res.error };
-  return { ok: true, added: true, note: `Added ${dayWords(day)} to ${g.words}'s schedule.` };
+  return { ok: true, added: true, note: await ws.say("ag_srv_dayBooked", { day: dayWords(day, await ws.lang()), job: g.words }) };
 }
 
 /**
@@ -1504,17 +1600,18 @@ export async function bookWorkedDay(jobId: string, day: string): Promise<Result 
 export async function unbookWorkedDay(jobId: string, day: string): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const g = await workedDayGuards(supabase, jobId, day);
   if (!g.ok) return { ok: false, error: g.error };
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
-  if (!coversDay(segments, day)) return { ok: true, note: `${dayWords(day)} isn't on ${g.words}'s schedule.` };
+  if (!coversDay(segments, day)) return { ok: true, note: await ws.say("ag_srv_dayNotBooked", { day: dayWords(day, await ws.lang()), job: g.words }) };
   const res = await writeScheduleRanges(supabase, jobId, removeDaySegment(segments, day), undefined, planSpan(g.job, g.tz) ?? "none", undefined, {
     promote: false,
   });
   if (!res.ok) return { ok: false, error: res.error };
-  return { ok: true, note: `Took ${dayWords(day)} off ${g.words}'s schedule.` };
+  return { ok: true, note: await ws.say("ag_srv_dayUnbooked", { day: dayWords(day, await ws.lang()), job: g.words }) };
 }
 
 /**
@@ -1534,8 +1631,9 @@ export async function unbookWorkedDay(jobId: string, day: string): Promise<Resul
 export async function sizeJob(jobId: string, plannedMinutes: number | null): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const m = Number(plannedMinutes) || 0;
-  if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: "That duration isn't sensible." };
+  if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: await ws.say("ag_srv_badDuration") };
   // 0 means "not sure yet" and clears it — never a zero-length job. Blank is not zero.
   const { data, error } = await ctx.supabase
     .from("jobs")
@@ -1543,7 +1641,7 @@ export async function sizeJob(jobId: string, plannedMinutes: number | null): Pro
     .eq("id", jobId)
     .select("id"); // THE SILENT-WRITE LAW: a zero-row update is a 204, not an error.
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That job isn't available." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_jobGone") };
   revalidatePath("/schedule");
   revalidatePath("/jobs");
   return { ok: true };
@@ -1572,7 +1670,8 @@ export async function placeAppointmentOnDay(
 ): Promise<Result & { note?: string; /** The start it wrote: the rail's Undo sends it back, so a visit someone moved since is refused. */ placedAt?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: await ws.say("ag_pickADay") };
   const hm = /^\d{2}:\d{2}$/.test(startHHMM) ? startHHMM : "09:00";
 
   // THE ORG'S CLOCK, NOT THE SERVER'S. `new Date("2026-08-27T08:00")` on Vercel is 8am UTC — which
@@ -1580,7 +1679,7 @@ export async function placeAppointmentOnDay(
   // uses, rather than a second copy of the settings read that could drift from it.
   const tz = await orgTimezone(ctx.supabase);
   const startsAt = tzDateTimeUtc(dateISO, hm, tz);
-  if (!startsAt) return { ok: false, error: "I couldn't read that day." };
+  if (!startsAt) return { ok: false, error: await ws.say("ag_srv_cantReadDay") };
 
   // An END only when somebody actually sized it. Blank is not zero, and a fake 90 minutes would put
   // a block on the calendar that no human chose.
@@ -1616,17 +1715,18 @@ export async function setVisitTimes(
 ): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const day = String(t?.day ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: "Pick a day." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: await ws.say("ag_pickADay") };
   const s = readHm(t?.start);
   const e = readHm(t?.end);
-  if (s == null || e == null) return { ok: false, error: "Pick a start and an end." };
+  if (s == null || e == null) return { ok: false, error: await ws.say("ag_srv_pickStartEnd") };
   const endDay = t.endDay && /^\d{4}-\d{2}-\d{2}$/.test(t.endDay) && t.endDay >= day ? t.endDay : day;
-  if (endDay === day && e <= s) return { ok: false, error: "The end has to be after the start." };
+  if (endDay === day && e <= s) return { ok: false, error: await ws.say("ag_srv_endAfterStart") };
   const tz = await orgTimezone(ctx.supabase);
   const startsAt = tzDateTimeUtc(day, String(t.start).slice(0, 5), tz);
   const endsAt = tzDateTimeUtc(endDay, String(t.end).slice(0, 5), tz);
-  if (!startsAt || !endsAt) return { ok: false, error: "I couldn't read that day." };
+  if (!startsAt || !endsAt) return { ok: false, error: await ws.say("ag_srv_cantReadDay") };
   return rescheduleAppointment(id, startsAt, endsAt);
 }
 
@@ -1648,18 +1748,19 @@ export async function sizeAppointment(
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   /* A KIND THAT ISN'T ONE IS REFUSED (W2-06), in words and with nothing written: the same rule sizeLead
      keeps. Any known kind is taken (the pickers narrow what's offered; a guard never refuses a row's own
      old kind, so an old Quote or Office can be picked again), and "other". Junk used to fall through
      appointmentTypeFor's default and land as an inspection nobody chose. */
   if (patch?.workKind && !isWorkKind(patch.workKind) && patch.workKind !== "other") {
-    return { ok: false, error: "That isn't a kind of work." };
+    return { ok: false, error: await ws.say("ag_srv_notAKind") };
   }
 
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if ("plannedMinutes" in patch) {
     const m = Number(patch.plannedMinutes ?? 0);
-    if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: "That duration isn't sensible." };
+    if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: await ws.say("ag_srv_badDuration") };
     update.planned_minutes = m > 0 ? m : null; // blank is not zero
   }
   if (patch.workKind) update.type = appointmentTypeFor(patch.workKind);
@@ -1697,7 +1798,7 @@ export async function sizeAppointment(
     .eq("id", id)
     .select("id"); // a zero-row UPDATE is a 204, not an error
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That visit isn't available." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_visitGone") };
   revalidatePath("/schedule");
   revalidatePath("/inspections");
   return { ok: true };
@@ -1732,7 +1833,8 @@ export async function planDayTimes(
 ): Promise<{ ok: boolean; times: string[]; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, times: [], error: ctx.error };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, times: [], error: "Pick a day." };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, times: [], error: await ws.say("ag_pickADay") };
   const own = new Set((opts?.jobIds ?? []).map(String));
 
   const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(ctx.supabase);
@@ -1861,15 +1963,16 @@ export async function planDayTimes(
 export async function setJobHold(jobId: string, reason: string | null, when?: ComeBackWhen | null): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
 
   if (reason !== null) {
     // A HOLD HAS A REASON (0234) — and " " is not one (audit v921). Refuse rather than parking the
     // job with hold_reason NULL, which is exactly the state the migration was written to end.
     const cleanReason = reason.trim();
-    if (!cleanReason) return { ok: false, error: "Say why it's on hold — that's what the crew and the customer will read." };
+    if (!cleanReason) return { ok: false, error: await ws.say("ag_srv_holdWhy") };
     let holdUntil: string | null = null;
     if (when) {
-      const day = resolveComeBack(todayStrInTz(await orgTimezone(ctx.supabase)), when);
+      const day = await comeBack(todayStrInTz(await orgTimezone(ctx.supabase)), when, ws);
       if (!day.ok) return { ok: false, error: day.error };
       holdUntil = day.day;
     }
@@ -1888,7 +1991,7 @@ export async function setJobHold(jobId: string, reason: string | null, when?: Co
     // 0366 not applied yet: park exactly as before (the reason), without the day it can't hold yet.
     if (error && holdUntil && isMissingColumn(error)) ({ data, error } = await park(false));
     if (error) return { ok: false, error: dbError(error) };
-    if (!data?.length) return { ok: false, error: "That job isn't available." };
+    if (!data?.length) return { ok: false, error: await ws.say("ag_srv_jobGone") };
   } else {
     // Waking up: back to where its date says it belongs — scheduled if it has one, the waiting
     // room if it doesn't. The reason clears with the hold; a stale reason is a false alarm. (The
@@ -1905,7 +2008,7 @@ export async function setJobHold(jobId: string, reason: string | null, when?: Co
       .eq("status", "on_hold")
       .select("id");
     if (error) return { ok: false, error: dbError(error) };
-    if (!data?.length) return { ok: false, error: "That job isn't on hold." };
+    if (!data?.length) return { ok: false, error: await ws.say("ag_srv_notOnHold") };
   }
   revalidatePath("/schedule");
   revalidatePath("/jobs");
@@ -1924,13 +2027,14 @@ export async function setJobHold(jobId: string, reason: string | null, when?: Co
 export async function snoozeJobHold(jobId: string, when: ComeBackWhen, reason?: string | null): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const day = resolveComeBack(todayStrInTz(await orgTimezone(ctx.supabase)), when);
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  const day = await comeBack(todayStrInTz(await orgTimezone(ctx.supabase)), when, ws);
   if (!day.ok) return { ok: false, error: day.error };
 
   const { data: job, error: readErr } = await ctx.supabase.from("jobs").select("id, status, hold_reason").eq("id", jobId).maybeSingle();
   if (readErr) return { ok: false, error: dbError(readErr) };
-  if (!job) return { ok: false, error: "That job isn't available." };
-  if ((job as { status?: string | null }).status !== "on_hold") return { ok: false, error: "That job isn't on hold." };
+  if (!job) return { ok: false, error: await ws.say("ag_srv_jobGone") };
+  if ((job as { status?: string | null }).status !== "on_hold") return { ok: false, error: await ws.say("ag_srv_notOnHold") };
 
   const said = (reason ?? "").trim();
   const saved = String((job as { hold_reason?: string | null }).hold_reason ?? "").trim();
@@ -1943,10 +2047,10 @@ export async function snoozeJobHold(jobId: string, when: ComeBackWhen, reason?: 
   if (error) {
     return {
       ok: false,
-      error: isMissingColumn(error) ? "This needs a quick database update before a hold can take a day." : dbError(error),
+      error: isMissingColumn(error) ? await ws.say("ag_srv_holdDayNeedsUpdate") : dbError(error),
     };
   }
-  if (!data?.length) return { ok: false, error: "That job isn't on hold." };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_notOnHold") };
   revalidatePath("/planner");
   revalidatePath("/schedule");
   revalidatePath("/jobs");
@@ -1973,10 +2077,11 @@ export async function setJobContact(
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const supabase = ctx.supabase;
   const phone = formatPhone(String(patch.phone ?? "").trim());
   const email = String(patch.email ?? "").trim();
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "That email doesn't look right." };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: await ws.say("ag_srv_badEmail") };
   if (!phone && !email) return { ok: true };
 
   const { data: job } = await supabase
@@ -1985,7 +2090,7 @@ export async function setJobContact(
     .select("id, name, customer_id, inquiry_id, created_by")
     .eq("id", jobId)
     .maybeSingle();
-  if (!job) return { ok: false, error: "That job isn't available." };
+  if (!job) return { ok: false, error: await ws.say("ag_srv_jobGone") };
 
   /* WHO IT IS BEFORE MINTING ANYONE (audit v921). This branch used to insert a card named after the
      JOB — "Site inspection: Karen" — for any job with no customer, ignoring both the lead the job
@@ -2010,14 +2115,14 @@ export async function setJobContact(
       .select("id, phone, email") // PROJECTION LAW: the fill-only rule reads both below
       .eq("id", customerId)
       .maybeSingle();
-    if (!cust) return { ok: false, error: "This job's customer isn't available." };
+    if (!cust) return { ok: false, error: await ws.say("ag_srv_customerGone") };
     if (linkedNow) {
       const { data: linked } = await supabase
         .from("jobs")
         .update({ customer_id: cust.id, updated_at: new Date().toISOString() })
         .eq("id", jobId)
         .select("id"); // SILENT-WRITE LAW: a zero-row link is a 204, not a linked job
-      if (!linked?.length) return { ok: false, error: "That job isn't available." };
+      if (!linked?.length) return { ok: false, error: await ws.say("ag_srv_jobGone") };
     }
     const fill: Record<string, string> = {};
     if (phone && !String(cust.phone ?? "").trim()) fill.phone = phone;
@@ -2028,7 +2133,7 @@ export async function setJobContact(
         revalidatePath(`/jobs/${jobId}`);
         return { ok: true };
       }
-      return { ok: false, error: "This customer already has that on file — change it on their card, where every job sees it." };
+      return { ok: false, error: await ws.say("ag_srv_alreadyOnFile") };
     }
     const { error } = await supabase.from("customers").update({ ...fill, updated_at: new Date().toISOString() }).eq("id", cust.id);
     if (error) return { ok: false, error: dbError(error) };
@@ -2050,7 +2155,7 @@ export async function setJobContact(
       .update({ customer_id: cust.id, updated_at: new Date().toISOString() })
       .eq("id", jobId)
       .select("id"); // SILENT-WRITE LAW: the new card is useless if the link didn't land
-    if (!linked?.length) return { ok: false, error: "That job isn't available." };
+    if (!linked?.length) return { ok: false, error: await ws.say("ag_srv_jobGone") };
   }
   revalidatePath("/schedule");
   revalidatePath(`/jobs/${jobId}`);

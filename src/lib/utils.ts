@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { localeOf } from "@/lib/locale";
+import { esMeridiem } from "@/lib/lang-words";
 
 /** Merge Tailwind class names, resolving conflicts. */
 export function cn(...inputs: ClassValue[]) {
@@ -124,23 +125,25 @@ export function formatDateTime(value: string | Date | null | undefined, tz: stri
   return dateFormat(lang, { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d);
 }
 
-/** Time-only ("h:mm AM") in the business timezone. */
-export function formatTime(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
+/** Time-only ("h:mm AM") in the business timezone. `lang` "es" (agenda wave): "9:30 a. m." through
+ *  Intl es-US, the half of the day spelled one way on the server and in the browser (lib/lang-words). */
+export function formatTime(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE, lang?: string | null) {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   if (isNaN(d.getTime())) return "—";
+  if (lang === "es") return esMeridiem(dateFormat(lang, { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(d));
   return d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
 }
 
-/** Short date ("Mon D", no year) — date-only safe, timestamps in the business tz. */
-export function formatDateShort(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
+/** Short date ("Mon D", no year) — date-only safe, timestamps in the business tz. `lang` "es": "5 nov". */
+export function formatDateShort(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE, lang?: string | null) {
   if (!value) return "—";
   if (typeof value === "string" && DATE_ONLY.test(value)) {
-    return new Date(`${value}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+    return dateFormat(lang, { timeZone: "UTC", month: "short", day: "numeric" }).format(new Date(`${value}T12:00:00Z`));
   }
   const d = typeof value === "string" ? new Date(value) : value;
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" });
+  return dateFormat(lang, { timeZone: tz, month: "short", day: "numeric" }).format(d);
 }
 
 /** Hours between two timestamps, minus lunch minutes, rounded to 2 decimals. */

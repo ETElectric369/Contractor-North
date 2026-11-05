@@ -18,6 +18,8 @@
  * overflowing at 375px. No money here or anywhere near it: the crew reads the same blocks.
  */
 import { pillColorForPerson } from "@/lib/employee-color";
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 /** The street line of a one-line address: "12 Elm St, Testville, CA 96161" → "12 Elm St". A line whose
  *  head is only a town or a zip ("Testville, CA 96161", "96161") has no street: "". */
@@ -136,6 +138,8 @@ export function crewChips(
     /** Everyone the company ever had (id, name), so a person who left is named, never "Unnamed". */
     people?: readonly Person[] | null;
   },
+  lang: Lang = "en",
+  words?: Words,
 ): CrewChip[] {
   const out: CrewChip[] = [];
   const nameOf = (id: string): { name: string; departed: boolean } => {
@@ -144,7 +148,7 @@ export function crewChips(
     const gone = day?.people?.find((m) => m.id === id)?.full_name?.trim();
     // Named from the whole company's people only when the active team doesn't carry them: they left.
     if (gone) return { name: gone, departed: true };
-    return { name: "Unnamed", departed: false };
+    return { name: say(lang, words, "ag_unnamed", "Unnamed"), departed: false };
   };
   const rowOf = new Map<string, CrewDayRow>();
   for (const r of day?.rows ?? []) if (r?.profile_id) rowOf.set(String(r.profile_id), r);
@@ -157,17 +161,19 @@ export function crewChips(
     const c: CrewChip = { id, initials: initialsOf(name), name };
     if (departed) {
       c.departed = true;
-      c.title = `${name} · No Longer On The Team`;
+      c.title = say(lang, words, "ag_chipGone", `${name} · No Longer On The Team`, { name });
     }
     const r = rowOf.get(id);
     if (r?.kind === "off") {
       c.state = "off";
-      c.title = `${name} · Off That Day`;
+      c.title = say(lang, words, "ag_chipOff", `${name} · Off That Day`, { name });
     } else if (jobId && r?.kind === "job" && r.job_id && r.job_id !== jobId) {
       const other = day?.jobNames?.get(r.job_id) ?? null;
       c.state = "elsewhere";
       c.otherJob = other;
-      c.title = other ? `${name} · On ${other} That Day` : `${name} · On Another Job That Day`;
+      c.title = other
+        ? say(lang, words, "ag_chipOnOther", `${name} · On ${other} That Day`, { name, job: other })
+        : say(lang, words, "ag_chipOnAnother", `${name} · On Another Job That Day`, { name });
     }
     return c;
   };
@@ -195,21 +201,33 @@ export function chipDot(c: Pick<CrewChip, "id" | "dot">): string {
 
 /** The crew in words, for a block's title and label: "Crew: Brian Cole (off that day), Erik Taylor", or
  *  "Nobody on it". */
-export function crewWords(crew: readonly CrewChip[]): string {
-  if (!crew.length) return "Nobody on it";
+export function crewWords(crew: readonly CrewChip[], lang: Lang = "en", words?: Words): string {
+  if (!crew.length) return say(lang, words, "ag_nobodyOnIt", "Nobody on it");
+  const another = say(lang, words, "ag_anotherJob", "another job");
   const one = (c: CrewChip) =>
-    c.state === "off" ? `${c.name} (off that day)` : c.state === "elsewhere" ? `${c.name} (on ${c.otherJob ?? "another job"} that day)` : c.name;
-  return `Crew: ${crew.map(one).join(", ")}`;
+    c.state === "off"
+      ? say(lang, words, "ag_nameOffThatDay", `${c.name} (off that day)`, { name: c.name })
+      : c.state === "elsewhere"
+        ? say(lang, words, "ag_nameOnThatDay", `${c.name} (on ${c.otherJob ?? "another job"} that day)`, { name: c.name, job: c.otherJob ?? another })
+        : c.name;
+  const list = crew.map(one).join(", ");
+  return say(lang, words, "ag_crewList", `Crew: ${list}`, { list });
 }
 
 /** What that day's rows did to the crew, one plain line each, for the tile's sheet: "Brian is off that
  *  day.", "Erik is on 12 Elm St · J-048 that day." Nothing when the day moves nobody. */
-export function crewDayLines(crew: readonly CrewChip[] | null | undefined): string[] {
+export function crewDayLines(crew: readonly CrewChip[] | null | undefined, lang: Lang = "en", words?: Words): string[] {
   const first = (c: CrewChip) => c.name.split(/\s+/)[0] || c.name;
   const out: string[] = [];
   for (const c of crew ?? []) {
-    if (c.state === "off") out.push(`${first(c)} is off that day.`);
-    else if (c.state === "elsewhere") out.push(`${first(c)} is on ${c.otherJob ?? "another job"} that day.`);
+    if (c.state === "off") out.push(say(lang, words, "ag_firstIsOff", `${first(c)} is off that day.`, { first: first(c) }));
+    else if (c.state === "elsewhere")
+      out.push(
+        say(lang, words, "ag_firstIsOn", `${first(c)} is on ${c.otherJob ?? "another job"} that day.`, {
+          first: first(c),
+          job: c.otherJob ?? say(lang, words, "ag_anotherJob", "another job"),
+        }),
+      );
   }
   return out;
 }

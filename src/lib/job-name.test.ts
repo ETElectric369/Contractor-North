@@ -233,9 +233,12 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     expect(src).toMatch(/if \(typedNameMayBeATag\(sentName\)\)/);
     expect(src).toMatch(/name = jobNameFrom\(\{\s*typed: sentName,[\s\S]*?street: address,\s*unit: emptyToNull\(formData\.get\("unit"\)\),/);
     expect(read("src/lib/actions/entities/job.ts")).toMatch(/return createJob\(fd\)/);
+    expect(src).toMatch(/name = jobNameFrom\(\{ typed: sentName, customer: who, street: address, unit: emptyToNull\(formData\.get\("unit"\)\), todayStr, lang, words: translator\(lang\) \}\)/);
+    expect(read("src/app/(app)/schedule/new-job-button.tsx")).toMatch(/<input type="hidden" name="lang" value=\{lang\} \/>/);
     // The New Job form's live line is the same default, unit and all.
     expect(read("src/app/(app)/schedule/new-job-button.tsx")).toMatch(
-      /willBeCalled = defaultJobName\(\{ customer: picked, street: form\.address, unit: form\.unit, todayStr: today \}\)/,
+      // …in the reader's language, the pair createJob hands jobNameFrom for the stub (agenda-in-Spanish).
+      /willBeCalled = defaultJobName\(\{ customer: picked, street: form\.address, unit: form\.unit, todayStr: today, lang, words: t \}\)/,
     );
   });
 
