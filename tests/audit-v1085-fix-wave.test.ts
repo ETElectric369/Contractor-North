@@ -229,7 +229,7 @@ describe("the carried items fixed in passing", () => {
     expect(rev).toContain('.order("accepted_at", { ascending: false, nullsFirst: false })');
     expect(rev).toContain("if (error) throw new Error(`revisionOf: ${dbError(error)}`);");
     const quotes = src("src/app/(app)/quotes/actions.ts");
-    expect(quotes.split("Couldn't check whether a revision replaced this estimate").length - 1).toBe(3); // requireEditableQuote + updateQuoteStatus + createJobFromQuote
+    expect(quotes.split('ws.say("qs_revisionCheckFailed"').length - 1).toBe(3); // requireEditableQuote + updateQuoteStatus + createJobFromQuote, in the caller's words (cn-v1145)
     expect(src("src/app/(app)/billing/actions.ts")).toContain("Couldn't check whether a revision replaced this estimate");
   });
 });

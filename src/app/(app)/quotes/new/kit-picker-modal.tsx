@@ -16,6 +16,8 @@ import {
 import { BookOpen } from "lucide-react";
 import { kitIsParametric, kitQuantities, type ParametricKitItem } from "@/lib/estimate/parametric-kit";
 import type { DraftLineItem } from "../actions";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 export interface KitForPicker {
   id: string;
@@ -46,6 +48,7 @@ export function KitPickerModal({
   onClose: () => void;
   onAdd: (lines: DraftLineItem[]) => void;
 }) {
+  const t = translator(useLang());
   const [rows, setRows] = useState<KitPickerRow[]>(() => kitItemsToPickerRows(kit.kit_items, pricing));
   const linkedCount = rows.filter((r) => r.linked).length;
   const [err] = useState<string | null>(null);
@@ -93,14 +96,14 @@ export function KitPickerModal({
     <Modal
       open
       onClose={onClose}
-      title={`Add from kit: ${kit.name}`}
+      title={fillText(t("qt_addFromKit"), { name: kit.name })}
       size="xl"
       dirty={hasEdits}
       footer={
         <ModalActions
           onCancel={onClose}
           onSave={() => onAdd(addLines)}
-          saveLabel={`Add ${addLines.length} item${addLines.length === 1 ? "" : "s"} — ${formatCurrency(subtotal)}`}
+          saveLabel={fillText(t(addLines.length === 1 ? "qt_addItemsOne" : "qt_addItemsMany"), { n: String(addLines.length), amount: formatCurrency(subtotal) })}
           disabled={addLines.length === 0}
           saving={false}
         />
@@ -108,13 +111,11 @@ export function KitPickerModal({
     >
       <div className="space-y-3">
         <p className="text-xs text-slate-500">
-          Tick the lines this estimate needs. Qty and price edits apply to THIS estimate only —
-          the kit itself is unchanged.
+          {t("qt_kitTickLines")}
           {linkedCount > 0 && (
             <>
               {" "}
-              <BookOpen className="inline h-3 w-3 text-brand" /> lines are priced from the Price List for this
-              customer.
+              <BookOpen className="inline h-3 w-3 text-brand" /> {t("qt_kitLinkedPriced")}
             </>
           )}
         </p>
@@ -122,18 +123,18 @@ export function KitPickerModal({
         {parametric && (
           <div className="rounded-lg border border-brand/30 bg-brand/5 p-3">
             <p className="mb-2 text-xs font-medium text-slate-600">
-              This list sizes itself.{" "}
+              {t("qt_kitSizesItself")}{" "}
               {measured?.sqft || measured?.linearFt
-                ? "Taken from the inspection — change them if the job did."
-                : "Enter the job\u2019s measurements and the quantities fill in."}
+                ? t("qt_kitTakenFromInspection")
+                : t("qt_kitEnterMeasurements")}
             </p>
             <div className="flex flex-wrap items-end gap-2">
               <div className="w-28">
-                <label className="mb-1 block text-[11px] text-slate-500" htmlFor="kit-sqft">Square feet</label>
+                <label className="mb-1 block text-[11px] text-slate-500" htmlFor="kit-sqft">{t("qt_squareFeet")}</label>
                 <NumberInput id="kit-sqft" value={sqft} onValueChange={setSqft} />
               </div>
               <div className="w-28">
-                <label className="mb-1 block text-[11px] text-slate-500" htmlFor="kit-lf">Linear feet</label>
+                <label className="mb-1 block text-[11px] text-slate-500" htmlFor="kit-lf">{t("qt_linearFeet")}</label>
                 <NumberInput id="kit-lf" value={linearFt} onValueChange={setLinearFt} />
               </div>
               <button
@@ -142,7 +143,7 @@ export function KitPickerModal({
                 disabled={sqft <= 0 && linearFt <= 0 && !Object.values(measured?.byKey ?? {}).some((v) => Number(v) > 0)}
                 className="h-10 rounded-lg bg-brand px-3 text-sm font-medium text-white disabled:opacity-40"
               >
-                Size To Job
+                {t("qt_btn_sizeToJob")}
               </button>
             </div>
           </div>
@@ -157,7 +158,7 @@ export function KitPickerModal({
             className="h-4 w-4 rounded border-slate-300 text-brand"
           />
           <span>
-            {checkedCount} of {rows.length} selected
+            {fillText(t("qt_nOfTotalSelected"), { n: String(checkedCount), total: String(rows.length) })}
           </span>
         </label>
 
@@ -173,23 +174,23 @@ export function KitPickerModal({
                   checked={r.checked}
                   onChange={(e) => patchRow(idx, { checked: e.target.checked })}
                   className="h-4 w-4 rounded border-slate-300 text-brand"
-                  aria-label={`Include ${r.description}`}
+                  aria-label={fillText(t("qt_includeLine"), { name: r.description })}
                 />
               </div>
               <div className="col-span-11 flex items-center gap-1.5 sm:col-span-5">
-                {r.linked && <BookOpen className="h-3.5 w-3.5 shrink-0 text-brand" aria-label="Priced from the Price List" />}
+                {r.linked && <BookOpen className="h-3.5 w-3.5 shrink-0 text-brand" aria-label={t("qt_pricedFromPriceList")} />}
                 <Input
                   value={r.description}
                   onChange={(e) => patchRow(idx, { description: e.target.value })}
-                  placeholder="Description"
+                  placeholder={t("qt_description")}
                 />
               </div>
               <div className="col-span-3 sm:col-span-2">
-                <NumberInput value={r.quantity} onValueChange={(n) => patchRow(idx, { quantity: n })} placeholder="Qty" aria-label="Quantity" />
+                <NumberInput value={r.quantity} onValueChange={(n) => patchRow(idx, { quantity: n })} placeholder={t("qt_qty")} aria-label={t("qt_quantity")} />
               </div>
               <div className="col-span-2 sm:col-span-1 text-center text-xs text-slate-500">{r.unit}</div>
               <div className="col-span-4 sm:col-span-2">
-                <NumberInput value={r.unit_price} onValueChange={(n) => patchRow(idx, { unit_price: n })} placeholder="Unit $" aria-label="Unit price" />
+                <NumberInput value={r.unit_price} onValueChange={(n) => patchRow(idx, { unit_price: n })} placeholder={t("qt_unitDollar")} aria-label={t("qt_unitPrice")} />
               </div>
               <div className="col-span-3 sm:col-span-1 text-right text-sm font-medium text-slate-700">
                 {formatCurrency((Number(r.quantity) || 0) * (Number(r.unit_price) || 0))}
@@ -197,7 +198,7 @@ export function KitPickerModal({
             </div>
           ))}
           {rows.length === 0 && (
-            <p className="py-4 text-center text-sm text-slate-400">This kit has no items yet — add the first one below.</p>
+            <p className="py-4 text-center text-sm text-slate-400">{t("qt_kitNoItemsYet")}</p>
           )}
         </div>
 
@@ -206,8 +207,7 @@ export function KitPickerModal({
             bottom is glitchy") — a tap could change the template for every future estimate
             while you thought you were adjusting this one. Selection only now. */}
         <p className="border-t border-slate-100 pt-3 text-[11px] text-slate-400">
-          Need to change the kit itself — add, remove or re-price a line for every future
-          estimate? Do it in Price list &amp; kits.
+          {t("qt_kitChangeItself")}
         </p>
 
         {err && <p className="text-sm text-red-600">{err}</p>}

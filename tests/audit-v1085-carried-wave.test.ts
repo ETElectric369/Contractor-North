@@ -8,6 +8,7 @@ import { revisionOf } from "../src/lib/estimate/revision";
 import { closingsFor } from "../src/lib/appointments/behind-quote";
 import { materialsWords, planPartSync, syncQuoteMaterials, type KeyedPart } from "../src/lib/estimate/sync-job-materials";
 import { discountRowLabel } from "../src/lib/invoice-math";
+import { dict } from "../src/lib/i18n";
 
 /**
  * THE SECOND VERIFY ROUND over audit v1085's carried findings (2026-10-11, 5 sonnet verifiers against
@@ -212,9 +213,10 @@ describe("the words and the doors (carried [16], [15], [38], [9], [43], [1], [19
   });
   it("[1] walking an accepted revision back names the estimate it leaves superseded; [19] a revision pinned at acceptance has the figure before read first; [20] both Accept branches keep the paperwork's results", () => {
     const quotes = src("src/app/(app)/quotes/actions.ts");
-    expect(quotes).toContain("was replaced by this estimate and now stands replaced by nothing — set it back to Accepted");
+    expect(quotes).toContain('said = await ws.say("qs_walkedBack"'); // the caller's words (cn-v1145)
+    expect(dict("en").qs_walkedBack).toContain("was replaced by this estimate and now stands replaced by nothing — set it back to Accepted");
     expect(quotes).toContain("const est = await estimateLines(supabase, { jobId: origJob, orgId: ctx.orgId });");
-    expect(quotes.match(/paperworkNote\(wo, list\)/g)).toHaveLength(2);
+    expect(quotes.match(/paperworkNote\(wo, list, ws\)/g)).toHaveLength(2);
     expect(quotes).not.toContain("Open Work Orders to add it.` : null"); // a rule's own refusal passes through: one action, not two
     expect(src("src/app/q/[token]/actions.ts")).toContain("await notifyQuoteAccepted(token, listSaid);"); // the customer's Accept: the office hears what the list did
     expect(src("src/components/section-actions-menu.tsx")).toContain("(res as { note?: string }).note, res.error]) if (w) toast(w, \"info\");");

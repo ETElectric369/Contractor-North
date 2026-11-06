@@ -3,10 +3,13 @@
 import { useState, useTransition } from "react";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { setQuoteType } from "../actions";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
-const LABEL: Record<"estimate" | "quote", string> = {
-  quote: "Quote (Fixed)",
-  estimate: "Estimate (T&M)",
+/** The two types' words (qt_btn_typeQuote / qt_btn_typeEstimate), read in the person's language. */
+const LABEL_KEY: Record<"estimate" | "quote", string> = {
+  quote: "qt_btn_typeQuote",
+  estimate: "qt_btn_typeEstimate",
 };
 
 /** Fixed-price quote vs time-&-materials estimate — same document, the label and
@@ -47,19 +50,20 @@ export function QuoteTypeToggle({
   const [type, setType] = useState<"estimate" | "quote">(value);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const t = translator(useLang());
 
-  function pick(t: "estimate" | "quote") {
-    if (t === type || pending) return;
+  function pick(next: "estimate" | "quote") {
+    if (next === type || pending) return;
     setError(null);
     start(async () => {
-      const res = await setQuoteType(id, t);
+      const res = await setQuoteType(id, next);
       // THE SILENT-WRITE LAW: the old call was `void setQuoteType(...)`, so a refusal — or a
       // dead database — landed nowhere at all and the pill simply sat on the new value.
       if (!res?.ok) {
-        setError(res?.error ?? "Couldn't change the type — try again.");
+        setError(res?.error ?? t("qt_couldntChangeType"));
         return;
       }
-      setType(t);
+      setType(next);
     });
   }
 
@@ -74,9 +78,9 @@ export function QuoteTypeToggle({
   if (status && status !== "draft") {
     return (
       <div className="min-w-0">
-        <div className="text-sm font-medium text-slate-700">{LABEL[type]}</div>
+        <div className="text-sm font-medium text-slate-700">{t(LABEL_KEY[type])}</div>
         <div className="text-xs text-slate-500">
-          Already sent, so the type is set - the copy the customer has states the pricing basis. Duplicate it to start a new one.
+          {t("qt_typeSetAlreadySent")}
         </div>
       </div>
     );
@@ -86,13 +90,13 @@ export function QuoteTypeToggle({
     // No min-w-0 on this wrapper: the header row sizes the ~250px pill by its content, and
     // letting it shrink below that is how the share icon got pushed off a 375px screen once.
     <div>
-      <div title="Quote = fixed price · Estimate = time & materials">
+      <div title={t("qt_typeTitle")}>
         <SegmentedControl
           activeId={type}
           onSelect={(id) => pick(id as "estimate" | "quote")}
           items={[
-            { id: "quote", label: LABEL.quote },
-            { id: "estimate", label: LABEL.estimate },
+            { id: "quote", label: t(LABEL_KEY.quote) },
+            { id: "estimate", label: t(LABEL_KEY.estimate) },
           ]}
         />
       </div>

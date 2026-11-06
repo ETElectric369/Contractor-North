@@ -17,6 +17,8 @@ import {
 import { KitPickerModal, type KitForPicker } from "@/app/(app)/quotes/new/kit-picker-modal";
 import type { KitPickerPricing } from "@/lib/kit-picker";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /**
  * THE ONE WAY TO PUT A LINE ON A DOCUMENT.
@@ -107,6 +109,7 @@ export function AddLineItems({
    *  land mid-flight (the one save model). */
   disabled?: boolean;
 }) {
+  const t = translator(useLang());
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [pickerKit, setPickerKit] = useState<KitForPicker | null>(null);
@@ -168,7 +171,7 @@ export function AddLineItems({
       {priceItems.length > 0 && (
         <div className="relative mb-3">
           <Input
-            placeholder="Add from Price List — tap to browse, or search…"
+            placeholder={t("qt_addFromPriceList")}
             value={query}
             disabled={disabled}
             onChange={(e) => {
@@ -211,7 +214,7 @@ export function AddLineItems({
                                 : formatCurrency(summary.ownChoice.unitPrice)}
                             </span>
                             <span className="text-xs font-medium text-brand">
-                              {summary.count} Vendor{summary.count === 1 ? "" : "s"}
+                              {fillText(t(summary.count === 1 ? "qt_vendorsOne" : "qt_vendorsMany"), { n: String(summary.count) })}
                             </span>
                           </span>
                         ) : (
@@ -231,7 +234,7 @@ export function AddLineItems({
                             >
                               <span className="min-w-0 truncate">
                                 {choice.makerLabel}
-                                {choice.isDefault && <span className="ml-1.5 text-xs font-medium text-brand">Default</span>}
+                                {choice.isDefault && <span className="ml-1.5 text-xs font-medium text-brand">{t("qt_default")}</span>}
                               </span>
                               <span className="shrink-0 text-slate-600">{formatCurrency(choice.unitPrice)}</span>
                             </button>
@@ -244,13 +247,13 @@ export function AddLineItems({
               })}
               {matches.length === 0 && (
                 <li className="px-3 py-2 text-sm text-slate-400">
-                  {priceItems.length === 0 ? "Your price list is empty." : "Nothing matches that."}
+                  {priceItems.length === 0 ? t("qt_priceListEmpty") : t("qt_nothingMatches")}
                 </li>
               )}
               {/* Say when the list is capped. A silent slice reads as "that's everything". */}
               {!query.trim() && priceItems.length > matches.length && (
                 <li className="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
-                  Showing {matches.length} of {priceItems.length} — type to narrow it down.
+                  {fillText(t("qt_showingNofTotal"), { n: String(matches.length), total: String(priceItems.length) })}
                 </li>
               )}
             </ul>
@@ -263,7 +266,7 @@ export function AddLineItems({
           list. Naming the lists out loud is the whole fix. */}
       {kits.length > 0 && (
         <div className="mb-3">
-          <p className="mb-1.5 text-xs font-medium text-slate-500">Add from a list</p>
+          <p className="mb-1.5 text-xs font-medium text-slate-500">{t("qt_addFromAList")}</p>
           <div className="flex flex-wrap gap-2">
             {kits.map((k) => (
               <button

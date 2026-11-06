@@ -124,7 +124,10 @@ export function pageReadsTheMap(file: string, slug: string, opts: { description?
   } else {
     expect(src).toContain('import { currentLangFor } from "@/lib/current-lang";');
     expect(src).not.toContain("currentLang()");
-    const calls = src.match(/translator\(await currentLangFor\((user\?\.id|user\.id|ctx\.userId|userId)\)\)/g) ?? [];
+    // Inline, or read once into `lang` and handed to the translator (a page that also hands the language to a
+    // label helper — /activity's estimate status since cn-v1145 — keeps it in a name).
+    const calls = src.match(/translator\(await currentLangFor\((user\?\.id|user\.id|ctx\.userId|userId)\)\)|const lang = await currentLangFor\((user\?\.id|user\.id|ctx\.userId|userId)\);\s+const t = translator\(lang\);/g) ?? [];
+    expect(src.match(/await currentLangFor\(/g) ?? [], `${file} reads currentLangFor once`).toHaveLength(1);
     expect(calls, `${file} reads currentLangFor once, with the id its session already holds`).toHaveLength(1);
     // The id came from the page's own session read, which sits above the language call.
     const session = src.search(/auth\.getUser\(\)|await requireStaff\(\)/);

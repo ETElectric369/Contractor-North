@@ -15,6 +15,9 @@ const { EstimateEditor } = await import("./estimate-editor");
 const { unsaved, saved } = renderers(EstimateEditor);
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 const editorSrc = read("src/app/(app)/quotes/estimate-editor.tsx");
+// The editor's words live in its catalog since cn-v1145 (qe_): a door is pinned by its key in the source
+// and by its English in the catalog, byte for byte.
+const { words: qe } = await import("@/lib/words/quotes-editor");
 
 const rule = { label: null, person_id: null, hours: 2, rate: 145, rate_from: "rule" as const };
 const task = { id: "li-1", description: "Install transfer switch", quantity: 1, unit: "ea", unit_price: 290, category: "Tasks", detail: { task_id: "t1", labor: [rule], units: null, kit_id: null, materials: [] }, sort_order: 0 };
@@ -73,10 +76,13 @@ describe("birth without litter", () => {
     // Born here and still on this route — a failed stash, a refusal, an error, a review: ANY reason — the
     // green line links the row; on its own page it says the estimate is on the list (skeptic #39, N3).
     expect(editorSrc).not.toContain("stayedHere");
-    expect(editorSrc).toMatch(/\{props\.mode === "unsaved" \? \(\s*<>\s*\{" · "\}\s*<Link href=\{`\/quotes\/\$\{savedId\}`\} className="font-semibold underline">\s*Open It\s*<\/Link>/);
-    expect(editorSrc).toContain("<> — it&apos;s on the Estimates list even if you leave.</>");
+    expect(editorSrc).toMatch(/\{props\.mode === "unsaved" \? \(\s*<>\s*\{" · "\}\s*<Link href=\{`\/quotes\/\$\{savedId\}`\} className="font-semibold underline">\s*\{t\("qe_btn_openIt"\)\}\s*<\/Link>/);
+    expect(qe.en.qe_btn_openIt).toBe("Open It");
+    expect(editorSrc).toContain('<> {t("qe_onTheListEvenIfYouLeave")}</>');
+    expect(qe.en.qe_onTheListEvenIfYouLeave).toBe("— it's on the Estimates list even if you leave.");
     // The estimator's error can be dismissed (Title Case: a button), so a stale one never holds the hand-off for good.
-    expect(editorSrc).toMatch(/\{aiError\}\{" "\}\s*<button type="button" onClick=\{\(\) => setAiError\(null\)\}[^>]*>\s*Dismiss\s*<\/button>/);
+    expect(editorSrc).toMatch(/\{aiError\}\{" "\}\s*<button type="button" onClick=\{\(\) => setAiError\(null\)\}[^>]*>\s*\{t\("qe_btn_dismiss"\)\}\s*<\/button>/);
+    expect(qe.en.qe_btn_dismiss).toBe("Dismiss");
   });
 
   it("the page's fresh props are taken when nothing is on the wire and nothing typed is uncommitted (S2) — a standing refusal does not hold them (skeptic #39: the store keeps a refused row's value and Retry through a reseed) — and the effect re-runs when either flips (the hold itself is driven in use-quote-writes.test.ts)", () => {
@@ -102,7 +108,18 @@ describe("birth without litter", () => {
   });
 
   it("the estimator's buttons read Title Case", () => {
-    for (const label of ["Not Now", "Drop Them All", "To The Estimate", "To The Price Book", "Tick All", "Untick All"]) expect(editorSrc).toContain(label);
+    const doors: [string, string][] = [
+      ["qe_btn_notNow", "Not Now"],
+      ["qe_btn_dropThemAll", "Drop Them All"],
+      ["qe_btn_addToEstimate", "Add {n} To The Estimate"],
+      ["qe_btn_applyToBook", "Apply {n} To The Price Book"],
+      ["qe_btn_tickAll", "Tick All"],
+      ["qe_btn_untickAll", "Untick All"],
+    ];
+    for (const [key, english] of doors) {
+      expect(editorSrc).toContain(`t("${key}")`);
+      expect(qe.en[key]).toBe(english);
+    }
     for (const label of ["Not now", "Drop them all", "to the estimate\n", "to the price book", '"Tick all"', '"Untick all"']) expect(editorSrc).not.toContain(label);
   });
 
@@ -153,13 +170,22 @@ describe("the saved page's doors, on the editor", () => {
 
   it("the ⋯ menu's doors follow the row: View over Create once a record exists; no Create on a superseded estimate", () => {
     const src = editorSrc.slice(editorSrc.indexOf("function quoteTree("), editorSrc.indexOf("/** The words beside a refused write"));
-    expect(src).toContain('{ id: "qm-inv", label: "View Invoice", icon: "receipt", href: `/billing/${q.existing.invoice}` }');
-    expect(src).toContain('{ id: "qm-inv", label: "Create Invoice", icon: "receipt", run: () => createInvoiceFromQuote(q.id), hrefPrefix: "/billing/" }');
-    expect(src).toContain('{ id: "qm-job", label: "Create Job", icon: "briefcase", run: () => createJobFromQuote(q.id), hrefPrefix: "/jobs/" }');
-    expect(src).toContain('label: "Create Work Order"');
-    expect(src).toContain('label: "Create Material List"');
-    expect(src).toContain('label: "Print / PDF"');
-    expect(src).toContain('label: "Delete Quote"');
+    expect(src).toContain('{ id: "qm-inv", label: t("qe_btn_viewInvoice"), icon: "receipt", href: `/billing/${q.existing.invoice}` }');
+    expect(src).toContain('{ id: "qm-inv", label: t("qe_btn_createInvoice"), icon: "receipt", run: () => createInvoiceFromQuote(q.id), hrefPrefix: "/billing/" }');
+    expect(src).toContain('{ id: "qm-job", label: t("qe_btn_createJob"), icon: "briefcase", run: () => createJobFromQuote(q.id), hrefPrefix: "/jobs/" }');
+    expect(src).toContain('label: t("qe_btn_createWorkOrder")');
+    expect(src).toContain('label: t("qe_btn_createMaterialList")');
+    expect(src).toContain('label: t("qe_btn_printPdf")');
+    expect(src).toContain('label: t("qe_btn_deleteQuote")');
+    expect([qe.en.qe_btn_viewInvoice, qe.en.qe_btn_createInvoice, qe.en.qe_btn_createJob, qe.en.qe_btn_createWorkOrder, qe.en.qe_btn_createMaterialList, qe.en.qe_btn_printPdf, qe.en.qe_btn_deleteQuote]).toEqual([
+      "View Invoice",
+      "Create Invoice",
+      "Create Job",
+      "Create Work Order",
+      "Create Material List",
+      "Print / PDF",
+      "Delete Quote",
+    ]);
     expect(src).toContain('const replaced = q.status === "superseded";');
     expect(src).toContain('const noPaperYet = replaced || (!!q.revisesId && q.status !== "accepted");');
   });
@@ -220,7 +246,8 @@ describe("the one save model, on the screen", () => {
     expect(editorSrc).toContain("disabled={busy} onAdd={(lines) => void session.addLines(lines)}");
     expect(read("src/components/add-line-items.tsx")).toContain("disabled?: boolean;");
     expect(editorSrc).toContain("function Refused({ words, onRetry, disabled }");
-    expect(editorSrc).toMatch(/<button type="button" onClick=\{onRetry\} disabled=\{disabled\} className="font-semibold underline disabled:opacity-50">\s*Retry\s*<\/button>/);
+    expect(editorSrc).toMatch(/<button type="button" onClick=\{onRetry\} disabled=\{disabled\} className="font-semibold underline disabled:opacity-50">\s*\{t\("qe_btn_retry"\)\}\s*<\/button>/);
+    expect(qe.en.qe_btn_retry).toBe("Retry");
     // A commit queued behind the wire, a line waiting for its id: words, no button.
     expect(editorSrc).toContain("function Waiting({ words }: { words?: string })");
     expect(editorSrc).toContain('<Waiting words={state.waiting[slot]} />');

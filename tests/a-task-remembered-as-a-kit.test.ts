@@ -29,7 +29,8 @@ describe("the door on the estimate", () => {
     expect(breakdown).toContain("Remember As A Kit");
     expect(breakdown).toContain("rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d, category: kitCategory.trim() || null })");
     // The pure rule speaks BEFORE the round trip, so the door never opens onto a refusal.
-    expect(breakdown).toContain("kitFromTaskDetail(d, { name: kitName || \"kit\", unit: kitUnit })");
+    // Since cn-v1145 the screen hands its language and translator on (the refusal reads in Spanish).
+    expect(breakdown).toContain("kitFromTaskDetail(d, { name: kitName || \"kit\", unit: kitUnit }, lang, t)");
   });
   it("both pages hand the editor the task kits by name", () => {
     expect(src("src/app/(app)/quotes/new/page.tsx")).toContain("taskKits,");
@@ -119,7 +120,7 @@ describe("the plain kit pickers never offer a task kit", () => {
     const breakdown = builder.slice(builder.indexOf("export function TaskBreakdown("));
     expect(breakdown).toContain("reexpandTaskDetail(d, n, fromKit, { orgDefaultPct: pricing.orgDefaultPct ?? 0, levelPct: pricing.levelPct })");
     expect(breakdown).toContain("description: lineNameWithUnits(line.description, d.units, next.units)");
-    expect(breakdown).toContain('aria-label="Units"');
+    expect(breakdown).toContain('aria-label={t("qb_units")}'); // "Units" (lib/words/quotes-breakdown, cn-v1145)
     // A blank mid-typing is not a count; a hand-typed Unit $ stands through the change.
     expect(breakdown).toContain("if (!fromKit || !(n > 0)) return;");
     expect(breakdown).toContain("onChange(hand ? { ...priced, unit_price: line.unit_price } : priced);");

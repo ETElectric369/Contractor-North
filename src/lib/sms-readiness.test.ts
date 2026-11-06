@@ -161,3 +161,18 @@ describe("smsReadiness and sendSms read the same environment", () => {
     expect(await sendSms("+15305550100", "hi")).toBe(false);
   });
 });
+
+describe("the Text doors' refusals speak the reader's language (cn-v1145)", () => {
+  it("English inline, byte for byte the constants; Spanish only when a Spanish caller hands its translator", async () => {
+    const { textNotReadyRefusal, textRefused, TEXT_REFUSED } = await import("./sms-readiness");
+    const { translator } = await import("@/lib/i18n");
+    expect(textNotReadyRefusal()).toBe(TEXT_NOT_READY_REFUSAL);
+    expect(textRefused()).toBe(TEXT_REFUSED);
+    expect(textNotReadyRefusal("es")).toBe(TEXT_NOT_READY_REFUSAL); // no translator handed in: English, never a key
+    expect(textNotReadyRefusal("en", translator("en"))).toBe(TEXT_NOT_READY_REFUSAL);
+    expect(translator("en")("qs_lib_textNotReady")).toBe(TEXT_NOT_READY_REFUSAL);
+    expect(translator("en")("qs_lib_textRefused")).toBe(TEXT_REFUSED);
+    expect(textNotReadyRefusal("es", translator("es"))).toMatch(/^El envío de mensajes aún no está configurado/);
+    expect(textRefused("es", translator("es"))).toMatch(/^El servicio de mensajes no aceptó/);
+  });
+});

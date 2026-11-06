@@ -11,6 +11,9 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { FIXED_PILL_CLASS, isFixedPrice } from "@/lib/doc-label";
 import { deleteQuote, resolveDuplicateDrafts } from "./actions";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
+import { estimateStatusLabel } from "@/lib/statuses";
 
 type QuoteRow = {
   id: string;
@@ -44,6 +47,8 @@ export function QuotesList({
   clusters: DupCluster[];
   isStaff: boolean;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   return (
     <>
       {isStaff && clusters.length > 0 && (
@@ -61,7 +66,7 @@ export function QuotesList({
           rowAction={(q) => (isStaff && (q.status ?? "") === "draft" ? <DeleteDraftButton quoteId={q.id} /> : null)}
           columns={[
             {
-              header: "Estimate #",
+              header: t("qt_colEstimateNo"),
               span: 2,
               className: "font-medium text-slate-900",
               cell: (q) => (
@@ -69,31 +74,31 @@ export function QuotesList({
                   {q.quote_number}
                   {/* THE FIXED CHIP (W1-25): a mark on the fixed-price rows only; a Time & Material
                       row wears nothing. The /quotes words and the ?type= filter are untouched. */}
-                  {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>Fixed</span>}
+                  {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>{t("qt_fixed")}</span>}
                 </>
               ),
             },
             {
-              header: "Customer",
+              header: t("qt_colCustomer"),
               span: 4,
               className: "text-sm text-slate-600",
               cell: (q) => (
                 <>
                   {q.customers?.name ?? (q.inquiry?.name ? (
-                    <span>{q.inquiry.name} <span className="text-xs text-slate-400">· lead</span></span>
+                    <span>{q.inquiry.name} <span className="text-xs text-slate-400">{t("qt_dotLead")}</span></span>
                   ) : "—")}
                   {q.title && <span className="block text-xs text-slate-400">{q.title}</span>}
                 </>
               ),
             },
-            { header: "Date", span: 2, className: "text-sm text-slate-500", cell: (q) => formatDate(q.created_at) },
-            { header: "Total", span: 2, align: "right", className: "text-sm font-medium text-slate-900", cell: (q) => formatCurrency(q.total) },
+            { header: t("qt_colDate"), span: 2, className: "text-sm text-slate-500", cell: (q) => formatDate(q.created_at, undefined, lang) },
+            { header: t("qt_colTotal"), span: 2, align: "right", className: "text-sm font-medium text-slate-900", cell: (q) => formatCurrency(q.total) },
             {
-              header: "Status",
+              header: t("qt_colStatus"),
               span: 2,
               align: "right",
               className: "flex items-center justify-end gap-2 pr-8",
-              cell: (q) => <Badge tone={statusTone(q.status ?? "")}>{q.status}</Badge>,
+              cell: (q) => <Badge tone={statusTone(q.status ?? "")}>{estimateStatusLabel(q.status ?? "", lang, t)}</Badge>,
             },
           ]}
         />
@@ -107,15 +112,16 @@ function DeleteDraftButton({ quoteId }: { quoteId: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
+  const t = translator(useLang());
 
   function onDelete(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm("Delete this draft?")) return;
+    if (!confirm(t("qt_confirmDeleteDraft"))) return;
     start(async () => {
       const res = await deleteQuote(quoteId);
-      if (!res.ok) return toast(res.error ?? "Couldn't delete the draft.", "error");
-      toast("Draft deleted.", "success");
+      if (!res.ok) return toast(res.error ?? t("qt_couldntDeleteDraft"), "error");
+      toast(t("qt_draftDeleted"), "success");
       router.refresh();
     });
   }
@@ -125,8 +131,8 @@ function DeleteDraftButton({ quoteId }: { quoteId: string }) {
       type="button"
       onClick={onDelete}
       disabled={pending}
-      aria-label="Delete this draft"
-      title="Delete this draft"
+      aria-label={t("qt_deleteThisDraft")}
+      title={t("qt_deleteThisDraft")}
       className="absolute right-4 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
     >
       <Trash2 className="h-4 w-4" />
@@ -135,15 +141,16 @@ function DeleteDraftButton({ quoteId }: { quoteId: string }) {
 }
 
 function DuplicatesCard({ clusters }: { clusters: DupCluster[] }) {
+  const t = translator(useLang());
   return (
     <Card className="mb-4 overflow-hidden border-amber-200 bg-amber-50/60">
       <div className="flex items-center gap-2 border-b border-amber-100 px-4 py-2.5">
         <Copy className="h-4 w-4 text-amber-600" />
         <h2 className="text-sm font-semibold text-amber-900">
-          Possible duplicates
+          {t("qt_possibleDuplicates")}
         </h2>
         <span className="text-xs text-amber-700">
-          {clusters.length} {clusters.length === 1 ? "group" : "groups"}
+          {fillText(t(clusters.length === 1 ? "qt_groupsOne" : "qt_groupsMany"), { n: String(clusters.length) })}
         </span>
       </div>
       <ul className="divide-y divide-amber-100">
@@ -159,6 +166,8 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
+  const lang = useLang();
+  const t = translator(lang);
 
   // Prefer keeping a draft pinned to a job (job_id not null) — that's the one
   // wired into real work; the rest are stray copies.
@@ -170,7 +179,7 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
     if (!keep || losers.length === 0) return;
     if (
       !confirm(
-        `Keep ${keep.quote_number ?? "this draft"} and delete the other ${losers.length}?`,
+        fillText(t("qt_confirmKeepDeleteOthers"), { which: keep.quote_number ?? t("qt_thisDraft"), n: String(losers.length) }),
       )
     )
       return;
@@ -180,9 +189,9 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
         losers.map((d) => d.id),
       );
       if (!res.ok)
-        return toast(res.error ?? "Couldn't clean up the duplicates.", "error");
+        return toast(res.error ?? t("qt_couldntCleanDuplicates"), "error");
       toast(
-        `Kept ${keep.quote_number ?? "the draft"}, deleted ${res.deleted ?? losers.length}.`,
+        fillText(t("qt_keptDeleted"), { which: keep.quote_number ?? t("qt_theDraft"), n: String(res.deleted ?? losers.length) }),
         "success",
       );
       router.refresh();
@@ -210,10 +219,10 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
                 className="min-w-0 flex-1 truncate hover:text-slate-900 hover:underline"
               >
                 <span className="font-medium text-slate-800">{d.quote_number}</span>
-                {d.title ? ` · ${d.title}` : ""} · {formatDate(d.created_at)}
+                {d.title ? ` · ${d.title}` : ""} · {formatDate(d.created_at, undefined, lang)}
                 {isPinned && (
                   <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                    On A Job
+                    {t("qt_onAJob")}
                   </span>
                 )}
               </Link>
@@ -222,9 +231,9 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
                 onClick={() => keepAndClean(d.id)}
                 disabled={pending}
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-white px-2 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
-                title="Keep this one, delete the rest"
+                title={t("qt_keepThisDeleteRest")}
               >
-                <Check className="h-4 w-4 shrink-0" /> Keep This
+                <Check className="h-4 w-4 shrink-0" /> {t("qt_btn_keepThis")}
               </button>
             </li>
           );
@@ -232,7 +241,7 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
       </ul>
       {pinned && (
         <p className="mt-1.5 text-[11px] text-amber-700">
-          {pinned.quote_number} is on a job — keeping that one is usually right.
+          {fillText(t("qt_pinnedOnAJob"), { which: pinned.quote_number ?? "" })}
         </p>
       )}
     </li>

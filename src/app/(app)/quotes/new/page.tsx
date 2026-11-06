@@ -456,7 +456,7 @@ export default async function NewQuotePage({
 
   return (
     <div>
-      <BackLink fallback="/quotes" fallbackLabel="Back to Estimates" />
+      <BackLink fallback="/quotes" fallbackLabel={t("qt_btn_backToEstimates")} backLabel={t("sh_back")} />
       <PageHeader title={t("nv_page_quotesNew")} description={t("nv_desc_quotesNew")}>
         {/* Onsite with no capture yet? Start the inspection from where you'll end up — one
             tap creates it (threaded to the lead when this builder came from one) and lands
@@ -471,7 +471,7 @@ export default async function NewQuotePage({
           before anybody prices anything, and leave every other control on the page working. */}
       {priceItemsErr && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
+          <p className="text-sm font-medium text-amber-900">{t("qt_priceListDidntLoad")}</p>
           <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
         </div>
       )}
@@ -479,7 +479,7 @@ export default async function NewQuotePage({
           hours and no parts, and nobody would know why. Same banner as the price list's. */}
       {kitDoors && kitsReadWords(kitsRead.state) && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-sm font-medium text-amber-900">Kits didn&apos;t load whole</p>
+          <p className="text-sm font-medium text-amber-900">{t("qt_kitsDidntLoadWhole")}</p>
           <p className="mt-0.5 text-sm text-amber-800">{kitsReadWords(kitsRead.state)}</p>
         </div>
       )}

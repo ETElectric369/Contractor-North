@@ -8,6 +8,7 @@ import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
+import { estimateStatusLabel } from "@/lib/statuses";
 import { setAppointmentOutcome } from "../actions";
 import { LinkPicker } from "./link-picker";
 
@@ -150,7 +151,7 @@ export function VisitEnding({
           <Link href={`/quotes/${estimate.id}`} className="font-medium text-brand hover:underline">
             {estimate.number ?? t("vp_btn_theEstimate")}
           </Link>
-          {estimate.status ? ` · ${estimate.status}` : ""}
+          {estimate.status ? ` · ${estimateStatusLabel(estimate.status, lang, t)}` : ""}
           {!estimate.live && <span className="text-slate-500"> {t("vp_estimateIsOver")}</span>}
         </p>
       )}

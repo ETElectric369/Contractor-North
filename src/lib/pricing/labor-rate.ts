@@ -1,3 +1,6 @@
+import { say, type Words } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
+
 /**
  * THE ONE LABOR-RATE RULE — for an hour he is QUOTING and for an hour somebody WORKED alike.
  *
@@ -45,16 +48,20 @@ export function laborRateFor(input: LaborRateInput): { rate: number; from: Labor
 }
 
 /** The words a screen prints beside a rate for where it came from (Title Case is for buttons;
- *  this sits in a sentence). `personName` is used only for "person". */
-export function laborRateFromWords(from: LaborRateFrom, personName?: string | null): string {
+ *  this sits in a sentence). `personName` is used only for "person". The English is inline, byte for
+ *  byte; a Spanish reader's caller hands its `lang` and translator (lib/lang-words say), and the
+ *  Spanish lives in lib/words/quotes-breakdown (qb_lib_rateFrom…). */
+export function laborRateFromWords(from: LaborRateFrom, personName?: string | null, lang: Lang | string | null = "en", words?: Words): string {
   switch (from) {
     case "person":
-      return personName ? `${personName}'s rate` : "their rate";
+      return personName
+        ? say(lang, words, "qb_lib_rateFromPerson", `${personName}'s rate`, { name: personName })
+        : say(lang, words, "qb_lib_rateFromTheirs", "their rate");
     case "level":
-      return "the customer's level";
+      return say(lang, words, "qb_lib_rateFromLevel", "the customer's level");
     case "default":
-      return "company default";
+      return say(lang, words, "qb_lib_rateFromDefault", "company default");
     default:
-      return "no rate set";
+      return say(lang, words, "qb_lib_rateFromNone", "no rate set");
   }
 }

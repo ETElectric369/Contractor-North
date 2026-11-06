@@ -6,7 +6,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { translator } from "@/lib/i18n";
 import { currentLangFor } from "@/lib/current-lang";
 import { Button } from "@/components/ui/button";
-import { QUOTE_STATUSES, QUOTE_STATUS_PRIORITY, type QuoteStatus } from "@/lib/statuses";
+import { QUOTE_STATUSES, QUOTE_STATUS_PRIORITY, estimateStatusLabel, type QuoteStatus } from "@/lib/statuses";
 import { QuotesList } from "./quotes-list";
 import { switchesFromRow } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
@@ -38,7 +38,8 @@ export default async function QuotesPage({
   const isStaff = !!me && isStaffRole((me as { role?: string }).role ?? "");
   const sw = switchesFromRow(me);
   const estimatesOn = featureOn(sw.features, "estimates");
-  const t = translator(await currentLangFor(user?.id));
+  const lang = await currentLangFor(user?.id);
+  const t = translator(lang);
 
   // inquiry:inquiry_id — so a deferred-customer estimate (customer_id null until accepted) still
   // shows WHO it's for (the lead's name) instead of a blank dash.
@@ -65,7 +66,7 @@ export default async function QuotesPage({
   // a strong "saved twice" signal (the E-009/E-010/E-011 400A case). Cluster
   // them so the office can keep one and sweep the rest in a tap. Never nag when
   // there are none — the card is hidden entirely.
-  const clusters = buildDuplicateClusters(quotes);
+  const clusters = buildDuplicateClusters(quotes, t("qt_unknownCustomer"));
 
   return (
     <div>
@@ -73,7 +74,7 @@ export default async function QuotesPage({
         {estimatesOn && (
           <Link href="/quotes/new" data-tour="new-estimate">
             <Button>
-              <Plus className="h-4 w-4" /> New Estimate
+              <Plus className="h-4 w-4" /> {t("qt_btn_newEstimate")}
             </Button>
           </Link>
         )}
@@ -85,7 +86,7 @@ export default async function QuotesPage({
             href="/quotes"
             className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
           >
-            Filtered: <span className="font-medium capitalize">{statusFilter}</span>
+            {t("qt_filtered")} <span className="font-medium capitalize">{estimateStatusLabel(statusFilter, lang, t)}</span>
             <X className="h-3.5 w-3.5 text-slate-400" />
           </Link>
         </div>
@@ -94,8 +95,8 @@ export default async function QuotesPage({
       {quotes.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="No estimates yet"
-          description={estimatesOn ? "Create your first estimate with New Estimate above — the AI can draft line items from a scope of work." : "Estimates are off for this company."}
+          title={t("qt_noEstimatesYet")}
+          description={estimatesOn ? t("qt_emptyFirstEstimate") : t("qt_estimatesOff")}
         />
       ) : (
         <QuotesList quotes={quotes} clusters={clusters} isStaff={isStaff} />
@@ -107,7 +108,7 @@ export default async function QuotesPage({
 /** Group DRAFT quotes by (customer_id, rounded total). Any bucket with 2+
  *  members is a possible-duplicate cluster. Unattached-customer drafts
  *  (customer_id null) are never clustered — no customer to match on. */
-function buildDuplicateClusters(quotes: any[]) {
+function buildDuplicateClusters(quotes: any[], unknownCustomer: string) {
   const buckets = new Map<string, any[]>();
   for (const q of quotes) {
     if ((q.status ?? "") !== "draft") continue;
@@ -129,7 +130,7 @@ function buildDuplicateClusters(quotes: any[]) {
     if (drafts.length < 2) continue;
     clusters.push({
       key,
-      customerName: drafts[0].customers?.name ?? "Unknown customer",
+      customerName: drafts[0].customers?.name ?? unknownCustomer,
       total: drafts[0].total ?? 0,
       drafts,
     });

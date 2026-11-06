@@ -215,7 +215,8 @@ describe("how the visit ended, in Spanish", () => {
 
   it("the estimate it became, a dead one said so; the outcome with a Spanish day and Cambiar", () => {
     const dead = ending({ estimate: { id: "q1", number: "EST-0042", status: "declined", live: false } });
-    expect(text(dead)).toContain("Redactada como EST-0042 · declined — ese presupuesto terminó; se puede empezar uno nuevo abajo.");
+    // The estimate's status in the reader's language since cn-v1145 (lib/statuses estimateStatusLabel, qt_status_…).
+    expect(text(dead)).toContain("Redactada como EST-0042 · rechazado — ese presupuesto terminó; se puede empezar uno nuevo abajo.");
     // An estimate with no number yet is linked by its name, a door (vp_btn_theEstimate).
     const unnumbered = ending({ estimate: { id: "q1", number: null, status: "draft", live: true } });
     expect(unnumbered).toContain(">El Presupuesto</a>");

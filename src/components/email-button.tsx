@@ -6,7 +6,9 @@ import { Mail, MessageSquare, Loader2 } from "lucide-react";
 import { useToast } from "@/components/toast";
 import { emailQuote, textQuote } from "@/app/(app)/quotes/actions";
 import { emailInvoice, textInvoice } from "@/app/(app)/billing/actions";
-import { TEXT_NOT_READY_REFUSAL } from "@/lib/sms-readiness";
+import { textNotReadyRefusal } from "@/lib/sms-readiness";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /** `notReady`: texting isn't set up (lib/sms-readiness). Nothing was sent; the refusal names the
  *  doors that work, and is said as information, not as a failure of his. */
@@ -38,6 +40,7 @@ function SendChip({
   notActive?: string;
 }) {
   const toast = useToast();
+  const t = translator(useLang());
   // Busy state only — success/failure now report through the app-wide toast so a
   // stale green check can't keep claiming "Sent" after the page state moves on.
   const [busy, setBusy] = useState(false);
@@ -52,7 +55,7 @@ function SendChip({
     try {
       const res = await run();
       if (!res?.ok) {
-        toast(res?.error ?? "Couldn't send — try again.", res?.notReady ? "info" : "error");
+        toast(res?.error ?? t("qt_couldntSendTryAgain"), res?.notReady ? "info" : "error");
         return;
       }
       toast(successText, "success");
@@ -103,36 +106,40 @@ export function EmailButton({
   textReady?: boolean;
 }) {
   const router = useRouter();
+  const lang = useLang();
+  const t = translator(lang);
   const isInvoice = kind === "invoice";
   const money =
     amount != null
       ? amount.toLocaleString(undefined, { style: "currency", currency: "USD" })
       : null;
-  const who = customerName?.trim() || "the customer";
+  const who = customerName?.trim() || t("qt_theCustomer");
+  // A quote's chips ask "Email?" / "Text?" (the chip's own word and a question mark), said here so
+  // the question follows the person's language too.
   const emailConfirm = isInvoice
-    ? `Send this ${money ? `${money} ` : ""}invoice to ${who} by email? This marks it Sent.`
-    : undefined;
+    ? fillText(t(money ? "qt_confirmEmailInvoiceAmount" : "qt_confirmEmailInvoice"), { money: money ?? "", who })
+    : t("qt_confirmEmail");
   const textConfirm = isInvoice
-    ? `Text this ${money ? `${money} ` : ""}invoice to ${who}? This marks it Sent.`
-    : undefined;
+    ? fillText(t(money ? "qt_confirmTextInvoiceAmount" : "qt_confirmTextInvoice"), { money: money ?? "", who })
+    : t("qt_confirmText");
 
   return (
     <div className="flex items-center gap-2">
       <SendChip
-        label={isInvoice ? "Send Invoice" : "Email"}
+        label={isInvoice ? t("qt_btn_sendInvoice") : t("qt_btn_email")}
         icon={Mail}
         primary={isInvoice}
         confirmText={emailConfirm}
-        successText={isInvoice ? "Invoice emailed" : "Estimate emailed"}
+        successText={isInvoice ? t("qt_invoiceEmailed") : t("qt_estimateEmailed")}
         onDone={isInvoice ? () => router.refresh() : undefined}
         run={() => (kind === "quote" ? emailQuote(id) : emailInvoice(id))}
       />
       <SendChip
-        label="Text"
+        label={t("qt_btn_text")}
         icon={MessageSquare}
         confirmText={textConfirm}
-        successText={isInvoice ? "Invoice texted" : "Estimate texted"}
-        notActive={textReady ? undefined : TEXT_NOT_READY_REFUSAL}
+        successText={isInvoice ? t("qt_invoiceTexted") : t("qt_estimateTexted")}
+        notActive={textReady ? undefined : textNotReadyRefusal(lang, t)}
         onDone={isInvoice ? () => router.refresh() : undefined}
         run={() => (kind === "quote" ? textQuote(id) : textInvoice(id))}
       />

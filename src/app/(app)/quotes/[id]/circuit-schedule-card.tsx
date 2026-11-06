@@ -9,6 +9,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { QuoteCircuit } from "@/lib/types";
 import { generateCircuitSchedule, saveCircuitSchedule } from "../actions";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 const blank = (): QuoteCircuit => ({ ckt: "", description: "", wire: "", breaker: "", load: "" });
 
@@ -24,6 +26,7 @@ export function CircuitScheduleCard({
   panelJob?: { id: string; label: string } | null;
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [rows, setRows] = useState<QuoteCircuit[]>(initial.length ? initial : []);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export function CircuitScheduleCard({
     setError(null);
     startSave(async () => {
       const res = await saveCircuitSchedule(quoteId, rows);
-      if (!res.ok) return setError(res.error ?? "Couldn't save.");
+      if (!res.ok) return setError(res.error ?? t("qt_couldntSave"));
       setDirty(false);
       router.refresh();
     });
@@ -62,16 +65,16 @@ export function CircuitScheduleCard({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
         <div className="flex items-center gap-2">
           <Zap className="h-4 w-4 text-brand" />
-          <span className="text-sm font-semibold text-slate-900">Circuit Schedule</span>
-          <span className="text-xs text-slate-400">· prints as a second page</span>
+          <span className="text-sm font-semibold text-slate-900">{t("qt_circuitSchedule")}</span>
+          <span className="text-xs text-slate-400">{t("qt_printsAsSecondPage")}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={generate} disabled={generating || saving}>
-            {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading…</> : <><Sparkles className="h-4 w-4" /> {rows.length ? "Regenerate" : "Generate From Line Items"}</>}
+            {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> {t("qt_btn_reading")}</> : <><Sparkles className="h-4 w-4" /> {rows.length ? t("qt_btn_regenerate") : t("qt_btn_generateFromLineItems")}</>}
           </Button>
           {dirty && (
             <Button onClick={save} disabled={saving || generating}>
-              {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Save className="h-4 w-4" /> Save</>}
+              {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> {t("qt_btn_saving")}</> : <><Save className="h-4 w-4" /> {t("qt_btn_save")}</>}
             </Button>
           )}
         </div>
@@ -81,12 +84,12 @@ export function CircuitScheduleCard({
           and an edit here changes what the customer was proposed, not what is in the panel. */}
       {panelJob && (
         <div className="mx-5 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1 text-sm text-slate-700">
-          <span className="py-2">This Is The Proposal. The Job Keeps Its Own List On The Panel Tab.</span>
+          <span className="py-2">{t("qt_proposalNotJobList")}</span>
           <Link
             href={`/jobs/${panelJob.id}?tab=panel`}
             className="inline-flex min-h-[44px] items-center gap-1 font-semibold text-brand hover:underline"
           >
-            Open {panelJob.label}&apos;s Panel <ChevronRight className="h-4 w-4" />
+            {fillText(t("qt_openJobPanel"), { job: panelJob.label })} <ChevronRight className="h-4 w-4" />
           </Link>
         </div>
       )}
@@ -94,18 +97,18 @@ export function CircuitScheduleCard({
 
       {rows.length === 0 ? (
         <p className="px-5 py-6 text-center text-sm text-slate-400">
-          No circuit schedule yet. Tap Generate From Line Items to read the breakers and wire in the line items, or Add Circuit to type rows by hand.
+          {t("qt_noCircuitScheduleYet")}
         </p>
       ) : (
         <div className="overflow-x-auto px-2 py-2">
           <table className="w-full min-w-[640px] border-collapse text-sm">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-                <th className="w-14 px-2 py-1.5 font-semibold">Ckt</th>
-                <th className="px-2 py-1.5 font-semibold">Description</th>
-                <th className="w-24 px-2 py-1.5 font-semibold">Wire</th>
-                <th className="w-24 px-2 py-1.5 font-semibold">Breaker</th>
-                <th className="w-40 px-2 py-1.5 font-semibold">Load / Notes</th>
+                <th className="w-14 px-2 py-1.5 font-semibold">{t("qt_colCkt")}</th>
+                <th className="px-2 py-1.5 font-semibold">{t("qt_description")}</th>
+                <th className="w-24 px-2 py-1.5 font-semibold">{t("qt_colWire")}</th>
+                <th className="w-24 px-2 py-1.5 font-semibold">{t("qt_colBreaker")}</th>
+                <th className="w-40 px-2 py-1.5 font-semibold">{t("qt_colLoadNotes")}</th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -115,7 +118,7 @@ export function CircuitScheduleCard({
                   <td className="px-1 py-1"><Input value={r.ckt ?? ""} onChange={(e) => set(i, { ckt: e.target.value })} className="text-center" /></td>
                   <td className="px-1 py-1"><Input value={r.description} onChange={(e) => set(i, { description: e.target.value })} /></td>
                   <td className="px-1 py-1"><Input value={r.wire ?? ""} onChange={(e) => set(i, { wire: e.target.value })} placeholder="12/2" /></td>
-                  <td className="px-1 py-1"><Input value={r.breaker ?? ""} onChange={(e) => set(i, { breaker: e.target.value })} placeholder="20A" /></td>
+                  <td className="px-1 py-1"><Input value={r.breaker ?? ""} onChange={(e) => set(i, { breaker: e.target.value })} placeholder={t("qt_breakerExample")} /></td>
                   <td className="px-1 py-1"><Input value={r.load ?? ""} onChange={(e) => set(i, { load: e.target.value })} /></td>
                   <td className="px-1 py-1 text-center">
                     {/* 44px: a bare 16px trash icon is the tap target the whole app has been retiring. */}
@@ -123,8 +126,8 @@ export function CircuitScheduleCard({
                       type="button"
                       onClick={() => delRow(i)}
                       className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                      aria-label="Remove Circuit"
-                      title="Remove Circuit"
+                      aria-label={t("qt_btn_removeCircuit")}
+                      title={t("qt_btn_removeCircuit")}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -138,7 +141,7 @@ export function CircuitScheduleCard({
 
       <div className="border-t border-slate-100 px-5 py-3">
         <Button variant="outline" onClick={addRow} disabled={generating}>
-          <Plus className="h-4 w-4" /> Add Circuit
+          <Plus className="h-4 w-4" /> {t("qt_btn_addCircuit")}
         </Button>
       </div>
     </Card>

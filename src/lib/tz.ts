@@ -5,7 +5,7 @@
  * in the Americas fall into "tomorrow", so always derive the day in the org tz.
  */
 import { formatDate, formatDateTime } from "./utils";
-import { localeOf } from "./locale";
+import { localeOf, type Lang } from "./locale";
 
 /** Milliseconds the tz is ahead of UTC at the given instant (handles DST). */
 export function tzOffsetMs(tz: string, at: Date): number {
@@ -156,8 +156,10 @@ export function todayBoundsInTz(tz: string): { dayStart: Date; dayEnd: Date; tod
  *  implementation — pass a per-org tz here when you have one; callers without an
  *  org tz can use formatDate/formatDateTime directly (they default to the business
  *  timezone). Kept as named twins so existing call sites need no change. */
-export function formatDateTimeTz(value: string | Date | null | undefined, tz: string): string {
-  return formatDateTime(value, tz);
+export function formatDateTimeTz(value: string | Date | null | undefined, tz: string, lang?: Lang): string {
+  // `lang` (cn-v1145): "es" reads es-US through lib/utils formatDateTime ("5 nov, 3:00 p. m."); English, the
+  // default, is byte for byte what it always printed.
+  return formatDateTime(value, tz, lang);
 }
 
 export function formatDateTz(value: string | Date | null | undefined, tz: string): string {

@@ -60,7 +60,8 @@ describe("cn-v1128 — the estimate allowance became the one usage meter (cn-v11
     expect(a.match(/questions: \[\.\.\.gate\.notes, \.\.\.out\.questions\]/g)?.length).toBe(3);
     expect(a).not.toMatch(/surface: "estimator", usage[^\n]*\n?[^\n]*DEFAULT_MODEL/);
     // In the caller's language, and naming no purchase door (the App Store app reaches it; Apple 3.1.1).
-    expect(a).toContain("const lang = await callerLang(ctx.supabase, ctx.userId);");
+    expect(a).toContain("const lang = await ws.lang();"); // the caller's language, the one read wordsOf makes (cn-v1145)
+    expect(a).toContain("const ws = wordsOf(ctx.supabase, ctx.userId);");
     expect(a).toContain('notes.push(fillText(translator(lang)("us_estimatorLighter"), { date: shortDate(usage.resetOn, lang) }));');
     expect(a).not.toContain("Add usage or upgrade in Settings");
     expect(dict("en").us_estimatorLighter).toBe("Your company's usage for this month is used up, so this estimate runs on the lighter model until {date}.");

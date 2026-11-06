@@ -94,7 +94,7 @@ describe("pinning an accepted estimate to a job", () => {
     expect(write).toBeGreaterThan(read);
     expect(after).toBeGreaterThan(write);
     expect(fn).toContain('.select("id")');
-    expect(fn).toContain('"That estimate could not be found."');
+    expect(fn).toContain('ws.say("qs_estimateNotFound")'); // the refusal in the caller's words (cn-v1145)
     expect(fn).toContain('status === "accepted"'); // a draft pinned to a job births nothing yet
   });
 });
@@ -106,7 +106,7 @@ describe("the one rule, and nothing silent", () => {
     expect(fn).toContain('reportError("jobFollowsEstimate"');
     expect(fn).toContain("revalidatePath(`/jobs/${who.jobId}`)");
     expect(fn).toContain('revalidatePath("/schedule")');
-    expect(fn).toContain("syncWords(res, lead?.tasks)");
+    expect(fn).toContain("syncWords(res, lead?.tasks, lang, words)"); // in the caller's words (cn-v1145)
   });
   it("the estimate editor shows what the job's list did after a delete or a rename, and shows what it could not do as a note", () => {
     // The one editor (cn-v1132): the save model keeps the words per line (follow) and under the list
@@ -163,7 +163,7 @@ describe("the buy list follows too (0390)", () => {
     const mats = fn.indexOf("syncJobMaterials(");
     expect(tasks).toBeGreaterThan(-1);
     expect(mats).toBeGreaterThan(tasks);
-    expect(fn).toContain("materialsWords(mats, lead?.materials)");
+    expect(fn).toContain("materialsWords(mats, lead?.materials, lang, words)");
     expect(fn).toContain('reportError("jobFollowsEstimate:materials"');
     expect(fn).toContain('revalidatePath("/materials")');
   });
@@ -213,8 +213,8 @@ describe("the deferred items (cn-v1084)", () => {
     const fn = body(actions, "export async function setQuoteJob(");
     expect(fn).toContain('select("status, job_id")');
     expect(fn).toContain("if (accepted && from && from !== jobId) {");
-    expect(fn).toContain("tasks: left.label ? `The job it left (${left.label}) follows too` : \"The job it left follows too\"");
-    expect(fn).toContain('for (const [table, what] of [["work_orders", "work order"], ["material_lists", "materials list"]] as const)');
+    expect(fn).toContain('tasks: left.label ? await ws.say("qs_leftJobFollowsNamed", { job: left.label }) : await ws.say("qs_leftJobFollows")'); // the caller's words (cn-v1145)
+    expect(fn).toContain('for (const [table, what] of [["work_orders", "qs_workOrderNotMoved"], ["material_lists", "qs_materialsListNotMoved"]] as const)');
     expect(fn).toContain('.update({ job_id: jobId }).eq("quote_id", quoteId).select("id")');
     expect(fn).toContain('reportError("setQuoteJob:movePaperwork"');
     expect(fn).toContain("if (left) revalidatePath(`/jobs/${left.jobId}`);");
@@ -245,7 +245,8 @@ describe("the deferred items (cn-v1084)", () => {
       expect(text, page).toContain(`readTaskKits((sel) => supabase.from("kits").select(sel).order("name")${extra})`);
       expect(text, page).toContain(`reportError("${sink}"`);
       expect(text, page).toContain("plainKitsReadWords(");
-      expect(text, page).toContain("Kits didn&apos;t load whole");
+      // The estimate's page reads its banner through the catalog since cn-v1145 (qt_kitsDidntLoadWhole = "Kits didn't load whole").
+      expect(text, page).toContain(page.includes("/quotes/") ? '{t("qt_kitsDidntLoadWhole")}' : "Kits didn&apos;t load whole");
       expect(text, page).not.toContain("firstThatWorks(");
     }
     // Only where a picker is: a locked estimate and a non-draft invoice have none to be "off".

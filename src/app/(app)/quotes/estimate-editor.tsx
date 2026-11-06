@@ -32,6 +32,9 @@ import type { DraftLineItem } from "@/lib/estimate/line-map";
 import type { EstimateFormat } from "@/lib/doc-style";
 import type { Customer, QuoteCircuit } from "@/lib/types";
 import { PaperFormatSwitch } from "./paper-format-switch";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
+import { estimateStatusLabel } from "@/lib/statuses";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useToast } from "@/components/toast";
 import {
@@ -310,7 +313,8 @@ function linesFrom(props: EstimateEditorProps): (DraftLineItem & { id?: string |
 
 /** The ⋯ menu's map for a saved estimate — the same tree the page used to build server-side, built
  *  here so an estimate born on this screen has the same doors without a reload. */
-function quoteTree(q: {
+function quoteTree(
+  q: {
   id: string;
   number: string;
   status: string;
@@ -318,7 +322,9 @@ function quoteTree(q: {
   lineCount: number;
   existing: SavedEstimate["existing"];
   revisesId: string | null;
-}): NavTree {
+  },
+  t: (key: string) => string,
+): NavTree {
   // A REPLACED ESTIMATE MAKES NO MORE PAPER (audit v1085, carried): a superseded estimate offers no
   // Create door — its revision does; a revision not yet accepted makes no work order or list. View
   // doors stay. The rules themselves refuse too.
@@ -328,36 +334,36 @@ function quoteTree(q: {
     center: { label: q.number, icon: "fileText" },
     nodes: [
       ...(q.existing.invoice
-        ? [{ id: "qm-inv", label: "View Invoice", icon: "receipt", href: `/billing/${q.existing.invoice}` }]
+        ? [{ id: "qm-inv", label: t("qe_btn_viewInvoice"), icon: "receipt", href: `/billing/${q.existing.invoice}` }]
         : replaced
           ? []
-          : [{ id: "qm-inv", label: "Create Invoice", icon: "receipt", run: () => createInvoiceFromQuote(q.id), hrefPrefix: "/billing/" }]),
+          : [{ id: "qm-inv", label: t("qe_btn_createInvoice"), icon: "receipt", run: () => createInvoiceFromQuote(q.id), hrefPrefix: "/billing/" }]),
       ...(q.jobId
-        ? [{ id: "qm-job", label: "View Job", icon: "briefcase", href: `/jobs/${q.jobId}` }]
+        ? [{ id: "qm-job", label: t("qe_btn_viewJob"), icon: "briefcase", href: `/jobs/${q.jobId}` }]
         : replaced
           ? []
-          : [{ id: "qm-job", label: "Create Job", icon: "briefcase", run: () => createJobFromQuote(q.id), hrefPrefix: "/jobs/" }]),
+          : [{ id: "qm-job", label: t("qe_btn_createJob"), icon: "briefcase", run: () => createJobFromQuote(q.id), hrefPrefix: "/jobs/" }]),
       ...(q.lineCount > 0
         ? [
             ...(q.existing.workOrder
-              ? [{ id: "qm-wo", label: "View Work Order", icon: "clipboardCheck", href: `/work-orders/${q.existing.workOrder}` }]
+              ? [{ id: "qm-wo", label: t("qe_btn_viewWorkOrder"), icon: "clipboardCheck", href: `/work-orders/${q.existing.workOrder}` }]
               : noPaperYet
                 ? []
-                : [{ id: "qm-wo", label: "Create Work Order", icon: "clipboardCheck", run: () => createWorkOrderFromQuote(q.id), hrefPrefix: "/work-orders/" }]),
+                : [{ id: "qm-wo", label: t("qe_btn_createWorkOrder"), icon: "clipboardCheck", run: () => createWorkOrderFromQuote(q.id), hrefPrefix: "/work-orders/" }]),
             ...(q.existing.materialList
-              ? [{ id: "qm-ml", label: "View Material List", icon: "boxes", href: `/materials/${q.existing.materialList}` }]
+              ? [{ id: "qm-ml", label: t("qe_btn_viewMaterialList"), icon: "boxes", href: `/materials/${q.existing.materialList}` }]
               : noPaperYet
                 ? []
-                : [{ id: "qm-ml", label: "Create Material List", icon: "boxes", run: () => createMaterialListFromQuote(q.id), hrefPrefix: "/materials/" }]),
+                : [{ id: "qm-ml", label: t("qe_btn_createMaterialList"), icon: "boxes", run: () => createMaterialListFromQuote(q.id), hrefPrefix: "/materials/" }]),
           ]
         : []),
-      { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/pdf-preview?doc=quote&id=${q.id}&back=/quotes/${q.id}` },
+      { id: "qm-print", label: t("qe_btn_printPdf"), icon: "fileSpreadsheet", href: `/print/pdf-preview?doc=quote&id=${q.id}&back=/quotes/${q.id}` },
       {
         id: "qm-del",
-        label: "Delete Quote",
+        label: t("qe_btn_deleteQuote"),
         icon: "trash",
         danger: true,
-        confirmText: `Delete quote ${q.number}? Its line items go with it.`,
+        confirmText: fillText(t("qe_confirmDeleteQuote"), { number: q.number }),
         run: () => deleteQuote(q.id),
         href: "/quotes",
       },
@@ -367,13 +373,26 @@ function quoteTree(q: {
 
 /** The words beside a refused write and the one way to run it again (Title Case: it is a button). */
 function Refused({ words, onRetry, disabled }: { words: string; onRetry: () => void; disabled: boolean }) {
+  const t = translator(useLang());
   return (
     <p className="mt-1 text-xs text-red-600">
       {words}{" "}
       <button type="button" onClick={onRetry} disabled={disabled} className="font-semibold underline disabled:opacity-50">
-        Retry
+        {t("qe_btn_retry")}
       </button>
     </p>
+  );
+}
+
+/** A sentence with one link inside it — one key, one {link} slot: the words either side, the link between. */
+function aroundLink(words: string, link: React.ReactNode) {
+  const [before, after = ""] = words.split("{link}");
+  return (
+    <>
+      {before}
+      {link}
+      {after}
+    </>
   );
 }
 
@@ -387,6 +406,8 @@ export function EstimateEditor(props: EstimateEditorProps) {
   const { priceItems, kits, taskKits, kitsOn, taxRates, people, defaultMarkupPct, defaultLaborRate, companyEstimateFormat, salesTax, estimatorTaskMode, measured, scopeWord = null, orgId } = catalog;
   const toast = useToast();
   const router = useRouter();
+  const lang = useLang();
+  const t = translator(lang);
   const { session, state } = useQuoteSession(() =>
     createQuoteSession({
       mode:
@@ -395,6 +416,8 @@ export function EstimateEditor(props: EstimateEditorProps) {
           : { kind: "unsaved", clientId: props.seed.clientId ?? crypto.randomUUID() },
       header: headerFrom(props),
       items: linesFrom(props),
+      // The store's own words (the waiting lines, the refusals' fallbacks) in this person's language.
+      say: t,
       actions: {
         saveQuote,
         appendQuoteLines,
@@ -474,11 +497,12 @@ export function EstimateEditor(props: EstimateEditorProps) {
   // The attached lead ALWAYS has a row to sit on, even if it has been won/lost or aged out of the
   // server's list — a <Select> whose value matches no option renders the first one, which would
   // read "Nobody yet" over an estimate that is very much attached to somebody.
+  const theLeadThisCameFrom = t("qe_theLeadThisCameFrom");
   const leadOptions = useMemo(() => {
     const list = (leads ?? []).slice();
-    if (header.leadId && !list.some((l) => l.id === header.leadId)) list.unshift({ id: header.leadId, name: "The lead this estimate came from", company_name: null });
+    if (header.leadId && !list.some((l) => l.id === header.leadId)) list.unshift({ id: header.leadId, name: theLeadThisCameFrom, company_name: null });
     return list;
-  }, [leads, header.leadId]);
+  }, [leads, header.leadId, theLeadThisCameFrom]);
   const selectedLead = leadOptions.find((l) => l.id === header.leadId) ?? null;
   // A customer WINS the display slot when there is one — that's the order the printed document
   // and the Estimates list already resolve in (customers ?? inquiries). The lead stays attached
@@ -504,13 +528,13 @@ export function EstimateEditor(props: EstimateEditorProps) {
   }
   const whoHint = selectedCust
     ? selectedLead
-      ? `A customer — started from the lead ${selectedLead.name}.`
+      ? fillText(t("qe_whoCustomerFromLead"), { name: selectedLead.name })
       : "" // a plain customer needs no explaining; a line saying "A customer." is noise
     : selectedLead
-      ? `${selectedLead.name} is a lead. They become a customer when you win the work — you don't have to make one now.`
+      ? fillText(t("qe_whoIsALead"), { name: selectedLead.name })
       : leadOptions.length || allCustomers.length
-        ? "Pick the lead who asked for it, or a customer. You can leave this blank and decide later."
-        : "No leads or customers yet — add a customer below, or leave this blank.";
+        ? t("qe_whoPickHint")
+        : t("qe_whoNoneYet");
   // The plan PDFs came off the lead this estimate is for. If the picker has since moved to a
   // different lead — or to none — they are somebody else's drawings and must stop being offered.
   const plansForLead = catalog.leadPlans && header.leadId === catalog.leadPlans.leadId ? catalog.leadPlans.files : [];
@@ -664,7 +688,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
         if (dup) already.push(i.description);
         return !dup;
       });
-    setQuestions([...(res.questions ?? []), ...already.map((n) => `Already on the estimate: ${n}`)]);
+    setQuestions([...(res.questions ?? []), ...already.map((n) => fillText(t("qe_alreadyOnEstimate"), { name: n }))]);
     setProposed(fresh.map((i, n) => ({ ...i, pid: n, keep: true })));
     // THE SCOPE, POLISHED — as a DEFAULT: it fills a hole and never overwrites a hand.
     if (res.description?.trim() && !header.description.trim()) {
@@ -703,9 +727,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
   /** #116: the file goes to STORAGE, the action gets a PATH — Vercel caps request bodies at
    *  ~4.5MB, under one sheet of a real plan set. Org folder, so 0013's RLS owns access. */
   async function stashUpload(file: File): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
-    if (!orgId) return { ok: false, error: "Couldn't start the upload — reload the page and try again." };
+    if (!orgId) return { ok: false, error: t("qe_uploadCouldntStart") };
     if (file.size > 20 * 1024 * 1024)
-      return { ok: false, error: `That file is ${Math.round(file.size / 1024 / 1024)}MB — the plan reader's ceiling is 20MB. Split the PDF (Preview → Print → page range) and upload the sheets that matter.` };
+      return { ok: false, error: fillText(t("qe_fileTooBig"), { mb: String(Math.round(file.size / 1024 / 1024)) }) };
     const supabase = createBrowserClient();
     const safe = file.name.replace(/[^\w.\-]+/g, "_").slice(-80);
     const path = `${orgId}/ai-uploads/${crypto.randomUUID()}-${safe}`;
@@ -715,8 +739,8 @@ export function EstimateEditor(props: EstimateEditorProps) {
         ok: false,
         // Say what STORAGE said (audit 7): a project-cap refusal blamed the jobsite connection.
         error: /fetch|network|load failed/i.test(error.message ?? "")
-          ? "Upload didn't finish — check your connection and try again."
-          : `Upload refused: ${String(error.message ?? "storage error").slice(0, 140)}`,
+          ? t("qe_uploadDidntFinish")
+          : fillText(t("qe_uploadRefused"), { why: String(error.message ?? t("qe_storageError")).slice(0, 140) }),
       };
     return { ok: true, path };
   }
@@ -759,8 +783,15 @@ export function EstimateEditor(props: EstimateEditorProps) {
         bookReview.additions.filter((a) => a.keep).map((a) => ({ description: a.description, unit: a.unit, newBuy: a.newBuy })),
         bookReview.source,
       );
-      if (!r.ok) return setBookMsg(r.error ?? "Couldn't update the price book.");
-      setBookMsg(`Price book updated — ${r.updated ?? 0} price${(r.updated ?? 0) === 1 ? "" : "s"}, ${r.added ?? 0} new item${(r.added ?? 0) === 1 ? "" : "s"}.`);
+      if (!r.ok) return setBookMsg(r.error ?? t("qe_couldntUpdateBook"));
+      const updated = r.updated ?? 0;
+      const added = r.added ?? 0;
+      setBookMsg(
+        fillText(t("qe_bookUpdated"), {
+          prices: fillText(t(updated === 1 ? "qe_pricesOne" : "qe_pricesMany"), { n: String(updated) }),
+          items: fillText(t(added === 1 ? "qe_newItemsOne" : "qe_newItemsMany"), { n: String(added) }),
+        }),
+      );
       setBookReview(null);
     });
   }
@@ -789,7 +820,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
         return;
       }
       applyDraft(res);
-      toast(`Read ${file.name} — review the drafted lines.${res.kept ? ` ${res.kept.words}` : ""}`, "success", undefined, res.kept && !res.kept.kept ? { sticky: true } : undefined);
+      toast(`${fillText(t("qe_readReviewDrafted"), { name: file.name })}${res.kept ? ` ${res.kept.words}` : ""}`, "success", undefined, res.kept && !res.kept.kept ? { sticky: true } : undefined);
     });
   }
 
@@ -810,7 +841,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
         return;
       }
       applyDraft(res);
-      toast(`Read ${p.name} — review the drafted lines`, "success");
+      toast(fillText(t("qe_readReviewDraftedNoDot"), { name: p.name }), "success");
     });
   }
 
@@ -841,26 +872,29 @@ export function EstimateEditor(props: EstimateEditorProps) {
   const quoteDocType: QuoteDocType = header.docType;
   const tree =
     savedId && mode.kind === "saved"
-      ? quoteTree({
-          id: savedId,
-          number: number || "this estimate",
+      ? quoteTree(
+          {
+            id: savedId,
+            number: number || t("qe_thisEstimate"),
           status,
           jobId: header.jobId,
           lineCount: items.filter((l) => l.description.trim()).length,
           existing: savedPage?.existing ?? { invoice: null, workOrder: null, materialList: null },
           revisesId: savedPage?.quote.revises_quote_id ?? null,
-        })
+          },
+          t,
+        )
       : null;
   const revises = savedPage?.revises ?? null;
   const supersededBy = savedPage?.supersededBy ?? null;
   const revisesWords = !revises
     ? ""
     : revises.status === "superseded"
-      ? " — which it superseded when accepted."
+      ? ` ${t("qe_revisesSupersededIt")}`
       : status === "accepted"
-        ? ` — that estimate stands as ${revises.status ?? "it was"}, not superseded.`
+        ? ` ${fillText(t("qe_revisesStandsAs"), { status: revises.status ? estimateStatusLabel(revises.status, lang, t) : t("qe_itWas") })}`
         : status === "draft" || status === "sent"
-          ? " — accepting this one supersedes it."
+          ? ` ${t("qe_revisesAcceptingSupersedes")}`
           : ".";
 
   return (
@@ -873,7 +907,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
             <div className="flex items-start gap-3">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
                 <h1 className="min-w-0 text-2xl font-bold text-slate-900">{number}</h1>
-                <Badge tone={statusTone(status)}>{status}</Badge>
+                <Badge tone={statusTone(status)}>{estimateStatusLabel(status, lang, t)}</Badge>
                 {/* The status is what makes this gate work: past draft the toggle reads as text. */}
                 <QuoteTypeToggle id={savedId} status={status} value={quoteDocType} />
               </div>
@@ -883,53 +917,57 @@ export function EstimateEditor(props: EstimateEditorProps) {
             {/* REVISIONS (0391), both ways. */}
             {supersededBy && (
               <p className="mt-1 text-sm text-slate-600">
-                Superseded by{" "}
-                <Link href={`/quotes/${supersededBy.id}`} className="text-brand hover:underline">
-                  {supersededBy.quote_number ?? "its revision"}
-                </Link>{" "}
-                — that estimate is the price for this work now.
+                {aroundLink(
+                  t("qe_supersededBy"),
+                  <Link href={`/quotes/${supersededBy.id}`} className="text-brand hover:underline">
+                    {supersededBy.quote_number ?? t("qe_itsRevision")}
+                  </Link>,
+                )}
               </p>
             )}
             {revises && (
               <p className="mt-1 text-sm text-slate-600">
-                Revises{" "}
-                <Link href={`/quotes/${revises.id}`} className="text-brand hover:underline">
-                  {revises.quote_number ?? "an earlier estimate"}
-                </Link>
+                {aroundLink(
+                  t("qe_revises"),
+                  <Link href={`/quotes/${revises.id}`} className="text-brand hover:underline">
+                    {revises.quote_number ?? t("qe_anEarlierEstimate")}
+                  </Link>,
+                )}
                 {revisesWords}
               </p>
             )}
             {/* Provenance backlinks — the lead, the visit. */}
             {savedPage?.lead && (
               <Link href={`/leads?focus=${savedPage.lead.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
-                ← From Lead: {savedPage.lead.name}
+                {fillText(t("qe_fromLead"), { name: savedPage.lead.name ?? "" })}
               </Link>
             )}
             {savedPage?.visitBehind && (
               <Link href={`/appointments/${savedPage.visitBehind.id}`} className="mt-1 block text-sm text-brand hover:underline">
-                ← From The Visit{savedPage.visitBehind.starts_at ? ` on ${formatDate(savedPage.visitBehind.starts_at)}` : ""}
+                {t("qe_fromTheVisit")}
+                {savedPage.visitBehind.starts_at ? ` ${fillText(t("qe_visitOnDate"), { date: formatDate(savedPage.visitBehind.starts_at, undefined, lang) })}` : ""}
               </Link>
             )}
             {/* What the customer attached at intake: this estimate is the thing being priced FROM them. */}
             {savedPage?.lead && <IntakeFiles inquiryId={savedPage.lead.id} paths={savedPage.lead.intakePaths} />}
             {savedPage && (
               <p className="mt-1 text-sm text-slate-400">
-                Created {formatDate(savedPage.quote.created_at)}
-                {header.validUntil ? ` · Valid until ${formatDate(header.validUntil)}` : ""}
+                {fillText(t("qe_created"), { date: formatDate(savedPage.quote.created_at, undefined, lang) })}
+                {header.validUntil ? ` ${fillText(t("qe_validUntilOn"), { date: formatDate(header.validUntil, undefined, lang) })}` : ""}
               </p>
             )}
             {(mode.bornHere || born) && (
               <p className="mt-1 text-xs text-emerald-700">
-                Saved as {number || born}
+                {fillText(t("qe_savedAs"), { number: number || born || "" })}
                 {props.mode === "unsaved" ? (
                   <>
                     {" · "}
                     <Link href={`/quotes/${savedId}`} className="font-semibold underline">
-                      Open It
+                      {t("qe_btn_openIt")}
                     </Link>
                   </>
                 ) : (
-                  <> — it&apos;s on the Estimates list even if you leave.</>
+                  <> {t("qe_onTheListEvenIfYouLeave")}</>
                 )}
               </p>
             )}
@@ -962,17 +1000,17 @@ export function EstimateEditor(props: EstimateEditorProps) {
               <CardContent className="space-y-3 py-5">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-brand" />
-                  <h3 className="text-sm font-semibold text-slate-900">Draft with Estimator</h3>
+                  <h3 className="text-sm font-semibold text-slate-900">{t("qe_draftWithEstimator")}</h3>
                 </div>
                 {/* THE SENTENCE MATCHES THE DOOR (onboarding-truth-law). */}
                 <p className="text-xs text-slate-500">
                   {estimatorTaskMode && !plansForLead.length
-                    ? "Splits your scope into tasks, one line each, with the hours and parts you wrote. Nothing is priced for you: a task without hours asks for them."
-                    : "Priced from your price book (your net cost + markup). Items not in the book come in at a Home Depot estimate, flagged to confirm."}
+                    ? t("qe_estimatorTasksLine")
+                    : t("qe_estimatorBookLine")}
                 </p>
                 <Textarea
                   rows={3}
-                  placeholder="Describe the work — or, with a plan uploaded, what's already done or excluded, in your own words: which parts, how many, and what's already in."
+                  placeholder={t("qe_scopePh")}
                   value={scope}
                   onChange={(e) => setScope(e.target.value)}
                 />
@@ -982,7 +1020,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <p className="text-sm text-red-600">
                     {aiError}{" "}
                     <button type="button" onClick={() => setAiError(null)} className="font-semibold underline">
-                      Dismiss
+                      {t("qe_btn_dismiss")}
                     </button>
                   </p>
                 )}
@@ -990,29 +1028,29 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <Button variant="primary" onClick={onGenerate} disabled={generating || uploading || busy}>
                     {generating ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+                        <Loader2 className="h-4 w-4 animate-spin" /> {t("qe_btn_generating")}
                       </>
                     ) : (
                       <>
-                        <Sparkles className="h-4 w-4" /> Generate Line Items
+                        <Sparkles className="h-4 w-4" /> {t("qe_btn_generateLineItems")}
                       </>
                     )}
                   </Button>
                   {plansForLead.length > 0 && !generating && (
-                    <span className="text-xs text-slate-500">reads their plans ({plansForLead.map((p) => p.name).join(", ")})</span>
+                    <span className="text-xs text-slate-500">{fillText(t("qe_readsTheirPlans"), { names: plansForLead.map((p) => p.name).join(", ") })}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-3 pt-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-400">or</span>
-                  <DropTarget onFiles={(files) => onUploadPlan(files[0])} accept="application/pdf" multiple={false} label="Drop the Plan PDF" disabled={uploading || generating}>
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-400">{t("qe_or")}</span>
+                  <DropTarget onFiles={(files) => onUploadPlan(files[0])} accept="application/pdf" multiple={false} label={t("qe_dropThePlanPdf")} disabled={uploading || generating}>
                     <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-brand/40 bg-white/60 px-3 py-2 text-sm font-medium text-brand hover:bg-brand-light/40 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
                       {uploading ? (
                         <>
-                          <Loader2 className="h-4 w-4 animate-spin" /> Reading plan…
+                          <Loader2 className="h-4 w-4 animate-spin" /> {t("qe_readingPlan")}
                         </>
                       ) : (
                         <>
-                          <FileUp className="h-4 w-4" /> Upload Plans
+                          <FileUp className="h-4 w-4" /> {t("qe_btn_uploadPlans")}
                         </>
                       )}
                       <input
@@ -1028,9 +1066,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
                       />
                     </label>
                   </DropTarget>
-                  <DropTarget onFiles={(files) => onUploadSupplier(files[0])} accept="application/pdf,text/csv,.csv,.txt" multiple={false} label="Drop the Supplier Quote" disabled={uploading || generating}>
+                  <DropTarget onFiles={(files) => onUploadSupplier(files[0])} accept="application/pdf,text/csv,.csv,.txt" multiple={false} label={t("qe_dropTheSupplierQuote")} disabled={uploading || generating}>
                     <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white/60 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
-                      <FileUp className="h-4 w-4" /> Supplier Quote
+                      <FileUp className="h-4 w-4" /> {t("qe_btn_supplierQuote")}
                       <input
                         type="file"
                         accept="application/pdf,text/csv,.csv,.txt"
@@ -1044,14 +1082,14 @@ export function EstimateEditor(props: EstimateEditorProps) {
                       />
                     </label>
                   </DropTarget>
-                  {scope.trim() && !uploading && <span className="text-xs text-slate-400">applies your note above to the plan</span>}
+                  {scope.trim() && !uploading && <span className="text-xs text-slate-400">{t("qe_appliesYourNote")}</span>}
                 </div>
                 <p className="text-xs text-slate-500">
-                  Plans are kept as Plans on the customer{header.jobId ? " and this job" : ""}. A supplier quote is read, then deleted, so its prices never sit where the crew can open them.
+                  {t(header.jobId ? "qe_plansKeptCustomerJob" : "qe_plansKeptCustomer")}
                 </p>
                 {plansForLead.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2 pt-2">
-                    <span className="text-xs font-medium text-slate-500">Their plans are already here:</span>
+                    <span className="text-xs font-medium text-slate-500">{t("qe_theirPlansHere")}</span>
                     {plansForLead.map((p) => (
                       <button
                         key={p.path}
@@ -1060,7 +1098,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                         onClick={() => onReadLeadPlan(p)}
                         className={`inline-flex items-center gap-1.5 rounded-lg border border-dashed border-brand/40 bg-white/60 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand-light/40 ${uploading ? "pointer-events-none opacity-60" : ""}`}
                       >
-                        <FileUp className="h-3.5 w-3.5" /> Read {p.name}
+                        <FileUp className="h-3.5 w-3.5" /> {fillText(t("qe_btn_readPlan"), { name: p.name })}
                       </button>
                     ))}
                   </div>
@@ -1078,14 +1116,14 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <>
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <h3 className="text-sm font-semibold text-slate-900">Update your price book from this quote?</h3>
+                        <h3 className="text-sm font-semibold text-slate-900">{t("qe_updateBookFromQuote")}</h3>
                         <p className="text-xs text-slate-500">
-                          Tick what you want &mdash; nothing changes unless you apply.
-                          {bookReview.unchanged > 0 && ` ${bookReview.unchanged} matched at the same price.`}
+                          {t("qe_tickWhatYouWant")}
+                          {bookReview.unchanged > 0 && ` ${fillText(t(bookReview.unchanged === 1 ? "qe_matchedSamePriceOne" : "qe_matchedSamePriceMany"), { n: String(bookReview.unchanged) })}`}
                         </p>
                       </div>
                       <button type="button" onClick={() => setBookReview(null)} className="text-xs text-slate-400 hover:text-slate-900">
-                        Not Now
+                        {t("qe_btn_notNow")}
                       </button>
                     </div>
                     <div className="space-y-1.5">
@@ -1117,7 +1155,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                           </label>
                           {u.unitMismatch && (
                             <p className="pl-6 text-xs font-medium text-amber-700">
-                              Different units — the quote is per {u.newUnit}, your book is per {u.oldUnit}. Check before you tick this, or the price is wrong by whatever a {u.newUnit} holds.
+                              {fillText(t("qe_differentUnits"), { newUnit: u.newUnit ?? "", oldUnit: u.oldUnit ?? "" })}
                             </p>
                           )}
                         </div>
@@ -1132,7 +1170,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                           />
                           <span className="min-w-0 truncate">{a.description}</span>
                           <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-600">
-                            new · ${a.newBuy.toFixed(2)}/{a.unit}
+                            {fillText(t("qe_newAt"), { price: a.newBuy.toFixed(2), unit: a.unit })}
                           </span>
                         </label>
                       ))}
@@ -1140,7 +1178,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                     <div className="mt-3">
                       <Button type="button" size="sm" onClick={applyBook} disabled={applyingBook || !(bookReview.updates.some((u) => u.keep) || bookReview.additions.some((a) => a.keep))}>
                         {applyingBook ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                        Apply {bookReview.updates.filter((u) => u.keep).length + bookReview.additions.filter((a) => a.keep).length} To The Price Book
+                        {fillText(t("qe_btn_applyToBook"), { n: String(bookReview.updates.filter((u) => u.keep).length + bookReview.additions.filter((a) => a.keep).length) })}
                       </Button>
                     </div>
                   </>
@@ -1156,9 +1194,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-900">
-                      {proposed.length ? `Proposed — ${proposed.length} line${proposed.length === 1 ? "" : "s"}` : "Worth checking"}
+                      {proposed.length ? fillText(t(proposed.length === 1 ? "qe_proposedOne" : "qe_proposedMany"), { n: String(proposed.length) }) : t("qe_worthChecking")}
                     </h3>
-                    {proposed.length > 0 && <p className="text-xs text-slate-500">Nothing here is on your estimate yet.</p>}
+                    {proposed.length > 0 && <p className="text-xs text-slate-500">{t("qe_nothingOnEstimateYet")}</p>}
                   </div>
                   {proposed.length > 1 ? (
                     <button
@@ -1169,11 +1207,11 @@ export function EstimateEditor(props: EstimateEditorProps) {
                       }}
                       className="text-xs font-medium text-slate-500 hover:text-slate-900"
                     >
-                      {proposed.every((p) => p.keep) ? "Untick All" : "Tick All"}
+                      {proposed.every((p) => p.keep) ? t("qe_btn_untickAll") : t("qe_btn_tickAll")}
                     </button>
                   ) : proposed.length === 0 && questions.length > 0 ? (
                     <button onClick={() => setQuestions([])} className="text-xs text-slate-400 hover:text-slate-900">
-                      Clear
+                      {t("qe_btn_clear")}
                     </button>
                   ) : null}
                 </div>
@@ -1181,24 +1219,24 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   {proposed.map((p) => (
                     <div key={p.pid} className={`grid grid-cols-12 items-start gap-2 rounded-lg border p-2 ${p.keep ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50/70 opacity-55"}`}>
                       <div className="col-span-1 pt-2.5">
-                        <input type="checkbox" className="h-4 w-4" checked={p.keep} onChange={(e) => editProposal(p.pid, { keep: e.target.checked })} aria-label={`Add ${p.description}`} />
+                        <input type="checkbox" className="h-4 w-4" checked={p.keep} onChange={(e) => editProposal(p.pid, { keep: e.target.checked })} aria-label={fillText(t("qe_addAria"), { name: p.description })} />
                       </div>
                       <div className="col-span-11 sm:col-span-4">
-                        <Input placeholder="Description" value={p.description} onChange={(e) => editProposal(p.pid, { description: e.target.value })} />
+                        <Input placeholder={t("qe_description")} value={p.description} onChange={(e) => editProposal(p.pid, { description: e.target.value })} />
                         {p.flag && <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">{p.flag}</span>}
                       </div>
                       <div className="col-span-3 sm:col-span-2">
-                        <NumberInput placeholder="Qty" value={p.quantity} onValueChange={(n) => editProposal(p.pid, { quantity: n })} />
+                        <NumberInput placeholder={t("qe_qty")} value={p.quantity} onValueChange={(n) => editProposal(p.pid, { quantity: n })} />
                       </div>
                       <div className="col-span-3 sm:col-span-1">
-                        <Input placeholder="ea" value={p.unit} onChange={(e) => editProposal(p.pid, { unit: e.target.value })} />
+                        <Input placeholder={t("qe_ea")} value={p.unit} onChange={(e) => editProposal(p.pid, { unit: e.target.value })} />
                       </div>
                       <div className="col-span-4 sm:col-span-2">
-                        <NumberInput placeholder="Unit $" value={p.unit_price} onValueChange={(n) => editProposal(p.pid, { unit_price: n })} />
+                        <NumberInput placeholder={t("qe_unitDollar")} value={p.unit_price} onValueChange={(n) => editProposal(p.pid, { unit_price: n })} />
                       </div>
                       <div className="col-span-2 flex items-center justify-end gap-1">
                         <span className="text-sm font-medium text-slate-700">{formatCurrency(p.quantity * p.unit_price)}</span>
-                        <button type="button" onClick={() => setProposed((prev) => prev.filter((x) => x.pid !== p.pid))} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Drop this proposal">
+                        <button type="button" onClick={() => setProposed((prev) => prev.filter((x) => x.pid !== p.pid))} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={t("qe_dropThisProposal")}>
                           <X className="h-4 w-4" />
                         </button>
                       </div>
@@ -1209,17 +1247,17 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <Button variant="primary" onClick={acceptProposals} disabled={!proposed.some((p) => p.keep) || busy}>
                       <Check className="h-4 w-4" />
-                      Add {proposed.filter((p) => p.keep).length} To The Estimate
+                      {fillText(t("qe_btn_addToEstimate"), { n: String(proposed.filter((p) => p.keep).length) })}
                     </Button>
                     <button type="button" onClick={() => setProposed([])} className="text-sm text-slate-500 hover:text-slate-900">
-                      Drop Them All
+                      {t("qe_btn_dropThemAll")}
                     </button>
                     <span className="text-sm text-slate-500">{formatCurrency(proposed.filter((p) => p.keep).reduce((t, p) => t + p.quantity * p.unit_price, 0))}</span>
                   </div>
                 )}
                 {questions.length > 0 && (
                   <div className={proposed.length ? "mt-4 border-t border-slate-200 pt-3" : ""}>
-                    {proposed.length > 0 && <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Worth checking</h4>}
+                    {proposed.length > 0 && <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("qe_worthChecking")}</h4>}
                     <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
                       {questions.map((q, i) => (
                         <li key={i}>{q}</li>
@@ -1235,15 +1273,15 @@ export function EstimateEditor(props: EstimateEditorProps) {
           <Card>
             <CardContent className="py-5">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">Line items</h3>
+                <h3 className="text-sm font-semibold text-slate-900">{t("qe_lineItems")}</h3>
                 {!readOnly && (
                   <div className="flex items-center gap-2">
                     {/* A task is a line with its hours and parts behind it; a line is just a line. */}
                     <Button size="sm" variant="outline" onClick={addTask} disabled={busy}>
-                      <ListPlus className="h-4 w-4" /> Add A Task
+                      <ListPlus className="h-4 w-4" /> {t("qe_btn_addATask")}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => session.addLine(blankItem())} disabled={busy}>
-                      <Plus className="h-4 w-4" /> Add A Line
+                      <Plus className="h-4 w-4" /> {t("qe_btn_addALine")}
                     </Button>
                   </div>
                 )}
@@ -1263,9 +1301,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
                       <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.quantity * it.unit_price)}</div>
                     </li>
                   ))}
-                  {items.length === 0 && <li className="py-6 text-center text-sm text-slate-400">No line items yet.</li>}
+                  {items.length === 0 && <li className="py-6 text-center text-sm text-slate-400">{t("qe_noLineItemsYet")}</li>}
                   <li className="mt-3 rounded-lg bg-slate-50/60 px-4 py-3">
-                    <div className="text-sm font-medium text-slate-800">These line items are locked</div>
+                    <div className="text-sm font-medium text-slate-800">{t("qe_theseAreLocked")}</div>
                     <p className="mt-0.5 text-sm text-slate-600">{lock?.reason}</p>
                   </li>
                 </ul>
@@ -1276,7 +1314,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <AddLineItems priceItems={priceItems} kits={kits as never} pricing={pricing} measured={measured} disabled={busy} onAdd={(lines) => void session.addLines(lines)} />
                   {priceItems.length === 0 && kits.length === 0 && (
                     <p className="mb-3 text-xs text-slate-500">
-                      No price list or kits yet, so there&apos;s nothing to pick from. Type the lines by hand below, or build your catalog under Money → Price List and they&apos;ll show up here.
+                      {t("qe_noPriceListYet")}
                     </p>
                   )}
                   <div className="space-y-2">
@@ -1296,7 +1334,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                               {isCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
                               <span className="text-sm font-semibold text-slate-800">{group}</span>
                               <span className="text-xs text-slate-400">
-                                · {entries.length} item{entries.length === 1 ? "" : "s"}
+                                {fillText(t(entries.length === 1 ? "qe_groupItemsOne" : "qe_groupItemsMany"), { n: String(entries.length) })}
                               </span>
                               <span className="ml-auto text-sm font-medium text-slate-600">{formatCurrency(gSub)}</span>
                             </button>
@@ -1364,7 +1402,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                                         // A plain line can become a task (cn-v1131): its words and price stay,
                                         // and the hours and parts open beneath it.
                                         <button type="button" disabled={busy} onClick={() => makeTask(it)} className="mt-1 text-[11px] text-slate-400 hover:text-brand hover:underline disabled:opacity-50">
-                                          Make This A Task
+                                          {t("qe_btn_makeThisATask")}
                                         </button>
                                       )}
                                       <Waiting words={waiting} />
@@ -1374,13 +1412,13 @@ export function EstimateEditor(props: EstimateEditorProps) {
                                       {follow?.note && <p className="mt-1 text-xs text-amber-700">{follow.note}</p>}
                                     </div>
                                     <div className="col-span-3 sm:col-span-2">
-                                      <NumberInput placeholder="Qty" value={it.quantity} disabled={busy} onValueChange={(n) => session.typeLine(it.key, { quantity: n })} onBlur={() => void session.commitLine(it.key)} />
+                                      <NumberInput placeholder={t("qe_qty")} value={it.quantity} disabled={busy} onValueChange={(n) => session.typeLine(it.key, { quantity: n })} onBlur={() => void session.commitLine(it.key)} />
                                     </div>
                                     <div className="col-span-3 sm:col-span-1">
-                                      <Input placeholder="ea" value={it.unit} disabled={busy} onChange={(e) => session.typeLine(it.key, { unit: e.target.value })} onBlur={() => void session.commitLine(it.key)} onKeyDown={blurOnEnter} />
+                                      <Input placeholder={t("qe_ea")} value={it.unit} disabled={busy} onChange={(e) => session.typeLine(it.key, { unit: e.target.value })} onBlur={() => void session.commitLine(it.key)} onKeyDown={blurOnEnter} />
                                     </div>
                                     <div className="col-span-4 sm:col-span-2">
-                                      <NumberInput placeholder="Unit $" value={it.unit_price} disabled={busy} onValueChange={(n) => session.typeLine(it.key, { unit_price: n })} onBlur={() => void session.commitLine(it.key)} />
+                                      <NumberInput placeholder={t("qe_unitDollar")} value={it.unit_price} disabled={busy} onValueChange={(n) => session.typeLine(it.key, { unit_price: n })} onBlur={() => void session.commitLine(it.key)} />
                                     </div>
                                     <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-2">
                                       <span className="text-sm font-medium text-slate-700">{formatCurrency(it.quantity * it.unit_price)}</span>
@@ -1389,7 +1427,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                                         disabled={busy}
                                         onClick={() => void session.removeLine(it.key)}
                                         className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                                        aria-label="Remove line"
+                                        aria-label={t("qe_removeLine")}
                                       >
                                         <Trash2 className="h-4 w-4" />
                                       </button>
@@ -1424,8 +1462,8 @@ export function EstimateEditor(props: EstimateEditorProps) {
               {/* What the customer's document calls itself. Once the row exists the header's toggle is
                   the one door (QuoteTypeToggle, which reads as text past draft). */}
               {mode.kind === "unsaved" && (
-                <div title="Quote = fixed price · Estimate = time & materials">
-                  <Label>Document</Label>
+                <div title={t("qt_typeTitle")}>
+                  <Label>{t("qe_document")}</Label>
                   <div className={busy ? "pointer-events-none opacity-60" : undefined}>
                     <SegmentedControl
                       stretch
@@ -1436,8 +1474,8 @@ export function EstimateEditor(props: EstimateEditorProps) {
                         commitField("docType");
                       }}
                       items={[
-                        { id: "quote", label: "Quote (Fixed)" },
-                        { id: "estimate", label: "Estimate (T&M)" },
+                        { id: "quote", label: t("qt_btn_typeQuote") },
+                        { id: "estimate", label: t("qt_btn_typeEstimate") },
                       ]}
                     />
                   </div>
@@ -1446,11 +1484,11 @@ export function EstimateEditor(props: EstimateEditorProps) {
               )}
               {!savedPage && (
                 <div>
-                  <Label htmlFor="who">Who&apos;s this for?</Label>
+                  <Label htmlFor="who">{t("qe_whoIsThisFor")}</Label>
                   <Select id="who" value={whoValue} disabled={busy} onChange={(e) => pickWho(e.target.value)}>
-                    <option value="">— Nobody yet —</option>
+                    <option value="">{t("qe_nobodyYet")}</option>
                     {leadOptions.length > 0 && (
-                      <optgroup label={leadsOffered ? "Leads — not customers yet" : "The lead this estimate came from"}>
+                      <optgroup label={leadsOffered ? t("qe_leadsNotCustomers") : theLeadThisCameFrom}>
                         {(leadsOffered ? leadOptions : leadOptions.filter((l) => l.id === header.leadId)).map((l) => (
                           <option key={l.id} value={`lead:${l.id}`}>
                             {l.name}
@@ -1460,7 +1498,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                       </optgroup>
                     )}
                     {allCustomers.length > 0 && (
-                      <optgroup label="Customers">
+                      <optgroup label={t("qe_customers")}>
                         {allCustomers.map((c) => (
                           <option key={c.id} value={`customer:${c.id}`}>
                             {c.name}
@@ -1483,18 +1521,18 @@ export function EstimateEditor(props: EstimateEditorProps) {
                 </div>
               )}
               <div>
-                <Label htmlFor="title">Title</Label>
-                <Input id="title" placeholder="What the job is, in a few words" value={header.title} disabled={busy} onChange={(e) => typeField("title", e.target.value)} onBlur={() => commitField("title")} onKeyDown={blurOnEnter} />
+                <Label htmlFor="title">{t("qe_title")}</Label>
+                <Input id="title" placeholder={t("qe_titlePh")} value={header.title} disabled={busy} onChange={(e) => typeField("title", e.target.value)} onBlur={() => commitField("title")} onKeyDown={blurOnEnter} />
                 {fieldWords("header:title")}
               </div>
               <div>
                 <Label htmlFor="q-description">
-                  Description <span className="font-normal text-slate-400">(shows above the line items)</span>
+                  {t("qe_description")} <span className="font-normal text-slate-400">{t("qe_showsAboveLines")}</span>
                 </Label>
                 <Textarea
                   id="q-description"
                   rows={3}
-                  placeholder="Scope summary the customer reads before the line items."
+                  placeholder={t("qe_descriptionPh")}
                   value={header.description}
                   disabled={busy}
                   onChange={(e) => typeField("description", e.target.value)}
@@ -1505,7 +1543,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
               <div className="grid grid-cols-2 gap-3">
                 {taxShown && (
                   <div>
-                    <Label htmlFor="tax">Tax rate</Label>
+                    <Label htmlFor="tax">{t("qe_taxRate")}</Label>
                     {readOnly ? (
                       // The same substitution the invoice page makes on a sent bill: the rate as text,
                       // not an input that can only be refused.
@@ -1513,7 +1551,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
                         <div id="tax" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                           {(header.taxRate * 100).toFixed(2)}%
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">Changing the rate would change the total. {lock?.reason}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {t("qe_changingRate")} {lock?.reason}
+                        </p>
                       </>
                     ) : taxAsSelect ? (
                       <Select
@@ -1526,7 +1566,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                           commitField("taxRate");
                         }}
                       >
-                        <option value="">No Tax</option>
+                        <option value="">{t("qe_btn_noTax")}</option>
                         {taxRates.map((t) => (
                           <option key={t.id} value={t.id}>
                             {t.name} ({Number(t.rate)}%)
@@ -1550,13 +1590,13 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   </div>
                 )}
                 <div>
-                  <Label htmlFor="valid">Valid until</Label>
+                  <Label htmlFor="valid">{t("qe_validUntil")}</Label>
                   <Input id="valid" type="date" value={header.validUntil} disabled={busy} onChange={(e) => typeField("validUntil", e.target.value)} onBlur={() => commitField("validUntil")} />
                   {fieldWords("header:validUntil")}
                 </div>
               </div>
               <div>
-                <Label htmlFor="notes">Notes</Label>
+                <Label htmlFor="notes">{t("qe_notes")}</Label>
                 <Textarea id="notes" rows={3} value={header.notes} disabled={busy} onChange={(e) => typeField("notes", e.target.value)} onBlur={() => commitField("notes")} />
                 {fieldWords("header:notes")}
               </div>
@@ -1582,25 +1622,25 @@ export function EstimateEditor(props: EstimateEditorProps) {
                 </div>
               )}
               <div className="flex justify-between text-slate-600">
-                <span>Subtotal</span>
+                <span>{t("qe_subtotal")}</span>
                 <span>{formatCurrency(subtotal)}</span>
               </div>
               {taxFieldShown(salesTax, { tax }) && (
                 <div className="flex justify-between text-slate-600">
-                  <span>Tax</span>
+                  <span>{t("qe_tax")}</span>
                   <span>{formatCurrency(tax)}</span>
                 </div>
               )}
               <div className="flex justify-between border-t border-slate-100 pt-2 text-base font-semibold text-slate-900">
-                <span>Total</span>
+                <span>{t("qe_total")}</span>
                 <span>{formatCurrency(total)}</span>
               </div>
               {/* THE ONE SAVE MODEL, SAID: a write on the wire, the first save that did not land. */}
-              {busy && <p className="pt-1 text-xs text-slate-400">Saving…</p>}
+              {busy && <p className="pt-1 text-xs text-slate-400">{t("qe_saving")}</p>}
               {refusal("first-save") && <Refused words={refusal("first-save")!} onRetry={retry("first-save")} disabled={busy} />}
               {refusal("read-back") && <Refused words={refusal("read-back")!} onRetry={retry("read-back")} disabled={busy} />}
               {mode.kind === "unsaved" && !busy && !refusal("first-save") && (
-                <p className="pt-1 text-xs text-slate-400">Saves itself the moment you put something on it.</p>
+                <p className="pt-1 text-xs text-slate-400">{t("qe_savesItself")}</p>
               )}
             </CardContent>
           </Card>

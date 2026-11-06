@@ -4,6 +4,7 @@ import { coerceTaskDetail, detailExplains } from "@/lib/estimate/task-lines";
 import { repriceRows, type RuleInputs } from "@/lib/estimate/reprice-rows";
 import type { EstimateFormat } from "@/lib/doc-style";
 import type { QuoteDocType } from "@/lib/doc-label";
+import { words as editorWords } from "@/lib/words/quotes-editor";
 
 /**
  * THE ONE SAVE MODEL FOR AN ESTIMATE (cn-v1132) — the invoice editor's, and nothing else.
@@ -61,18 +62,22 @@ import type { QuoteDocType } from "@/lib/doc-label";
  *     what this store wrote since the last seed it took, which that seed may predate.
  */
 
-export const COULD_NOT_REACH = "Couldn't reach the server — press Retry";
+/** THE STORE'S OWN WORDS ARE THE EDITOR'S CATALOG (qe_, cn-v1145). The constants below are its English,
+ *  byte for byte (the tests pin them, and deleteQuoteItem's LINE_GONE is matched against the server's
+ *  English); a session reads them in the signed-in person's language through SessionInit.say. */
+const EN = editorWords.en;
+export const COULD_NOT_REACH = EN.qe_couldNotReach;
 /** A commit asked for while another write was still on the wire: queued, not refused. Words only —
  *  there is nothing to retry, it goes next on its own. */
-export const STILL_SAVING = "Still saving the last change — this goes next.";
+export const STILL_SAVING = EN.qe_stillSaving;
 /** A line with no description cannot be saved (the server refuses it by name); it waits here. */
-export const NAME_THE_LINE = "Give this line a description to save it.";
-export const READ_BACK_FAILED = "Saved, but couldn't read the lines back — press Retry before editing them.";
-export const WAITING_READ_BACK = "This line is saved; its id is still being read back — press Retry above.";
+export const NAME_THE_LINE = EN.qe_nameTheLine;
+export const READ_BACK_FAILED = EN.qe_readBackFailed;
+export const WAITING_READ_BACK = EN.qe_waitingReadBack;
 /** deleteQuoteItem's zero-row answer (actions.ts): the line is not on the estimate — which, from the
  *  editor, means it is already gone. Treated as a delete that landed. */
-export const LINE_GONE = "That line isn't on this estimate.";
-export const LINE_WAS_GONE = "That line was already off the estimate.";
+export const LINE_GONE = EN.qe_lineGone;
+export const LINE_WAS_GONE = EN.qe_lineWasGone;
 /** A write that answers nothing for this long reads as unreachable, with Retry. */
 export const WRITE_TIMEOUT_MS = 20_000;
 
@@ -91,6 +96,8 @@ export async function settle<T extends Answer>(
   call: () => Promise<T>,
   fallback: string,
   timeoutMs: number = WRITE_TIMEOUT_MS,
+  /** The unreachable line in the reader's language (the session's say); English by default. */
+  unreachable: string = COULD_NOT_REACH,
 ): Promise<{ landed: true; value: Landed<T> } | { landed: false; words: string }> {
   let res: T;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -100,7 +107,7 @@ export async function settle<T extends Answer>(
     });
     res = await Promise.race([call(), clock]);
   } catch {
-    return { landed: false, words: COULD_NOT_REACH };
+    return { landed: false, words: unreachable };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -186,7 +193,7 @@ export interface SessionActions {
    *  the same two updateQuoteItem answers with; both optional, so an append that followed nothing says nothing. */
   appendQuoteLines: (quoteId: string, lines: (DraftLineItem & { id: string })[]) => Promise<{ ok: true; ids: string[]; said?: string; note?: string } | { ok: false; error: string }>;
   updateQuoteItem: (itemId: string, quoteId: string, patch: LinePatch) => Promise<{ ok: boolean; error?: string; said?: string; note?: string }>;
-  deleteQuoteItem: (itemId: string, quoteId: string) => Promise<{ ok: boolean; error?: string; said?: string; note?: string }>;
+  deleteQuoteItem: (itemId: string, quoteId: string) => Promise<{ ok: boolean; error?: string; lineGone?: boolean; said?: string; note?: string }>;
   updateQuoteMeta: (quoteId: string, meta: MetaPatch) => Promise<{ ok: boolean; error?: string }>;
   setQuoteCustomer: (quoteId: string, customerId: string | null) => Promise<{ ok: boolean; error?: string }>;
   setQuoteType: (quoteId: string, docType: QuoteDocType) => Promise<{ ok: boolean; error?: string }>;
@@ -410,6 +417,9 @@ export interface SessionInit {
   newId?: () => string;
   /** The write clock (WRITE_TIMEOUT_MS; a test shortens it under fake timers). */
   timeoutMs?: number;
+  /** The signed-in person's translator (lib/i18n translator(lang)): the store's own words — the
+   *  waiting lines, the refusal fallbacks, the unreachable line — read through it. Omitted = English. */
+  say?: (key: string) => string;
 }
 
 export interface SavedReseed {
@@ -463,6 +473,16 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
   const newKey = init.newKey ?? (() => `k${++keyN}`);
   const newId = init.newId ?? randomId;
   const timeoutMs = init.timeoutMs ?? WRITE_TIMEOUT_MS;
+  const say = init.say ?? ((key: string) => EN[key] ?? key);
+  // The store's words in the reader's language, read once (a language change reloads the page).
+  const W = {
+    couldNotReach: say("qe_couldNotReach"),
+    stillSaving: say("qe_stillSaving"),
+    nameTheLine: say("qe_nameTheLine"),
+    readBackFailed: say("qe_readBackFailed"),
+    waitingReadBack: say("qe_waitingReadBack"),
+    lineWasGone: say("qe_lineWasGone"),
+  };
   let state: SessionState = {
     mode: init.mode,
     header: headerOf(init.header),
@@ -526,7 +546,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
   async function run<T extends Answer>(slot: string, call: () => Promise<T>, fallback: string, onOk: (v: Landed<T>) => void | Promise<void>): Promise<boolean> {
     retries.set(slot, () => run(slot, call, fallback, onOk));
     set({ pending: slot, refusals: withRefusal(state.refusals, slot, null) });
-    const r = await settle(call, fallback, timeoutMs);
+    const r = await settle(call, fallback, timeoutMs, W.couldNotReach);
     if (!r.landed) {
       set({ pending: null, refusals: withRefusal(state.refusals, slot, r.words) });
       await drain();
@@ -562,7 +582,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         firstSaveSent = new Set(sent.map((l) => l.key));
         return init.actions.saveQuote(payload);
       },
-      "Couldn't save the estimate.",
+      say("qe_couldntSaveEstimate"),
       async (res) => {
         const sent = firstSaveSent ?? new Set<string>();
         firstSaveSent = null;
@@ -586,16 +606,16 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     // after a landed read said "press Retry above" over a slot that had no Retry.
     const read = async () => {
       const r = await init.actions.readQuoteLineIds(id);
-      if (!r.ok) return { ok: false as const, error: READ_BACK_FAILED };
+      if (!r.ok) return { ok: false as const, error: W.readBackFailed };
       // Matched by the words the first save SENT (the record taken at send), never the words typed since.
       const items = idsBySortOrder(state.items, r.items, (key) => committedLines.get(key)?.description);
       const idless = new Set(items.filter((l) => l.saved && !l.id).map((l) => `line:${l.key}`));
-      const waiting = Object.fromEntries(Object.entries(state.waiting).filter(([slot, w]) => w !== WAITING_READ_BACK || idless.has(slot)));
+      const waiting = Object.fromEntries(Object.entries(state.waiting).filter(([slot, w]) => w !== W.waitingReadBack || idless.has(slot)));
       set({ items, waiting });
       // A line edited or removed while its id was on the way is queued; the drain writes it now.
-      return idless.size ? { ok: false as const, error: READ_BACK_FAILED } : { ok: true as const };
+      return idless.size ? { ok: false as const, error: W.readBackFailed } : { ok: true as const };
     };
-    return run("read-back", read, READ_BACK_FAILED, () => {});
+    return run("read-back", read, W.readBackFailed, () => {});
   }
 
   /** ONE deed, one pending: each named line in turn; the first refusal stops the pass and names the
@@ -612,14 +632,14 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
           const was = committedLines.get(key);
           if (was && sameLine(was, l)) continue;
           const res = await init.actions.updateQuoteItem(l.id, id, linePatch(l));
-          if (!res.ok) return { ok: false, error: `${l.description || "A line"}: ${res.error ?? "couldn't be saved."}` };
+          if (!res.ok) return { ok: false, error: `${l.description || say("qe_aLine")}: ${res.error ?? say("qe_couldntBeSaved")}` };
           // Recorded per line as it lands, so Retry carries on from the line that was refused.
           committedLines.set(key, lineForServer(l));
           written.lines.add(key);
         }
         return { ok: true };
       },
-      "Couldn't save the lines.",
+      say("qe_couldntSaveLines"),
       () => {},
     );
   }
@@ -643,7 +663,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         for (const l of lines) committedLines.set(l.key, lineForServer(l));
         return init.actions.appendQuoteLines(id, lines.map((l) => ({ ...lineForServer(l), id: l.id as string })));
       },
-      "Couldn't add those lines.",
+      say("qe_couldntAddLines"),
       (res) => {
         const landed = new Set(still().map((l) => l.key));
         // What the job's list did with the lines (a kit added to an accepted, job-linked estimate):
@@ -697,9 +717,9 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       `delete:${key}`,
       async () => {
         const r = await init.actions.deleteQuoteItem(itemId, id);
-        return !r.ok && r.error === LINE_GONE ? { ok: true, said: LINE_WAS_GONE } : r;
+        return !r.ok && (r.lineGone || r.error === LINE_GONE) ? { ok: true, said: W.lineWasGone } : r; // the flag first (the server words it in the caller's language); the English sentence is the fallback
       },
-      "Couldn't remove the line.",
+      say("qe_couldntRemoveLine"),
       (res) => {
         committedLines.delete(key);
         written.gone.add(itemId);
@@ -724,7 +744,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       // Saved by the first save, its id still on the way back: the typed figure waits on the row
       // (not marked sent) and goes once the read-back lands.
       queued.lines.add(l.key);
-      wait(slot, WAITING_READ_BACK);
+      wait(slot, W.waitingReadBack);
       return false;
     }
     const itemId = l.id;
@@ -734,7 +754,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         committedLines.set(l.key, lineForServer(l));
         return init.actions.updateQuoteItem(itemId, id, linePatch(l));
       },
-      "Couldn't save the line.",
+      say("qe_couldntSaveLine"),
       (res) => {
         const words = { ...(res.said ? { said: res.said } : {}), ...(res.note ? { note: res.note } : {}) };
         written.lines.add(l.key);
@@ -762,9 +782,9 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
           written.header.add(field);
         },
       );
-    if (w.kind === "meta") return send(() => init.actions.updateQuoteMeta(id, w.meta), "Couldn't save that.");
-    if (w.kind === "customer") return send(() => init.actions.setQuoteCustomer(id, w.customerId), "Couldn't change the customer.");
-    return send(() => init.actions.setQuoteType(id, w.docType), "Couldn't change the type.");
+    if (w.kind === "meta") return send(() => init.actions.updateQuoteMeta(id, w.meta), say("qe_couldntSaveThat"));
+    if (w.kind === "customer") return send(() => init.actions.setQuoteCustomer(id, w.customerId), say("qe_couldntChangeCustomer"));
+    return send(() => init.actions.setQuoteType(id, w.docType), say("qe_couldntChangeType"));
   }
 
   /** A line the server was never asked for (no id: no append attempted, not in the first save) just goes. */
@@ -821,7 +841,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       }
       if (!named(l)) {
         queued.lines.delete(k);
-        wait(`line:${k}`, hasSubstance(l) ? NAME_THE_LINE : null);
+        wait(`line:${k}`, hasSubstance(l) ? W.nameTheLine : null);
         continue;
       }
       if (!l.saved) fresh.push(k);
@@ -836,7 +856,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     for (const k of queued.lines) {
       const l = line(k) as EditorLine;
       if (!l.id) {
-        wait(`line:${k}`, WAITING_READ_BACK);
+        wait(`line:${k}`, W.waitingReadBack);
         continue;
       }
       queued.lines.delete(k);
@@ -869,7 +889,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         continue;
       }
       if (!l.id) {
-        wait(`line:${k}`, WAITING_READ_BACK);
+        wait(`line:${k}`, W.waitingReadBack);
         continue;
       }
       queued.deletes.delete(k);
@@ -962,7 +982,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       if (state.header[field] === committedHeader[field]) return true;
       if (busy()) {
         queued.header.add(field);
-        wait(`header:${field}`, STILL_SAVING);
+        wait(`header:${field}`, W.stillSaving);
         return false;
       }
       if (!savedId()) return firstSave();
@@ -983,12 +1003,12 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       if (!named(l)) {
         // A blank row he just added and left says nothing; a row with a figure on it and no words is
         // asked for them, because without them the server will not take it.
-        wait(slot, hasSubstance(l) ? NAME_THE_LINE : null);
+        wait(slot, hasSubstance(l) ? W.nameTheLine : null);
         return false;
       }
       if (busy()) {
         queued.lines.add(key);
-        wait(slot, STILL_SAVING);
+        wait(slot, W.stillSaving);
         return false;
       }
       if (!savedId()) {
@@ -1011,7 +1031,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       if (busy()) {
         for (const a of added) {
           queued.lines.add(a.key);
-          wait(`line:${a.key}`, STILL_SAVING);
+          wait(`line:${a.key}`, W.stillSaving);
         }
         return false;
       }
@@ -1035,12 +1055,12 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         // A delete supersedes an edit of the same line queued behind the wire.
         queued.lines.delete(key);
         queued.deletes.add(key);
-        wait(`line:${key}`, STILL_SAVING);
+        wait(`line:${key}`, W.stillSaving);
         return false;
       }
       if (!l.id) {
         queued.deletes.add(key);
-        wait(`line:${key}`, WAITING_READ_BACK);
+        wait(`line:${key}`, W.waitingReadBack);
         return false;
       }
       return deleteKey(key);
@@ -1055,7 +1075,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
       if (busy()) {
         for (const l of changed) {
           queued.lines.add(l.key);
-          wait(`line:${l.key}`, STILL_SAVING);
+          wait(`line:${l.key}`, W.stillSaving);
         }
         return false;
       }
@@ -1071,7 +1091,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         if (l.id) ready.push(l.key);
         else {
           queued.lines.add(l.key);
-          wait(`line:${l.key}`, WAITING_READ_BACK);
+          wait(`line:${l.key}`, W.waitingReadBack);
           held = true;
         }
       }

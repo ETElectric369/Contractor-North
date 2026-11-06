@@ -5,6 +5,8 @@ import { refusalWords } from "@/lib/org-access";
 import { accessState, type AccessState, type BillingOrg } from "@/lib/subscription";
 import { billingEnabled } from "@/lib/stripe";
 import { canPickPlan } from "@/lib/lapse-doors";
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 /**
  * THE LAPSE REFUSAL'S WORDS, WITH THE PERSON IN THEM (cn-v1137, decision 3). refusalWords
@@ -89,16 +91,19 @@ export async function nortPausedWords(
   return refusalWords(state, role, await ownerFirstName(orgId));
 }
 
-/** The texting doors' refusal (Text on an estimate, Text on an invoice): nothing was sent. */
-export function textingPausedWords(role: string | null | undefined, owner?: string | null): string {
-  if (canPickPlan(role)) return "Texting is paused until a plan is picked. Pick a plan in Settings › Getting Paid.";
+/** The texting doors' refusal (Text on an estimate, Text on an invoice): nothing was sent. English
+ *  inline, byte for byte; the Spanish (qs_lib_textPaused…, lib/words/quotes-server) only when a Spanish
+ *  caller hands its translator (lib/lang-words say, cn-v1145). */
+export function textingPausedWords(role: string | null | undefined, owner?: string | null, lang: Lang | string = "en", words?: Words): string {
+  if (canPickPlan(role)) return say(lang, words, "qs_lib_textPausedPick", "Texting is paused until a plan is picked. Pick a plan in Settings › Getting Paid.");
   const who = owner?.trim() ? owner.trim() : "the owner";
-  return `Texting is paused until a plan is picked. Ask ${who} to pick a plan.`;
+  if (!owner?.trim()) return say(lang, words, "qs_lib_textPausedAskOwner", `Texting is paused until a plan is picked. Ask ${who} to pick a plan.`); // Spanish's "al dueño" is one word
+  return say(lang, words, "qs_lib_textPausedAsk", `Texting is paused until a plan is picked. Ask ${who} to pick a plan.`, { who });
 }
 
 /** textingPausedWords for the signed-in person: the role and, when needed, the owner's name read here. */
-export async function textingPausedWordsFor(orgId: string | null | undefined, role?: string | null): Promise<string> {
+export async function textingPausedWordsFor(orgId: string | null | undefined, role?: string | null, lang: Lang | string = "en", words?: Words): Promise<string> {
   const r = role === undefined ? await callerRole() : role;
-  if (canPickPlan(r)) return textingPausedWords(r);
-  return textingPausedWords(r, await ownerFirstName(orgId));
+  if (canPickPlan(r)) return textingPausedWords(r, undefined, lang, words);
+  return textingPausedWords(r, await ownerFirstName(orgId), lang, words);
 }

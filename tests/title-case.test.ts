@@ -249,6 +249,9 @@ const ALLOW: { text: string; file?: string; why: string }[] = [
   // "Superseded by … — that estimate is the price for this work now." / "Revises …".
   { text: "its revision", file: "src/app/(app)/quotes/estimate-editor.tsx", why: "a noun inside a sentence, standing in for the estimate's number" },
   { text: "an earlier estimate", file: "src/app/(app)/quotes/estimate-editor.tsx", why: "a noun inside a sentence, standing in for the estimate's number" },
+  // The same two stand-ins in Spanish (qe_itsRevision, qe_anEarlierEstimate, cn-v1145).
+  { text: "su revisión", file: "src/app/(app)/quotes/estimate-editor.tsx", why: "a noun inside a sentence, standing in for the estimate's number" },
+  { text: "un presupuesto anterior", file: "src/app/(app)/quotes/estimate-editor.tsx", why: "a noun inside a sentence, standing in for the estimate's number" },
   // APPLE'S WORDS. The Tap to Pay on iPhone awareness screen's two CTAs are the marketing toolkit's
   // approved strings, verbatim (awareness.tsx header) — the one place the Title Case law yields.
   { text: "Enable now", file: "src/components/tap-to-pay/awareness.tsx", why: "Apple's approved Tap to Pay on iPhone CTA, verbatim — Apple's review wording, not ours to re-case" },
@@ -263,6 +266,12 @@ const ALLOW: { text: string; file?: string; why: string }[] = [
   { text: "mi held", file: "src/app/(app)/payroll/person-statement.tsx", why: "a figure's unit (mi) and state, after the miles" },
   // A noun phrase inside the customer's sentence ("Plus $500 of work not yet billed, …"), the figure before it.
   { text: "of work", file: "src/components/portal/portal-job-page.tsx", why: "a noun phrase inside a sentence, after the figure" },
+  // The kit picker's title names the kit after the colon ("Add from kit: Panel Swap"); a modal's heading, not a door,
+  // and its English is what it always said (qt_addFromKit, cn-v1145 — the scanner reads the key now, not the template).
+  { text: "Add from kit:", file: "src/app/(app)/quotes/new/kit-picker-modal.tsx", why: "a modal heading that names the kit after the colon, not a door" },
+  { text: "Agregar del kit:", file: "src/app/(app)/quotes/new/kit-picker-modal.tsx", why: "a modal heading that names the kit after the colon, not a door" },
+  // The job's own label carries the possessive ("Open J-012 Snowbell's Panel"): the 's belongs to the name before it.
+  { text: "'s Panel", file: "src/app/(app)/quotes/[id]/circuit-schedule-card.tsx", why: "the possessive of the job's label, which is computed before it" },
 ];
 
 const allowed = (file: string, text: string) => ALLOW.some((a) => a.text === text && (!a.file || file.endsWith(a.file)));

@@ -28,6 +28,9 @@
  * Any one of them, plus the texting account itself, is ready.
  */
 
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
+
 /** What the server's environment holds, as presence only. */
 export type SmsEnv = {
   /** The texting account and a credential for it. */
@@ -62,6 +65,18 @@ export const TEXT_NOT_READY_REFUSAL =
 /** The refusal when texting IS set up and the texting service still did not take the message. */
 export const TEXT_REFUSED =
   "The texting service didn't take this one, so nothing was texted. It has been logged. Email it, or text the link from your own phone.";
+
+/** TEXT_NOT_READY_REFUSAL in the reader's language (cn-v1145): English inline, byte for byte the
+ *  constant; the Spanish (qs_lib_textNotReady, lib/words/quotes-server) only when a Spanish caller hands
+ *  its translator (lib/lang-words say). This file imports no catalog. */
+export function textNotReadyRefusal(lang: Lang | string = "en", words?: Words): string {
+  return say(lang, words, "qs_lib_textNotReady", TEXT_NOT_READY_REFUSAL);
+}
+
+/** TEXT_REFUSED in the reader's language, the same way (qs_lib_textRefused). */
+export function textRefused(lang: Lang | string = "en", words?: Words): string {
+  return say(lang, words, "qs_lib_textRefused", TEXT_REFUSED);
+}
 
 /**
  * A phone number in the form the texting service takes (E.164), or null when it isn't one we can

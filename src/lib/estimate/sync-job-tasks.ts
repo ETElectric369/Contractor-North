@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 import { bornTasks, dismissalEntry, dismissalKey, dismissalTitle, partsFromLines, tasksFromLines, type BornTask, type LineRow } from "./born-with-tasks";
 
 /**
@@ -370,8 +372,10 @@ export interface SyncResult {
 
 const NONE: SyncResult = { inserted: 0, rekeyed: 0, removed: 0, kept: 0, timed: 0, keptNames: [], leftOff: [], twice: [], sizeSet: false };
 
-/** THE SYNC: read what the accepted estimates say and what the job has, plan, write, count. */
-export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<SyncResult> {
+/** THE SYNC: read what the accepted estimates say and what the job has, plan, write, count. `lang` +
+ *  `words` (cn-v1145): its own refusals in the caller's language (qs_lib_task…, lib/words/quotes-server);
+ *  English, the default, byte for byte. A database's own words (dbError) pass through as they are. */
+export async function syncJobTasks(sb: SupabaseClient, who: SyncWho, lang: Lang = "en", words?: Words): Promise<SyncResult> {
   const est = await estimateLines(sb, who);
   if (est.error) return { ...NONE, error: est.error };
   const wanted = tasksFromLines(est.lines).tasks;
@@ -402,7 +406,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
   if (who.orgId) jq = jq.eq("org_id", who.orgId);
   const { data: job, error: jErr } = await jq.maybeSingle();
   if (jErr) return { ...NONE, error: dbError(jErr) };
-  if (!job) return { ...NONE, error: "That job could not be read." };
+  if (!job) return { ...NONE, error: say(lang, words, "qs_lib_taskJobUnread", "That job could not be read.") };
   const dismissedList = (Array.isArray((job as { dismissed_task_keys?: unknown }).dismissed_task_keys) ? (job as { dismissed_task_keys: unknown[] }).dismissed_task_keys : []).filter(
     (k): k is string => typeof k === "string",
   );
@@ -439,7 +443,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
       continue;
     }
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
-    if (!data?.length) return { ...NONE, rekeyed, error: "A task could not be matched to its line." };
+    if (!data?.length) return { ...NONE, rekeyed, error: say(lang, words, "qs_lib_taskUnmatched", "A task could not be matched to its line.") };
     rekeyed++;
     rekeyedOk.push(r);
   }
@@ -451,7 +455,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     if (who.orgId) kq = kq.eq("org_id", who.orgId);
     const { data, error } = await kq.select("id");
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
-    if (!data?.length) return { ...NONE, rekeyed, error: "A kept task could not be marked." };
+    if (!data?.length) return { ...NONE, rekeyed, error: say(lang, words, "qs_lib_taskKeptUnmarked", "A kept task could not be marked.") };
   }
 
   let removed = 0;
@@ -485,7 +489,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho): Promise<Sy
     if (who.orgId) dq = dq.eq("org_id", who.orgId);
     const { data, error } = await dq.select("id");
     if (error) return { ...NONE, rekeyed, removed, kept, keptNames, error: dbError(error) };
-    if (!data?.length) return { ...NONE, rekeyed, removed, kept, keptNames, error: "The job's deleted tasks could not be kept up." };
+    if (!data?.length) return { ...NONE, rekeyed, removed, kept, keptNames, error: say(lang, words, "qs_lib_taskDeletedNotKept", "The job's deleted tasks could not be kept up.") };
   }
 
   // A TASK'S OWN MINUTES FOLLOW ITS LINE (0395), the size's rule per task: the task that holds each
@@ -596,19 +600,26 @@ export const hoursWords = (minutes: number | null): string => (minutes === null 
 const few = (names: string[]): string => (names.length ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""})` : "");
 
 /** What the job's list did, in a sentence — or null when nothing changed. `lead` names whose list, when
- *  it is not the obvious one (the job an estimate was moved away from). */
-export function syncWords(r: SyncResult, lead = "The job's list follows the estimate"): string | null {
+ *  it is not the obvious one (the job an estimate was moved away from). `lang` + `words` (cn-v1145): the
+ *  sentence in the caller's language (qs_lib_tasks…, a count's word paired …One/…Many for Spanish's
+ *  agreement); English, the default, byte for byte. */
+export function syncWords(r: SyncResult, lead?: string, lang: Lang = "en", words?: Words): string | null {
+  const head = lead ?? say(lang, words, "qs_lib_tasksLead", "The job's list follows the estimate");
+  /** A count's words: Spanish agrees with the count (…One / …Many); English says one thing for both. */
+  const n = (count: number, key: string, en: string, vars?: Record<string, string | number>) =>
+    say(lang, words, `${key}${count === 1 ? "One" : "Many"}`, en, { n: count, ...vars });
+  const hours = (minutes: number | null) => (minutes === null ? say(lang, words, "qs_lib_hoursNone", "none") : hoursWords(minutes));
   const bits: string[] = [];
-  if (r.inserted) bits.push(`${plural(r.inserted, "task", "tasks")} added`);
-  if (r.rekeyed) bits.push(`${r.rekeyed} matched`);
-  if (r.removed) bits.push(`${r.removed} removed`);
-  if (r.kept) bits.push(`${r.kept} kept${few(r.keptNames)} — done, or with notes, a photo or steps`);
-  if (r.leftOff?.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the job before`);
-  if (r.twice?.length) bits.push(`${r.twice.length} on the list twice${few(r.twice)} — remove one`);
-  if (r.leftAlone?.length) bits.push(`${r.leftAlone.length} left alone${few(r.leftAlone)} — an estimate not yet accepted still has them`);
-  if (r.timed) bits.push(`${r.timed} ${r.timed === 1 ? "task's" : "tasks'"} hours updated`);
-  if (r.hoursStay?.length) bits.push(`${r.hoursStay.length} kept ${r.hoursStay.length === 1 ? "its" : "their"} hours${few(r.hoursStay)} — set on the job`);
-  if (r.sizeSet) bits.push(`the job's length is now ${hoursWords(r.sizeNow ?? null)}`);
-  if (r.sizeStays) bits.push(`the job's length stays at ${hoursWords(r.sizeStays.box)} (the estimate now says ${hoursWords(r.sizeStays.estimate)})`);
-  return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;
+  if (r.inserted) bits.push(n(r.inserted, "qs_lib_tasksAdded", `${plural(r.inserted, "task", "tasks")} added`));
+  if (r.rekeyed) bits.push(n(r.rekeyed, "qs_lib_tasksMatched", `${r.rekeyed} matched`));
+  if (r.removed) bits.push(n(r.removed, "qs_lib_tasksRemoved", `${r.removed} removed`));
+  if (r.kept) bits.push(n(r.kept, "qs_lib_tasksKept", `${r.kept} kept${few(r.keptNames)} — done, or with notes, a photo or steps`, { names: few(r.keptNames) }));
+  if (r.leftOff?.length) bits.push(n(r.leftOff.length, "qs_lib_tasksLeftOff", `${r.leftOff.length} left off${few(r.leftOff)} — deleted from the job before`, { names: few(r.leftOff) }));
+  if (r.twice?.length) bits.push(n(r.twice.length, "qs_lib_tasksTwice", `${r.twice.length} on the list twice${few(r.twice)} — remove one`, { names: few(r.twice) }));
+  if (r.leftAlone?.length) bits.push(n(r.leftAlone.length, "qs_lib_tasksLeftAlone", `${r.leftAlone.length} left alone${few(r.leftAlone)} — an estimate not yet accepted still has them`, { names: few(r.leftAlone) }));
+  if (r.timed) bits.push(n(r.timed, "qs_lib_tasksTimed", `${r.timed} ${r.timed === 1 ? "task's" : "tasks'"} hours updated`));
+  if (r.hoursStay?.length) bits.push(n(r.hoursStay.length, "qs_lib_tasksHoursStay", `${r.hoursStay.length} kept ${r.hoursStay.length === 1 ? "its" : "their"} hours${few(r.hoursStay)} — set on the job`, { names: few(r.hoursStay) }));
+  if (r.sizeSet) bits.push(say(lang, words, "qs_lib_sizeSet", `the job's length is now ${hoursWords(r.sizeNow ?? null)}`, { hours: hours(r.sizeNow ?? null) }));
+  if (r.sizeStays) bits.push(say(lang, words, "qs_lib_sizeStays", `the job's length stays at ${hoursWords(r.sizeStays.box)} (the estimate now says ${hoursWords(r.sizeStays.estimate)})`, { box: hours(r.sizeStays.box), estimate: hours(r.sizeStays.estimate) }));
+  return bits.length ? `${head}: ${bits.join(" · ")}.` : null;
 }

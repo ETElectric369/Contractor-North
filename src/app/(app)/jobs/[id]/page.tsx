@@ -18,7 +18,7 @@ import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
+import { appointmentTypeLabel, estimateStatusLabel, isInspectionType } from "@/lib/statuses";
 import { Tabs } from "@/components/tabs";
 import {
   formatCurrency,
@@ -123,7 +123,7 @@ import { TookFromStock } from "../../materials/took-from-stock";
 import { stockForLines } from "@/lib/materials-stock";
 import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
-import { fillText, localeOf, translator } from "@/lib/i18n";
+import { asLang, fillText, localeOf, translator } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -2078,7 +2078,7 @@ export default async function JobDetailPage({
                     {/* THE FIXED CHIP (W1-25): fixed-price rows only; Time & Material wears nothing. */}
                     {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>{t("jb_fixed")}</span>}
                   </span>
-                  <span className="flex items-center gap-3"><span className="text-slate-600">{formatCurrency(q.total)}</span><Badge tone={statusTone(q.status)}>{q.status}</Badge></span>
+                  <span className="flex items-center gap-3"><span className="text-slate-600">{formatCurrency(q.total)}</span><Badge tone={statusTone(q.status)}>{estimateStatusLabel(q.status, asLang(lang), t)}</Badge></span>
                 </Link>
               </li>
             ))}

@@ -10,6 +10,9 @@ import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
+import { estimateStatusLabel } from "@/lib/statuses";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
@@ -56,6 +59,9 @@ export default async function CustomerDetailPage({
   // Viewer's role gates the staff-only verbs in the Actions menu (New quote/invoice),
   // matching the job page.
   const { data: { user } } = await supabase.auth.getUser();
+  // The estimates-in-Spanish wave (cn-v1145): the estimate badges below say their status in the viewer's language.
+  const lang = await currentLangFor(user?.id);
+  const t = translator(lang);
   // The company's switches ride the same row (the switch board, 0352): Estimates off hides New
   // Estimate, Customer Portal off hides the portal link card. No extra round trip.
   const { data: meRow } = await supabase.from("profiles").select("role, active, organizations(settings)").eq("id", user?.id ?? "").maybeSingle();
@@ -294,7 +300,7 @@ export default async function CustomerDetailPage({
                 </>
               ),
               value: formatCurrency(q.total),
-              badge: { tone: statusTone(q.status), text: q.status },
+              badge: { tone: statusTone(q.status), text: estimateStatusLabel(q.status, lang, t) },
               href: `/quotes/${q.id}`,
             }))}
             empty={empty("estimates")}

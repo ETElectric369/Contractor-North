@@ -3,6 +3,8 @@
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Label } from "@/components/ui/input";
 import type { EstimateFormat } from "@/lib/doc-style";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * LABOR AND PARTS ON THE PAPER (cn-v1131). Erik: "time and material line items for each task
@@ -33,9 +35,10 @@ export function PaperFormatSwitch({
   /** While a save is in flight: the pill stays where it is and a tap does nothing. */
   disabled?: boolean;
 }) {
+  const t = translator(useLang());
   return (
     <div>
-      <Label>Labor And Parts On The Paper</Label>
+      <Label>{t("qt_laborPartsOnPaper")}</Label>
       <div className={disabled ? "pointer-events-none opacity-60" : undefined} aria-disabled={disabled || undefined}>
         <SegmentedControl
           activeId={segmentFor(value)}
@@ -44,14 +47,14 @@ export function PaperFormatSwitch({
             onChange(SEGMENT[id as SegmentId]);
           }}
           items={[
-            { id: "default", label: companyDefault === "detailed" ? "Company Default · On" : "Company Default · Off" },
-            { id: "show", label: "Show" },
-            { id: "hide", label: "Hide" },
+            { id: "default", label: companyDefault === "detailed" ? t("qt_btn_companyDefaultOn") : t("qt_btn_companyDefaultOff") },
+            { id: "show", label: t("qt_btn_show") },
+            { id: "hide", label: t("qt_btn_hide") },
           ]}
         />
       </div>
       <p className="mt-1 text-xs text-slate-500">
-        Prints each task&apos;s hours at the rate and its parts beneath it, on the paper and the customer&apos;s link. The company default is set in Document Studio.
+        {t("qt_paperFormatHelp")}
       </p>
     </div>
   );

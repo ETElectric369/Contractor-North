@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 import { partsFromLines, type KeyedPart, type LineRow } from "./born-with-tasks";
 import { GONE_KEY, LINE_KEY, VISIT_KEY } from "./sync-job-tasks";
 import { HOW_MANY, few, insertKeyedRows, isClaimableKey, plainLineOf, plainRowHalf, plural, readPriceBook, taskPartRow } from "./take-off-from-quote";
@@ -353,7 +355,9 @@ const add = (a: MaterialsSyncResult, b: MaterialsSyncResult): MaterialsSyncResul
 const org = (q: any, orgId: string | null): any => (orgId ? q.eq("org_id", orgId) : q);
 
 /** ONE ESTIMATE'S LIST, brought in step with its task lines. No list → nothing (the acceptance doors make it). */
-export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncWho & { quoteId: string }): Promise<MaterialsSyncResult> {
+/** `lang` + `words` (cn-v1145): its own refusals in the caller's language (qs_lib_part…, lib/words/quotes-server);
+ *  English, the default, byte for byte. A database's own words (dbError) pass through as they are. */
+export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncWho & { quoteId: string }, lang: Lang = "en", words?: Words): Promise<MaterialsSyncResult> {
   const { data: list, error: lErr } = await org(sb.from("material_lists").select("id, dismissed_keys").eq("quote_id", who.quoteId), who.orgId).limit(1).maybeSingle();
   if (lErr) return { ...NONE, error: dbError(lErr) };
   if (!list) return NONE;
@@ -372,7 +376,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
   // wrote their part number from the book), prices a claimed visit row's blanks and the rows inserted.
   // A lost read is an error here — the list is left exactly as it was, never priced around.
   const book = await readPriceBook(sb, who.orgId);
-  if (book.error) return { ...NONE, error: `The price book could not be read (${book.error}); the list was left as it was.` };
+  if (book.error) return { ...NONE, error: say(lang, words, "qs_lib_partBookUnread", `The price book could not be read (${book.error}); the list was left as it was.`, { error: String(book.error) }) };
   const findPl = book.findPl;
 
   const { data: rows, error: rErr } = await org(sb.from("material_list_items").select("id, source_key, description, part_number, quantity, purchased, is_tool, vendor, est_cost, unit").eq("list_id", listId), who.orgId).order("sort_order");
@@ -431,7 +435,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     }
     const { data, error } = await org(sb.from("material_list_items").update(patch).eq("id", r.id).eq("list_id", listId), who.orgId).select("id");
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
-    if (!data?.length) return { ...NONE, rekeyed, error: "A part could not be matched to its line." };
+    if (!data?.length) return { ...NONE, rekeyed, error: say(lang, words, "qs_lib_partUnmatched", "A part could not be matched to its line.") };
     rekeyed++;
   }
 
@@ -443,7 +447,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
   for (const r of plan.rename) {
     const { data, error } = await org(sb.from("material_list_items").update({ source_key: r.source_key, description: r.description }).eq("id", r.id).eq("list_id", listId), who.orgId).select("id");
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
-    if (!data?.length) return { ...NONE, rekeyed, error: "A renamed part could not be matched to its line." };
+    if (!data?.length) return { ...NONE, rekeyed, error: say(lang, words, "qs_lib_partRenamedUnmatched", "A renamed part could not be matched to its line.") };
     renamed.push(r.description);
   }
 
@@ -479,7 +483,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     // this once, not on every sync after, and the line can still find it if it ever comes back.
     const { data, error } = await org(sb.from("material_list_items").update({ source_key: t.source_key }).eq("id", t.id).eq("list_id", listId), who.orgId).select("id");
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
-    if (!data?.length) return { ...NONE, rekeyed, error: "A kept part could not be marked." };
+    if (!data?.length) return { ...NONE, rekeyed, error: say(lang, words, "qs_lib_partKeptUnmarked", "A kept part could not be marked.") };
   }
 
   let removed = 0;
@@ -509,7 +513,7 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
     const next = [...now.filter((k) => !consumed.has(k)), ...plan.redismiss.filter((k) => !now.includes(k))];
     const { data, error } = await org(sb.from("material_lists").update({ dismissed_keys: next }).eq("id", listId), who.orgId).select("id");
     if (error) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, error: dbError(error) };
-    if (!data?.length) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, error: "The list's dismissed parts could not be kept up." };
+    if (!data?.length) return { ...NONE, rekeyed, removed, removedNames, kept, keptNames, error: say(lang, words, "qs_lib_partDismissedNotKept", "The list's dismissed parts could not be kept up.") };
   }
 
   let inserted = 0;
@@ -544,26 +548,35 @@ export async function syncQuoteMaterials(sb: SupabaseClient, who: MaterialsSyncW
 }
 
 /** EVERY ACCEPTED ESTIMATE OF THE JOB that has a list, each brought in step. */
-export async function syncJobMaterials(sb: SupabaseClient, who: MaterialsSyncWho): Promise<MaterialsSyncResult> {
+export async function syncJobMaterials(sb: SupabaseClient, who: MaterialsSyncWho, lang: Lang = "en", words?: Words): Promise<MaterialsSyncResult> {
   const { data: quotes, error } = await org(sb.from("quotes").select("id, accepted_at, created_at").eq("job_id", who.jobId).eq("status", "accepted"), who.orgId).order("accepted_at");
   if (error) return { ...NONE, error: dbError(error) };
   let total = NONE;
-  for (const q of (quotes ?? []) as Array<{ id: string }>) total = add(total, await syncQuoteMaterials(sb, { ...who, quoteId: q.id }));
+  for (const q of (quotes ?? []) as Array<{ id: string }>) total = add(total, await syncQuoteMaterials(sb, { ...who, quoteId: q.id }, lang, words));
   return total;
 }
 
-/** What the estimate's materials list did, as a sentence — or null when nothing changed. */
-export function materialsWords(r: MaterialsSyncResult, lead = "The estimate's materials list follows too"): string | null {
+/** What the estimate's materials list did, as a sentence — or null when nothing changed. `lang` + `words`
+ *  (cn-v1145): the sentence in the caller's language (qs_lib_parts…, a count's word paired …One/…Many for
+ *  Spanish's agreement); English, the default, byte for byte. */
+export function materialsWords(r: MaterialsSyncResult, lead?: string, lang: Lang = "en", words?: Words): string | null {
+  const head = lead ?? say(lang, words, "qs_lib_partsLead", "The estimate's materials list follows too");
+  /** A count's words: Spanish agrees with the count (…One / …Many); English says one thing for both. */
+  const n = (count: number, key: string, en: string, vars?: Record<string, string | number>) =>
+    say(lang, words, `${key}${count === 1 ? "One" : "Many"}`, en, { n: count, ...vars });
   const bits: string[] = [];
-  if (r.inserted) bits.push(`${plural(r.inserted, "part", "parts")} added`);
-  if (r.rekeyed) bits.push(`${r.rekeyed} matched`);
-  if (r.removed) bits.push(`${r.removed} removed${few(r.removedNames)}`);
-  if (r.kept) bits.push(`${r.kept} kept${few(r.keptNames)} — bought, or a tool`);
-  if (r.leftOff.length) bits.push(`${r.leftOff.length} left off${few(r.leftOff)} — deleted from the list before`);
-  if (r.filled?.length) bits.push(`${plural(r.filled.length, "count", "counts")} filled in${few(r.filled)}`);
-  if (r.moved?.length) bits.push(`${r.moved.length} re-counted${few(r.moved)}`);
-  if (r.renamed?.length) bits.push(`${r.renamed.length} renamed${few(r.renamed)}`);
-  for (const c of r.countsDiffer.slice(0, 3)) bits.push(`${c.description} shows ${c.shows ?? "no count"}, the estimate says ${c.estimate}`);
-  if (r.countsDiffer.length > 3) bits.push(`${r.countsDiffer.length - 3} more counts differ`);
-  return bits.length ? `${lead}: ${bits.join(" · ")}.` : null;
+  if (r.inserted) bits.push(n(r.inserted, "qs_lib_partsAdded", `${plural(r.inserted, "part", "parts")} added`));
+  if (r.rekeyed) bits.push(n(r.rekeyed, "qs_lib_partsMatched", `${r.rekeyed} matched`));
+  if (r.removed) bits.push(n(r.removed, "qs_lib_partsRemoved", `${r.removed} removed${few(r.removedNames)}`, { names: few(r.removedNames) }));
+  if (r.kept) bits.push(n(r.kept, "qs_lib_partsKept", `${r.kept} kept${few(r.keptNames)} — bought, or a tool`, { names: few(r.keptNames) }));
+  if (r.leftOff.length) bits.push(n(r.leftOff.length, "qs_lib_partsLeftOff", `${r.leftOff.length} left off${few(r.leftOff)} — deleted from the list before`, { names: few(r.leftOff) }));
+  if (r.filled?.length) bits.push(n(r.filled.length, "qs_lib_partsFilled", `${plural(r.filled.length, "count", "counts")} filled in${few(r.filled)}`, { names: few(r.filled) }));
+  if (r.moved?.length) bits.push(n(r.moved.length, "qs_lib_partsRecounted", `${r.moved.length} re-counted${few(r.moved)}`, { names: few(r.moved) }));
+  if (r.renamed?.length) bits.push(n(r.renamed.length, "qs_lib_partsRenamed", `${r.renamed.length} renamed${few(r.renamed)}`, { names: few(r.renamed) }));
+  for (const c of r.countsDiffer.slice(0, 3)) {
+    const shows = c.shows ?? say(lang, words, "qs_lib_partsNoCount", "no count");
+    bits.push(say(lang, words, "qs_lib_partsCountDiffers", `${c.description} shows ${c.shows ?? "no count"}, the estimate says ${c.estimate}`, { part: c.description, shows, estimate: c.estimate }));
+  }
+  if (r.countsDiffer.length > 3) bits.push(n(r.countsDiffer.length - 3, "qs_lib_partsMoreDiffer", `${r.countsDiffer.length - 3} more counts differ`));
+  return bits.length ? `${head}: ${bits.join(" · ")}.` : null;
 }

@@ -18,7 +18,7 @@ import { CATALOGS } from "@/lib/i18n";
  *     setStatus(…) when it is a literal of two or more words (a status line is a tech's words);
  *   · a string literal under an object property named title, body, error, message or label, of
  *     two or more words;
- *   · a call to jobStatusLabel(…) or appointmentTypeLabel(…) with no language argument (the badge
+ *   · a call to jobStatusLabel(…), appointmentTypeLabel(…) or estimateStatusLabel(…) with no language argument (the badge
  *     reads the catalog only when handed one);
  *   · an import of an all-caps *_LINE or *_FAILED constant from src/lib (an English sentence under
  *     an identifier the literal scan cannot see).
@@ -32,8 +32,8 @@ import { CATALOGS } from "@/lib/i18n";
  */
 const ROOT = process.cwd();
 
-/** The screens the catalogs name at the visit-page wave's foundation (133: the agenda wave's 122 + the Settle Up button, the shell's off line and directions link, the Inspector, and the visit page's six — its page, start card, link picker, ending, header actions, Mark Complete — and its hear-actions), at the agenda wave's foundation (122: the sheet, the calendar's eleven, the rail's ten, the server's three), at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
-export const FILES_FLOOR = 138;
+/** The screens the catalogs name at the estimates wave's foundation (157, cn-v1145: the visit-page wave's 138 + the estimates' nineteen — qt_'s fifteen screens, qe_'s editor and its writes, qb_'s task breakdown, qs_'s quotes/actions), at the visit-page wave's foundation (133: the agenda wave's 122 + the Settle Up button, the shell's off line and directions link, the Inspector, and the visit page's six — its page, start card, link picker, ending, header actions, Mark Complete — and its hear-actions), at the agenda wave's foundation (122: the sheet, the calendar's eleven, the rail's ten, the server's three), at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
+export const FILES_FLOOR = 157;
 
 /** English that stands on a named screen on purpose: the exact words, the file, and why. */
 const ALLOW: { file: string; text: string; why: string }[] = [
@@ -47,6 +47,13 @@ const ALLOW: { file: string; text: string; why: string }[] = [
   // setAppointmentStatus' list is the guard's own words for a status no door can send.
   { file: "src/app/(app)/appointments/actions.ts", text: "Site notes —", why: "a title stored on the visit, read back by whoever opens it: a record, not a sentence" },
   { file: "src/app/(app)/appointments/actions.ts", text: "Status must be one of: .", why: "a programming refusal: every door sends one of the four statuses, so no person reads it" },
+  // The estimates-in-Spanish wave's server words (qs_): the staff bell + push for an accepted estimate is
+  // rung from the customer's public Accept page with NO session (no caller to read a language from) —
+  // pinned by src/app/q/[token]/accept-door.test.ts; carried: one line per recipient (langOf) later.
+  // updateQuoteStatus' list is the guard's own words for a status no door can send.
+  { file: "src/app/(app)/quotes/actions.ts", text: "Estimate accepted", why: "rung from the public Accept page with no session: English until it is written per recipient" },
+  { file: "src/app/(app)/quotes/actions.ts", text: "was accepted — schedule the job.", why: "rung from the public Accept page with no session: English until it is written per recipient" },
+  { file: "src/app/(app)/quotes/actions.ts", text: "Status must be one of: .", why: "a programming refusal: every door sends one of the estimate statuses, so no person reads it" },
 ];
 
 export type Leak = { line: number; kind: string; text: string };
@@ -54,8 +61,8 @@ export type Leak = { line: number; kind: string; text: string };
 const WORD_ATTRS = new Set(["title", "placeholder", "aria-label", "label"]);
 /** State setters whose first argument is a line a tech reads. */
 const LINE_SETTERS = /^(setError|setSaid|setStatus)$/;
-/** The two badge helpers that read the catalog only when handed a language. */
-const LANG_LABELS = /^(jobStatusLabel|appointmentTypeLabel)$/;
+/** The badge helpers that read the catalog only when handed a language (estimateStatusLabel since cn-v1145). */
+const LANG_LABELS = /^(jobStatusLabel|appointmentTypeLabel|estimateStatusLabel)$/;
 /** An all-caps sentence constant: TRY_AGAIN_LINE, TAKES_READ_FAILED. */
 const SENTENCE_CONST = /^[A-Z0-9_]+_(LINE|FAILED)$/;
 const WORD_PROPS = new Set(["title", "body", "error", "message", "label"]);
@@ -210,19 +217,22 @@ describe("the scanner reads the shapes English leaks in", () => {
     ]);
   });
 
-  it("jobStatusLabel and appointmentTypeLabel leak when called without a language; with one they pass", () => {
+  it("jobStatusLabel, appointmentTypeLabel and estimateStatusLabel leak when called without a language; with one they pass", () => {
     const src = `
       const A = () => (
         <>
           <Badge>{jobStatusLabel(job.status)}</Badge>
           <Badge>{appointmentTypeLabel(a.type)}</Badge>
+          <Badge>{estimateStatusLabel(q.status)}</Badge>
           <Badge>{jobStatusLabel(job.status, lang)}</Badge>
           <Badge>{appointmentTypeLabel(a.type, lang)}</Badge>
+          <Badge>{estimateStatusLabel(q.status, lang, t)}</Badge>
         </>
       );`;
     expect(collectLeaks(src, "a.tsx").map((l) => [l.kind, l.text])).toEqual([
       ["label without lang", "jobStatusLabel(…)"],
       ["label without lang", "appointmentTypeLabel(…)"],
+      ["label without lang", "estimateStatusLabel(…)"],
     ]);
   });
 
@@ -301,7 +311,7 @@ describe("every named screen's words come through the catalog", () => {
   const leaks = files.flatMap((f) => collectLeaks(readFileSync(join(ROOT, f), "utf8"), f).map((l) => ({ ...l, file: f })));
 
   it("the catalogs loaded and the scan read every screen they name", () => {
-    expect(CATALOGS.length).toBe(20);
+    expect(CATALOGS.length).toBe(24);
     expect(files.length).toBeGreaterThanOrEqual(FILES_FLOOR);
   });
 

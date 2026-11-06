@@ -335,7 +335,7 @@ describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head
     // A task line has two part boxes (the same LineDescInput): still one door, the line's.
     const task = builder({ seededLines: [taskLine] });
     expect((task.match(/Add A Note|Edit Note/g) ?? []).length).toBe(1);
-    expect(src).toContain('placeholder="Part"\n              className={box}\n              value={m.name}\n              noteDoor={false}');
+    expect(src).toContain('placeholder={t("qb_part")}\n              className={box}\n              value={m.name}\n              noteDoor={false}');
   });
 
   it("join and split live in lib/estimate/line-note (skeptic #43, S6), so the task, part and kit readers share the one rule; the breakdown re-exports them", () => {
@@ -369,6 +369,6 @@ describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head
     expect(src).toContain("onChange={(e) => onText(joinLineNote(head, e.target.value))}");
     expect(src).toContain("const q = head.trim().toLowerCase();");
     expect(src).toContain("onBlur={() => {\n                setNoteOpen(false);\n                onBlur?.();\n              }}");
-    expect(src).toContain('{hasNote ? "Edit Note" : "Add A Note"}');
+    expect(src).toContain('{hasNote ? t("qb_btn_editNote") : t("qb_btn_addANote")}');
   });
 });

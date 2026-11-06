@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import type { Customer } from "@/lib/types";
 import { setQuoteCustomer } from "../actions";
 import { createCustomer } from "../../crm/actions";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 interface CustomerLite {
   id: string;
@@ -48,6 +50,7 @@ export function CustomerSelect({
   customers: CustomerLite[];
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(customer?.id ?? "");
   const [pending, start] = useTransition();
@@ -62,18 +65,18 @@ export function CustomerSelect({
   const [newAddr, setNewAddr] = useState("");
 
   function createAndAttach() {
-    if (!newName.trim()) return setError("Name is required.");
+    if (!newName.trim()) return setError(t("qt_nameRequired"));
     setError(null);
     start(async () => {
       const fd = new FormData();
       fd.set("name", newName.trim());
       if (newAddr.trim()) fd.set("address", newAddr.trim());
       const made = await createCustomer(fd);
-      if (!made.ok || !made.id) return setError(made.error ?? "Couldn't create the customer.");
+      if (!made.ok || !made.id) return setError(made.error ?? t("qt_couldntCreateCustomer"));
       // ATTACH IN THE SAME BREATH. A created-but-unattached customer is the same dead end one
       // step further along, and it's the step somebody walks away from.
       const res = await setQuoteCustomer(quoteId, made.id);
-      if (!res.ok) return setError(res.error ?? "Created them, but couldn't attach — pick them from the list.");
+      if (!res.ok) return setError(res.error ?? t("qt_createdNotAttached"));
       setCreating(false);
       setEditing(false);
       setNewName("");
@@ -86,7 +89,7 @@ export function CustomerSelect({
     setError(null);
     start(async () => {
       const res = await setQuoteCustomer(quoteId, value || null);
-      if (!res.ok) return setError(res.error ?? "Couldn't change the customer.");
+      if (!res.ok) return setError(res.error ?? t("qt_couldntChangeCustomer"));
       setEditing(false);
       router.refresh();
     });
@@ -96,19 +99,19 @@ export function CustomerSelect({
     return (
       <div className="space-y-2">
         <div>
-          <Label htmlFor="qc-name">Name</Label>
-          <Input id="qc-name" autoComplete="name" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Customer name" />
+          <Label htmlFor="qc-name">{t("qt_name")}</Label>
+          <Input id="qc-name" autoComplete="name" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("qt_customerName")} />
         </div>
         <div>
-          <Label htmlFor="qc-addr">Address</Label>
+          <Label htmlFor="qc-addr">{t("qt_address")}</Label>
           {/* The one field that made him stuck — it is what prints on the estimate. */}
-          <Input id="qc-addr" autoComplete="street-address" value={newAddr} onChange={(e) => setNewAddr(e.target.value)} placeholder="Job address" />
+          <Input id="qc-addr" autoComplete="street-address" value={newAddr} onChange={(e) => setNewAddr(e.target.value)} placeholder={t("qt_jobAddress")} />
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={createAndAttach} disabled={pending}>Create &amp; Attach</Button>
-          <Button size="sm" variant="outline" onClick={() => { setCreating(false); setError(null); }} disabled={pending}>Cancel</Button>
+          <Button size="sm" onClick={createAndAttach} disabled={pending}>{t("qt_btn_createAndAttach")}</Button>
+          <Button size="sm" variant="outline" onClick={() => { setCreating(false); setError(null); }} disabled={pending}>{t("qt_btn_cancel")}</Button>
         </div>
-        <p className="text-xs text-slate-400">Phone, email and the rest can go in from the contact afterwards.</p>
+        <p className="text-xs text-slate-400">{t("qt_restFromContact")}</p>
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
     );
@@ -122,11 +125,11 @@ export function CustomerSelect({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             disabled={pending}
-            aria-label="Customer"
+            aria-label={t("qt_colCustomer")}
           >
             {/* Say what "none" MEANS when a lead is holding the document — clearing the customer
                 doesn't blank the estimate, it leaves it made out to the lead. */}
-            <option value="">{lead?.name?.trim() ? `— No customer — leave it with the lead ${lead.name.trim()} —` : "— No customer —"}</option>
+            <option value="">{lead?.name?.trim() ? fillText(t("qt_noCustomerLeaveWithLead"), { name: lead.name.trim() }) : t("qt_noCustomer")}</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -138,7 +141,7 @@ export function CustomerSelect({
             onClick={save}
             disabled={pending}
             className="shrink-0 rounded-md bg-[rgb(var(--glass-ink))] p-1.5 text-white hover:bg-[rgb(var(--glass-ink))]/90 disabled:opacity-50"
-            aria-label="Save customer"
+            aria-label={t("qt_saveCustomer")}
           >
             <Check className="h-4 w-4" />
           </button>
@@ -150,7 +153,7 @@ export function CustomerSelect({
             }}
             disabled={pending}
             className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-100"
-            aria-label="Cancel"
+            aria-label={t("qt_btn_cancel")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -159,7 +162,7 @@ export function CustomerSelect({
           onClick={() => { setCreating(true); setError(null); }}
           className="text-xs font-medium text-brand underline-offset-2 hover:underline"
         >
-          + New Customer
+          {t("qt_btn_newCustomer")}
         </button>
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
@@ -175,7 +178,7 @@ export function CustomerSelect({
     <div className="flex items-start justify-between gap-3">
       {customer ? (
         <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Customer</p>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">{t("qt_colCustomer")}</p>
           <Link href={`/crm/${customer.id}`} className="flex items-center gap-3 hover:text-brand">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
               <User className="h-4 w-4 text-slate-500" />
@@ -188,12 +191,12 @@ export function CustomerSelect({
             </div>
           </Link>
           {leadName && (
-            <p className="mt-1.5 text-xs text-slate-400">Started from the lead {leadName}.</p>
+            <p className="mt-1.5 text-xs text-slate-400">{fillText(t("qt_startedFromLead"), { name: leadName })}</p>
           )}
         </div>
       ) : leadName ? (
         <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Lead — not a customer yet</p>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">{t("qt_leadNotCustomerYet")}</p>
           <Link href={`/leads?focus=${lead?.id ?? ""}`} className="flex items-center gap-3 hover:text-brand">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-50">
               <Sprout className="h-4 w-4 text-amber-600" />
@@ -206,23 +209,22 @@ export function CustomerSelect({
             </div>
           </Link>
           <p className="mt-1.5 text-xs text-slate-500">
-            This estimate is made out to them. They become a customer when you win the work — there&apos;s nothing to
-            do here now.
+            {t("qt_madeOutToLead")}
           </p>
         </div>
       ) : (
         <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Prepared for</p>
-          <p className="text-sm text-slate-400">Nobody attached yet — it prints without a name until you pick someone.</p>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">{t("qt_preparedFor")}</p>
+          <p className="text-sm text-slate-400">{t("qt_nobodyAttachedYet")}</p>
         </div>
       )}
       <div className="flex shrink-0 items-center gap-2">
         <button
           onClick={() => setEditing(true)}
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-          title={customer ? "Change the customer on this estimate" : "Attach a customer"}
+          title={customer ? t("qt_changeCustomerTitle") : t("qt_attachCustomerTitle")}
         >
-          <Pencil className="h-4 w-4 shrink-0" /> {customer ? "Change" : "Attach Customer"}
+          <Pencil className="h-4 w-4 shrink-0" /> {customer ? t("qt_btn_change") : t("qt_btn_attachCustomer")}
         </button>
         {customer && <EditCustomerButton customer={customer} />}
       </div>

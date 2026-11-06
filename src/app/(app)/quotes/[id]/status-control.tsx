@@ -4,7 +4,9 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Select } from "@/components/ui/input";
 import { updateQuoteStatus } from "../actions";
-import { QUOTE_STATUSES } from "@/lib/statuses";
+import { QUOTE_STATUSES, estimateStatusLabel } from "@/lib/statuses";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * THE STATUS OF THE DEAL — and it has to actually save.
@@ -22,6 +24,8 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
   const [said, setSaid] = useState<string | null>(null);
   const [shown, setShown] = useState(status);
   const router = useRouter();
+  const lang = useLang();
+  const t = translator(lang);
   return (
     <>
     <Select
@@ -38,7 +42,7 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
           const res = await updateQuoteStatus(id, next);
           if (!res?.ok) {
             setShown(prev);
-            setErr(res?.error ?? "That didn't save — try again.");
+            setErr(res?.error ?? t("qt_didntSaveTryAgain"));
             return;
           }
           // Accepted, but the job didn't spin up — say so instead of a silent "done".
@@ -54,7 +58,7 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
           then as the one thing the select can say. */}
       {QUOTE_STATUSES.filter((s) => s !== "superseded" || shown === "superseded").map((s) => (
         <option key={s} value={s} disabled={s === "superseded"}>
-          {s[0].toUpperCase() + s.slice(1)}
+          {((w) => w[0].toUpperCase() + w.slice(1))(estimateStatusLabel(s, lang, t))}
         </option>
       ))}
     </Select>

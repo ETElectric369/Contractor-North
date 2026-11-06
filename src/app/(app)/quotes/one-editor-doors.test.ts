@@ -161,7 +161,8 @@ describe("appendQuoteLines", () => {
     expect(await appendQuoteLines("q1", [plain, { ...task, id: "not-an-id" }])).toEqual({ ok: false, error: "Line 2 has no id to save under — reload the estimate and try again." });
     expect(await appendQuoteLines("q1", [plain, { ...task, id: "" as string }])).toEqual({ ok: false, error: "Line 2 has no id to save under — reload the estimate and try again." });
     expect(await appendQuoteLines("q1", [plain, { ...task, id: A.toUpperCase() }])).toEqual({ ok: false, error: "Two of those lines carry the same id — reload the estimate and try again." });
-    expect(s.calls).toEqual([]);
+    // Nothing of the estimate's is read: the one read is the caller's language, for the refusal's words (cn-v1145).
+    expect(s.calls.filter((c) => c.table !== "profiles")).toEqual([]);
   });
 
   it("the primary key taken is this estimate's rows already there (an earlier try's lost answer): each row is UPDATED from the batch — never sort_order, never an upsert — scoped and read back, the ids handed back, the totals rewritten; a row that is not this estimate's is a refusal", async () => {
@@ -208,8 +209,9 @@ describe("appendQuoteLines", () => {
     expect(res).toEqual({ ok: true, ids: [B], said: "The job's list follows the estimate: 1 task's hours updated · the job's length is now 3 h. The estimate's materials list follows too: 1 part added." });
     expect(s.calls.findIndex(behind)).toBeLessThan(s.calls.findIndex(lineInsert));
     expect(rules.estimateLines).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1" });
-    expect(rules.syncJobTasks).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", createdBy: "office-1", sizeBefore: 120, tasksBefore: FIGURE.tasksBefore });
-    expect(rules.syncJobMaterials).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", userId: "office-1", partsBefore: FIGURE.partsBefore });
+    // The caller's language and its words ride along (cn-v1145): an unset language reads as English.
+    expect(rules.syncJobTasks).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", createdBy: "office-1", sizeBefore: 120, tasksBefore: FIGURE.tasksBefore }, "en", expect.any(Function));
+    expect(rules.syncJobMaterials).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", userId: "office-1", partsBefore: FIGURE.partsBefore }, "en", expect.any(Function));
     expect(rules.syncJobTasks.mock.invocationCallOrder[0]).toBeGreaterThan(rules.estimateLines.mock.invocationCallOrder[0]);
     // A draft runs nothing and says nothing: the shape the editor codes against is unchanged.
     s.calls = [];
@@ -277,7 +279,7 @@ describe("updateQuoteItem with detail and category", () => {
     expect(await updateQuoteItem("l1", "q1", { detail: "junk" as never })).toEqual({ ok: false, error: "That line's breakdown couldn't be read — nothing was changed." });
     expect(s.calls.filter(lineUpdate)).toEqual([]);
     s.answer = (c) => (lineUpdate(c) ? { data: [], error: null } : base(c));
-    expect(await updateQuoteItem("l-other", "q1", { detail: DETAIL })).toEqual({ ok: false, error: "That line isn't on this estimate." });
+    expect(await updateQuoteItem("l-other", "q1", { detail: DETAIL })).toEqual({ ok: false, error: "That line isn't on this estimate.", lineGone: true }); // a flag beside the words (cn-v1145): the client reads it, not the sentence
   });
 });
 
@@ -302,8 +304,9 @@ describe("updateQuoteItem: the job follows a figure change (S5)", () => {
     expect(rules.estimateLines).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1" });
     // The figure was read before the line was written: the behind read sits before the update.
     expect(s.calls.findIndex(behind)).toBeLessThan(s.calls.findIndex(lineUpdate));
-    expect(rules.syncJobTasks).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", createdBy: "office-1", sizeBefore: 120, tasksBefore: FIGURE.tasksBefore });
-    expect(rules.syncJobMaterials).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", userId: "office-1", partsBefore: FIGURE.partsBefore });
+    // The caller's language and its words ride along (cn-v1145): an unset language reads as English.
+    expect(rules.syncJobTasks).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", createdBy: "office-1", sizeBefore: 120, tasksBefore: FIGURE.tasksBefore }, "en", expect.any(Function));
+    expect(rules.syncJobMaterials).toHaveBeenCalledWith(client, { jobId: "j1", orgId: "org-1", userId: "office-1", partsBefore: FIGURE.partsBefore }, "en", expect.any(Function));
     // The rules ran after the write landed.
     expect(rules.syncJobTasks.mock.invocationCallOrder[0]).toBeGreaterThan(rules.estimateLines.mock.invocationCallOrder[0]);
   });
@@ -364,7 +367,7 @@ describe("updateQuoteItem: the job follows a figure change (S5)", () => {
 describe("deleteQuoteItem", () => {
   it("zero rows is the one sentence the editor reads as 'already gone' (LINE_GONE), after the lock and the detail read; a delete that lands says what the job's list did", async () => {
     s.answer = (c) => (c.table === "quote_line_items" && c.verb === "delete" ? { data: [], error: null } : base(c));
-    expect(await deleteQuoteItem("l-gone", "q1")).toEqual({ ok: false, error: LINE_GONE });
+    expect(await deleteQuoteItem("l-gone", "q1")).toEqual({ ok: false, error: LINE_GONE, lineGone: true }); // the flag the editor reads first (cn-v1145); the sentence is the caller's words
     const del = s.calls.find((c) => c.table === "quote_line_items" && c.verb === "delete")!;
     expect(del).toMatchObject({ select: "id", filters: [["eq", "id", "l-gone"], ["eq", "quote_id", "q1"]] });
     s.calls = [];

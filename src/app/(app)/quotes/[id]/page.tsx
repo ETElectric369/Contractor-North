@@ -13,6 +13,8 @@ import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import type { Customer } from "@/lib/types";
 import { featureOn } from "@/lib/features";
+import { translator } from "@/lib/i18n";
+import { currentLang } from "@/lib/current-lang";
 
 export const dynamic = "force-dynamic";
 // The estimator runs inside this page's server actions (generateQuoteDraft and kin, quotes/actions):
@@ -31,6 +33,7 @@ export const maxDuration = 300;
 async function panelJobFor(
   supabase: Awaited<ReturnType<typeof createClient>>,
   q: { id: string; job_id?: string | null; circuits?: unknown },
+  theJob: string,
 ): Promise<{ id: string; label: string } | null> {
   if (!Array.isArray(q.circuits) || q.circuits.length === 0) return null;
   let jobId = q.job_id ?? null;
@@ -42,7 +45,7 @@ async function panelJobFor(
   const { data: job } = await supabase.from("jobs").select("id, job_number, name").eq("id", jobId).maybeSingle();
   if (!job) return null;
   const j = job as { id: string; job_number: string | null; name: string | null };
-  return { id: j.id, label: [j.job_number, j.name].filter(Boolean).join(" ") || "the job" };
+  return { id: j.id, label: [j.job_number, j.name].filter(Boolean).join(" ") || theJob };
 }
 
 /**
@@ -55,6 +58,7 @@ async function panelJobFor(
 export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
+  const t = translator(await currentLang());
 
   const { data: quote, error: quoteErr } = await supabase
     .from("quotes")
@@ -164,7 +168,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
 
   return (
     <div>
-      <BackLink fallback="/quotes" fallbackLabel="Back to Quotes" />
+      <BackLink fallback="/quotes" fallbackLabel={t("qt_btn_backToQuotes")} backLabel={t("sh_back")} />
 
       {/* NOTHING SILENT. The picker inside the editor renders nothing at all when it is handed no
           book, which on this page reads as a broken control rather than a failed read — and an
@@ -173,13 +177,13 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           the list below is missing. */}
       {priceItemsErr && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
+          <p className="text-sm font-medium text-amber-900">{t("qt_priceListDidntLoad")}</p>
           <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
         </div>
       )}
       {kitsNote && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-sm font-medium text-amber-900">Kits didn&apos;t load whole</p>
+          <p className="text-sm font-medium text-amber-900">{t("qt_kitsDidntLoadWhole")}</p>
           <p className="mt-0.5 text-sm text-amber-800">{kitsNote}</p>
         </div>
       )}
@@ -200,7 +204,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           supersededBy,
           visitBehind: (visitBehind as { id: string; starts_at: string | null } | null) ?? null,
           showCircuits,
-          panelJob: await panelJobFor(supabase, q),
+          panelJob: await panelJobFor(supabase, q, t("qt_theJob")),
         }}
         catalog={{
           orgId: String(org?.id ?? ""),

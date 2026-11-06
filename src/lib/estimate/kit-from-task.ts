@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
 import type { TaskDetail } from "./line-map";
 import { stripUnits } from "./task-lines";
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 /**
  * REMEMBER A PRICED TASK AS A KIT (W4, cn-v1076). Erik (2026-10-09, his fourth answer): a task he
@@ -58,9 +60,11 @@ export function kitNameFromLine(description: string): string {
   return stripUnits(description).slice(0, MAX_KIT_NAME);
 }
 
-export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; unit: string; category?: string | null }): KitFromTaskResult {
+/** `lang` + `words` (cn-v1145): each refusal in the caller's language (qs_lib_kit…, lib/words/quotes-server);
+ *  English, the default, is byte for byte what it always said. */
+export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; unit: string; category?: string | null }, lang: Lang = "en", words?: Words): KitFromTaskResult {
   const name = (typeof input.name === "string" ? input.name : "").trim().slice(0, MAX_KIT_NAME);
-  if (!name) return refuse("Give the kit a name.");
+  if (!name) return refuse(say(lang, words, "qs_lib_kitNoName", "Give the kit a name."));
   const unit = (typeof input.unit === "string" ? input.unit : "").trim().slice(0, MAX_KIT_UNIT) || "ea";
   const category = (typeof input.category === "string" ? input.category : "").trim().replace(/\s+/g, " ").slice(0, MAX_KIT_CATEGORY) || null;
   // THE KIT REMEMBERS MINUTES, NOT A RATE (0386): its hours are the labor rows' hours SUMMED (cn-v1131
@@ -70,7 +74,11 @@ export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; uni
   const asking = rows.filter((r) => r.hours === null || !(r.hours > 0));
   if (!rows.length || asking.length) {
     const who = rows.length > 1 ? asking.find((r) => r.label?.trim())?.label?.trim() : null;
-    return refuse(who ? `Give ${who} its hours first — a kit remembers your hours per unit.` : "Give the task its hours first — a kit remembers your hours per unit.");
+    return refuse(
+      who
+        ? say(lang, words, "qs_lib_kitHoursWho", `Give ${who} its hours first — a kit remembers your hours per unit.`, { who })
+        : say(lang, words, "qs_lib_kitHours", "Give the task its hours first — a kit remembers your hours per unit."),
+    );
   }
   const hours = round2(rows.reduce((t, r) => t + (r.hours ?? 0), 0));
   const units = detail.units !== null && detail.units > 0 ? detail.units : 1;
@@ -78,22 +86,25 @@ export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; uni
   // counts to the cent, and the next task multiplies them back. What would come back different
   // from what he gave is refused, not rounded — 1 h across 100 units is not "1 minute each".
   const labor_minutes = Math.round((hours * 60) / units);
-  if (labor_minutes < 1) return refuse("The hours come to less than a minute per unit — give the task more hours.");
+  if (labor_minutes < 1) return refuse(say(lang, words, "qs_lib_kitUnderMinute", "The hours come to less than a minute per unit — give the task more hours."));
   const hoursBack = (labor_minutes * units) / 60;
   if (Math.abs(hoursBack - hours) > hours * 0.02) {
-    return refuse(`${hours} h does not split into whole minutes across ${units} — give the task hours that do.`);
+    return refuse(say(lang, words, "qs_lib_kitHoursSplit", `${hours} h does not split into whole minutes across ${units} — give the task hours that do.`, { hours, units }));
   }
 
   const named = detail.materials.filter((m) => m.name.trim());
   const uncounted = named.filter((m) => m.qty === null || !(m.qty > 0));
-  if (uncounted.length) return refuse(`Give every part a count first: ${uncounted.map((m) => m.name.trim()).join(", ")}.`);
+  if (uncounted.length) {
+    const names = uncounted.map((m) => m.name.trim()).join(", ");
+    return refuse(say(lang, words, "qs_lib_kitCountFirst", `Give every part a count first: ${names}.`, { names }));
+  }
 
   const items: KitFromTaskItem[] = [];
   for (const m of named) {
     const qty = m.qty as number;
     const quantity = round2(qty / units);
     if (quantity <= 0 || round2(quantity * units) !== round2(qty)) {
-      return refuse(`${m.name.trim()}: ${qty} does not split evenly across ${units} — give it a count that does.`);
+      return refuse(say(lang, words, "qs_lib_kitSplitEvenly", `${m.name.trim()}: ${qty} does not split evenly across ${units} — give it a count that does.`, { name: m.name.trim(), qty, units }));
     }
     items.push({
       code: m.code,
@@ -109,11 +120,18 @@ export function kitFromTaskDetail(detail: TaskDetail, input: { name: string; uni
 }
 
 /** What the kit will say, in his words, before he saves it: "2 h and Concrete ×4 per footing". */
-export function kitSummary(v: KitFromTask, fromUnits: number | null): string {
+export function kitSummary(v: KitFromTask, fromUnits: number | null, lang: Lang = "en", words?: Words): string {
   const labor = v.kit.labor_minutes % 60 === 0 ? `${v.kit.labor_minutes / 60} h` : `${v.kit.labor_minutes} min`;
   const parts = v.items.map((i) => `${i.description} ×${i.quantity}`).join(", ");
-  const from = fromUnits !== null && fromUnits !== 1 ? ` (from this line's ×${fromUnits})` : " (this line is one unit)";
-  return `${labor}${parts ? ` and ${parts}` : ""} per ${v.kit.unit}${from}`;
+  const from =
+    fromUnits !== null && fromUnits !== 1
+      ? say(lang, words, "qs_lib_kitFromUnits", `(from this line's ×${fromUnits})`, { n: fromUnits })
+      : say(lang, words, "qs_lib_kitOneUnit", "(this line is one unit)");
+  const unit = v.kit.unit;
+  const body = parts
+    ? say(lang, words, "qs_lib_kitSummaryParts", `${labor} and ${parts} per ${unit}`, { labor, parts, unit })
+    : say(lang, words, "qs_lib_kitSummary", `${labor} per ${unit}`, { labor, unit });
+  return `${body} ${from}`;
 }
 
 export interface RememberResult {
@@ -130,13 +148,13 @@ export interface RememberResult {
  * sell the task had. Both inserts read back their ids (silent-write law) and a kit whose parts
  * failed is taken away again — half a kit would price every future task short.
  */
-export async function rememberKit(sb: SupabaseClient, value: KitFromTask): Promise<RememberResult> {
+export async function rememberKit(sb: SupabaseClient, value: KitFromTask, lang: Lang = "en", words?: Words): Promise<RememberResult> {
   // Case-blind, in code: a LIKE pattern would read his "*" or "%" as wildcards.
   const names = await sb.from("kits").select("id, name");
   if (names.error) return { ok: false, error: dbError(names.error) };
   const wanted = value.kit.name.trim().toLowerCase();
   if (((names.data ?? []) as { name: string | null }[]).some((k) => String(k.name ?? "").trim().toLowerCase() === wanted)) {
-    return { ok: false, error: `A kit named ${value.kit.name} already exists — pick another name.` };
+    return { ok: false, error: say(lang, words, "qs_lib_kitExists", `A kit named ${value.kit.name} already exists — pick another name.`, { name: value.kit.name }) };
   }
 
   const codes = [...new Set(value.items.map((i) => i.code).filter((c): c is string => !!c))];
@@ -154,7 +172,7 @@ export async function rememberKit(sb: SupabaseClient, value: KitFromTask): Promi
     .insert({ name: value.kit.name, unit: value.kit.unit, labor_minutes: value.kit.labor_minutes, category: value.kit.category ?? null })
     .select("id")
     .single();
-  if (kit.error || !kit.data) return { ok: false, error: dbError(kit.error ?? "Could not save the kit.") };
+  if (kit.error || !kit.data) return { ok: false, error: dbError(kit.error ?? say(lang, words, "qs_lib_kitNotSaved", "Could not save the kit.")) };
   const kitId = (kit.data as { id: string }).id;
 
   if (value.items.length) {
@@ -177,11 +195,11 @@ export async function rememberKit(sb: SupabaseClient, value: KitFromTask): Promi
       // The clean-up is a write too: read it back, and if the kit could not be taken away, say
       // exactly what is left and the one thing to do about it.
       const gone = await sb.from("kits").delete().eq("id", kitId).select("id");
-      const why = ins.error ? dbError(ins.error) : `only ${n} of ${rows.length} parts were saved`;
+      const why = ins.error ? dbError(ins.error) : say(lang, words, "qs_lib_kitPartsSaved", `only ${n} of ${rows.length} parts were saved`, { n, total: rows.length });
       if (gone.error || !gone.data?.length) {
-        return { ok: false, error: `The kit ${value.kit.name} was saved without its parts (${why}) — delete it from the Price List.` };
+        return { ok: false, error: say(lang, words, "qs_lib_kitSavedWithoutParts", `The kit ${value.kit.name} was saved without its parts (${why}) — delete it from the Price List.`, { name: value.kit.name, why }) };
       }
-      return { ok: false, error: `The kit was not kept (${why}) — press Save The Kit again.` };
+      return { ok: false, error: say(lang, words, "qs_lib_kitNotKept", `The kit was not kept (${why}) — press Save The Kit again.`, { why }) };
     }
   }
   return { ok: true, id: kitId, name: value.kit.name };

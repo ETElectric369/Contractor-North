@@ -41,6 +41,7 @@ import { usageFor } from "@/lib/usage-meter";
 import { shortDate } from "@/lib/usage-window";
 import { callerLang } from "@/lib/lang-of";
 import { fillText, translator } from "@/lib/i18n";
+import { fillSlots } from "@/lib/lang-words";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
@@ -63,7 +64,7 @@ import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms, smsReadiness } from "@/lib/sms";
-import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
+import { textNotReadyRefusal, textRefused } from "@/lib/sms-readiness";
 import { orgAccess } from "@/lib/org-access";
 import { textingPausedWordsFor } from "@/lib/lapse-words";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
@@ -74,6 +75,41 @@ import type { EditorQuote, QuoteCircuit, QuoteLineItem } from "@/lib/types";
 import { promptCodeTable } from "@/lib/panel/breaker-catalog";
 import { isEstimatorStash, keepPlanUpload, type KeptPlan } from "@/lib/estimate/keep-plan-upload";
 
+/**
+ * THE CALLER'S OWN WORDS (the estimates-in-Spanish wave, cn-v1145). Every sentence this file hands a
+ * SCREEN — a refusal, a note, a "said" line, a warning — comes from lib/words/quotes-server (qs_) in
+ * the caller's language: profiles.language through lib/lang-of callerLang, read ONCE per action call
+ * and only when an answer needs words (a save that says nothing pays no extra round trip); English
+ * when nobody is signed in or the read fails. The English is the catalog's, byte for byte what this
+ * file always said. What a tenant's CUSTOMER reads (the text body, the share sheet's title and text,
+ * the notice email and its subject), the estimator's prompts and the staff bell rung from the public
+ * Accept page stay English: none of them is said to the caller.
+ *
+ * ONE READ PER CALL, KEYED ON THE CALL'S OWN CLIENT (schedule/actions' wordsOf, copied): requireStaff
+ * makes a fresh session client per call, so the memo is kept on that object (a WeakMap: it goes when
+ * the call does). The action registers it with the signed-in id; a private helper handed the same
+ * client (requireEditableQuote, jobFollows) says its words without a second read. Not exported: a
+ * "use server" file exports only async functions.
+ */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+const SAID = new WeakMap<object, Said>();
+function wordsOf(supabase: unknown, userId?: string | null): Said {
+  // The action's own entry (it hands the signed-in id) starts this call's memo; a helper (no id) reads it.
+  const memo = supabase && typeof supabase === "object" ? (supabase as object) : null;
+  const had = memo ? SAID.get(memo) : undefined;
+  if (had && userId === undefined) return had;
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as Parameters<typeof callerLang>[0], userId));
+  const made: Said = { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+  if (memo) SAID.set(memo, made);
+  return made;
+}
+/** A sentence in a language already read (the estimator's gate reads it once and hands it on). */
+const sayIn = (lang: Lang | undefined, key: string, vars?: Record<string, string | number>): string => fillSlots(translator(lang ?? "en")(key), vars);
+/** A thrown take-off refusal that carries its key, so the catch says it in the caller's words
+ *  (its message is the English, so a reader of the raw error sees what it always saw). */
+const keyedError = (key: string): Error & { key: string } => Object.assign(new Error(translator("en")(key)), { key });
+
 /* Built from the ORG's settings, not NEXT_PUBLIC_SITE_URL — see orgDocUrl in lib/org-settings.
    Both callers below already fetch the org row, so this costs no extra query. */
 
@@ -81,6 +117,7 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   // The Estimate|Quote label is a LEGAL claim on the document — QuoteDocument prints a
   // "fixed price" sentence for a quote and a "not a contract" one for an estimate. Flipping it
   // after the customer already has a copy leaves their stored PDF asserting the wrong basis
@@ -88,7 +125,7 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
   const { data: cur } = await supabase.from("quotes").select("status").eq("id", id).maybeSingle();
   const curStatus = (cur as { status?: string } | null)?.status;
   if (curStatus && curStatus !== "draft") {
-    return { ok: false, error: "This estimate was already sent — its type can't be changed. Duplicate it to start a new one." };
+    return { ok: false, error: await ws.say("qs_typeLocked") };
   }
   const { data: wrote, error } = await supabase
     .from("quotes")
@@ -96,7 +133,7 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!wrote?.length) return { ok: false, error: "That estimate could not be found." };
+  if (!wrote?.length) return { ok: false, error: await ws.say("qs_estimateNotFound") };
   await bustDocPdf("quote", id); // even a draft may have a cached preview
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
@@ -107,6 +144,7 @@ export async function textQuote(
   id: string,
 ): Promise<{ ok: boolean; error?: string; notReady?: boolean }> {
   const supabase = await createClient();
+  const ws = wordsOf(supabase);
   const { data: quote } = await supabase
     .from("quotes")
     // THE LEAD RIDES ALONG (PROJECTION LAW). An estimate can be made out to a lead — the printed
@@ -116,20 +154,20 @@ export async function textQuote(
     .select("quote_number, total, public_token, doc_type, status, address, customers(name, phone, address), inquiry:inquiry_id(name, phone, address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
-  if (!quote) return { ok: false, error: "Quote not found." };
+  if (!quote) return { ok: false, error: await ws.say("qs_quoteNotFound") };
   const { data: org } = await supabase.from("organizations").select("id, name, settings").maybeSingle();
   // TEXTING NOT SET UP (lib/sms-readiness): said here, where he tapped, before anything is promised
   // or stamped. Nothing is sent and the estimate stays a draft.
-  if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL };
+  if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: textNotReadyRefusal(await ws.lang(), translator(await ws.lang())) };
   // THE PLAN HAS ENDED (cn-v1137, decision 3): a lapsed company sends no texts. Said where he
   // tapped, in his role (the owner is told the door, everyone else the owner); nothing is sent.
   const quoteOrgId = (org as { id?: string } | null)?.id;
   const access = await orgAccess(quoteOrgId);
-  if (!access.state.active) return { ok: false, error: await textingPausedWordsFor(quoteOrgId) };
+  if (!access.state.active) return { ok: false, error: await textingPausedWordsFor(quoteOrgId, undefined, await ws.lang(), translator(await ws.lang())) };
   // Same order the document itself resolves in: the customer when there is one, else the lead.
   const customer = (quote as any).customers ?? (quote as any).inquiry;
   if (!customer?.phone)
-    return { ok: false, error: "There's no phone number on file for whoever this estimate is for — add one on their lead or contact, then send again." };
+    return { ok: false, error: await ws.say("qs_noPhone") };
 
   const label = docLabel(quote as { doc_type?: string | null });
   const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token, rowPlace(quote as any));
@@ -138,7 +176,7 @@ export async function textQuote(
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
   // Texting is set up (asked above), so a false here is the service refusing it; sendSms has
   // already logged why. It is never "add your Twilio account" on an account that has one.
-  if (!sent) return { ok: false, error: TEXT_REFUSED };
+  if (!sent) return { ok: false, error: textRefused(await ws.lang(), translator(await ws.lang())) };
   // Mark as sent once texted (unless already accepted/declined) — mirrors emailQuote.
   if (["draft"].includes((quote as any).status ?? "")) {
     await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
@@ -182,29 +220,30 @@ export async function quoteShareText(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   const { data: quote } = await supabase
     .from("quotes")
     .select("quote_number, total, public_token, doc_type, status, address, customers(address), inquiry:inquiry_id(address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
-  if (!quote) return { ok: false, error: "That estimate could not be found." };
+  if (!quote) return { ok: false, error: await ws.say("qs_estimateNotFound") };
   const label = docLabel(quote as { doc_type?: string | null });
   const token = (quote as { public_token?: string | null }).public_token;
-  if (!token) return { ok: false, error: `This ${label.toLowerCase()} has no customer link yet — send it by Email or Text instead.` };
+  if (!token) return { ok: false, error: await ws.say(label === "Estimate" ? "qs_shareNoLinkEstimate" : "qs_shareNoLinkQuote") };
 
   if (String((quote as { status?: string | null }).status ?? "") === "draft") {
     if (!opts?.sendIt) {
       return {
         ok: false,
         needsSend: true,
-        error: `Sharing marks ${quote.quote_number} as sent — the customer link only works on a sent ${label.toLowerCase()}.`,
+        error: await ws.say(label === "Estimate" ? "qs_shareMarksSentEstimate" : "qs_shareMarksSentQuote", { number: String(quote.quote_number ?? "") }),
       };
     }
     // SILENT-WRITE LAW: a zero-row UPDATE is a 204. Read the row back before handing out a link
     // that would 404 on a document still stuck at draft.
     const { data: wrote, error } = await supabase.from("quotes").update({ status: "sent" }).eq("id", id).select("id");
     if (error) return { ok: false, error: dbError(error) };
-    if (!wrote?.length) return { ok: false, error: `Couldn't mark ${quote.quote_number} as sent — send it by Email or Text instead.` };
+    if (!wrote?.length) return { ok: false, error: await ws.say("qs_shareNotMarked", { number: String(quote.quote_number ?? "") }) };
     revalidatePath(`/quotes/${id}`);
     revalidatePath("/quotes");
   }
@@ -226,6 +265,7 @@ export async function emailQuote(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
+  const ws = wordsOf(supabase);
 
   const { data: quote } = await supabase
     .from("quotes")
@@ -234,10 +274,10 @@ export async function emailQuote(
     .select("*, customers(name, email, address), inquiry:inquiry_id(name, email, address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
-  if (!quote) return { ok: false, error: "Quote not found." };
+  if (!quote) return { ok: false, error: await ws.say("qs_quoteNotFound") };
   const customer = (quote as any).customers ?? (quote as any).inquiry;
   if (!customer?.email)
-    return { ok: false, error: "There's no email address on file for whoever this estimate is for — add one on their lead or contact, then send again." };
+    return { ok: false, error: await ws.say("qs_noEmail") };
   const label = docLabel(quote as { doc_type?: string | null });
 
   const { data: org } = await supabase
@@ -346,12 +386,13 @@ async function requireEditableQuote(
   supabase: any,
   quoteId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ws = wordsOf(supabase);
   const { data: quote } = await supabase
     .from("quotes")
     .select("status, job_id, quote_number, doc_type")
     .eq("id", quoteId)
     .maybeSingle();
-  if (!quote) return { ok: false, error: "Quote not found." };
+  if (!quote) return { ok: false, error: await ws.say("qs_quoteNotFound") };
   // SUPERSEDED (0391): replaced by its revision — the revision is the paper to edit now. With no
   // revision standing (deleted, or walked back) the estimate is his again: editable, and its status
   // may be set back by hand (updateQuoteStatus applies the same test).
@@ -360,9 +401,9 @@ async function requireEditableQuote(
     try {
       rev = await revisionOf(supabase, { quoteId, orgId: null });
     } catch (e) {
-      return { ok: false, error: `Couldn't check whether a revision replaced this estimate (${e instanceof Error ? e.message : String(e)}) — try again.` }; // fail closed, said
+      return { ok: false, error: await ws.say("qs_revisionCheckFailed", { why: e instanceof Error ? e.message : String(e) }) }; // fail closed, said
     }
-    if (rev) return { ok: false, error: `${(quote as any).quote_number || "This estimate"} is superseded by ${rev.quote_number ?? "its revision"} — edit that one instead.` };
+    if (rev) return { ok: false, error: await ws.say("qs_supersededBy", { quote: (quote as any).quote_number || (await ws.say("qs_thisEstimate")), revision: rev.quote_number ?? (await ws.say("qs_itsRevision")) }) };
     return { ok: true };
   }
   if ((quote as any).status !== "accepted") return { ok: true };
@@ -400,7 +441,10 @@ async function requireEditableQuote(
     const num = (signed as { contract_number?: string | null }).contract_number;
     return {
       ok: false,
-      error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} priced ${num ? `contract ${num}` : "a contract"}, which the customer has already signed — changing it now would re-price the draws against a total they never agreed to. Revise it instead (or void the contract).`,
+      error: await ws.say("qs_lockSigned", {
+        quote: (quote as any).quote_number || (await ws.say(label0 === "Estimate" ? "qs_thisEstimate" : "qs_thisQuote")),
+        contract: num ? await ws.say("qs_contractNumbered", { number: num }) : await ws.say("qs_aContract"),
+      }),
     };
   }
 
@@ -417,7 +461,10 @@ async function requireEditableQuote(
 
   return {
     ok: false,
-    error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} is accepted and ${live.length} scheduled payment${live.length === 1 ? " has" : "s have"} already been billed against it — changing it now would re-price the remaining draws. Revise it instead (or void the draw).`,
+    error: await ws.say(live.length === 1 ? "qs_lockDrawnOne" : "qs_lockDrawnMany", {
+      quote: (quote as any).quote_number || (await ws.say(label0 === "Estimate" ? "qs_thisEstimate" : "qs_thisQuote")),
+      n: live.length,
+    }),
   };
 }
 
@@ -440,6 +487,7 @@ async function requireEditableQuote(
 export async function quoteEditLock(quoteId: string): Promise<{ reason: string } | null> {
   const ctx = await requireStaff();
   if ("error" in ctx) return null; // not this function's refusal to make; the actions still guard
+  wordsOf(ctx.supabase, ctx.userId); // this call's words: the lock's sentence is said in them
   const editable = await requireEditableQuote(ctx.supabase, quoteId);
   return editable.ok ? null : { reason: editable.error };
 }
@@ -468,12 +516,13 @@ export async function readQuoteForEditor(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: String(ctx.error) };
   const supabase: any = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   const [q, li] = await Promise.all([
     supabase.from("quotes").select(EDITOR_QUOTE_COLUMNS).eq("id", quoteId).eq("org_id", ctx.orgId).maybeSingle(),
     supabase.from("quote_line_items").select(EDITOR_ITEM_COLUMNS).eq("quote_id", quoteId).eq("org_id", ctx.orgId).order("sort_order"),
   ]);
   if (q.error) return { ok: false, error: dbError(q.error) };
-  if (!q.data) return { ok: false, error: "Quote not found." };
+  if (!q.data) return { ok: false, error: await ws.say("qs_quoteNotFound") };
   if (li.error) return { ok: false, error: dbError(li.error) };
   const n = (v: unknown): number => Number(v ?? 0) || 0;
   const row = q.data as Record<string, unknown>;
@@ -580,21 +629,24 @@ async function jobFollows(
   /** Whose list the sentences name, when it is not the obvious job (the one an estimate was moved off). */
   lead?: { tasks: string; materials: string },
 ): Promise<{ said?: string; note?: string }> {
-  const res = await syncJobTasks(supabase, { jobId: who.jobId, orgId: ctx.orgId, createdBy: ctx.userId, sizeBefore: who.sizeBefore, tasksBefore: who.tasksBefore });
-  const mats = await syncJobMaterials(supabase, { jobId: who.jobId, orgId: ctx.orgId, userId: ctx.userId, partsBefore: who.partsBefore });
+  const ws = wordsOf(supabase);
+  const lang = await ws.lang();
+  const words = translator(lang);
+  const res = await syncJobTasks(supabase, { jobId: who.jobId, orgId: ctx.orgId, createdBy: ctx.userId, sizeBefore: who.sizeBefore, tasksBefore: who.tasksBefore }, lang, words);
+  const mats = await syncJobMaterials(supabase, { jobId: who.jobId, orgId: ctx.orgId, userId: ctx.userId, partsBefore: who.partsBefore }, lang, words);
   revalidatePath(`/jobs/${who.jobId}`);
   revalidatePath("/schedule");
   revalidatePath("/materials");
   const notes: string[] = [];
   if (res.error) {
     reportError("jobFollowsEstimate", new Error(res.error), { jobId: who.jobId });
-    notes.push(`The job's list could not follow this change (${res.error}). Check its tasks.`);
+    notes.push(await ws.say("qs_followTasksFailed", { why: res.error }));
   }
   if (mats.error) {
     reportError("jobFollowsEstimate:materials", new Error(mats.error), { jobId: who.jobId });
-    notes.push(`The buy list could not follow this change (${mats.error}). Check the job's materials.`);
+    notes.push(await ws.say("qs_followPartsFailed", { why: mats.error }));
   }
-  const said = [res.error ? null : syncWords(res, lead?.tasks), mats.error ? null : materialsWords(mats, lead?.materials)].filter(Boolean).join(" ");
+  const said = [res.error ? null : syncWords(res, lead?.tasks, lang, words), mats.error ? null : materialsWords(mats, lead?.materials, lang, words)].filter(Boolean).join(" ");
   return { ...(said ? { said } : {}), ...(notes.length ? { note: notes.join(" ") } : {}) };
 }
 
@@ -664,7 +716,7 @@ async function appendQuoteLine(
     })
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!added?.length) return { ok: false, error: "That line didn't save. Reload the estimate and try again." };
+  if (!added?.length) return { ok: false, error: await wordsOf(supabase).say("qs_lineNotSaved") };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -678,7 +730,8 @@ export async function addQuoteItem(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  const ws = wordsOf(supabase, ctx.userId);
+  if (!item.description.trim()) return { ok: false, error: await ws.say("qs_descriptionRequired") };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
   return appendQuoteLine(supabase, quoteId, item);
@@ -723,13 +776,14 @@ export async function appendQuoteLines(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: String(ctx.error) };
   const supabase = ctx.supabase;
-  if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: "There are no lines to add." };
+  const ws = wordsOf(supabase, ctx.userId);
+  if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: await ws.say("qs_noLinesToAdd") };
   const blank = lines.findIndex((l) => !String(l?.description ?? "").trim());
-  if (blank !== -1) return { ok: false, error: `Line ${blank + 1} has no description.` };
+  if (blank !== -1) return { ok: false, error: await ws.say("qs_lineNoDescription", { n: blank + 1 }) };
   const noId = lines.findIndex((l) => !UUID_SHAPE.test(String(l?.id ?? "")));
-  if (noId !== -1) return { ok: false, error: `Line ${noId + 1} has no id to save under — reload the estimate and try again.` };
+  if (noId !== -1) return { ok: false, error: await ws.say("qs_lineNoId", { n: noId + 1 }) };
   const ids = lines.map((l) => l.id.toLowerCase());
-  if (new Set(ids).size !== ids.length) return { ok: false, error: "Two of those lines carry the same id — reload the estimate and try again." };
+  if (new Set(ids).size !== ids.length) return { ok: false, error: await ws.say("qs_lineIdsTwice") };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
   const { data: last, error: lastErr } = await supabase
@@ -764,7 +818,7 @@ export async function appendQuoteLines(
     const { data: already, error: readErr } = await supabase.from("quote_line_items").select("id").eq("quote_id", quoteId).in("id", ids);
     if (readErr) return { ok: false, error: dbError(readErr) };
     const here = new Set(((already ?? []) as { id: string }[]).map((r) => String(r.id).toLowerCase()));
-    if (ids.some((id) => !here.has(id))) return { ok: false, error: "Those lines didn't save — one of their ids is already taken. Reload the estimate and try again." };
+    if (ids.some((id) => !here.has(id))) return { ok: false, error: await ws.say("qs_lineIdsTaken") };
     // Every row is this estimate's: the batch carries his newest words, so each row takes them — not
     // sort_order (the first landing chose it). Scoped to the estimate and the id, read back; a zero-row
     // write is the same refusal as a foreign id, never a quiet "landed".
@@ -772,7 +826,7 @@ export async function appendQuoteLines(
       const { id, quote_id: _q, sort_order: _s, ...patch } = row;
       const { data: rewrote, error: rewriteErr } = await supabase.from("quote_line_items").update(patch).eq("quote_id", quoteId).eq("id", id).select("id");
       if (rewriteErr) return { ok: false, error: dbError(rewriteErr) };
-      if (!rewrote?.length) return { ok: false, error: "Those lines didn't save — one of their ids is already taken. Reload the estimate and try again." };
+      if (!rewrote?.length) return { ok: false, error: await ws.say("qs_lineIdsTaken") };
     }
   } else {
     const got = new Set(((added ?? []) as { id: string }[]).map((r) => String(r.id).toLowerCase()));
@@ -781,8 +835,8 @@ export async function appendQuoteLines(
         ok: false,
         error:
           got.size === 0
-            ? "Those lines didn't save. Reload the estimate and try again."
-            : `Only ${got.size} of ${rows.length} lines saved. Reload the estimate to see what landed.`,
+            ? await ws.say("qs_linesNotSaved")
+            : await ws.say("qs_linesPartlySaved", { saved: got.size, total: rows.length }),
       };
     }
   }
@@ -825,7 +879,8 @@ export async function addQuoteItemFromPriceItem(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  if (!pick?.priceItemId) return { ok: false, error: "Pick an item from your price list first." };
+  const ws = wordsOf(supabase, ctx.userId);
+  if (!pick?.priceItemId) return { ok: false, error: await ws.say("qs_pickPriceItem") };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
 
@@ -846,7 +901,7 @@ export async function addQuoteItemFromPriceItem(
   // picked at the $830 allowance and call it a success.
   if (itemErr) return { ok: false, error: dbError(itemErr) };
   if (quoteErr) return { ok: false, error: dbError(quoteErr) };
-  if (!itemRow) return { ok: false, error: "That item is no longer in your price list. Pick another one." };
+  if (!itemRow) return { ok: false, error: await ws.say("qs_priceItemGone") };
 
   const item = itemRow as unknown as OptionedPriceItem;
   const optionId = pick.optionId === undefined ? defaultItemOptionId(item) : pick.optionId;
@@ -884,15 +939,16 @@ export async function updateQuoteItem(
     /** The scope group (0104): a word, null for none, undefined to leave it alone. */
     category?: string | null;
   },
-): Promise<{ ok: boolean; error?: string; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
+): Promise<{ ok: boolean; error?: string; /** The line is not on this estimate (already deleted): a flag, never a sentence to compare. */ lineGone?: boolean; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   // PATCH semantics (mirrors updateBill): write ONLY the keys the caller sent — an
   // omitted field never touches its column (it used to reset unit to "ea", qty to 1…).
   const clean: Record<string, unknown> = {};
   if (item.description !== undefined) {
-    if (!item.description.trim()) return { ok: false, error: "Description is required." };
+    if (!item.description.trim()) return { ok: false, error: await ws.say("qs_descriptionRequired") };
     clean.description = item.description.trim();
   }
   if (item.quantity !== undefined) clean.quantity = item.quantity || 1;
@@ -904,12 +960,12 @@ export async function updateQuoteItem(
       // A breakdown that does not read as one is refused, never stored as null: clearing it would
       // silently cut the line from the job's task (task_id) and drop the hours behind its price.
       const d = coerceTaskDetail(item.detail);
-      if (!d) return { ok: false, error: "That line's breakdown couldn't be read — nothing was changed." };
+      if (!d) return { ok: false, error: await ws.say("qs_breakdownUnread") };
       clean.detail = d;
     }
   }
   if (item.category !== undefined) clean.category = item.category === null ? null : item.category.trim() || null;
-  if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
+  if (Object.keys(clean).length === 0) return { ok: false, error: await ws.say("qs_nothingToUpdate") };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
   // WHAT THE LINE SAID BEFORE: the words, so the job's task is renamed only while it still reads exactly
@@ -938,7 +994,7 @@ export async function updateQuoteItem(
     .eq("quote_id", quoteId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!touched?.length) return { ok: false, error: "That line isn't on this estimate." };
+  if (!touched?.length) return { ok: false, error: await ws.say("qs_lineNotHere"), lineGone: true };
   await recalcQuote(supabase, quoteId);
   let follow: { said?: string; note?: string } = {};
   if (before && clean.description !== undefined && coerceTaskDetail(before.detail)) {
@@ -947,9 +1003,9 @@ export async function updateQuoteItem(
       const r = await retitleLineTask(supabase, { jobId, orgId: ctx.orgId, lineId: itemId, from: String(before.description ?? ""), to: String(clean.description) });
       if (r.error) {
         reportError("updateQuoteItem:retitle", new Error(r.error), { jobId, itemId });
-        follow = { note: `The job's task could not be renamed (${r.error}).` };
+        follow = { note: await ws.say("qs_taskNotRenamed", { why: String(r.error) }) };
       } else if (r.renamed) {
-        follow = { said: "The job's task is renamed too." };
+        follow = { said: await ws.say("qs_taskRenamed") };
         revalidatePath(`/jobs/${jobId}`);
       } else {
         // No task reads as the line put it: he may have DELETED it. Its dismissal remembers the old title
@@ -976,10 +1032,11 @@ export async function updateQuoteItem(
 export async function deleteQuoteItem(
   itemId: string,
   quoteId: string,
-): Promise<{ ok: boolean; error?: string; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
+): Promise<{ ok: boolean; error?: string; /** The line is not on this estimate (already deleted): a flag, never a sentence to compare. */ lineGone?: boolean; /** What the job's list did. */ said?: string; /** What it could not do. */ note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
   // THE JOB FOLLOWS (item 1, 2026-10-10): when a TASK line goes (a plain line has no task on the job),
@@ -996,7 +1053,7 @@ export async function deleteQuoteItem(
     .eq("quote_id", quoteId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!gone?.length) return { ok: false, error: "That line isn't on this estimate." };
+  if (!gone?.length) return { ok: false, error: await ws.say("qs_lineNotHere"), lineGone: true };
   await recalcQuote(supabase, quoteId);
   const follow = behind ? await jobFollows(supabase, behind, ctx) : {};
   revalidatePath(`/quotes/${quoteId}`);
@@ -1022,6 +1079,7 @@ export async function updateQuoteMeta(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   const clean: Record<string, unknown> = {};
   if (meta.title !== undefined) clean.title = meta.title.trim() || null;
   if (meta.description !== undefined) clean.description = meta.description.trim() || null;
@@ -1030,7 +1088,7 @@ export async function updateQuoteMeta(
   if (meta.valid_until !== undefined) clean.valid_until = meta.valid_until;
   // Validated to the column's own check: anything but the two words is "the company's" (null).
   if (meta.estimate_format !== undefined) clean.estimate_format = meta.estimate_format === "tasks" || meta.estimate_format === "detailed" ? meta.estimate_format : null;
-  if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
+  if (Object.keys(clean).length === 0) return { ok: false, error: await ws.say("qs_nothingToUpdate") };
   // Only the tax rate moves `total` (through recalcQuote) — so only a tax-rate change on a
   // drawn contract trips the accepted-lock. Re-titling or re-noting an accepted quote is
   // harmless and stays allowed.
@@ -1045,7 +1103,7 @@ export async function updateQuoteMeta(
     .eq("id", quoteId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!landed?.length) return { ok: false, error: "That estimate isn't here to update." };
+  if (!landed?.length) return { ok: false, error: await ws.say("qs_estimateNotHere") };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -1064,11 +1122,12 @@ export async function setQuoteCustomer(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   let safeCustomerId: string | null = null;
   if (customerId) {
     safeCustomerId = await visibleCustomerIdOrNull(supabase, customerId);
-    if (!safeCustomerId) return { ok: false, error: "That customer isn't available." };
+    if (!safeCustomerId) return { ok: false, error: await ws.say("qs_customerUnavailable") };
   }
 
   const { error } = await supabase
@@ -1094,10 +1153,11 @@ export async function setQuoteJob(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   if (jobId) {
     const { data } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
-    if (!data) return { ok: false, error: "That job isn't available." };
+    if (!data) return { ok: false, error: await ws.say("qs_jobUnavailable") };
   }
 
   // THE JOB FOLLOWS (item 1, 2026-10-10): an ACCEPTED estimate pinned to a job puts its task lines on
@@ -1131,7 +1191,7 @@ export async function setQuoteJob(
     .eq("id", quoteId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!moved?.length) return { ok: false, error: "That estimate could not be found." };
+  if (!moved?.length) return { ok: false, error: await ws.say("qs_estimateNotFound") };
   // Pinning an estimate to a job is the same win as making the job from it: the visit it was written
   // up from gets the job (where it has none) and reads won (cn-v1069, lib/appointments/behind-quote).
   if (jobId) {
@@ -1151,18 +1211,18 @@ export async function setQuoteJob(
   // list left on the old job was the crew's buy list for work that is no longer that job's. Zero rows
   // is "none made yet", not a failure; a refusal is said.
   const notes: string[] = [];
-  for (const [table, what] of [["work_orders", "work order"], ["material_lists", "materials list"]] as const) {
+  for (const [table, what] of [["work_orders", "qs_workOrderNotMoved"], ["material_lists", "qs_materialsListNotMoved"]] as const) {
     const { error: moveErr } = await supabase.from(table).update({ job_id: jobId }).eq("quote_id", quoteId).select("id");
     if (moveErr) {
       reportError("setQuoteJob:movePaperwork", moveErr, { quoteId, table });
-      notes.push(`The estimate's ${what} could not be moved to this job (${dbError(moveErr)}).`);
+      notes.push(await ws.say(what, { why: dbError(moveErr) }));
     }
   }
   const follow = jobId && pinned ? await jobFollows(supabase, { jobId, ...pinned }, ctx) : {};
   const leftBehind = left
     ? await jobFollows(supabase, { jobId: left.jobId, sizeBefore: left.sizeBefore, tasksBefore: left.tasksBefore, partsBefore: left.partsBefore }, ctx, {
-        tasks: left.label ? `The job it left (${left.label}) follows too` : "The job it left follows too",
-        materials: left.label ? `${left.label}'s materials list too` : "Its materials list too",
+        tasks: left.label ? await ws.say("qs_leftJobFollowsNamed", { job: left.label }) : await ws.say("qs_leftJobFollows"),
+        materials: left.label ? await ws.say("qs_leftJobMaterialsNamed", { job: left.label }) : await ws.say("qs_leftJobMaterials"),
       })
     : {};
   revalidatePath(`/quotes/${quoteId}`);
@@ -1275,9 +1335,10 @@ export async function resolveDuplicateDrafts(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   const losers = deleteIds.filter((id) => id && id !== keepId);
-  if (losers.length === 0) return { ok: false, error: "Nothing to delete." };
+  if (losers.length === 0) return { ok: false, error: await ws.say("qs_nothingToDelete") };
 
   // Fetch the whole cluster (keep + losers) under RLS — foreign rows drop out.
   const ids = [keepId, ...losers];
@@ -1290,15 +1351,15 @@ export async function resolveDuplicateDrafts(
   const found = rows ?? [];
   // Every id must have resolved (RLS didn't hide any) — else refuse the batch.
   if (found.length !== ids.length)
-    return { ok: false, error: "One of these drafts isn't available." };
+    return { ok: false, error: await ws.say("qs_draftsUnavailable") };
   // All must be drafts — never delete a sent/accepted quote through this path.
   if (found.some((r) => r.status !== "draft"))
-    return { ok: false, error: "Only draft estimates can be cleaned up here." };
+    return { ok: false, error: await ws.say("qs_onlyDraftsCleaned") };
   // All must share the keep's customer — the dedupe signal we grouped on.
   const keepRow = found.find((r) => r.id === keepId);
-  if (!keepRow) return { ok: false, error: "That draft isn't available." };
+  if (!keepRow) return { ok: false, error: await ws.say("qs_draftUnavailable") };
   if (found.some((r) => (r.customer_id ?? null) !== (keepRow.customer_id ?? null)))
-    return { ok: false, error: "These drafts belong to different customers." };
+    return { ok: false, error: await ws.say("qs_draftsDifferentCustomers") };
 
   const { error } = await supabase.from("quotes").delete().in("id", losers);
   if (error) return { ok: false, error: dbError(error) };
@@ -1315,6 +1376,7 @@ export async function saveQuote(input: SaveQuoteInput) {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   // THE HEADER IS A PROVISIONAL FIGURE HERE. These products are raw JS floats summed and then
   // rounded once; the DB stores each line as round(quantity * unit_price, 2) and rounds half
@@ -1393,7 +1455,7 @@ export async function saveQuote(input: SaveQuoteInput) {
       // THE DRAFT LOCK, DECIDED ON WHAT WAS READ: the RPC holds the same lock under its row lock, so
       // this is its refusal one round trip earlier, not a second rule.
       if (standing.status !== "draft") {
-        return { ok: false as const, code: "not_editable" as const, error: "That draft was sent — it can't be edited from the builder anymore." };
+        return { ok: false as const, code: "not_editable" as const, error: await ws.say("qs_draftWasSent") };
       }
       // AUTOSAVE UPDATE — one TRANSACTION via save_quote_draft (0211): row-locked,
       // draft-locked, header + wholesale line replace atomically. The old three-REST-call
@@ -1418,13 +1480,13 @@ export async function saveQuote(input: SaveQuoteInput) {
         const msg = rpcErr.message ?? "";
         if (msg.includes("QUOTE_NOT_DRAFT")) {
           // Sent between the read and the lock: the builder must stop and say so — never rewrite a live document.
-          return { ok: false as const, code: "not_editable" as const, error: "That draft was sent — it can't be edited from the builder anymore." };
+          return { ok: false as const, code: "not_editable" as const, error: await ws.say("qs_draftWasSent") };
         }
         if (msg.includes("EMPTY_REPLACE")) {
           return {
             ok: false as const,
             code: "empty_replace" as const,
-            error: "Refused: this would wipe the draft's line items. Reload the estimate to pick up its saved lines, or delete the draft if you meant to start over.",
+            error: await ws.say("qs_refusedWipe"),
           };
         }
         if (msg.includes("QUOTE_GONE")) {
@@ -1445,7 +1507,7 @@ export async function saveQuote(input: SaveQuoteInput) {
           // changed, so this is not a write per autosave.
           const { data: fmt, error: fmtErr } = await supabase.from("quotes").update({ estimate_format: estimateFormat }).eq("id", quote.id).eq("status", "draft").select("id");
           if (fmtErr) return { ok: false as const, error: dbError(fmtErr) };
-          if (!fmt?.length) return { ok: false as const, error: "The paper format didn't land — reload the estimate and try again." };
+          if (!fmt?.length) return { ok: false as const, error: await ws.say("qs_formatNotLanded") };
         }
       }
     }
@@ -1463,7 +1525,7 @@ export async function saveQuote(input: SaveQuoteInput) {
         if (input.id && idTaken(error)) {
           const twin = await standingOf(input.id);
           if (twin && "error" in twin) return { ok: false as const, error: twin.error };
-          if (!twin) return { ok: false as const, error: "Quote not found." };
+          if (!twin) return { ok: false as const, error: await ws.say("qs_quoteNotFound") };
           standing = twin;
           prevInquiryId = twin.inquiry_id;
           continue;
@@ -1473,7 +1535,7 @@ export async function saveQuote(input: SaveQuoteInput) {
       quote = ins as { id: string; quote_number?: string | null };
     }
   }
-  if (!quote) return { ok: false as const, error: "The save didn't land." };
+  if (!quote) return { ok: false as const, error: await ws.say("qs_saveNotLanded") };
 
   if (input.items.length && !updateItemsDone) {
     const rows = input.items.map((it, idx) => ({
@@ -1594,6 +1656,7 @@ export async function duplicateQuote(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   const revision = !!opts?.revision;
 
   // circuits rides along (Panel plan, phase 0): the copy used to drop the circuit schedule without
@@ -1610,11 +1673,11 @@ export async function duplicateQuote(
   const first = await supabase.from("quotes").select(`${columns}, estimate_format`).eq("id", id).maybeSingle();
   const withFormat = !(first.error && isMissingColumn(first.error));
   const { data: quote } = withFormat ? first : await supabase.from("quotes").select(columns).eq("id", id).maybeSingle();
-  if (!quote) return { ok: false, error: "Quote not found." };
+  if (!quote) return { ok: false, error: await ws.say("qs_quoteNotFound") };
   const format = (quote as { estimate_format?: unknown }).estimate_format;
   // Only an offer or a won estimate can be revised: a draft is edited, a declined one is over.
   if (revision && !["sent", "accepted"].includes(String((quote as { status?: string }).status)))
-    return { ok: false, error: "Only a sent or accepted estimate can be revised — edit this one instead." };
+    return { ok: false, error: await ws.say("qs_onlySentRevised") };
 
   const { data: items, error: itemsErr } = await supabase
     .from("quote_line_items")
@@ -1669,9 +1732,9 @@ export async function duplicateQuote(
       if (dErr || !gone?.length) {
         // The stray copy is still there (audit v1085, carried): say so, or "Revise again" makes a second one.
         reportError("quotes.duplicateQuote.cleanup", dErr ?? new Error("zero rows"), { from: id, to: res.id });
-        return { ok: false, error: `The revision could not be made${sErr ? ` (${dbError(sErr)})` : ""} and its half-made copy is still there — delete the new draft of this estimate, then Revise again.` };
+        return { ok: false, error: await ws.say("qs_revisionHalfMade", { why: sErr ? ` (${dbError(sErr)})` : "" }) };
       }
-      return { ok: false, error: `The revision could not be made${sErr ? ` (${dbError(sErr)})` : ""} — Revise again.` };
+      return { ok: false, error: await ws.say("qs_revisionNotMade", { why: sErr ? ` (${dbError(sErr)})` : "" }) };
     }
   }
 
@@ -1693,7 +1756,7 @@ export async function duplicateQuote(
       return {
         ok: true,
         id: res.id,
-        warning: `The copy is made, but its ${circuits.length} circuit${circuits.length === 1 ? "" : "s"} didn't come with it. Add them on the copy's Circuit Schedule.`,
+        warning: await ws.say(circuits.length === 1 ? "qs_copyNoCircuitsOne" : "qs_copyNoCircuitsMany", { n: circuits.length }),
       };
     }
   }
@@ -1728,10 +1791,10 @@ async function materializeQuoteCustomer(
 /** A work order or a materials list the acceptance could not make — or a list that is there with a word
  *  about itself — said, never dropped (audit v1085, carried: both Accept branches used to throw the two
  *  results away, so a failed take-off was neither said nor reported). */
-function paperworkNote(wo: { ok: boolean; error?: string }, list: { ok: boolean; error?: string }): string | null {
+async function paperworkNote(wo: { ok: boolean; error?: string }, list: { ok: boolean; error?: string }, ws: Said): Promise<string | null> {
   // Each rule's own words name the one way out (a refusal on purpose, or a lost write), so they pass through
   // unchanged — wrapping them named a second action.
-  const bits = [!wo.ok ? (wo.error ?? "The work order could not be made — open Work Orders to add it.") : null, !list.ok ? (list.error ?? "The materials list could not be made — open Materials to add it.") : (list.error ?? null)].filter(Boolean);
+  const bits = [!wo.ok ? (wo.error ?? (await ws.say("qs_workOrderNotMade"))) : null, !list.ok ? (list.error ?? (await ws.say("qs_materialsListNotMade"))) : (list.error ?? null)].filter(Boolean);
   return bits.length ? bits.join(" ") : null;
 }
 
@@ -1755,6 +1818,7 @@ export async function createJobFromQuote(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   const { data: q } = await supabase
     .from("quotes")
@@ -1764,16 +1828,16 @@ export async function createJobFromQuote(
     .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id")
     .eq("id", quoteId)
     .maybeSingle();
-  if (!q) return { ok: false, error: "Quote not found." };
+  if (!q) return { ok: false, error: await ws.say("qs_quoteNotFound") };
   // A REPLACED ESTIMATE MAKES NO JOB (audit v1085, carried): its revision does. Named, or the way back.
   if ((q as { status?: string }).status === "superseded") {
     let rev: { id: string; quote_number: string | null } | null = null;
     try {
       rev = await revisionOf(supabase, { quoteId, orgId: ctx.orgId });
     } catch (e) {
-      return { ok: false, error: `Couldn't check whether a revision replaced this estimate (${e instanceof Error ? e.message : String(e)}) — try again.` };
+      return { ok: false, error: await ws.say("qs_revisionCheckFailed", { why: e instanceof Error ? e.message : String(e) }) };
     }
-    return { ok: false, error: rev ? `${rev.quote_number ?? "A revision"} replaced this estimate — open that one.` : "This estimate was replaced by a revision — set it back to Accepted first." };
+    return { ok: false, error: rev ? await ws.say("qs_revisionReplacedOpen", { revision: rev.quote_number ?? (await ws.say("qs_aRevision")) }) : await ws.say("qs_replacedSetBack") };
   }
   // A REVISION TAKES THE ORIGINAL'S JOB (0391): born while the original was only sent (so with no
   // job), the revision would make a SECOND job when the customer accepted the original in between.
@@ -1816,7 +1880,7 @@ export async function createJobFromQuote(
       // The original still counts: a follow now would double the job's tasks and hours. Nothing more is
       // done; the way back is to accept again (supersede is idempotent).
       reportError("createJobFromQuote:supersede", new Error(sup.error), { quoteId });
-      return { ok: true, id: q.job_id, note: `The estimate this revises could not be marked superseded (${sup.error}). Accept it again to retry.` };
+      return { ok: true, id: q.job_id, note: await ws.say("qs_supersedeFailed", { why: String(sup.error) }) };
     }
     // THE PAPERWORK FIRST, THEN THE FOLLOW (cn-v1084): the take-off may ADOPT the job's own list (a
     // visit-born job's), seeding its plain lines and leaving the task parts to the materials sync,
@@ -1829,7 +1893,7 @@ export async function createJobFromQuote(
     // THE PAPERWORK IS SAID: what the take-off did to the crew's list (a revision's plain rows follow,
     // Erik 2026-10-11), then what the job's tasks and parts did; what could not be made is a note.
     const said = [list.said, follow.said].filter(Boolean).join(" ");
-    const note = [paperworkNote(wo, list), follow.note].filter(Boolean).join(" ");
+    const note = [await paperworkNote(wo, list, ws), follow.note].filter(Boolean).join(" ");
     return { ok: true, id: q.job_id, ...(said ? { said } : {}), ...(note ? { note } : {}), ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
   }
 
@@ -1961,12 +2025,12 @@ export async function createJobFromQuote(
     const { data: dropped, error: dropErr } = await supabase.from("jobs").delete().eq("id", job.id).eq("org_id", ctx.orgId).select("id");
     const stuck = !!dropErr || !dropped?.length;
     if (stuck) reportError("createJobFromQuote:dropUnlinked", dropErr ?? new Error("zero rows"), { jobId: job.id, quoteId });
-    return { ok: false, error: `${dbError(linkErr)}${stuck ? " An empty job was left behind — delete it on Jobs." : ""}` };
+    return { ok: false, error: `${dbError(linkErr)}${stuck ? ` ${await ws.say("qs_emptyJobLeft")}` : ""}` };
   }
   if (!linked?.length) {
     const { data: theirs } = await supabase.from("quotes").select("job_id").eq("id", quoteId).maybeSingle();
     const otherJob = (theirs as { job_id?: string | null } | null)?.job_id ?? null;
-    if (!otherJob) return { ok: false, error: "The job was made but could not be linked to the estimate. Reload the estimate and try again." };
+    if (!otherJob) return { ok: false, error: await ws.say("qs_jobNotLinked") };
     const { data: dropped, error: dropErr } = await supabase.from("jobs").delete().eq("id", job.id).eq("org_id", ctx.orgId).select("id");
     if (dropErr || !dropped?.length) reportError("createJobFromQuote:dropTwin", dropErr ?? new Error("zero rows"), { jobId: job.id, quoteId, otherJob });
     revalidatePath(`/quotes/${quoteId}`);
@@ -1974,7 +2038,7 @@ export async function createJobFromQuote(
     return {
       ok: true,
       id: otherJob,
-      ...(dropErr || !dropped?.length ? { note: "Another door made this estimate's job in the same moment; a second, empty job could not be removed — delete it on Jobs." } : {}),
+      ...(dropErr || !dropped?.length ? { note: await ws.say("qs_twinJobNotRemoved") } : {}),
     };
   }
   // THE VISIT BEHIND THIS ESTIMATE IS WON, AND ATTACHED TO THE JOB IT BECAME (cn-v1069). This door
@@ -1992,7 +2056,7 @@ export async function createJobFromQuote(
   const born = await bornWithTasks(supabase, { jobId: job.id, quoteId, orgId: ctx.orgId, createdBy: ctx.userId });
   if (born.error) {
     reportError("createJobFromQuote:tasks", new Error(born.error), { jobId: job.id, quoteId });
-    note = `The job was made; its tasks could not all be listed (${born.error}). Add them on the job.`;
+    note = await ws.say("qs_tasksNotListed", { why: String(born.error) });
   }
 
   // Winning a quote spins up the field paperwork — a work order + a material
@@ -2003,7 +2067,7 @@ export async function createJobFromQuote(
 
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/schedule");
-  const notes = [note, paperworkNote(wo, list), sup.error ? `The estimate this revises could not be marked superseded (${sup.error}). Accept it again to retry.` : null].filter(Boolean);
+  const notes = [note, await paperworkNote(wo, list, ws), sup.error ? await ws.say("qs_supersedeFailed", { why: String(sup.error) }) : null].filter(Boolean);
   return { ok: true, id: job.id, ...(list.said ? { said: list.said } : {}), ...(notes.length ? { note: notes.join(" ") } : {}), ...(sup.superseded.length ? { superseded: sup.superseded } : {}) };
 }
 
@@ -2045,17 +2109,24 @@ async function pushQuoteAccepted(id: string): Promise<void> {
 export async function setQuoteFollowUp(quoteId: string, date: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const { data: org } = await ctx.supabase.from("organizations").select("settings").eq("id", ctx.orgId ?? "").maybeSingle();
-  const day = checkComeBackDay(todayStrInTz(getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone), date);
-  if (!day.ok) return { ok: false, error: day.error };
+  const today = todayStrInTz(getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone);
+  const day = checkComeBackDay(today, date);
+  if (!day.ok) {
+    // The refusal in the caller's words (the language is read only when it refuses).
+    const lang = await ws.lang();
+    const again = checkComeBackDay(today, date, lang, translator(lang));
+    return { ok: false, error: again.ok ? day.error : again.error };
+  }
   const { data, error } = await ctx.supabase.from("quotes").update({ follow_up_at: day.day }).eq("id", quoteId).select("id");
   if (error) {
     return {
       ok: false,
-      error: isMissingColumn(error) ? "This needs a quick database update before an estimate can take a follow-up day." : dbError(error),
+      error: isMissingColumn(error) ? await ws.say("qs_followUpNeedsUpdate") : dbError(error),
     };
   }
-  if (!data?.length) return { ok: false, error: "That estimate could not be found." };
+  if (!data?.length) return { ok: false, error: await ws.say("qs_estimateNotFound") };
   revalidatePath("/planner");
   revalidatePath("/quotes");
   revalidatePath(`/quotes/${quoteId}`);
@@ -2068,6 +2139,7 @@ export async function updateQuoteStatus(id: string, status: string) {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   // THE JOB CATCHES UP (item 1, 2026-10-10): an estimate already linked to a job and accepted (again)
   // hands createJobFromQuote the estimate's figure as it stood BEFORE this write makes its lines
@@ -2077,7 +2149,7 @@ export async function updateQuoteStatus(id: string, status: string) {
   // not undone by hand while the revision stands: set back to accepted, the original would count
   // beside its revision (tasks, hours, buy list, contract total all doubled). With no revision standing
   // (deleted, or walked back) the estimate is his again and may move.
-  if (status === "superseded") return { ok: false as const, error: "Superseded is set by accepting a revision — Revise this estimate instead." };
+  if (status === "superseded") return { ok: false as const, error: await ws.say("qs_supersededByAccepting") };
   const { data: was } = await supabase.from("quotes").select("job_id, status, revises_quote_id").eq("id", id).maybeSingle();
   // Acceptance is the moment work is won. The office "Accepted" dropdown used to just
   // flip the status — no job, no signal — so an accepted estimate vanished (the bug Erik
@@ -2094,9 +2166,9 @@ export async function updateQuoteStatus(id: string, status: string) {
     try {
       rev = await revisionOf(supabase, { quoteId: id, orgId: ctx.orgId });
     } catch (e) {
-      return { ok: false as const, error: `Couldn't check whether a revision replaced this estimate (${e instanceof Error ? e.message : String(e)}) — try again.` };
+      return { ok: false as const, error: await ws.say("qs_revisionCheckFailed", { why: e instanceof Error ? e.message : String(e) }) };
     }
-    if (rev) return { ok: false as const, error: `${rev.quote_number ?? "A revision"} replaced this estimate — change that one instead.` };
+    if (rev) return { ok: false as const, error: await ws.say("qs_revisionReplacedChange", { revision: rev.quote_number ?? (await ws.say("qs_aRevision")) }) };
   }
   if (status === "accepted") {
     const jobId = (was as { job_id?: string | null } | null)?.job_id ?? null;
@@ -2110,7 +2182,7 @@ export async function updateQuoteStatus(id: string, status: string) {
   // on to read the quote and ring THAT org's bell (audit v921 high). No rows = not ours = stop.
   const { data: updated, error } = await supabase.from("quotes").update(patch).eq("id", id).select("id");
   if (error) return { ok: false as const, error: dbError(error) };
-  if (!updated?.length) return { ok: false as const, error: "That estimate could not be found." };
+  if (!updated?.length) return { ok: false as const, error: await ws.say("qs_estimateNotFound") };
   /** What the job's list did when a linked estimate was accepted (shown under the status, not as a warning). */
   let said: string | undefined;
   // WALKING BACK AN ACCEPTED REVISION (audit v1085, carried): the estimate it replaced stays superseded
@@ -2119,7 +2191,7 @@ export async function updateQuoteStatus(id: string, status: string) {
   if (revisesId && (was as { status?: string } | null)?.status === "accepted" && status !== "accepted") {
     const { data: orig } = await supabase.from("quotes").select("quote_number, status").eq("id", revisesId).maybeSingle();
     const o = orig as { quote_number?: string | null; status?: string } | null;
-    if (o?.status === "superseded") said = `${o.quote_number ?? "The estimate this revised"} was replaced by this estimate and now stands replaced by nothing — set it back to Accepted if that work goes ahead.`;
+    if (o?.status === "superseded") said = await ws.say("qs_walkedBack", { quote: o.quote_number ?? (await ws.say("qs_theEstimateRevised")) });
   }
 
   /**
@@ -2155,14 +2227,14 @@ export async function updateQuoteStatus(id: string, status: string) {
     try {
       // links quotes.job_id + spins up WO/materials; on a linked estimate, the job catches up
       const jobRes = await createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore, partsBefore: linked.partsBefore } : undefined);
-      if (jobRes && jobRes.ok === false) jobWarn = jobRes.error ?? "The job wasn't created.";
+      if (jobRes && jobRes.ok === false) jobWarn = jobRes.error ?? (await ws.say("qs_jobNotCreated"));
       // The job was made and something it should carry (its tasks) could not be listed: said, not sunk.
       else if (jobRes?.note) jobWarn = jobRes.note;
       if (jobRes?.said) said = jobRes.said;
       // A REVISION accepted: the original it revises stopped counting — said first, it is the news.
       if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), said].filter(Boolean).join(" ");
     } catch (e) {
-      jobWarn = "The job wasn't created.";
+      jobWarn = await ws.say("qs_jobNotCreated");
       reportError("updateQuoteStatus:createJob", e, { quoteId: id });
     }
     if (!alreadyAccepted) await pushQuoteAccepted(id); // one bell per acceptance, never one per re-select
@@ -2171,7 +2243,7 @@ export async function updateQuoteStatus(id: string, status: string) {
     revalidatePath(`/quotes/${id}`);
     revalidatePath("/quotes");
     if (jobWarn) {
-      return { ok: true as const, warning: `Estimate accepted, but the job needs attention: ${jobWarn}`, ...(said ? { said } : {}) };
+      return { ok: true as const, warning: await ws.say("qs_acceptedJobAttention", { why: jobWarn }), ...(said ? { said } : {}) };
     }
   }
   revalidatePath(`/quotes/${id}`);
@@ -2243,7 +2315,7 @@ async function runEstimatorTasks(opts: {
   // TRUNCATION IS CHECKED FIRST AND NEVER SALVAGED (the rule the priced-lines parse runs under): a
   // task list that quietly lost its last tasks is a wrong estimate wearing a finished one's face.
   if (msg.stop_reason === "max_tokens")
-    throw new Error("That take-off ran longer than one pass — trim the scope and try again.");
+    throw keyedError("qs_takeoffTooLongTrim");
   const parsed = (await parseAiJson(client, text, orgId)) as TaskModeParsed;
   return taskModeDraft(scope, parsed, {
     book: taskBookFromRows(rows),
@@ -2510,7 +2582,7 @@ async function runEstimator(
    * long instead, and let him split the job.
    */
   if (msg.stop_reason === "max_tokens")
-    throw new Error("That take-off ran longer than one pass — split the plan, or trim the scope and try again.");
+    throw keyedError("qs_takeoffTooLongSplit");
   const parsed = (await parseAiJson(client, text, (org as { id?: string } | null)?.id)) as {
     items?: any[];
     questions?: any[];
@@ -2584,8 +2656,8 @@ function estimatorError(e: any, lang?: Lang): { ok: false; error: string } {
   return {
     ok: false as const,
     error: e?.message?.includes("ANTHROPIC_API_KEY")
-      ? "AI isn't available right now. Try again later."
-      : `Estimator failed: ${e?.message ?? "unknown error"}`,
+      ? sayIn(lang, "qs_aiUnavailable")
+      : sayIn(lang, "qs_estimatorFailed", { why: typeof e?.key === "string" ? sayIn(lang, e.key) : (e?.message ?? sayIn(lang, "qs_unknownError")) }),
   };
 }
 
@@ -2612,16 +2684,17 @@ async function guardEstimator(): Promise<
   | { ok: false; error: string }
 > {
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Only office staff can run the estimator." };
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? (await wordsOf(await createClient()).say("qs_staffOnlyEstimator")) };
   // Per-user, because the ceiling below is per-ORG and a runaway loop would otherwise burn the
   // whole company's month before anyone noticed.
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   if (await rateLimited(`estimator:${ctx.userId}`, 10, 900, { failClosed: true }))
-    return { ok: false, error: "That's a lot of estimates in a row — give it a minute." };
+    return { ok: false, error: await ws.say("qs_tooManyEstimates") };
   const orgId = await currentOrgId();
   // ONE GATE (cn-v1137, aiAllowed): a company whose plan has ended gets no estimator — said in the
   // asker's role — and then the ceiling, in its own words.
   const gate = await aiAllowed(orgId, undefined, { ceilingWords: "Your company has hit its AI ceiling for the last 30 days. Message us and we'll lift it." });
-  if (!gate.ok) return { ok: false, error: gate.why };
+  if (!gate.ok) return { ok: false, error: gate.reason === "ceiling" ? await ws.say("qs_aiCeiling") : gate.why };
   // THE MONTH'S USAGE, ONE METER (cn-v1140; the estimate allowance of cn-v1128 is gone). The
   // company's model spend this month against its plan's budget (lib/usage-meter, the same read the
   // ring on the plan card shows): past 100% the run moves to the lighter model and the draft SAYS
@@ -2635,7 +2708,7 @@ async function guardEstimator(): Promise<
   const tier = tierOfUsage(usage);
   const notes: string[] = [];
   // The caller's language, read once: the lighter note and a declined run (saidFailure) say it.
-  const lang = await callerLang(ctx.supabase, ctx.userId);
+  const lang = await ws.lang();
   if (tier === "lighter") {
     notes.push(fillText(translator(lang)("us_estimatorLighter"), { date: shortDate(usage.resetOn, lang) }));
   }
@@ -2649,7 +2722,7 @@ export async function generateQuoteDraft(
 ): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
-  if (!scope.trim()) return { ok: false, error: "Describe the work first." };
+  if (!scope.trim()) return { ok: false, error: sayIn(gate.lang, "qs_describeWorkFirst") };
   try {
     const out = await runEstimator(scope, markupPct, laborRate, gate.model);
     if ("refused" in out) return saidFailure("refused", gate.lang);
@@ -2705,22 +2778,23 @@ export async function generateQuoteDraft(
  */
 async function intakePlanUpload(
   formData: FormData,
+  lang?: Lang,
 ): Promise<{ ok: true; bytes: ArrayBuffer; size: number; name: string; mime: string } | { ok: false; error: string } | null> {
   const intakePath = String(formData.get("intakePath") ?? "").trim();
   if (!intakePath) return null; // not this transport — fall through to the stash
   const inquiryId = String(formData.get("inquiryId") ?? "").trim();
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Only office staff can run the estimator." };
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? (await wordsOf(await createClient()).say("qs_staffOnlyEstimator")) };
   const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id, intake").eq("id", inquiryId).maybeSingle();
-  if (!inq) return { ok: false, error: "The lead this plan belongs to wasn't found." };
+  if (!inq) return { ok: false, error: sayIn(lang, "qs_leadPlanNotFound") };
   const orgId = String((inq as { org_id?: string }).org_id ?? "");
-  if (!isOwnIntakePath(orgId, intakePath)) return { ok: false, error: "That file isn't on this lead." };
+  if (!isOwnIntakePath(orgId, intakePath)) return { ok: false, error: sayIn(lang, "qs_fileNotOnLead") };
   const answers = ((inq as { intake?: { intake_answers?: Record<string, unknown> } }).intake?.intake_answers ??
     {}) as Record<string, unknown>;
   const known = Object.values(answers).some((v) => Array.isArray(v) && v.includes(intakePath));
-  if (!known) return { ok: false, error: "That file isn't on this lead." };
+  if (!known) return { ok: false, error: sayIn(lang, "qs_fileNotOnLead") };
   const { data: blob } = await createServiceClient().storage.from(INTAKE_BUCKET).download(intakePath);
-  if (!blob) return { ok: false, error: "Couldn't read the customer's plan from storage." };
+  if (!blob) return { ok: false, error: sayIn(lang, "qs_planUnreadStorage") };
   return {
     ok: true,
     bytes: await blob.arrayBuffer(),
@@ -2732,7 +2806,7 @@ async function intakePlanUpload(
 
 async function estimatorUpload(
   formData: FormData,
-  opts: { orgId: string | null; keep?: boolean },
+  opts: { orgId: string | null; keep?: boolean; lang?: Lang },
 ): Promise<
   | { ok: true; bytes: ArrayBuffer; size: number; name: string; mime: string; stashPath: string | null }
   | { ok: false; error: string }
@@ -2741,10 +2815,10 @@ async function estimatorUpload(
   if (storagePath) {
     // ONLY THE STASH (Panel plan, phase 4). Anything this door reads it may delete, so a path
     // anywhere else in the org's folder (a job's photo, a filed plan) is refused before either.
-    if (!isEstimatorStash(opts.orgId, storagePath)) return { ok: false, error: "That upload isn't in the estimator's folder. Upload it again." };
+    if (!isEstimatorStash(opts.orgId, storagePath)) return { ok: false, error: sayIn(opts.lang, "qs_uploadNotInFolder") };
     const supabase = await createClient();
     const { data: blob, error } = await supabase.storage.from("documents").download(storagePath);
-    if (error || !blob) return { ok: false, error: "Couldn't read the uploaded file — try the upload again." };
+    if (error || !blob) return { ok: false, error: sayIn(opts.lang, "qs_uploadUnread") };
     // THE STASH IS A TRANSPORT, NOT A LIBRARY (audit 7): delete on read, best-effort — an
     // orphan per estimate would grow the bucket forever, and a CED quote's net pricing must
     // not sit where any org member (field techs included) can list and download it. The one
@@ -2761,7 +2835,7 @@ async function estimatorUpload(
     };
   }
   const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a file to upload." };
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: sayIn(opts.lang, "qs_chooseFile") };
   return { ok: true, bytes: await file.arrayBuffer(), size: file.size, name: file.name, mime: file.type, stashPath: null };
 }
 
@@ -2775,12 +2849,12 @@ export async function generateQuoteDraftFromSupplier(
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
     // A SUPPLIER QUOTE IS NEVER KEPT: its net pricing is deleted the moment it is read (audit 7).
-    const up = await estimatorUpload(formData, { orgId: gate.orgId });
+    const up = await estimatorUpload(formData, { orgId: gate.orgId, lang: gate.lang });
     if (!up.ok) return up;
-    if (up.size > 20 * 1024 * 1024) return { ok: false, error: "File is too large (max 20 MB — the reader's ceiling)." };
+    if (up.size > 20 * 1024 * 1024) return { ok: false, error: sayIn(gate.lang, "qs_fileTooLarge") };
     const isPdf = up.mime === "application/pdf" || /\.pdf$/i.test(up.name);
     const isText = /csv|text|plain/.test(up.mime) || /\.(csv|txt)$/i.test(up.name);
-    if (!isPdf && !isText) return { ok: false, error: "Upload the supplier quote as a PDF or CSV." };
+    if (!isPdf && !isText) return { ok: false, error: sayIn(gate.lang, "qs_supplierPdfOrCsv") };
 
     const mk = formData.get("markupPct");
     const levelPct = mk != null && String(mk) !== "" ? Number(mk) : null;
@@ -2825,7 +2899,7 @@ export async function generateQuoteDraftFromSupplier(
     void recordAiUsage({ orgId: (org as { id?: string } | null)?.id, model: msg.model, surface: "estimator:supplier-quote", usage: msg.usage as never });
     if (refused(msg)) return saidFailure("refused", gate.lang);
     if (msg.stop_reason === "max_tokens")
-      return { ok: false, error: "That quote ran longer than one pass — split the file and try again." };
+      return { ok: false, error: sayIn(gate.lang, "qs_supplierTooLong") };
     const text = msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
     const parsed = (await parseAiJson(client, text, (org as { id?: string } | null)?.id)) as {
       items?: unknown[];
@@ -2875,7 +2949,7 @@ export async function generateQuoteDraftFromSupplier(
         };
       })
       .filter((l) => l.description);
-    if (!items.length) return { ok: false, error: "Couldn't read any line items off that quote — is it the itemized page?" };
+    if (!items.length) return { ok: false, error: sayIn(gate.lang, "qs_supplierNoLines") };
 
     // THE BOOK REVIEW — read off the PRE-tax nets, because the book stores COST as the supplier
     // states it; the tax share is an estimate-side concern (landed cost), not a catalog fact.
@@ -2902,17 +2976,17 @@ export async function generateQuoteDraftFromPlan(
   try {
     // The lead's stored plan first (intakePath), the office's own upload otherwise. The office's
     // upload through THIS door is plans, so it is kept (Erik's decision 3), never deleted on read.
-    const up = (await intakePlanUpload(formData)) ?? (await estimatorUpload(formData, { orgId: gate.orgId, keep: true }));
-    if (!up.ok) return { ok: false, error: up.error === "Choose a file to upload." ? "Choose a plan PDF to upload." : up.error };
+    const up = (await intakePlanUpload(formData, gate.lang)) ?? (await estimatorUpload(formData, { orgId: gate.orgId, keep: true, lang: gate.lang }));
+    if (!up.ok) return { ok: false, error: up.error === sayIn(gate.lang, "qs_chooseFile") ? sayIn(gate.lang, "qs_choosePlanPdf") : up.error };
     const stash: string | null = "stashPath" in up && typeof up.stashPath === "string" ? up.stashPath : null;
     const refuse = async (error: string) => {
       // Not a plan this door reads: it isn't kept either (the stash stays a transport).
       if (stash) void (await createClient()).storage.from("documents").remove([stash]).then(() => undefined, () => undefined);
       return { ok: false as const, error };
     };
-    if (up.mime !== "application/pdf" && !/\.pdf$/i.test(up.name)) return refuse("Upload the plan as a PDF.");
+    if (up.mime !== "application/pdf" && !/\.pdf$/i.test(up.name)) return refuse(sayIn(gate.lang, "qs_planAsPdf"));
     // Cap at 20 MB: base64 inflates ~33%, and Anthropic's per-request ceiling is 32 MB.
-    if (up.size > 20 * 1024 * 1024) return refuse("Plan is too large (max 20 MB — the reader's ceiling).");
+    if (up.size > 20 * 1024 * 1024) return refuse(sayIn(gate.lang, "qs_planTooLarge"));
     // FILED BEFORE THE READ: a take-off that fails still leaves the plans on file.
     if (stash && gate.orgId) {
       kept = await keepPlanUpload((await createClient()) as never, {
@@ -2981,12 +3055,12 @@ export async function generateQuoteDraftFromLeadPlans(
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
     const ctx = await requireStaff();
-    if ("error" in ctx) return { ok: false, error: ctx.error ?? "Only office staff can run the estimator." };
+    if ("error" in ctx) return { ok: false, error: ctx.error ?? (await wordsOf(await createClient()).say("qs_staffOnlyEstimator")) };
     const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id, intake").eq("id", inquiryId).maybeSingle();
-    if (!inq) return { ok: false, error: "The lead these plans belong to wasn't found." };
+    if (!inq) return { ok: false, error: sayIn(gate.lang, "qs_leadPlansNotFound") };
     const orgId = String((inq as { org_id?: string }).org_id ?? "");
     const paths = intakePaths((inq as { intake?: unknown }).intake).filter((p) => isOwnIntakePath(orgId, p));
-    if (!paths.length) return { ok: false, error: "This lead has no uploaded plans." };
+    if (!paths.length) return { ok: false, error: sayIn(gate.lang, "qs_leadNoPlans") };
 
     const svc = createServiceClient();
     const sized: { path: string; bytes: number | null }[] = [];
@@ -2999,13 +3073,13 @@ export async function generateQuoteDraftFromLeadPlans(
       sized.push({ path: p, bytes: error ? null : Number((meta as { size?: number } | null)?.size ?? 0) });
     }
     const { read, skipped } = pickReadablePlans(sized);
-    if (!read.length) return { ok: false, error: "None of the customer's uploads is a readable plan PDF." };
+    if (!read.length) return { ok: false, error: sayIn(gate.lang, "qs_noReadablePlan") };
 
     const docs: any[] = [];
     for (const p of read) {
       const { data: blob } = await svc.storage.from(INTAKE_BUCKET).download(p);
       if (!blob) {
-        skipped.push({ name: uploadDisplayName(p), reason: "file no longer in storage" });
+        skipped.push({ name: uploadDisplayName(p), reason: sayIn(gate.lang, "qs_fileGone") });
         continue;
       }
       docs.push({
@@ -3013,14 +3087,14 @@ export async function generateQuoteDraftFromLeadPlans(
         source: { type: "base64", media_type: "application/pdf", data: Buffer.from(await blob.arrayBuffer()).toString("base64") },
       });
     }
-    if (!docs.length) return { ok: false, error: "Couldn't read the customer's plans from storage." };
+    if (!docs.length) return { ok: false, error: sayIn(gate.lang, "qs_plansUnreadStorage") };
 
     const content = [...docs, { type: "text", text: planTakeoffInstruction(scope.trim()) }];
     const out = await runEstimator(content, markupPct, laborRate, gate.model);
     if ("refused" in out) return saidFailure("refused", gate.lang);
     // NO SILENT CAPS: what didn't ride is a review item, not a secret.
     if (skipped.length)
-      out.questions = [`Not read: ${skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}`, ...out.questions];
+      out.questions = [sayIn(gate.lang, "qs_notRead", { list: skipped.map((s) => `${s.name} (${s.reason})`).join("; ") }), ...out.questions];
     return { ok: true, ...out, questions: [...gate.notes, ...out.questions] };
   } catch (e) {
     return estimatorError(e, gate.lang);
@@ -3037,22 +3111,23 @@ export async function generateCircuitSchedule(
   quoteId: string,
 ): Promise<{ ok: true; circuits: QuoteCircuit[] } | { ok: false; error: string }> {
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Not allowed." };
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? (await wordsOf(await createClient()).say("qs_notAllowed")) };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   const { data: quote } = await supabase
     .from("quotes")
     .select("id, title, description, org_id")
     .eq("id", quoteId)
     .maybeSingle();
-  if (!quote) return { ok: false, error: "Estimate not found." };
+  if (!quote) return { ok: false, error: await ws.say("qs_estimateNotFoundShort") };
   const { data: items } = await supabase
     .from("quote_line_items")
     .select("description, quantity, unit")
     .eq("quote_id", quoteId)
     .order("sort_order");
   const lines = (items ?? []).map((i: any) => `${i.quantity} ${i.unit ?? ""} · ${i.description}`).join("\n");
-  if (!lines.trim()) return { ok: false, error: "Add line items first." };
+  if (!lines.trim()) return { ok: false, error: await ws.say("qs_addLinesFirst") };
 
   try {
     const client = getAnthropic();
@@ -3075,7 +3150,7 @@ export async function generateCircuitSchedule(
     });
     void recordAiUsage({ orgId: (quote as { org_id?: string }).org_id, model: msg.model, surface: "circuit-schedule", usage: msg.usage as never });
     // A decline is said in the asker's language, never parsed as an empty schedule.
-    if (refused(msg)) return saidFailure("refused", await callerLang(supabase, ctx.userId));
+    if (refused(msg)) return saidFailure("refused", await ws.lang());
     const text = msg.content
       .filter((b) => b.type === "text")
       .map((b) => (b as { text: string }).text)
@@ -3093,18 +3168,18 @@ export async function generateCircuitSchedule(
     // Read back (the silent-write law): a zero-row update is a 204, and "no error" is not "saved".
     const { data: wrote, error } = await supabase.from("quotes").update({ circuits }).eq("id", quoteId).select("id");
     if (error) return { ok: false, error: dbError(error) };
-    if (!wrote?.length) return { ok: false, error: "The circuit schedule didn't save. Open the estimate again and retry." };
+    if (!wrote?.length) return { ok: false, error: await ws.say("qs_circuitsNotSaved") };
     // The circuit schedule renders on the printed quote — regenerating drops the stored copy (audit 7).
     await bustDocPdf("quote", quoteId);
     revalidatePath(`/quotes/${quoteId}`);
     return { ok: true, circuits };
   } catch (e: any) {
-    if (isAiRefused(e)) return saidFailure("refused");
+    if (isAiRefused(e)) return saidFailure("refused", await ws.lang());
     return {
       ok: false,
       error: e?.message?.includes("ANTHROPIC_API_KEY")
-        ? "AI isn't available right now. Try again later."
-        : `Circuit schedule failed: ${e?.message ?? "unknown error"}`,
+        ? await ws.say("qs_aiUnavailable")
+        : await ws.say("qs_circuitFailed", { why: e?.message ?? (await ws.say("qs_unknownError")) }),
     };
   }
 }
@@ -3116,6 +3191,7 @@ export async function saveCircuitSchedule(
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const clean = (Array.isArray(circuits) ? circuits : [])
     .map((r) => ({
       ckt: r.ckt ? String(r.ckt).trim() : null,
@@ -3131,7 +3207,7 @@ export async function saveCircuitSchedule(
     .eq("id", quoteId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!wrote?.length) return { ok: false, error: "The circuit schedule didn't save. Open the estimate again and retry." };
+  if (!wrote?.length) return { ok: false, error: await ws.say("qs_circuitsNotSaved") };
   // The schedule prints as the second page — a hand correction has to bust the stored PDF just
   // like generating one does, or the share link keeps handing out the old panel (audit v921).
   await bustDocPdf("quote", quoteId);

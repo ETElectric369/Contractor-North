@@ -100,3 +100,18 @@ describe("ownerFirstName", () => {
     expect(reportError).toHaveBeenLastCalledWith("lapse-words:owner-read", expect.objectContaining({ message: "connection reset" }), { orgId: ORG });
   });
 });
+
+describe("the texting doors' paused words speak the reader's language (cn-v1145)", () => {
+  it("English inline, byte for byte; Spanish only with a Spanish caller's translator; the owner's name rides both", async () => {
+    const { textingPausedWords } = await import("./lapse-words");
+    const { translator } = await import("@/lib/i18n");
+    expect(textingPausedWords("owner")).toBe("Texting is paused until a plan is picked. Pick a plan in Settings › Getting Paid.");
+    expect(textingPausedWords("tech", "Larkspur")).toBe("Texting is paused until a plan is picked. Ask Larkspur to pick a plan.");
+    expect(textingPausedWords("tech")).toBe("Texting is paused until a plan is picked. Ask the owner to pick a plan.");
+    expect(textingPausedWords("tech", null, "es")).toBe("Texting is paused until a plan is picked. Ask the owner to pick a plan.");
+    const es = translator("es");
+    expect(textingPausedWords("owner", null, "es", es)).toBe("El envío de mensajes está en pausa hasta que se elija un plan. Elige un plan en Ajustes › Cobros.");
+    expect(textingPausedWords("tech", "Larkspur", "es", es)).toBe("El envío de mensajes está en pausa hasta que se elija un plan. Pídele a Larkspur que elija un plan.");
+    expect(textingPausedWords("tech", null, "es", es)).toBe("El envío de mensajes está en pausa hasta que se elija un plan. Pídele al dueño que elija un plan.");
+  });
+});

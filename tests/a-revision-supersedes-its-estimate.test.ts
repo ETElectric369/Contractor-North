@@ -7,6 +7,7 @@ import { isLiveQuote } from "../src/lib/invoice-import-rule";
 import { CUSTOMER_VISIBLE_STATUSES } from "../src/lib/customer-visible-docs";
 import { computeQuoteStats } from "../src/lib/analytics/money-metrics";
 import { visitsBehindQuoteFilter } from "../src/lib/appointments/behind-quote";
+import { dict } from "../src/lib/i18n";
 
 /**
  * A REVISION SUPERSEDES THE ESTIMATE IT REVISES (0391, cn-v1085). Two accepted estimates on one job add
@@ -62,20 +63,25 @@ describe("the doors", () => {
     expect(fn).toContain('const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status" as const;');
     expect(fn).toContain('select(`${columns}, estimate_format`)'); // the copy keeps the paper format (cn-v1131), two rungs across the 0395 gap
     expect(fn).toContain("const withFormat = !(first.error && isMissingColumn(first.error));");
-    expect(fn).toContain('"Only a sent or accepted estimate can be revised — edit this one instead."');
+    expect(fn).toContain('ws.say("qs_onlySentRevised")'); // the caller's words (cn-v1145); the English is the catalog's
+    expect(dict("en").qs_onlySentRevised).toBe("Only a sent or accepted estimate can be revised — edit this one instead.");
     expect(fn).toContain("job_id: revision ? ((quote as { job_id?: string | null }).job_id ?? null) : null,");
     expect(fn).toContain("title: revision ? (quote.title ?? \"Quote\") : `${quote.title ?? \"Quote\"} (copy)`,");
     expect(fn).toContain('.update({ revises_quote_id: id }).eq("id", res.id).select("id")');
     expect(fn).toContain('.delete().eq("id", res.id).eq("status", "draft").select("id")'); // no half-made revision
-    expect(fn).toContain("— Revise again.");
+    expect(fn).toContain('ws.say("qs_revisionNotMade"');
+    expect(dict("en").qs_revisionNotMade).toContain("— Revise again.");
     expect(fn).toContain("valid_until: revision ? null : quote.valid_until ?? null,");
     // cn-v1132: the door lives on the one editor now; the page only reads the row and mounts it.
     const page = src("src/app/(app)/quotes/estimate-editor.tsx");
     expect(page).toContain('(status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision />');
-    expect(page).toContain("Superseded by{");
-    expect(page).toContain("Revises{");
+    expect(page).toContain('t("qe_supersededBy")'); // the caller's words (cn-v1145); the English is the catalog's
+    expect(dict("en").qe_supersededBy).toBe("Superseded by {link} — that estimate is the price for this work now.");
+    expect(page).toContain('t("qe_revises")');
+    expect(dict("en").qe_revises).toBe("Revises {link}");
     const button = src("src/app/(app)/quotes/[id]/duplicate-quote-button.tsx");
-    expect(button).toContain('revision ? "Revise" : "Duplicate"');
+    expect(button).toContain('revision ? t("qt_btn_revise") : t("qt_btn_duplicate")'); // the caller's words (cn-v1145)
+    expect([dict("en").qt_btn_revise, dict("en").qt_btn_duplicate]).toEqual(["Revise", "Duplicate"]);
     expect(button).toContain("duplicateQuote(id, revision ? { revision: true } : undefined)");
   });
   it("accepting a revision supersedes the original on BOTH office branches, before the follow / the birth; a failed supersede skips the follow; the revision takes the original's job", () => {
@@ -89,13 +95,16 @@ describe("the doors", () => {
     expect(second).toBeGreaterThan(follow);
     expect(second).toBeLessThan(birth);
     expect(create).toContain("superseded?: string[];");
-    expect(create).toContain("Accept it again to retry.");
-    expect(create.indexOf("Accept it again to retry.")).toBeLessThan(follow); // the linked branch returns before the follow
+    expect(create).toContain('ws.say("qs_supersedeFailed"');
+    expect(dict("en").qs_supersedeFailed).toContain("Accept it again to retry.");
+    expect(create.indexOf('ws.say("qs_supersedeFailed"')).toBeLessThan(follow); // the linked branch returns before the follow
     expect(create).toContain('.update({ job_id: origJob }).eq("id", quoteId).is("job_id", null).select("id")'); // the original's job, read back
     expect(create).toContain("revises_quote_id: revises }, { jobId: job.id, outcome: \"won\", orgId: ctx.orgId }"); // the visit behind the original closes too, the company named (S6)
     const status = body(actions, "export async function updateQuoteStatus(");
-    expect(status).toContain('if (status === "superseded") return { ok: false as const, error: "Superseded is set by accepting a revision — Revise this estimate instead." };');
-    expect(status).toContain("replaced this estimate — change that one instead."); // leaving superseded by hand while the revision stands
+    expect(status).toContain('if (status === "superseded") return { ok: false as const, error: await ws.say("qs_supersededByAccepting") };');
+    expect(dict("en").qs_supersededByAccepting).toBe("Superseded is set by accepting a revision — Revise this estimate instead.");
+    expect(status).toContain('ws.say("qs_revisionReplacedChange"');
+    expect(dict("en").qs_revisionReplacedChange).toContain("replaced this estimate — change that one instead."); // leaving superseded by hand while the revision stands
     expect(status).toContain('QUOTE_STATUSES.filter((s) => s !== "superseded").join(", ")');
     expect(status).toContain("if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), said].filter(Boolean).join(\" \");");
   });
@@ -128,9 +137,11 @@ describe("the doors", () => {
     const guard = body(actions, "async function requireEditableQuote(");
     expect(guard).toContain('if ((quote as any).status === "superseded") {');
     expect(guard).toContain("rev = await revisionOf(supabase, { quoteId, orgId: null });"); // inside a try: a failed read is a said refusal
-    expect(guard).toContain("— edit that one instead.");
-    expect(actions).toContain("Revise it instead (or void the contract).");
-    expect(actions).toContain("Revise it instead (or void the draw).");
+    expect(guard).toContain('ws.say("qs_supersededBy"'); // the caller's words (cn-v1145)
+    expect(dict("en").qs_supersededBy).toContain("— edit that one instead.");
+    expect(dict("en").qs_lockSigned).toContain("Revise it instead (or void the contract).");
+    expect(dict("en").qs_lockDrawnOne).toContain("Revise it instead (or void the draw).");
+    expect(dict("en").qs_lockDrawnMany).toContain("Revise it instead (or void the draw).");
     expect(actions).not.toContain("Duplicate it as a revision");
   });
   it("a revision adopts the original's materials list (compare-and-set on the original's id), so the crew's bought marks carry over", () => {

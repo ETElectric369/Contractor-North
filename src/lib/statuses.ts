@@ -5,6 +5,9 @@
  * and `quote_status`. The write actions validate against these before touching the DB.
  */
 
+import type { Lang } from "@/lib/locale";
+import type { Words } from "@/lib/lang-words";
+
 export const WORK_ORDER_STATUSES = ["draft", "assigned", "in_progress", "complete", "cancelled"] as const;
 export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
 
@@ -12,6 +15,29 @@ export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
  *  by hand: a superseded estimate keeps its lines and history and stops counting as the work's price. */
 export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined", "expired", "superseded"] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+/** The catalog key a status reads its word from in another language (lib/words/quotes, qt_status_…). */
+const QUOTE_STATUS_KEY: Record<QuoteStatus, string> = {
+  draft: "qt_status_draft",
+  sent: "qt_status_sent",
+  accepted: "qt_status_accepted",
+  declined: "qt_status_declined",
+  expired: "qt_status_expired",
+  superseded: "qt_status_superseded",
+};
+
+/** An estimate's status as a person reads it (the estimates-in-Spanish wave, cn-v1145), shaped like
+ *  lib/job-status jobStatusLabel. English, the default, is the raw value byte for byte — every badge
+ *  printed `{q.status}` ("draft") and each caller keeps its own capitalizing — so a caller that passes
+ *  nothing reads what it always did. A Spanish reader gets the catalog's word ("borrador") through the
+ *  caller's translator; this file rides customer bundles (lib/catalog-free-libs.test.ts), so it imports
+ *  no dictionary. An unknown or retired value reads as itself in both languages. */
+export function estimateStatusLabel(status: string, lang: Lang = "en", words?: Words): string {
+  const raw = String(status ?? "");
+  if (lang !== "es" || !words) return raw;
+  const key = QUOTE_STATUS_KEY[raw as QuoteStatus];
+  return key ? words(key) : raw;
+}
 
 /** Inquiry (lead) pipeline statuses. inquiries.status is FREE TEXT in the DB (0034 —
  *  comment-only enum), so this TS spine is the ONLY write guard: a junk status write

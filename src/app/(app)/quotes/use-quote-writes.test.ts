@@ -643,6 +643,16 @@ describe("a line the server may hold is deleted there, never dropped (S1)", () =
     expect(s.get().said).toBe(LINE_WAS_GONE);
     expect(s.get().refusals).toEqual({});
   });
+  it("a Spanish-worded refusal carrying lineGone lands as gone — the flag decides, never the sentence (cn-v1145)", async () => {
+    const { s, a } = saved([{ ...trench, id: "li-1" }], {
+      deleteQuoteItem: vi.fn(async () => ({ ok: false, error: "Esa línea no está en este presupuesto.", lineGone: true })),
+    });
+    expect(await s.removeLine(s.get().items[0].key)).toBe(true);
+    expect(a.deleteQuoteItem).toHaveBeenCalledWith("li-1", "q1");
+    expect(s.get().items.length).toBe(0);
+    expect(s.get().said).toBe(LINE_WAS_GONE);
+    expect(s.get().refusals).toEqual({});
+  });
   it("removed while another write is on the wire: queued behind it, then deleted on the server — the queued path drops nothing with an id", async () => {
     const g = gate<{ ok: boolean }>();
     const { s, a } = saved([{ ...trench, id: "li-1" }], {

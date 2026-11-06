@@ -23,6 +23,8 @@ import { rowForWho, type RuleInputs } from "@/lib/estimate/reprice-rows";
 import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";
 import { rememberTaskAsKit } from "../price-list/kit-actions";
 import type { DraftLineItem, TaskDetail, TaskDetailMaterial, TaskLabor } from "@/lib/estimate/line-map";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 export interface PriceItemLite {
   id: string;
@@ -66,7 +68,7 @@ export function LineDescInput({
   disabled,
   priceItems,
   pricing,
-  placeholder = "Description",
+  placeholder,
   className,
   noteDoor = true,
 }: {
@@ -92,6 +94,7 @@ export function LineDescInput({
   placeholder?: string;
   className?: string;
 }) {
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   // The head is what the box shows and the book matches; the note rides along in `value`.
   const { head, note } = splitLineNote(value);
@@ -113,7 +116,7 @@ export function LineDescInput({
   return (
     <div className="relative">
       <Input
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("qb_description")}
         className={className}
         value={head}
         autoFocus={autoFocus}
@@ -149,7 +152,7 @@ export function LineDescInput({
       {open && priceItems.length === 0 && (
         <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
           {/* Price List sits in the dock's Money group (lib/dock.ts); Tools holds only Calculators & Tools. */}
-          No price book yet. Upload or build one under Money → Price List and these will autocomplete.
+          {t("qb_noPriceBookYet")}
         </div>
       )}
       {open && priceItems.length > 0 && (
@@ -187,12 +190,12 @@ export function LineDescInput({
           {matches.length === 0 && (
             // Say it out loud. A dropdown that renders nothing at all reads as a broken control
             // rather than as an answer.
-            <li className="px-3 py-2 text-sm text-slate-400">Nothing in your price list matches that.</li>
+            <li className="px-3 py-2 text-sm text-slate-400">{t("qb_nothingMatches")}</li>
           )}
           {/* A silent slice reads as "that's everything". */}
           {!head.trim() && priceItems.length > matches.length && (
             <li className="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
-              Showing {matches.length} of {priceItems.length} — type to narrow it down.
+              {fillText(t("qb_showingNofTotal"), { n: String(matches.length), total: String(priceItems.length) })}
             </li>
           )}
         </ul>
@@ -205,8 +208,8 @@ export function LineDescInput({
         <div className="mt-1 text-xs">
           {noteOpen ? (
             <Textarea
-              aria-label="Note"
-              placeholder="A note under this line — it prints on the estimate."
+              aria-label={t("qb_note")}
+              placeholder={t("qb_notePlaceholder")}
               className="min-h-[3.5rem] px-2 py-1 text-xs"
               value={note}
               autoFocus
@@ -236,7 +239,7 @@ export function LineDescInput({
                 onClick={() => setNoteOpen(true)}
                 className="font-medium text-brand hover:underline disabled:opacity-50"
               >
-                {hasNote ? "Edit Note" : "Add A Note"}
+                {hasNote ? t("qb_btn_editNote") : t("qb_btn_addANote")}
               </button>
             </>
           )}
@@ -317,6 +320,8 @@ export function TaskBreakdown({
   /** Write the line: as it stands (a box left), or as `next` says (a tap that decided something). */
   onCommit: (next?: DraftLineItem) => void;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const type = (next: TaskDetail) => onChange(lineFromDetail(line, next));
   const commit = (next: TaskDetail) => onCommit(lineFromDetail(line, next));
   const leave = () => onCommit();
@@ -379,15 +384,15 @@ export function TaskBreakdown({
   // for a typed figure.
   const rateWords = (row: TaskLabor, live: { rate: number; from: LaborRateFrom; person: PersonOption | null }): string => {
     const at = `${formatCurrency(row.rate)}/h`;
-    if (row.rate_from === "hand") return `× ${at} · typed`;
-    if (row.rate_from === "stated") return `× ${at} · from the scope`;
-    if (row.rate_from === "legacy") return `quoted at ${at}`;
-    if (cents(live.rate) === row.rate) return `× ${at} · ${laborRateFromWords(live.from, live.person?.name)}`;
-    return `quoted at ${at} · the rule says ${live.rate > 0 ? `${formatCurrency(live.rate)}/h` : "no rate"} now`;
+    if (row.rate_from === "hand") return fillText(t("qb_rateTyped"), { at });
+    if (row.rate_from === "stated") return fillText(t("qb_rateFromScope"), { at });
+    if (row.rate_from === "legacy") return fillText(t("qb_rateQuotedAt"), { at });
+    if (cents(live.rate) === row.rate) return `× ${at} · ${laborRateFromWords(live.from, live.person?.name, lang, t)}`;
+    return fillText(t("qb_rateRuleMoved"), { at, rule: live.rate > 0 ? `${formatCurrency(live.rate)}/h` : t("qb_noRate") });
   };
   // The one way back from a typed figure, named for what it goes back TO (a button, so Title Case).
   const backWords = (live: { from: LaborRateFrom; person: PersonOption | null }): string | null =>
-    live.from === "person" && live.person ? `Use ${live.person.name}'s Rate` : live.from === "level" ? "Use The Customer's Level" : live.from === "default" ? "Use The Company Default" : null;
+    live.from === "person" && live.person ? fillText(t("qb_usePersonsRate"), { name: live.person.name }) : live.from === "level" ? t("qb_btn_useCustomersLevel") : live.from === "default" ? t("qb_btn_useCompanyDefault") : null;
   // THE UNITS BOX on a kit-built line: the kit's hours and parts are derived again for the new
   // count through THE one expandTaskKit, his own stand, and the count rides the line's name.
   const setUnits = (n: number) => {
@@ -424,7 +429,7 @@ export function TaskBreakdown({
   // The kit behind the line, while the company's Kits switch is on (off = no kit door, as everywhere).
   const fromKit = kitsOn && d.kit_id ? taskKits.find((k) => k.id === d.kit_id) ?? null : null;
   const openKit = () => {
-    const probe = kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit });
+    const probe = kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit }, lang, t);
     if (!probe.ok) {
       setKitSaid({ ok: false, text: probe.error });
       return;
@@ -438,19 +443,19 @@ export function TaskBreakdown({
       const r = await rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d, category: kitCategory.trim() || null });
       if (r.ok) {
         setKitOpen(false);
-        setKitSaid({ ok: true, text: `Remembered as the kit ${r.name ?? kitName} — it's under Kits on the Price List and in the Inspector's kit picker.` });
+        setKitSaid({ ok: true, text: fillText(t("qb_rememberedAsKit"), { name: r.name ?? kitName }) });
       } else {
-        setKitSaid({ ok: false, text: r.error ?? "Could not remember the kit." });
+        setKitSaid({ ok: false, text: r.error ?? t("qb_couldNotRememberKit") });
       }
     } catch {
-      setKitSaid({ ok: false, text: "Could not reach the server — press Save The Kit again." });
+      setKitSaid({ ok: false, text: t("qb_couldNotReachServer") });
     } finally {
       setKitBusy(false);
     }
   };
   // WHAT WILL BE SAVED, before he saves it: the per-unit figures the rule will write, or the one
   // thing still in the way. Nothing is divided by a count he cannot see.
-  const planned = kitOpen ? kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit }) : null;
+  const planned = kitOpen ? kitFromTaskDetail(d, { name: kitName || "kit", unit: kitUnit }, lang, t) : null;
   return (
     <div className="mt-1.5 space-y-1 rounded-md border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-600">
       {d.labor.map((row, i) => {
@@ -465,20 +470,20 @@ export function TaskBreakdown({
         const back = cents(live.rate) !== row.rate ? backWords(live) : null;
         return (
           <div key={i} className="flex flex-wrap items-center gap-1.5">
-            <Select aria-label="Who" className={`${box} w-28 py-0`} value={who} disabled={disabled} onChange={(e) => pickWho(i, e.target.value)}>
-              <option value="">Labor</option>
+            <Select aria-label={t("qb_who")} className={`${box} w-28 py-0`} value={who} disabled={disabled} onChange={(e) => pickWho(i, e.target.value)}>
+              <option value="">{t("qb_labor")}</option>
               {people.map((p) => (
                 <option key={p.id} value={`person:${p.id}`}>
                   {p.name}
                 </option>
               ))}
-              {!known && <option value={`person:${row.person_id}`}>Someone No Longer On The Team</option>}
-              <option value="other">Other…</option>
+              {!known && <option value={`person:${row.person_id}`}>{t("qb_someoneNoLongerOnTeam")}</option>}
+              <option value="other">{t("qb_other")}</option>
             </Select>
             {who === "other" && (
               <Input
-                aria-label="Who, in your words"
-                placeholder="Helper, 2-man crew…"
+                aria-label={t("qb_whoInYourWords")}
+                placeholder={t("qb_whoPlaceholder")}
                 className={`${box} w-28`}
                 value={row.label ?? ""}
                 disabled={disabled}
@@ -486,22 +491,22 @@ export function TaskBreakdown({
                 onBlur={leave}
               />
             )}
-            <NumberInput aria-label="Hours" placeholder="hours?" className={`${box} w-20`} value={row.hours ?? 0} disabled={disabled} onValueChange={(n) => setHours(i, n)} onBlur={leave} />
+            <NumberInput aria-label={t("qb_hours")} placeholder={t("qb_hoursQ")} className={`${box} w-20`} value={row.hours ?? 0} disabled={disabled} onValueChange={(n) => setHours(i, n)} onBlur={leave} />
             {/* THE RATE CHIP: the figure and where it came from (rateWords). Tapping it opens a box; a
                 typed figure is his ("typed") and stands until he goes back to the rule by name. */}
             <button
               type="button"
               onClick={() => setRateOpen(rateOpen === i ? null : i)}
               className="whitespace-nowrap rounded px-1 hover:bg-white hover:underline"
-              aria-label="Change The Rate"
+              aria-label={t("qb_btn_changeTheRate")}
             >
               {words}
             </button>
             {rateOpen === i && (
               <>
                 <NumberInput
-                  aria-label="Rate"
-                  placeholder="$/h"
+                  aria-label={t("qb_rate")}
+                  placeholder={t("qb_perHour")}
                   className={`${box} w-20`}
                   value={row.rate}
                   autoFocus
@@ -527,7 +532,7 @@ export function TaskBreakdown({
             <span className="ml-auto tabular-nums text-slate-700">{formatCurrency(laborMoney(row))}</span>
             {/* The first row is the task's labor; a task always has one. The others can go. */}
             {i > 0 && (
-              <button type="button" disabled={disabled} onClick={() => dropLabor(i)} className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50" aria-label="Remove This Labor">
+              <button type="button" disabled={disabled} onClick={() => dropLabor(i)} className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50" aria-label={t("qb_btn_removeThisLabor")}>
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
@@ -536,15 +541,15 @@ export function TaskBreakdown({
       })}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
         <button type="button" disabled={disabled} onClick={addLabor} className="font-medium text-brand hover:underline disabled:opacity-50">
-          Add Labor At Another Rate
+          {t("qb_btn_addLaborAtAnotherRate")}
         </button>
-        {d.labor.length > 1 && <span className="tabular-nums text-slate-500">Labor {formatCurrency(money.labor)}</span>}
+        {d.labor.length > 1 && <span className="tabular-nums text-slate-500">{fillText(t("qb_laborTotal"), { amount: formatCurrency(money.labor) })}</span>}
       </div>
       {d.materials.map((m, i) => (
         <div key={i} className="flex flex-wrap items-center gap-1.5">
           <div className="min-w-[8rem] flex-1">
             <LineDescInput
-              placeholder="Part"
+              placeholder={t("qb_part")}
               className={box}
               value={m.name}
               noteDoor={false}
@@ -562,8 +567,8 @@ export function TaskBreakdown({
             />
           </div>
           <NumberInput
-            aria-label="How many"
-            placeholder="how many"
+            aria-label={t("qb_howMany")}
+            placeholder={t("qb_howManyPlaceholder")}
             className={`${box} w-20`}
             value={m.qty ?? 0}
             disabled={disabled}
@@ -572,8 +577,8 @@ export function TaskBreakdown({
           />
           <span>×</span>
           <NumberInput
-            aria-label="Price each"
-            placeholder="price?"
+            aria-label={t("qb_priceEach")}
+            placeholder={t("qb_priceQ")}
             className={`${box} w-20`}
             value={m.sell ?? 0}
             disabled={disabled}
@@ -588,7 +593,7 @@ export function TaskBreakdown({
             disabled={disabled}
             onClick={() => dropPart(i)}
             className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-            aria-label="Remove This Part"
+            aria-label={t("qb_btn_removeThisPart")}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -603,9 +608,9 @@ export function TaskBreakdown({
           onClick={() => type({ ...d, materials: [...d.materials, { code: null, name: "", qty: null, cost: null, sell: null }] })}
           className="font-medium text-brand hover:underline disabled:opacity-50"
         >
-          Add A Part
+          {t("qb_btn_addAPart")}
         </button>
-        {d.materials.length > 0 && <span className="tabular-nums text-slate-500">Parts {formatCurrency(money.parts)}</span>}
+        {d.materials.length > 0 && <span className="tabular-nums text-slate-500">{fillText(t("qb_partsTotal"), { amount: formatCurrency(money.parts) })}</span>}
       </div>
       {/* The sum is for ONE of the task; when the line's Qty is more, the row says what the paper will
           charge, so $540 under a $1,080 line is not a puzzle (the Qty box is "this many of the task"). */}
@@ -620,17 +625,17 @@ export function TaskBreakdown({
         {d.kit_id ? (
           <>
             <span className="text-slate-500">
-              From the kit {fromKit ? fromKit.name : kitsOn ? "it was built from (no longer in your kits)" : "it was built from"}
+              {fromKit ? fillText(t("qb_fromKitNamed"), { name: fromKit.name }) : kitsOn ? t("qb_fromKitGone") : t("qb_fromKitHidden")}
             </span>
             {fromKit ? (
               <>
-                <span className="text-slate-500">· Units</span>
+                <span className="text-slate-500">{t("qb_dotUnits")}</span>
                 {/* A blank count reads BLANK, never as a chosen 1 (audit v1085, carried [5]): the line's flag
                     asks "units?" until he types one; the kit prices at one unit meanwhile. */}
-                <NumberInput aria-label="Units" placeholder="units" className={`${box} w-20`} value={d.units ?? 0} disabled={disabled} onValueChange={setUnits} onBlur={leave} />
+                <NumberInput aria-label={t("qb_units")} placeholder={t("qb_unitsPlaceholder")} className={`${box} w-20`} value={d.units ?? 0} disabled={disabled} onValueChange={setUnits} onBlur={leave} />
                 {fromKit.unit && <span className="text-slate-500">{fromKit.unit}</span>}
                 {d.labor.some((r) => r.hours !== null && r.from_kit !== true) && Number(fromKit.labor_minutes) > 0 && (
-                  <span className="text-slate-400">· your hours stand; the kit&rsquo;s parts follow the units</span>
+                  <span className="text-slate-400">{t("qb_hoursStand")}</span>
                 )}
               </>
             ) : (
@@ -639,39 +644,39 @@ export function TaskBreakdown({
           </>
         ) : !kitsOn ? null : kitOpen ? (
           <>
-            <Input aria-label="Kit name" placeholder="Kit name" className={`${box} w-40`} value={kitName} onChange={(e) => setKitName(e.target.value)} />
-            <span>per</span>
-            <Input aria-label="Unit" placeholder="ea" className={`${box} w-20`} value={kitUnit} onChange={(e) => setKitUnit(e.target.value)} />
-            <span>under</span>
-            <Input aria-label="Scope" placeholder="the scope, like Deck" className={`${box} w-32`} value={kitCategory} onChange={(e) => setKitCategory(e.target.value)} />
+            <Input aria-label={t("qb_kitName")} placeholder={t("qb_kitName")} className={`${box} w-40`} value={kitName} onChange={(e) => setKitName(e.target.value)} />
+            <span>{t("qb_per")}</span>
+            <Input aria-label={t("qb_unit")} placeholder={t("qb_ea")} className={`${box} w-20`} value={kitUnit} onChange={(e) => setKitUnit(e.target.value)} />
+            <span>{t("qb_under")}</span>
+            <Input aria-label={t("qb_scope")} placeholder={t("qb_scopePlaceholder")} className={`${box} w-32`} value={kitCategory} onChange={(e) => setKitCategory(e.target.value)} />
             <button
               type="button"
               disabled={kitBusy || !kitName.trim() || !planned?.ok}
               onClick={() => void remember()}
               className="font-medium text-brand hover:underline disabled:opacity-50"
             >
-              {kitBusy ? "Saving…" : "Save The Kit"}
+              {kitBusy ? t("qb_btn_saving") : t("qb_btn_saveTheKit")}
             </button>
             <button type="button" onClick={() => setKitOpen(false)} className="text-slate-500 hover:underline">
-              Cancel
+              {t("qb_btn_cancel")}
             </button>
           </>
         ) : (
           <button type="button" onClick={openKit} className="font-medium text-brand hover:underline">
-            Remember As A Kit
+            {t("qb_btn_rememberAsAKit")}
           </button>
         )}
       </div>
       {planned && (
         <p className={planned.ok ? "text-slate-500" : "text-amber-700"}>
-          {planned.ok ? `Will save: ${kitSummary(planned.value, d.units)}` : planned.error}
+          {planned.ok ? fillText(t("qb_willSave"), { summary: kitSummary(planned.value, d.units, lang, t) }) : planned.error}
         </p>
       )}
       {kitSaid && <p className={kitSaid.ok ? "text-emerald-700" : "text-amber-700"}>{kitSaid.text}</p>}
       {/* A Unit $ typed over the sum is HIS price and stands; the breakdown then describes a number
           the customer is not being asked for, so the document leaves it off (quote-document.tsx
           prints it only while detailExplains). Nothing is deleted: the job still reads the hours. */}
-      {!detailExplains(d, line) && <p className="text-amber-700">Price set by hand — the breakdown stays off the paper</p>}
+      {!detailExplains(d, line) && <p className="text-amber-700">{t("qb_priceSetByHand")}</p>}
     </div>
   );
 }

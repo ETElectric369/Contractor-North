@@ -6,6 +6,8 @@ import { Share, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 type Payload = { ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string };
 
@@ -54,7 +56,7 @@ type Payload = { ok: boolean; error?: string; needsSend?: boolean; title?: strin
  */
 export function ShareIconButton({
   load,
-  label = "Share",
+  label,
   className,
 }: {
   load: (opts?: { sendIt?: boolean }) => Promise<Payload>;
@@ -64,12 +66,14 @@ export function ShareIconButton({
   const [busy, setBusy] = useState(false);
   const [ask, setAsk] = useState<string | null>(null);
   const toast = useToast();
+  const t = translator(useLang());
+  const doorLabel = label ?? t("qt_btn_share");
   const router = useRouter();
 
   /** Hand the payload to the OS, or to the clipboard. Called with the tap still warm. */
   async function handOff(res: Payload) {
     if (!res.ok || !res.url) {
-      toast(res.error ?? "Couldn't build the link.", "error");
+      toast(res.error ?? t("qt_couldntBuildLink"), "error");
       return;
     }
     if (typeof navigator !== "undefined" && navigator.share) {
@@ -88,9 +92,9 @@ export function ShareIconButton({
     // paste into an email or a text reads as a sentence rather than a bare link.
     try {
       await navigator.clipboard.writeText(`${res.text} ${res.url}`);
-      toast("Copied — paste it into a text or email.", "success");
+      toast(t("qt_copiedPasteIt"), "success");
     } catch {
-      toast("Couldn't share that — try Email instead.", "error");
+      toast(t("qt_couldntShare"), "error");
     }
   }
 
@@ -104,12 +108,12 @@ export function ShareIconButton({
          sending, so one plain-words yes marks it sent and opens the sheet in the same motion —
          but the yes has to be its own tap, or the sheet has no tap left to open on. */
       if (!res.ok && res.needsSend) {
-        setAsk(res.error ?? "This is still a draft.");
+        setAsk(res.error ?? t("qt_stillADraft"));
         return;
       }
       await handOff(res);
     } catch {
-      toast("Couldn't share that — try Email instead.", "error");
+      toast(t("qt_couldntShare"), "error");
     } finally {
       setBusy(false);
     }
@@ -128,7 +132,7 @@ export function ShareIconButton({
       setAsk(null);
       if (res.ok) router.refresh(); // the page must show Sent, not yesterday's Draft
     } catch {
-      toast("Couldn't share that — try Email instead.", "error");
+      toast(t("qt_couldntShare"), "error");
       setAsk(null);
     } finally {
       setBusy(false);
@@ -141,8 +145,8 @@ export function ShareIconButton({
         type="button"
         variant="outline"
         size="icon-sm"
-        aria-label={label}
-        title={label}
+        aria-label={doorLabel}
+        title={doorLabel}
         onClick={go}
         disabled={busy}
         className={className}
@@ -153,21 +157,20 @@ export function ShareIconButton({
       <Modal
         open={!!ask}
         onClose={() => setAsk(null)}
-        title="Share This Now?"
+        title={t("qt_btn_shareThisNow")}
         footer={
           <ModalActions
             onCancel={() => setAsk(null)}
             onSave={sendAndShare}
-            saveLabel="Mark Sent And Share"
+            saveLabel={t("qt_btn_markSentAndShare")}
             saving={busy}
-            cancelLabel="Not Yet"
+            cancelLabel={t("qt_btn_notYet")}
           />
         }
       >
         <p className="text-sm leading-relaxed text-slate-700">{ask}</p>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
-          Sharing the link is sending it, so this marks it sent and opens your share sheet in the
-          same motion. You can still change it afterwards.
+          {t("qt_sharingIsSending")}
         </p>
       </Modal>
     </>

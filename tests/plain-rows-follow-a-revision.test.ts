@@ -269,7 +269,7 @@ describe("the doors say what the paperwork did", () => {
     expect(mats).toContain("const said: string[] = [takeOffWords(res)]");
     const quotes = src("src/app/(app)/quotes/actions.ts");
     expect(quotes.match(/const wo = await createWorkOrderFromQuote\(quoteId\);\n\s*const list = await createMaterialListFromQuote\(quoteId\);/g)).toHaveLength(2);
-    expect(quotes.match(/paperworkNote\(wo, list\)/g)).toHaveLength(2);
+    expect(quotes.match(/paperworkNote\(wo, list, ws\)/g)).toHaveLength(2); // its fallback words in the caller's language (cn-v1145)
     expect(quotes).toContain("const said = [list.said, follow.said].filter(Boolean).join(\" \");");
   });
   it("takeOffWords is null when nothing was adopted or nothing changed", () => {

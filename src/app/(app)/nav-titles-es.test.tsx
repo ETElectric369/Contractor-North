@@ -122,7 +122,9 @@ describe("every Sales and Money page reads its title and line through the map", 
 describe("Estimates / Quotes: the one computed heading and its line", () => {
   it("the page picks nv_page_quotes with ?type=quote and nv_page_estimates otherwise, and the matching line", () => {
     const src = read("quotes/page.tsx");
-    expect(src).toContain("const t = translator(await currentLangFor(user?.id));");
+    // The language read once into `lang` (cn-v1145: the status filter's word reads it too), then the translator.
+    expect(src).toContain("const lang = await currentLangFor(user?.id);\n  const t = translator(lang);");
+    expect(src.match(/await currentLangFor\(/g) ?? []).toHaveLength(1);
     expect(src).not.toContain("currentLang()");
     expect(src).toContain('const heading = filter === "quote" ? t("nv_page_quotes") : t("nv_page_estimates");');
     expect(src).toContain('<PageHeader title={heading} description={filter === "quote" ? t("nv_desc_quotes") : t("nv_desc_estimates")}>');

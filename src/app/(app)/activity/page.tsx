@@ -9,7 +9,7 @@ import { currentLangFor } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { hoursBetween, formatDuration, formatDateShort, DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
-import { visitTitle } from "@/lib/statuses";
+import { estimateStatusLabel, visitTitle } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +50,11 @@ export default async function ActivityPage() {
     : { data: null };
   if (!me || !isStaffRole((me as { role?: string }).role ?? "")) redirect("/planner");
 
+  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav; an
+  // estimate's status in the feed too (cn-v1145, lib/statuses estimateStatusLabel).
+  const lang = await currentLangFor(user?.id);
+  const t = translator(lang);
+
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
 
   const [jobs, quotes, invoices, appts, tasks, times] = await Promise.all([
@@ -63,7 +68,7 @@ export default async function ActivityPage() {
 
   const items: Item[] = [];
   for (const j of jobs.data ?? []) items.push({ when: j.created_at as string, icon: "job", text: `Job created — ${j.job_number} ${j.name}`, href: `/jobs/${j.id}` });
-  for (const q of quotes.data ?? []) items.push({ when: q.created_at as string, icon: "quote", text: `Quote ${q.quote_number} (${q.status})`, href: `/quotes/${q.id}` });
+  for (const q of quotes.data ?? []) items.push({ when: q.created_at as string, icon: "quote", text: `Quote ${q.quote_number} (${estimateStatusLabel(String(q.status), lang, t)})`, href: `/quotes/${q.id}` });
   for (const iv of invoices.data ?? []) items.push({ when: iv.created_at as string, icon: "invoice", text: `Invoice ${iv.invoice_number} (${iv.status})`, href: `/billing/${iv.id}` });
   // Deep-link to the day the visit HAPPENS (schedule day drill), not a generic list.
   // The site visit's one word (lib/statuses): "Inspection booked — <title>". The TITLE goes through
@@ -81,8 +86,6 @@ export default async function ActivityPage() {
   items.sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime());
   const feed = items.slice(0, 60);
 
-  // The title and its line in the person's language (cn-v1139): nv_page_ / nv_desc_ in lib/words/nav.
-  const t = translator(await currentLangFor(user?.id));
 
   return (
     <div className="mx-auto max-w-3xl">

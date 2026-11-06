@@ -14,10 +14,10 @@ import type { WordCatalog } from "@/lib/words/types";
  * keep the scan honest.
  */
 
-/** The twenty catalogs (lib/words; nv_ the office's map since cn-v1139, us_ the usage meter since cn-v1140, the agenda's four — ag_, ag_cal_, ag_rail_, ag_srv_ — since the agenda-in-Spanish wave, the visit page's three — su_ the Settle Up button, vi_ the Inspector, vp_ the visit page — since the visit-page-in-Spanish wave, cn-v1144). */
-export const CATALOG_FLOOR = 20;
-/** The keys across every catalog at the visit-page wave's close (cn-v1144: 2,873 — the visit page's three catalogs whole, su_ 125, vi_ 185, vp_ 260, and the shell's and Nort's additions; skeptic #50's fixes added nine to vp_: the Lost door's own vp_btn_ key and the clock-in clash's eight — recount with `CATALOGS.flatMap((c) => Object.keys(c.en)).length` and set the floor to the count, never below it), at that wave's foundation (2,406: su_ 125 whole and the shell's 7 for the off line and the directions link, vi_ and vp_ still empty shelves), at the agenda wave (2,274: the agenda's four catalogs whole — ag_ 89, ag_cal_ 122, ag_rail_ 175, ag_srv_ 155 = 541), at its foundation (1,825: the agenda's 93 + three placeholders, one per sub-catalog), at cn-v1140 (1,729 with the fixer's four — the shell's used-up line, the estimator's lighter line, the notice button, Ask The Owner — less the owner slot word; 1,726 with the plan card's words; 1,711 when the floor was set; 1,694 at cn-v1139; 1,562 at cn-v1138); raise it as keys land. */
-export const KEYS_FLOOR = 2873;
+/** The twenty-four catalogs (lib/words; nv_ the office's map since cn-v1139, us_ the usage meter since cn-v1140, the agenda's four — ag_, ag_cal_, ag_rail_, ag_srv_ — since the agenda-in-Spanish wave, the visit page's three — su_ the Settle Up button, vi_ the Inspector, vp_ the visit page — since the visit-page-in-Spanish wave, cn-v1144, the estimates' four — qt_ the screens, qe_ the one editor, qb_ the task breakdown, qs_ the server and its libraries — since the estimates-in-Spanish wave, cn-v1145). */
+export const CATALOG_FLOOR = 24;
+/** The keys across every catalog at the estimates wave's close (cn-v1145: 3,422 — the four estimates catalogs whole, qt_ 159, qe_ 136, qb_ 66, qs_ 188; the fixer took the editor's three copies of the type words (the editor reads qt_'s) and added qs_lib_text's five for the Text doors' refusals), at its foundation (2,951 — the status family's six in qt_ and the four shared libraries' 72 in qs_lib_, qe_ and qb_ still empty shelves), at the visit-page wave's close (cn-v1144: 2,873 — the visit page's three catalogs whole, su_ 125, vi_ 185, vp_ 260, and the shell's and Nort's additions; skeptic #50's fixes added nine to vp_: the Lost door's own vp_btn_ key and the clock-in clash's eight — recount with `CATALOGS.flatMap((c) => Object.keys(c.en)).length` and set the floor to the count, never below it), at that wave's foundation (2,406: su_ 125 whole and the shell's 7 for the off line and the directions link, vi_ and vp_ still empty shelves), at the agenda wave (2,274: the agenda's four catalogs whole — ag_ 89, ag_cal_ 122, ag_rail_ 175, ag_srv_ 155 = 541), at its foundation (1,825: the agenda's 93 + three placeholders, one per sub-catalog), at cn-v1140 (1,729 with the fixer's four — the shell's used-up line, the estimator's lighter line, the notice button, Ask The Owner — less the owner slot word; 1,726 with the plan card's words; 1,711 when the floor was set; 1,694 at cn-v1139; 1,562 at cn-v1138); raise it as keys land. */
+export const KEYS_FLOOR = 3422;
 
 /**
  * THE KEY FAMILIES THAT ARE CLICKABLES (Erik's law: Title Case in BOTH languages, every word
@@ -28,10 +28,12 @@ export const KEYS_FLOOR = 2873;
  * not Title Case — the pages' own words, not the catalog's to change.
  */
 // The agenda's four catalogs key every clickable with `_btn_` right after the prefix (lib/words/agenda's header); so do
-// the visit page's three (su_btn_, vi_btn_, vp_btn_) and, since that wave, the shell's new clickables (sh_btn_).
+// the visit page's three (su_btn_, vi_btn_, vp_btn_) and, since that wave, the shell's new clickables (sh_btn_); so do the
+// estimates' four (qt_btn_, qe_btn_, qb_btn_, qs_btn_), since the estimates-in-Spanish wave (cn-v1145).
 const TITLE_CASE_FAMILIES = [
   "sh_dock_", "sh_help_", "sh_btn_", "nv_add_", "nv_set_", "nv_role_", "nv_sched_", "us_door_",
   "ag_btn_", "ag_cal_btn_", "ag_rail_btn_", "ag_srv_btn_", "su_btn_", "vi_btn_", "vp_btn_", "nt_btn_",
+  "qt_btn_", "qe_btn_", "qb_btn_", "qs_btn_",
 ];
 const TITLE_CASE_ES_ONLY = ["nv_page_"];
 /** Every word begins with a capital, a digit or a symbol; a {slot} is a hole, not a word; "/", "&", "+", "·", a dash
@@ -48,7 +50,7 @@ const ROOT = process.cwd();
 const keysOf = (c: WordCatalog) => Object.keys(c.en);
 
 describe("the catalogs", () => {
-  it("there are twenty, each with a prefix of its own, and together they hold at least the floor's keys", () => {
+  it("there are twenty-four, each with a prefix of its own, and together they hold at least the floor's keys", () => {
     expect(CATALOGS.length).toBeGreaterThanOrEqual(CATALOG_FLOOR);
     const prefixes = CATALOGS.map((c) => c.prefix);
     expect(new Set(prefixes).size).toBe(prefixes.length);

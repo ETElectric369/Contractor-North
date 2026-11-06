@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createInspectionNow } from "./actions";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * THE shared "new inspection" affordance (Erik: "sometimes we're onsite already — too many
@@ -48,6 +50,7 @@ export function NewInspectionButton({
   variant?: "outline";
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,7 +59,7 @@ export function NewInspectionButton({
     setError(null);
     const res = await createInspectionNow({ inquiryId: inquiryId ?? null });
     if (!res.ok || !res.id) {
-      setError(res.error ?? "Could not start the inspection.");
+      setError(res.error ?? t("qt_couldNotStartInspection"));
       setBusy(false);
       return;
     }
@@ -67,7 +70,7 @@ export function NewInspectionButton({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button size={size} variant={variant} onClick={inspectNow} disabled={busy} title={title} className="shrink-0 whitespace-nowrap">
-        <ClipboardCheck className={iconClassName ?? "h-4 w-4"} /> {busy ? "Starting…" : (label ?? "Start An Inspection")}
+        <ClipboardCheck className={iconClassName ?? "h-4 w-4"} /> {busy ? t("qt_btn_starting") : (label ?? t("qt_btn_startAnInspection"))}
       </Button>
       {!nowOnly &&
         (schedule ?? (
@@ -78,7 +81,7 @@ export function NewInspectionButton({
           // (the /inspections header AND empty state both do now).
           <Link href="/schedule?new=appointment">
             <Button size={size} variant="outline" className="shrink-0 whitespace-nowrap">
-              Book An Inspection
+              {t("qt_btn_bookAnInspection")}
             </Button>
           </Link>
         ))}

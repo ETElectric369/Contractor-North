@@ -1,9 +1,11 @@
-// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in twenty catalogs,
+// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in twenty-four catalogs,
 // one per side of the app (lib/words/*: tc_ the Time Clock, cs_ its server, gf_ the geofence, nb_
 // the texts and pushes, au_ sign-in, md_ My Day, tk_ tasks, jb_ jobs, mt_ materials, sh_ the shell,
 // nt_ Nort, nv_ the office's map — cn-v1139, us_ the usage meter — cn-v1140; the agenda's four, ag_ / ag_cal_ /
 // ag_rail_ / ag_srv_, since the agenda-in-Spanish wave; the visit page's three, su_ the Settle Up
-// button / vi_ the Inspector / vp_ the visit page, since the visit-page-in-Spanish wave, cn-v1144), each English beside
+// button / vi_ the Inspector / vp_ the visit page, since the visit-page-in-Spanish wave, cn-v1144; the estimates' four, qt_ the screens /
+// qe_ the one editor / qb_ the task breakdown / qs_ the server and its libraries, since the estimates-in-Spanish
+// wave, cn-v1145), each English beside
 // Spanish under its own prefix. This file merges them: dict("en") is
 // every catalog's English; dict("es") is every catalog's Spanish laid over the English, so a key
 // missing from a catalog's Spanish still reads in English at runtime and a person never sees a raw
@@ -46,20 +48,27 @@ import { words as agendaServer } from "@/lib/words/agenda-server";
 import { words as settleUp } from "@/lib/words/settle-up";
 import { words as visitInspector } from "@/lib/words/visit-inspector";
 import { words as visitPage } from "@/lib/words/visit-page";
+import { words as quotes } from "@/lib/words/quotes";
+import { words as quotesEditor } from "@/lib/words/quotes-editor";
+import { words as quotesBreakdown } from "@/lib/words/quotes-breakdown";
+import { words as quotesServer } from "@/lib/words/quotes-server";
 
 export const LANGUAGES: { code: Lang; label: string }[] = [
   { code: "en", label: "English" },
   { code: "es", label: "Español" },
 ];
 
-/** The twenty catalogs, by name, in the order they are merged (the agenda's four since the
+/** The twenty-four catalogs, by name, in the order they are merged (the agenda's four since the
  *  agenda-in-Spanish wave: ag_ the libraries + shared doors, ag_cal_ the calendar, ag_rail_ the rail
  *  and sheets, ag_srv_ the server messages; the visit page's three since the visit-page-in-Spanish
- *  wave: su_ the Settle Up button, vi_ the Inspector, vp_ the visit page and its hear-actions). */
+ *  wave: su_ the Settle Up button, vi_ the Inspector, vp_ the visit page and its hear-actions; the
+ *  estimates' four since the estimates-in-Spanish wave, cn-v1145: qt_ the screens and the status
+ *  family, qe_ the one estimate editor, qb_ the task breakdown, qs_ quotes/actions and its libraries). */
 export const CATALOGS: readonly WordCatalog[] = [
   timeclock, clockserver, geofence, messages, auth, myday, tasks, jobs, materials, shell, nort, nav, usage,
   agenda, agendaCalendar, agendaRail, agendaServer,
   settleUp, visitInspector, visitPage,
+  quotes, quotesEditor, quotesBreakdown, quotesServer,
 ];
 
 type Dict = Record<string, string>;
