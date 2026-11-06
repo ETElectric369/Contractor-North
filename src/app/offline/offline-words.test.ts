@@ -33,7 +33,7 @@ describe("OfflineWords", () => {
   });
   it("the Spanish words exist for the same keys, and the door is Title Case there too", () => {
     expect(es.cs_youreOffline).toBe("Estás sin conexión");
-    expect(es.cs_tryAgain).toBe("Intentar De Nuevo");
+    expect(es.cs_tryAgain).toBe("Intentar de Nuevo");
     expect(es.cs_offlineBody).not.toBe(en.cs_offlineBody);
   });
   it("the page mounts the words and keeps the vendor's title", () => {

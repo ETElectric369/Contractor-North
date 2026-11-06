@@ -64,11 +64,11 @@ describe("a nav title's Spanish is its dock row's Spanish", () => {
     }
   });
 
-  it("a page title not on the dock still follows the glossary: Manual Del Empleado for the Handbook page, Documentos Del Empleado for Employee Docs (Employee = Empleado, one word)", () => {
-    expect(nav.es.nv_page_handbook).toBe("Manual Del Empleado");
+  it("a page title not on the dock still follows the glossary: Manual del Empleado for the Handbook page, Documentos del Empleado for Employee Docs (Employee = Empleado, one word)", () => {
+    expect(nav.es.nv_page_handbook).toBe("Manual del Empleado");
     expect(shell.es["sh_dock_o-handbook"]).toBe("Manual");
-    expect(nav.es.nv_page_employeeDocs).toBe("Documentos Del Empleado");
-    expect(shell.es["sh_dock_o-docs"]).toBe("Documentos Del Empleado");
+    expect(nav.es.nv_page_employeeDocs).toBe("Documentos del Empleado");
+    expect(shell.es["sh_dock_o-docs"]).toBe("Documentos del Empleado");
     expect(nav.es.nv_page_safety).toBe("Seguridad / OSHA");
     expect(shell.es["sh_dock_o-safety"]).toBe("Seguridad");
   });

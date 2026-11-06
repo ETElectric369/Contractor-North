@@ -42,6 +42,7 @@ import LoginPage, { generateMetadata } from "./page";
 import { login, sendLoginCode, verifyLoginCode, requestPasswordReset } from "./actions";
 import { dict } from "@/lib/i18n";
 import { DEACTIVATED_MESSAGE } from "@/lib/deactivation-gate";
+import { titleCaseIn } from "../../../tests/es-function-words";
 
 const render = async (params: Record<string, string> = {}) => renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve(params) }));
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ");
@@ -78,19 +79,19 @@ describe("the page", () => {
     expect(t).toContain("Contraseña");
     expect(t).toContain("¿Olvidaste Tu Contraseña?");
     expect(t).toContain("Iniciar Sesión");
-    expect(t).toContain("Iniciar Sesión Con Un Código — Sin Contraseña");
+    expect(t).toContain("Iniciar Sesión con un Código — Sin Contraseña");
     expect(t).toContain("¿Necesitas una cuenta?");
     expect(t).toContain("Registrarme");
     expect(html).toContain('placeholder="tu@empresa.com"');
     expect(t).not.toMatch(/Sign in|Welcome back|Forgot Password/);
     // The code door, both halves.
-    expect(text(await render({ mode: "code" }))).toContain("Envíame Un Código Por Correo");
+    expect(text(await render({ mode: "code" }))).toContain("Envíame un Código por Correo");
     const sent = text(await render({ mode: "code", sent: "1", email: "larkspur@example.test" }));
     expect(sent).toContain("Código de 6 dígitos");
     expect(sent).toContain("Enviado a larkspur@example.test: escribe el código o toca el enlace del correo. Revisa el spam si no lo ves.");
-    expect(sent).toContain("Verificar E Iniciar Sesión");
+    expect(sent).toContain("Verificar e Iniciar Sesión");
     expect(sent).toContain("Reenviar Código");
-    expect(sent).toContain("Mejor Usar Una Contraseña");
+    expect(sent).toContain("Mejor Usar una Contraseña");
     // Sign-up, and the shell's two notes.
     const signup = text(await render({ mode: "signup" }));
     expect(signup).toContain("Crea tu cuenta");
@@ -144,8 +145,8 @@ describe("the actions' errors come back in the same language as the page", () =>
     expect(dict("es").au_deactivated).not.toBe(DEACTIVATED_MESSAGE);
     for (const key of ["au_signIn", "au_signUp", "au_createAccount", "au_verifySignIn", "au_resendCode", "au_usePassword", "au_emailMeCode", "au_forgotPassword", "au_signInWithCode", "au_setMyPassword", "au_savePasswordContinue"]) {
       for (const lang of ["en", "es"] as const) {
-        const words = dict(lang)[key].split(/\s+/).filter((w) => /\p{L}/u.test(w));
-        expect(words.every((w) => /^[^\p{L}]*\p{Lu}/u.test(w)), `${lang}:${key} "${dict(lang)[key]}"`).toBe(true);
+        // Title Case by each language's rule: English every word, Spanish the significant words (cn-v1147).
+        expect(titleCaseIn(dict(lang)[key], lang), `${lang}:${key} "${dict(lang)[key]}"`).toBe(true);
       }
     }
   });

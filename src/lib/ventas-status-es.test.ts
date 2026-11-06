@@ -100,13 +100,13 @@ describe("lib/leads/next-step", () => {
   });
   it("Spanish through a translator; tone and bucket unchanged", () => {
     const step = leadNextStep({ ...base, lead_bucket: "A", site_inspection_required: true }, null, "2026-11-06", opts, "es", es);
-    expect(step.label).toBe("A · Nuevo · Llámale · Necesita Una Visita");
+    expect(step.label).toBe("A · Nuevo · Llámale · Necesita una Visita");
     expect(step.tone).toBe("blue");
     expect(step.bucket).toBe("A");
     expect(leadNextStep({ ...base, status: "lost" }, null, "2026-11-06", opts, "es", es).label).toBe("Perdido");
-    expect(leadNextStep(base, VISITS_UNREAD, "2026-11-06", opts, "es", es).label).toBe("No Cargaron Las Visitas");
-    expect(leadNextStep({ ...base, next_follow_up_at: "2026-09-20" }, null, "2026-11-06", opts, "es", es).label).toMatch(/^Volver A Llamar · 20/);
+    expect(leadNextStep(base, VISITS_UNREAD, "2026-11-06", opts, "es", es).label).toBe("No Cargaron las Visitas");
+    expect(leadNextStep({ ...base, next_follow_up_at: "2026-09-20" }, null, "2026-11-06", opts, "es", es).label).toMatch(/^Volver a Llamar · 20/);
     const booked = leadNextStep(base, { done: 0, upcoming: 1, nextAt: null, nextType: "inspection" }, "2026-11-06", opts, "es", es);
-    expect(booked.label).toBe(`${es("ag_btn_kindInspection")} · Aún Sin Día`);
+    expect(booked.label).toBe(`${es("ag_btn_kindInspection")} · Aún sin Día`);
   });
 });

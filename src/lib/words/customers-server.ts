@@ -20,6 +20,8 @@ import type { WordCatalog } from "./types";
  * template. Reused from builder C's lib/words/customers: combinar = merge, libreta de contactos = your
  * book, crédito a favor = account credit, and the portal card's buttons the refusals name — New Link =
  * Nuevo Enlace (cu_btn_newLink), Turn On = Activar (cu_btn_turnOn).
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "cu_srv_",

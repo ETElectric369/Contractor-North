@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1147", date: "2026-11-07", line: "Spanish buttons and titles follow Spanish capitalization: the small words (a, de, la, y…) stay lowercase, the way the RAE writes a name — Mover a un Día, Lista de Precios. English unchanged." },
   { version: "cn-v1146", date: "2026-11-07", line: "The Sales side in Spanish — leads, inspections and customers, their sheets, doors and sort bars, and every server message follow your language; lead and customer statuses too. No migration." },
   { version: "cn-v1145", date: "2026-11-06", line: "The Estimates in Spanish — the list, New, the one editor, the task breakdown, the share, email and text doors, and every server message follow your language; estimate statuses too. No migration." },
   { version: "cn-v1144", date: "2026-11-05", line: "The visit page in Spanish — the page a tech opens from the schedule, its inspection sheet, the start card, every door, the Settle Up button and the server's words follow your language. No migration." },

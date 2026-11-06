@@ -57,7 +57,7 @@ const PAGES: Page[] = [
   { file: "bills/page.tsx", slug: "bills", title: "Bills", desc: "Drop a receipt or bill anywhere on this page.", es: "Cuentas" },
   { file: "reconcile/page.tsx", slug: "reconcile", title: "Reconcile", desc: "Two records that should agree, and do not.", es: "Conciliar" },
   { file: "payroll/page.tsx", slug: "pay", title: "Pay", desc: "What you owe each person, and what you have paid them.", es: "Nómina" },
-  { file: "tax-report/page.tsx", slug: "taxReport", title: "Tax report", desc: "Sales tax collected by rate / jurisdiction — for filing & remittance.", es: "Reporte De Impuestos", noId: true },
+  { file: "tax-report/page.tsx", slug: "taxReport", title: "Tax report", desc: "Sales tax collected by rate / jurisdiction — for filing & remittance.", es: "Reporte de Impuestos", noId: true },
   { file: "analytics/page.tsx", slug: "analytics", title: "Analytics", desc: "How the business is actually doing — money in, money owed, win rate, job profit.", es: "Análisis" },
   {
     file: "analytics/accountant/page.tsx",
@@ -67,7 +67,7 @@ const PAGES: Page[] = [
     es: "Para Tu Contador",
   },
   { file: "recurring/page.tsx", slug: "recurring", title: "Recurring", desc: "Jobs, invoices, and expenses that repeat. Each one is made on its day, automatically.", es: "Recurrentes", noId: true },
-  { file: "timecards/page.tsx", slug: "timecards", title: "Timecards", desc: "Review your crew's hours by week.", es: "Tarjetas De Tiempo" },
+  { file: "timecards/page.tsx", slug: "timecards", title: "Timecards", desc: "Review your crew's hours by week.", es: "Tarjetas de Tiempo" },
   { file: "organize/page.tsx", slug: "organize", title: "Organize My…", desc: "Papers you snapped wait here until you file them.", es: "Organizar Mis…", noId: true },
   {
     file: "petty-cash/page.tsx",
@@ -164,19 +164,19 @@ describe("Price List: the two-part line", () => {
       "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier's list via CSV. Click any item to give it vendors, each with its own cost and sell. A vendor is anyone you buy from or hire: a supplier, a sub, or a brand.";
     expect(renderToStaticMarkup(createElement(PageHeader, { title: en("nv_page_priceList"), description: vendorsOn(en) }))).toBe(literal("Price List", old));
     const esHtml = text(renderToStaticMarkup(createElement(PageHeader, { title: es("nv_page_priceList"), description: vendorsOn(es) })));
-    expect(esHtml).toContain("Lista De Precios");
+    expect(esHtml).toContain("Lista de Precios");
     expect(esHtml).toContain("una casa de materiales, un subcontratista o una marca.");
     expect(esHtml).not.toMatch(/\b(vendor|supplier|brand|Price List|markup)\b/);
   });
 
-  it("en: the joined line is byte for byte the old literal (its tail IS VENDOR_MEANS); es: Lista De Precios, all three parts Spanish", () => {
+  it("en: the joined line is byte for byte the old literal (its tail IS VENDOR_MEANS); es: Lista de Precios, all three parts Spanish", () => {
     expect(en("nv_desc_priceListVendorsMeans")).toBe(VENDOR_MEANS);
     const joined = (t: (k: string) => string) => t("nv_desc_priceList") + ` ${t("nv_desc_priceListVendors")} ${t("nv_desc_priceListVendorsMeans")}`;
     expect(joined(en)).toBe(
       "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier's list via CSV. Click any item to give it vendors, each with its own cost and sell. " +
         VENDOR_MEANS,
     );
-    expect(text(header(es, "priceList"))).toContain("Lista De Precios");
+    expect(text(header(es, "priceList"))).toContain("Lista de Precios");
     expect(joined(es)).toContain("Tu catálogo con precios");
     expect(joined(es)).toContain("Toca cualquier artículo");
     // The Spanish line no longer ends in English: the what-a-vendor-is tail is the catalog's.
@@ -199,10 +199,10 @@ describe("the schedule's two headings", () => {
     expect(src).toContain('{t("nv_sched_waitingForADay")} <span className="font-normal text-slate-400">({waiting.length}{railCapped ? "+" : ""})</span>');
     expect(src).not.toContain("Waiting For A Day <span");
     expect(en("nv_sched_waitingForADay")).toBe("Waiting For A Day");
-    expect(es("nv_sched_waitingForADay")).toBe("Esperando Un Día");
+    expect(es("nv_sched_waitingForADay")).toBe("Esperando un Día");
   });
 
-  it("Everyone's Day: the crew board (a client component) reads useLang(); es draws El Día De Todos, en Everyone's Day as before", () => {
+  it("Everyone's Day: the crew board (a client component) reads useLang(); es draws El Día de Todos, en Everyone's Day as before", () => {
     const unassigned: Lane = { id: "__unassigned__", name: "Unassigned", jobs: [], appts: [], decision: null, scheduledJobId: null, scheduledLabel: null };
     const board = (lang: "en" | "es") =>
       renderToStaticMarkup(
@@ -226,10 +226,10 @@ describe("the schedule's two headings", () => {
         ),
       );
     expect(board("en")).toContain('<h1 class="text-lg font-bold tracking-tight text-slate-900">Everyone&#x27;s Day</h1>');
-    expect(board("es")).toContain('<h1 class="text-lg font-bold tracking-tight text-slate-900">El Día De Todos</h1>');
+    expect(board("es")).toContain('<h1 class="text-lg font-bold tracking-tight text-slate-900">El Día de Todos</h1>');
     // The Calendar back-link beside it (nv_sched_calendar): en byte for byte the "</svg> Calendar</a>" the board drew before the key.
     expect(board("en")).toContain('<path d="m15 18-6-6 6-6"></path></svg> Calendar</a><h1 class="text-lg font-bold tracking-tight text-slate-900">Everyone&#x27;s Day</h1>');
-    expect(board("es")).toContain('</svg> Calendario</a><h1 class="text-lg font-bold tracking-tight text-slate-900">El Día De Todos</h1>');
+    expect(board("es")).toContain('</svg> Calendario</a><h1 class="text-lg font-bold tracking-tight text-slate-900">El Día de Todos</h1>');
     expect(board("es")).not.toContain("> Calendar<");
     const src = read("schedule/crew-board.tsx");
     expect(src).toContain('import { useLang } from "@/components/lang-provider";');

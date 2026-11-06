@@ -44,12 +44,12 @@ const paper = () => createElement(PaperFormatSwitch, { value: null, companyDefau
 describe("the estimate's cards follow the signed-in person's language", () => {
   it("the circuit schedule card: its title, its doors and the empty line in Spanish", () => {
     const t = text(es(card()));
-    expect(t).toContain("Tabla De Circuitos");
+    expect(t).toContain("Tabla de Circuitos");
     expect(t).toContain("· se imprime como segunda página");
-    expect(t).toContain("Generar Desde Las Partidas");
+    expect(t).toContain("Generar desde las Partidas");
     expect(t).toContain("Agregar Circuito");
-    expect(t).toContain("Abrir El Panel De J-012 Larkspur");
-    expect(t).toContain("Esta Es La Propuesta.");
+    expect(t).toContain("Abrir el Panel de J-012 Larkspur");
+    expect(t).toContain("Esta Es la Propuesta.");
     expect(t).not.toMatch(/Circuit Schedule|Add Circuit|Generate From Line Items|No circuit schedule yet/);
   });
 
@@ -59,8 +59,8 @@ describe("the estimate's cards follow the signed-in person's language", () => {
     expect(c).toContain("Nadie adjunto todavía — se imprime sin nombre hasta que elijas a alguien.");
     expect(c).toContain("Adjuntar Cliente");
     const p = text(es(paper()));
-    expect(p).toContain("Mano De Obra Y Piezas En El Papel");
-    expect(p).toContain("Predeterminado De La Empresa · Activado");
+    expect(p).toContain("Mano de Obra y Piezas en el Papel");
+    expect(p).toContain("Predeterminado de la Empresa · Activado");
     expect(p).toContain("Mostrar");
     expect(p).toContain("Ocultar");
     expect(p).not.toContain("Labor And Parts On The Paper");
@@ -117,8 +117,8 @@ describe("the keys say the literal each one replaced", () => {
     };
     for (const [k, v] of Object.entries(table)) expect(EN[k], k).toBe(v);
     // Save The Kit's Spanish is the button qs_lib_kitNotKept names.
-    expect(dict("es").qb_btn_saveTheKit).toBe("Guardar El Kit");
-    expect(dict("es").qs_lib_kitNotKept).toContain("Guardar El Kit");
+    expect(dict("es").qb_btn_saveTheKit).toBe("Guardar el Kit");
+    expect(dict("es").qs_lib_kitNotKept).toContain("Guardar el Kit");
   });
 
   it("where a rate came from: English inline as always; Spanish when the caller hands its language", () => {

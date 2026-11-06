@@ -141,7 +141,7 @@ describe("GET /api/timeclock/long-shift after a Switch Job", () => {
     state.client = fakeSupabase([b], [{ ...head, profile_id: "larkspur-1", long_shift_warned_at: iso("17:00") }, b], calls);
     const res = await (await GET(req())).json();
     expect(res).toMatchObject({ nudges_due: 1, asked: 1, office_buzzes: 1 });
-    expect(spies.push[0][2]).toMatchObject({ title: "¿Sigues En El Reloj?", body: "Llevas en el reloj desde jue 7:00 am (en Fernhill desde 3:00 pm). Toca para poner a qué hora paraste." });
+    expect(spies.push[0][2]).toMatchObject({ title: "¿Sigues en el Reloj?", body: "Llevas en el reloj desde jue 7:00 am (en Fernhill desde 3:00 pm). Toca para poner a qué hora paraste." });
     expect(spies.notify[0][2].body).toBe("Llevas en el reloj desde jue 7:00 am (en Fernhill desde 3:00 pm). Toca para poner a qué hora paraste.");
     expect(spies.push[1][2].body).toMatch(/^On the clock since Thu 7:00 AM, 12 hours; at Fernhill since 3:00 PM\. Larkspur has been asked when the shift ended\. Clock Out Larkspur on Timecards if you know\.$/);
   });

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOGS, dict, fillText, translator } from "@/lib/i18n";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { esTitleCase } from "../../../../../tests/es-function-words";
 
 /**
  * THE VISIT PAGE IN SPANISH (the visit-page-in-Spanish wave, cn-v1144, vp_). The page a tech opens from
@@ -98,8 +99,8 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
     const body = text(html);
     expect(body).toMatch(/^¿Vienes a hacer el trabajo\?/);
     expect(body).toContain("Empieza un trabajo desde esta visita. Trae Pat Thistlewood, la dirección y la hora de la visita.");
-    expect(html).toContain("Empezar El Trabajo Y Marcar Entrada");
-    expect(html).toContain("Empezar El Trabajo</button>");
+    expect(html).toContain("Empezar el Trabajo y Marcar Entrada");
+    expect(html).toContain("Empezar el Trabajo</button>");
     expect(html).toContain('aria-label="Empezar el trabajo"');
     expect(html).not.toMatch(NO_ENGLISH_DOORS);
   });
@@ -107,8 +108,8 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
   it("on the clock on the very job the customer already has: the bold job, a Spanish clock, and the link door", () => {
     const html = card({ linkInstead: { ...j55, customer: "Pat Thistlewood" }, openEntry: onJ55 });
     expect(html).toContain('Desde 12:00 p. m. estás en el reloj en <span class="font-semibold">J-055</span> · Twelve Bayberry Lane. Pat Thistlewood ya lo tiene. Enlaza esta visita a él.');
-    expect(html).toContain("Enlazar A J-055</button>");
-    expect(html).toContain("Crear Nuevo Trabajo De Todos Modos");
+    expect(html).toContain("Enlazar a J-055</button>");
+    expect(html).toContain("Crear Nuevo Trabajo de Todos Modos");
     expect(html).not.toContain("12:00 PM");
     expect(html).not.toMatch(NO_ENGLISH_DOORS);
   });
@@ -118,17 +119,17 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
     const body = text(html);
     expect(body).toMatch(/^Esta visita está hecha/);
     expect(body).toContain("Pat Thistlewood ya tiene J-055 · Twelve Bayberry Lane, hecho ese día y terminado. ¿Enlazar esta visita a él?");
-    expect(html).toContain("Enlazar A J-055</button>");
+    expect(html).toContain("Enlazar a J-055</button>");
     expect(html).not.toContain("En Su Lugar");
     const before = card({ visitOver: false, linkInstead: { ...j55, customer: "Pat Thistlewood" } });
-    expect(before).toContain("Enlazar A J-055 En Su Lugar");
+    expect(before).toContain("Enlazar a J-055 en Su Lugar");
     expect(text(before)).toContain("hecho ese día. ¿Usarlo en vez de crear un segundo trabajo?");
   });
 
   it("a visit that is over with no job: the quiet door and the line that says it starts no clock", () => {
     const html = card({ visitOver: true });
     expect(text(html)).toContain("No tiene trabajo. Si el trabajo sigue, empieza uno desde ella: trae Pat Thistlewood, la dirección y la hora de la visita, y no empieza tu reloj.");
-    expect(html).toContain("Empezar Un Trabajo Desde Esta Visita");
+    expect(html).toContain("Empezar un Trabajo desde Esta Visita");
     expect(html).not.toContain("Marcar Entrada");
   });
 
@@ -142,7 +143,7 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
     expect(text(sw)).toContain("Desde 8:00 a. m. estás en el reloj en J-050. Al cambiar, esa parte termina ahora y empieza esta.");
     // A Spanish clock ends in a period, so no sentence ends on one: never "a. m.." on the card.
     expect(text(young) + text(older) + text(sw)).not.toContain("m..");
-    expect(sw).toContain("Cambiar A J-055");
+    expect(sw).toContain("Cambiar a J-055");
     expect(text(atClock("2026-09-25T15:05:00.000Z", { job: j55, openEntry: onJ50 }))).toContain("Al cambiar, toda esta marcación pasa a J-055 — nada se queda atrás.");
   });
 
@@ -151,7 +152,7 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
     const body = text(html);
     expect(body).toMatch(/^Pídele a la oficina que empiece el trabajo/);
     expect(body).toContain("Esta visita aún no tiene trabajo, y solo la oficina puede empezar uno. En cuanto lo haga, puedes marcar entrada aquí mismo.");
-    for (const w of ["Pídele A La Oficina", "Llamar A La Oficina", "Enviar Mensaje A La Oficina"]) expect(html, w).toContain(w);
+    for (const w of ["Pídele a la Oficina", "Llamar a la Oficina", "Enviar Mensaje a la Oficina"]) expect(html, w).toContain(w);
     expect(text(card({ isStaff: false, visitOver: true }))).toContain("Esta visita está hecha y no tiene trabajo. Si el trabajo sigue, pídele a la oficina que empiece uno.");
     expect(html).not.toMatch(NO_ENGLISH_DOORS);
   });
@@ -159,10 +160,10 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
   it("a linked job: clock in, open; already on it; and a closed visit on a finished job", () => {
     const linked = card({ job: j55 });
     expect(text(linked)).toMatch(/^Esta visita es J-055 · Twelve Bayberry Lane/);
-    expect(linked).toContain("Marcar Entrada En J-055");
+    expect(linked).toContain("Marcar Entrada en J-055");
     expect(linked).toContain("Abrir J-055");
     const here = card({ isStaff: false, job: j55, openEntry: onJ55 });
-    expect(here).toContain("Estás En El Reloj Aquí");
+    expect(here).toContain("Estás en el Reloj Aquí");
     expect(here).not.toContain("Marcar Entrada En");
     const closed = card({ visitOver: true, job: { ...j55, status: "complete" } });
     expect(text(closed)).toContain("La visita está hecha y J-055 está terminado, así que no hay reloj que empezar aquí.");
@@ -173,9 +174,9 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
 
   it("the sheet: what the job will be, when the clock starts — the Visit Time chip carries a Spanish clock, and the Planned row a Spanish date", () => {
     const html = atClock("2026-09-25T22:32:00.000Z", {});
-    expect(html).toContain('data-modal="Empezar El Trabajo Y Marcar Entrada"');
+    expect(html).toContain('data-modal="Empezar el Trabajo y Marcar Entrada"');
     const body = text(html);
-    for (const w of ["El trabajo será", "Nombre", "Cliente", "Dirección", "Planeado", "Hora de inicio", "Ahora", "Hora De La Visita · 10:00 a. m.", "Elegir Una Hora", "Cancelar"]) expect(body, w).toContain(w);
+    for (const w of ["El trabajo será", "Nombre", "Cliente", "Dirección", "Planeado", "Hora de inicio", "Ahora", "Hora de la Visita · 10:00 a. m.", "Elegir una Hora", "Cancelar"]) expect(body, w).toContain(w);
     expect(body).toContain(formatDateTime(preview.scheduledStart, TZ, "es"));
     expect(body).not.toContain(formatDateTime(preview.scheduledStart, TZ, "en"));
     expect(html).toContain('aria-label="Hora de inicio"');
@@ -205,11 +206,11 @@ describe("how the visit ended, in Spanish", () => {
   const base = { appointmentId: "appt-1", isStaff: true, decidable: true, status: "completed", estimate: null, outcome: null, outcomeAt: null, job: null, tz: TZ };
   const ending = (o: Partial<Parameters<typeof VisitEnding>[0]>) => es(createElement(VisitEnding, { ...base, ...o }));
 
-  it("the two honest endings: Perdida, and Ganada · Elegir El Trabajo on the attach door", () => {
+  it("the two honest endings: Perdida, and Ganada · Elegir el Trabajo on the attach door", () => {
     const html = ending({});
     expect(text(html)).toMatch(/^¿Cómo terminó esta\?/);
     expect(html).toContain(">Perdida<");
-    expect(html).toContain("Ganada · Elegir El Trabajo");
+    expect(html).toContain("Ganada · Elegir el Trabajo");
     expect(html).not.toMatch(/Lost|Won · Pick The Job|How did this one end/);
   });
 
@@ -243,7 +244,7 @@ describe("the link picker, in Spanish", () => {
     expect(text(closed)).toContain("Para Conectar esto a un prospecto, cliente o trabajo");
     // A caller's own words win, and label={null} draws no label (the ending card's door).
     const handed = es(createElement(LinkPicker, { appointmentId: "appt-1", linked: null, seed: "", kinds: ["job"], openLabel: t("vp_btn_wonPickTheJob"), label: null }));
-    expect(text(handed)).toBe("Ganada · Elegir El Trabajo");
+    expect(text(handed)).toBe("Ganada · Elegir el Trabajo");
     expect(resting + closed).not.toMatch(/Connect this to|>For<|>Change<|>lead</);
   });
 
@@ -263,7 +264,7 @@ describe("the link picker, in Spanish", () => {
 });
 
 describe("the header's ⋯ rows and Mark Complete, in Spanish", () => {
-  it("Marcar Hecha · Devolverla A La Agenda · No Se Hará, and the main button Marcar Inspección Hecha", () => {
+  it("Marcar Hecha · Devolverla a la Agenda · No Se Hará, and the main button Marcar Inspección Hecha", () => {
     const rows = es(
       <>
         <MarkDoneRow id="appt-1" />
@@ -271,7 +272,7 @@ describe("the header's ⋯ rows and Mark Complete, in Spanish", () => {
         <WontHappenRow id="appt-1" deletes={false} afterHref="/schedule" />
       </>,
     );
-    for (const w of ["Marcar Hecha", "Devolverla A La Agenda", "No Se Hará"]) expect(rows, w).toContain(w);
+    for (const w of ["Marcar Hecha", "Devolverla a la Agenda", "No Se Hará"]) expect(rows, w).toContain(w);
     expect(rows).not.toMatch(/Mark Done|Put It Back|Won't Happen/);
     const main = es(createElement(MarkCompleteButton, { id: "appt-1" }));
     expect(main).toContain("Marcar Inspección Hecha");
@@ -364,7 +365,7 @@ describe("the visit page catalog (vp_)", () => {
     expect(doors.length).toBeGreaterThanOrEqual(34);
     for (const k of [...doors, "vp_makeANewJob", "vp_youreOnTheClockHere"]) {
       expect(titleCase(vp.en[k]), `en:${k} "${vp.en[k]}"`).toBe(true);
-      expect(titleCase(vp.es[k]), `es:${k} "${vp.es[k]}"`).toBe(true);
+      expect(esTitleCase(vp.es[k]), `es:${k} "${vp.es[k]}"`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
     // The closed picker's default door is a sentence in English today, so it is keyed as one, not vp_btn_.
     expect(vp.en.vp_connectThisTo).toBe("Connect this to a lead, customer or job");
@@ -385,12 +386,12 @@ describe("the visit page catalog (vp_)", () => {
     expect(vp.es.vp_address).toBe(d.ag_rail_address);
     expect(vp.es.vp_inspection).toBe(d.jb_apptInspection);
     expect(vp.es.vp_theOtherJob).toBe(d.jb_theOtherJob);
-    expect(vp.es.vp_btn_clockInOn).toBe(`${d.tc_clockIn} En {job}`);
-    expect(vp.es.vp_btn_backToSchedule).toBe(`Volver A La ${d.sh_dock_schedule}`);
-    expect(vp.es.vp_btn_backToMyDay).toBe(`Volver A ${d.sh_myDay}`);
-    expect(vp.es.vp_btn_startTheJob).toBe("Empezar El Trabajo"); // Start = Empezar (sh_help_startHere, tc_startingNow)
+    expect(vp.es.vp_btn_clockInOn).toBe(`${d.tc_clockIn} en {job}`);
+    expect(vp.es.vp_btn_backToSchedule).toBe(`Volver a la ${d.sh_dock_schedule}`);
+    expect(vp.es.vp_btn_backToMyDay).toBe(`Volver a ${d.sh_myDay}`);
+    expect(vp.es.vp_btn_startTheJob).toBe("Empezar el Trabajo"); // Start = Empezar (sh_help_startHere, tc_startingNow)
     expect(d.tc_startingNow).toMatch(/^Empezando/);
-    expect(vp.es.vp_btn_linkTo).toMatch(/^Enlazar A /); // Link = Enlazar (jb_link)
+    expect(vp.es.vp_btn_linkTo).toMatch(/^Enlazar a /); // Link = Enlazar (jb_link)
     expect(d.jb_link).toBe("Enlazar");
     expect(vp.es.vp_btn_pickATime).toMatch(/^Elegir /); // Pick = Elegir (ag_rail_btn_pickADay)
     expect(vp.es.vp_btn_addAsANewLead).toContain("Prospecto"); // Lead = Prospecto (nv_page_leads)

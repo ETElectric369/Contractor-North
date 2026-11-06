@@ -8,6 +8,8 @@ import type { WordCatalog } from "./types";
  * the fence with the title and body in the person's language). The English is byte-for-byte what
  * the code said before cn-v1138; a {slot} is filled by fillText. Buttons are Title Case in both
  * languages; sentences keep sentence case.
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "gf_",
@@ -71,7 +73,7 @@ export const words: WordCatalog = {
     gf_clockedOutYouLeftTitle: "Salida marcada — saliste del sitio de trabajo",
     gf_tapToFinishTimecard: "Toca para terminar tu tarjeta de tiempo.",
     gf_clockedOutAtYouLeft: "Salida marcada a las {time} — saliste de {label}.",
-    gf_finishYourTimecard: "Terminar Tu Tarjeta De Tiempo →",
+    gf_finishYourTimecard: "Terminar Tu Tarjeta de Tiempo →",
     gf_looksLikeYouLeftClockOut: "Parece que saliste de {label}. ¿Marcar salida?",
     gf_stillOnClockPickTime: "Sigues en el reloj. ¿Te fuiste hace rato con la app cerrada? Elige la hora en que saliste en realidad.",
     gf_noAnswer5MinPicking: "¿Sin respuesta en 5 minutos? Te marcaremos salida a las {at}, la última vez que estuviste en el sitio.",
@@ -81,6 +83,6 @@ export const words: WordCatalog = {
     gf_back: "Atrás",
     gf_stillWorking: "Sigo Trabajando",
     gf_clockOutNow: "Marcar Salida Ahora",
-    gf_pickTheTime: "Elegir La Hora…",
+    gf_pickTheTime: "Elegir la Hora…",
   },
 };

@@ -16,6 +16,8 @@ import type { WordCatalog } from "./types";
  * (refuseStaleFill's "NOT filled — …", the seen list, "Selected contact: … customer_id …") — the
  * model reads those, not the person; and the office-only verbs in time.ts (addEntry, fixEntry,
  * listEntries, splitEntry), which stay English with the office pages' contents (sh_spanishCovers).
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "nt_",
@@ -280,7 +282,7 @@ export const words: WordCatalog = {
     nt_noJobAttached: ", SIN trabajo asignado",
     nt_switchRepointed: "Listo. Toda esta marcación ya está en el trabajo nuevo. Lo anterior del día se queda donde estaba.",
     nt_switchCut:
-      "Cambiado. El reloj ya corre en el trabajo nuevo. Las {hours} horas antes del cambio se quedaron en {stayed}: un cambio abre un registro nuevo, nunca mueve horas ya trabajadas. Si esas horas también son del trabajo nuevo, la oficina las mueve en Tarjetas De Tiempo.",
+      "Cambiado. El reloj ya corre en el trabajo nuevo. Las {hours} horas antes del cambio se quedaron en {stayed}: un cambio abre un registro nuevo, nunca mueve horas ya trabajadas. Si esas horas también son del trabajo nuevo, la oficina las mueve en Tarjetas de Tiempo.",
     nt_theJobYouWereOn: "el trabajo en el que estabas",
     nt_notSignedIn: "No has iniciado sesión.",
     nt_notClockedIn: "No has marcado entrada.",
@@ -288,9 +290,9 @@ export const words: WordCatalog = {
     nt_hearFail: "No se escuchó. Inténtalo de nuevo, o escríbelo.",
     nt_voiceUnavailable: "La voz no está disponible ahora. Escríbelo.",
     nt_badUpload: "Subida inválida.",
-    nt_tryAgainLine: "Toca Hablar Con Nort para intentarlo de nuevo, o escribe abajo.",
+    nt_tryAgainLine: "Toca Hablar con Nort para intentarlo de nuevo, o escribe abajo.",
     nt_noVoiceLine: "La voz no está disponible aquí. Escribe abajo.",
-    nt_btn_justTellNort: "Solo Dile A Nort",
+    nt_btn_justTellNort: "Solo Dile a Nort",
     nt_btn_justSayIt: "Solo Dilo",
     nt_tellNortPlaceholder: "Di todo el trabajo como se lo dirías a una persona: qué quieren, dónde, cuánto y cualquier cosa que estorbe…",
     nt_sayTheWholeThingHint: "Dilo todo — {hint}, y cualquier otra cosa que le dirías a alguien.",

@@ -15,8 +15,8 @@ import { MODAL_WORDS } from "@/components/ui/modal-words";
  *   ag_rail_  lib/words/agenda-rail — the rail, the add-to-schedule and new-job sheets, the crew board;
  *   ag_srv_   lib/words/agenda-server — the schedule's and the appointments' server messages.
  * A CLICKABLE KEY CONTAINS `_btn_` RIGHT AFTER ITS PREFIX (ag_btn_, ag_cal_btn_, ag_rail_btn_,
- * ag_srv_btn_): a door, a chip, a tab, a menu row, a sheet's title — every word capitalized in BOTH
- * languages ("Abrir El Trabajo", "Vuelve Hoy"; tests/words-parity.test.ts TITLE_CASE_FAMILIES holds
+ * ag_srv_btn_): a door, a chip, a tab, a menu row, a sheet's title — Title Case in BOTH
+ * languages ("Abrir el Trabajo", "Vuelve Hoy"; tests/words-parity.test.ts TITLE_CASE_FAMILIES holds
  * the four families). A sentence (ends in a period) under a _btn_ key is not judged. A key that is
  * not a door is sentence case. Plurals are paired keys (ag_minute / ag_minutes); a {slot} is filled
  * by fillText (lib/i18n) or, in a library, by lib/lang-words say.
@@ -25,6 +25,8 @@ import { MODAL_WORDS } from "@/components/ui/modal-words";
  * Semana, Mes. Booked = Agendado; Worked = Trabajado; Off (that day) = Libre; On Hold = En Pausa (the
  * job status, jb_statusOnHold); Town = Ciudad; Inspection = Inspección. The clock's half of the day
  * is "a. m." / "p. m." (lib/lang-words clock12 / esMeridiem), dates through Intl es-US ("jue, 5 nov").
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "ag_",
@@ -152,9 +154,9 @@ export const words: WordCatalog = {
     ag_btn_done: "Hecho",
     ag_btn_move: "Mover",
     ag_btn_undo: "Deshacer",
-    ag_btn_openTheJob: "Abrir El Trabajo",
-    ag_btn_openTheVisit: "Abrir La Visita",
-    ag_btn_workedNotBooked: "Trabajado, Sin Agendar",
+    ag_btn_openTheJob: "Abrir el Trabajo",
+    ag_btn_openTheVisit: "Abrir la Visita",
+    ag_btn_workedNotBooked: "Trabajado, sin Agendar",
 
     ag_btn_close: MODAL_WORDS.es.close,
     ag_btn_save: MODAL_WORDS.es.save,
@@ -173,7 +175,7 @@ export const words: WordCatalog = {
     ag_workedDayPlanned: "Día trabajado · planeado para {day}",
 
     ag_unnamed: "Sin nombre",
-    ag_chipGone: "{name} · Ya No Está En El Equipo",
+    ag_chipGone: "{name} · Ya No Está en el Equipo",
     ag_chipOff: "{name} · Libre Ese Día",
     ag_chipOnOther: "{name} · En {job} Ese Día",
     ag_chipOnAnother: "{name} · En Otro Trabajo Ese Día",
@@ -211,7 +213,7 @@ export const words: WordCatalog = {
 
     ag_btn_kindJob: "Trabajo",
     ag_btn_kindInspection: "Inspección",
-    ag_btn_kindServiceCall: "Llamada De Servicio",
+    ag_btn_kindServiceCall: "Llamada de Servicio",
     ag_btn_kindOffice: "Oficina",
     ag_btn_kindQuote: "Cotización",
     ag_btn_kindPhoneCall: "Llamada",

@@ -163,7 +163,7 @@ describe("the clock button", () => {
 
 describe("the task list", () => {
   const base = { jobId: "j1", orgId: "o1", tasks: [], viewerId: "u1", viewerIsStaff: false, tz: "America/Los_Angeles", nowIso: "2026-09-26T19:00:00Z", stamps: true, doneOpen: false };
-  it("the Add line reads Agregar Una Tarea… / Agregar for a Spanish tech, Add A Task… / Add for an English one", () => {
+  it("the Add line reads Agregar una Tarea… / Agregar for a Spanish tech, Add A Task… / Add for an English one", () => {
     const r = both(JobTaskList, base as never);
     expect(r.es).toContain(`placeholder="${es.jb_addATaskPh}"`);
     expect(text(r.es)).toContain("Agregar");
@@ -250,20 +250,20 @@ describe("the contacts card", () => {
 });
 
 describe("Finish Job", () => {
-  it("the door reads Terminar El Trabajo in Spanish and Finish Job in English", () => {
+  it("the door reads Terminar el Trabajo in Spanish and Finish Job in English", () => {
     const r = both(FinishJobButton, { jobId: "j1", hasQuote: true });
-    expect(text(r.es)).toContain("Terminar El Trabajo");
+    expect(text(r.es)).toContain("Terminar el Trabajo");
     expect(text(r.en)).toContain("Finish Job");
     expect(text(r.en)).not.toContain("Terminar");
   });
 });
 
 describe("the Scheduled box", () => {
-  it("Agregar Rango De Fechas in Spanish; Add Date Range in English", () => {
+  it("Agregar Rango de Fechas in Spanish; Add Date Range in English", () => {
     const WORK_DAY = { start: "09:00", end: "17:00" };
     const block = readJobBlock({ scheduledStart: null, scheduledEnd: null, plannedMinutes: null, tz: "America/Los_Angeles", workDay: WORK_DAY });
     const r = both(JobScheduleControl, { id: "j1", segments: [], block, workDay: WORK_DAY } as never);
-    expect(text(r.es)).toContain("Agregar Rango De Fechas");
+    expect(text(r.es)).toContain("Agregar Rango de Fechas");
     expect(text(r.en)).toContain("Add Date Range");
     expect(text(r.en)).not.toContain("Agregar");
   });
@@ -281,6 +281,6 @@ describe("the catalog's own shape", () => {
     expect(es.jb_tabMaterials).toBe("Materiales");
     expect(es.jb_tabPhotos).toBe("Fotos");
     expect(es.jb_clockIn).toBe("Marcar Entrada");
-    expect(es.jb_finishJob).toBe("Terminar El Trabajo");
+    expect(es.jb_finishJob).toBe("Terminar el Trabajo");
   });
 });

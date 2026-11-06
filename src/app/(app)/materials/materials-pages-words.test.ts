@@ -116,10 +116,10 @@ describe("the list page (materials/[id]) in Spanish", () => {
   it("a tech on a job's list: the back door, the date, Took From Stock, the editor and Tell The Office", async () => {
     const html = await listPage("es");
     const text = textOf(html);
-    expect(text).toContain("Volver A Las Listas De Materiales");
+    expect(text).toContain("Volver a las Listas de Materiales");
     expect(text).toContain("Creada el 20 oct 2026");
-    expect(buttons(html)).toContain("Tomado Del Inventario");
-    expect(buttons(html)).toContain("Avisar A La Oficina");
+    expect(buttons(html)).toContain("Tomado del Inventario");
+    expect(buttons(html)).toContain("Avisar a la Oficina");
     expect(html).toContain('placeholder="Agregar un artículo…"');
     expect(text).toContain("Comprados (1)");
     expect(text).toContain("1 por comprar");
@@ -160,7 +160,7 @@ describe("the index (materials) in Spanish", () => {
     expect(text).toContain("Listas de materiales");
     expect(text).toContain("La lista de materiales de cada trabajo — la misma que ve la oficina.");
     expect(text).toContain("1 por comprar");
-    expect(text).toContain("Aún Sin Artículos");
+    expect(text).toContain("Aún sin Artículos");
     expect(text).toContain("20 oct 2026");
     expect(text).not.toContain("to buy");
     expect(text).not.toContain("No Items Yet");

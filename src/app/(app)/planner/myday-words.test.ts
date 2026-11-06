@@ -88,18 +88,18 @@ describe("the Now card", () => {
     expect(dict("en").md_tookLunch).toBe(LUNCH_LABEL);
   });
 
-  it("on the clock with no job in Spanish: the question and ONE Elegir El Trabajo door", () => {
+  it("on the clock with no job in Spanish: the question and ONE Elegir el Trabajo door", () => {
     const s = es(createElement(NowCard, { open: punch({ job_id: null }), job: null, userId: "u1" }));
     expect(s).toContain("¿En qué trabajo estás?");
     expect(s).toContain("Estás en el reloj, pero esta marcación aún no tiene trabajo.");
-    expect(s.match(/Elegir El Trabajo/g)).toHaveLength(1);
+    expect(s.match(/Elegir el Trabajo/g)).toHaveLength(1);
     expect(s).not.toContain("Pick The Job");
   });
 
-  it("the crew pulse in Spanish: En El Reloj, 3 de 4, sin trabajo aún, desde; a failed read is said in Spanish", () => {
+  it("the crew pulse in Spanish: En el Reloj, 3 de 4, sin trabajo aún, desde; a failed read is said in Spanish", () => {
     const crew = { on: 3, of: 4, rows: [{ id: "e1", name: "Crew B", job: null, since: "6:30 AM", href: "/timecards?week=0&entry=e1" }] };
     const s = es(createElement(NowCard, { open: null, job: null, userId: "u1", crew }));
-    expect(s).toContain("En El Reloj");
+    expect(s).toContain("En el Reloj");
     expect(s).toContain("3 de 4");
     expect(s).toContain("sin trabajo aún");
     expect(s).toContain("desde 6:30 AM");
@@ -114,10 +114,10 @@ describe("the Now card", () => {
 
 describe("the clocked-in job's tasks", () => {
   const NEXT = [{ id: "a", title: "Pull the permit" }, { id: "b", title: "Set the meter base" }];
-  it("Spanish: Tareas: faltan 4, Todas Las Tareas, and the row's aria words; English unchanged", () => {
+  it("Spanish: Tareas: faltan 4, Todas las Tareas, and the row's aria words; English unchanged", () => {
     const s = es(createElement(NowTasks, { jobId: "j1", left: 4, next: NEXT }));
     expect(s).toContain("Tareas: faltan 4");
-    expect(s).toContain("Todas Las Tareas");
+    expect(s).toContain("Todas las Tareas");
     expect(s).toContain('aria-label="Marcar Pull the permit"');
     expect(s).toContain("Pull the permit");
     const e = en(createElement(NowTasks, { jobId: "j1", left: 4, next: NEXT }));
@@ -132,9 +132,9 @@ describe("Tasks & Reminders", () => {
 
   it("the Add line in Spanish: the placeholder, Agregar, the job chip's rows; English as before", () => {
     const s = es(createElement(AddReminderLine, { jobs: JOBS, todayStr: TODAY }));
-    expect(s).toContain('placeholder="Agregar Un Recordatorio O Tarea…"');
+    expect(s).toContain('placeholder="Agregar un Recordatorio o Tarea…"');
     expect(s).toContain('aria-label="Trabajo (opcional)"');
-    expect(s).toContain("Sin Trabajo: Un Recordatorio Para Mí");
+    expect(s).toContain("Sin Trabajo: un Recordatorio para Mí");
     expect(s).toContain("En J-055 Larkspur Panel");
     expect(s).toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Agregar<\/button>/);
     const e = en(createElement(AddReminderLine, { jobs: JOBS, todayStr: TODAY }));
@@ -143,17 +143,17 @@ describe("Tasks & Reminders", () => {
     expect(e).toContain("On J-055 Larkspur Panel");
   });
 
-  it("the card in Spanish: the heading, Todos Los Recordatorios, the empty line and Tomar Uno; the carried chip; the More For You line", () => {
+  it("the card in Spanish: the heading, Todos los Recordatorios, the empty line and Tomar Uno; the carried chip; the More For You line", () => {
     const empty = es(createElement(YourList, { rows: [], subtasks: [], todayStr: TODAY, doneToday: 0, restCount: 2 }));
-    expect(empty).toContain("Tareas Y Recordatorios");
-    expect(empty).toContain("Todos Los Recordatorios");
+    expect(empty).toContain("Tareas y Recordatorios");
+    expect(empty).toContain("Todos los Recordatorios");
     expect(empty).toContain("Nada urgente hoy.");
     expect(empty).toContain("Tomar Uno →");
     expect(empty).not.toContain("Grab One");
     const carried = es(createElement(YourList, { rows: [row({ focus_date: "2026-09-25" })], subtasks: [], todayStr: TODAY, doneToday: 1, restCount: 4 }));
-    expect(carried).toContain("Viene De Ayer");
+    expect(carried).toContain("Viene de Ayer");
     expect(carried).toContain('aria-label="Marcar Call the PUD como hecho"');
-    expect(carried).toContain("Todos Los Recordatorios · 4 Más Para Ti");
+    expect(carried).toContain("Todos los Recordatorios · 4 Más para Ti");
     expect(carried).toContain('aria-label="1 de 2 hechos hoy"');
     expect(carried).not.toContain("Carried From");
   });
@@ -172,7 +172,7 @@ describe("Tasks & Reminders", () => {
 
   it("the pure words take a language: the later row, the moved sentence, the carried day", () => {
     expect(laterRow("in_a_week", TODAY)).toEqual({ label: "In A Week", due: "2026-10-03" });
-    expect(laterRow("in_a_week", TODAY, "es")).toEqual({ label: "En Una Semana", due: "2026-10-03" });
+    expect(laterRow("in_a_week", TODAY, "es")).toEqual({ label: "En una Semana", due: "2026-10-03" });
     expect(laterRow("someday", TODAY, "es")).toEqual({ label: "Algún Día (Quitar Fecha)", due: null });
     const plain = { focus_date: null, priority: 0, category: "operations" };
     expect(movedWords(plain, "2026-09-27", TODAY)).toBe("Due tomorrow. It waits on your Reminders list till then.");

@@ -294,11 +294,11 @@ describe("in Spanish (cn-v1138)", () => {
   it("the button, the takes' heading and Undo", () => {
     const door = doorIn("es");
     const texts = buttons(door).map((b) => b.text);
-    expect(texts).toContain("Tomado Del Inventario");
+    expect(texts).toContain("Tomado del Inventario");
     expect(texts).toContain("Deshacer");
     expect(texts).not.toContain("Took From Stock");
     expect(texts).not.toContain("Undo");
-    expect(textOf(door)).toContain("Lo Tomado Del Inventario");
+    expect(textOf(door)).toContain("Lo Tomado del Inventario");
   });
 
   it("English is unchanged: the same render inside an English provider is the render with no provider", () => {

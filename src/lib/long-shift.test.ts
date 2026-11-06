@@ -249,7 +249,7 @@ describe("clockedOutWords: the deed is said as a clock-out (Erik: \"Brian is Clo
     expect(nameless.headline).toBe("Esa Persona Tiene Salida Marcada");
     expect(nameless.told).toBe("Ya se le avisó.");
     expect(`${nameless.subject} ya ${nameless.was} salida marcada`).toBe("Esa persona ya tenía salida marcada");
-    expect(clockDoorWords("Brian Cole", { lang: "es" })).toEqual({ clockOut: "Marcar Salida De Brian" });
+    expect(clockDoorWords("Brian Cole", { lang: "es" })).toEqual({ clockOut: "Marcar Salida de Brian" });
     expect(clockDoorWords(null, { lang: "es" })).toEqual({ clockOut: "Marcar Su Salida" });
     expect(clockDoorWords("Brian Cole", { self: true, lang: "es" })).toEqual({ clockOut: "Marcar Salida" });
     // English with a language passed is the English without one.

@@ -12,6 +12,8 @@ import type { WordCatalog } from "./types";
  * languages. Spanish is tú, US/Mexican, the house words (Prospecto, Cliente, Inspección, Trabajo,
  * Presupuesto) — the glossary in lib/words/leads. A database's own words (dbError) pass through as
  * they are; nothing a tenant's CUSTOMER reads moves here.
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "ld_srv_",

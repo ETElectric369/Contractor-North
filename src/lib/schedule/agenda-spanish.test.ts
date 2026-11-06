@@ -14,6 +14,7 @@ import { backWords, checkComeBackDay, offHoldWords, shortDay } from "@/lib/come-
 import { jobLabel, toStaffOptions, defaultJobName } from "@/lib/schedule-options";
 import { jobWords } from "@/lib/action-items/words";
 import { modalWords } from "@/components/ui/modal-words";
+import { esTitleCase } from "../../../tests/es-function-words";
 
 /**
  * THE AGENDA'S LIBRARIES IN SPANISH (the agenda-in-Spanish wave's foundation). Each library keeps its
@@ -21,7 +22,6 @@ import { modalWords } from "@/components/ui/modal-words";
  * ag_ catalog's words, a clock's half of the day as "a. m." / "p. m.", and a date through Intl es-US.
  */
 const t = translator("es");
-const titleCase = (s: string) => s.replace(/\{\w+\}/g, " ").split(/\s+/).filter(Boolean).every((w) => /^[\p{Lu}\p{N}&\/+·(]/u.test(w));
 
 describe("the agenda's libraries in Spanish", () => {
   it("lib/utils: formatTime says a. m. / p. m., formatDateShort the day before the month; English unchanged", () => {
@@ -71,7 +71,7 @@ describe("the agenda's libraries in Spanish", () => {
     const team = [{ id: "a", full_name: "Larkspur Catbird" }];
     const chips = crewChips(["a", "b"], team, { rows: [{ profile_id: "a", work_date: "2026-11-05", kind: "off", job_id: null }] }, "es", t);
     expect(chips[0].title).toBe("Larkspur Catbird · Libre Ese Día");
-    expect(titleCase(chips[0].title!)).toBe(true);
+    expect(esTitleCase(chips[0].title!)).toBe(true);
     expect(chips[1].name).toBe("Sin nombre");
     expect(crewWords([], "es", t)).toBe("Nadie asignado");
     expect(crewWords(chips, "es", t)).toBe("Cuadrilla: Larkspur Catbird (libre ese día), Sin nombre");
@@ -105,10 +105,10 @@ describe("the agenda's libraries in Spanish", () => {
   });
 
   it("work-shape: the kind chips Title Case, days, unsized, the buckets", () => {
-    expect(kindLabel("service", "es", t)).toBe("Llamada De Servicio");
+    expect(kindLabel("service", "es", t)).toBe("Llamada de Servicio");
     expect(kindLabel("walkthrough", "es", t)).toBe("Inspección");
     expect(kindLabel("walkthrough")).toBe("Inspection");
-    for (const k of ["job", "walkthrough", "service", "office", "quote", "call", "other"] as const) expect(titleCase(kindLabel(k, "es", t))).toBe(true);
+    for (const k of ["job", "walkthrough", "service", "office", "quote", "call", "other"] as const) expect(esTitleCase(kindLabel(k, "es", t))).toBe(true); // Spanish: the significant words (cn-v1147)
     expect(durationLabel(1440, "es", t)).toBe("3 días");
     expect(dayLoad([{ planned_minutes: 120 }, {}], "es", t).label).toBe("2h · 1 sin duración");
     expect(durationBuckets("es", t).map((b) => b.label)).toContain("Medio día");
@@ -184,8 +184,8 @@ describe("the agenda's house words (one word per idea, the older catalogs' spell
     expect(t("ag_srv_markDoneTip")).toBe("Marcar como hecha");
     expect(t("ag_srv_visitDidHappen")).toContain("marcada como Hecha,");
     expect(t("ag_srv_visitChangedDone")).toContain("marcada como Hecha.");
-    expect(t("ag_rail_btn_newApptAt")).toBe("Nueva Cita A Las {time}");
-    expect(t("ag_rail_btn_newApptOn")).toBe("Nueva Cita El {day}");
+    expect(t("ag_rail_btn_newApptAt")).toBe("Nueva Cita a las {time}");
+    expect(t("ag_rail_btn_newApptOn")).toBe("Nueva Cita el {day}");
     expect(t("ag_srv_confirmCancel")).toContain("usa Eliminar para quitarla.");
     expect(t("ag_rail_btn_holdIt")).toBe("Pausarlo");
     expect(t("ag_srv_movedAllWorkedRange")).toMatch(/se agrega como día nuevo\.$/);

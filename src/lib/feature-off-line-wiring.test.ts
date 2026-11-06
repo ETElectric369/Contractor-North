@@ -98,7 +98,7 @@ describe("the Off line on every record page", () => {
     const block = src.slice(at, src.indexOf("</EmptyState>", at));
     expect(block).toContain('description={leadsOn ? t("ip_emptyDescLeadsOn") : t("ip_emptyDescLeadsOff")}');
     expect(inspectionsWords.en.ip_emptyDescLeadsOn).toContain("Start An Inspection");
-    expect(inspectionsWords.es.ip_emptyDescLeadsOn).toContain("Empezar Una Inspección");
+    expect(inspectionsWords.es.ip_emptyDescLeadsOn).toContain("Empezar una Inspección");
     expect(inspectionsWords.en.ip_emptyDescLeadsOff).toBe("Nothing open right now.");
     expect(block).toContain("{leadsOn && <NewInspectionButton");
   });

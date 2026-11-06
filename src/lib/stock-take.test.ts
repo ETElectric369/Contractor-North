@@ -128,7 +128,7 @@ describe("the words", () => {
     expect(takeLine(take, es)).toBe("Brian tomó 60 ft de 12/2 NM-B · 10 ft más del inventario, en espera de la oficina · 5 ft devueltos");
     expect(takeLine(take, translator("en"))).toBe(takeLine(take));
     expect(takeLine(take)).toBe("Brian took 60 ft of 12/2 NM-B · 10 ft past stock, waiting on the office · 5 ft brought back");
-    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0 }, es)).toEqual({ kind: "billed", label: "Quítalo De INV-078 Primero", status: "Facturado en INV-078", part: false });
+    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0 }, es)).toEqual({ kind: "billed", label: "Quítalo de INV-078 Primero", status: "Facturado en INV-078", part: false });
     expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0, partBilled: true }, es)).toMatchObject({ status: "Una parte facturada en INV-078, el resto todavía sin facturar" });
     expect(takeDoor({ canUndo: false, billedOn: null, back: 5 }, es)).toEqual({ kind: "none", why: "Una parte volvió al inventario, así que esta toma no se puede deshacer." });
     expect(takeDoor({ canUndo: false, billedOn: null, back: 0, settledByOffice: true }, es)).toMatchObject({ why: "La oficina ajustó parte de esta toma, así que pídele a la oficina que la deshaga." });
@@ -138,7 +138,7 @@ describe("the words", () => {
     expect(takeShortWords({ short: 0, past: 0, unit: "ft" }, es)).toBeNull();
     expect(takesReadFailed(es)).toBe("No se pudo leer lo que se ha tomado para este trabajo ahora. Recarga antes de tomar más.");
     expect(takesReadFailed(translator("en"))).toBe(TAKES_READ_FAILED);
-    expect(takeUnheardWords(true, true, es)).toBe("Sin señal, así que Tomarlo no recibió respuesta. Puede que se haya guardado: revisa Lo Tomado Del Inventario abajo antes de tocar otra vez.");
+    expect(takeUnheardWords(true, true, es)).toBe("Sin señal, así que Tomarlo no recibió respuesta. Puede que se haya guardado: revisa Lo Tomado del Inventario abajo antes de tocar otra vez.");
     expect(takeUnheardWords(false, false, es)).toBe("Tomarlo no recibió respuesta. Puede que se haya guardado: recarga antes de tocar otra vez.");
     // The toast and the office's bell are built with no translator: English, as before.
     expect(tookWords({ qty: 60, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 20, onHandAfter: -20 })).toBe(

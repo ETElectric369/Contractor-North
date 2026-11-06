@@ -3,6 +3,7 @@ import { DOCK, LAPSED_DOCK, visibleDock, type DockNode } from "@/lib/dock";
 import { dockLabel, dockTileLabel } from "@/lib/dock-words";
 import { dict } from "@/lib/i18n";
 import { ALL_ON } from "@/lib/features";
+import { esTitleCase } from "../../tests/es-function-words";
 
 /**
  * THE DOCK'S WORDS IN THE PERSON'S LANGUAGE (cn-v1138; the office's rows too since cn-v1139).
@@ -19,7 +20,8 @@ const row = (id: string): DockNode => {
   throw new Error(`no dock row ${id}`);
 };
 const section = (key: string) => [...DOCK, LAPSED_DOCK].find((s) => s.key === key)!;
-/** Erik's law for a clickable: every word begins with a capital, a digit or a symbol. */
+/** Erik's law for a clickable: every word begins with a capital, a digit or a symbol (English; Spanish is judged by
+ *  tests/es-function-words esTitleCase, the significant words, since cn-v1147). */
 const titleCase = (s: string) => s.split(/\s+/).every((w) => /^[\p{Lu}\p{N}&]/u.test(w));
 
 describe("dockLabel", () => {
@@ -37,20 +39,20 @@ describe("dockLabel", () => {
     }
   });
 
-  it("the office's rows in Spanish too (cn-v1139), the glossary's words: Facturas, Nómina, Tarjetas De Tiempo, Lista De Precios; English byte for byte", () => {
+  it("the office's rows in Spanish too (cn-v1139), the glossary's words: Facturas, Nómina, Tarjetas de Tiempo, Lista de Precios; English byte for byte", () => {
     expect(dockLabel(row("m-inv"), "es")).toBe("Facturas");
     expect(dockLabel(row("ma-payroll"), "es")).toBe("Nómina");
     expect(dockLabel(row("sl-leads"), "es")).toBe("Prospectos");
     expect(dockLabel(row("sl-quotes"), "es")).toBe("Presupuestos");
     expect(dockLabel(row("m-clock"), "es")).toBe("Reloj");
-    expect(dockLabel(row("ck-cards"), "es")).toBe("Tarjetas De Tiempo");
-    expect(dockLabel(row("m-bills"), "es")).toBe("Cuentas Y Órdenes");
+    expect(dockLabel(row("ck-cards"), "es")).toBe("Tarjetas de Tiempo");
+    expect(dockLabel(row("m-bills"), "es")).toBe("Cuentas y Órdenes");
     expect(dockLabel(row("m-recon"), "es")).toBe("Conciliar");
-    expect(dockLabel(row("m-price"), "es")).toBe("Lista De Precios");
-    expect(dockLabel(row("ma-tax"), "es")).toBe("Reporte De Impuestos");
+    expect(dockLabel(row("m-price"), "es")).toBe("Lista de Precios");
+    expect(dockLabel(row("ma-tax"), "es")).toBe("Reporte de Impuestos");
     expect(dockLabel(row("o-team"), "es")).toBe("Equipo");
     expect(dockLabel(row("ma-stock"), "es")).toBe("Inventario");
-    expect(dockLabel(row("o-audit"), "es")).toBe("Auditoría De Actividad");
+    expect(dockLabel(row("o-audit"), "es")).toBe("Auditoría de Actividad");
     for (const id of ["m-inv", "ma-payroll", "sl-leads", "m-bills", "ma-stock"]) expect(dockLabel(row(id), "en"), id).toBe(row(id).label);
     // A row no catalog names (a test's stand-in) reads its own label.
     expect(dockLabel({ id: "no-such-row", label: "Whatever It Says" }, "es")).toBe("Whatever It Says");
@@ -113,7 +115,7 @@ describe("dockLabel", () => {
     for (const k of keys) {
       const id = k.slice("sh_dock_".length).replace(/_(off|only)$/, "");
       expect(ids.has(id) || synthesized.has(id), k).toBe(true);
-      for (const lang of ["en", "es"] as const) expect(titleCase(dict(lang)[k]), `${lang}:${k} "${dict(lang)[k]}"`).toBe(true);
+      for (const lang of ["en", "es"] as const) expect((lang === "es" ? esTitleCase : titleCase)(dict(lang)[k]), `${lang}:${k} "${dict(lang)[k]}"`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
   });
 });

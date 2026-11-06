@@ -10,6 +10,8 @@ import type { WordCatalog } from "./types";
  * languages (Erik's law; the title-case test reads t() doors); the sentences keep sentence case.
  * au_deactivated is the one deactivation sentence (lib/deactivation-gate's DEACTIVATED_MESSAGE),
  * pinned equal in login-words.test.tsx so the two never drift.
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "au_",
@@ -94,19 +96,19 @@ export const words: WordCatalog = {
     au_welcomeBack: "Qué bueno verte de nuevo.",
     au_codeLabel: "Código de 6 dígitos",
     au_sentTo: "Enviado a {email}: escribe el código o toca el enlace del correo. Revisa el spam si no lo ves.",
-    au_verifySignIn: "Verificar E Iniciar Sesión",
+    au_verifySignIn: "Verificar e Iniciar Sesión",
     au_resendCode: "Reenviar Código",
-    au_usePassword: "Mejor Usar Una Contraseña",
+    au_usePassword: "Mejor Usar una Contraseña",
     au_email: "Correo",
     au_emailPlaceholder: "tu@empresa.com",
-    au_emailMeCode: "Envíame Un Código Por Correo",
+    au_emailMeCode: "Envíame un Código por Correo",
     au_fullName: "Nombre completo",
     au_fullNamePlaceholder: "Ana García",
     au_password: "Contraseña",
     au_forgotPassword: "¿Olvidaste Tu Contraseña?",
     au_createAccount: "Crear Cuenta",
     au_signIn: "Iniciar Sesión",
-    au_signInWithCode: "Iniciar Sesión Con Un Código — Sin Contraseña",
+    au_signInWithCode: "Iniciar Sesión con un Código — Sin Contraseña",
     au_shellSignupNote: "Las cuentas se crean desde tu correo de invitación en Safari. Abre la invitación ahí, crea tu cuenta y luego inicia sesión aquí.",
     au_shellInviteNote: "¿Tienes un correo de invitación? Ábrelo en tu navegador para crear tu cuenta y luego inicia sesión aquí.",
     au_alreadyHave: "¿Ya tienes cuenta?",
@@ -129,7 +131,7 @@ export const words: WordCatalog = {
     au_atLeast8: "Al menos 8 caracteres",
     au_confirmPassword: "Confirma la contraseña",
     au_saving: "Guardando",
-    au_savePasswordContinue: "Guardar Contraseña Y Continuar",
+    au_savePasswordContinue: "Guardar Contraseña y Continuar",
     au_notSignedIn: "No has iniciado sesión.",
     au_savedButStuck: "Tu contraseña nueva se guardó, pero esta pantalla no pudo terminar. Cierra sesión, vuelve a entrar con ella y avisa a un dueño o administrador si te la pide otra vez.",
     au_tapToSet: "Toca para crear tu contraseña.",

@@ -42,8 +42,8 @@ const ES: RootErrorWords = {
   checkSignal: "Revisa tu señal e inténtalo de nuevo. No se perdió nada.",
   somethingWrong: "Algo salió mal",
   unexpectedError: "Ocurrió un error inesperado. Puedes intentar de nuevo o volver al panel.",
-  tryAgain: "Intentar De Nuevo",
-  tryingAgain: "Intentando De Nuevo…",
+  tryAgain: "Intentar de Nuevo",
+  tryingAgain: "Intentando de Nuevo…",
   dashboard: "Panel",
 };
 

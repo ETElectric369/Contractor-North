@@ -578,13 +578,13 @@ describe("the 12-hour question, as a text too", () => {
     expect(spies.push.map((p) => [p[0], p[1], p[2].title, p[2].body])).toEqual([
       [["brian-1"], "clock_out", "Still On The Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
       [["office-1"], "long_shift", "Brian Is Still On The Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Brian has been asked when the shift ended. Clock Out Brian on Timecards if you know."],
-      [["larkspur-1"], "clock_out", "¿Sigues En El Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
+      [["larkspur-1"], "clock_out", "¿Sigues en el Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
       [["office-1"], "long_shift", "Larkspur Is Still On The Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Larkspur has been asked when the shift ended. Clock Out Larkspur on Timecards if you know."],
     ]);
     // The bell line says what the push said, to the same person.
     expect(spies.notify.map((n) => [n[1], n[2].title, n[2].body])).toEqual([
       [["brian-1"], "Still On The Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
-      [["larkspur-1"], "¿Sigues En El Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
+      [["larkspur-1"], "¿Sigues en el Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
     ]);
   });
 

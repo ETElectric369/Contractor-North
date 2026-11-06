@@ -25,7 +25,7 @@ describe("the lines a failed voice turn shows", () => {
     expect(tryAgainLine("en")).toBe(TRY_AGAIN_LINE);
     expect(noVoiceLine("en")).toBe(NO_VOICE_LINE);
     expect(TRY_AGAIN_LINE).toBe(dict("en").nt_tryAgainLine);
-    expect(tryAgainLine("es")).toBe("Toca Hablar Con Nort para intentarlo de nuevo, o escribe abajo.");
+    expect(tryAgainLine("es")).toBe("Toca Hablar con Nort para intentarlo de nuevo, o escribe abajo.");
     expect(noVoiceLine("es")).toBe("La voz no está disponible aquí. Escribe abajo.");
     expect(tryAgainLine(null)).toBe(TRY_AGAIN_LINE);
   });

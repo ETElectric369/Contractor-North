@@ -36,6 +36,7 @@ import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { ClockStartPicker } from "./clock-start-picker";
 import { NewJobInline } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
+import { esTitleCase } from "../../../../tests/es-function-words";
 
 const ROOT = process.cwd();
 const src = (f: string) => readFileSync(join(ROOT, f), "utf8");
@@ -110,11 +111,11 @@ describe("the catalog names the clock's client side", () => {
   it("the glossary's exact words are the Spanish on the doors", () => {
     expect(es.tc_clockIn).toBe("Marcar Entrada");
     expect(es.tc_clockOut).toBe("Marcar Salida");
-    expect(es.tc_switchJob).toBe("Cambiar De Trabajo");
+    expect(es.tc_switchJob).toBe("Cambiar de Trabajo");
     expect(es.tc_cancel).toBe("Cancelar");
     expect(es.tc_undo).toBe("Deshacer");
     expect(es.tc_done).toBe("Hecho");
-    expect(es.tc_nortEndOfDay).toBe("Nort — Reporte Del Día");
+    expect(es.tc_nortEndOfDay).toBe("Nort — Reporte del Día");
     expect(es.tc_officeReadsMyDay).toContain("Mi Día");
     // Brand words and job numbers stay; "mi" is the unit in both.
     expect(es.tc_confirmedByNort).toContain("Nort");
@@ -142,7 +143,7 @@ describe("the panel", () => {
   it("clocked in on no job, staff: Pick The Job, Clock Out and More Options read in Spanish", () => {
     const html = inLang("es", createElement(TimeclockPanel, { ...props, openEntry: openPunch, isStaff: true, lang: "es" }));
     expect(html).toContain("Esta marcación aún no tiene trabajo.");
-    expect(html).toContain(">Elegir El Trabajo</button>");
+    expect(html).toContain(">Elegir el Trabajo</button>");
     expect(html).toContain("Entrada marcada — Sin trabajo elegido");
     expect(html).toContain("Marcar Salida");
     expect(html).toContain("Más Opciones");
@@ -164,7 +165,7 @@ describe("finish your timecard (the auto clock-out card)", () => {
     const html = inLang("es", createElement(AutoClockoutPrompt, props));
     expect(html).toContain("Termina tu tarjeta de tiempo: marcaste salida a las 4:30pm.");
     expect(html).toContain("8:00am–4:30pm en Larkspur. Nadie preguntó por el almuerzo cuando se cerró.");
-    expect(html).toContain("Cambié De Trabajo Durante Este Turno");
+    expect(html).toContain("Cambié de Trabajo durante Este Turno");
     expect(html).toContain(">Guardar Mis Horas</button>");
     expect(html).not.toContain("Save My Hours");
   });
@@ -205,7 +206,8 @@ describe("the start-time picker", () => {
     for (const lang of ["en", "es"] as const) {
       for (const key of ["tc_roundedTo", "tc_startingNowRound", "tc_startingNow"]) {
         const label = dict(lang)[key].replace("{time}", "7:00 AM");
-        for (const w of label.split(/\s+/)) if (/\p{L}/u.test(w)) expect(w, `${lang}:${key} "${label}"`).toMatch(/^\p{Lu}/u);
+        if (lang === "es") expect(esTitleCase(label), `${lang}:${key} "${label}"`).toBe(true); // Spanish: the significant words (cn-v1147)
+        else for (const w of label.split(/\s+/)) if (/\p{L}/u.test(w)) expect(w, `${lang}:${key} "${label}"`).toMatch(/^\p{Lu}/u);
       }
     }
   });
@@ -233,7 +235,7 @@ describe("New Job, from the clock", () => {
 describe("Nort's end-of-day debrief", () => {
   it("open, in Spanish: the sheet's title, the two questions, the placeholders and the doors", () => {
     const html = inLang("es", createElement(DailyReportDebrief, { open: true, onClose: () => {} }));
-    expect(html).toContain("Nort — Reporte Del Día");
+    expect(html).toContain("Nort — Reporte del Día");
     expect(html).toContain("¿Qué hiciste hoy?");
     expect(html).toContain("¿Qué materiales necesitas mañana?");
     expect(html).toContain('placeholder="Qué se hizo hoy, en palabras sencillas…"');

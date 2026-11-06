@@ -12,6 +12,7 @@ import { offerLabel } from "@/lib/playbook/scope";
 import { retiredLabel } from "@/lib/playbook/answers";
 import { DropTarget } from "@/components/drop-target";
 import { TellNort } from "@/components/tell-nort";
+import { esTitleCase } from "../../tests/es-function-words";
 
 /**
  * THE ENGLISH A SPANISH TECH STILL MET INSIDE THE SHEET (the visit-page-in-Spanish wave, cn-v1144,
@@ -65,7 +66,7 @@ describe("lib/native-scan speaks the reader's language when handed it, and its E
     expect(keptElsewhereWords(es("vi_theVisit"), "es", es)).toBe("El modelo 3D escaneado para la visita sigue esperando a enviarse. Toca Escaneo 3D ahí para enviarlo.");
     expect(keptElsewhereWords('"Larkspur deck"', "es", es)).toBe('El modelo 3D escaneado para "Larkspur deck" sigue esperando a enviarse. Toca Escaneo 3D ahí para enviarlo.');
     expect(keptElsewhereWords(null)).toBe(`The kept 3D model was scanned for a task that has been removed. Tap ${DISCARD_KEPT_LABEL}.`);
-    expect(keptElsewhereWords(null, "es", es)).toBe("El modelo 3D guardado se escaneó para una tarea que ya se quitó. Toca Descartar El Modelo 3D Guardado.");
+    expect(keptElsewhereWords(null, "es", es)).toBe("El modelo 3D guardado se escaneó para una tarea que ya se quitó. Toca Descartar el Modelo 3D Guardado.");
     expect(keptElsewhereWords(null, "es", es)).toContain(`Toca ${ES.vi_btn_discardKept3dModel}.`);
     expect(EN.vi_btn_discardKept3dModel).toBe(DISCARD_KEPT_LABEL);
   });
@@ -143,8 +144,8 @@ describe("lib/native-measure, lib/playbook/scope and lib/playbook/answers", () =
 
   it("the offer row: Title Case in both languages, the company's own scope word as typed, the count in its parentheses", () => {
     expect(offerLabel("deck", 2)).toBe("Add The Deck Tasks (2)");
-    expect(offerLabel("deck", 2, "es", es)).toBe("Agregar Las Tareas De Deck (2)");
-    expect(offerLabel("panel swap", 1, "es", es)).toBe("Agregar Las Tareas De Panel Swap (1)");
+    expect(offerLabel("deck", 2, "es", es)).toBe("Agregar las Tareas de Deck (2)");
+    expect(offerLabel("panel swap", 1, "es", es)).toBe("Agregar las Tareas de Panel Swap (1)");
     expect(offerLabel("deck", 2, "en", es)).toBe("Add The Deck Tasks (2)");
     expect(fillText(EN.vi_btn_addTheScopeTasks, { scope: "Deck", count: "(2)" })).toBe("Add The Deck Tasks (2)");
   });
@@ -208,7 +209,7 @@ describe("the drop zone's own words", () => {
     expect(src).toContain("const lang = useLang();");
     expect(ES.vi_dropFilesHere).toBe("Suelta los archivos aquí");
     expect(ES.vi_fileTypeDoesntGoHere).toBe("Ese tipo de archivo no va aquí");
-    expect(ES.vi_btn_tapToDismiss).toBe("Toca Para Cerrar");
+    expect(ES.vi_btn_tapToDismiss).toBe("Toca para Cerrar");
     // Drop = Suelta, the way the sheet's own two pills say it.
     for (const k of ["vi_dropThePlans", "vi_dropPhotosPdfs3d", "vi_dropFilesHere"]) expect(ES[k], k).toMatch(/^Suelta /);
   });
@@ -250,7 +251,7 @@ describe("Just Tell Nort speaks Spanish", () => {
   });
 
   it("closed: the door's default label, a surface's own label as it came, and the Nort-off twin without the name", () => {
-    expect(buttons(render())).toEqual(["Solo Dile A Nort"]);
+    expect(buttons(render())).toEqual(["Solo Dile a Nort"]);
     expect(buttons(render({ label: "Tell Nort about your business" }))).toEqual(["Tell Nort about your business"]);
     const off = render({ nortOn: false });
     expect(buttons(off)).toEqual(["Solo Dilo"]);
@@ -377,7 +378,7 @@ describe("the keys this wave added", () => {
     for (const k of [...Object.keys(VI), ...Object.keys(NT)]) expect(slots(es(k)), k).toEqual(slots(en(k)));
     for (const k of [...Object.keys(VI), ...Object.keys(NT)].filter((k) => /^(vi|nt)_btn_/.test(k))) {
       expect(titleCase(en(k)), `en:${k} "${en(k)}"`).toBe(true);
-      expect(titleCase(es(k)), `es:${k} "${es(k)}"`).toBe(true);
+      expect(esTitleCase(es(k)), `es:${k} "${es(k)}"`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
     expect(fillText(EN.vi_uploadTooBig, { what: "The 3D model", mb: "62", action: "Scan a smaller area." })).toBe("The 3D model is too big to send (62 MB). Scan a smaller area.");
     expect(fillText(EN.vi_uploadNoSignal, { what: "IMG_0412.jpeg" })).toBe("IMG_0412.jpeg didn't go: no signal. Try again where there's service.");

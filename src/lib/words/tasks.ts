@@ -7,6 +7,8 @@ import type { WordCatalog } from "./types";
  * language). Moved whole in cn-v1138; the English is byte-for-byte what the screens said. The
  * Spanish doors are Title Case like every button; the sentences keep sentence case. A {slot} is
  * filled by fillText.
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "tk_",
@@ -120,8 +122,8 @@ export const words: WordCatalog = {
     tk_couldNotAddReminder: "No se pudo agregar el recordatorio. Inténtalo de nuevo.",
     tk_alreadyOnList: "Ya está en la lista.",
     tk_reminderAdded: "Recordatorio agregado",
-    tk_addPlaceholder: "Agregar Un Recordatorio…",
-    tk_addAria: "Agregar Un Recordatorio",
+    tk_addPlaceholder: "Agregar un Recordatorio…",
+    tk_addAria: "Agregar un Recordatorio",
     tk_add: "Agregar",
     tk_titleRequired: "Falta el título.",
     tk_couldNotSave: "No se pudo guardar.",
@@ -132,7 +134,7 @@ export const words: WordCatalog = {
     tk_noDueDate: "Sin fecha",
     tk_priority: "Prioridad",
     tk_whoFor: "Para Quién Es",
-    tk_whoeverMadeIt: "Quien Lo Hizo",
+    tk_whoeverMadeIt: "Quien lo Hizo",
     tk_unnamed: "Sin Nombre",
     tk_you: "Tú",
     tk_someoneOnTeam: "Alguien del equipo",
@@ -147,11 +149,11 @@ export const words: WordCatalog = {
     tk_couldNotUpdate: "No se pudo actualizar la tarea — inténtalo de nuevo.",
     tk_couldNotUpdateSubtask: "No se pudo actualizar la subtarea — inténtalo de nuevo.",
     tk_unpinned: "Desfijado",
-    tk_pinnedToTop: "Fijado arriba en Tareas Y Recordatorios. Se queda hasta que lo desfijes.",
+    tk_pinnedToTop: "Fijado arriba en Tareas y Recordatorios. Se queda hasta que lo desfijes.",
     tk_due: "Vence {date}",
-    tk_carriedFrom: "Viene De {day}",
+    tk_carriedFrom: "Viene de {day}",
     tk_unpin: "Desfijar",
-    tk_pinToTop: "Fijar Arriba (Se Queda Hasta Que Lo Desfijes)",
+    tk_pinToTop: "Fijar Arriba (Se Queda hasta que lo Desfijes)",
     tk_addSubtask: "Agregar subtarea",
     tk_edit: "Editar",
     tk_deleteAsk: "¿Eliminar \"{title}\"? No se puede deshacer.",
@@ -172,7 +174,7 @@ export const words: WordCatalog = {
     tk_byCategory: "Por Categoría",
     tk_nothingOpen: "Nada abierto. Agrega un recordatorio arriba.",
     tk_completed: "Completados",
-    tk_showAllCompleted: "Ver Todos Los Completados ({n})",
+    tk_showAllCompleted: "Ver Todos los Completados ({n})",
     // ── the actions' answers ──
     tk_jobTaskNoAssignee:
       "La tarea de un trabajo es del trabajo, no de una persona: el jefe de cuadrilla la reparte. Quita el nombre, o hazla un Recordatorio para esa persona sin trabajo.",

@@ -11,6 +11,7 @@ import { translator } from "@/lib/i18n";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import { NORT_TALK_EVENT, SETUP_EVENT } from "@/lib/onboarding/help-rows";
+import { esTitleCase } from "../../tests/es-function-words";
 
 const barSrc = readFileSync(join(process.cwd(), "src/components/command-bar.tsx"), "utf8");
 
@@ -41,7 +42,7 @@ describe("commandNavItems", () => {
       // ?query like every status row and stays out of the palette; Settings is its door here.
       expect(hrefs(items), String(isStaff)).toEqual(["/subscribe", "/settings", "/analytics/accountant"]);
       expect(items.map((i) => i.label)).toEqual(["Pick A Plan", "Settings", "Download For Your Accountant"]);
-      expect(commandNavItems(isStaff, ALL_ON, true, true, "es").map((i) => i.label)).toEqual(["Elegir Un Plan", "Ajustes", "Descargar Para Tu Contador"]);
+      expect(commandNavItems(isStaff, ALL_ON, true, true, "es").map((i) => i.label)).toEqual(["Elegir un Plan", "Ajustes", "Descargar para Tu Contador"]);
       expect(hrefs(matchNavItems(items, "accountant"))).toEqual(["/analytics/accountant"]);
       expect(hrefs(matchNavItems(items, "jobs"))).toEqual([]);
     }
@@ -361,8 +362,8 @@ describe("the palette in Spanish", () => {
     expect(labelsOf(es).some((l) => /^(My Day|Time Clock|All|Jobs|You|Your Settings|Handbook|Reminders)$/.test(l))).toBe(false);
   });
 
-  it("before anything is typed: Hablar Con Nort, said out loud", () => {
-    expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false, lang: "es" }).map((r) => [r.label, r.sub])).toEqual([["Hablar Con Nort", "Dilo en voz alta"]]);
+  it("before anything is typed: Hablar con Nort, said out loud", () => {
+    expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false, lang: "es" }).map((r) => [r.label, r.sub])).toEqual([["Hablar con Nort", "Dilo en voz alta"]]);
     expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false }).map((r) => [r.label, r.sub])).toEqual([["Talk To Nort", "Say it out loud"]]);
   });
 
@@ -377,8 +378,9 @@ describe("the palette in Spanish", () => {
 
   it("lapsed: the three open doors in Spanish, Title Case", () => {
     const rows = labelsOf(commandNavItems(false, ALL_ON, false, true, "es"));
-    expect(rows).toEqual(["Elegir Un Plan", "Ajustes", "Descargar Para Tu Contador"]);
-    for (const r of rows) for (const w of r.split(" ")) expect(w).toMatch(/^[A-ZÁÉÍÓÚÑ]/);
+    expect(rows).toEqual(["Elegir un Plan", "Ajustes", "Descargar para Tu Contador"]);
+    // Spanish Title Case: the significant words, the function words lowercase after the first (cn-v1147).
+    for (const r of rows) expect(esTitleCase(r), r).toBe(true);
   });
 });
 
@@ -400,12 +402,12 @@ describe("the palette in Spanish: the office's rows (cn-v1139)", () => {
     expect(byHref(es, "/quotes")).toMatchObject({ label: "Presupuestos", sub: "Ventas" });
     expect(byHref(es, "/crm")).toMatchObject({ label: "Clientes", sub: "Ventas" });
     expect(byHref(es, "/billing")).toMatchObject({ label: "Facturas", sub: "Dinero" });
-    expect(byHref(es, "/timecards")).toMatchObject({ label: "Tarjetas De Tiempo", sub: "Dinero" });
-    expect(byHref(es, "/bills")).toMatchObject({ label: "Cuentas Y Órdenes", sub: "Dinero" });
+    expect(byHref(es, "/timecards")).toMatchObject({ label: "Tarjetas de Tiempo", sub: "Dinero" });
+    expect(byHref(es, "/bills")).toMatchObject({ label: "Cuentas y Órdenes", sub: "Dinero" });
     expect(byHref(es, "/payroll")).toMatchObject({ label: "Nómina", sub: "Dinero" });
     expect(byHref(es, "/team")).toMatchObject({ label: "Equipo", sub: "Oficina" });
     expect(byHref(es, "/inventory")).toMatchObject({ label: "Inventario", sub: "Oficina" });
-    expect(byHref(es, "/tools")).toMatchObject({ label: "Calculadoras Y Herramientas", sub: "Herramientas" });
+    expect(byHref(es, "/tools")).toMatchObject({ label: "Calculadoras y Herramientas", sub: "Herramientas" });
     // No English label is left on a Spanish screen.
     expect(es.map((i) => i.label).filter((l) => en.some((e) => e.label === l))).toEqual([]);
   });
@@ -485,7 +487,7 @@ describe("the palette in Spanish: the office's rows (cn-v1139)", () => {
     }
     expect(foldSearch("Nómina")).toBe("nomina");
     expect(foldSearch("Mi Día")).toBe("mi dia");
-    expect(foldSearch("Cuentas Y Órdenes")).toBe("cuentas y ordenes");
+    expect(foldSearch("Cuentas y Órdenes")).toBe("cuentas y ordenes");
     // A switch's Spanish words leave with it: Purchase Orders off, "orden de compra" finds nothing.
     lands(en, "orden de compra", "/bills");
     expect(hrefs(matchNavItems(commandNavItems(true, off("purchase_orders")), "orden de compra"))).not.toContain("/bills");
@@ -496,14 +498,14 @@ describe("the palette in Spanish: the office's rows (cn-v1139)", () => {
     expect(matchNavItems(es, "Catbird Bayberry")).toEqual([]);
   });
 
-  it("the help rows in Spanish, Title Case: Empieza Aquí, Muéstrame Cómo, Repetir La Configuración; Terminar La Configuración · Pendiente: 2", () => {
+  it("the help rows in Spanish, Title Case: Empieza Aquí, Muéstrame Cómo, Repetir la Configuración; Terminar la Configuración · Pendiente: 2", () => {
     const labels = (rows: ReturnType<typeof idleRows>) => rows.map((r) => r.label);
     expect(labels(idleRows({ isStaff: true, features: ALL_ON, setup: {}, onboarded: false, lang: "es" }))).toEqual([
-      "Hablar Con Nort", "Empieza Aquí", "Muéstrame Cómo", "Repetir La Configuración",
+      "Hablar con Nort", "Empieza Aquí", "Muéstrame Cómo", "Repetir la Configuración",
     ]);
     const DONE = { full_name: "Pat Lee", trade: "Electrical", city: "Truckee", service_area: "Tahoe", labor_rate: 120 };
     const rows = idleRows({ isStaff: true, features: ALL_ON, setup: { ...DONE, service_area: null, labor_rate: null }, onboarded: true, lang: "es" });
-    expect(labels(rows)).toEqual(["Hablar Con Nort", "Terminar La Configuración · Pendiente: 2", "Muéstrame Cómo", "Repetir La Configuración"]);
+    expect(labels(rows)).toEqual(["Hablar con Nort", "Terminar la Configuración · Pendiente: 2", "Muéstrame Cómo", "Repetir la Configuración"]);
     expect(rows[1].sub).toMatch(/^Todavía falta: /);
     expect(rows[0].sub).toBe("Dilo en voz alta");
     expect(rows[3].sub).toBe("La configuración desde el principio. Cambia lo que le dijiste a Nort.");

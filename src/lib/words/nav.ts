@@ -22,11 +22,13 @@ import type { WordCatalog } from "./types";
  * that reads a rendered English screen still passes). Where a page's title is the same English as
  * its dock row, the Spanish is the same word as the dock's (tests/nav-titles-match-dock.test.ts);
  * the dock's own words live in lib/words/shell.ts (sh_dock_). Clickables and titles are Title Case
- * in both languages — every word, articles and prepositions included ("Lista De Precios"); a
+ * in both languages — in English every word, in Spanish the significant ones ("Lista de Precios"); a
  * description is a sentence and keeps sentence case.
  *
  * `files` is narrow on purpose: the + menu, the Settings side-tab and the PageHeader component —
  * never an office page, whose contents are not promised in Spanish yet.
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "nv_",
@@ -157,19 +159,19 @@ export const words: WordCatalog = {
     nv_desc_bills: "Suelta un recibo o una cuenta en cualquier parte de esta página.",
     nv_page_reconcile: "Conciliar",
     nv_desc_reconcile: "Dos registros que deberían coincidir, y no coinciden.",
-    nv_page_priceList: "Lista De Precios",
+    nv_page_priceList: "Lista de Precios",
     nv_desc_priceList: "Tu catálogo con precios y tus kits reutilizables: costo, sobreprecio y venta, listos para los presupuestos. Importa la lista de un proveedor por CSV.",
     nv_desc_priceListVendors: "Toca cualquier artículo para darle proveedores, cada uno con su propio costo y venta.",
     nv_desc_priceListVendorsMeans: "Un proveedor es cualquiera a quien le compras o contratas: una casa de materiales, un subcontratista o una marca.",
     nv_page_pay: "Nómina",
     nv_desc_pay: "Lo que le debes a cada persona y lo que ya le pagaste.",
-    nv_page_taxReport: "Reporte De Impuestos",
+    nv_page_taxReport: "Reporte de Impuestos",
     nv_desc_taxReport: "Impuesto sobre ventas cobrado por tasa / jurisdicción, para declarar y pagar.",
     nv_page_analytics: "Análisis",
     nv_desc_analytics: "Cómo va el negocio de verdad: dinero que entra, dinero que te deben, tasa de cierre, ganancia por trabajo.",
     nv_page_recurring: "Recurrentes",
     nv_desc_recurring: "Trabajos, facturas y gastos que se repiten. Cada uno se crea en su día, automáticamente.",
-    nv_page_timecards: "Tarjetas De Tiempo",
+    nv_page_timecards: "Tarjetas de Tiempo",
     nv_desc_timecards: "Revisa las horas de tu cuadrilla por semana.",
     nv_page_compliance: "Cumplimiento",
     nv_desc_compliance: "Licencias, certificaciones y permisos, con sus fechas de renovación. (Las pólizas viven en Seguros; las revisiones en Auditorías.)",
@@ -181,20 +183,20 @@ export const words: WordCatalog = {
     nv_desc_audits: "Auditorías de seguridad, OSHA, seguros y finanzas: hallazgos, fechas de seguimiento, nada se pasa por alto.",
     nv_page_team: "Equipo",
     nv_desc_team: "Tu cuadrilla: invita gente, fija tarifas de pago y de cobro, cambia roles y desactiva a quien ya se fue.",
-    nv_page_employeeDocs: "Documentos Del Empleado",
+    nv_page_employeeDocs: "Documentos del Empleado",
     nv_desc_employeeDocs: "Licencias de conducir, I-9, W-2 y certificaciones, guardadas de forma segura (solo oficina).",
     nv_page_forms: "Formularios",
     nv_desc_forms: "Formularios de campo: listas de seguridad, firmas de conformidad y tu hoja de inspección.",
     nv_page_resources: "Recursos",
     nv_desc_resources: "Departamentos de construcción, inspectores, servicios públicos, ingenieros y portales de permisos: los números y enlaces que la cuadrilla necesita.",
-    nv_page_handbook: "Manual Del Empleado",
+    nv_page_handbook: "Manual del Empleado",
     nv_desc_handbook: "Políticas y expectativas en {company}.",
     nv_desc_handbookCompany: "la empresa",
     nv_page_inventory: "Inventario",
     nv_desc_inventory: "Qué hay en inventario, qué costó, de dónde vino cada rollo y a dónde fue cada pieza.",
     nv_page_activity: "Actividad",
     nv_desc_activity: "Actividad reciente del negocio en todo el taller: los últimos 30 días.",
-    nv_page_audit: "Auditoría De Actividad",
+    nv_page_audit: "Auditoría de Actividad",
     nv_desc_audit: "Cada acción que pasa por el registro de acciones de la app, la más reciente primero.",
     nv_page_tools: "Herramientas",
     nv_desc_tools: "Calculadoras de campo: medidas, materiales, márgenes.",
@@ -205,7 +207,7 @@ export const words: WordCatalog = {
     nv_page_organize: "Organizar Mis…",
     nv_desc_organize: "Los papeles que fotografiaste esperan aquí hasta que los archives.",
     nv_page_pettyCash: "Caja Chica",
-    nv_desc_pettyCash: "Efectivo que sacaste y entradas de efectivo anteriores. Una compra nueva en efectivo entra por Foto O Nota o Agregar A Mano.",
+    nv_desc_pettyCash: "Efectivo que sacaste y entradas de efectivo anteriores. Una compra nueva en efectivo entra por Foto o Nota o Agregar a Mano.",
     nv_page_quotesNew: "Nuevo Presupuesto",
     nv_desc_quotesNew: "Arma las partidas a mano, o deja que el estimador las redacte desde un alcance de trabajo o un plano subido.",
     nv_page_quotes: "Cotizaciones",
@@ -213,8 +215,8 @@ export const words: WordCatalog = {
     nv_page_estimates: "Presupuestos",
     nv_desc_estimates: "Los presupuestos son por tiempo y materiales de forma predeterminada; cambia cualquiera a una cotización de precio fijo.",
 
-    nv_sched_everyonesDay: "El Día De Todos",
-    nv_sched_waitingForADay: "Esperando Un Día",
+    nv_sched_everyonesDay: "El Día de Todos",
+    nv_sched_waitingForADay: "Esperando un Día",
     nv_sched_calendar: "Calendario",
 
     nv_add_newLead: "Nuevo Prospecto",
@@ -224,19 +226,19 @@ export const words: WordCatalog = {
     nv_add_newEstimate: "Nuevo Presupuesto",
     nv_add_newInvoice: "Nueva Factura",
     nv_add_noSignal: "No hay señal ahora, así que {label} no puede abrir. Vuelve a tocar {label} cuando tengas una o dos barras.",
-    nv_add_stillSendingOne: "Foto O Nota todavía está enviando 1 archivo, y recargar ahora lo detendría. Toca {label} de nuevo cuando ya esté.",
-    nv_add_stillSendingMany: "Foto O Nota todavía está enviando {n} archivos, y recargar ahora los detendría. Toca {label} de nuevo cuando ya estén.",
+    nv_add_stillSendingOne: "Foto o Nota todavía está enviando 1 archivo, y recargar ahora lo detendría. Toca {label} de nuevo cuando ya esté.",
+    nv_add_stillSendingMany: "Foto o Nota todavía está enviando {n} archivos, y recargar ahora los detendría. Toca {label} de nuevo cuando ya estén.",
 
     nv_set_company: "Empresa",
     nv_set_playbook: "Guía",
     nv_set_features: "Funciones",
     nv_set_money: "Dinero",
-    nv_set_docs: "Presupuestos Y Facturas",
+    nv_set_docs: "Presupuestos y Facturas",
     nv_set_getpaid: "Cobros",
-    nv_set_crew: "Cuadrilla Y Tiempo",
+    nv_set_crew: "Cuadrilla y Tiempo",
     nv_set_customers: "Clientes",
     nv_set_website: "Sitio Web",
-    nv_set_content: "Fotos Y Páginas",
+    nv_set_content: "Fotos y Páginas",
     nv_set_integrations: "Conexiones",
 
     nv_role_owner: "Dueño",

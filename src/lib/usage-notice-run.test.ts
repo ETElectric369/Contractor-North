@@ -198,7 +198,7 @@ const EN_100 = {
   body: "This month's usage is used up, so Nort and the estimator run on the lighter model until Dec 1. Add usage or upgrade in Settings › Getting Paid.",
 };
 const ES_80 = {
-  title: "Uso: 80% De Este Mes",
+  title: "Uso: 80% de Este Mes",
   body: "Ya se usó la mayor parte de este mes. Se reinicia el 1 dic. Nada se detiene: pasado el 100%, Nort y el estimador corren más ligeros hasta entonces.",
 };
 
@@ -440,7 +440,7 @@ describe("each in their own language", () => {
     const c = fakeClient({ orgs: [org()], spend: OUT });
     await run(c);
     expect(wordsSent(0, "es")).toEqual({
-      title: "Uso: Agotado Por Este Mes",
+      title: "Uso: Agotado por Este Mes",
       body: "El uso de este mes se agotó, así que Nort y el estimador corren en el modelo más ligero hasta el 1 dic. Agrega uso o mejora tu plan en Ajustes › Cobros.",
       url: NOTICE_URL,
     });

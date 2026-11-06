@@ -22,13 +22,13 @@ import { PasskeyManager } from "./passkey-manager";
 import { AvatarUpload } from "./avatar-upload";
 import { LangProvider } from "@/components/lang-provider";
 import type { Lang } from "@/lib/i18n";
+import { esTitleCase } from "../../../../tests/es-function-words";
 
 const r = (lang: Lang, el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(createElement(LangProvider, { lang, children: el }));
 const words = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replace(/&#x27;/g, "'").trim();
 /** The visible words of every button, in order. */
 const buttons = (html: string) =>
   [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((m) => words(m[1])).filter(Boolean);
-const titleCase = (s: string) => s.split(/[\s/]+/).every((w) => /^[\p{Lu}\p{N}]/u.test(w));
 
 describe("How Nort talks to you", () => {
   const tone = createElement(NortTone, { humor: 50, register: "match", notes: "" });
@@ -46,8 +46,8 @@ describe("How Nort talks to you", () => {
   it("Spanish: the same screen in the tech's words, the doors Title Case", () => {
     const html = r("es", tone);
     expect(words(html)).toContain("Humor — Like a person you'd work with"); // the dial's own words are Nort's (lib/nort/tone)
-    expect(buttons(html)).toEqual(["Habla Como Yo Hablo", "Sin Groserías", "Guardar"]);
-    for (const b of buttons(html)) expect(titleCase(b), b).toBe(true);
+    expect(buttons(html)).toEqual(["Habla como Yo Hablo", "Sin Groserías", "Guardar"]);
+    for (const b of buttons(html)) expect(esTitleCase(b), b).toBe(true); // Spanish: the significant words (cn-v1147)
     expect(html).toContain('aria-label="Qué tan gracioso es Nort"');
     expect(words(html)).toContain("Órdenes permanentes: lo que le has dicho a Nort que haga siempre");
     expect(words(html)).toContain("Nada de esto llega a tus clientes.");
@@ -65,7 +65,7 @@ describe("Nort speaks first", () => {
     expect(words(en)).toContain("Nort greets you as");
     expect(en).toContain('placeholder="Your first name"');
     const es = r("es", greeting);
-    expect(words(es)).toContain("Nort habla primero Cuando tocas Hablar Con Nort, él saluda en cuanto el micrófono está listo");
+    expect(words(es)).toContain("Nort habla primero Cuando tocas Hablar con Nort, él saluda en cuanto el micrófono está listo");
     expect(words(es)).toContain("Nort te saluda como");
     expect(es).toContain('placeholder="Tu nombre"');
     expect(buttons(es)).toEqual(["Guardar"]);
@@ -84,14 +84,14 @@ describe("Sign-in & security", () => {
     expect(words(en)).toContain("Passkey · added");
     expect(en).toContain('aria-label="Remove passkey"');
     expect(buttons(en)).toEqual(["Add Another Passkey"]);
-    expect(buttons(r("es", createElement(PasskeyManager, { passkeys: [] })))).toEqual(["Configurar Face ID / Llave De Acceso"]);
+    expect(buttons(r("es", createElement(PasskeyManager, { passkeys: [] })))).toEqual(["Configurar Face ID / Llave de Acceso"]);
     const es = r("es", createElement(PasskeyManager, { passkeys: one }));
     expect(words(es)).toContain("Registra Face ID / Touch ID (una llave de acceso).");
     expect(es).toContain('cualquier <span class="font-medium">acción con dinero que haga el asistente</span> necesita un toque');
     expect(words(es)).toContain("Llave de acceso · agregada");
     expect(es).toContain('aria-label="Quitar llave de acceso"');
-    expect(buttons(es)).toEqual(["Agregar Otra Llave De Acceso"]);
-    for (const b of buttons(es)) expect(titleCase(b), b).toBe(true);
+    expect(buttons(es)).toEqual(["Agregar Otra Llave de Acceso"]);
+    for (const b of buttons(es)) expect(esTitleCase(b), b).toBe(true); // Spanish: the significant words (cn-v1147)
   });
 });
 
@@ -106,6 +106,6 @@ describe("Your photo", () => {
     expect(buttons(es)).toEqual(["Cambiar Foto", "Quitar"]);
     expect(es).toContain('title="Cambiar foto"');
     expect(buttons(r("es", createElement(AvatarUpload, none)))).toEqual(["PL", "Agregar Foto"]);
-    for (const b of buttons(es)) expect(titleCase(b), b).toBe(true);
+    for (const b of buttons(es)) expect(esTitleCase(b), b).toBe(true); // Spanish: the significant words (cn-v1147)
   });
 });

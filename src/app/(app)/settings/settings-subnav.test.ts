@@ -10,6 +10,7 @@ import { SettingsSubnav } from "./settings-subnav";
 import { LangProvider } from "@/components/lang-provider";
 import { SETTINGS_CLUSTER_KEYS, roleLabel, settingsClusterLabel } from "@/lib/settings-words";
 import { dict, translator } from "@/lib/i18n";
+import { esTitleCase } from "../../../../tests/es-function-words";
 
 /**
  * THE SETTINGS SIDE-TAB IN THE PERSON'S LANGUAGE (cn-v1139): the group is Settings → Ajustes
@@ -38,9 +39,9 @@ describe("the Settings side-tab's words", () => {
     expect(html).toContain('title="Settings — Money"');
   });
 
-  it("in Spanish: Ajustes and the clusters through the map — Tú, Empresa, Dinero, Presupuestos Y Facturas, Conexiones; an id the map does not name keeps its label", () => {
+  it("in Spanish: Ajustes and the clusters through the map — Tú, Empresa, Dinero, Presupuestos y Facturas, Conexiones; an id the map does not name keeps its label", () => {
     const html = render("es");
-    expect(column(html)).toEqual(["Tú", "Empresa", "Dinero", "Presupuestos Y Facturas", "Conexiones", "Not Yet Named"]);
+    expect(column(html)).toEqual(["Tú", "Empresa", "Dinero", "Presupuestos y Facturas", "Conexiones", "Not Yet Named"]);
     expect(html).toContain('title="Ajustes — Dinero"');
     expect(html).not.toContain(">Company<");
   });
@@ -55,7 +56,8 @@ describe("the Settings side-tab's words", () => {
       for (const lang of ["en", "es"] as const) {
         const text = dict(lang)[key];
         expect(text, `${lang}:${key}`).toBeDefined();
-        for (const w of text.split(" ")) expect(w, `${lang}:${key} "${text}"`).toMatch(/^[\p{Lu}&]/u);
+        if (lang === "es") expect(esTitleCase(text), `${lang}:${key} "${text}"`).toBe(true); // Spanish: the significant words (cn-v1147)
+        else for (const w of text.split(" ")) expect(w, `${lang}:${key} "${text}"`).toMatch(/^[\p{Lu}&]/u);
       }
     }
     // The English of each key is the literal the page declares (the You tab reads sh_you already).

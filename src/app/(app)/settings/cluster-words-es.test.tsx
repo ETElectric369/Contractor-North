@@ -78,7 +78,7 @@ describe("the Settings clusters' words", () => {
     expect(byId.you).toBe("Tú");
     expect(byId.company).toBe("Empresa");
     expect(byId.getpaid).toBe("Cobros");
-    expect(byId.crew).toBe("Cuadrilla Y Tiempo");
+    expect(byId.crew).toBe("Cuadrilla y Tiempo");
     expect(byId.integrations).toBe("Conexiones");
   });
 

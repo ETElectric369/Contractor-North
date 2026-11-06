@@ -26,7 +26,7 @@ describe("New List and Edit List (cn-v1138)", () => {
   it("Spanish: the doors, and the sheets' headings and Save in the catalog, every door Title Case", () => {
     expect(buttons(newList("es"))).toContain("Nueva Lista");
     expect(rename("es")).toContain('title="Editar lista"');
-    expect(dict("es").mt_newMaterialList).toBe("Nueva Lista De Materiales");
+    expect(dict("es").mt_newMaterialList).toBe("Nueva Lista de Materiales");
     expect(dict("es").mt_createList).toBe("Crear Lista");
     expect(dict("es").mt_editList).toBe("Editar Lista");
     expect(dict("es").mt_save).toBe("Guardar");

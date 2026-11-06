@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOGS, dict, mergeWords, translator } from "@/lib/i18n";
 import type { WordCatalog } from "@/lib/words/types";
+import { titleCaseIn } from "./es-function-words";
 
 /**
  * EVERY WORD IN BOTH LANGUAGES (cn-v1138). The runtime lays Spanish over English so a missing key
@@ -20,8 +21,10 @@ export const CATALOG_FLOOR = 29;
 export const KEYS_FLOOR = 3896;
 
 /**
- * THE KEY FAMILIES THAT ARE CLICKABLES (Erik's law: Title Case in BOTH languages, every word
- * capitalized — "Lista De Precios", "Cuentas Y Órdenes"). A sentence under one of these prefixes
+ * THE KEY FAMILIES THAT ARE CLICKABLES (Erik's law: Title Case in BOTH languages). English capitalizes
+ * every word ("Price List", "Bills & POs"); Spanish, since cn-v1147, the SIGNIFICANT words, the RAE's way
+ * ("Lista de Precios", "Cuentas y Órdenes"): a function word (a, de, la, y…) stays lowercase except as the
+ * first word or the first after a separator (· — – / ( &). A sentence under one of these prefixes
  * (a help row's line, ending in a period) keeps sentence case and is not judged. The page titles
  * (nv_page_) are judged in SPANISH only: their English is byte for byte what each page says today,
  * and four of them ("Tax report", "Activity audit", "Employee documents", "Employee handbook") are
@@ -38,15 +41,8 @@ const TITLE_CASE_FAMILIES = [
   "ld_btn_", "ld_srv_btn_", "cu_btn_", "cu_srv_btn_", "ip_btn_",
 ];
 const TITLE_CASE_ES_ONLY = ["nv_page_"];
-/** Every word begins with a capital, a digit or a symbol; a {slot} is a hole, not a word; "/", "&", "+", "·", a dash
- *  ("They Paid — Record It", the way tests/title-case.test.ts lets "Saved — Open It" through) and Spanish's opening
- *  "¿" / "¡" ("¿Cobrar Ahora?") pass. */
-const titleCase = (s: string) =>
-  s
-    .replace(/\{\w+\}/g, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((w) => /^[¿¡]?[\p{Lu}\p{N}&\/+·(—–]/u.test(w));
+/** The rule: tests/es-function-words titleCaseIn (English every word; Spanish the significant words, cn-v1147). */
+const titleCase = titleCaseIn;
 
 const ROOT = process.cwd();
 const keysOf = (c: WordCatalog) => Object.keys(c.en);
@@ -158,7 +154,7 @@ describe("the catalogs", () => {
     }
   });
 
-  it("every clickable or title key family is Title Case in both languages — every word, De / Y / Del included", () => {
+  it("every clickable or title key family is Title Case — English every word; Spanish the significant words, de / y / del lowercase after the first (cn-v1147)", () => {
     const offenders: string[] = [];
     let judged = 0;
     for (const c of CATALOGS) {
@@ -170,22 +166,35 @@ describe("the catalogs", () => {
           const text = c[lang][k];
           if (/[.]$/.test(text)) continue; // a sentence beside the door, not its words
           judged++;
-          if (!titleCase(text)) offenders.push(`${lang}:${k} "${text}"`);
+          if (!titleCase(text, lang)) offenders.push(`${lang}:${k} "${text}"`);
         }
       }
     }
     expect(judged).toBeGreaterThanOrEqual(200);
     expect(offenders).toEqual([]);
-    // The rule itself: an article or a preposition is a word and starts with a capital.
-    expect(titleCase("Lista De Precios")).toBe(true);
-    expect(titleCase("Cuentas Y Órdenes")).toBe(true);
-    expect(titleCase("Finish Setting Up · {n} Left")).toBe(true);
-    expect(titleCase("They Paid — Record It")).toBe(true);
-    expect(titleCase("¿Cobrar Ahora?")).toBe(true);
-    expect(titleCase("Lista de Precios")).toBe(false);
-    expect(titleCase("Cuentas y Órdenes")).toBe(false);
-    expect(titleCase("¿cobrar Ahora?")).toBe(false);
-    expect(titleCase("They Paid — record It")).toBe(false);
+    // The rule itself. English: every word starts with a capital, an article or a preposition included.
+    expect(titleCase("Add To The Schedule", "en")).toBe(true);
+    expect(titleCase("Bills & POs", "en")).toBe(true);
+    expect(titleCase("Finish Setting Up · {n} Left", "en")).toBe(true);
+    expect(titleCase("They Paid — Record It", "en")).toBe(true);
+    expect(titleCase("Add to The Schedule", "en")).toBe(false);
+    expect(titleCase("They Paid — record It", "en")).toBe(false);
+    // Spanish (cn-v1147): the significant words; a function word lowercase after the first word of a segment.
+    expect(titleCase("Lista de Precios", "es")).toBe(true);
+    expect(titleCase("Cuentas y Órdenes", "es")).toBe(true);
+    expect(titleCase("Mover a un Día", "es")).toBe(true);
+    expect(titleCase("El Día de Todos", "es")).toBe(true);
+    expect(titleCase("Ganada · Elegir el Trabajo", "es")).toBe(true);
+    expect(titleCase("O una Cita", "es")).toBe(true);
+    expect(titleCase("Nueva Cita a las {time}", "es")).toBe(true);
+    expect(titleCase("Fijar Arriba (Se Queda hasta que lo Desfijes)", "es")).toBe(true);
+    expect(titleCase("¿Cobrar Ahora?", "es")).toBe(true);
+    expect(titleCase("Lista De Precios", "es")).toBe(false);
+    expect(titleCase("Cuentas Y Órdenes", "es")).toBe(false);
+    expect(titleCase("Mover A Un Día", "es")).toBe(false);
+    expect(titleCase("Lista de precios", "es")).toBe(false);
+    expect(titleCase("¿cobrar Ahora?", "es")).toBe(false);
+    expect(titleCase("lista de Precios", "es")).toBe(false);
   });
 });
 

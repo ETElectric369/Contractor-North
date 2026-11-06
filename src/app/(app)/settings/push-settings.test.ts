@@ -15,6 +15,7 @@ vi.mock("@/lib/native-push", () => ({ registerForNativePush: vi.fn(), nativePush
 
 import { pushTriggersFor } from "./push-settings";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
+import { esTitleCase } from "../../../../tests/es-function-words";
 
 /**
  * THE ALERT SWITCHES AND THE SWITCH BOARD (0352). An alert only a switched-off feature sends isn't
@@ -76,10 +77,10 @@ describe("pushTriggersFor", () => {
     const titleCase = (s: string) => s.split(/[\s:]+/).filter(Boolean).every((w) => /^[\p{Lu}\p{N}]/u.test(w));
     for (const key of ["booked", "billing", "bug_watch"]) {
       const row = es("owner", ALL_ON, true).find((t) => t.key === key)!;
-      expect(titleCase(row.label), row.label).toBe(true);
+      expect(esTitleCase(row.label), row.label).toBe(true); // Spanish: the significant words (cn-v1147)
       expect(titleCase(pushTriggersFor("owner", ALL_ON, true).find((t) => t.key === key)!.label)).toBe(true);
     }
-    expect(es("owner", ALL_ON, true).find((t) => t.key === "bug_watch")!.label).toBe("Bug Watch: Bloqueos Y El Resumen Del Lunes");
+    expect(es("owner", ALL_ON, true).find((t) => t.key === "bug_watch")!.label).toBe("Bug Watch: Bloqueos y el Resumen del Lunes");
   });
 });
 

@@ -5,6 +5,7 @@ import { translator } from "@/lib/i18n";
 import { words as shell } from "@/lib/words/shell";
 import { ALL_ON, FEATURE_KEYS, type FeatureMap } from "@/lib/features";
 import { helpRows } from "@/lib/onboarding/help-rows";
+import { esTitleCase } from "./es-function-words";
 
 /**
  * THE HONESTY LINE IS TRUE (cn-v1139, E3). sh_spanishCovers promises the dock, the + menu, search, the
@@ -123,7 +124,7 @@ describe("the dock in Spanish: the one a staff seat, a tech and a lapsed company
     expect(SAME_BY_DECLARATION).toContain("Plan");
     for (const isStaff of [true, false]) {
       const rows = resolve({ name: "lapsed", isStaff, features: ALL_ON, lapsed: true });
-      expect(rows.map((r) => r.es)).toEqual(["Plan", "Elegir Un Plan", "Ajustes", "Descargar Para Tu Contador", "Descargar Todo"]);
+      expect(rows.map((r) => r.es)).toEqual(["Plan", "Elegir un Plan", "Ajustes", "Descargar para Tu Contador", "Descargar Todo"]);
     }
   });
 
@@ -174,12 +175,12 @@ describe("the help rows resolve in es", () => {
     expect(helpRows({ isStaff: false, onboarded: false, setup: {}, nortOn: true, features: ALL_ON, t: es })).toEqual([]);
   });
 
-  it("the four doors by name, Title Case: Empieza Aquí, Terminar La Configuración · Pendiente: 2, Muéstrame Cómo, Repetir La Configuración", () => {
+  it("the four doors by name, Title Case: Empieza Aquí, Terminar la Configuración · Pendiente: 2, Muéstrame Cómo, Repetir la Configuración", () => {
     expect(helpRows({ isStaff: true, onboarded: false, setup: {}, nortOn: true, features: ALL_ON, t: es }).map((r) => r.label)).toEqual([
-      "Empieza Aquí", "Muéstrame Cómo", "Repetir La Configuración",
+      "Empieza Aquí", "Muéstrame Cómo", "Repetir la Configuración",
     ]);
     const finish = helpRows({ isStaff: true, onboarded: true, setup: { ...DONE, service_area: null, labor_rate: null }, nortOn: false, features: ALL_ON, t: es });
-    expect(finish.map((r) => r.label)).toEqual(["Terminar La Configuración · Pendiente: 2", "Muéstrame Cómo", "Repetir La Configuración"]);
-    for (const r of finish) for (const w of wordsOf(r.label)) expect(w, r.label).toMatch(/^[\p{Lu}\p{N}]/u);
+    expect(finish.map((r) => r.label)).toEqual(["Terminar la Configuración · Pendiente: 2", "Muéstrame Cómo", "Repetir la Configuración"]);
+    for (const r of finish) expect(esTitleCase(r.label), r.label).toBe(true); // Spanish: the significant words (cn-v1147)
   });
 });

@@ -131,22 +131,22 @@ describe("the actions answer in the caller's language", () => {
 describe("the Reminders view in Spanish", () => {
   it("the add line: placeholder, Agregar; English as before", () => {
     const s = es(createElement(NewReminderBox));
-    expect(s).toContain('placeholder="Agregar Un Recordatorio…"');
+    expect(s).toContain('placeholder="Agregar un Recordatorio…"');
     expect(s).toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Agregar<\/button>/);
     const e = en(createElement(NewReminderBox));
     expect(e).toContain('placeholder="Add A Reminder…"');
     expect(e).toMatch(/Add<\/button>/);
   });
 
-  it("a row: Vence, Alta, the category chip, Viene De lunes, the door titles; English unchanged", () => {
+  it("a row: Vence, Alta, the category chip, Viene de lunes, the door titles; English unchanged", () => {
     const props = { t: REMINDER, people: PEOPLE, category: "office", todayStr: TODAY, showCategory: true, overdue: true };
     const s = es(createElement(TaskRow, props));
     expect(s).toContain("Vence 20 sept 2026");
     expect(s).toContain(">Alta<");
     expect(s).toContain(">Oficina<");
-    expect(s).toContain("Viene De lunes");
+    expect(s).toContain("Viene de lunes");
     expect(s).toContain('title="Desfijar"'); // a carried pin is a standing pin: the door unpins
-    expect(es(createElement(TaskRow, { ...props, t: { ...REMINDER, focus_date: null } }))).toContain('title="Fijar Arriba (Se Queda Hasta Que Lo Desfijes)"');
+    expect(es(createElement(TaskRow, { ...props, t: { ...REMINDER, focus_date: null } }))).toContain('title="Fijar Arriba (Se Queda hasta que lo Desfijes)"');
     expect(s).toContain('title="Editar"');
     expect(s).toContain('title="Eliminar"');
     expect(s).toContain('title="Agregar subtarea"');
@@ -160,7 +160,7 @@ describe("the Reminders view in Spanish", () => {
     expect(en(createElement(TaskRow, { ...props, t: { ...REMINDER, focus_date: null } }))).toContain('title="Pin To Top (Carries Until You Unpin It)"');
   });
 
-  it("the edit sheet: Editar Recordatorio, Guardar Cambios, the labels, Quien Lo Hizo, the priorities", () => {
+  it("the edit sheet: Editar Recordatorio, Guardar Cambios, the labels, Quien lo Hizo, the priorities", () => {
     const props = { t: REMINDER, people: PEOPLE, category: "office", open: true, onClose: () => {}, viewerId: "u1" };
     const s = es(createElement(TaskEditModal, props));
     expect(s).toContain("Editar Recordatorio");
@@ -169,7 +169,7 @@ describe("the Reminders view in Spanish", () => {
     expect(s).toContain(">Categoría<");
     expect(s).toContain(">Prioridad<");
     expect(s).toContain("Para Quién Es");
-    expect(s).toContain("Quien Lo Hizo");
+    expect(s).toContain("Quien lo Hizo");
     expect(s).toContain(">Urgente<");
     expect(s).toContain('placeholder="Agrega detalles o contexto…"');
     const other = es(createElement(TaskEditModal, { ...props, viewerId: "someone-else" }));

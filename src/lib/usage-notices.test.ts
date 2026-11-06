@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { translator } from "@/lib/i18n";
 import { usageNoticeKey, usageNoticeKind, usageNoticeWords } from "./usage-notices";
+import { esTitleCase } from "../../tests/es-function-words";
 
 /**
  * THE USAGE NOTICES' KEYS AND WORDS (cn-v1140): one key per month per threshold so the cron tells
@@ -66,11 +67,11 @@ describe("usageNoticeWords", () => {
 
   it("both in Spanish, the date as 1 nov", () => {
     expect(usageNoticeWords("usage_80:2026-10", window, es, "es")).toEqual({
-      title: "Uso: 80% De Este Mes",
+      title: "Uso: 80% de Este Mes",
       body: "Ya se usó la mayor parte de este mes. Se reinicia el 1 nov. Nada se detiene: pasado el 100%, Nort y el estimador corren más ligeros hasta entonces.",
     });
     expect(usageNoticeWords("usage_100:2026-10", window, es, "es")).toEqual({
-      title: "Uso: Agotado Por Este Mes",
+      title: "Uso: Agotado por Este Mes",
       body: "El uso de este mes se agotó, así que Nort y el estimador corren en el modelo más ligero hasta el 1 nov. Agrega uso o mejora tu plan en Ajustes › Cobros.",
     });
   });
@@ -78,7 +79,7 @@ describe("usageNoticeWords", () => {
   it("the titles are Title Case in both languages; a key that is not a usage notice answers null", () => {
     for (const key of ["usage_80:2026-10", "usage_100:2026-10"]) {
       expect(titleCase(usageNoticeWords(key, window, en, "en")!.title)).toBe(true);
-      expect(titleCase(usageNoticeWords(key, window, es, "es")!.title)).toBe(true);
+      expect(esTitleCase(usageNoticeWords(key, window, es, "es")!.title)).toBe(true); // Spanish: the significant words (cn-v1147)
     }
     expect(usageNoticeWords("lapsed", window, en, "en")).toBeNull();
   });

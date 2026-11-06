@@ -23,9 +23,9 @@ describe("/employee-docs's title and line", () => {
     expect(description).toBe("Driver's licenses, I-9, W-2, and certifications — stored securely (staff only).");
   });
 
-  it("Spanish for a Spanish speaker: Documentos Del Empleado, and the catalog's line", async () => {
+  it("Spanish for a Spanish speaker: Documentos del Empleado, and the catalog's line", async () => {
     const { title, description, html } = await renderHeader(Page, "es");
-    expect(title).toBe("Documentos Del Empleado");
+    expect(title).toBe("Documentos del Empleado");
     expect(description).toBe(catalog.es.nv_desc_employeeDocs);
     expect(description).not.toBe(catalog.en.nv_desc_employeeDocs);
     expect(html).not.toContain(">Employee documents<");

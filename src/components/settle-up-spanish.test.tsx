@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { CATALOGS, dict, fillText, translator } from "@/lib/i18n";
 import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
+import { esTitleCase } from "../../tests/es-function-words";
 
 /**
  * THE SETTLE UP BUTTON IN SPANISH (the visit-page-in-Spanish wave, cn-v1144, su_). The one Get Paid
@@ -46,11 +47,11 @@ describe("the Get Paid sheet speaks Spanish to a Spanish reader", () => {
     expect(html).toContain('data-modal="Cobrar $1,558.62"');
     const body = text(html);
     expect(body).toMatch(/^Cobrar /);
-    const card = body.indexOf("Mostrar QR De Tarjeta");
-    const other = body.indexOf("O Pagaron De Otra Forma");
+    const card = body.indexOf("Mostrar QR de Tarjeta");
+    const other = body.indexOf("O Pagaron de Otra Forma");
     expect(card).toBeGreaterThan(-1);
     expect(other).toBeGreaterThan(card);
-    for (const w of ["Dinero que se movió fuera de Stripe", "Monto", "Cómo pagaron", "Fecha De Pago", "Nota", "Registrarlo"]) expect(body, w).toContain(w);
+    for (const w of ["Dinero que se movió fuera de Stripe", "Monto", "Cómo pagaron", "Fecha de Pago", "Nota", "Registrarlo"]) expect(body, w).toContain(w);
     expect(html).toContain('placeholder="$ monto"');
     expect(html).toContain('placeholder="p. ej. cheque #1042"');
     expect(html).not.toMatch(/Show Card QR|Or They Paid Another Way|Record It|Date Paid|How they paid/);
@@ -66,8 +67,8 @@ describe("the Get Paid sheet speaks Spanish to a Spanish reader", () => {
   it("with cards off: Cómo Pagaron, and where cards get switched on", () => {
     const body = text(sheet({ ...INV, cardEnabled: false, methods: ["Cash"] }));
     expect(body).toContain("Cómo Pagaron");
-    expect(body).not.toContain("O Pagaron De Otra Forma");
-    expect(body).toContain("Las tarjetas aún no están activadas para esta empresa: Ajustes → Cobros → Configurar Pagos Con Tarjeta toma unos cinco minutos.");
+    expect(body).not.toContain("O Pagaron de Otra Forma");
+    expect(body).toContain("Las tarjetas aún no están activadas para esta empresa: Ajustes → Cobros → Configurar Pagos con Tarjeta toma unos cinco minutos.");
     expect(body).not.toContain("Set Up Card Payments");
   });
 
@@ -80,7 +81,7 @@ describe("the Get Paid sheet speaks Spanish to a Spanish reader", () => {
     expect(text(sheet({ ...INV, trigger: "link" }))).toMatch(/^¿Cobrar Ahora\?/);
     const job = es(createElement(SettleUpButton as never, { source: "job", id: "j-1", compact: true, cardEnabled: true, methods: ["Cash"] }));
     expect(job).toContain('data-modal="Cobrar"');
-    expect(text(job)).toContain("Enviar La Factura Y Mostrar QR De Tarjeta");
+    expect(text(job)).toContain("Enviar la Factura y Mostrar QR de Tarjeta");
     expect(text(job)).toContain("Una tarjeta se cobra sobre la factura abierta del trabajo");
     const visit = text(es(createElement(SettleUpButton as never, { source: "appointment", id: "a-1", cardEnabled: true, methods: ["Cash"] })));
     expect(visit).toContain("Una tarjeta escribe la factura, la envía y marca la visita como hecha");
@@ -153,7 +154,7 @@ describe("the Get Paid sheet speaks Spanish to a Spanish reader", () => {
     expect(customerPayLinkText(null, 150, "https://x")).toBe("$150.00. Pay by card here: https://x");
     // The same sheet drawn for a Spanish reader: its doors are Spanish, and the customer's words carry no Spanish —
     // they are the catalog's English through translator("en"), the sentences the old sheet assembled.
-    expect(text(sheet({ ...INV, cardEnabled: true, methods: ["Cash"] }))).toContain("Mostrar QR De Tarjeta");
+    expect(text(sheet({ ...INV, cardEnabled: true, methods: ["Cash"] }))).toContain("Mostrar QR de Tarjeta");
     const en = translator("en");
     const line = customerReceiptWords("paid", receipt, 150, on).line;
     const pay = customerPayLinkText("1042", 150, "https://x");
@@ -186,7 +187,7 @@ describe("the Settle Up catalog (su_)", () => {
     expect(doors.length).toBeGreaterThanOrEqual(28);
     for (const k of doors) {
       expect(titleCase(su.en[k]), `en:${k} "${su.en[k]}"`).toBe(true);
-      expect(titleCase(su.es[k]), `es:${k} "${su.es[k]}"`).toBe(true);
+      expect(esTitleCase(su.es[k]), `es:${k} "${su.es[k]}"`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
     expect(su.en.su_apple_tapToPay).toBe("Tap to Pay");
     expect(su.es.su_apple_tapToPay).toBe("Tap to Pay");
@@ -196,7 +197,7 @@ describe("the Settle Up catalog (su_)", () => {
     expect(su.es.su_askAdmin).toContain("Tap to Pay en el iPhone");
   });
 
-  it("the house words: Cobrar, Factura, Borrador, Recibo, Hecho, Ajustes › Cobros, Intentar De Nuevo, Cancelar, Atrás", () => {
+  it("the house words: Cobrar, Factura, Borrador, Recibo, Hecho, Ajustes › Cobros, Intentar de Nuevo, Cancelar, Atrás", () => {
     expect(su.es.su_btn_getPaid).toBe("Cobrar");
     expect(dict("es").jb_getPaid).toBe(su.es.su_btn_getPaid);
     expect(su.es.su_btn_done).toBe(dict("es").ag_btn_done);

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { CATALOGS, dict, translator } from "@/lib/i18n";
 import { formatDateTime } from "@/lib/utils";
 import type { Customer } from "@/lib/types";
+import { esTitleCase } from "../../../../tests/es-function-words";
 
 /**
  * THE CUSTOMERS' SCREENS IN SPANISH (builder C of the Ventas-2 wave, cn-v1146, cu_): the table's
@@ -99,7 +100,7 @@ describe("New Customer in Spanish", () => {
     expect(words).toContain("Nuevo Cliente");
     expect(html).toContain('data-modal="Nuevo Cliente"');
     expect(html).toContain('data-actions="Crear Cliente"');
-    for (const w of ["Nombre *", "Empresa", "Tipo", "Estado", "Correo", "Teléfono", "Dirección", "Ciudad", "Estado (EE. UU.)", "Código postal", "Notas", "Importar Un .vcf", "Autorrelleno"]) expect(words).toContain(w);
+    for (const w of ["Nombre *", "Empresa", "Tipo", "Estado", "Correo", "Teléfono", "Dirección", "Ciudad", "Estado (EE. UU.)", "Código postal", "Notas", "Importar un .vcf", "Autorrelleno"]) expect(words).toContain(w);
     for (const o of ["Residencial", "Comercial", "Industrial", "Contratista", "Subcontratista", "Activo", "Inactivo"]) {
       expect(html).toContain(`>${o}</option>`);
       expect(titleCase(o)).toBe(true);
@@ -152,9 +153,9 @@ describe("the portal link card in Spanish", () => {
     expect(words).toContain("No hay correo registrado: no puede iniciar sesión.");
     for (const k of ["cu_btn_seeWhatTheySee", "cu_btn_copyTheLink", "cu_btn_emailItToThem", "cu_btn_newLink", "cu_btn_turnOff", "cu_btn_signOutAllDevices"]) {
       expect(words).toContain(t(k));
-      expect(titleCase(t(k)), k).toBe(true);
+      expect(esTitleCase(t(k)), k).toBe(true); // Spanish: the significant words (cn-v1147)
     }
-    expect(html).toContain('data-modal="¿Crear Un Enlace Nuevo Para Larkspur?"');
+    expect(html).toContain('data-modal="¿Crear un Enlace Nuevo para Larkspur?"');
     expect(html).toContain('data-actions="Crear Enlace Nuevo"');
     // The customer's own page's words, quoted for the office, stay what that page says.
     expect(words).toContain("“This link was turned off.”");
@@ -207,7 +208,7 @@ describe("the catalog", () => {
   it("every cu_btn_ door is Title Case in both languages, and every key has its Spanish", () => {
     for (const k of Object.keys(cu.en)) {
       expect(cu.es[k], k).toBeTypeOf("string");
-      if (k.startsWith("cu_btn_")) for (const lang of ["en", "es"] as const) expect(titleCase(cu[lang][k]), `${lang}:${k}`).toBe(true);
+      if (k.startsWith("cu_btn_")) for (const lang of ["en", "es"] as const) expect((lang === "es" ? esTitleCase : titleCase)(cu[lang][k]), `${lang}:${k}`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
   });
 

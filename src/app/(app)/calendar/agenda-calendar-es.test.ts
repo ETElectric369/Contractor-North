@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * THE CALENDAR SURFACE IN SPANISH (the agenda-in-Spanish wave, lib/words/agenda-calendar ag_cal_). Each
- * screen rendered inside a LangProvider with "es": its doors in Title Case ("Quitar La Fecha"), one
+ * screen rendered inside a LangProvider with "es": its doors in Title Case ("Quitar la Fecha"), one
  * sentence, one date or time in es-US ("jue, 5 nov", "10:00 a. m."). The English renders (no provider)
  * stay in their own tests, untouched: tile-sheet.test, calendar-view-render.test, block-info-render.test.
  */
@@ -88,8 +88,8 @@ describe("the tile's sheet in Spanish", () => {
   it("a job: its doors Title Case, its time in a. m./p. m., its crew sentence", () => {
     const html = sheet(bayberry());
     const t = text(html);
-    expect(html).toMatch(/<a[^>]*href="\/jobs\/j-bayberry"[^>]*>Abrir El Trabajo<\/a>/);
-    for (const door of ["Quitar La Fecha", "Mover", "Día Completo"]) expect(t).toContain(door);
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j-bayberry"[^>]*>Abrir el Trabajo<\/a>/);
+    for (const door of ["Quitar la Fecha", "Mover", "Día Completo"]) expect(t).toContain(door);
     for (const heading of ["Día", "Hora", "Cuadrilla", "Inicio", "Fin"]) expect(t).toContain(heading);
     expect(t).toContain("10:00 a. m. – 12:00 p. m. · 2 horas — cámbialo");
     expect(t).toContain("Todo el trabajo, cada día.");
@@ -105,11 +105,11 @@ describe("the tile's sheet in Spanish", () => {
       createElement(TileSheetBody, { target: { ...bayberry({ scheduled_end: at("2026-11-07", "12:00") }), dayHours: { start: "12:00", end: "17:00" } } as TileTarget, tz: LA, workDay: WORK_DAY, team, canEdit: true, perDayHours: true, onClose: () => {} }),
     );
     expect(text(per)).toMatch(/Este Día, jue, 5 (de )?nov: sus propias horas\. Los otros días del trabajo mantienen las suyas\./);
-    expect(text(per)).toContain("Usar Las Horas Del Trabajo");
+    expect(text(per)).toContain("Usar las Horas del Trabajo");
     expect(text(html)).toMatch(/cada día hasta sáb, 7 (de )?nov/);
   });
 
-  it("a visit: Quién Va, Nadie lit, Abrir La Visita", () => {
+  it("a visit: Quién Va, Nadie lit, Abrir la Visita", () => {
     const visit: TileTarget = {
       kind: "visit",
       day: DAY,
@@ -118,7 +118,7 @@ describe("the tile's sheet in Spanish", () => {
     const html = sheet(visit);
     expect(text(html)).toContain("Quién Va");
     expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*border-dashed[^>]*>Nadie<\/button>/);
-    expect(html).toMatch(/<a[^>]*href="\/appointments\/v-catbird"[^>]*>Abrir La Visita<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/appointments\/v-catbird"[^>]*>Abrir la Visita<\/a>/);
     expect(html).toContain('aria-label="Quién va"');
   });
 });
@@ -131,17 +131,17 @@ describe("the ghost (work nobody booked) in Spanish", () => {
     customer: "Snowbell",
     people: mergePeople([{ profileId: "p-snowbell", name: "Sam Snowbell", jobId: "j-catbird", dayStr: "2026-09-25", startMin: 11 * 60 + 4, endMin: 13 * 60 + 46 }], (m) => m),
   };
-  it("its sheet: Agendar Este Día, Abrir El Trabajo, the sentence in Spanish with a. m./p. m.", () => {
+  it("its sheet: Agendar Este Día, Abrir el Trabajo, the sentence in Spanish with a. m./p. m.", () => {
     const html = es(createElement(GhostSheetBody, { day: "2026-09-25", ghost, canEdit: true, onClose: () => {} }));
     const t = text(html);
     expect(t).toContain("Agendar Este Día");
-    expect(t).toContain("Abrir El Trabajo");
+    expect(t).toContain("Abrir el Trabajo");
     expect(t).toContain("No se agendó nada este día.");
     expect(t).toMatch(/11:04 a\. m\./);
   });
-  it("today's row: Trabajado, Sin Agendar, and when it can be booked", () => {
+  it("today's row: Trabajado, sin Agendar, and when it can be booked", () => {
     const t = text(es(createElement(GhostRow, { day: "2026-09-25", ghost, canEdit: true, today: true })));
-    expect(t).toContain("Trabajado, Sin Agendar");
+    expect(t).toContain("Trabajado, sin Agendar");
     expect(t).toContain("Agéndalo cuando termine el día.");
   });
 });
@@ -164,7 +164,7 @@ describe("the day drill's card, the grid, the chips, the map, the ⋯ and Move T
     expect(html).toMatch(/border-dashed[^>]*>Nadie</);
   });
 
-  it("the grid: hoy, todo el día, the hours in a. m./p. m., Agregar A La Agenda", () => {
+  it("the grid: hoy, todo el día, the hours in a. m./p. m., Agregar a la Agenda", () => {
     const html = es(
       createElement(TimeGrid, {
         days: [{ dayStr: DAY, label: "jue 5", isToday: true }],
@@ -180,16 +180,16 @@ describe("the day drill's card, the grid, the chips, the map, the ⋯ and Move T
     expect(text(html)).toContain("todo el día");
     expect(text(html)).toContain("8 a. m.");
     expect(text(html)).toContain("1 p. m.");
-    expect(html).toContain('aria-label="Agregar A La Agenda, jue 5"');
-    expect(html).toContain('title="Agregar A La Agenda: toca una hora libre"');
+    expect(html).toContain('aria-label="Agregar a la Agenda, jue 5"');
+    expect(html).toContain('title="Agregar a la Agenda: toca una hora libre"');
   });
 
-  it("the chips say Nadie; the ⋯ says Más Para; Move To Day's trigger says Mover A Un Día (Title Case, Erik's cn-v1144 decision)", () => {
+  it("the chips say Nadie; the ⋯ says Más Para; Move To Day's trigger says Mover a un Día (Title Case, Erik's cn-v1144 decision)", () => {
     expect(es(createElement(CrewInitials, { crew: [], lang: "es" }))).toContain(">Nadie<");
     const more = es(createElement(RowMoreSheet, { title: "14 Bayberry Ln", children: "rows" }));
-    expect(more).toContain('aria-label="Más Para 14 Bayberry Ln"');
+    expect(more).toContain('aria-label="Más para 14 Bayberry Ln"');
     expect(more).toContain('title="Más"');
-    expect(es(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Mover A Un Día"');
+    expect(es(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Mover a un Día"');
     // The one intended English change of the visit-page wave: the trigger's words are a clickable's.
     expect(renderToStaticMarkup(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Move To A Day"');
   });
@@ -236,7 +236,7 @@ describe("the calendar in Spanish", () => {
   it("the day: Día / Semana / Mes, Hoy, its headings, its sentence, its date in es-US", () => {
     const html = render("day");
     const t = text(html);
-    for (const door of ["Día", "Semana", "Mes", "Hoy", "Agregar A La Agenda"]) expect(t).toContain(door);
+    for (const door of ["Día", "Semana", "Mes", "Hoy", "Agregar a la Agenda"]) expect(t).toContain(door);
     expect(t).toContain("← Semana");
     for (const line of ["Citas", "Trabajos programados", "Nada agendado este día."]) expect(t).toContain(line);
     expect(t).toContain("El tiempo marcado no cargó, así que hoy y los días pasados muestran solo lo agendado.");

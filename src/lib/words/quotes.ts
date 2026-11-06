@@ -30,6 +30,8 @@ import type { WordCatalog } from "./types";
  * THE ESTIMATE STATUS FAMILY (qt_status_…): lib/statuses estimateStatusLabel reads these for a Spanish
  * reader through the caller's translator. Lowercase, like the raw values every badge prints in English
  * ("draft"); a caller that capitalizes (the status select) capitalizes the Spanish the same way.
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "qt_",
@@ -266,14 +268,14 @@ export const words: WordCatalog = {
     qt_theDraft: "el borrador",
     qt_couldntCleanDuplicates: "No se pudieron limpiar los duplicados.",
     qt_keptDeleted: "Se dejó {which}, se eliminaron {n}.",
-    qt_onAJob: "En Un Trabajo",
+    qt_onAJob: "En un Trabajo",
     qt_keepThisDeleteRest: "Dejar este, eliminar los demás",
     qt_btn_keepThis: "Dejar Este",
     qt_pinnedOnAJob: "{which} está en un trabajo — casi siempre conviene dejar ese.",
 
     // ── New Estimate and the saved estimate's page (quotes/new/page, quotes/[id]/page) ──
-    qt_btn_backToEstimates: "Volver A Presupuestos",
-    qt_btn_backToQuotes: "Volver A Cotizaciones",
+    qt_btn_backToEstimates: "Volver a Presupuestos",
+    qt_btn_backToQuotes: "Volver a Cotizaciones",
     qt_priceListDidntLoad: "La lista de precios no cargó",
     qt_kitsDidntLoadWhole: "Los kits no cargaron completos",
 
@@ -282,37 +284,37 @@ export const words: WordCatalog = {
     qt_addItemsOne: "Agregar {n} partida — {amount}",
     qt_addItemsMany: "Agregar {n} partidas — {amount}",
     qt_kitTickLines: "Marca las líneas que necesita este presupuesto. Los cambios de cantidad y precio solo cuentan para ESTE presupuesto — el kit no cambia.",
-    qt_kitLinkedPriced: "las líneas marcadas toman su precio de la Lista De Precios para este cliente.",
+    qt_kitLinkedPriced: "las líneas marcadas toman su precio de la Lista de Precios para este cliente.",
     qt_kitSizesItself: "Esta lista se calcula sola.",
     qt_kitTakenFromInspection: "Tomadas de la inspección — cámbialas si el trabajo cambió.",
     qt_kitEnterMeasurements: "Escribe las medidas del trabajo y las cantidades se llenan solas.",
     qt_squareFeet: "Pies cuadrados",
     qt_linearFeet: "Pies lineales",
-    qt_btn_sizeToJob: "Calcular Para El Trabajo",
+    qt_btn_sizeToJob: "Calcular para el Trabajo",
     qt_nOfTotalSelected: "{n} de {total} seleccionadas",
     qt_includeLine: "Incluir {name}",
-    qt_pricedFromPriceList: "Con precio de la Lista De Precios",
+    qt_pricedFromPriceList: "Con precio de la Lista de Precios",
     qt_description: "Descripción",
     qt_qty: "Cant.",
     qt_quantity: "Cantidad",
     qt_unitDollar: "$ por unidad",
     qt_unitPrice: "Precio por unidad",
     qt_kitNoItemsYet: "Este kit aún no tiene partidas — agrega la primera abajo.",
-    qt_kitChangeItself: "¿Necesitas cambiar el kit mismo — agregar, quitar o cambiar el precio de una línea para todos los presupuestos futuros? Hazlo en Lista De Precios y kits.",
+    qt_kitChangeItself: "¿Necesitas cambiar el kit mismo — agregar, quitar o cambiar el precio de una línea para todos los presupuestos futuros? Hazlo en Lista de Precios y kits.",
 
     // ── The circuit schedule card (quotes/[id]/circuit-schedule-card) ──
     qt_theJob: "el trabajo",
     qt_couldntSave: "No se pudo guardar.",
-    qt_circuitSchedule: "Tabla De Circuitos",
+    qt_circuitSchedule: "Tabla de Circuitos",
     qt_printsAsSecondPage: "· se imprime como segunda página",
     qt_btn_reading: "Leyendo…",
     qt_btn_regenerate: "Regenerar",
-    qt_btn_generateFromLineItems: "Generar Desde Las Partidas",
+    qt_btn_generateFromLineItems: "Generar desde las Partidas",
     qt_btn_saving: "Guardando…",
     qt_btn_save: "Guardar",
-    qt_proposalNotJobList: "Esta Es La Propuesta. El Trabajo Lleva Su Propia Lista En La Pestaña Panel.",
-    qt_openJobPanel: "Abrir El Panel De {job}",
-    qt_noCircuitScheduleYet: "Aún no hay tabla de circuitos. Toca Generar Desde Las Partidas para leer los interruptores y el cable de las partidas, o Agregar Circuito para escribir las filas a mano.",
+    qt_proposalNotJobList: "Esta Es la Propuesta. El Trabajo Lleva Su Propia Lista en la Pestaña Panel.",
+    qt_openJobPanel: "Abrir el Panel de {job}",
+    qt_noCircuitScheduleYet: "Aún no hay tabla de circuitos. Toca Generar desde las Partidas para leer los interruptores y el cable de las partidas, o Agregar Circuito para escribir las filas a mano.",
     qt_colCkt: "Cto.",
     qt_colWire: "Cable",
     qt_colBreaker: "Interruptor",
@@ -330,7 +332,7 @@ export const words: WordCatalog = {
     qt_customerName: "Nombre del cliente",
     qt_address: "Dirección",
     qt_jobAddress: "Dirección del trabajo",
-    qt_btn_createAndAttach: "Crear Y Adjuntar",
+    qt_btn_createAndAttach: "Crear y Adjuntar",
     qt_btn_cancel: "Cancelar",
     qt_restFromContact: "El teléfono, el correo y lo demás se agregan después desde el contacto.",
     qt_noCustomerLeaveWithLead: "— Sin cliente — dejarlo con el prospecto {name} —",
@@ -349,7 +351,7 @@ export const words: WordCatalog = {
 
     // ── The estimate's type, status, Duplicate and the paper format (quote-type-toggle, status-control, duplicate-quote-button, paper-format-switch) ──
     qt_btn_typeQuote: "Cotización (Precio Fijo)",
-    qt_btn_typeEstimate: "Presupuesto (Tiempo Y Material)",
+    qt_btn_typeEstimate: "Presupuesto (Tiempo y Material)",
     qt_couldntChangeType: "No se pudo cambiar el tipo — inténtalo de nuevo.",
     qt_typeSetAlreadySent: "Ya se envió, así que el tipo queda fijo - la copia que tiene el cliente dice cómo se cobra. Usa Duplicar para empezar uno nuevo.",
     qt_typeTitle: "Cotización = precio fijo · Presupuesto = tiempo y materiales",
@@ -362,15 +364,15 @@ export const words: WordCatalog = {
     qt_btn_duplicating: "Duplicando…",
     qt_btn_revise: "Crear Revisión",
     qt_btn_duplicate: "Duplicar",
-    qt_laborPartsOnPaper: "Mano De Obra Y Piezas En El Papel",
-    qt_btn_companyDefaultOn: "Predeterminado De La Empresa · Activado",
-    qt_btn_companyDefaultOff: "Predeterminado De La Empresa · Desactivado",
+    qt_laborPartsOnPaper: "Mano de Obra y Piezas en el Papel",
+    qt_btn_companyDefaultOn: "Predeterminado de la Empresa · Activado",
+    qt_btn_companyDefaultOff: "Predeterminado de la Empresa · Desactivado",
     qt_btn_show: "Mostrar",
     qt_btn_hide: "Ocultar",
     qt_paperFormatHelp: "Imprime las horas de cada tarea a su tarifa y sus piezas debajo, en el papel y en el enlace del cliente. El predeterminado de la empresa se fija en Document Studio.",
 
     // ── Add Line Items (components/add-line-items; also drawn on billing) ──
-    qt_addFromPriceList: "Agregar de la Lista De Precios — toca para ver, o busca…",
+    qt_addFromPriceList: "Agregar de la Lista de Precios — toca para ver, o busca…",
     qt_vendorsOne: "{n} Proveedor",
     qt_vendorsMany: "{n} Proveedores",
     qt_default: "Predeterminado",
@@ -386,7 +388,7 @@ export const words: WordCatalog = {
     qt_couldntShare: "No se pudo compartir — mejor usa Correo.",
     qt_stillADraft: "Esto todavía es un borrador.",
     qt_btn_shareThisNow: "¿Compartirlo Ahora?",
-    qt_btn_markSentAndShare: "Marcar El Envío Y Compartir",
+    qt_btn_markSentAndShare: "Marcar el Envío y Compartir",
     qt_btn_notYet: "Aún No",
     qt_sharingIsSending: "Compartir el enlace es enviarlo, así que esto marca el envío y abre la hoja para compartir en el mismo paso. Aún puedes cambiarlo después.",
 
@@ -410,7 +412,7 @@ export const words: WordCatalog = {
     // ── New Inspection (appointments/new-inspection-button; drawn on New Estimate, the Inspections tab and the lead row) ──
     qt_couldNotStartInspection: "No se pudo empezar la inspección.",
     qt_btn_starting: "Empezando…",
-    qt_btn_startAnInspection: "Empezar Una Inspección",
-    qt_btn_bookAnInspection: "Agendar Una Inspección",
+    qt_btn_startAnInspection: "Empezar una Inspección",
+    qt_btn_bookAnInspection: "Agendar una Inspección",
   },
 };

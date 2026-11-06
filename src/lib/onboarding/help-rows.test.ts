@@ -5,6 +5,7 @@ vi.mock("@/lib/tts", () => ({ unlockAudio: vi.fn() }));
 import { helpRows } from "./help-rows";
 import { dict, translator } from "@/lib/i18n";
 import { ALL_ON } from "@/lib/features";
+import { esTitleCase } from "../../../tests/es-function-words";
 
 /**
  * THE HELP ROWS' WORDS (cn-v1139): the four rows and their lines are the shell catalog's sh_help_
@@ -32,13 +33,13 @@ describe("helpRows", () => {
     expect(helpRows({ isStaff: true, onboarded: false, setup: {}, nortOn: true, features: ALL_ON, t: translator("en") })).toEqual(start);
   });
 
-  it("Spanish: Empieza Aquí, Terminar La Configuración · Pendiente: 2, Muéstrame Cómo, Repetir La Configuración — the same keys, requests and lessons", () => {
+  it("Spanish: Empieza Aquí, Terminar la Configuración · Pendiente: 2, Muéstrame Cómo, Repetir la Configuración — the same keys, requests and lessons", () => {
     const es = translator("es");
     const rows = helpRows({ isStaff: true, onboarded: true, setup: open2, nortOn: true, features: ALL_ON, t: es });
     expect(rows.map((r) => [r.key, r.label])).toEqual([
-      ["finish", "Terminar La Configuración · Pendiente: 2"],
+      ["finish", "Terminar la Configuración · Pendiente: 2"],
       ["lessons", "Muéstrame Cómo"],
-      ["again", "Repetir La Configuración"],
+      ["again", "Repetir la Configuración"],
     ]);
     expect(rows[0].sub).toMatch(/^Todavía falta: .+\.$/);
     expect("request" in rows[0] && rows[0].request).toBe("finish");
@@ -58,9 +59,8 @@ describe("helpRows", () => {
       ["sh_help_again", "sh_help_againNort", "sh_help_againQuiet", "sh_help_finish", "sh_help_finishSub", "sh_help_showMeHow", "sh_help_startHere", "sh_help_startHereNort", "sh_help_startHereQuiet"].sort(),
     );
     for (const k of ["sh_help_startHere", "sh_help_finish", "sh_help_showMeHow", "sh_help_again"]) {
-      for (const lang of ["en", "es"] as const) {
-        for (const w of dict(lang)[k].replace(/\{\w+\}/g, "").split(/\s+/).filter(Boolean)) expect(w, `${lang}:${k}`).toMatch(/^[\p{Lu}·]/u);
-      }
+      for (const w of dict("en")[k].replace(/\{\w+\}/g, "").split(/\s+/).filter(Boolean)) expect(w, `en:${k}`).toMatch(/^[\p{Lu}·]/u);
+      expect(esTitleCase(dict("es")[k]), `es:${k}`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
     for (const k of ["sh_help_startHereNort", "sh_help_startHereQuiet", "sh_help_finishSub", "sh_help_againNort", "sh_help_againQuiet"]) {
       for (const lang of ["en", "es"] as const) expect(dict(lang)[k], `${lang}:${k}`).toMatch(/\.$/);

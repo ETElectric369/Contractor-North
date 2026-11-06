@@ -11,6 +11,8 @@ import type { WordCatalog } from "./types";
  * and kitSummary) live in lib/estimate/kit-from-task with their English inline and their Spanish under
  * qs_lib_kit… (lib/words/quotes-server): pass the screen's `lang` and `t` to kitFromTaskDetail(detail,
  * input, lang, t) and kitSummary(value, fromUnits, lang, t).
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "qb_",
@@ -96,13 +98,13 @@ export const words: WordCatalog = {
   es: {
     // ── A line's description box (LineDescInput): the book's dropdown and the note door ──
     qb_description: "Descripción",
-    qb_noPriceBookYet: "Aún no hay lista de precios. Súbela o ármala en Dinero → Lista De Precios y esto se autocompletará.",
+    qb_noPriceBookYet: "Aún no hay lista de precios. Súbela o ármala en Dinero → Lista de Precios y esto se autocompletará.",
     qb_nothingMatches: "Nada en tu lista de precios coincide con eso.",
     qb_showingNofTotal: "Mostrando {n} de {total} — escribe para acotar.",
     qb_note: "Nota",
     qb_notePlaceholder: "Una nota debajo de esta línea — se imprime en el presupuesto.",
     qb_btn_editNote: "Editar Nota",
-    qb_btn_addANote: "Agregar Una Nota",
+    qb_btn_addANote: "Agregar una Nota",
 
     // ── A task's labor rows: who, the hours, the rate chip and the way back to the rule ──
     qb_rateTyped: "× {at} · escrita",
@@ -110,22 +112,22 @@ export const words: WordCatalog = {
     qb_rateQuotedAt: "cotizada a {at}",
     qb_rateRuleMoved: "cotizada a {at} · la regla ahora dice {rule}",
     qb_noRate: "sin tarifa",
-    qb_usePersonsRate: "Usar La Tarifa De {name}",
-    qb_btn_useCustomersLevel: "Usar El Nivel Del Cliente",
-    qb_btn_useCompanyDefault: "Usar El Predeterminado De La Empresa",
+    qb_usePersonsRate: "Usar la Tarifa de {name}",
+    qb_btn_useCustomersLevel: "Usar el Nivel del Cliente",
+    qb_btn_useCompanyDefault: "Usar el Predeterminado de la Empresa",
     qb_who: "Quién",
-    qb_labor: "Mano De Obra",
-    qb_someoneNoLongerOnTeam: "Alguien Que Ya No Está En El Equipo",
+    qb_labor: "Mano de Obra",
+    qb_someoneNoLongerOnTeam: "Alguien que Ya No Está en el Equipo",
     qb_other: "Otro…",
     qb_whoInYourWords: "Quién, en tus palabras",
     qb_whoPlaceholder: "Ayudante, cuadrilla de 2…",
     qb_hours: "Horas",
     qb_hoursQ: "¿horas?",
-    qb_btn_changeTheRate: "Cambiar La Tarifa",
+    qb_btn_changeTheRate: "Cambiar la Tarifa",
     qb_rate: "Tarifa",
     qb_perHour: "$/h",
-    qb_btn_removeThisLabor: "Quitar Esta Mano De Obra",
-    qb_btn_addLaborAtAnotherRate: "Agregar Mano De Obra A Otra Tarifa",
+    qb_btn_removeThisLabor: "Quitar Esta Mano de Obra",
+    qb_btn_addLaborAtAnotherRate: "Agregar Mano de Obra a Otra Tarifa",
     qb_laborTotal: "Mano de obra {amount}",
 
     // ── A task's parts ──
@@ -135,7 +137,7 @@ export const words: WordCatalog = {
     qb_priceEach: "Precio por pieza",
     qb_priceQ: "¿precio?",
     qb_btn_removeThisPart: "Quitar Esta Pieza",
-    qb_btn_addAPart: "Agregar Una Pieza",
+    qb_btn_addAPart: "Agregar una Pieza",
     qb_partsTotal: "Piezas {amount}",
 
     // ── The kit it came from, and Remember As A Kit (kitSummary and the kit rule's refusals are lib/estimate/kit-from-task's, qs_lib_kit…) ──
@@ -154,13 +156,13 @@ export const words: WordCatalog = {
     qb_scope: "Alcance",
     qb_scopePlaceholder: "el alcance, como Terraza",
     qb_btn_saving: "Guardando…",
-    qb_btn_saveTheKit: "Guardar El Kit",
+    qb_btn_saveTheKit: "Guardar el Kit",
     qb_btn_cancel: "Cancelar",
-    qb_btn_rememberAsAKit: "Recordar Como Un Kit",
+    qb_btn_rememberAsAKit: "Recordar como un Kit",
     qb_willSave: "Se guardará: {summary}",
-    qb_rememberedAsKit: "Guardado como el kit {name} — está en Kits de la Lista De Precios y en el selector de kits del Inspector.",
+    qb_rememberedAsKit: "Guardado como el kit {name} — está en Kits de la Lista de Precios y en el selector de kits del Inspector.",
     qb_couldNotRememberKit: "No se pudo guardar el kit.",
-    qb_couldNotReachServer: "No se pudo conectar con el servidor — toca Guardar El Kit otra vez.",
+    qb_couldNotReachServer: "No se pudo conectar con el servidor — toca Guardar el Kit otra vez.",
     qb_priceSetByHand: "Precio puesto a mano — el desglose no sale en el papel",
 
     // ── Where a rate came from (lib/pricing/labor-rate laborRateFromWords; its English stays inline there) ──

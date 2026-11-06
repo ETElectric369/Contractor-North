@@ -128,7 +128,7 @@ describe("the row in Spanish", () => {
 
   it("the ⋯ panel's doors are Spanish", () => {
     const html = es(createElement(LeadDetails, { inquiry: lead(), todayYmd: "2026-09-28" }));
-    for (const w of ["Seguimiento", "Marcar Como Contactado", "Marcar Como Perdido", "Guardar Como Contacto", "Eliminar Prospecto", "Editar"]) {
+    for (const w of ["Seguimiento", "Marcar como Contactado", "Marcar como Perdido", "Guardar como Contacto", "Eliminar Prospecto", "Editar"]) {
       expect(html, w).toContain(w);
     }
   });
@@ -138,7 +138,7 @@ describe("New Lead's fields in Spanish", () => {
   it("labels, durations and the closed More Options row", () => {
     const html = es(createElement(InquiryFields, { value: inquiryFormValue(), onChange: () => {} }));
     const labels = [...html.matchAll(/<label[^>]*>([^<]+)<\/label>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Nombre", "Teléfono", "Dirección", "Lo Que Necesitan", "Qué Tipo De Trabajo", "Cuánto Tiempo"]);
+    expect(labels).toEqual(["Nombre", "Teléfono", "Dirección", "Lo que Necesitan", "Qué Tipo de Trabajo", "Cuánto Tiempo"]);
     expect(html).toContain("Medio Día (4h)");
     expect(html).toContain("Aún No Sé");
     expect(html).toContain("Más Opciones");
@@ -150,7 +150,7 @@ describe("New Lead's fields in Spanish", () => {
 describe("the convert menu in Spanish", () => {
   it("the booking sheet speaks Spanish", () => {
     const html = es(createElement(ConvertMenu, { inquiryId: "lead-1", inquiryName: "Ana Larkspur" }));
-    expect(html).toContain("Agendar Una Inspección");
+    expect(html).toContain("Agendar una Inspección");
     expect(html).toContain("Pone una inspección para <strong>Ana Larkspur</strong> en tu Agenda");
     expect(html).toContain("Que Ellos Elijan");
   });
@@ -158,9 +158,9 @@ describe("the convert menu in Spanish", () => {
   it("the link-ready screen is Spanish, but the text the CUSTOMER gets stays English", () => {
     seed.link = { token: "tok-1", phone: "5305550100" };
     const html = es(createElement(ConvertMenu, { inquiryId: "lead-1", inquiryName: "Ana Larkspur", businessPhone: "(530) 555-0199" }));
-    expect(html).toContain("Envíales Estas Horas Por Mensaje");
+    expect(html).toContain("Envíales Estas Horas por Mensaje");
     expect(html).toContain("Copiar Enlace");
-    expect(html).toContain("Enviar Por Mensaje");
+    expect(html).toContain("Enviar por Mensaje");
     expect(html).toContain("no desde <span class=\"font-medium\">(530) 555-0199</span>");
     const href = decode(html.match(/href="(sms:[^"]+)"/)![1]);
     const body = decodeURIComponent(href.slice(href.indexOf("body=") + 5));

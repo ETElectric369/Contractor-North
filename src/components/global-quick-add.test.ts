@@ -11,6 +11,7 @@ import { ACTIONS, GlobalQuickAdd, QuickAddMenu, STUCK_MS, plusOpens, quickAddAct
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { LangProvider } from "@/components/lang-provider";
 import { dict, translator } from "@/lib/i18n";
+import { esTitleCase } from "../../tests/es-function-words";
 
 /**
  * THE + (W1-11: eight rows to six) AND THE SWITCH BOARD (0352). The office: Snap Or Note first, then
@@ -64,12 +65,12 @@ describe("the + on screen", () => {
     for (const html of [tech, office]) expect(html).toMatch(/<button[^>]*class="[^"]*\bh-11 w-11\b/);
   });
 
-  it("a Spanish-speaking tech (cn-v1138): his + is Foto O Nota; the office's menu keeps Snap Or Note in its words; English byte for byte as before", () => {
+  it("a Spanish-speaking tech (cn-v1138): his + is Foto o Nota; the office's menu keeps Snap Or Note in its words; English byte for byte as before", () => {
     const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es" } as Parameters<typeof LangProvider>[0], el));
     const tech = es(createElement(GlobalQuickAdd, { isStaff: false }));
-    expect(tech).toMatch(/<button[^>]*aria-label="Foto O Nota"[^>]*title="Foto O Nota"/);
+    expect(tech).toMatch(/<button[^>]*aria-label="Foto o Nota"[^>]*title="Foto o Nota"/);
     expect(tech).not.toContain("Snap Or Note");
-    expect(rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })))[0]).toBe("Foto O Nota");
+    expect(rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })))[0]).toBe("Foto o Nota");
     expect(es(createElement(GlobalQuickAdd, { isStaff: true, placement: "topbar" }))).toMatch(/<button[^>]*aria-label="Agregar Rápido"/);
     const en = renderToStaticMarkup(createElement(LangProvider, { lang: "en" } as Parameters<typeof LangProvider>[0], createElement(GlobalQuickAdd, { isStaff: false })));
     expect(en).toBe(renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: false })));
@@ -78,8 +79,8 @@ describe("the + on screen", () => {
   it("the office's verbs in Spanish (cn-v1139): every row Title Case, through the nav catalog by key; English byte for byte", () => {
     const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es" } as Parameters<typeof LangProvider>[0], el));
     const menu = rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })));
-    expect(menu).toEqual(["Foto O Nota", "Nuevo Prospecto", "Nuevo Trabajo", "Nueva Cita", "Nueva Inspección", "Nuevo Presupuesto", "Nueva Factura"]);
-    for (const r of menu) for (const w of r.split(" ")) expect(w, r).toMatch(/^[A-ZÁÉÍÓÚÑ]/);
+    expect(menu).toEqual(["Foto o Nota", "Nuevo Prospecto", "Nuevo Trabajo", "Nueva Cita", "Nueva Inspección", "Nuevo Presupuesto", "Nueva Factura"]);
+    for (const r of menu) expect(esTitleCase(r), r).toBe(true); // the significant words (cn-v1147)
     expect(quickAddActions(true, ALL_ON, translator("es")).map((a) => a.label)).toEqual(menu.slice(1));
     expect(quickAddActions(true, ALL_ON, translator("en")).map((a) => a.label)).toEqual(quickAddActions(true, ALL_ON).map((a) => a.label));
     // Each row carries its key, and the key's English is the row's old literal.
@@ -98,11 +99,11 @@ describe("the + on screen", () => {
     });
     expect(quickAddGo({ online: true, lastFailed: true, stuck: false, label: "Nuevo Trabajo", sending: 6 }, t)).toEqual({
       way: "wait",
-      said: "Foto O Nota todavía está enviando 6 archivos, y recargar ahora los detendría. Toca Nuevo Trabajo de nuevo cuando ya estén.",
+      said: "Foto o Nota todavía está enviando 6 archivos, y recargar ahora los detendría. Toca Nuevo Trabajo de nuevo cuando ya estén.",
     });
     expect(quickAddGo({ online: true, lastFailed: false, stuck: true, label: "Nuevo Trabajo", sending: 1 }, t)).toEqual({
       way: "wait",
-      said: "Foto O Nota todavía está enviando 1 archivo, y recargar ahora lo detendría. Toca Nuevo Trabajo de nuevo cuando ya esté.",
+      said: "Foto o Nota todavía está enviando 1 archivo, y recargar ahora lo detendría. Toca Nuevo Trabajo de nuevo cuando ya esté.",
     });
     // The component hands its own translator in, with the row's translated label.
     const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");

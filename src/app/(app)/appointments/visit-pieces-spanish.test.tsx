@@ -9,6 +9,7 @@ import { putBackPlan, visitDayWords, wontHappenConfirm, wontHappenToast, wontHap
 import { inspectionUnreadWords, INSPECTION_UNREAD } from "@/lib/inspection/inspection-access";
 import { kitsReadWords } from "@/lib/estimate/task-kits";
 import { clockInClashWords } from "@/lib/overlap-refusal";
+import { esTitleCase } from "../../../../tests/es-function-words";
 
 /**
  * THE VISIT PAGE'S PIECES IN SPANISH (builder D of the visit-page-in-Spanish wave, cn-v1144, vp_): the
@@ -101,7 +102,7 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
     expect(html).toContain("Nuevo Prospecto</button>");
     expect(html).toContain("Cliente Nuevo</button>"); // the rail's order (ag_rail_btn_newCustomer)
     expect(body).toContain("¿No está en la lista? Agrégalo aquí.");
-    expect(html).toContain("Convertir En Trabajo →</button>");
+    expect(html).toContain("Convertir en Trabajo →</button>");
     expect(html).toContain(">Eliminar</button>");
     // The type options read the jobs catalog's words through appointmentTypeLabel(type, lang, t).
     expect(html).toContain(">Inspección</option>");
@@ -109,24 +110,24 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
     expect(html).not.toMatch(/Edit Inspection|Save Inspection|Assigned to|Anyone|Convert To Job|New Lead|New Customer|Address or site|Not in the list|>Location<|>Notes<|>Type<|>Title</);
   });
 
-  it("the pencil trigger is titled Editar; a new visit's sheet is Nueva Cita with Fijar Una Hora · Proponer Horas; the closed trigger follows the kind", () => {
+  it("the pencil trigger is titled Editar; a new visit's sheet is Nueva Cita with Fijar una Hora · Proponer Horas; the closed trigger follows the kind", () => {
     expect(es(form({ appointment: appt }))).toContain('title="Editar"');
     const fresh = es(form({}));
     expect(fresh).toContain('data-modal="Nueva Cita"');
     expect(fresh).toContain('data-actions="Guardar Cita"');
     expect(fresh).toContain("Nueva Cita</button>");
-    expect(fresh).toContain("Fijar Una Hora");
+    expect(fresh).toContain("Fijar una Hora");
     expect(fresh).toContain("Proponer Horas");
     expect(fresh).not.toMatch(/Set A Time|Propose Times|New Appointment|Save Appointment/);
     expect(es(form({ defaultType: "inspection" }))).toContain("Nueva Inspección</button>");
-    expect(es(form({ defaultType: "inspection", buttonLabel: "Agendar Una Inspección" }))).toContain("Agendar Una Inspección</button>"); // a caller's own words first
+    expect(es(form({ defaultType: "inspection", buttonLabel: "Agendar una Inspección" }))).toContain("Agendar una Inspección</button>"); // a caller's own words first
   });
 
   it("the door words, as a pure function, in both languages (whole phrases: Cita and Inspección carry their own article)", () => {
     expect(apptFormWords({ kind: "inspection", editing: false, mode: "set", linkReady: false }, t)).toEqual({ title: "Nueva Inspección", saveLabel: "Guardar Inspección", trigger: "Nueva Inspección" });
     expect(apptFormWords({ kind: "inspection", editing: true, mode: "set", linkReady: false }, t)).toEqual({ title: "Editar Inspección", saveLabel: "Guardar Inspección", trigger: "Nueva Inspección" });
     expect(apptFormWords({ kind: "other", editing: false, mode: "propose", linkReady: false }, t)).toEqual({ title: "Nueva Cita", saveLabel: "Crear Enlace", trigger: "Nueva Cita" });
-    expect(apptFormWords({ kind: "other", editing: false, mode: "propose", linkReady: true }, t).title).toBe("Enviar Estas Horas Al Cliente Por Mensaje");
+    expect(apptFormWords({ kind: "other", editing: false, mode: "propose", linkReady: true }, t).title).toBe("Enviar Estas Horas al Cliente por Mensaje");
     expect(apptFormWords({ kind: "job", editing: true, mode: "set", linkReady: false }, t)).toEqual({ title: "Editar Cita", saveLabel: "Guardar Cita", trigger: "Nueva Cita" });
     // No translator handed in: English, byte for byte, as appointment-button.test pins.
     expect(apptFormWords({ kind: "inspection", editing: true, mode: "set", linkReady: false })).toEqual({ title: "Edit Inspection", saveLabel: "Save Inspection", trigger: "New Inspection" });
@@ -178,16 +179,16 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
 });
 
 describe("the Clear The Date row, in Spanish", () => {
-  it("Quitar La Fecha as a ⋯ row and as a button; English without a provider", () => {
+  it("Quitar la Fecha as a ⋯ row and as a button; English without a provider", () => {
     const row = es(createElement(UnscheduleButton, { id: "appt-1", menuItem: true }));
-    expect(row).toContain("Quitar La Fecha</button>");
+    expect(row).toContain("Quitar la Fecha</button>");
     expect(row).not.toContain("Clear The Date");
-    expect(es(createElement(UnscheduleButton, { id: "appt-1" }))).toContain("Quitar La Fecha");
+    expect(es(createElement(UnscheduleButton, { id: "appt-1" }))).toContain("Quitar la Fecha");
     expect(en(createElement(UnscheduleButton, { id: "appt-1", menuItem: true }))).toContain("Clear The Date</button>");
     // The calendar's own Clear The Date says the same Spanish (one word per English word).
     expect(t("vp_btn_clearTheDate")).toBe(dict("es").ag_cal_btn_clearTheDate);
     expect(t("vp_btn_clearing")).toBe("Quitando…");
-    expect(t("vp_waitsUnderWaitingForADay")).toBe("Espera bajo Esperando Un Día en la agenda. Ponla ahí cuando llamen.");
+    expect(t("vp_waitsUnderWaitingForADay")).toBe("Espera bajo Esperando un Día en la agenda. Ponla ahí cuando llamen.");
     expect(t("vp_waitsUnderWaitingForADay")).toContain(dict("es").vp_waitingForADay);
     expect(t("vp_couldntClearTheDate")).toBe("No se pudo quitar la fecha.");
   });
@@ -246,7 +247,7 @@ describe("Start The Job's server (start-job-actions): the mechanism on the sourc
       expect(t(key)).toBe(spanish);
     }
     // The slotted ones: the clock leads in Spanish, and a fragment the caller fills rides as received.
-    expect(fillText(t("vp_onClockSwitchHere"), { label: "J-050", since: "8:00 a. m." })).toBe("Desde 8:00 a. m. estás en el reloj en J-050. Cambiar A Este Trabajo mueve tu reloj aquí ahora. Aún no se ha empezado nada.");
+    expect(fillText(t("vp_onClockSwitchHere"), { label: "J-050", since: "8:00 a. m." })).toBe("Desde 8:00 a. m. estás en el reloj en J-050. Cambiar a Este Trabajo mueve tu reloj aquí ahora. Aún no se ha empezado nada.");
     expect(fillText(translator("en")("vp_onClockSwitchHere"), { label: "J-050", since: "8:00 AM" })).toBe("You're on the clock on J-050 since 8:00 AM. Switch To This Job moves your clock here now. Nothing was started yet.");
     expect(t("vp_onClockSwitchHere")).toContain(dict("es").vp_btn_switchToThisJob);
     expect(fillText(t("vp_onClockLinkInstead"), { job: "J-055", customer: "Pat Thistlewood" })).toBe("Estás en el reloj en J-055, el trabajo que Pat Thistlewood ya tiene de hoy. Mejor enlaza esta visita a J-055. No se empezó nada.");
@@ -282,7 +283,7 @@ describe("the pure libraries: English inline by default, the catalog's Spanish w
 
   it("visit-start: the start window's sentences, the job's fallback, the clock", () => {
     expect(startedAtProblem("2026-09-25T23:30:00Z", NOW, TZ, "es", t)).toBe("Esa hora todavía no ha llegado."); // cs_timeHasntHappened's words
-    expect(startedAtProblem("2026-09-24T06:30:00Z", NOW, TZ, "es", t)).toBe("Elige una hora desde la medianoche de ayer. Para horas más antiguas, agrégalas en Tarjetas De Tiempo.");
+    expect(startedAtProblem("2026-09-24T06:30:00Z", NOW, TZ, "es", t)).toBe("Elige una hora desde la medianoche de ayer. Para horas más antiguas, agrégalas en Tarjetas de Tiempo.");
     expect(startedAtProblem("nope", NOW, TZ, "es", t)).toBe("Elige una hora de inicio."); // vp_pickAStartTime, the card's own key
     expect(startedAtProblem("2026-09-25T23:30:00Z", NOW, TZ)).toBe("That time hasn't happened yet.");
     expect(startedAtProblem("2026-09-24T06:30:00Z", NOW, TZ)).toBe("Pick a time since midnight yesterday. For older hours, add them on Timecards.");
@@ -348,7 +349,7 @@ describe("the pure libraries: English inline by default, the catalog's Spanish w
     expect(kitsReadWords("failed")).toBe("The kits could not be read — a task's kit picker is off until you reload; its own hours stand.");
   });
 
-  it("overlap-refusal: the clock-in's clash, said in Spanish when handed the language — the day and the clock with an article, de … a … between the clocks, Tarjetas De Tiempo, and no sentence ending on the clock; English by default, byte for byte the Timecards' own sentence", () => {
+  it("overlap-refusal: the clock-in's clash, said in Spanish when handed the language — the day and the clock with an article, de … a … between the clocks, Tarjetas de Tiempo, and no sentence ending on the clock; English by default, byte for byte the Timecards' own sentence", () => {
     const clash = { id: "e1", clockIn: "2026-09-25T16:00:00.000Z", clockOut: "2026-09-25T18:30:00.000Z", jobId: "j50", jobCode: null, jobLabel: "J-050", noJob: false, exact: false, lunchMinutes: 0, notes: null };
     const start = "2026-09-25T17:00:00.000Z"; // 10:00 AM Pacific, over a 9:00 to 11:30 shift
     // The day as Intl es-US spells it on this machine ("viernes 25 sept"), so the pin is not an ICU version's.
@@ -358,7 +359,7 @@ describe("the pure libraries: English inline by default, the catalog's Spanish w
     const nothing = t("vp_nothingWasStarted");
     const staff = clockInClashWords({ clash, startIso: start, tz: TZ, isStaff: true, nothing }, "es", t);
     expect(staff).toBe(
-      `Ya tienes horas registradas el ${day}, de 9:00 a. m. a 11:30 a. m. en J-050, así que un reloj que empiece a las 10:00 a. m. las contaría dos veces. No se empezó nada. Empieza el reloj a las 11:30 a. m. o más tarde, o corrige ese turno en Tarjetas De Tiempo.`,
+      `Ya tienes horas registradas el ${day}, de 9:00 a. m. a 11:30 a. m. en J-050, así que un reloj que empiece a las 10:00 a. m. las contaría dos veces. No se empezó nada. Empieza el reloj a las 11:30 a. m. o más tarde, o corrige ese turno en Tarjetas de Tiempo.`,
     );
     const tech = clockInClashWords({ clash: { ...clash, jobLabel: null, noJob: true }, startIso: start, tz: TZ, isStaff: false }, "es", t);
     expect(tech).toBe(
@@ -458,7 +459,7 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     for (const k of D_BTN) {
       expect(vp.en[k], k).toBeTruthy();
       expect(titleCase(vp.en[k]), `en:${k} "${vp.en[k]}"`).toBe(true);
-      expect(titleCase(vp.es[k]), `es:${k} "${vp.es[k]}"`).toBe(true);
+      expect(esTitleCase(vp.es[k]), `es:${k} "${vp.es[k]}"`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
   });
 
@@ -483,8 +484,8 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     expect(vp.es.vp_title).toBe(d.tk_titleLabel);
     expect(vp.es.vp_job).toBe(d.ag_job);
     expect(vp.es.vp_visitNotFound).toBe(d.ag_srv_apptGone);
-    expect(vp.es.vp_btn_textIt).toMatch(/^Enviar .*Por Mensaje$/); // su_btn_textReceipt's verb
-    expect(vp.es.vp_pickSinceMidnightYesterday).toContain(d["sh_dock_ck-cards"]); // Tarjetas De Tiempo, the page's own name (nv_page_timecards too)
+    expect(vp.es.vp_btn_textIt).toMatch(/^Enviar .*por Mensaje$/); // su_btn_textReceipt's verb
+    expect(vp.es.vp_pickSinceMidnightYesterday).toContain(d["sh_dock_ck-cards"]); // Tarjetas de Tiempo, the page's own name (nv_page_timecards too)
     expect(vp.es.vp_clashFixOnTimecards).toContain(d["sh_dock_ck-cards"]);
     expect(vp.es.vp_timeNotYet).toBe(d.cs_timeHasntHappened);
     expect(`+ ${vp.es.vp_btn_newCustomer}`).toBe(d.ag_rail_btn_newCustomer);

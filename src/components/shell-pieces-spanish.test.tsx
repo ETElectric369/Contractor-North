@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOGS, dict } from "@/lib/i18n";
 import { ALL_ON } from "@/lib/features";
+import { esTitleCase } from "../../tests/es-function-words";
 
 /**
  * THE OFF LINE AND THE DIRECTIONS LINK IN SPANISH (the visit-page-in-Spanish wave, cn-v1144): the two
@@ -30,16 +31,16 @@ describe("the off line speaks Spanish to a Spanish reader", () => {
   it("the owner: Desactivado with a 44px Activar", () => {
     const html = es(off(true));
     expect(html).toContain("Panel Map</span> · Desactivado");
-    expect(html).not.toContain("Pídele Al Dueño");
+    expect(html).not.toContain("Pídele al Dueño");
     const button = html.match(/<button[^>]*>[^<]*<\/button>/)![0];
     expect(button).toContain(">Activar<");
     expect(button).toMatch(/\bh-11\b/);
     expect(html).not.toMatch(/· Off|Turn On/);
   });
 
-  it("everyone else: Desactivado · Pídele Al Dueño, and no button", () => {
+  it("everyone else: Desactivado · Pídele al Dueño, and no button", () => {
     const html = es(off(false));
-    expect(html).toContain(" · Desactivado · Pídele Al Dueño");
+    expect(html).toContain(" · Desactivado · Pídele al Dueño");
     expect(html).not.toContain("<button");
   });
 
@@ -96,7 +97,7 @@ describe("the shell keys the wave added (sh_)", () => {
     for (const [k, literal] of Object.entries(replaced)) expect(dict("en")[k], k).toBe(literal);
     for (const k of ["sh_askTheOwner", "sh_btn_turnOn", "sh_btn_turningOn", "sh_btn_googleMaps", "sh_btn_appleMaps"]) {
       expect(titleCase(sh.en[k]), `en:${k}`).toBe(true);
-      expect(titleCase(sh.es[k]), `es:${k}`).toBe(true);
+      expect(esTitleCase(sh.es[k]), `es:${k}`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
     // The house words: a switch turns on with Activar (sh_enable) and reads Desactivado off (sh_pushOff…); the owner is el Dueño (nv_role_owner).
     expect(sh.es.sh_btn_turnOn).toBe(dict("es").sh_enable);

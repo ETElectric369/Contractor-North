@@ -21,6 +21,7 @@ import { JOB_SITE_LABEL, fenceArmOptions, parsePendingExit } from "@/lib/native-
 import { GeofenceIdleLine } from "@/components/geofence-monitor";
 import { LangProvider } from "@/components/lang-provider";
 import { codeOnly } from "@/lib/migration-body.test-util";
+import { esTitleCase } from "../../tests/es-function-words";
 
 const en = dict("en");
 const es = dict("es");
@@ -86,7 +87,9 @@ describe("GeofenceIdleLine: the idle line in the person's language", () => {
 describe("the catalog: Title Case on every door, and the English is the shell's own fallback", () => {
   it("the buttons are Title Case in both languages", () => {
     for (const k of ["gf_turnOnLocation", "gf_finishYourTimecard", "gf_back", "gf_stillWorking", "gf_clockOutNow", "gf_pickTheTime"]) {
-      for (const v of [en[k], es[k]]) for (const w of v.replace(/[…→]/g, "").trim().split(/\s+/)) expect(w[0], `${k}: ${v}`).toBe(w[0].toUpperCase());
+      for (const w of en[k].replace(/[…→]/g, "").trim().split(/\s+/)) expect(w[0], `${k}: ${en[k]}`).toBe(w[0].toUpperCase());
+      // Spanish Title Case: the significant words, the function words lowercase after the first (cn-v1147).
+      expect(esTitleCase(es[k].replace(/[…→]/g, "").trim()), `${k}: ${es[k]}`).toBe(true);
     }
   });
   it("the Swift fallback is the English catalog, so an old page and a new one post the same alert", () => {

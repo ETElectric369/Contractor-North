@@ -35,9 +35,9 @@ describe("/handbook's title and line", () => {
     expect((await renderHeader(Page, "en")).description).toBe("Policies and expectations at the company.");
   });
 
-  it("Spanish for a Spanish speaker: Manual Del Empleado, the company's name kept, the stand-in translated", async () => {
+  it("Spanish for a Spanish speaker: Manual del Empleado, the company's name kept, the stand-in translated", async () => {
     const { title, description, html } = await renderHeader(Page, "es");
-    expect(title).toBe("Manual Del Empleado");
+    expect(title).toBe("Manual del Empleado");
     expect(description).toBe("Políticas y expectativas en Larkspur Electric.");
     expect(html).not.toContain(">Employee handbook<");
     resetOfficeTables({ organizations: [] });

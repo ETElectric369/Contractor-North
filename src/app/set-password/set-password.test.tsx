@@ -50,7 +50,7 @@ describe("the page", () => {
     expect(text(es)).toContain("Elige tu contraseña. La usarás de ahora en adelante.");
     expect(text(es)).toContain("Contraseña nueva");
     expect(text(es)).toContain("Confirma la contraseña");
-    expect(text(es)).toContain("Guardar Contraseña Y Continuar");
+    expect(text(es)).toContain("Guardar Contraseña y Continuar");
     expect(es).toContain('placeholder="Al menos 8 caracteres"');
     expect((await generateMetadata()).title).toBe("Crea tu contraseña");
     state.language = null;

@@ -25,7 +25,7 @@ describe("Tell The Office, in the tech's language (cn-v1138)", () => {
     expect(text).toContain("¿Lo necesitas rápido? Avisa a la oficina.");
     expect(text).toContain("Di el artículo: va a la lista de arriba como una línea por comprar, y directo al teléfono de la oficina con este trabajo adjunto. No tienes que perseguir a nadie.");
     expect(html).toContain('placeholder="Dos cajas más de tornillos — las necesito mañana"');
-    expect(buttons(html)).toContain("Avisar A La Oficina");
+    expect(buttons(html)).toContain("Avisar a la Oficina");
     expect(text).not.toContain("Tell The Office");
     expect(text).not.toContain("Need it fast");
   });

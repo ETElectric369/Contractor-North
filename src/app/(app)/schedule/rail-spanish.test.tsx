@@ -75,7 +75,7 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
         }),
       ),
     );
-    for (const w of ["Hoy", "En Este Trabajo", "Programado", "Libre", "Días Libres", "Poner A Larkspur En Un Trabajo"]) expect(t, w).toContain(w);
+    for (const w of ["Hoy", "En Este Trabajo", "Programado", "Libre", "Días Libres", "Poner a Larkspur en un Trabajo"]) expect(t, w).toContain(w);
     expect(t).toContain("Nada programado. Tiene espacio.");
     expect(t).toContain("abierto");
     expect(t).not.toMatch(/Has room|On This Job|Put Larkspur/);
@@ -85,13 +85,13 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
     expect(text(es(createElement(TimeOffButton, { members: [{ id: "p1", full_name: "Bayberry" }] })))).toBe("Días Libres");
   });
 
-  it("a rail card's ⋯: Abrir El Trabajo and Poner En Pausa…; a held one Posponer…, Cambiar Motivo…, Quitar La Pausa", () => {
+  it("a rail card's ⋯: Abrir el Trabajo and Poner en Pausa…; a held one Posponer…, Cambiar Motivo…, Quitar la Pausa", () => {
     const job = { id: "j1", kind: "job", name: "12 Thistlewood Ln", address: "12 Thistlewood Ln", city: "Catbird", status: "to_be_scheduled" };
     const a = text(es(createElement(RailCardRows, { i: job as never, todayStr: "2026-11-05", close: () => {} })));
-    expect(a).toContain("Abrir El Trabajo");
-    expect(a).toContain("Poner En Pausa…");
+    expect(a).toContain("Abrir el Trabajo");
+    expect(a).toContain("Poner en Pausa…");
     const held = text(es(createElement(RailCardRows, { i: { ...job, onHold: true, holdReason: "x" } as never, todayStr: "2026-11-05", close: () => {} })));
-    for (const w of ["Posponer…", "Cambiar Motivo…", "Quitar La Pausa"]) expect(held, w).toContain(w);
+    for (const w of ["Posponer…", "Cambiar Motivo…", "Quitar la Pausa"]) expect(held, w).toContain(w);
   });
 
   it("the rail: the town's count, the kind, the hold badge and its day back, No Address Yet in Spanish", () => {
@@ -121,8 +121,8 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
   it("Add To Schedule: its title and doors, and the day said with its slot", () => {
     const jobs = [{ id: "j1", name: "12 Thistlewood Ln", status: "in_progress", address: "12 Thistlewood Ln", assigned_to: [] }];
     const t = text(es(createElement(AddToScheduleSheet, { at: { day: "2026-11-05", minute: null }, jobs, team: [], workDay: WORK_DAY, onClose: () => {} })));
-    for (const w of ["Agregar A La Agenda", "Trabajo", "Día", "Hora", "O Una Cita", "En Curso"]) expect(t, w).toContain(w);
-    expect(t).toMatch(/Nueva Cita El jue, 5 de nov/);
+    for (const w of ["Agregar a la Agenda", "Trabajo", "Día", "Hora", "O una Cita", "En Curso"]) expect(t, w).toContain(w);
+    expect(t).toMatch(/Nueva Cita el jue, 5 de nov/);
     expect(t).toMatch(/jue, 5 de nov\. El trabajo conserva sus otros días\./);
     expect(t).not.toMatch(/Add To Schedule|Or An Appointment|keeps every other day/);
   });
@@ -154,7 +154,7 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
 
   it("the come-back picker: the chips, and the day it comes back said with its slot", () => {
     const t = text(es(createElement(ComeBackPicker, { label: "Pausar", requireWhy: true, todayStr: "2026-11-05", onSubmit: () => {}, onCancel: () => {} })));
-    for (const w of ["Mañana", "Lun", "En Una Semana", "Elegir Un Día", "Pausar", "Cancelar"]) expect(t, w).toContain(w);
+    for (const w of ["Mañana", "Lun", "En una Semana", "Elegir un Día", "Pausar", "Cancelar"]) expect(t, w).toContain(w);
     // In A Week is picked: Thursday the 5th + 7.
     expect(t).toContain("Vuelve el 12 nov");
     expect(t).toContain("Di por qué: es el recordatorio cuando vuelva el trabajo");

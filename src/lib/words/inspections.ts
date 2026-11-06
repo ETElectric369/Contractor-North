@@ -19,6 +19,8 @@ import type { WordCatalog } from "./types";
  * (Completed: jb_completedShelf's Terminados, agreeing), Canceladas, Próximas y propuestas; written up =
  * redactada (vp_writtenUpAs); Book An Inspection / Start An Inspection = qt_btn_'s Agendar / Empezar Una
  * Inspección; Create Estimate = Crear Presupuesto.
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "ip_",
@@ -59,12 +61,12 @@ export const words: WordCatalog = {
     ip_completedWrittenUp: "Terminadas y redactadas",
     ip_cancelled: "Canceladas",
     ip_noOpenInspections: "No hay inspecciones abiertas",
-    ip_emptyDescLeadsOn: "Empieza una desde un prospecto, agenda una, o toca Empezar Una Inspección cuando ya estés ahí.",
+    ip_emptyDescLeadsOn: "Empieza una desde un prospecto, agenda una, o toca Empezar una Inspección cuando ya estés ahí.",
     ip_emptyDescLeadsOff: "No hay nada abierto ahora.",
     ip_toWriteUp: "Por redactar ({n})",
     ip_upcomingProposed: "Próximas y propuestas",
-    ip_waitingForADay: "Esperando Un Día",
+    ip_waitingForADay: "Esperando un Día",
     ip_btn_createEstimate: "Crear Presupuesto",
-    ip_btn_bookAnInspection: "Agendar Una Inspección",
+    ip_btn_bookAnInspection: "Agendar una Inspección",
   },
 };

@@ -216,7 +216,7 @@ describe("clock-told: the sentence the app says about the job it chose, in the c
     expect(unreadJobLabel("en")).toBe(UNREAD_JOB_LABEL);
     expect(unreadJobLabel("es")).toBe(es.cs_unreadJobLabel);
     expect(CHANGE_JOB_LABEL).toBe("Change The Job");
-    expect(changeJobLabel("es")).toBe("Cambiar El Trabajo");
+    expect(changeJobLabel("es")).toBe("Cambiar el Trabajo");
     // The English sentence is asserted through the catalog: clock-told.test.ts refuses a second copy of its words.
     expect(appChoseSentence("41 Larkspur", "schedule")).toBe(fillText(en.cs_appChoseSentence, { label: "41 Larkspur", because: en.cs_fromTodaysSchedule }));
     expect(appChoseSentence("41 Larkspur", "schedule")).toMatch(/^Your punch is on 41 Larkspur\. /);
@@ -227,7 +227,7 @@ describe("clock-told: the sentence the app says about the job it chose, in the c
   it("tellAppChose and replayTold carry the language through", () => {
     const res = { ok: true, id: "e1", jobPick: { chosenBy: "app" as const, id: "j1", from: "schedule" as const, label: "41 Larkspur" } };
     expect(tellAppChose(res, "es")?.sentence).toMatch(/^Tu marcación está en 41 Larkspur\./);
-    expect(tellAppChose(res, "es")?.say).toContain("Cambiar El Trabajo");
+    expect(tellAppChose(res, "es")?.say).toContain("Cambiar el Trabajo");
     expect(tellAppChose(res)?.say).toContain("Change The Job");
     expect(replayTold(res, "es").told?.sentence).toMatch(/^Tu marcación está en 41 Larkspur\./);
     expect(replayTold(res).told?.sentence).toMatch(/^Your punch is on 41 Larkspur\./);
@@ -257,7 +257,7 @@ describe("the Which Job sheet renders in the language it is handed, with no hook
   it("Spanish: the headline is the Time Clock's own key, the Skip door is Title Case, the rows are the jobs", () => {
     const html = renderToStaticMarkup(createElement(WhichJobSheetView, props("es")));
     expect(html).toContain(es.tc_whichJobHeadline);
-    expect(html).toContain("Omitir, La Oficina Elige");
+    expect(html).toContain("Omitir, la Oficina Elige");
     expect(html).toContain("41 Larkspur");
     expect(html).not.toContain("Skip, The Office Will Pick");
     expect(html).not.toContain("Which Job Are You On?");

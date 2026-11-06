@@ -12,6 +12,8 @@ import type { WordCatalog } from "./types";
  * that to people." So no word here names a dollar, a token or an estimate as a unit: Usage = Uso, a
  * percent, a date. Spanish is tú, US/Mexican. A date slot is filled by lib/usage-window shortDate in
  * the person's language ("Nov 1" / "1 nov").
+ * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
+ * Precios", "Mover a un Día"); English keeps every word capitalized.
  */
 export const words: WordCatalog = {
   prefix: "us_",
@@ -101,9 +103,9 @@ export const words: WordCatalog = {
     us_subscribedThanks: "Suscripción activa. ¡Gracias!",
     us_added: "Agregado: se verá en el anillo en un minuto.",
 
-    us_notice80Title: "Uso: 80% De Este Mes",
+    us_notice80Title: "Uso: 80% de Este Mes",
     us_notice80Body: "Ya se usó la mayor parte de este mes. Se reinicia el {date}. Nada se detiene: pasado el 100%, Nort y el estimador corren más ligeros hasta entonces.",
-    us_notice100Title: "Uso: Agotado Por Este Mes",
+    us_notice100Title: "Uso: Agotado por Este Mes",
     us_notice100Body: "El uso de este mes se agotó, así que Nort y el estimador corren en el modelo más ligero hasta el {date}. Agrega uso o mejora tu plan en Ajustes › Cobros.",
     us_noticeOpenSettings: "Abrir Ajustes",
   },

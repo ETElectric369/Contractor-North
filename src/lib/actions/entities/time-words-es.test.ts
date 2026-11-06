@@ -79,7 +79,7 @@ describe("time verbs, in Spanish", () => {
     const { timeActions, switchJobSpoken } = await import("./time");
     const cut = (await timeActions["time.switchJob"].handler({ job_id: "job-1" } as any, ES as any)) as any;
     expect(cut.speak).toMatch(/^Cambiado\. El reloj ya corre en el trabajo nuevo\. Las 2\.32 horas antes del cambio se quedaron en .*Larkspur/);
-    expect(cut.speak).toMatch(/Tarjetas De Tiempo\.$/);
+    expect(cut.speak).toMatch(/Tarjetas de Tiempo\.$/);
     expect(switchJobSpoken("repointed", 0, null, "es")).toBe(dict("es").nt_switchRepointed);
     expect(switchJobSpoken("cut", 1.5, null, "es")).toContain("se quedaron en el trabajo en el que estabas");
     // The English, untouched (the older pins): the default language.

@@ -37,6 +37,7 @@ import { Inspector, measuredRowLabel, measureLabelWords } from "./inspector";
 import { LangProvider } from "@/components/lang-provider";
 import type { InspectionAccess } from "@/lib/inspection/inspection-access";
 import type { PlanBrief } from "@/lib/plan-brief";
+import { esTitleCase } from "../../../../../tests/es-function-words";
 
 const SHEET = {
   id: "sheet-1",
@@ -111,8 +112,8 @@ describe("a crew lead's sheet speaks Spanish", () => {
 
   it("says whose it is, and every heading, door and jump chip is the catalog's Spanish", () => {
     expect(t).toContain("Eres el líder de cuadrilla de esta visita: llénala aquí. La oficina le pone precio.");
-    for (const d of ["Guardar", "Tomar", "Agregar", "Solo Dile A Nort", "Otra Cosa", "Agregar Una Medida", "Agregar Una Tarea", "Agregar Un Material", "Hecho", "Deck", "Remodel"]) expect(doors, d).toContain(d);
-    const bar = html.slice(html.indexOf('aria-label="Ir A"'), html.indexOf("Inspección"));
+    for (const d of ["Guardar", "Tomar", "Agregar", "Solo Dile a Nort", "Otra Cosa", "Agregar una Medida", "Agregar una Tarea", "Agregar un Material", "Hecho", "Deck", "Remodel"]) expect(doors, d).toContain(d);
+    const bar = html.slice(html.indexOf('aria-label="Ir a"'), html.indexOf("Inspección"));
     expect(buttons(bar)).toEqual(["Tareas", "Fotos", "Notas"]);
     for (const h of [">Inspección<", ">Para<", ">Materiales<", ">Fotos<", ">Medidas<", ">Nota<", ">Horas<", ">Respondidas<"]) expect(html, h).toContain(h);
     // The visit's own address and link read as stored; the price stays the office's.
@@ -126,7 +127,7 @@ describe("a crew lead's sheet speaks Spanish", () => {
     for (const p of ["La parte del trabajo, en tus palabras", "cuántas", "qué mediste", "ft", "Lo que hay que saber de esta parte — la pared, el acceso, el detalle."]) {
       expect(html, p).toContain(`placeholder="${p}"`);
     }
-    for (const a of ["Quitar Esta Tarea", "Quitar Este Material", "Quitar Esta Medida", "Ir A"]) expect(html, a).toContain(`aria-label="${a}"`);
+    for (const a of ["Quitar Esta Tarea", "Quitar Este Material", "Quitar Esta Medida", "Ir a"]) expect(html, a).toContain(`aria-label="${a}"`);
     expect(html).toContain(">¿horas?<"); // the hot tub task still asks
     expect(t).toContain("Hot tub wires ¿horas?");
   });
@@ -152,19 +153,19 @@ describe("the office's sheet speaks Spanish too", () => {
     const html = render("office", { templates: two });
     expect(html).toContain(">Dónde<");
     expect(buttons(html)).toContain("Usar Mi Ubicación");
-    expect(html).toContain(">Elegir Una Hoja…<");
-    expect(html).toContain(">Agregar Una Partida…<");
+    expect(html).toContain(">Elegir una Hoja…<");
+    expect(html).toContain(">Agregar una Partida…<");
     expect(html).toContain('aria-label="Quitar Remodel scope"');
-    expect(buttons(html)).toContain("Empezar El Presupuesto");
+    expect(buttons(html)).toContain("Empezar el Presupuesto");
     expect(html).toContain('href="/quotes/new?capture=appt-1"');
     expect(buttons(html)).not.toContain("Start The Estimate");
     expect(html).not.toContain("Pick A Sheet");
   });
 
-  it("an estimate that stands opens as Abrir El Presupuesto", () => {
+  it("an estimate that stands opens as Abrir el Presupuesto", () => {
     const html = render("office", { estimate: { id: "q-1", number: "EST-7", live: true } });
-    expect(buttons(html)).toContain("Abrir El Presupuesto");
-    expect(buttons(html)).not.toContain("Empezar El Presupuesto");
+    expect(buttons(html)).toContain("Abrir el Presupuesto");
+    expect(buttons(html)).not.toContain("Empezar el Presupuesto");
     expect(html).not.toContain("Open The Estimate");
   });
 
@@ -179,7 +180,7 @@ describe("the office's sheet speaks Spanish too", () => {
     expect(textOf(hours)).toContain("Del kit, para ×7 footing: tus 3 h se quedan (el kit dice 14 h)");
     const gone = render("office", { taskKits: [], initialAnswers: KIT_ANSWERS });
     expect(gone).toContain(">¿kit?<");
-    expect(gone).toContain(">Kit Que Ya No Está En La Lista De Precios<");
+    expect(gone).toContain(">Kit que Ya No Está en la Lista de Precios<");
     expect(gone).toContain('title="Ese kit ya no está en la lista de precios — elige otro o dale sus horas a la tarea"');
     const unread = render("office", { taskKits: [], kitsUnread: true, kitsNote: "The page's own note.", initialAnswers: KIT_ANSWERS });
     expect(textOf(unread)).toContain("Kit sin leer");
@@ -194,7 +195,7 @@ describe("the office's sheet speaks Spanish too", () => {
     const t = textOf(html);
     expect(t).toContain("Footings horas del kit · ×7 footing · Footing");
     expect(t).toContain("Hot tub wires 1 foto · 1 medida ¿horas?");
-    expect(buttons(html)).toContain("Agregar Una Tarea");
+    expect(buttons(html)).toContain("Agregar una Tarea");
     expect(buttons(html)).not.toContain("Hecho");
   });
 
@@ -224,7 +225,7 @@ describe("the office's sheet speaks Spanish too", () => {
       'Work — están abajo en <span class="font-medium">Respondidas</span>; corrige lo que esté mal. Las preguntas que siguen aquí son las que los planos no pudieron responder.',
     );
     expect(t).toContain("Ya llenado desde los planos: Work");
-    expect(buttons(html)).toContain("Llenar 1 Respuesta Desde Los Planos");
+    expect(buttons(html)).toContain("Llenar 1 Respuesta desde los Planos");
     const e = textOf(render("office", { planBrief: brief }, "en"));
     expect(e).toContain("Already filled from the plans: Work — they're under Answered below, edit anything that's off. The questions still showing here are the ones the plans couldn't answer.");
     expect(e).toContain("Fill 1 Answer From The Plans");
@@ -267,7 +268,7 @@ describe("a plain tech and an empty sheet, in Spanish", () => {
     const office = render("office", { templates: [], initialTemplateId: null, initialAnswers: {} });
     expect(textOf(office)).toContain("Aún no tienes un conjunto de preguntas de inspección. Empieza con las de tu oficio — una pregunta a la vez, y solo lo que aplica al trabajo que tienes enfrente.");
     expect(buttons(office)).toContain("Configurar Mis Preguntas");
-    expect(office).toContain(">O Armar Las Mías<");
+    expect(office).toContain(">O Armar las Mías<");
     expect(textOf(render("crewLead", { templates: [], initialTemplateId: null, initialAnswers: {} }))).toContain(
       "La oficina aún no ha configurado las preguntas de inspección. Las notas, medidas y fotos de abajo sí se guardan.",
     );
@@ -365,7 +366,7 @@ describe("the Inspector catalog (vi_)", () => {
     expect(doors.length).toBeGreaterThanOrEqual(40);
     for (const k of doors) {
       expect(titleCase(vi_.en[k]), `en:${k} "${vi_.en[k]}"`).toBe(true);
-      expect(titleCase(vi_.es[k]), `es:${k} "${vi_.es[k]}"`).toBe(true);
+      expect(esTitleCase(vi_.es[k]), `es:${k} "${vi_.es[k]}"`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
   });
 
@@ -375,7 +376,7 @@ describe("the Inspector catalog (vi_)", () => {
     for (const k of Object.keys(vi_.en)) if (!vi_.sameInBoth.includes(k)) expect(vi_.es[k], k).not.toBe(vi_.en[k]);
   });
 
-  it("the house words, one Spanish per English across the catalogs: Hecho, Agregar, Quitar, Guardar, Guardado, Guardando…, Fotos, Materiales, Notas, Nota, Horas, Inspección, Presupuesto, Lista De Precios, Oficina, señal, líder de cuadrilla, medidas", () => {
+  it("the house words, one Spanish per English across the catalogs: Hecho, Agregar, Quitar, Guardar, Guardado, Guardando…, Fotos, Materiales, Notas, Nota, Horas, Inspección, Presupuesto, Lista de Precios, Oficina, señal, líder de cuadrilla, medidas", () => {
     expect(es.vi_btn_done).toBe(es.ag_btn_done);
     expect(es.vi_btn_done).toBe(es.su_btn_done);
     expect(es.vi_btn_add).toBe(es.jb_add);
@@ -394,8 +395,8 @@ describe("the Inspector catalog (vi_)", () => {
     expect(es.vi_inspection).toBe(es.ag_btn_kindInspection);
     expect(es.vi_btn_startTheEstimate).toContain(es.nt_estimate); // Presupuesto
     expect(es.vi_btn_openTheEstimate).toContain(es.nt_estimate);
-    expect(Object.values(es)).toContain("Lista De Precios"); // the office's map says it so (cn-v1139) …
-    expect(es.vi_btn_kitNoLongerInThePriceList).toContain("Lista De Precios"); // … and the door says it the same way
+    expect(Object.values(es)).toContain("Lista de Precios"); // the office's map says it so (cn-v1139) …
+    expect(es.vi_btn_kitNoLongerInThePriceList).toContain("Lista de Precios"); // … and the door says it the same way
     expect(es.vi_kitGoneTitle).toContain("lista de precios");
     expect(es.vi_crewLeadLine).toContain("líder de cuadrilla");
     expect(es.ag_srv_crewOrOffice).toContain("líder de cuadrilla");

@@ -37,7 +37,7 @@ describe("the (app) error boundary", () => {
 
   it("Spanish: the same page in the tech's words, its two doors Title Case", () => {
     const html = app("es", snag);
-    expect(words(html)).toContain("Esta página tuvo un problema Algo salió mal al cargar esta pantalla. Tus datos están a salvo: inténtalo de nuevo o vuelve a tu día. Intentar De Nuevo Mi Día");
+    expect(words(html)).toContain("Esta página tuvo un problema Algo salió mal al cargar esta pantalla. Tus datos están a salvo: inténtalo de nuevo o vuelve a tu día. Intentar de Nuevo Mi Día");
     expect(html).toMatch(/<a href="\/planner"><button[^>]*>Mi Día<\/button><\/a>/);
     expect(words(app("es", dropped))).toContain("Se cortó la conexión Revisa tu señal e inténtalo de nuevo. No se perdió nada.");
     for (const en of ["hit a snag", "Try Again", "My Day", "connection dropped"]) expect(words(app("es", snag)) + words(app("es", dropped))).not.toContain(en);

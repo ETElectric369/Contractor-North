@@ -139,7 +139,7 @@ describe("the day's shifts in Spanish (cn-v1138): the list reads the person's la
     expect(html).toContain("Brian ya tiene un turno el vie, 11");
     expect(html).toMatch(/10:31 a\.\s?m\. a 6:57 p\.\s?m\. · 8\.43 h/);
     expect(html).toContain("Sin trabajo");
-    expect(html).toContain(">Poner Esto En 41 Larkspur</button>");
+    expect(html).toContain(">Poner Esto en 41 Larkspur</button>");
     expect(html).toContain("Ponlo en 41 Larkspur en vez de agregar las horas otra vez.");
     expect(html).not.toContain("already has");
     expect(html).not.toContain("Put This On");

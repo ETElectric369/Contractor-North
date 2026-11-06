@@ -23,9 +23,9 @@ describe("/audit's title and line", () => {
     expect(description).toBe("Every action that runs through the app's action registry, newest first.");
   });
 
-  it("Spanish for a Spanish speaker: Auditoría De Actividad, and the catalog's line", async () => {
+  it("Spanish for a Spanish speaker: Auditoría de Actividad, and the catalog's line", async () => {
     const { title, description, html } = await renderHeader(Page, "es");
-    expect(title).toBe("Auditoría De Actividad");
+    expect(title).toBe("Auditoría de Actividad");
     expect(description).toBe(catalog.es.nv_desc_audit);
     expect(description).not.toBe(catalog.en.nv_desc_audit);
     expect(html).not.toContain(">Activity audit<");

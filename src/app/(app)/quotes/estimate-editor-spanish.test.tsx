@@ -30,8 +30,8 @@ describe("the editor in Spanish", () => {
     const words = text(html);
     expect(words).toContain("Redactar con el Estimador");
     expect(words).toContain("Generar Partidas"); // qe_btn_generateLineItems
-    expect(words).toContain("Agregar Una Tarea"); // qe_btn_addATask
-    expect(words).toContain("Agregar Una Línea"); // qe_btn_addALine
+    expect(words).toContain("Agregar una Tarea"); // qe_btn_addATask
+    expect(words).toContain("Agregar una Línea"); // qe_btn_addALine
     expect(words).toContain("Cotización (Precio Fijo)");
     expect(words).toContain("¿Para quién es?");
     expect(words).toContain("Válido hasta");
@@ -81,10 +81,10 @@ describe("the editor in Spanish", () => {
     expect(COULD_NOT_REACH).toBe(qe.en.qe_couldNotReach);
   });
 
-  it("the doors' Spanish is Title Case and the house's words (Presupuesto, Lista De Precios, Orden De Trabajo, Lista De Materiales)", () => {
-    expect(es("qe_btn_addToEstimate")).toBe("Agregar {n} Al Presupuesto");
-    expect(es("qe_btn_applyToBook")).toBe("Aplicar {n} A La Lista De Precios");
-    expect(es("qe_btn_createWorkOrder")).toBe("Crear Orden De Trabajo");
-    expect(es("qe_btn_createMaterialList")).toBe("Crear Lista De Materiales");
+  it("the doors' Spanish is Title Case and the house's words (Presupuesto, Lista de Precios, Orden De Trabajo, Lista De Materiales)", () => {
+    expect(es("qe_btn_addToEstimate")).toBe("Agregar {n} al Presupuesto");
+    expect(es("qe_btn_applyToBook")).toBe("Aplicar {n} a la Lista de Precios");
+    expect(es("qe_btn_createWorkOrder")).toBe("Crear Orden de Trabajo");
+    expect(es("qe_btn_createMaterialList")).toBe("Crear Lista de Materiales");
   });
 });
